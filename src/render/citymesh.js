@@ -236,8 +236,8 @@ export function buildCityMesh(city, collision) {
   const fronds = colored(new THREE.ConeGeometry(0.38, 0.14, 6).translate(0, 1.0, 0), 0x4c9a52);
   const palmGeom = mergeGeometries([palmTrunk, fronds]);
   const pole = colored(new THREE.BoxGeometry(0.16, 1, 0.16).translate(0, 0.5, 0), 0x4a4d52);
-  const arm = colored(new THREE.BoxGeometry(0.3, 0.02, 0.08).translate(0.15, 0.99, 0), 0x4a4d52);
-  const lampHead = colored(new THREE.BoxGeometry(0.1, 0.02, 0.1).translate(0.28, 0.975, 0), 0xfff2c4);
+  const arm = colored(new THREE.BoxGeometry(2, 0.018, 0.12).translate(1, 0.99, 0), 0x4a4d52);
+  const lampHead = colored(new THREE.BoxGeometry(0.7, 0.012, 0.3).translate(1.75, 0.975, 0), 0xfff2c4);
   const lampGeom = mergeGeometries([pole, arm, lampHead]);
 
   const trees = city.props.filter((p) => p.type === 'tree');
@@ -259,7 +259,7 @@ export function buildCityMesh(city, collision) {
   const lampMesh = instanced(lampGeom, plainMat, lamps, (it, p, q, s, up) => {
     p.set(it.x, 0, it.z);
     q.setFromAxisAngle(up, -(it.rot || 0));
-    s.set(it.h, it.h, it.h);
+    s.set(1, it.h, 1);
   });
   for (const m of [treeMesh, palmMesh, lampMesh]) if (m) group.add(m);
 

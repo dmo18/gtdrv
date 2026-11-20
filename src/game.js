@@ -31,7 +31,7 @@ export function createGame({ canvas, uiRoot }) {
   scene.background = new THREE.Color().setHex(SKY, THREE.SRGBColorSpace);
   scene.fog = new THREE.Fog(scene.background.getHex(), 220, 1050);
   const camera = new THREE.PerspectiveCamera(62, 1, 0.5, 1800);
-  const hemi = new THREE.HemisphereLight(0xe4f1ff, 0x77705f, 1.25);
+  const hemi = new THREE.HemisphereLight(0xe4f1ff, 0x8a8272, 1.9);
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
   sun.position.set(0.55, 1, 0.35);
   scene.add(hemi, sun);
