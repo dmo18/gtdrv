@@ -45,12 +45,15 @@ Step functions: `step<Kind>(craft, controls, dt, world)`
     object) means steer is a share of the speed-dependent lock; absent
     (AI) means steer x `steerMax / (1 + |speed| / 20)` is the wanted wheel
     angle. Both are clipped to the same lock, which shrinks with speed so
-    full input asks for about 0.85 (sim) / 0.95 (arcade) of lateral grip.
+    full input asks for about 0.85 (sim) / all (arcade) of lateral grip.
   - `setHandlingMode('arcade' | 'sim')` / `getHandlingMode()` in
     vehicle.js pick the handling of every car (saved as
-    `settings.handling`, applied by economy.applySettings). Arcade adds
-    lateral grip, more lock at speed, quicker steering and a yaw-rate
-    assist; braking, traction, gears and the AI angle mapping are the same.
+    `settings.handling`, applied by economy.applySettings). Arcade has
+    about 2.5..2.8 g of lateral grip, more lock (also at speed), quicker
+    steering, a yaw-rate assist and a firmer stability assist; braking,
+    traction, gears and the AI angle mapping are the same in both. AI
+    planners still use the bicycle relation tan(angle) = wheelBase * kappa,
+    which arcade follows more closely.
 - Fixed step dt = 1/60. No allocations in step functions. Never NaN.
 
 Car-only fields (src/entities/vehicle.js)

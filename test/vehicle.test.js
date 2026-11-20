@@ -219,7 +219,10 @@ const DEG = Math.PI / 180;
 // Run a test body in one handling mode, then go back to the default.
 const inMode = (mode, fn) => () => {
   setHandlingMode(mode);
-  try { fn(); } finally { setHandlingMode('arcade'); }
+  try { fn(mode); } finally { setHandlingMode('arcade'); }
+};
+const inBothModes = (fn) => () => {
+  for (const mode of ['sim', 'arcade']) inMode(mode, fn)();
 };
 
 test('0-100 km/h times fall in believable bands per spec', () => {
@@ -267,6 +270,8 @@ test('braking from 100 km/h stops in a realistic distance, with ABS and no lock'
   }
 });
 
+// Realistic grip numbers: this one only holds in the sim mode (arcade
+// corners at about 2.5 g; see test/steering.test.js).
 test('steady cornering at 20 m/s with full steer settles to a constant radius (sim)', inMode('sim', () => {
   for (const id of ['sedan', 'sports', 'muscle', 'truck']) {
     const v = createVehicle(id, 0, 0, 0);
@@ -322,7 +327,7 @@ test('releasing the steering at 40 m/s returns straight without weaving', () => 
   }
 });
 
-test('rwd car: handbrake starts a slide, the assist recovers it after release (sim)', inMode('sim', () => {
+test('rwd car: handbrake starts a slide, the assist recovers it after release', inBothModes(() => {
   for (const id of ['sports', 'muscle']) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 20;
@@ -346,7 +351,7 @@ test('rwd car: handbrake starts a slide, the assist recovers it after release (s
   }
 }));
 
-test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches it (sim)', inMode('sim', () => {
+test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches it', inBothModes((mode) => {
   const powerOn = (id) => {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 12;
@@ -365,7 +370,7 @@ test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches
   assert.ok(m.maxYaw > m.before * 1.3 && m.maxBeta > 6 * DEG, `muscle oversteer ${JSON.stringify(m)}`);
   assert.ok(m.maxBeta < 25 * DEG, `muscle caught before spinning ${(m.maxBeta / DEG).toFixed(1)}`);
   const s = powerOn('sedan');
-  assert.ok(s.maxYaw <= s.before * 1.05 && s.maxBeta < 3 * DEG, `sedan understeers ${JSON.stringify(s)}`);
+  assert.ok(s.maxYaw <= s.before * 1.05 && s.maxBeta < (mode === 'sim' ? 3 : 5) * DEG, `${mode} sedan understeers ${JSON.stringify(s)}`);
   // Off the throttle the front bites harder than on it (weight transfer).
   const turnIn = (throttle) => {
     const v = createVehicle('sedan', 0, 0, 0);

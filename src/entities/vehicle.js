@@ -160,25 +160,39 @@ const ABS_K = 0.95; // ABS keeps braking at this share of the tyre limit
 const HB_K = 0.8; // locked rear tyres slide at this share of grip
 
 // Two handling modes, module-wide (every car at once):
-// - 'arcade' (default): tight and forgiving. More lateral grip than real
-//   tyres (lateral friction latBase + latK * spec.grip, about 1.7..2.1),
-//   a tyre curve that hardly sags past the peak, more steering lock at
-//   speed (the lock is capped by the lateral acceleration it asks for,
-//   not by a heavy speed taper), quicker steering and a yaw-rate assist
-//   that pulls the car toward the bicycle-model yaw rate of the wheel
-//   angle. Longitudinal grip (traction, braking, ABS), weight transfer,
-//   gears, power oversteer and handbrake slides are the same as 'sim'.
-// - 'sim': realistic grip numbers (lateral friction = spec.grip), the
-//   tyre force sags past the peak, full input asks for about 0.85 of grip
-//   and the lock tapers with speed; only a light yaw damper.
+// - 'arcade' (default): tight and forgiving, about 2.5..2.8 g of lateral
+//   grip (latBase + latK * spec.grip), a tyre curve that hardly sags past
+//   the peak, more lock at speed (capped by the lateral acceleration it
+//   asks for rather than a heavy speed taper), quicker steering, a
+//   yaw-rate assist toward the bicycle-model yaw rate, less speed scrubbed
+//   off through the steered wheels, and a firmer stability assist that
+//   watches the rear axle (also during handbrake slides, short of a
+//   spin-out). Longitudinal grip (traction, braking, ABS), weight
+//   transfer, gears, power oversteer and handbrake slides remain.
+// - 'sim': realistic grip (lateral friction = spec.grip), the tyre force
+//   sags past the peak, full input asks for about 0.85 of grip and the
+//   lock tapers with speed; only a light yaw damper. The original model.
+// Fields: latBase/latK lateral friction; fall tyre sag past the peak;
+// latTarget share of lateral grip full lock asks for; mechV and lockK
+// mechanical lock lockK * steerMax / (1 + u / mechV); rearLat rear axle
+// lateral grip factor (> 1: settles at the limit); comb/combR friction
+// ellipse weight of the longitudinal force, front/rear; scrub share of
+// the steered-wheel drag kept; steerRate/steerRateV input rate
+// rate / (1 + u / rateV); yawK/yawFirm yaw assist gains (under/over
+// rotating); betaK slide-correction gain; cutMin least drive kept in a
+// slide; rearSlide measure the slide at the rear axle instead of the
+// body; hbBeta/hbYaw handbrake slide caps (0 = none); squealR/squealF
+// tyre squeal onset (multiples of the peak slip).
 const HANDLING = {
   arcade: {
-    latBase: 2.4, latK: 0.3, fall: 0.06, latTarget: 1, mechV: 80, lockK: 1.12, rearLat: 1.12, cutMin: 0.3, scrub: 0.35, betaK: 150, comb: 0.5, combR: 0.85,
-    steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 10, yawLimK: 1,
+    latBase: 2.4, latK: 0.3, fall: 0.06, latTarget: 1, mechV: 80, lockK: 1.12, rearLat: 1.12,
+    comb: 0.5, combR: 0.85, scrub: 0.35, steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 4,
+    betaK: 150, cutMin: 0.3, rearSlide: true, hbBeta: 0.6, hbYaw: 2.2, squealR: 1.3, squealF: 1.5,
   },
   sim: {
-    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, lockK: 1, rearLat: 1, cutMin: 0.25, scrub: 1, betaK: 30, comb: 0.85, combR: 0.85,
-    steerRate: 7, steerRateV: 15, yawK: 1.5, yawFirm: 4, yawLimK: 1,
+    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, lockK: 1, rearLat: 1,
+    comb: 0.85, combR: 0.85, scrub: 1, steerRate: 7, steerRateV: 15, yawK: 1.5, yawFirm: 4,
+    betaK: 30, cutMin: 0.25, rearSlide: false, hbBeta: 0, hbYaw: 0, squealR: 0.9, squealF: 1.1,
   },
 };
 let handlingMode = 'arcade';
@@ -392,23 +406,33 @@ export function stepVehicle(v, controls, dt, world) {
     const capF = mu * fzF, capR = mu * fzR; // longitudinal limits
     const capLF = muLat * fzF, capLR = muLat * H.rearLat * fzR; // lateral limits
 
-    // Stability assist (off while the handbrake is held).
+    // Stability assist (sim: off while the handbrake is held).
     const beta = Math.atan2(vl, Math.max(avf, V0));
     let assistMz = 0;
     let driveScale = 1;
     if (!handbrake && avf > 4 && !v.wrecked) {
       let yawRef = vf * Math.tan(delta) / L;
-      const yLim = H.yawLimK * muLat * G / Math.max(avf, 1);
+      const yLim = muLat * G / Math.max(avf, 1);
       yawRef = clamp(yawRef, -yLim, yLim);
-      const over = Math.abs(beta) - d.betaAllow;
+      // Sim measures the slide by the body slip angle; arcade by the rear
+      // axle's slip past its peak, so the big body slip of a tight turn
+      // at low speed is not mistaken for a slide.
+      const sl = H.rearSlide ? Math.atan2(vl - b * r, Math.max(avf, V0)) : beta;
+      const over = Math.abs(sl) - d.betaAllow - (H.rearSlide ? d.apR : 0);
       if (over > 0) {
-        assistMz += d.iz * H.betaK * (beta > 0 ? over : -over);
+        assistMz += d.iz * H.betaK * (sl > 0 ? over : -over);
         driveScale = clamp(1 - over * 5, H.cutMin, 1);
       }
       const eY = r - yawRef;
       // Damp yaw toward the steering's intent; firmer when over-rotating.
       const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK;
       assistMz -= d.iz * firm * eY;
+    } else if (handbrake && H.hbBeta > 0 && avf > 2 && !v.wrecked) {
+      // Arcade handbrake: a big slide, but held short of a spin-out.
+      const over = Math.abs(beta) - H.hbBeta;
+      if (over > 0) assistMz += d.iz * H.betaK * (beta > 0 ? over : -over);
+      const rOver = Math.abs(r) - H.hbYaw;
+      if (rOver > 0) assistMz -= d.iz * 12 * (r > 0 ? rOver : -rOver);
     }
 
     // Longitudinal forces per axle (along each wheel), friction limited.
@@ -549,7 +573,8 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.suspension < 1e-4) v.suspension = 0;
 
   v.wheelSpin = (v.wheelSpin + (vf + Math.sign(driveF) * v.spin * 8) * dt / s.wheelRadius) % (Math.PI * 2);
-  const slideAmt = Math.max(clamp((slideR - 0.9) / 1.2, 0, 1), clamp((slideF - 1.1) / 2, 0, 1));
+  // Squeal starts past the tyre peak (later in arcade, whose tyres saturate softly).
+  const slideAmt = Math.max(clamp((slideR - H.squealR) / 1.2, 0, 1), clamp((slideF - H.squealF) / 2, 0, 1));
   const hbAmt = handbrake && Math.abs(vf) > 3 ? clamp(0.4 + hbSlide / 25, 0, 1) : 0;
   v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
 
