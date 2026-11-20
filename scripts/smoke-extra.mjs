@@ -1,5 +1,11 @@
 // Extra end-to-end checks run by `npm run smoke -- --extra`.
 export default async function extra(page, check) {
+  // Advance the game by simulated seconds, independent of how fast the
+  // test machine can draw frames.
+  const sim = (seconds) => page.evaluate((n) => {
+    const g = window.__rw;
+    for (let i = 0; i < n; i++) g.step(1 / 60);
+  }, Math.round(seconds * 60));
   const tap = async (name) => {
     await page.evaluate((n) => {
       window.__rw.input.press(n);
@@ -18,7 +24,7 @@ export default async function extra(page, check) {
   let s = await page.evaluate(() => ({ mode: window.__rw.player.mode, x: window.__rw.player.x, z: window.__rw.player.z }));
   check(s.mode === 'foot', `player gets out of the car (${s.mode})`);
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(1200);
+  await sim(1.2);
   await page.keyboard.up('KeyW');
   const s2 = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z }));
   check(Math.hypot(s2.x - s.x, s2.z - s.z) > 1, 'player walks on foot');
@@ -63,7 +69,8 @@ export default async function extra(page, check) {
   check(await board('boat', 'speedboat'), 'a speedboat exists to board');
   let b0 = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z }));
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(4000);
+  await sim(4);
+  await page.waitForTimeout(300);
   await page.screenshot({ path: 'shots/boat.png' });
   await page.keyboard.up('KeyW');
   let b1 = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, sd: window.__rw.city.shoreDist(window.__rw.player.x, window.__rw.player.z), mode: window.__rw.player.mode }));
@@ -73,7 +80,8 @@ export default async function extra(page, check) {
   check(await board('plane', 'prop'), 'a prop plane exists to board');
   await page.keyboard.down('KeyW');
   await page.keyboard.down('KeyI');
-  await page.waitForTimeout(9000);
+  await sim(9);
+  await page.waitForTimeout(300);
   await page.screenshot({ path: 'shots/plane.png' });
   const f = await page.evaluate(() => ({ y: window.__rw.player.y, mode: window.__rw.player.mode, sp: window.__rw.player.vehicle.speed }));
   await page.keyboard.up('KeyW');
@@ -82,7 +90,8 @@ export default async function extra(page, check) {
 
   check(await board('heli', 'heli'), 'a helicopter exists to board');
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(7000);
+  await sim(7);
+  await page.waitForTimeout(300);
   await page.screenshot({ path: 'shots/heli.png' });
   const h = await page.evaluate(() => ({ y: window.__rw.player.y, mode: window.__rw.player.mode }));
   await page.keyboard.up('KeyW');

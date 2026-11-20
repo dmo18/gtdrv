@@ -38,7 +38,11 @@ try {
   await page.waitForTimeout(1500);
   const before = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, cars: window.__rw.vehicles.length }));
   await page.keyboard.down('ArrowUp');
-  await page.waitForTimeout(4000);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    for (let i = 0; i < 240; i++) window.__rw.step(1 / 60);
+  });
+  await page.waitForTimeout(300);
   const mid = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, speed: window.__rw.player.vehicle?.speed ?? 0, t: window.__rw.time }));
   await page.screenshot({ path: 'shots/drive.png' });
   await page.keyboard.up('ArrowUp');
