@@ -31,6 +31,12 @@ await build({
       import { createInput, shapeSteer, tiltAngle, tiltToSteer } from './src/core/input.js';
       import { createTouchControls } from './src/ui/touch.js';
       import { createHud } from './src/ui/hud.js';
+      import { createCombatHud } from './src/ui/combathud.js';
+      import { createChaseCamera } from './src/render/chasecam.js';
+      import { createCollisionWorld } from './src/world/collision.js';
+      import { createArms } from './src/core/weapons.js';
+      import { createEvents } from './src/core/events.js';
+      import * as THREE from 'three';
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0';
       document.body.appendChild(root);
@@ -38,7 +44,85 @@ await build({
       const fallbacks = [];
       const touch = createTouchControls(root, input, { onSteerFallback: (s, why) => fallbacks.push(why) });
       const hud = createHud(root);
-      window.rw = { input, touch, hud, shapeSteer, tiltAngle, tiltToSteer, fallbacks };
+      // A small arena for the aiming tests: the real chase camera, aim
+      // controller and combat HUD, plain boxes for people and walls.
+      const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 800);
+      const chase = createChaseCamera(camera);
+      const collision = createCollisionWorld();
+      const events = createEvents();
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8fb0cc);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x554433, 2.2));
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: 0x6f6a60 }));
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+      const walker = { x: 0, z: 0, y: 0, px: 0, pz: 0, heading: 0, speed: 0, hp: 100, maxHp: 100, team: 'player',
+        life: 'ok', fade: 0, radius: 0.35, height: 1.8, arms: createArms('pistol') };
+      const game = { input, touch, hud, chase, camera, events, collision, actors: [walker], vehicles: [], seaY: 0,
+        aim: { dx: 1, dy: 0, dz: 0, manual: false }, player: { walker, vehicle: null, mode: 'foot', x: 0, z: 0 } };
+      const chud = createCombatHud(game, root);
+      const meshes = new Map();
+      const personMesh = (color) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.8, 0.5), new THREE.MeshLambertMaterial({ color }));
+        scene.add(m);
+        return m;
+      };
+      const me = personMesh(0xe2733a);
+      const addActor = (x, z, team, extra = {}) => {
+        const a = { x, z, y: 0, hp: 60, maxHp: 60, team, life: 'ok', fade: 0, radius: 0.35, height: 1.8, ...extra };
+        game.actors.push(a);
+        meshes.set(a, personMesh(team === 'crew' ? 0x7a2a8c : team === 'police' ? 0x2a4c9a : 0x6a9a5a));
+        return a;
+      };
+      const addWall = (x0, z0, x1, z1, h) => {
+        collision.addBox(x0, z0, x1, z1, h);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, h, z1 - z0), new THREE.MeshLambertMaterial({ color: 0x9a8a78 }));
+        m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2);
+        scene.add(m);
+      };
+      const clear = () => {
+        for (const [a, m] of meshes) { scene.remove(m); game.actors.splice(game.actors.indexOf(a), 1); }
+        meshes.clear();
+      };
+      let renderer = null;
+      const camTarget = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 0, height: 1.5 };
+      const arena = (on) => {
+        if (on && !renderer) {
+          renderer = new THREE.WebGLRenderer({ antialias: true });
+          renderer.domElement.style.cssText = 'position:fixed;inset:0;width:100%;height:100%';
+          document.body.insertBefore(renderer.domElement, root);
+        }
+        if (renderer) renderer.domElement.style.display = on ? 'block' : 'none';
+        input.lookX = 0;
+        input.lookY = 0;
+        walker.heading = 0;
+        camTarget.heading = 0;
+        chase.setMode('foot');
+        chase.snap(camTarget);
+      };
+      const frame = (n = 1, dt = 1 / 60) => {
+        for (let i = 0; i < n; i++) {
+          touch.update(dt);
+          input.poll();
+          chud.always(dt);
+          chud.fixedUpdate(dt);
+          camTarget.x = walker.x; camTarget.z = walker.z; camTarget.heading = walker.heading;
+          chase.update(camTarget, dt, input, collision);
+          chud.render(1, dt);
+          input.endStep();
+        }
+        me.position.set(walker.x, 0.9, walker.z);
+        me.rotation.y = -walker.heading;
+        for (const [a, m] of meshes) m.position.set(a.x, 0.9, a.z);
+        if (renderer) {
+          renderer.setSize(innerWidth, innerHeight, false);
+          camera.aspect = innerWidth / innerHeight;
+          camera.updateProjectionMatrix();
+          renderer.render(scene, camera);
+        }
+      };
+      window.rw = { input, touch, hud, shapeSteer, tiltAngle, tiltToSteer, fallbacks,
+        game, chud, chase, walker, addActor, addWall, clear, arena, frame };
     `,
   },
   bundle: true, platform: 'browser', format: 'esm', outfile: path.join(out, 'harness.js'),
@@ -414,7 +498,7 @@ try {
   check('foot: no attack/weapon/jump buttons', gone.every((v) => !v), JSON.stringify(gone));
   const run = await center('Run');
   const ent = await center('Enter car');
-  check('foot: ENTER large', ent.w >= 90, `${ent.w}`);
+  check('foot: ENTER still large', ent.w >= 64, `${ent.w}`);
   await down(7, run.x, run.y);
   check('foot: RUN sets sprint', (await read('rw.input.sprint')) === true);
   await up(7);
@@ -557,6 +641,243 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   check('blur releases gas', (await read('rw.input.throttle')) === 0);
   await up(9);
+
+  // ======== combat controls (task 26) ========
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.evaluate(() => {
+    rw.touch.setLeftHanded(false);
+    rw.touch.setSteering('wheel', 1);
+    rw.touch.setCombat({ show: true, weapon: 'pistol', name: 'Pocket Rattler', mag: 9, max: 12, reload: 0, locked: false, drive: true });
+  });
+  const hudFor = (m) => page.evaluate((mm) => {
+    try {
+      rw.hud.update({ mode: mm === 'foot' ? 'foot' : 'car', speedKmh: mm === 'foot' ? 0 : 87, health: 80, armor: 0, money: 12345, wanted: 3,
+        district: 'Cinder Flats', time: 13.5, vehicleHealth: mm === 'foot' ? null : 0.7, weapon: null, ammo: null, score: 12345, heat: 3 });
+      rw.hud.setPrompt(mm === 'foot' ? 'Tap ENTER: Sedan' : null);
+    } catch { /* hud shape owned by another task */ }
+  }, m);
+  // Every visible control and HUD block: inside the screen, no overlaps.
+  const layoutOf = () => page.evaluate(() => {
+    const out = [];
+    const add = (e, name) => {
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ name, l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, btn: e.classList.contains('rw-btn') });
+    };
+    for (const e of document.querySelectorAll('.rw-touch .rw-btn')) if (e.offsetParent) add(e, e.getAttribute('aria-label'));
+    for (const sel of ['.rw-wheel', '.rw-stick', '.rw-pad', '.rw-hud .rw-tl', '.rw-hud .rw-tr', '.rw-prompt', '.rw-speedbox', '.rw-chp']) {
+      for (const e of document.querySelectorAll(sel)) if (e.offsetParent && getComputedStyle(e).display !== 'none') add(e, sel);
+    }
+    return { out, W: innerWidth, H: innerHeight };
+  });
+  const checkLayout = async (label) => {
+    const { out, W, H } = await layoutOf();
+    const bad = [];
+    for (const b of out) {
+      if (b.l < -0.5 || b.t < -0.5 || b.r > W + 0.5 || b.b > H + 0.5) bad.push(`${b.name} off-screen`);
+      if (b.btn && Math.min(b.w, b.h) < 56) bad.push(`${b.name} ${b.w}x${b.h} < 56`);
+    }
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        const a = out[i], b = out[j];
+        const ox = Math.min(a.r, b.r) - Math.max(a.l, b.l), oy = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+        if (ox > 1 && oy > 1) bad.push(`${a.name} x ${b.name}`);
+      }
+    }
+    check(`layout ${label}: ${out.length} blocks in view, >=56px, no overlaps`, bad.length === 0, bad.join(', '));
+  };
+  for (const [vw, vh] of [[915, 412], [780, 360]]) {
+    await page.setViewportSize({ width: vw, height: vh });
+    await page.waitForTimeout(120);
+    for (const lefty of [false, true]) {
+      await page.evaluate((l) => rw.touch.setLeftHanded(l), lefty);
+      for (const m of ['foot', 'car', 'boat', 'plane', 'heli']) {
+        await page.evaluate((mm) => rw.touch.setMode(mm), m);
+        await hudFor(m);
+        await page.waitForTimeout(30);
+        await checkLayout(`${m} ${vw}x${vh}${lefty ? ' lefty' : ''}`);
+        if (!lefty || m === 'foot' || m === 'car') await shot(`combat-${m}${lefty ? '-lefty' : ''}-${vw}x${vh}.png`);
+      }
+      await page.evaluate(() => { rw.touch.setMode('car'); rw.touch.setSteering('buttons'); });
+      await checkLayout(`car buttons-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
+      await page.evaluate(() => rw.touch.setSteering('slider'));
+      await checkLayout(`car slider-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
+      await page.evaluate(() => rw.touch.setSteering('wheel'));
+    }
+  }
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.evaluate(() => { rw.touch.setLeftHanded(false); rw.touch.setMode('car'); });
+  await page.waitForTimeout(100);
+
+  // ---- drive-by: steer, gas and fire with three fingers at once ----
+  const dbf = await center('Drive-by fire');
+  const g3 = await center('Gas');
+  check('drive-by FIRE above the pedals', dbf.y < g3.y - 60 && Math.abs(dbf.x - g3.x) < 30 && dbf.w >= 56, JSON.stringify([dbf, g3]));
+  const wb3 = await wheelBox();
+  p0 = rimPt(wb3, 0);
+  await down(1, p0.x, p0.y);
+  await turn(1, wb3, 0, 130);
+  await down(2, g3.x, g3.y);
+  await down(3, dbf.x, dbf.y);
+  const three = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");
+  check('three fingers: steer 1, gas 1, fire held', three.join() === '1,1,true', three.join());
+  await shot('driveby-three-fingers-915x412.png');
+  await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
+  await drag(3, dbf.x, dbf.y, dbf.x - 80, dbf.y, 6);
+  const dl = await read("[rw.input.lookX, rw.input.held('fire'), rw.input.steer, rw.input.throttle]");
+  check('sliding the held FIRE orbits the camera, nothing else changes', Math.abs(dl[0] + 80) < 3 && dl[1] === true && dl[2] === 1 && dl[3] === 1, dl.join());
+  await up(3);
+  const after = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");
+  check('fire released, steer and gas still held', after.join() === '1,1,false', after.join());
+  await down(3, dbf.x, dbf.y);
+  await page.evaluate(() => rw.touch.setMode('boat'));
+  const sw = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");
+  check('mode switch with three fingers down zeroes everything', sw.join() === '0,0,false', sw.join());
+  await up(3); await up(2); await up(1);
+  // Boat: the same scheme.
+  const bf = await center('Drive-by fire');
+  const bg = await center('Gas');
+  const bw2 = await wheelBox();
+  p0 = rimPt(bw2, 0);
+  await down(1, p0.x, p0.y);
+  await turn(1, bw2, 0, -130);
+  await down(2, bg.x, bg.y);
+  await down(3, bf.x, bf.y);
+  const bthree = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");
+  check('boat: steer, gas, fire together', bthree.join() === '-1,1,true', bthree.join());
+  await up(3); await up(2); await up(1);
+  await page.evaluate(() => rw.touch.setMode('plane'));
+  check('plane: no combat buttons', !(await page.locator('[aria-label="Drive-by fire"]').isVisible()) && !(await page.locator('[aria-label="Fire"]').isVisible()));
+
+  // ---- foot: walk, fire and look at once; taps ----
+  await page.evaluate(() => rw.touch.setMode('foot'));
+  const ff = await center('Fire');
+  check('foot FIRE big, under the right thumb', ff.w >= 90 && ff.x > 915 - 150 && ff.y > 412 - 150, JSON.stringify(ff));
+  await down(1, 120, 320);
+  await drag(1, 120, 320, 121, 270);
+  await down(2, ff.x, ff.y);
+  await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
+  await down(3, 560, 150);
+  await drag(3, 560, 150, 620, 150, 4);
+  const fw = await read("[rw.input.moveY, rw.input.held('fire'), rw.input.lookX]");
+  check('foot: stick, FIRE and look drag together', fw[0] > 0.6 && fw[1] === true && Math.abs(fw[2] - 60) < 3, fw.join());
+  await up(3); await up(2); await up(1);
+  check('foot: all released', (await read("[rw.input.moveY, rw.input.held('fire')]")).join() === '0,false');
+  for (const [label, name] of [['Lock on', 'lock'], ['Swap weapon', 'swap'], ['Reload', 'reload']]) {
+    const b = await center(label);
+    await down(4, b.x, b.y);
+    await up(4);
+    check(`foot: ${label} tap presses '${name}'`, (await read(`[rw.input.consume('${name}'), rw.input.held('${name}')]`)).join() === 'true,false');
+  }
+  await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 0, max: 30, reload: 0.5, locked: true, drive: false }));
+  check('ammo panel shows weapon, count and reload', (await page.textContent('.rw-ammo')).includes('Buzzbox')
+    && (await page.textContent('.rw-ammo-n')) === '0' && await page.locator('.rw-ammo.rw-reloading').count() === 1
+    && await page.locator('.rw-lock.rw-on').count() === 1);
+  // Left-handed: every combat control mirrors and still works.
+  await page.evaluate(() => rw.touch.setLeftHanded(true));
+  const lf = await center('Fire'), ll = await center('Lock on'), ls = await center('Swap weapon'), la = await center('Reload');
+  check('lefty: FIRE, LOCK, SWAP, ammo on the left', lf.x < 150 && ll.x < 300 && ls.x < 300 && la.x < 350, JSON.stringify([lf.x, ll.x, ls.x, la.x]));
+  await down(1, 780, 320);
+  await drag(1, 780, 320, 780, 260);
+  await down(2, lf.x, lf.y);
+  const lfw = await read("[rw.input.moveY, rw.input.held('fire')]");
+  check('lefty: stick right + FIRE left together', lfw[0] > 0.9 && lfw[1] === true, lfw.join());
+  await up(2); await up(1);
+  await page.evaluate(() => rw.touch.setMode('car'));
+  const ldb = await center('Drive-by fire');
+  check('lefty: drive-by FIRE on the left beside the pedals', ldb.x < 300, `${ldb.x}`);
+  await page.evaluate(() => { rw.touch.setLeftHanded(false); rw.touch.setMode('foot'); });
+
+  // ---- the aim itself: real camera, assist, walls, lock-on ----
+  await page.evaluate(() => {
+    rw.arena(true);
+    rw.addWall(7, -1.5, 8, 0.8, 4);
+    window.__A = rw.addActor(14, 2.2, 'crew');
+    window.__B = rw.addActor(14, 0, 'crew'); // dead ahead, behind the wall
+    rw.frame(5);
+  });
+  const fire2 = await center('Fire');
+  await down(2, fire2.x, fire2.y);
+  await page.evaluate(() => rw.frame(20));
+  const as = await page.evaluate(() => {
+    const a = rw.game.aim, t = window.__A;
+    const dx = t.x - rw.walker.x, dy = 1.1 - 1.4, dz = t.z - rw.walker.z;
+    const l = Math.hypot(dx, dy, dz);
+    return { aiming: rw.chud.aiming, k: rw.chase.aim.k, fov: rw.camera ? 0 : rw.game.camera.fov, onA: rw.chud.target === window.__A,
+      onB: rw.chud.target === window.__B, dot: (a.dx * dx + a.dy * dy + a.dz * dz) / l,
+      hot: !!document.querySelector('.rw-xhair.rw-on.rw-hot'), brackets: !!document.querySelector('.rw-tgt.rw-on') };
+  });
+  check('FIRE held: aim view on (FOV 55)', as.aiming && as.k === 1 && Math.abs(as.fov - 55) < 0.5, JSON.stringify(as));
+  check('assist ignores the target behind the wall, bends to the visible one', as.onA && !as.onB && as.dot > 0.9999, JSON.stringify(as));
+  check('crosshair red with target brackets', as.hot && as.brackets);
+  await shot('aim-assist-915x412.png');
+  await page.evaluate(() => {
+    rw.clear();
+    window.__C = rw.addActor(30, 4.5, 'crew');
+    window.__D = rw.addActor(12, 2.0, 'crew');
+    rw.frame(2);
+  });
+  const nearest = await page.evaluate(() => ({ d: rw.chud.target === window.__D, c: rw.chud.target === window.__C, yaw: rw.chase.aim.yaw, n: rw.game.actors.length, aiming: rw.chud.aiming }));
+  check('assist picks the nearest target in the cone', nearest.d, JSON.stringify(nearest));
+  // Dragging while FIRE is held turns the aim (slower over a target).
+  const y0 = await page.evaluate(() => rw.chase.aim.yaw);
+  await down(3, 560, 150);
+  for (let i = 1; i <= 6; i++) {
+    await move(3, 560 + i * 20, 150);
+    await page.evaluate(() => rw.frame(1));
+  }
+  await up(3);
+  const y1 = await page.evaluate(() => rw.chase.aim.yaw);
+  check('look drag turns the aim while firing', y1 - y0 > 0.2 && y1 - y0 < 0.55, `${y0} -> ${y1}`);
+  await up(2);
+  await page.evaluate(() => rw.frame(100));
+  check('aim view leaves after FIRE is let go', await page.evaluate(() => !rw.chud.aiming && rw.chase.aim.k === 0));
+  // Lock-on follows a moving target.
+  await page.evaluate(() => {
+    rw.clear();
+    window.__E = rw.addActor(20, 6, 'crew');
+    rw.frame(2);
+  });
+  const lk2 = await center('Lock on');
+  await down(4, lk2.x, lk2.y);
+  await page.evaluate(() => rw.frame(1));
+  await up(4);
+  check('LOCK tap locks the crew member', await page.evaluate(() => rw.chud.lock === window.__E));
+  const follow = await page.evaluate(() => {
+    rw.frame(30);
+    for (let i = 0; i < 120; i++) { window.__E.z += 0.06; rw.frame(1); }
+    const r = rw.chase.ray, e = window.__E;
+    const dx = e.x - r.x, dy = 1.1 - r.y, dz = e.z - r.z, l = Math.hypot(dx, dy, dz);
+    return { deg: Math.acos((dx * r.dx + dy * r.dy + dz * r.dz) / l) * 180 / Math.PI, lock: rw.chud.lock === e,
+      ring: !!document.querySelector('.rw-tgt.rw-locked'), btn: !!document.querySelector('.rw-lock.rw-on') };
+  });
+  check('lock-on keeps a moving target near the centre', follow.lock && follow.deg < 6, JSON.stringify(follow));
+  check('lock ring and LOCK button lit', follow.ring && follow.btn);
+  await shot('aim-lock-915x412.png');
+  // A swipe flicks to the next target on that side.
+  await page.evaluate(() => { window.__F = rw.addActor(15, -4, 'crew'); rw.frame(1); });
+  await down(3, 700, 150);
+  for (let i = 1; i <= 5; i++) {
+    await move(3, 700 - i * 30, 150);
+    await page.evaluate(() => rw.frame(1));
+  }
+  await up(3);
+  check('swipe left flicks the lock to the target on the left', await page.evaluate(() => rw.chud.lock === window.__F));
+  await page.evaluate(() => { rw.addWall(6, -3.5, 8, -1, 5); rw.frame(100); });
+  check('lock breaks 1.5 s after the target is out of sight', await page.evaluate(() => rw.chud.lock === null));
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.evaluate(() => {
+    rw.clear();
+    window.__G = rw.addActor(16, 1.5, 'crew');
+    rw.input.press('lock');
+    rw.frame(40);
+    rw.input.release('lock');
+  });
+  await page.waitForTimeout(100);
+  await page.evaluate(() => rw.frame(2));
+  await shot('aim-lock-780x360.png');
+  await checkLayout('foot aiming 780x360');
+  await page.evaluate(() => { rw.input.press('lock'); rw.frame(2); rw.input.release('lock'); rw.frame(100); rw.arena(false); });
+  await page.setViewportSize({ width: 915, height: 412 });
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {

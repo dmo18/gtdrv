@@ -60,9 +60,9 @@ test('a minor bump does not count; ramming traffic raises heat one step at a tim
   assert.equal(heat.level, 1, 'grace period');
   runHeat(heat, 4, (f) => { f.seenByPolice = true; });
   assert.equal(heat.level, 2);
-  // Never above 3, however many rams.
+  // Never above 4, however many rams.
   runHeat(heat, 60, (f, t) => { f.crashedTraffic = Math.floor(t * 60) % 30 === 0; f.seenByPolice = true; });
-  assert.equal(heat.level, 3);
+  assert.equal(heat.level, 4);
 });
 
 test('speeding unseen does nothing; seen for long enough gives heat 1', () => {
@@ -101,7 +101,7 @@ test('out of sight for the cooldown clears heat and reports the escape once', ()
   assert.equal(heat.level, 0);
   assert.equal(heat.escapedLevel, 1);
   assert.equal(heat.cooldown, 0);
-  assert.equal(escapeReward(heat.escapedLevel), 30);
+  assert.equal(escapeReward(heat.escapedLevel), 500, '500 points x level (MISSIONS.md)');
 });
 
 test('at sea clears faster, even with police nearby', () => {
@@ -353,7 +353,7 @@ test('system: off means nothing happens; on, a ram brings a siren chase', () => 
   assert.deepEqual(sirens, [true, false]);
 });
 
-test('system: pulled over takes a fine no bigger than the player has', () => {
+test('system: pulled over ends the chase with no fine', () => {
   const game = fakeGame(true);
   game.progress.money = 70;
   const sys = createPolice(game);
@@ -375,8 +375,11 @@ test('system: pulled over takes a fine no bigger than the player has', () => {
     sys.fixedUpdate(DT);
   }
   assert.equal(sys.heat.level, 0);
-  assert.equal(game.progress.money, 0);
-  assert.ok(game.toasts.some((t) => t === 'Pulled over! Fine $70'), game.toasts.join('|'));
+  assert.equal(game.progress.money, 70, 'no fines any more');
+  assert.ok(game.toasts.some((t) => t.startsWith('Pulled over!')), game.toasts.join('|'));
   assert.deepEqual(fails, ['Pulled over']);
+  // Officers who stepped out walk back first; then every car leaves.
+  for (let k = 0; k < 300; k++) sys.fixedUpdate(DT);
+  assert.equal(sys.officers.filter((o) => o.active).length, 0);
   assert.ok(game.vehicles.filter((v) => v.police).every((v) => v.role === 'leave' && !v.siren));
 });

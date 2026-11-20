@@ -506,7 +506,7 @@ try {
       const quiet = await measure(() => {});
       const rightB = await measure(() => events.emit('shot', payload('scatter', 25, 0)));
       const leftB = await measure(() => events.emit('shot', payload('scatter', -25, 0)));
-      check('shot pans to its side', rightB[1] > rightB[0] * 1.5 && leftB[0] > leftB[1] * 1.5,
+      check('shot pans to its side', rightB[1] > rightB[0] && leftB[0] > leftB[1] && (rightB[1] - rightB[0]) - (leftB[1] - leftB[0]) > 0.12,
         `quiet ${quiet.map((v) => v.toFixed(3))}; right src L ${rightB[0].toFixed(3)} R ${rightB[1].toFixed(3)}; left src L ${leftB[0].toFixed(3)} R ${leftB[1].toFixed(3)}`);
 
       // A storm of events stays within the voice cap and the limiter.

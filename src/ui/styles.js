@@ -223,7 +223,11 @@ const CSS = `
 .rw-lefty .rw-lock { right: auto; left: calc(var(--rw-sl) + 138px); }
 .rw-lefty .rw-swap { right: auto; left: calc(var(--rw-sl) + 98px); }
 .rw-lefty .rw-btn.rw-ammo { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty.rw-mode-car .rw-ammo, .rw-lefty.rw-mode-boat .rw-ammo { right: auto; left: calc(var(--rw-sl) + 100px); }
+/* the minimap stays top-left, so the upper controls move inward instead */
+.rw-lefty .rw-swap { left: calc(var(--rw-sl) + 214px); bottom: calc(var(--rw-sb) + 92px); }
+.rw-lefty .rw-btn.rw-ammo { left: calc(var(--rw-sl) + 214px); bottom: calc(var(--rw-sb) + 164px); }
+.rw-lefty .rw-btn.rw-dbfire { left: calc(var(--rw-sl) + 208px); bottom: calc(var(--rw-sb) + 26px); }
+.rw-lefty.rw-mode-car .rw-ammo, .rw-lefty.rw-mode-boat .rw-ammo { right: auto; left: calc(var(--rw-sl) + 290px); bottom: calc(var(--rw-sb) + 140px); }
 
 /* ---------- HUD ---------- */
 .rw-hud { z-index: 10; pointer-events: none; }
@@ -316,7 +320,7 @@ const CSS = `
 .rw-xhair.rw-hit .rw-x-hit { opacity: 1; }
 .rw-xhair.rw-hot.rw-hit .rw-x-hit { stroke: #ffd2a8; }
 .rw-x-lock { stroke: #ff4a36; stroke-width: 2.2; opacity: 0; stroke-dasharray: 8 5; }
-.rw-xhair.rw-lock .rw-x-lock { opacity: 1; }
+.rw-xhair.rw-locked .rw-x-lock { opacity: 1; }
 .rw-xring { position: absolute; inset: 0; display: none; }
 .rw-xring.rw-on { display: block; }
 .rw-x-ringbg { stroke: rgba(0, 0, 0, 0.35); stroke-width: 3.5; }
@@ -328,7 +332,7 @@ const CSS = `
 .rw-tgt i:nth-child(2) { right: 0; top: 0; border-right-width: 3px; border-top-width: 3px; }
 .rw-tgt i:nth-child(3) { left: 0; bottom: 0; border-left-width: 3px; border-bottom-width: 3px; }
 .rw-tgt i:nth-child(4) { right: 0; bottom: 0; border-right-width: 3px; border-bottom-width: 3px; }
-.rw-tgt.rw-lock i { border-color: #ff2e1f; width: 36%; height: 36%; }
+.rw-tgt.rw-locked i { border-color: #ff2e1f; width: 36%; height: 36%; }
 .rw-notarget {
   left: 50%; top: 58%; transform: translateX(-50%); padding: 4px 10px; border-radius: 10px; display: none;
   font-size: 13px; font-weight: 700; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);

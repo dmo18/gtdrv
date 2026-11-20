@@ -270,15 +270,16 @@ export function createChaseCamera(camera) {
   }
 
   function updateFov(spd, dt, snap) {
-    let want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
-    const s = smooth01(aim.k);
-    if (s > 0) want += (AIM.fov - want) * s;
+    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
     const next = snap ? want : curFov + (want - curFov) * Math.min(1, 3 * dt);
-    if (Math.abs(next - camera.fov) > 0.01) {
-      camera.fov = next;
+    curFov = next;
+    // The aim view blends its own FOV in with the same 0.2 s ease.
+    const s = smooth01(aim.k);
+    const fov = s > 0 ? next + (AIM.fov - next) * s : next;
+    if (Math.abs(fov - camera.fov) > 0.01) {
+      camera.fov = fov;
       camera.updateProjectionMatrix();
     }
-    curFov = next;
   }
 
   function setAim(on, instant = false) {

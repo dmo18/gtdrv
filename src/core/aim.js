@@ -160,7 +160,7 @@ function consider(ctx, t, eye, fwd, muzzle) {
   if (Q.mode === Q_ASSIST) {
     const cone = Q.cone || assistCone(d);
     if (ang > cone) return;
-    const score = ang / cone + 0.35 * (d / Q.range);
+    const score = ang / cone + 0.8 * (d / Q.range);
     if (score >= Q.score) return;
     if (!lineOfSight(ctx.collision, muzzle.x, muzzle.y, muzzle.z, TP.x, TP.y, TP.z)) return;
     Q.best = t;
@@ -205,6 +205,8 @@ function begin(mode, range) {
 // eye / fwd: the crosshair ray. muzzle: where the shot starts.
 // opts: { range, cone (fixed half-angle; else the foot cone by distance),
 //         craft (include crewed craft, default true) }
+// Score: share of the cone used plus 0.8 x share of the range, so the
+// nearer of two targets in the cone wins unless it is far off-centre.
 export function pickAssist(ctx, eye, fwd, muzzle, opts) {
   begin(Q_ASSIST, opts.range);
   Q.cone = opts.cone || 0;

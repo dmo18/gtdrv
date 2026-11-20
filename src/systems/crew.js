@@ -266,6 +266,7 @@ export function createFootActor(team, rng, weapon = 'pistol') {
     coverX: 0, coverZ: 0, peekX: 0, peekZ: 0, hasCover: false, coverT: 0, peeking: false,
     coverFromX: 0, coverFromZ: 0, coverAge: 99, coverPhase: rng.next() * TAU,
     stuckT: 0, fleeT: 0, fleeRolled: false, idleT: 0, flee: false,
+    detourT: 0, dtx: 0, dtz: 0, detourSide: 1, peekT: 0, covered: false, coverGood: false,
     mesh: null, tag: null, shots: 0, hits: 0,
   };
   initActor(a, team);
@@ -292,6 +293,7 @@ export function placeFootActor(a, x, z, heading = 0) {
   a.peeking = false;
   a.coverAge = 99;
   a.stuckT = 0;
+  a.detourT = 0;
   a.fleeT = 0;
   a.fleeRolled = false;
   a.flee = false;
@@ -325,7 +327,11 @@ export function stepFoot(game, a, dt) {
     return;
   }
   let wvx = 0, wvz = 0;
-  const ex = a.tx - a.x, ez = a.tz - a.z;
+  // Stuck against a wall on the way: walk round it for a moment.
+  if (a.detourT > 0) a.detourT -= dt;
+  else if (a.stuckT > 0.5) startDetour(game, a);
+  const gx = a.detourT > 0 ? a.dtx : a.tx, gz = a.detourT > 0 ? a.dtz : a.tz;
+  const ex = gx - a.x, ez = gz - a.z;
   const d = Math.sqrt(ex * ex + ez * ez);
   if (d > 0.25 && a.moveV > 0) {
     const sp = d < 1 ? a.moveV * d : a.moveV;
@@ -390,6 +396,21 @@ export function stepFoot(game, a, dt) {
   else a.stuckT = Math.max(0, a.stuckT - dt);
 }
 
+function startDetour(game, a) {
+  a.stuckT = 0;
+  const col = game.collision;
+  let ux = a.tx - a.x, uz = a.tz - a.z;
+  const l = Math.sqrt(ux * ux + uz * uz) || 1;
+  ux /= l;
+  uz /= l;
+  const left = col ? col.raycast(a.x, a.z, -uz, ux, 6) : 6, right = col ? col.raycast(a.x, a.z, uz, -ux, 6) : 6;
+  a.detourSide = left === right ? -(a.detourSide || 1) : left > right ? 1 : -1;
+  const s = a.detourSide, r = Math.min(4, Math.max(1, (s > 0 ? left : right) - 0.5));
+  a.dtx = a.x - uz * r * s + ux * 0.8;
+  a.dtz = a.z + ux * r * s + uz * 0.8;
+  a.detourT = 1.4;
+}
+
 // Face the travel direction, or a point while standing (aiming).
 export function faceToward(a, x, z, dt, rate = 10) {
   const want = Math.atan2(z - a.z, x - a.x);
@@ -430,16 +451,40 @@ export function chooseCover(game, a, tx, tz, out) {
       out.covered = covered;
       out.x = cx;
       out.z = cz;
-      // Peek spot: step sideways off the line, on the side with room.
-      const pxv = -uz, pzv = ux;
-      const left = col.raycast(cx, cz, pxv, pzv, 2.2), right = col.raycast(cx, cz, -pxv, -pzv, 2.2);
-      const sgn = left >= right ? 1 : -1;
-      const reach = Math.max(0.8, Math.min(1.9, (sgn > 0 ? left : right) - 0.4));
-      out.px = cx + pxv * sgn * reach + ux * 0.3;
-      out.pz = cz + pzv * sgn * reach + uz * 0.3;
+      out.d = d;
+      out.ux = ux;
+      out.uz = uz;
     }
   }
+  if (out.found) findPeek(col, out, tx, tz);
   return out;
+}
+
+// Peek spot for a cover point: slide sideways (1 to 5 m, either side,
+// never through a wall) until the line to the threat clears.
+function findPeek(col, out, tx, tz) {
+  const cx = out.x, cz = out.z;
+  out.px = cx;
+  out.pz = cz;
+  if (!out.covered) return;
+  const pxv = -out.uz, pzv = out.ux;
+  const left = col.raycast(cx, cz, pxv, pzv, 5.5), right = col.raycast(cx, cz, -pxv, -pzv, 5.5);
+  for (let step = 1; step <= 5; step++) {
+    for (let k = 0; k < 2; k++) {
+      const sgn = k === 0 ? 1 : -1;
+      if ((sgn > 0 ? left : right) < step + 0.4) continue;
+      const qx = cx + pxv * sgn * step, qz = cz + pzv * sgn * step;
+      if (col.lineClear(qx, qz, tx, tz)) {
+        out.px = qx;
+        out.pz = qz;
+        return;
+      }
+    }
+  }
+  // Nowhere clear close by: step out as far as there is room.
+  const sgn = left >= right ? 1 : -1, reach = Math.max(0, Math.min(2, Math.max(left, right) - 0.4));
+  out.px = cx + pxv * sgn * reach;
+  out.pz = cz + pzv * sgn * reach;
 }
 
 // ---------------------------------------------------------------------
@@ -451,7 +496,7 @@ const CREW_PALETTES = [
   { shirt: 0x5b1a45, trousers: 0x1a1a24, skin: 0xe0b48c, hair: 0x6b3a1e },
 ];
 const HANGOUT_DISTRICTS = { docks: 3, industrial: 2.5, midtown: 1, beach: 1, downtown: 0.6, residential: 0.4 };
-const COVER = { found: false, covered: false, x: 0, z: 0, px: 0, pz: 0 };
+const COVER = { found: false, covered: false, x: 0, z: 0, px: 0, pz: 0, d: 0, ux: 1, uz: 0 };
 const EXIT = { x: 0, z: 0, ok: false };
 const LP = { x: 0, z: 0, heading: 0 };
 
@@ -913,15 +958,17 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       releaseSlot(game, m);
       return;
     }
-    // (Re)pick cover now and then, or when the player moved a lot.
+    // (Re)pick cover when there is none, the player moved a lot, or this
+    // one has not let us shoot for a while.
     const moved = (p.x - m.coverFromX) * (p.x - m.coverFromX) + (p.z - m.coverFromZ) * (p.z - m.coverFromZ) > 64;
-    if ((!m.hasCover || moved || m.coverAge > 6) && !m.shooting) {
+    if ((!m.hasCover || moved || (m.coverAge > 8 && !m.coverGood)) && !m.shooting) {
       const b = budget(game);
       if (b.covers > 0) {
         b.covers--;
         stats.covers++;
         chooseCover(game, m, p.x, p.z, COVER);
         m.coverAge = 0;
+        m.coverGood = false;
         m.coverFromX = p.x;
         m.coverFromZ = p.z;
         if (COVER.found) {
@@ -932,31 +979,28 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
           m.peekZ = COVER.covered ? COVER.pz : COVER.z;
           m.covered = COVER.covered;
           m.peeking = false;
-          m.coverT = 0.6 + rng.next() * 1.2;
+          m.coverT = 0.4 + rng.next() * 0.8;
         }
       }
     }
-    // Cover cycle: hide (reload, wait), then peek and fire a burst.
-    if (m.hasCover) {
+    // Cover cycle: hide (reload, wait), then peek out to fire.
+    if (m.hasCover && m.covered) {
       if (!m.peeking) {
         m.tx = m.coverX;
         m.tz = m.coverZ;
         m.moveV = RUN_V;
-        m.coverT -= THINK_T;
         const atCover = (m.x - m.coverX) * (m.x - m.coverX) + (m.z - m.coverZ) * (m.z - m.coverZ) < 1.2;
-        if (m.coverT <= 0 && (atCover || m.stuckT > 0.5) && !m.arms.reloading && m.burstCool <= 0) {
+        if (atCover || m.stuckT > 0.5) m.coverT -= THINK_T;
+        if (m.coverT <= 0 && !m.arms.reloading && m.burstCool <= 0) {
           m.peeking = true;
           m.peekT = 0;
         }
       } else {
         m.tx = m.peekX;
         m.tz = m.peekZ;
-        m.moveV = WALK_V * 1.5;
-        m.peekT += THINK_T;
-        if (m.burst <= 0 && !m.shooting && m.los && takeSlot(game, m, game.time, 3)) {
-          m.burst = 3 + Math.floor(rng.next() * 3);
-          m.shooting = true;
-        }
+        const atPeek = (m.x - m.peekX) * (m.x - m.peekX) + (m.z - m.peekZ) * (m.z - m.peekZ) < 0.7;
+        m.moveV = atPeek ? 0 : RUN_V * 0.7;
+        m.peekT += atPeek ? THINK_T : THINK_T * 0.3;
         // Nothing to see from here: try somewhere else.
         if (!m.los && m.peekT > 1.6) {
           m.hasCover = false;
@@ -965,15 +1009,19 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
         }
       }
     } else {
-      // Out in the open: hold at mid range and shoot.
-      m.moveV = d > 18 ? WALK_V : 0;
+      // No real cover: hold at mid range.
+      m.moveV = d > 20 ? WALK_V : 0;
       m.tx = p.x;
       m.tz = p.z;
-      if (m.burst <= 0 && !m.shooting && m.los && m.burstCool <= 0 && takeSlot(game, m, game.time, 3)) {
-        m.burst = 3 + Math.floor(rng.next() * 3);
-        m.shooting = true;
-      }
     }
+    // A clear line and a free attack slot: a burst of 3 to 5.
+    if (m.burst <= 0 && !m.shooting && m.los && m.burstCool <= 0 && !m.arms.reloading && takeSlot(game, m, game.time, 3)) {
+      m.burst = 3 + Math.floor(rng.next() * 3);
+      m.shooting = true;
+      if (m.peeking) m.coverGood = true;
+      if (m.hasCover && m.covered && !m.peeking) m.moveV = 0; // stop and shoot
+    }
+    if (m.shooting && !(m.hasCover && m.covered && !m.peeking)) m.moveV = Math.min(m.moveV, WALK_V * 0.5);
   }
 
   function endBurst(m) {

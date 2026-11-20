@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { generateCity } from '../src/world/citygen.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createRng } from '../src/core/rng.js';
-import { createVehicle } from '../src/entities/vehicle.js';
-import { createPed, placePed, stepPed } from '../src/systems/peds.js';
+import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
+import { createPed, placePed, stepPed, createPeds } from '../src/systems/peds.js';
+import { createTraffic, createDriver, placeDriver } from '../src/systems/traffic.js';
+import { makeFightGame, step as fightStep, cityAndCollision } from './fightgame.js';
 
 const DT = 1 / 60;
 const city = generateCity();
@@ -122,4 +124,87 @@ test('no NaN over 5000 steps with random vehicles moving about', () => {
       assert.ok(Number.isFinite(p.x + p.z + p.heading + p.stride + p.speed), `NaN at ${i}`);
     }
   }
+});
+
+// --- Drivers who bail out (task 27) ---
+
+function trafficCar(game, sys, along = 30) {
+  const { city: c } = cityAndCollision();
+  const e = c.edges.find((x) => !x.causeway && x.length > 80 && Math.hypot(c.nodes[x.a].x - game.player.x, c.nodes[x.a].z - game.player.z) < 120);
+  const dr = createDriver(c, game.rng);
+  const v = createVehicle('sedan', 0, 0, 0);
+  placeDriver(dr, v, e.id, e.a, along, 0);
+  v.controls = { steer: 0, throttle: 0, brake: 0, handbrake: false };
+  v.ai = dr;
+  v.driver = dr;
+  v.traffic = true;
+  v.asleep = false;
+  game.addVehicle(v);
+  sys.cars.push(v);
+  return v;
+}
+
+test('a shot traffic car stops; the driver gets out and runs as a ped', () => {
+  const { city: c } = cityAndCollision();
+  const game = makeFightGame({ px: c.spawn.x, pz: c.spawn.z, seed: 2 });
+  game.peds = createPeds(game);
+  const traffic = createTraffic(game, { max: 0 });
+  const v = trafficCar(game, traffic);
+  v.vx = Math.cos(v.heading) * 10;
+  v.vz = Math.sin(v.heading) * 10;
+  v.speed = 10;
+  let bailed = 0;
+  game.events.on('driverBailed', () => bailed++);
+  fightStep(game, [game.peds, traffic], 30, (g) => { for (const o of g.vehicles) stepVehicle(o, o.controls, DT, g.world); });
+  assert.equal(bailed, 0);
+  game.combat.damage(v, 30, game.player.walker, 'bullet');
+  let t = 0;
+  while (!bailed && t < 600) {
+    fightStep(game, [game.peds, traffic], 1, (g) => { for (const o of g.vehicles) stepVehicle(o, o.controls, DT, g.world); });
+    t++;
+  }
+  assert.equal(bailed, 1, 'bailed out');
+  assert.ok(Math.abs(v.speed) < 2.5, `stopped first (${v.speed.toFixed(1)} m/s)`);
+  assert.equal(v.driver, null);
+  assert.ok(v.bailed && !traffic.cars.includes(v));
+  const runner = game.peds.slots.map((s) => s.ped).find((p) => p.active && p.state === 'fleeing' && Math.hypot(p.x - v.x, p.z - v.z) < 6);
+  assert.ok(runner, 'a fleeing ped next to the car');
+  assert.ok(game.actors.includes(runner));
+  fightStep(game, [game.peds, traffic], 120);
+  assert.ok(Math.hypot(runner.x - v.x, runner.z - v.z) > 5, 'ran off');
+});
+
+test('hijack: entering a traffic car with its driver pulls them out; they flee from the player', () => {
+  const { city: c } = cityAndCollision();
+  const game = makeFightGame({ px: c.spawn.x, pz: c.spawn.z, seed: 3 });
+  game.peds = createPeds(game);
+  const traffic = createTraffic(game, { max: 0 });
+  const v = trafficCar(game, traffic, 40);
+  const w = game.player.walker;
+  w.x = v.x - Math.sin(v.heading) * 2.5;
+  w.z = v.z + Math.cos(v.heading) * 2.5;
+  fightStep(game, [game.peds], 40); // fill the ped slots first
+  const before = game.peds.slots.filter((s) => s.ped.active).length;
+  let bailed = 0;
+  game.events.on('driverBailed', () => bailed++);
+  // What game.enterVehicle does.
+  v.driver = 'player';
+  game.player.vehicle = v;
+  fightStep(game, [game.peds, traffic], 1);
+  assert.equal(bailed, 1);
+  assert.ok(!traffic.cars.includes(v) && !v.ai && !v.traffic);
+  const runner = game.peds.slots.map((s) => s.ped).find((p) => p.active && p.state === 'fleeing' && p.panicT > 5);
+  assert.ok(runner, 'the driver runs');
+  assert.ok(game.peds.slots.filter((s) => s.ped.active).length >= Math.min(before, 21));
+  // Runs away from where the player stood.
+  const d0 = Math.hypot(runner.x - w.x, runner.z - w.z);
+  fightStep(game, [game.peds], 90);
+  assert.ok(Math.hypot(runner.x - w.x, runner.z - w.z) > d0 + 3);
+  // A parked car (no driver) gives no runner.
+  const parked = createVehicle('sedan', v.x + 20, v.z, 0);
+  game.addVehicle(parked);
+  parked.driver = 'player';
+  game.player.vehicle = parked;
+  fightStep(game, [game.peds, traffic], 2);
+  assert.equal(bailed, 1);
 });

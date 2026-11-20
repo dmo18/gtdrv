@@ -489,8 +489,8 @@ export function createCombatHud(game, uiRoot) {
     const lock = !!st.lock && tOn;
     if (lock !== view.lock) {
       view.lock = lock;
-      ui.tgt.classList.toggle('rw-lock', lock);
-      ui.xhair.classList.toggle('rw-lock', lock);
+      ui.tgt.classList.toggle('rw-locked', lock);
+      ui.xhair.classList.toggle('rw-locked', lock);
     }
     const noT = st.noTargetT > 0;
     if (noT !== view.noT) {

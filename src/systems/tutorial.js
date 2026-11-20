@@ -2,7 +2,7 @@
 // player is in that situation, and remembered in the saved progress.
 const HINTS = {
   car: ['Hold GAS to drive. Steer with the wheel on the left.', 'Tap EXIT to get out. Walk up to anything and tap ENTER.'],
-  foot: ['Left stick to walk, drag the right side to look around.', 'Boats wait at the piers. Aircraft are at Gullwing Airfield, east over the causeway.'],
+  foot: ['Left stick to walk, drag the right side to look around.', 'Hold FIRE to aim and shoot, drag to aim. LOCK sticks to a target, SWAP changes weapon.', 'Boats wait at the piers. Aircraft are at Gullwing Airfield, east over the causeway.'],
   boat: ['Hold GAS. Boats turn best under power.', 'Pull up beside a pier to get out.'],
   plane: ['Hold THRUST and push the stick up to take off.', 'Let go of the stick to level out. Ease off THRUST to come down.'],
   heli: ['Hold UP to lift off. Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],

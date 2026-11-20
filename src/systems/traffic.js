@@ -11,6 +11,7 @@
 // the route moves one hop on and the polyline is rebuilt.
 import { lanePoint, lanesPerDirection, signalState } from '../world/citygen.js';
 import { createVehicle } from '../entities/vehicle.js';
+import { exitPosition } from '../entities/onfoot.js';
 import { clamp } from '../core/rng.js';
 
 const K = 12; // interior samples of the junction path
@@ -39,6 +40,7 @@ const otherEnd = (e, from) => (e.a === from ? e.b : e.a);
 
 // Scratch objects (no allocations per step).
 const LP = { x: 0, z: 0, heading: 0 };
+const EXIT = { x: 0, z: 0, ok: false };
 const LA = { x: 0, z: 0, ux: 0, uz: 0 };
 const PR = { along: 0, lat: 0, ux: 0, uz: 0 };
 
@@ -688,6 +690,7 @@ const CLEARANCE = 12;
 export function createTraffic(game, { max = 14 } = {}) {
   const city = game.city;
   const cars = [];
+  const wrecks = []; // cars their drivers left: cleared once out of view
   const near = [];
   const ctx = { time: 0, vehicles: game.vehicles };
   let nearTimer = 0, spawnTimer = 0;
@@ -701,6 +704,18 @@ export function createTraffic(game, { max = 14 } = {}) {
     v.ai = null;
     v.traffic = false;
     v.controls = null;
+  }
+
+  // The driver gets out and runs as a pedestrian (task 27): pulled out
+  // by a hijacking player, or bailing from a shot, burning or wrecked car.
+  function bailOut(v, fromX, fromZ) {
+    const peds = game.peds;
+    exitPosition(v, game.world || { collision: game.collision, city }, EXIT);
+    if (peds && peds.spawnFleeing) {
+      const x = EXIT.ok ? EXIT.x : v.x, z = EXIT.ok ? EXIT.z : v.z;
+      peds.spawnFleeing(x, z, fromX, fromZ);
+    }
+    if (game.events && game.events.emit) game.events.emit('driverBailed', v);
   }
 
   function refreshNear(px, pz) {
@@ -790,6 +805,7 @@ export function createTraffic(game, { max = 14 } = {}) {
   return {
     name: 'traffic',
     cars,
+    wrecks,
     get count() {
       return cars.length;
     },
@@ -798,6 +814,18 @@ export function createTraffic(game, { max = 14 } = {}) {
       ctx.time = game.time;
       ctx.vehicles = game.vehicles;
       const idle = city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150;
+      for (let i = wrecks.length - 1; i >= 0; i--) {
+        const v = wrecks[i];
+        if (v.removed || v.driver) {
+          wrecks.splice(i, 1);
+          continue;
+        }
+        const dx = v.x - p.x, dz = v.z - p.z;
+        if (dx * dx + dz * dz > OUT_OF_VIEW * OUT_OF_VIEW) {
+          game.removeVehicle(v);
+          wrecks.splice(i, 1);
+        }
+      }
       for (let i = cars.length - 1; i >= 0; i--) {
         const v = cars[i];
         if (v.removed) {
@@ -805,12 +833,29 @@ export function createTraffic(game, { max = 14 } = {}) {
           continue;
         }
         if (v.driver === 'player' || p.vehicle === v) {
+          // Hijacked with the driver still inside: pulled out, runs off.
+          if (v.ai && !v.ai.dead) bailOut(v, p.x, p.z);
           release(v);
           cars.splice(i, 1);
           continue;
         }
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         const dr = v.ai;
+        // Shot at, burning or wrecked: stop, get out and run.
+        if (v.combatHit || v.burning || v.wrecked) {
+          dr.dead = true;
+          driveStep(dr, v, dt, ctx); // handbrake on
+          if (Math.abs(v.speed) < 2.5 || v.wrecked) {
+            const src = v.lastHitBy;
+            bailOut(v, src && Number.isFinite(src.x) ? src.x : v.x, src && Number.isFinite(src.z) ? src.z : v.z);
+            release(v);
+            v.driver = null;
+            v.bailed = true;
+            cars.splice(i, 1);
+            wrecks.push(v);
+          }
+          continue;
+        }
         if (d > DESPAWN || ((dr.stuck || dr.dead || v.wrecked) && d > OUT_OF_VIEW)) {
           game.removeVehicle(v);
           release(v);

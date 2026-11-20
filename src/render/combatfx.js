@@ -175,7 +175,7 @@ export function createCombatFx(game) {
     if (!decalMesh) return;
     const slot = SCORCH + holeHead;
     holeHead = (holeHead + 1) % HOLES;
-    const size = 0.1 + rnd() * 0.08;
+    const size = 0.16 + rnd() * 0.1;
     const op = 0.6 + rnd() * 0.4;
     if (flat) putDecal(slot, x, 0.035, z, rnd() * 6.28, -Math.PI / 2, size * 1.2, op);
     else putDecal(slot, x + nx * 0.02, y, z + nz * 0.02, Math.atan2(nx, nz), 0, size, op);
@@ -342,13 +342,13 @@ export function createCombatFx(game) {
     const qq = q();
     const gy = y < 0.5 ? 0.4 : y;
     // Flash and fireball.
-    add(x, gy + 0.5, z, 0, 0, 0, 0.2, 5 * k, 11 * k, 2.2, 1, 0.92, 0.7, GLOW);
-    add(x, gy + 0.5, z, 0, 0, 0, 0.35, 12 * k, 20 * k, 0.28, 1, 0.55, 0.2, GLOW);
+    add(x, gy + 0.8, z, 0, 0, 0, 0.22, 8 * k, 16 * k, 2.2, 1, 0.92, 0.7, GLOW);
+    add(x, gy + 0.8, z, 0, 0, 0, 0.4, 16 * k, 26 * k, 0.3, 1, 0.55, 0.2, GLOW);
     const nf = Math.max(5, Math.round(14 * qq));
     for (let i = 0; i < nf; i++) {
       const a = rnd() * 6.28, up = rnd();
       const sp = (2 + rnd() * 4) * k;
-      add(x + rs() * k, gy + 0.4 + up * 1.4 * k, z + rs() * k, Math.cos(a) * sp, 1 + up * 3, Math.sin(a) * sp, 0.45 + rnd() * 0.5, 2 * k, 4.6 * k, 0.9, 1, 0.5 + rnd() * 0.25, 0.12, PUFF, -0.5, 1.8);
+      add(x + rs() * k, gy + 0.4 + up * 1.4 * k, z + rs() * k, Math.cos(a) * sp, 1 + up * 3, Math.sin(a) * sp, 0.5 + rnd() * 0.6, 3.2 * k, 7 * k, 0.9, 1, 0.5 + rnd() * 0.25, 0.12, PUFF, -0.5, 1.8);
     }
     const nc = Math.max(3, Math.round(7 * qq));
     for (let i = 0; i < nc; i++) {
@@ -364,8 +364,8 @@ export function createCombatFx(game) {
       if (j >= 0) S.rotV[j] = rs() * 0.4;
     }
     // Shock ring on the ground, and dust racing outward.
-    alpha(x, 0.25, z, 0, 0, 0, 0.5, 1.5, e.radius * 2.8, 0.7, 1, 0.92, 0.78, RING + 4, 0, 0, 0.02);
-    add(x, 0.3, z, 0, 0, 0, 0.3, 1, e.radius * 2.2, 0.45, 1, 0.8, 0.5, RING + 4);
+    alpha(x, 0.25, z, 0, 0, 0, 0.55, 1.5, e.radius * 3, 1, 1, 0.95, 0.85, RING + 4, 0, 0, 0.02);
+    add(x, 0.3, z, 0, 0, 0, 0.35, 1, e.radius * 2.4, 0.8, 1, 0.8, 0.5, RING + 4);
     const nd = Math.max(4, Math.round(10 * qq));
     for (let i = 0; i < nd; i++) {
       const a = (i / nd) * 6.28 + rnd() * 0.4;
@@ -422,19 +422,19 @@ export function createCombatFx(game) {
       const len = (sp.length || 4) * 0.5, wid = (sp.width || 1.8) * 0.5, h = (sp.height || 1.4);
       const ch = Math.cos(c.heading || 0), sh = Math.sin(c.heading || 0);
       const y0 = (c.y || 0);
-      bn.a += dt * 24 * qq;
+      bn.a += dt * 30 * qq;
       while (bn.a >= 1) {
         bn.a -= 1;
         const lx = rs() * len * 0.8, lz = rs() * wid * 0.7;
         const px = c.x + ch * lx - sh * lz, pz = c.z + sh * lx + ch * lz;
-        add(px, y0 + h * 0.55, pz, rs() * 0.4 + (c.vx || 0) * 0.3, 1.8 + rnd() * 2.2, rs() * 0.4 + (c.vz || 0) * 0.3, 0.4 + rnd() * 0.3, 0.9, 0.25, 0.85, 1, 0.45 + rnd() * 0.25, 0.1, PUFF, -0.4, 1.2);
+        add(px, y0 + h * 0.5, pz, rs() * 0.4 + (c.vx || 0) * 0.3, 2 + rnd() * 2.5, rs() * 0.4 + (c.vz || 0) * 0.3, 0.5 + rnd() * 0.35, 2.6, 0.7, 1, 1, 0.5 + rnd() * 0.25, 0.1, PUFF, -0.6, 1.2);
       }
       bn.b += dt * 7 * qq;
       while (bn.b >= 1) {
         bn.b -= 1;
         const lx = rs() * len * 0.6, lz = rs() * wid * 0.5;
         const px = c.x + ch * lx - sh * lz, pz = c.z + sh * lx + ch * lz;
-        add(px, y0 + h * 0.5, pz, 0, 0.6, 0, 0.22, 1.1, 1.8, 0.55, 1, 0.9, 0.6, GLOW);
+        add(px, y0 + h * 0.5, pz, 0, 0.6, 0, 0.22, 2.2, 3.4, 0.6, 1, 0.8, 0.45, GLOW);
         add(px, y0 + h * 0.7, pz, rs() * 2, 3 + rnd() * 3, rs() * 2, 0.5 + rnd() * 0.5, 0.12, 0.04, 2.2, 1, 0.7, 0.25, STREAK + 8, 4, 0.5);
       }
       bn.s += dt * 9 * qq;

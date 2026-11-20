@@ -609,6 +609,61 @@ export function createPeds(game, { max = 22 } = {}) {
     first = false;
   }
 
+  // Nearest block that has a pavement loop (for a ped placed off-loop).
+  function nearestBlock(x, z) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
+      const dx = x < b.x0 ? b.x0 - x : x > b.x1 ? x - b.x1 : 0;
+      const dz = z < b.z0 ? b.z0 - z : z > b.z1 ? z - b.z1 : 0;
+      const d = dx * dx + dz * dz;
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  // A driver who bailed out of a car (task 27): a ped at (x, z) running
+  // from (fx, fz). Takes a free slot, else recycles the farthest ped.
+  // Returns the ped or null.
+  function spawnFleeing(x, z, fx, fz, time = PANIC_T + 2) {
+    if (hidden || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    let slot = freeSlot();
+    const px = game.player.x, pz = game.player.z;
+    if (!slot) {
+      let far = -1, fd = -1;
+      for (let i = 0; i < slots.length; i++) {
+        const p = slots[i].ped;
+        if (!p.active) continue;
+        const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
+        if (d > fd) { fd = d; far = i; }
+      }
+      if (far < 0) return null;
+      deactivate(slots[far]);
+      active--;
+      slot = slots[far];
+    }
+    const block = nearestBlock(x, z);
+    if (!block) return null;
+    const ped = slot.ped;
+    placePed(ped, block, game.rng, 'loop');
+    setPos(ped, x, z);
+    ped.s = nearestS(block, x, z);
+    if (game.actors && !addActor(game, ped)) {
+      ped.active = false;
+      ped.block = null;
+      return null;
+    }
+    onBlock[block.id]++;
+    active++;
+    scarePed(ped, fx, fz, time);
+    slot.mesh.visible = true;
+    return ped;
+  }
+
   // Gunfire nearby or someone knocked down: everyone close runs.
   function scareAround(x, z, r) {
     const r2 = r * r;
@@ -631,6 +686,7 @@ export function createPeds(game, { max = 22 } = {}) {
     name: 'peds',
     get count() { return active; },
     slots,
+    spawnFleeing,
     fixedUpdate(dt) {
       const p = game.player;
       if (p.y > SKY || (city.shoreDist && city.shoreDist(p.x, p.z) < SEA)) {

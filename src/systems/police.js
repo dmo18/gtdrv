@@ -615,7 +615,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   let sirenOn = false, wasEnabled = true;
   let violence = 0, lastShotStamp = NaN, officerSees = false;
   let blockCool = 0, stepTick = 0, enabledNow = true;
-  const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0 };
+  const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '' };
 
   // --- Witnesses for violence heat. ---
   function civNear(x, z, r) {
@@ -974,47 +974,53 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     if (sp < 5) return false;
     const fx = pv.vx / sp, fz = pv.vz / sp;
     const nodes = city.nodes, col = game.collision;
-    let best = -Infinity, bn = -1;
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      const dx = n.x - p.x, dz = n.z - p.z;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      if (d < BLOCK_MIN || d > BLOCK_MAX) continue;
-      const dot = (dx * fx + dz * fz) / d;
-      if (dot < 0.85) continue;
-      const s = dot - Math.abs(d - 140) / 300;
-      if (s > best) {
-        best = s;
-        bn = i;
+    // The road nearest to a point ~140 m ahead (any edge, however long).
+    let cx = 0, cz = 0, ux = 1, uz = 0, found = false;
+    for (let tries = 0; tries < 3 && !found; tries++) {
+      const ahead = 140 + (tries === 1 ? -30 : tries === 2 ? 40 : 0);
+      const qx = p.x + fx * ahead, qz = p.z + fz * ahead;
+      let bd = 25, be = -1;
+      for (let i = 0; i < city.edges.length; i++) {
+        const e = city.edges[i];
+        if (e.causeway) continue;
+        const d = segDist(city, e, qx, qz);
+        if (d < bd) {
+          bd = d;
+          be = i;
+        }
       }
+      if (be < 0) continue;
+      const e = city.edges[be];
+      const a = nodes[e.a], b = nodes[e.b];
+      ux = (b.x - a.x) / e.length;
+      uz = (b.z - a.z) / e.length;
+      const lo = extAt(a, e) + 6, hi = e.length - extAt(b, e) - 6;
+      if (hi <= lo) continue;
+      const t = clamp((qx - a.x) * ux + (qz - a.z) * uz, lo, hi);
+      cx = a.x + ux * t;
+      cz = a.z + uz * t;
+      const dx = cx - p.x, dz = cz - p.z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d < BLOCK_MIN || d > BLOCK_MAX || (dx * fx + dz * fz) / d < 0.75) continue;
+      if (col && col.lineClear && col.lineClear(p.x, p.z, cx, cz) && d < 120) continue; // too obvious
+      found = true;
     }
-    if (bn < 0) return false;
-    const n = nodes[bn];
-    // The edge the player will most likely arrive on.
-    let be = -1, bd = Infinity;
-    for (let k = 0; k < n.edges.length; k++) {
-      const e = city.edges[n.edges[k]];
-      if (e.causeway) continue;
-      const o = nodes[otherEnd(e, bn)];
-      const d = Math.hypot(o.x - p.x, o.z - p.z);
-      if (d < bd) {
-        bd = d;
-        be = n.edges[k];
-      }
+    if (!found) {
+      stats.blockFail = 'no road ahead';
+      return false;
     }
-    if (be < 0) return false;
-    const e = city.edges[be];
-    const o = nodes[otherEnd(e, bn)];
-    const ux = (o.x - n.x) / e.length, uz = (o.z - n.z) / e.length;
-    const at = Math.min(e.length * 0.5, extAt(n, e) + 8);
-    const cx = n.x + ux * at, cz = n.z + uz * at;
     const nx = -uz, nz = ux;
     const across = Math.atan2(nz, nx);
     for (let k = 0; k < 2; k++) {
       const s = k === 0 ? 1 : -1;
       const x = cx + nx * 2.4 * s, z = cz + nz * 2.4 * s;
-      if (col && col.resolveCircle(x, z, 1.2, 0).hit) return false;
-      if (!spotClear(x, z, 7)) return false;
+      if (col && col.resolveCircle(x, z, 1.2, 0).hit) {
+        stats.blockFail = 'wall';
+        return false;
+      }
+      if (!spotClear(x, z, 7)) {
+        stats.blockFail = 'cars';
+        return false;
+      }
     }
     for (let k = 0; k < 2; k++) {
       const s = k === 0 ? 1 : -1;
