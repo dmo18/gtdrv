@@ -752,7 +752,8 @@ export function createAudio(game) {
     let bd = Infinity;
     for (let i = 0; i < vs.length; i++) {
       const v = vs[i];
-      if (!v || !(v.police || (v.spec && v.spec.police)) || v.wrecked) continue;
+      // Only a police vehicle with its siren actually running can be heard.
+      if (!v || !(v.police || (v.spec && v.spec.police)) || v.wrecked || !v.siren) continue;
       const dx = fin(v.x) - fin(game.player.x);
       const dz = fin(v.z) - fin(game.player.z);
       const d = dx * dx + dz * dz - (v.siren ? 1e6 : 0);
@@ -761,7 +762,7 @@ export function createAudio(game) {
         best = v;
       }
     }
-    let g = 0.35;
+    let g = 0; // silent unless a siren is running nearby
     let dop = 1;
     sirenNear = false;
     if (best) {
