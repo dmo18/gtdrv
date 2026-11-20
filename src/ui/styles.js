@@ -245,6 +245,35 @@ const CSS = `
 .rw-sec span { font-size: 9px; }
 .rw-sec svg { width: 22px; height: 22px; }
 
+/* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
+   button by touch.js (kept off FIRE and pause). Never takes touches. */
+.rw-ww {
+  position: absolute; left: 0; top: 0; width: 216px; height: 216px; z-index: 30;
+  pointer-events: none; visibility: hidden; opacity: 0;
+  transition: opacity 0.1s ease-out, visibility 0s linear 0.1s;
+}
+.rw-ww.rw-ww-open { visibility: visible; opacity: 1; transition-delay: 0s; }
+.rw-ww-disc {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle, rgba(10, 14, 20, 0.9) 0 24px, rgba(10, 14, 20, 0.78) 25px);
+  border: 2px solid var(--rw-panel-edge); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+.rw-ww-cancel .rw-ww-disc { border-color: rgba(226, 70, 48, 0.8); opacity: 0.7; }
+.rw-ww-slice {
+  position: absolute; width: 54px; height: 50px; margin: -25px 0 0 -27px; border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: var(--rw-text); border: 2px solid transparent;
+  font: 700 8px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.05em;
+}
+.rw-ww-slice svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rw-ww-slice.rw-cur { border-color: rgba(255, 255, 255, 0.28); }
+.rw-ww-slice.rw-sel { background: var(--rw-accent); border-color: #ffd0b5; transform: scale(1.14); box-shadow: 0 0 12px var(--rw-accent-soft); }
+.rw-ww-label {
+  position: absolute; left: 50%; top: 50%; width: 84px; transform: translate(-50%, -50%);
+  text-align: center; font: 700 11px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--rw-text);
+}
+.rw-ww-cancel .rw-ww-label { color: #ff9c86; }
+
 /* combat: FIRE under the right thumb, LOCK beside it, reload chip above LOCK */
 .rw-btn.rw-fire { --x: 26px; --y: 24px; width: 100px; height: 100px; font-size: 13px; }
 .rw-btn.rw-fire .rw-face, .rw-btn.rw-dbfire .rw-face {
@@ -288,7 +317,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .rw-hot .rw-badge.rw-on { animation: none !important; background: #ff3b30; }
-  .rw-face, .rw-sec, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
+  .rw-face, .rw-sec, .rw-ww, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
   .rw-a-detonate .rw-face { animation: none; }
 }
 

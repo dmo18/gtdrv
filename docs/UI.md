@@ -50,6 +50,21 @@ the player owns placed charges. SIREN and VIEW stay in the fan. With
 thrown weapons FIRE aims on hold (arc preview) and throws on release;
 lifting the finger over the more button or SWAP cancels.
 
+## Weapon wheel
+
+Hold SWAP (about 250 ms) to open a ring of the seven weapons around the
+button; tapping SWAP under 250 ms still cycles. While the same finger stays
+down, dragging highlights the slice nearest the drag angle (slice 0 is up,
+clockwise) and shows its name in the middle; lifting picks it
+(`game.combat.pickWeapon`, the same `weaponSwitch` event as a tap, so the
+name toasts). Inside 24 px of the centre or past 128 px the lift changes
+nothing. The ring (216 px) is clamped on screen and slid clear of FIRE and
+pause. A throw being aimed is cancelled when the wheel opens. `releaseAll`
+(blur, hidden, mode change, pause) closes it without a change. Maths in
+`src/ui/wheel.js`, tests in `test/wheel.test.js`, check with
+`node scripts/wheel-shots.mjs`. The slices carry aria-labels and the ring is
+aria-hidden while closed. Left-handed layouts mirror automatically.
+
 ## Adding a control
 
 ```js
@@ -62,6 +77,7 @@ const h = game.touch.registerAction({
   slot: 'gun',                             // optional fixed arc slot (primary only)
   press() {}, release() {},                // or input: 'inputButtonName'
   visible: () => true,                     // optional, polled every step
+  pointer: { down(e) {}, move(e) {}, up(e) {} }, // optional finger path (SWAP wheel)
 });
 h.remove();
 ```

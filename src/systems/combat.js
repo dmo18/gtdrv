@@ -24,7 +24,7 @@
 import { createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
 import {
-  RULES, WEAPONS, MOUNTS, createArms, nextWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
+  RULES, WEAPONS, MOUNTS, createArms, nextWeapon, selectWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
@@ -2204,6 +2204,19 @@ export function createCombat(game, { seed = 23023 } = {}) {
     countStickies,
     armsOf: ensureArms,
     get throwAiming() { return throwAim; },
+    // The touch weapon wheel: pick a weapon by id on foot. Same event as a
+    // SWAP tap (the HUD toasts the name); a throw being aimed is cancelled.
+    pickWeapon(id) {
+      const w = game.player && game.player.walker;
+      if (!w || !w.arms || !WEAPONS[id] || game.player.vehicle) return false;
+      if (throwAim) throwCancel = true;
+      selectWeapon(w.arms, id);
+      const e = EV.weaponSwitch;
+      e.actor = w;
+      e.weapon = w.arms.weapon;
+      emit(game, 'weaponSwitch');
+      return true;
+    },
     trace: (x, y, z, dx, dy, dz, len, skipActor, skipCraft, out = TR) => trace(game, x, y, z, dx, dy, dz, len, skipActor, skipCraft, out),
     explode: (x, y, z, r, source = null, depth = 0, scale = 1, craft = null) => requestExplosion(x, y, z, r, source, depth, craft, 0, scale),
     craftDestroyed,

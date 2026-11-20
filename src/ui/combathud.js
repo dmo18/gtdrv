@@ -388,6 +388,10 @@ export function createCombatHud(game, uiRoot) {
   };
   const combatState = { show: false, weapon: '', name: '', mag: 0, max: 0, reload: 0, locked: false, drive: false };
   const armsCtl = game.touch ? registerArmsControls(game, game.touch) : null;
+  // Hold SWAP for the weapon wheel: the touch layer hands back a weapon id.
+  if (game.touch && game.touch.setWeaponPicker) {
+    game.touch.setWeaponPicker((id) => { if (game.combat && game.combat.pickWeapon) game.combat.pickWeapon(id); });
+  }
   const cview = { pip: false, px: -1, py: -1, box: false, bx: -1, by: -1, bs: -1, locked: null, arrow: false, aa: 99 };
   const ray = { x: 0, y: 0, z: 0, fx: 1, fy: 0, fz: 0 };
 

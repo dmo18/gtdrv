@@ -31,6 +31,8 @@ import {
   shapeSteer, rampSteer, angleDelta, tiltAngle, tiltToSteer, clampSensitivity,
   STEER_STYLES, WHEEL_LOCK_DEG,
 } from '../core/input.js';
+import { WEAPONS, WEAPON_IDS } from '../core/weapons.js';
+import { HOLD_MS, RING_PX, WHEEL_KEEP, WHEEL_CANCEL, wheelIndex, placeWheel } from './wheel.js';
 
 const SLIDER_RANGE = 110; // px of drag for full lock
 const SLIDER_DEAD = 0.04;
@@ -169,7 +171,7 @@ export function createTouchControls(root, input, opts = {}) {
   }
 
   // A round/pedal button. onDown/onUp do the actual input work.
-  function makeButton(cls, label, icon, text, onDown, onUp, buzz = true) {
+  function makeButton(cls, label, icon, text, onDown, onUp, buzz = true, hooks = null) {
     const b = el('button', 'rw-btn ' + cls, layer);
     b.type = 'button';
     b.tabIndex = -1;
@@ -179,9 +181,9 @@ export function createTouchControls(root, input, opts = {}) {
     const f = el('span', 'rw-face', b);
     f.innerHTML = (icon ? svg(icon) : '') + (text ? `<span>${text}</span>` : '');
     track(b, {
-      down() { b.classList.add('rw-down'); if (buzz) vibrate(); onDown(); },
-      move() {},
-      up() { b.classList.remove('rw-down'); onUp(); },
+      down(e) { b.classList.add('rw-down'); if (buzz) vibrate(); onDown(e); },
+      move(e) { if (hooks && hooks.move) hooks.move(e); },
+      up(e) { b.classList.remove('rw-down'); onUp(e); },
     });
     return b;
   }
@@ -501,16 +503,19 @@ export function createTouchControls(root, input, opts = {}) {
       modes: Array.isArray(def.modes) && def.modes.length ? def.modes.filter((m) => MODES.includes(m)) : MODES.slice(),
       vis: true, c: -1, r: -1, k: -1, el: null,
     };
+    // def.pointer { down(e), move(e), up(e) } replaces press/release for
+    // fingers (keyboard clicks still use press/release): the SWAP wheel.
+    const ptr = def.pointer || null;
     const idc = a.id.replace(/[^a-z0-9_-]/gi, '');
     const slot = !sec && def.slot ? String(def.slot).replace(/[^a-z0-9_-]/gi, '') : '';
     a.slot = slot;
     const b = makeButton(`rw-act ${sec ? 'rw-sec' : slot ? `rw-pri rw-slot rw-slot-${slot}` : 'rw-pri rw-extra'} rw-a-${idc}`,
       def.label || a.id, def.icon || null, def.text || '',
-      () => { if (sec) { fanHeld++; armFan(); } press(); },
-      () => {
-        release();
+      (e) => { if (sec) { fanHeld++; armFan(); } if (ptr) ptr.down(e); else press(); },
+      (e) => {
+        if (ptr) ptr.up(e); else release();
         if (sec) { fanHeld = Math.max(0, fanHeld - 1); if (!fanHeld) setFan(false); }
-      }, def.buzz !== false);
+      }, def.buzz !== false, ptr);
     b.dataset.action = a.id;
     gate(b, ...a.modes);
     if (sec) b.tabIndex = 0;
@@ -666,6 +671,104 @@ export function createTouchControls(root, input, opts = {}) {
   // Last shown values, so per-frame calls only touch the DOM on change.
   const shown = { weapon: '', mag: -2, max: -2, reload: -1, locked: null, show: null, drive: null, chip: null };
 
+  // ----- weapon wheel: hold SWAP, drag to a slice, lift to choose -----
+  // A tap (under HOLD_MS) still cycles. The wheel is only open while the
+  // SWAP finger is down; docs/UI.md "Weapon wheel".
+  const wheelN = WEAPON_IDS.length;
+  const wheelEl = el('div', 'rw-ww', layer);
+  wheelEl.setAttribute('aria-hidden', 'true');
+  el('div', 'rw-ww-disc', wheelEl);
+  const wheelSlices = [];
+  for (let i = 0; i < wheelN; i++) {
+    const id = WEAPON_IDS[i];
+    const a = (i * Math.PI * 2) / wheelN;
+    const sl = el('div', 'rw-ww-slice', wheelEl);
+    sl.setAttribute('role', 'img');
+    sl.setAttribute('aria-label', WEAPONS[id].name);
+    sl.style.left = `${(RING_PX + Math.sin(a) * 74).toFixed(1)}px`;
+    sl.style.top = `${(RING_PX - Math.cos(a) * 74).toFixed(1)}px`;
+    sl.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${WEAPON_ICONS[id] || ICONS.fire}</svg><span>${id.toUpperCase()}</span>`;
+    wheelSlices.push(sl);
+  }
+  const wheelLabel = el('div', 'rw-ww-label', wheelEl);
+  const wheelCtr = { x: 0, y: 0 }; // ring centre in client px
+  const wheelPos = { x: 0, y: 0 };
+  const wheelAvoid = [{ l: 0, t: 0, r: 0, b: 0 }, { l: 0, t: 0, r: 0, b: 0 }];
+  let wheelOpen = false, wheelSel = WHEEL_KEEP, swapTimer = 0, picker = null;
+  function wheelText() {
+    if (wheelSel === WHEEL_CANCEL) return 'Cancel';
+    const id = wheelSel >= 0 ? WEAPON_IDS[wheelSel] : shown.weapon;
+    return (WEAPONS[id] && WEAPONS[id].name) || '';
+  }
+  function wheelPaint() {
+    for (let i = 0; i < wheelN; i++) {
+      wheelSlices[i].classList.toggle('rw-sel', i === wheelSel);
+      wheelSlices[i].classList.toggle('rw-cur', WEAPON_IDS[i] === shown.weapon);
+    }
+    wheelEl.classList.toggle('rw-ww-cancel', wheelSel === WHEEL_CANCEL);
+    wheelLabel.textContent = wheelText();
+  }
+  function wheelClose() {
+    clearTimeout(swapTimer);
+    swapTimer = 0;
+    if (!wheelOpen) return;
+    wheelOpen = false;
+    wheelEl.classList.remove('rw-ww-open');
+    wheelEl.setAttribute('aria-hidden', 'true');
+  }
+  function wheelShow() {
+    swapTimer = 0;
+    if (!swapBtn.offsetParent) return; // SWAP is not on screen: no wheel
+    const r = root.getBoundingClientRect();
+    const sb = swapBtn.getBoundingClientRect();
+    const keep = [layer.querySelector('.rw-fire'), layer.querySelector('.rw-pause')];
+    for (let i = 0; i < 2; i++) {
+      const q = keep[i] && keep[i].getBoundingClientRect();
+      if (!q || !q.width) { wheelAvoid[i].l = wheelAvoid[i].r = -1e4; wheelAvoid[i].t = wheelAvoid[i].b = -1e4; continue; }
+      wheelAvoid[i].l = q.left - r.left; wheelAvoid[i].r = q.right - r.left;
+      wheelAvoid[i].t = q.top - r.top; wheelAvoid[i].b = q.bottom - r.top;
+    }
+    placeWheel(sb.left + sb.width / 2 - r.left, sb.top + sb.height / 2 - r.top, RING_PX, r.width, r.height, wheelAvoid, wheelPos);
+    wheelCtr.x = wheelPos.x + r.left;
+    wheelCtr.y = wheelPos.y + r.top;
+    wheelEl.style.transform = `translate(${Math.round(wheelPos.x - RING_PX)}px, ${Math.round(wheelPos.y - RING_PX)}px)`;
+    wheelSel = WHEEL_KEEP;
+    wheelPaint();
+    wheelOpen = true;
+    wheelEl.classList.add('rw-ww-open');
+    wheelEl.setAttribute('aria-hidden', 'false');
+    vibrate();
+    // A throw being aimed is cancelled; the wheel then picks the weapon.
+    input.press('cancel');
+    input.release('cancel');
+  }
+  function swapDown() {
+    clearTimeout(swapTimer);
+    swapTimer = setTimeout(wheelShow, HOLD_MS);
+  }
+  function swapMove(e) {
+    if (!wheelOpen) return;
+    const i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
+    if (i === wheelSel) return;
+    wheelSel = i;
+    wheelPaint();
+  }
+  // e is undefined when releaseAll closes it (blur, mode change, hidden):
+  // that never changes the weapon.
+  function swapUp(e) {
+    const lifted = !!e && e.type === 'pointerup';
+    if (wheelOpen) {
+      let i = wheelSel;
+      if (lifted && Number.isFinite(e.clientX)) i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
+      wheelClose();
+      if (lifted && i >= 0 && picker) picker(WEAPON_IDS[i]);
+      return;
+    }
+    const held = swapTimer !== 0;
+    wheelClose();
+    if (lifted && held) { input.press('swap'); input.release('swap'); } // quick tap: cycle
+  }
+
   // ----- secondary: folded into the fan -----
   const armed = () => shown.show !== false;
   // Handbrake is a primary button: always on screen in a car.
@@ -674,7 +777,8 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
   addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
-  addAction({ id: 'swap', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed });
+  addAction({ id: 'swap', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed,
+    pointer: { down: swapDown, move: swapMove, up: swapUp } });
   addAction({ id: 'reload', label: 'Reload', icon: 'reload', text: 'RELOAD', modes: ['foot', 'car', 'boat'], input: 'reload',
     visible: () => armed() && (mode === 'foot' || shown.drive === true) });
   addAction({ id: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
@@ -761,6 +865,9 @@ export function createTouchControls(root, input, opts = {}) {
     },
     getSteering: () => ({ style, sensitivity, leftHanded }),
     registerAction: addAction,
+    // fn(weaponId): called when the weapon wheel picks a weapon.
+    setWeaponPicker(fn) { picker = typeof fn === 'function' ? fn : null; },
+    isWheelOpen: () => wheelOpen,
     // 'minimal' (default): idle-shrunk primaries and the "more" fan.
     // 'full': every control shown, nothing folded or dimmed.
     setHudMode(m) {
@@ -792,11 +899,13 @@ export function createTouchControls(root, input, opts = {}) {
         layer.classList.toggle('rw-nodrive', !drive);
       }
       if (flipped) refreshActions();
+      if (!show) wheelClose();
       if (c.weapon !== shown.weapon) {
         shown.weapon = c.weapon;
         const ic = WEAPON_ICONS[c.weapon] || ICONS.fire;
         ammoIcon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>`;
         swapBtn.querySelector('svg').innerHTML = ic;
+        if (wheelOpen) wheelPaint();
         ammoName.textContent = c.name || '';
       }
       const mag = c.max > 0 ? Math.max(0, c.mag | 0) : -1;
@@ -857,6 +966,7 @@ export function createTouchControls(root, input, opts = {}) {
     dispose() {
       releaseAll();
       clearTimeout(fanTimer);
+      clearTimeout(swapTimer);
       stopTilt();
       for (const [t, type, fn, o] of listeners) t.removeEventListener(type, fn, o);
       listeners.length = 0;

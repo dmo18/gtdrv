@@ -277,3 +277,15 @@ None critical or high.
   traffic cars also fly off the street ramps (no score for them); ramps
   have no collision from the side, a car driving into one side-on passes
   through it.
+
+## 2026-11-20: weapon wheel on SWAP
+- Hold SWAP about 250 ms to open a ring of the seven weapons at the button;
+  drag to a slice, lift to choose (name shown in the middle and toasted).
+  Dead zone 24 px keeps the weapon, dragging past 128 px and lifting
+  cancels. A tap under 250 ms cycles as before (now on finger lift). Opening
+  the wheel cancels an aimed throw. Closed by blur, hidden, mode change and
+  pause (`releaseAll`). `src/ui/wheel.js` (pure maths, placement clear of
+  FIRE and pause), `touch.js` (`pointer` hook in `registerAction`,
+  `setWeaponPicker`), `combat.pickWeapon`, `combathud.js`, styles,
+  `test/wheel.test.js`. Docs in docs/UI.md.
+- Screenshots: docs/preview/weapon-wheel-*.png (`node scripts/wheel-shots.mjs`).
