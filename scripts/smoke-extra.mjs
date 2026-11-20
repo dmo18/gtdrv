@@ -118,15 +118,19 @@ export default async function extra(page, check) {
     };
     put(course.start);
     g.activities.start(course.id);
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    await wait(4500);
+    // Advance the simulation directly so this does not depend on how
+    // fast the test machine draws frames.
+    const run = (steps) => {
+      for (let i = 0; i < steps; i++) g.step(1 / 60);
+    };
+    run(300);
     for (let lap = 0; lap < (course.laps || 1); lap++) {
       for (const cp of course.checkpoints) {
         put(cp);
-        await wait(250);
+        run(12);
       }
     }
-    await wait(600);
+    run(30);
     return { id: course.id, name: course.name, medal: g.progress.medals[course.id] || null, gained: g.progress.money - money0, courses: g.activities.courses.length };
   });
   await page.screenshot({ path: 'shots/race.png' });
