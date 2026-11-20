@@ -64,6 +64,14 @@ export const BOAT_SPECS = {
     turnRate: 0.38, yawResp: 1.0, sideGrip: 1.0, hop: 0.1, pitchMax: 0.06, rollMax: 0.07,
     health: 2400, colors: [0xf7f7f4, 0x1c2a44, 0xe6e0d0],
   },
+  // Easter egg (found by double-tapping the version number in the pause menu).
+  submarine: {
+    id: 'submarine', label: 'Sub', hull: 'submarine',
+    length: 12, width: 2.6, height: 3.4, draft: 0.7,
+    mass: 9000, maxSpeed: 18, reverseSpeed: 4, accel: 3.2, drag: 0.03, coastDrag: 0.5,
+    turnRate: 0.7, yawResp: 1.6, sideGrip: 1.3, hop: 0.2, pitchMax: 0.05, rollMax: 0.1,
+    health: 2000, colors: [0x2b3a42, 0x3d4a3a, 0x58402a],
+  },
   dinghy: {
     id: 'dinghy', label: 'Bobbin', hull: 'inflatable',
     length: 3.2, width: 1.6, height: 0.75, draft: 0.2,

@@ -158,6 +158,19 @@ export function createMenu(root, game, economy) {
   // __VERSION__ comes from package.json at build time (scripts/build.mjs).
   /* global __VERSION__ */
   if (typeof __VERSION__ !== 'undefined') verEl.textContent = 'v' + __VERSION__;
+  // Easter egg: double-tap (or double-click) the version number.
+  let lastTap = { t: 0, x: 0, y: 0 };
+  verEl.addEventListener('pointerup', (e) => {
+    const now = performance.now();
+    const near = Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30;
+    if (now - lastTap.t < 400 && near) {
+      lastTap = { t: 0, x: 0, y: 0 };
+      close();
+      if (game.easterEgg) game.easterEgg();
+      return;
+    }
+    lastTap = { t: now, x: e.clientX, y: e.clientY };
+  });
   const pointsEl = h('span', 'rw-menu-points');
   pointsEl.setAttribute('aria-label', 'Score');
   head.append(title, pointsEl, verEl);

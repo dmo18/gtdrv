@@ -45,14 +45,15 @@ scene.add(water.mesh);
 const wake = createWakeTrail(scene, 64);
 
 const DT = 1 / 60;
-const ids = ['speedboat', 'jetski', 'fisher', 'yacht', 'dinghy'];
-const slots = [[0, -14], [3, 14], [-30, -14], [-34, 14], [-6, 0]];
+const ids = ['speedboat', 'jetski', 'fisher', 'yacht', 'dinghy', 'submarine'];
+const slots = [[0, -14], [3, 14], [-30, -14], [-34, 14], [-6, 0], [-14, 22]];
 const runs = {
   speedboat: { steps: 300, c: (i) => ({ throttle: 1, steer: i > 200 ? 0.6 : 0, brake: 0 }) },
   jetski: { steps: 240, c: (i) => ({ throttle: 1, steer: i > 160 ? -0.8 : 0, brake: 0 }) },
   fisher: { steps: 300, c: () => ({ throttle: 0.6, steer: 0, brake: 0 }) },
   yacht: { steps: 300, c: () => null },
   dinghy: { steps: 200, c: () => ({ throttle: 0.4, steer: 0, brake: 0 }) },
+  submarine: { steps: 240, c: () => ({ throttle: 0.5, steer: 0, brake: 0 }) },
 };
 const boats = [];
 const T = 12;
