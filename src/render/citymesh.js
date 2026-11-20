@@ -282,10 +282,10 @@ export function buildCityMesh(city, collision) {
   windows.buildInto(group, windowMat);
 
   // --- Trees, palms and street lamps (instanced). ---
-  const trunk = colored(new THREE.CylinderGeometry(0.16, 0.24, 1, 5).translate(0, 0.5, 0), 0x6b4a33);
-  const crown = colored(new THREE.IcosahedronGeometry(0.42, 0).scale(1, 0.8, 1).translate(0, 1.05, 0), 0x3f7f3c);
+  const trunk = colored(new THREE.CylinderGeometry(0.07, 0.11, 1, 5).translate(0, 0.5, 0), 0x6b4a33);
+  const crown = colored(new THREE.IcosahedronGeometry(1, 0).scale(1, 0.42, 1).translate(0, 0.95, 0), 0x3f7f3c);
   const treeGeom = mergeGeometries([trunk, crown]);
-  const palmTrunk = colored(new THREE.CylinderGeometry(0.07, 0.11, 1, 5).translate(0, 0.5, 0), 0x8a6a4a);
+  const palmTrunk = colored(new THREE.CylinderGeometry(0.025, 0.04, 1, 5).translate(0, 0.5, 0), 0x8a6a4a);
   const fronds = colored(new THREE.ConeGeometry(0.38, 0.14, 6).translate(0, 1.0, 0), 0x4c9a52);
   const palmGeom = mergeGeometries([palmTrunk, fronds]);
   const pole = colored(new THREE.BoxGeometry(0.16, 1, 0.16).translate(0, 0.5, 0), 0x4a4d52);
@@ -302,7 +302,7 @@ export function buildCityMesh(city, collision) {
   const placeTree = (it, p, q, s, up) => {
     p.set(it.x, 0, it.z);
     q.setFromAxisAngle(up, (it.x * 12.9898 + it.z * 78.233) % TAU);
-    s.set(it.h * 0.9, it.h, it.h * 0.9);
+    s.set(it.h * 0.33, it.h, it.h * 0.33);
   };
   const treeMesh = instanced(treeGeom, plainMat, trees, placeTree);
   const palmMesh = instanced(palmGeom, plainMat, palms, (it, p, q, s, up) => {

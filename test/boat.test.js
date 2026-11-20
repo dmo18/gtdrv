@@ -166,9 +166,15 @@ test('pier in waterCollision blocks the boat', () => {
   const buoys = createCollisionWorld();
   buoys.addCircle(30, 0, 0.6, 1.5, 'buoy');
   const c = createBoat('jetski', 0, 0, 0);
-  run(c, ctl(0.5), 600, { waterCollision: buoys });
-  assert.ok(c.impact >= 0);
-  assert.ok(Math.hypot(c.x - 30, c.z) > 0.6 + c.spec.width / 2 - 0.05 || c.x > 31);
+  const off = c.spec.length / 2 - c.spec.width / 2;
+  const wb = { waterCollision: buoys, time: 0 };
+  let closest = Infinity;
+  for (let i = 0; i < 300; i++) {
+    stepBoat(c, ctl(0.6), DT, wb);
+    const bx = c.x + Math.cos(c.heading) * off, bz = c.z + Math.sin(c.heading) * off;
+    closest = Math.min(closest, Math.hypot(bx - 30, bz));
+  }
+  assert.ok(closest > 0.6 + c.spec.width / 2 - 0.05, `bow came within ${closest} of the buoy`);
 });
 
 test('bobbing y stays within a sane band and follows the waves', () => {

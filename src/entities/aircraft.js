@@ -18,7 +18,7 @@ export const AIRCRAFT_SPECS = {
     id: 'prop', label: 'Pipwick', kind: 'plane',
     length: 7.6, width: 10.4, height: 2.6, mass: 900, health: 400,
     maxSpeed: 65, stallSpeed: 22, thrust: 6.5, groundBrake: 9,
-    maxBank: 55 * DEG, maxClimb: 35 * DEG, rollRate: 3.2, pitchRate: 2.2, turnGain: 1.6,
+    maxBank: 55 * DEG, maxClimb: 35 * DEG, rollRate: 3.2, pitchRate: 2.2, turnGain: 2.6,
     floats: false, hitRadius: 1.6,
     colors: [0xe8e2d0, 0xd9542b, 0x2f6fb5, 0xf0b429, 0x4f9d69],
   },
@@ -26,7 +26,7 @@ export const AIRCRAFT_SPECS = {
     id: 'stunt', label: 'Barrowlark', kind: 'plane',
     length: 6.0, width: 6.8, height: 2.3, mass: 650, health: 350,
     maxSpeed: 72, stallSpeed: 20, thrust: 9, groundBrake: 9,
-    maxBank: 80 * DEG, maxClimb: 60 * DEG, rollRate: 5.5, pitchRate: 3.4, turnGain: 1.5,
+    maxBank: 80 * DEG, maxClimb: 60 * DEG, rollRate: 5.5, pitchRate: 3.4, turnGain: 2.2,
     floats: false, hitRadius: 1.4,
     colors: [0xd81e2a, 0xf2d21b, 0x1c2f5e, 0x18a0a0, 0xf5f5f5],
   },
@@ -34,7 +34,7 @@ export const AIRCRAFT_SPECS = {
     id: 'seaplane', label: 'Ottermere', kind: 'plane',
     length: 8.4, width: 11.6, height: 3.5, mass: 1300, health: 500,
     maxSpeed: 58, stallSpeed: 24, thrust: 6.8, groundBrake: 7,
-    maxBank: 50 * DEG, maxClimb: 32 * DEG, rollRate: 2.6, pitchRate: 1.9, turnGain: 1.6,
+    maxBank: 50 * DEG, maxClimb: 32 * DEG, rollRate: 2.6, pitchRate: 1.9, turnGain: 2.5,
     floats: true, hitRadius: 1.8,
     colors: [0xf2efe6, 0xe07a1f, 0x2a9d8f, 0x3a5fa8, 0xc9c13a],
   },
@@ -42,7 +42,7 @@ export const AIRCRAFT_SPECS = {
     id: 'jet', label: 'Velloria', kind: 'plane',
     length: 12.5, width: 12.2, height: 3.9, mass: 4200, health: 600,
     maxSpeed: 120, stallSpeed: 40, thrust: 7, groundBrake: 11,
-    maxBank: 62 * DEG, maxClimb: 45 * DEG, rollRate: 3.0, pitchRate: 2.0, turnGain: 1.9,
+    maxBank: 62 * DEG, maxClimb: 45 * DEG, rollRate: 3.0, pitchRate: 2.0, turnGain: 3.2,
     floats: false, hitRadius: 2.0,
     colors: [0xf4f4f0, 0x23272e, 0x7a1f2b, 0x1f4e79, 0xb8a36a],
   },
@@ -186,9 +186,20 @@ function move(a, dt, world, checkGround) {
   const r = a.spec.hitRadius;
   for (let k = 0; k < n; k++) {
     const nx0 = a.x + a.vx * h, nz0 = a.z + a.vz * h;
+    const y0 = a.y;
     a.x = nx0;
     a.z = nz0;
     a.y += a.vy * h;
+    if (checkGround) {
+      // Coming down onto a surface from above (ground, sea or a roof).
+      const s = surfaceAt(world, nx0, nz0);
+      if (a.y <= s && y0 >= s) {
+        mvGround = true;
+        mvSurface = s;
+        mvWater = surfWater;
+        return;
+      }
+    }
     if (hasCol) {
       const res = col.resolveCircle(nx0, nz0, r, a.y < 0 ? 0 : a.y);
       if (res.hit) {
@@ -443,7 +454,7 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
 
   // Bank follows the stick and levels by itself; bank makes the turn.
   a.roll += (a.steer * s.maxBank - a.roll) * Math.min(1, s.rollRate * dt);
-  const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs), -1.3, 1.3);
+  const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs), -1.1, 1.1);
   a.heading = angleDiff(a.heading + turn * dt, 0);
 
   // Stall: soft, the nose drops until speed returns.

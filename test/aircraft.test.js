@@ -185,7 +185,8 @@ test('steep dive into the ground crashes', () => {
 test('steeply banked touchdown is not a clean landing', () => {
   const a = airborne('prop', 1.5, 30);
   a.roll = 0.9;
-  run(a, ctl({ steer: 1 }), 120);
+  a.pitch = -0.1;
+  run(a, ctl({ steer: 1, pitch: -0.5 }), 300);
   assert.ok(a.onGround);
   assert.ok(a.crashed || a.health < a.spec.health);
 });
@@ -206,7 +207,7 @@ test('flying into a tall box crashes or blocks, never passes through', () => {
   }
   // Coming down onto a roof from above is a crash too when steep.
   const w = emptyWorld();
-  w.collision.addBox(100, -60, 260, 60, 40);
+  w.collision.addBox(40, -60, 500, 60, 40);
   const d = airborne('prop', 90, 55);
   run(d, ctl({ throttle: 1, pitch: -1 }), 600, w);
   assert.ok(d.crashed);

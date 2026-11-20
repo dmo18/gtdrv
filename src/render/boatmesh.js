@@ -12,7 +12,6 @@ const MAT = {
 
 const GLASS = 0x22364a;
 const TRIM = 0x26292e;
-const DECK = 0xd9d4c4;
 const TEAK = 0x9a6a3e;
 const ANTIFOUL = 0x7a2420;
 const ENGINE = 0x2b2e33;
@@ -225,22 +224,22 @@ function buildJetski(spec, color, parts) {
   const fb = 0.38;
   hull(parts, {
     L, W, fb, D: spec.draft, sheer: 0.12, bowAt: 0.4, beamStern: 0.85,
-    top: color, stripe: 0x1d1f24, bottom: 0x2a2d33, deck: 0x2a2d33,
+    top: color, stripe: 0xf2f2f2, bottom: 0x2a2d33, deck: 0x8a8f96,
   });
-  // Front cowl rising to the handlebars.
-  taper(parts, color, 0.05, L * 0.42, 0.15, 0.55, fb, fb + 0.28, W * 0.38, W * 0.22);
+  // Front hood rising toward the handlebars.
+  taper(parts, color, -0.05, L * 0.42, 0.0, 0.5, fb, fb + 0.36, W * 0.36, W * 0.2);
   // Seat, long and raised.
-  taper(parts, 0x1b1d22, -L * 0.42, 0.1, -L * 0.38, 0.05, fb, fb + 0.3, W * 0.2, W * 0.17);
-  // Steering column and handlebars.
-  box(parts, 0x1b1d22, 0.12, 0.3, 0.14, 0.3, fb + 0.4, 0, -0.5);
-  box(parts, 0x1b1d22, 0.06, 0.06, 0.78, 0.22, fb + 0.55, 0);
-  box(parts, 0x50555c, 0.09, 0.09, 0.12, 0.22, fb + 0.55, 0.39);
-  box(parts, 0x50555c, 0.09, 0.09, 0.12, 0.22, fb + 0.55, -0.39);
-  // Small tinted visor.
-  box(parts, GLASS, 0.04, 0.12, 0.32, 0.4, fb + 0.4, 0, 0.9);
-  // Foot wells' rails and the jet nozzle.
-  box(parts, 0x1b1d22, L * 0.55, 0.06, 0.08, -0.25, fb + 0.02, W * 0.44);
-  box(parts, 0x1b1d22, L * 0.55, 0.06, 0.08, -0.25, fb + 0.02, -W * 0.44);
+  taper(parts, 0x2a3140, -L * 0.42, 0.02, -L * 0.39, -0.02, fb, fb + 0.3, W * 0.19, W * 0.16);
+  // Short column and handlebars just above the hood.
+  box(parts, 0x1b1d22, 0.12, 0.16, 0.12, 0.08, fb + 0.42, 0, 0.4);
+  box(parts, 0x1b1d22, 0.06, 0.05, 0.72, 0.04, fb + 0.5, 0);
+  box(parts, 0x50555c, 0.08, 0.08, 0.12, 0.04, fb + 0.5, 0.36);
+  box(parts, 0x50555c, 0.08, 0.08, 0.12, 0.04, fb + 0.5, -0.36);
+  // Small tinted visor on the hood.
+  box(parts, GLASS, 0.04, 0.1, 0.34, 0.24, fb + 0.4, 0, 0.9);
+  // Foot-well rails and the jet nozzle.
+  box(parts, 0x1b1d22, L * 0.55, 0.05, 0.07, -0.25, fb + 0.02, W * 0.44);
+  box(parts, 0x1b1d22, L * 0.55, 0.05, 0.07, -0.25, fb + 0.02, -W * 0.44);
   cyl(parts, 0x50555c, 0.08, 0.2, -L / 2 - 0.05, -0.05, 0);
 }
 

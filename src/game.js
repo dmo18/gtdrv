@@ -17,6 +17,11 @@ import { injectStyles } from './ui/styles.js';
 import { createParkedCars } from './systems/parked.js';
 import { createMapUi } from './systems/mapui.js';
 import { createAudio } from './systems/audio.js';
+import { createPeds } from './systems/peds.js';
+import { createFleet } from './systems/fleet.js';
+import { stepBoat, collideBoats } from './entities/boat.js';
+import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
+import { createWater, createWakeTrail } from './render/water.js';
 import { createWalker, stepWalker, findEnterable, exitPosition } from './entities/onfoot.js';
 import { createPersonMesh, updatePersonMesh } from './render/personmesh.js';
 
@@ -39,7 +44,18 @@ export function createGame({ canvas, uiRoot }) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
   sun.position.set(0.55, 1, 0.35);
   scene.add(hemi, sun);
-  scene.add(buildCityMesh(city, collision));
+  const cityMesh = buildCityMesh(city, collision);
+  scene.add(cityMesh);
+  // Animated sea in place of the flat placeholder. Sea level sits a
+  // little below the land so waves never wash over the beach.
+  const SEA_Y = -0.6;
+  cityMesh.remove(cityMesh.userData.water);
+  const water = createWater({});
+  const sea = new THREE.Group();
+  sea.position.y = SEA_Y;
+  sea.add(water.mesh);
+  scene.add(sea);
+  const wake = createWakeTrail(sea);
 
   const waterCollision = createCollisionWorld();
   for (const r of city.piers) waterCollision.addBox(r.x0, r.z0, r.x1, r.z1, 2, 'pier');
@@ -52,6 +68,7 @@ export function createGame({ canvas, uiRoot }) {
     // register themselves here.
     kinds: {
       car: { step: stepVehicle, createMesh: createVehicleMesh, updateMesh: updateVehicleMesh },
+      boat: { step: stepBoat, createMesh: createBoatMesh, updateMesh: updateBoatMesh },
     },
     vehicles: [],
     systems: [],
@@ -170,6 +187,8 @@ export function createGame({ canvas, uiRoot }) {
   game.addSystem(createParkedCars(game));
   game.map = game.addSystem(createMapUi(game, uiRoot));
   game.audio = game.addSystem(createAudio(game));
+  game.peds = game.addSystem(createPeds(game));
+  game.fleet = game.addSystem(createFleet(game));
 
   // --- Simulation step. ---
   function fixedUpdate(dt) {
@@ -201,7 +220,7 @@ export function createGame({ canvas, uiRoot }) {
       game.kinds[v.kind].step(v, controls, dt, game.world);
       if (v.impact > 0) events.emit('vehicleImpact', v, v.impact);
       // A parked car that has settled goes back to sleep.
-      if (!v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
+      if (v.kind === 'car' && !v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
         v.asleep = true;
         v.meshDirty = true;
       }
@@ -211,7 +230,12 @@ export function createGame({ canvas, uiRoot }) {
       for (let j = i + 1; j < vs.length; j++) {
         const b = vs[j];
         if (a.asleep && b.asleep) continue;
-        if (a.kind !== 'car' || b.kind !== 'car') continue;
+        if (a.kind !== b.kind) continue;
+        if (a.kind === 'boat') {
+          if (collideBoats(a, b)) events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
+          continue;
+        }
+        if (a.kind !== 'car') continue;
         if (collideVehicles(a, b)) {
           a.asleep = false;
           b.asleep = false;
@@ -249,6 +273,7 @@ export function createGame({ canvas, uiRoot }) {
   // --- Drawing step. ---
   let lastDistrict = '';
   let promptFor = null;
+  let wakeTick = 0;
   function render(alpha, dt) {
     const p = game.player;
     const vs = game.vehicles;
@@ -256,8 +281,15 @@ export function createGame({ canvas, uiRoot }) {
       const v = vs[i];
       if (v.asleep && !v.meshDirty) continue;
       game.kinds[v.kind].updateMesh(v.mesh, v, v.asleep ? 1 : alpha, game.time);
+      if (v.kind === 'boat') {
+        v.mesh.position.y += SEA_Y;
+        if (v.wake > 0.15 && (wakeTick + v.id) % 4 === 0) wake.emit(v.x - Math.cos(v.heading) * v.spec.length * 0.45, v.z - Math.sin(v.heading) * v.spec.length * 0.45, v.heading, v.wake);
+      }
       v.meshDirty = false;
     }
+    wakeTick++;
+    water.update(game.time, camera.position);
+    wake.update(dt, game.time);
     if (p.vehicle) {
       const v = p.vehicle;
       if (v.kind === 'car') setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });

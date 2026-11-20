@@ -14,6 +14,7 @@ export function createFleet(game) {
 
   function fill(s) {
     const c = s.make(s.spec, s.x, s.z, s.heading, game.rng);
+    if (!game.kinds[c.kind]) return;
     c.home = s;
     s.craft = c;
     game.addVehicle(c);
