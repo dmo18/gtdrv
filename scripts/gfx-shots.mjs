@@ -37,6 +37,7 @@ const VIEWS = {
   'rain-night': ['spawn', 22.5, 'rain', 0],
   residential: ['residential', 10.5, 'clear', 0],
   docks: ['docks', 15, 'clear', 0],
+  'harbour-dusk': ['docks', 19.3, 'clear', 0],
   beach: ['beach', 16.5, 'clear', 0],
   midtown: ['midtown', 11.5, 'clear', 0],
   airfield: ['airfield', 12, 'clear', 0],
