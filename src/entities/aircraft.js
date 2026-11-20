@@ -589,7 +589,7 @@ function stepHeli(a, controls, dt, world) {
   const ch = Math.cos(a.heading), sh = Math.sin(a.heading);
   let vf = a.vx * ch + a.vz * sh;
   let vl = -a.vx * sh + a.vz * ch;
-  let wantVf = 0;
+  let wantVf;
   if (lift) {
     a.heading = angleDiff(a.heading + a.steer * s.yawRate * dt, 0);
     wantVf = pitchIn * s.maxSpeed * (pitchIn < 0 ? 0.45 : 1);

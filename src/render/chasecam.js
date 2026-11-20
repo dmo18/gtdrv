@@ -9,7 +9,7 @@ import { angleDiff, clamp } from '../core/rng.js';
 // camera copies (planes, so the horizon moves).
 const MODES = {
   car: { dist: 7.5, height: 2.6, lookHeight: 1.2, lookAhead: 4, baseFov: 62, follow: 12, turn: 1, pitchShare: 0, rollShare: 0 },
-  foot: { dist: 4.2, height: 1.9, lookHeight: 1.5, lookAhead: 1.5, baseFov: 60, follow: 12, turn: 1, pitchShare: 0, rollShare: 0 },
+  foot: { dist: 5.6, height: 2.5, lookHeight: 1.15, lookAhead: 0.4, baseFov: 60, follow: 12, turn: 1, pitchShare: 0, rollShare: 0 },
   boat: { dist: 10.5, height: 3.6, lookHeight: 1.4, lookAhead: 5, baseFov: 62, follow: 10, turn: 0.8, pitchShare: 0, rollShare: 0 },
   plane: { dist: 16, height: 3.8, lookHeight: 1.8, lookAhead: 12, baseFov: 64, follow: 18, turn: 1, pitchShare: 0.55, rollShare: 0.22 },
   heli: { dist: 15, height: 6.5, lookHeight: 1.8, lookAhead: 3, baseFov: 62, follow: 6, turn: 0.55, pitchShare: 0, rollShare: 0.1 },
@@ -39,7 +39,16 @@ export function createChaseCamera(camera) {
         const t = i / SAMPLES;
         const d = dist * t;
         const lineY = y0 + (y1 - y0) * t;
-        if (collision.heightAt(x + bx * d, z + bz * d) > lineY - 0.3) return d - dist / SAMPLES;
+        if (collision.heightAt(x + bx * d, z + bz * d) > lineY - 0.3) {
+          // Refine between the last clear sample and this one.
+          let lo = d - dist / SAMPLES, hi = d;
+          for (let k = 0; k < 4; k++) {
+            const m = (lo + hi) / 2;
+            if (collision.heightAt(x + bx * m, z + bz * m) > y0 + (y1 - y0) * (m / dist) - 0.3) hi = m;
+            else lo = m;
+          }
+          return lo;
+        }
       }
       return dist;
     }

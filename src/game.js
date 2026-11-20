@@ -22,6 +22,8 @@ import { createFleet } from './systems/fleet.js';
 import { stepBoat, collideBoats } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
 import { createWater, createWakeTrail } from './render/water.js';
+import { stepAircraft, collideAircraft } from './entities/aircraft.js';
+import { createAircraftMesh, updateAircraftMesh } from './render/aircraftmesh.js';
 import { createWalker, stepWalker, findEnterable, exitPosition } from './entities/onfoot.js';
 import { createPersonMesh, updatePersonMesh } from './render/personmesh.js';
 
@@ -51,6 +53,15 @@ export function createGame({ canvas, uiRoot }) {
   const SEA_Y = -0.6;
   cityMesh.remove(cityMesh.userData.water);
   const water = createWater({});
+  // Draw the sea "behind" the land wherever the two nearly touch, so
+  // distant shorelines do not flicker.
+  for (const m of [water.near, water.far]) {
+    if (m && m.material) {
+      m.material.polygonOffset = true;
+      m.material.polygonOffsetFactor = 6;
+      m.material.polygonOffsetUnits = 6;
+    }
+  }
   const sea = new THREE.Group();
   sea.position.y = SEA_Y;
   sea.add(water.mesh);
@@ -69,6 +80,8 @@ export function createGame({ canvas, uiRoot }) {
     kinds: {
       car: { step: stepVehicle, createMesh: createVehicleMesh, updateMesh: updateVehicleMesh },
       boat: { step: stepBoat, createMesh: createBoatMesh, updateMesh: updateBoatMesh },
+      plane: { step: stepAircraft, createMesh: createAircraftMesh, updateMesh: updateAircraftMesh },
+      heli: { step: stepAircraft, createMesh: createAircraftMesh, updateMesh: updateAircraftMesh },
     },
     vehicles: [],
     systems: [],
@@ -230,6 +243,19 @@ export function createGame({ canvas, uiRoot }) {
       for (let j = i + 1; j < vs.length; j++) {
         const b = vs[j];
         if (a.asleep && b.asleep) continue;
+        const aAir = a.kind === 'plane' || a.kind === 'heli';
+        const bAir = b.kind === 'plane' || b.kind === 'heli';
+        if (aAir || bAir) {
+          // Only aircraft that are moving need checking against others.
+          if (aAir && (a.driver || Math.abs(a.speed) > 1) && collideAircraft(a, b)) {
+            b.asleep = false;
+            events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
+          } else if (bAir && (b.driver || Math.abs(b.speed) > 1) && collideAircraft(b, a)) {
+            a.asleep = false;
+            events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
+          }
+          continue;
+        }
         if (a.kind !== b.kind) continue;
         if (a.kind === 'boat') {
           if (collideBoats(a, b)) events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
