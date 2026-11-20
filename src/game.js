@@ -19,6 +19,8 @@ import { createMapUi } from './systems/mapui.js';
 import { createAudio } from './systems/audio.js';
 import { createPeds } from './systems/peds.js';
 import { createFleet } from './systems/fleet.js';
+import { createEconomy } from './systems/economy.js';
+import { createMenu } from './ui/menu.js';
 import { stepBoat, collideBoats } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
 import { createWater, createWakeTrail } from './render/water.js';
@@ -241,7 +243,17 @@ export function createGame({ canvas, uiRoot }) {
   game.map = game.addSystem(createMapUi(game, uiRoot));
   game.audio = game.addSystem(createAudio(game));
   game.peds = game.addSystem(createPeds(game));
+  // Saved progress (money, bought craft, medals, settings) lives in the
+  // browser's own storage on this device. Some private modes forbid it.
+  let storage;
+  try {
+    storage = window.localStorage;
+  } catch {
+    storage = null;
+  }
+  game.economy = game.addSystem(createEconomy(game, storage));
   game.fleet = game.addSystem(createFleet(game));
+  game.menu = createMenu(uiRoot, game, game.economy);
 
   // --- Simulation step. ---
   function fixedUpdate(dt) {

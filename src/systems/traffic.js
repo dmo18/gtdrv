@@ -28,6 +28,10 @@ const STOP_DECEL = 3.5;
 const MIN_GAP = 3.5; // standstill gap to the car ahead (m)
 const STOPLINE_BACK = 1; // stop line sits this far before the junction box
 const LEFT_R = 11; // left turns are wide so opposing left turns pass
+// Traffic stays off the airfield causeway for now: where it meets the
+// islet, city.shoreDist dips below 2 m and the vehicle's keep-on-land
+// push stops cars dead. Raise this once that seam is fixed.
+const CAUSEWAY_WEIGHT = 0;
 
 const laneSpeedOf = (e) => (e.causeway ? LANE_SPEED.causeway : e.avenue ? LANE_SPEED.avenue : LANE_SPEED.street);
 const extAt = (node, e) => (e.horizontal ? node.hx : node.hz);
@@ -56,7 +60,7 @@ export function createDriver(city, rng) {
     obsGap: Infinity, obsSpeed: 0, obsAlong: Infinity, obsVeh: null,
     boxBusy: false, oncoming: false, exitBlocked: false,
     // Timers and state.
-    yieldTime: 0, oncomingTime: 0, blockedTime: 0, waitTime: 0, nextAround: 6, pause: 0,
+    yieldTime: 0, oncomingTime: 0, blockedTime: 0, waitTime: 0, noProgress: 0, nextAround: 6, pause: 0,
     nudge: 0, // small sideways shift away from things beside the lane
     mode: 0, // 0 normal, 1 backing up, 2 steering around
     modeTime: 0, aroundVeh: null, offset: 0, override: 0,
@@ -95,9 +99,15 @@ function pickNext(dr, edgeId, nodeId) {
   for (let i = 0; i < n.edges.length; i++) {
     const id = n.edges[i];
     if (id === edgeId) continue;
+    const w = weightOf(dr, edgeId, from, id, nodeId);
+    if (w <= 0) continue;
     last = id;
-    r -= weightOf(dr, edgeId, from, id, nodeId);
+    r -= w;
     if (r <= 0) return id;
+  }
+  if (last === edgeId) {
+    // Only excluded roads lead on: take one anyway rather than U-turn.
+    for (let i = 0; i < n.edges.length; i++) if (n.edges[i] !== edgeId) return n.edges[i];
   }
   return last;
 }
@@ -105,7 +115,7 @@ function pickNext(dr, edgeId, nodeId) {
 function weightOf(dr, ea, fa, eb, fb) {
   const e = dr.city.edges[eb];
   let w = turnType(dr.city, ea, fa, eb, fb) === STRAIGHT ? 1.7 : 1;
-  if (e.causeway) w *= 0.5; // keep most traffic in town
+  if (e.causeway) w *= CAUSEWAY_WEIGHT;
   return w;
 }
 
@@ -573,6 +583,11 @@ export function driveStep(dr, v, dt, ctx = {}) {
     dr.nextAround = 6;
   }
   if (dr.blockedTime > 20) dr.stuck = true;
+  // Wants to go but is not getting anywhere (wedged against something).
+  if (vt > 3 && Math.abs(sp) < 0.5 && dr.pause <= 0) {
+    dr.noProgress += dt;
+    if (dr.noProgress > 20) dr.stuck = true;
+  } else dr.noProgress = 0;
   if (dr.mode === 0 && dr.blockedTime > dr.nextAround && ov && Math.abs(dr.obsSpeed) < 0.3) {
     dr.mode = 1;
     dr.modeTime = 0;
@@ -712,6 +727,7 @@ export function createTraffic(game, { max = 14 } = {}) {
     let best = -Infinity, be = -1, bf = -1, bd = 0, bl = 0;
     for (let k = 0; k < 8; k++) {
       const e = city.edges[near[rng.int(0, near.length - 1)]];
+      if (e.causeway && CAUSEWAY_WEIGHT <= 0) continue;
       const from = rng.next() < 0.5 ? e.a : e.b;
       const to = otherEnd(e, from);
       const d0 = extAt(city.nodes[from], e) + 12, d1 = e.length - extAt(city.nodes[to], e) - 22;
