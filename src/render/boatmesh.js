@@ -385,40 +385,7 @@ function buildInflatable(k, gk, spec, color) {
 }
 
 
-// Easter egg: a surfaced submarine. Long tapered hull, conning tower with
-// fairwater planes, periscope and a stern fin. Drives like a boat.
-function buildSubmarine(k, gk, spec, color) {
-  const Ln = spec.length, R = spec.width * 0.46;
-  const cy = 0.35; // axis height: hull sits in the water, deck just above it
-  const ring = [];
-  const n = 12;
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    // Round nose and a blunter tail that tapers into the stern.
-    const prof = Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.02)), 0.55);
-    ring.push([t * Ln, Math.max(0.02, R * prof)]); // lathe stations are metres along the axis
-  }
-  k.lathe([{ pts: ring, hex: color, cls: L }], 14, [-Ln / 2, cy, 0], [1, 0, 0]);
-  k.lathe([{ pts: [[0, 0], [0, 0.22], [Ln * 0.5, 0.16], [Ln * 0.9, 0.06], [Ln, 0]], hex: TRIM, cls: T }], 10, [-Ln / 2, cy, 0], [1, 0, 0]);
-  // Waterline stripe in a contrasting band.
-  k.rbox(0, cy - R * 0.2, 0, Ln * 0.9, 0.12, R * 2.02, 0xe8d24a, L, 0.04, 2);
-  // Conning tower and fairwater planes.
-  const top = cy + R;
-  k.rbox(-Ln * 0.08, top + 0.55, 0, Ln * 0.2, 1.1, R * 0.95, color, L, 0.3, 4);
-  k.rbox(-Ln * 0.08 + 0.15, top + 1.15, 0, Ln * 0.11, 0.12, R * 1.5, TRIM, T, 0.05, 2);
-  k.box(-Ln * 0.08 - 0.9, top + 0.05, 0, 0.9, 0.12, R * 1.2, color, L);
-  k.tube([-Ln * 0.08 + 0.45, top + 1.1, 0], [-Ln * 0.08 + 0.45, top + 2.3, 0], 0.07, 0.05, CH, CH, 6);
-  k.tube([-Ln * 0.08 - 0.25, top + 1.1, 0], [-Ln * 0.08 - 0.25, top + 1.6, 0], 0.05, 0.05, TRIM, T, 6);
-  // Stern fin and rudder.
-  k.rbox(-Ln / 2 + 0.7, top + 0.1, 0, 0.9, 1.0, 0.1, color, L, 0.03, 2);
-  k.rbox(-Ln / 2 + 0.3, cy + 0.05, 0, 0.6, 0.14, 0.9, TRIM, T, 0.04, 2);
-  // Hatch wheel and windows on the tower.
-  k.tube([-Ln * 0.08, top + 0.9, R * 0.5], [-Ln * 0.08, top + 0.95, R * 0.5 + 0.1], 0.12, 0.12, CH, CH, 8);
-  const lay = { spray: { L: Ln, W: spec.width, bowX: Ln * 0.42, sternX: -Ln / 2 - 0.4, rooster: 0.6 }, prop: true };
-  return lay;
-}
-
-const BUILDERS = { runabout: buildRunabout, jetski: buildJetski, fisher: buildFisher, yacht: buildYacht, inflatable: buildInflatable, submarine: buildSubmarine };
+const BUILDERS = { runabout: buildRunabout, jetski: buildJetski, fisher: buildFisher, yacht: buildYacht, inflatable: buildInflatable };
 
 // ---- spray: bow sheets and a stern wash, additive, vertex colour = strength
 function sprayGeometry(sp) {

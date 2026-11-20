@@ -16,6 +16,7 @@ import { TANK_LOOPS, TANK_SHOTS } from './tanksounds.js'; // tank (task 32)
 import { COMBAT_SHOTS, COMBAT_VARIANTS } from './combatsounds.js';
 import { CAR_LOOPS, CAR_SHOTS } from './carsounds.js';
 import { MUSIC_SHOTS } from './music.js';
+import { RADIO_SHOTS, RADIO_LOW } from './radiosounds.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -815,6 +816,7 @@ const SHOTS = {
   ...COMBAT_SHOTS,
   ...CAR_SHOTS,
   ...MUSIC_SHOTS,
+  ...RADIO_SHOTS,
 };
 delete SHOTS.blast; // replaced by the layered blastCrack/Body/Tail + debris
 
@@ -823,13 +825,13 @@ delete SHOTS.blast; // replaced by the layered blastCrack/Body/Tail + debris
 const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'tail']);
 
 // Deep one-shots rendered at half rate too.
-const LOW_SHOTS = new Set(['blastTail', 'm:pad', 'm:bass', 'm:kick']);
+const LOW_SHOTS = new Set(['blastTail', 'm:pad', 'm:bass', 'm:kick', ...RADIO_LOW]);
 
 // Made after the bank is playable: ambience beds and calls, the siren.
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
   'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
   'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn',
-  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS), ...Object.keys(COMBAT_SHOTS).filter((k) => k !== 'thud'), ...Object.keys(MUSIC_SHOTS), 'birds', 'stepHard', 'stepSoft']);
+  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS), ...Object.keys(COMBAT_SHOTS).filter((k) => k !== 'thud'), ...Object.keys(MUSIC_SHOTS), ...Object.keys(RADIO_SHOTS), 'birds', 'stepHard', 'stepSoft']);
 
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = {

@@ -101,7 +101,7 @@ export function styleFor(spec) {
 // Tyre width per spec.
 export function tyreWidth(spec) {
   if (spec.body === 'truck') return 0.4;
-  if (spec.id === 'sports' || spec.id === 'muscle') return 0.3;
+  if (spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'muscle') return 0.3;
   if (spec.body === 'pickup' || spec.body === 'van') return 0.28;
   return 0.25;
 }
@@ -589,7 +589,7 @@ function fascia(acc, headAcc, tailAcc, sh, spec) {
   const hw = sh.hw;
   const ff = faceFrame(sh, true);
   const S = sh.S;
-  const dark = spec.id === 'sports' || spec.id === 'police';
+  const dark = spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'police';
   if (F.head) {
     const h = F.head;
     const fr = h.f[1] - h.f[0], qr = h.q[1] - h.q[0];
@@ -625,7 +625,7 @@ function fascia(acc, headAcc, tailAcc, sh, spec) {
   }
   if (F.intake) {
     lens(acc, sh, ff, F.intake, 1, null, GRILLE, CLS.TRIM);
-    if (spec.id === 'sports' || spec.id === 'muscle' || spec.id === 'police') {
+    if (spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'muscle' || spec.id === 'police') {
       for (const side of [1, -1]) lens(acc, sh, ff, { q: [0.7, 0.93], f: [0.14, 0.32], e: 4, lift: 0.004 }, side, null, GRILLE, CLS.TRIM);
     }
   }
@@ -800,7 +800,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
   {
     const { wr, tw, ax, az } = wheelLayout(spec);
     const rimR = wr * RIM;
-    const hex = id === 'sports' ? 0xc81e28 : id === 'muscle' ? 0xd88a18 : id === 'police' ? 0x2a2c30 : 0x55585e;
+    const hex = id === 'ghostwake' ? 0x17e0cb : id === 'sports' ? 0xc81e28 : id === 'muscle' ? 0xd88a18 : id === 'police' ? 0x2a2c30 : 0x55585e;
     for (const wx of [ax, -ax]) {
       for (const s of [1, -1]) {
         const a = Math.PI * 0.56;
@@ -842,7 +842,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
     const zs = S.exhaust.n === 2 ? [S.exhaust.z, -S.exhaust.z] : [-S.exhaust.z];
     for (const zf of zs) {
       const z = zf * sh.hw * 2;
-      for (const dz of id === 'sports' ? [-0.055, 0.055] : [0]) {
+      for (const dz of id === 'sports' || id === 'ghostwake' ? [-0.055, 0.055] : [0]) {
         cylX(acc, CHROME, CLS.CHROME, 0.042, 0.14, x, y, z + dz, 10, true);
         cylX(acc, 0x050505, CLS.TRIM, 0.034, 0.02, x + 0.02, y, z + dz, 10);
       }
@@ -861,6 +861,20 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
   if (S.ducktail) {
     const x = sh.x0 + 0.1;
     box(acc, WHITE, CLS.PAINT, 0.12, 0.045, sh.W * 0.86, x, sh.top(x) + 0.015, 0, 0, 0, 0.25);
+  }
+  if (id === 'ghostwake') {
+    // The black half of the teal-and-black livery: two stripes down the
+    // bonnet and the boot, a black roof, in short flat pieces that follow the curve.
+    const stripe = (xa, xb, top) => {
+      for (let x = xa; x < xb; x += 0.28) {
+        const y = top(x + 0.14) + 0.004;
+        const dy = top(x + 0.28) - top(x);
+        for (const s of [1, -1]) box(acc, 0x0b0d0e, CLS.TRIM, 0.3, 0.012, 0.15, x + 0.14, y, s * 0.11, 0, 0, Math.atan2(dy, 0.28));
+      }
+    };
+    stripe(gs.xA + 0.05, sh.x1 - 0.3, sh.top);
+    stripe(sh.x0 + 0.1, gs.xR0 - 0.15, sh.top);
+    box(acc, 0x0b0d0e, CLS.TRIM, Math.max(0.4, gs.xR1 - gs.xR0), 0.012, gs.baseW(gs.xR0) * 1.5, (gs.xR0 + gs.xR1) / 2, gs.roofY + gs.crown * 0.8 + 0.006, 0);
   }
   if (S.roofSpoiler) {
     const x = gs.xR0 - 0.02;
@@ -984,6 +998,7 @@ export function wheelStyle(spec) {
   const id = spec.id;
   if (spec.body === 'truck') return { spokes: 10, kind: 'steel', rim: 0xb4b8be };
   if (id === 'sports') return { spokes: 10, kind: 'thin', rim: 0x34373c };
+  if (id === 'ghostwake') return { spokes: 10, kind: 'thin', rim: 0x1b2a2c };
   if (id === 'muscle') return { spokes: 5, kind: 'wide', rim: 0xd6d8dc };
   if (id === 'compact') return { spokes: 8, kind: 'thin', rim: 0xc6cad0 };
   if (id === 'pickup') return { spokes: 6, kind: 'wide', rim: 0x4a4d52 };

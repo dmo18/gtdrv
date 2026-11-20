@@ -31,6 +31,34 @@ function wheelGeo(spec, lite = false) {
   return g;
 }
 
+// Underbody light (spec.glow): a soft additive pool of colour on the road
+// under the car. One shared texture and material per colour.
+const glowMats = new Map();
+function underglow(spec) {
+  let m = glowMats.get(spec.glow);
+  if (!m) {
+    const n = 32, d = new Uint8Array(n * n * 4);
+    const c = new THREE.Color(spec.glow);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const r = Math.hypot((x + 0.5) / n - 0.5, (y + 0.5) / n - 0.5) * 2;
+        const a = Math.max(0, 1 - r) ** 1.6;
+        const o = (y * n + x) * 4;
+        d[o] = c.r * 255 * a; d[o + 1] = c.g * 255 * a; d[o + 2] = c.b * 255 * a; d[o + 3] = 255;
+      }
+    }
+    const tex = new THREE.DataTexture(d, n, n, THREE.RGBAFormat);
+    tex.needsUpdate = true;
+    m = new THREE.MeshBasicMaterial({ map: tex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false });
+    glowMats.set(spec.glow, m);
+  }
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(spec.length * 1.15, spec.width * 1.3), m);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.05;
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
 let barGeo = null;
 function lightBarGeometry() {
   if (barGeo) return barGeo;
@@ -184,6 +212,8 @@ export function createVehicleMesh(spec, color) {
     bar.position.set(-spec.length * 0.08, e.anchors.roofY - 0.01, 0);
     rig.add(bar);
   }
+
+  if (spec.glow) group.add(underglow(spec));
 
   group.rotation.order = 'YXZ';
   const L = spec.length;

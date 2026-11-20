@@ -1,0 +1,304 @@
+// Hidden secrets: six odd spots on the island, and the lock-up garage
+// that the sixth one gives away. Pure logic (no three.js, no DOM): the
+// spot finder reads the city layout and a fixed seed, so the same island
+// always hides them in the same places. systems/secrets.js watches the
+// player and draws them; docs/SPEC.md "Secrets" describes the rules.
+//
+// Coordinates: x east, z south, metres. Heading 0 faces +x.
+import { createRng, TAU } from '../core/rng.js';
+
+export const SECRETS_SEED = 4417;
+export const DISCOVER_R = 12; // m: walk or drive this close to find one
+export const SECRET_BONUS = 750; // points for each secret
+export const FINALE_BONUS = 2500; // extra for the sixth
+export const HINT_FUZZ = 55; // m: how far the faint map marker is off
+
+// One entry per secret, in the order they are listed in Records.
+export const SECRET_DEFS = [
+  { id: 'drowned-box', name: 'The Drowned Box', kind: 'container', note: 'A shipping container sinking just off the Saltyard shore.' },
+  { id: 'roof-garden', name: 'Roof Garden', kind: 'rooftop', note: 'Somebody keeps a lounge on a rooftop nobody can walk up to.' },
+  { id: 'the-gullet', name: 'The Gullet', kind: 'cave', note: 'A sea cave cut into the rocks of the coast.' },
+  { id: 'rustlamp', name: 'Rustlamp Rock', kind: 'lighthouse', note: 'A rusted lighthouse on the farthest headland.' },
+  { id: 'tag-alley', name: 'Tag Alley', kind: 'alley', note: 'A narrow alley with a tag that was not there yesterday.' },
+  { id: 'lone-ride', name: 'The Lone Ride', kind: 'playground', note: 'A playground in the park with one ride too many.' },
+];
+export const SECRET_IDS = SECRET_DEFS.map((d) => d.id);
+export const GARAGE_NAME = 'Ghostwake';
+
+const DIST = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+
+// Distance from a point to a rectangle (0 inside it).
+function rectDist(r, x, z) {
+  const dx = Math.max(r.x0 - x, 0, x - r.x1), dz = Math.max(r.z0 - z, 0, z - r.z1);
+  return Math.hypot(dx, dz);
+}
+
+const nearList = (list, x, z, d) => list.some((r) => rectDist(r, x, z) < d);
+
+// True when a disc of radius r around (x, z) is open ground: no building,
+// tree, bench, road or airfield inside it, and at least `shore` metres of
+// land to the sea.
+function openGround(city, x, z, r, shore = 0) {
+  if (city.districtOf(x, z) === 'airfield') return false;
+  if (city.mainShore(x, z) < Math.max(shore, 3)) return false;
+  const b = city.buildings;
+  for (let i = 0; i < b.length; i++) if (rectDist(b[i], x, z) < r) return false;
+  const p = city.props;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[i];
+    if (q.type === 'lamp') continue;
+    if (Math.abs(q.x - x) < r + 1 && Math.abs(q.z - z) < r + 1 && DIST(q.x, q.z, x, z) < r + (q.r || 0.5)) return false;
+  }
+  const f = city.furniture;
+  for (let i = 0; i < f.length; i++) {
+    if (Math.abs(f[i].x - x) < r && Math.abs(f[i].z - z) < r && DIST(f[i].x, f[i].z, x, z) < r) return false;
+  }
+  if (city.onRoad(x, z)) return false;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * TAU;
+    if (city.onRoad(x + Math.cos(a) * r, z + Math.sin(a) * r)) return false;
+  }
+  return true;
+}
+
+// A point on the coast, `want` metres inside the shoreline, at angle theta
+// from the island centre. `heading` points out to sea.
+function shorePoint(city, theta, want) {
+  const c = Math.cos(theta), s = Math.sin(theta);
+  let r = city.radiusAt(theta);
+  while (r > 50 && city.mainShore(c * r, s * r) < want) r -= 1;
+  return { x: c * r, z: s * r, heading: theta };
+}
+
+function shoreCandidates(city, rng, want) {
+  const out = [];
+  const offset = rng.range(0, 3);
+  const extra = city.extraLand || [];
+  for (let k = 0; k < 120; k++) {
+    const theta = ((k * 3 + offset) * Math.PI) / 180;
+    const p = shorePoint(city, theta, want);
+    if (city.districtOf(p.x, p.z) === 'airfield') continue;
+    if (nearList(city.piers, p.x, p.z, 45)) continue;
+    if (nearList(extra, p.x, p.z, 160)) continue;
+    if (city.boatSpots.some((s) => DIST(s.x, s.z, p.x, p.z) < 45)) continue;
+    if (!openGround(city, p.x, p.z, 8, 0)) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+// Pick from `list` something at least `sep` metres from every spot in
+// `taken`, easing the separation if nothing fits.
+function pickApart(rng, list, taken, seps = [260, 160, 80, 0]) {
+  for (const sep of seps) {
+    const ok = list.filter((c) => taken.every((t) => DIST(t.x, t.z, c.x, c.z) >= sep));
+    if (ok.length) return rng.pick(ok);
+  }
+  return list.length ? rng.pick(list) : null;
+}
+
+function findAlley(city, rng, taken) {
+  const bl = city.buildings.filter((b) => b.district !== 'airfield' && b.kind !== 'container' && b.h >= 5);
+  const found = [];
+  const clearGap = (x0, z0, x1, z1, a, b) => !bl.some((o) => o !== a && o !== b && o.x0 < x1 && o.x1 > x0 && o.z0 < z1 && o.z1 > z0);
+  for (let i = 0; i < bl.length; i++) {
+    const A = bl[i];
+    for (let j = i + 1; j < bl.length; j++) {
+      const B = bl[j];
+      // Gap along x (buildings side by side): the alley runs along z.
+      let lo = A, hi = B;
+      if (A.x0 > B.x0) { lo = B; hi = A; }
+      let gap = hi.x0 - lo.x1;
+      let ov = Math.min(A.z1, B.z1) - Math.max(A.z0, B.z0);
+      if (gap >= 3 && gap <= 8 && ov >= 14 && clearGap(lo.x1, Math.max(A.z0, B.z0), hi.x0, Math.min(A.z1, B.z1), A, B)) {
+        const z = (Math.max(A.z0, B.z0) + Math.min(A.z1, B.z1)) / 2;
+        // The tag goes on the west wall (lo), facing east into the gap.
+        found.push({ x: (lo.x1 + hi.x0) / 2, z, heading: Math.PI / 2, gap, len: ov, tag: { x: lo.x1, z, nx: 1, nz: 0 }, district: A.district });
+      }
+      // Gap along z: the alley runs along x.
+      lo = A;
+      hi = B;
+      if (A.z0 > B.z0) { lo = B; hi = A; }
+      gap = hi.z0 - lo.z1;
+      ov = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
+      if (gap >= 3 && gap <= 8 && ov >= 14 && clearGap(Math.max(A.x0, B.x0), lo.z1, Math.min(A.x1, B.x1), hi.z0, A, B)) {
+        const x = (Math.max(A.x0, B.x0) + Math.min(A.x1, B.x1)) / 2;
+        found.push({ x, z: (lo.z1 + hi.z0) / 2, heading: 0, gap, len: ov, tag: { x, z: lo.z1, nx: 0, nz: 1 }, district: A.district });
+      }
+    }
+  }
+  const good = found.filter((f) => ['downtown', 'midtown', 'docks', 'industrial'].includes(f.district));
+  const pool = (good.length ? good : found).sort((p, q) => q.len - p.len || p.x - q.x || p.z - q.z).slice(0, 14);
+  const near = (c) => taken.every((t) => DIST(t.x, t.z, c.x, c.z) >= 120);
+  const far = pool.filter(near);
+  return far.length ? rng.pick(far) : pool.length ? rng.pick(pool) : null;
+}
+
+function findRooftop(city, rng, taken) {
+  const pool = [];
+  for (const b of city.buildings) {
+    if (b.kind !== 'building' || b.district === 'airfield') continue;
+    if (b.h < 9 || b.h > 20 || b.x1 - b.x0 < 14 || b.z1 - b.z0 < 14) continue;
+    const x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2;
+    if (taken.some((t) => DIST(t.x, t.z, x, z) < 120)) continue;
+    pool.push({ b, x, z });
+  }
+  pool.sort((p, q) => Math.abs(p.b.h - 12) - Math.abs(q.b.h - 12) || p.x - q.x || p.z - q.z);
+  const top = pool.slice(0, 14);
+  if (!top.length) return null;
+  const c = rng.pick(top);
+  return { x: c.x, z: c.z, roofY: c.b.h, heading: rng.range(0, TAU), roof: { x0: c.b.x0, z0: c.b.z0, x1: c.b.x1, z1: c.b.z1 } };
+}
+
+function findPlayground(city, rng, taken) {
+  const parks = city.blocks.filter((b) => b.district === 'park' && b.x1 - b.x0 > 40 && b.z1 - b.z0 > 40);
+  const pool = parks.length ? parks : city.blocks.filter((b) => b.district === 'residential' && b.x1 - b.x0 > 60);
+  const order = pool.slice().sort((p, q) => p.id - q.id);
+  const blocks = order.filter((b) => taken.every((t) => DIST(t.x, t.z, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2) >= 120));
+  const block = rng.pick(blocks.length ? blocks : order);
+  if (!block) return null;
+  let best = { x: (block.x0 + block.x1) / 2, z: (block.z0 + block.z1) / 2, d: -1 };
+  for (let k = 0; k < 70; k++) {
+    const x = rng.range(block.x0 + 14, block.x1 - 14), z = rng.range(block.z0 + 14, block.z1 - 14);
+    let d = Infinity;
+    for (const p of city.props) d = Math.min(d, DIST(p.x, p.z, x, z));
+    for (const f of city.furniture) d = Math.min(d, DIST(f.x, f.z, x, z) * 1.4);
+    if (d > best.d) best = { x, z, d };
+  }
+  return { x: best.x, z: best.z, heading: rng.range(0, TAU) };
+}
+
+// The lock-up garage: footprint, wall boxes (x0, z0, x1, z1, h) and where
+// the car is parked. The roller door is at the front, facing `heading`.
+export const GARAGE_DEPTH = 9;
+export const GARAGE_HALF = 2.6; // inner half width
+const WALL = 0.4;
+
+export function garageGeometry(ox, oz, heading) {
+  const dx = Math.round(Math.cos(heading)), dz = Math.round(Math.sin(heading));
+  const px = -dz, pz = dx;
+  const W = (f, s) => [ox + dx * f + px * s, oz + dz * f + pz * s];
+  const box = (f0, f1, s0, s1, h) => {
+    const a = W(f0, s0), b = W(f1, s1);
+    return { x0: Math.min(a[0], b[0]), z0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), z1: Math.max(a[1], b[1]), h };
+  };
+  const D = GARAGE_DEPTH, H = GARAGE_HALF;
+  const car = W(-D / 2, 0);
+  const c = W(-D / 2, 0);
+  return {
+    x: c[0], z: c[1], heading, ox, oz,
+    carX: car[0], carZ: car[1],
+    walls: [
+      box(-D - WALL, -D, -H - WALL, H + WALL, 4),
+      box(-D, 0, -H - WALL, -H, 4),
+      box(-D, 0, H, H + WALL, 4),
+    ],
+    door: box(-0.15, 0.15, -H, H, 3),
+    footprint: box(-D - WALL, 2.5, -H - WALL, H + WALL, 4),
+  };
+}
+
+function findGarage(city, rng, taken) {
+  const dirs = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+  const tryAt = (x, z) => {
+    if (!openGround(city, x, z, 12, 12)) return null;
+    const turn = rng.int(0, 3);
+    for (let q = 0; q < 4; q++) {
+      const h = dirs[(q + turn) % 4];
+      const ox = x + Math.cos(h) * 4.5, oz = z + Math.sin(h) * 4.5;
+      // Open ground in front of the door so the car can drive out.
+      if (!openGround(city, ox + Math.cos(h) * 8, oz + Math.sin(h) * 8, 5, 5)) continue;
+      return garageGeometry(ox, oz, h);
+    }
+    return null;
+  };
+  const lots = city.parkingSpots.filter((s) => s.lot && city.districtOf(s.x, s.z) === 'industrial');
+  const seeds = lots.slice();
+  for (let x = 330; x < 700; x += 10) for (let z = -520; z < 520; z += 10) if (city.districtOf(x, z) === 'industrial') seeds.push({ x, z });
+  for (const s of seeds) {
+    if (taken.some((t) => DIST(t.x, t.z, s.x, s.z) < 100)) continue;
+    const g = tryAt(s.x, s.z);
+    if (g) return g;
+  }
+  for (let x = -600; x < 600; x += 16) {
+    for (let z = -600; z < 600; z += 16) {
+      if (taken.some((t) => DIST(t.x, t.z, x, z) < 100)) continue;
+      const g = tryAt(x, z);
+      if (g) return g;
+    }
+  }
+  return null;
+}
+
+// The whole hidden layout: { spots: [six secrets in SECRET_DEFS order],
+// garage }. Each spot has id, x, z, heading and `minY` (null, or the
+// height you must be at to count: the rooftop).
+export function findSecrets(city, seed = SECRETS_SEED) {
+  const rng = createRng(seed);
+  const spots = {};
+  const taken = [];
+  const put = (id, p, extra = {}) => {
+    if (!p) return;
+    const def = SECRET_DEFS.find((d) => d.id === id);
+    spots[id] = { id, kind: def.kind, name: def.name, x: p.x, z: p.z, heading: p.heading || 0, minY: null, ...extra };
+    taken.push(spots[id]);
+  };
+
+  // Shore spots first. The container hides near the docks, the lighthouse
+  // on the farthest headland, the cave on the beach side.
+  const shore = shoreCandidates(city, rng, 5);
+  const docks = shore.filter((p) => city.districtOf(p.x, p.z) === 'docks');
+  put('drowned-box', rng.pick(docks.length ? docks : shore));
+  const heads = shore.slice().sort((a, b) => city.radiusAt(b.heading) - city.radiusAt(a.heading)).slice(0, 6);
+  put('rustlamp', pickApart(rng, heads, taken));
+  const beach = shore.filter((p) => city.districtOf(p.x, p.z) === 'beach');
+  put('the-gullet', pickApart(rng, beach.length ? beach : shore, taken));
+
+  const roof = findRooftop(city, rng, taken);
+  if (roof) put('roof-garden', roof, { minY: roof.roofY - 3.5, roofY: roof.roofY, roof: roof.roof });
+  const alley = findAlley(city, rng, taken);
+  if (alley) put('tag-alley', alley, { tag: alley.tag, gap: alley.gap, len: alley.len });
+  put('lone-ride', findPlayground(city, rng, taken));
+
+  const list = SECRET_IDS.map((id) => spots[id]).filter(Boolean);
+  const garage = findGarage(city, rng, list);
+  return { spots: list, garage };
+}
+
+// ---- progress ----------------------------------------------------------------
+export function emptySecrets() {
+  return { found: [], ghostwake: false };
+}
+
+export const secretsDone = (s) => !!s && SECRET_IDS.every((id) => s.found.includes(id));
+
+// Is a player at (x, y, z) close enough to count as having found `spot`?
+export function inReach(spot, x, y, z) {
+  const dx = spot.x - x, dz = spot.z - z;
+  if (dx * dx + dz * dz > DISCOVER_R * DISCOVER_R) return false;
+  return spot.minY == null || y >= spot.minY;
+}
+
+// Record the first not-yet-found secret within reach and return it, or
+// null. Fires once per secret: a found id is never returned again.
+export function discover(state, spots, x, y, z) {
+  for (let i = 0; i < spots.length; i++) {
+    const s = spots[i];
+    if (state.found.includes(s.id) || !inReach(s, x, y, z)) continue;
+    state.found.push(s.id);
+    if (secretsDone(state)) state.ghostwake = true;
+    return s;
+  }
+  return null;
+}
+
+// Where the faint map hint sits: the first secret not yet found, nudged by
+// a fixed amount so it points at a neighbourhood, not at the spot. Null
+// until the first secret is found, and again when all are.
+export function hintFor(state, spots) {
+  if (!state.found.length || secretsDone(state)) return null;
+  const s = spots.find((p) => !state.found.includes(p.id));
+  if (!s) return null;
+  const a = (SECRET_IDS.indexOf(s.id) + 1) * 2.399;
+  return { id: s.id, x: s.x + Math.cos(a) * HINT_FUZZ, z: s.z + Math.sin(a) * HINT_FUZZ };
+}

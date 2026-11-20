@@ -82,7 +82,7 @@ export const ENGINES = {
 
 // Which character a craft uses.
 const CAR_ENGINE = {
-  compact: 'i4', sedan: 'v6', taxi: 'v6', police: 'v6', sports: 'sports',
+  compact: 'i4', sedan: 'v6', taxi: 'v6', police: 'v6', sports: 'sports', ghostwake: 'sports',
   muscle: 'v8', pickup: 'v8', van: 'diesel', truck: 'diesel',
 };
 const BOAT_ENGINE = { fisher: 'inboard', yacht: 'inboard' };

@@ -48,6 +48,15 @@ export const VEHICLE_SPECS = {
     drive: 'rwd', gears: 6, power: 190, firstGear: 18, cgFront: 0.45,
     health: 750, colors: [0xd81e2a, 0xf2d21b, 0x1e6fd8, 0xf5f5f5, 0x111111, 0xff7a1a],
   },
+  // The secret car (world/secrets.js): a sports-car chassis, 10 percent
+  // quicker at the top. `pedSafe`: knocking people down costs it nothing.
+  ghostwake: {
+    id: 'ghostwake', label: 'Ghostwake', body: 'coupe', glow: 0x3ff0dc, pedSafe: true,
+    length: 4.4, width: 1.95, height: 1.2, wheelBase: 2.6, wheelRadius: 0.34,
+    mass: 1250, maxSpeed: 68.2, reverseSpeed: 10, accel: 8, brake: 18, grip: 1.3, steerMax: 0.58,
+    drive: 'rwd', gears: 6, power: 215, firstGear: 19.5, cgFront: 0.45,
+    health: 850, colors: [0x0f9e92],
+  },
   muscle: {
     id: 'muscle', label: 'Thundrel', body: 'coupe',
     length: 4.8, width: 1.95, height: 1.35, wheelBase: 2.85, wheelRadius: 0.36,

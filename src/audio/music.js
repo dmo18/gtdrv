@@ -15,7 +15,7 @@ export const MUSIC_REF = { bass: 55, pluck: 440, pad: 220 };
 // Band-limited saw (harmonics up to `top` Hz) from a one-period table,
 // read with linear interpolation: cheap even for long notes.
 const TBL = 2048;
-function saw(out, f, amp, from = 0, top = 7000, detune = 0) {
+export function saw(out, f, amp, from = 0, top = 7000, detune = 0) {
   const K = Math.max(1, Math.floor(top / f));
   const tb = new Float32Array(TBL + 1);
   for (let k = 1; k <= K; k++) {
@@ -112,11 +112,13 @@ const CHORD_STEPS = [[0, 5, 3, 4], [0, 3, 5, 6], [0, 6, 5, 4], [0, 4, 5, 3], [0,
 
 // A seeded composer. bar(i) returns the notes of bar i:
 // [{ beat (0..4), inst, semi (from the key root), vel }]. tempo in BPM.
-export function createComposer(rng) {
+// opt.tempo: [min, span] overrides the 88..103 BPM range (other stations).
+export function createComposer(rng, opt = {}) {
   const modeNames = Object.keys(MODES);
   const mode = MODES[modeNames[Math.floor(rng.next() * modeNames.length)]];
   const root = Math.floor(rng.next() * 7) - 3; // key: a few semitones around A
-  const tempo = 88 + Math.floor(rng.next() * 16);
+  const tr = opt.tempo || [88, 16];
+  const tempo = tr[0] + Math.floor(rng.next() * tr[1]);
   let prog = CHORD_STEPS[Math.floor(rng.next() * CHORD_STEPS.length)];
   let arp = makeArp();
   let groove = makeGroove();

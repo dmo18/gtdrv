@@ -250,46 +250,6 @@ export function createGame({ canvas, uiRoot }) {
     return true;
   };
   // Test hook: put a fresh car on the map and keep it from being swept away.
-  // Easter egg: a submarine waits at the nearest free pier (found by
-  // double-tapping the version number in the pause menu).
-  game.easterEgg = () => {
-    const p = game.player;
-    const spots = game.city.boatSpots || [];
-    const free = (x, z) => !game.vehicles.some((c) => !c.removed && Math.hypot(c.x - x, c.z - z) < 9);
-    let best = null, bd = Infinity;
-    for (const s of spots) {
-      const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
-      if (d < bd && free(s.x, s.z)) {
-        bd = d;
-        best = s;
-      }
-    }
-    let x, z, h;
-    if (best) {
-      x = best.x;
-      z = best.z;
-      h = best.heading || 0;
-    } else {
-      // Every pier has a boat: take the nearest pier and park beside it, in the open water.
-      let near = null;
-      for (const s of spots) {
-        const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
-        if (!near || d < near.d) near = { s, d };
-      }
-      if (!near) {
-        hud.toast('Nothing to see here.', 2);
-        return;
-      }
-      h = near.s.heading || 0;
-      const side = Math.sin(h) >= 0 ? 1 : -1;
-      x = near.s.x - Math.sin(h) * 11 * side;
-      z = near.s.z + Math.cos(h) * 11 * side;
-    }
-    const sub = createBoat('submarine', x, z, h, rng);
-    sub.home = { craft: sub };
-    game.addVehicle(sub);
-    hud.toast('A submarine is waiting at the pier.', 3);
-  };
   game.debug = {
     spawnCar(specId, x, z, heading = 0) {
       const v = createVehicle(specId, x, z, heading, rng);

@@ -14,7 +14,12 @@
 // Version 3 adds `session`: the last place and craft and a small garage of
 // cars left behind (core/garage.js). Version 2 saves load unchanged with
 // no session. Wanted level is never saved.
+//
+// `secrets` (hidden spots found, world/secrets.js) was added without a new
+// version: saves that lack it load with none found.
 import { sanitizeSession } from './garage.js';
+import { STATION_IDS } from './radio.js';
+import { SECRET_IDS, emptySecrets, secretsDone } from '../world/secrets.js';
 
 export const SAVE_KEY = 'rustwater.save.v1';
 export const SAVE_VERSION = 3;
@@ -48,6 +53,7 @@ export function defaultProgress() {
     bestTimes: {},
     stats: { distance: 0, flights: 0, races: 0 },
     session: null, // last place, craft and garage (null = new game)
+    secrets: emptySecrets(), // { found: [ids], ghostwake: bool }
     settings: {
       master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true,
       steering: 'wheel', steerSensitivity: 1, handling: 'arcade', hud: 'minimal',
@@ -98,6 +104,20 @@ function readScore(src, dst) {
   dst.courses = readMap(src.courses, (v) => (isNum(v) ? Math.floor(clampNum(v)) : undefined));
 }
 
+// Only ids on the allow-list, each once; Ghostwake is unlocked only when
+// all of them are found, whatever the stored flag says.
+export function sanitizeSecrets(src) {
+  const out = emptySecrets();
+  if (!isObj(src) || !Array.isArray(src.found)) return out;
+  const n = Math.min(src.found.length, MAX_SCAN);
+  for (let i = 0; i < n; i++) {
+    const id = src.found[i];
+    if (typeof id === 'string' && SECRET_IDS.includes(id) && !out.found.includes(id)) out.found.push(id);
+  }
+  out.ghostwake = secretsDone(out);
+  return out;
+}
+
 export function sanitizeProgress(raw) {
   const p = defaultProgress();
   try {
@@ -109,6 +129,7 @@ export function sanitizeProgress(raw) {
       p.score.total = Math.floor(clampNum(raw.money, MAX_MONEY)) * 10;
     }
     if (own(raw, 'session')) p.session = sanitizeSession(raw.session);
+    if (own(raw, 'secrets')) p.secrets = sanitizeSecrets(raw.secrets);
     p.medals = readMap(raw.medals, (v) => (MEDALS.includes(v) ? v : undefined));
     p.bestTimes = readMap(raw.bestTimes, (v) => (
       isNum(v) && v > 0 && v < 86400 ? v : undefined));
@@ -131,6 +152,8 @@ export function sanitizeProgress(raw) {
       if (own(s, 'steering') && STEERING.includes(s.steering)) d.steering = s.steering;
       if (own(s, 'handling') && HANDLING.includes(s.handling)) d.handling = s.handling;
       if (own(s, 'hud') && HUD_MODES.includes(s.hud)) d.hud = s.hud;
+      // car radio: only a known station id is kept; absent means off (core/radio.js)
+      if (own(s, 'station') && typeof s.station === 'string' && STATION_IDS.includes(s.station)) d.station = s.station;
       if (own(s, 'steerSensitivity') && isNum(s.steerSensitivity)) {
         d.steerSensitivity = Math.round(Math.max(0.5, Math.min(1.5, s.steerSensitivity)) * 100) / 100;
       }
