@@ -123,7 +123,7 @@ export function createGame({ canvas, uiRoot }) {
   personMesh.visible = false;
   scene.add(personMesh);
   const exitSpot = { x: 0, z: 0, ok: false };
-  const uiModeFor = (kind) => (kind === 'foot' ? 'foot' : kind === 'plane' || kind === 'heli' ? kind : 'car');
+  const uiModeFor = (kind) => kind;
 
   game.setPlayerMode = (mode) => {
     const p = game.player;
