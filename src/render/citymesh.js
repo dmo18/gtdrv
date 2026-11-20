@@ -119,7 +119,24 @@ function makeMaterials(T) {
         #endif`);
   };
   M.wet = wet;
+  // Ambient occlusion lite on every facade: darker where walls meet the
+  // ground, a faint lift toward the top of tall buildings, so blocks do
+  // not read as flat cut-outs. Worked out per pixel from the world
+  // height: no extra vertices, textures or passes.
+  for (const k of ['glass', 'brick', 'office', 'stucco', 'siding', 'corrugated', 'roofing', 'shopfront']) facadeShade(M[k]);
   return M;
+}
+
+function facadeShade(mat) {
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vRwY;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vRwY;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= mix( 0.58, 1.0, smoothstep( 0.0, 1.8, vRwY ) ) * mix( 0.93, 1.05, smoothstep( 3.0, 60.0, vRwY ) );');
+  };
+  mat.customProgramCacheKey = () => 'rw-facade';
 }
 
 export function buildCityMesh(city, collision) {
