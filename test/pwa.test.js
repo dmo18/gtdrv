@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import vm from 'node:vm';
 import { shouldRegister } from '../src/pwa.js';
+import { buildGame } from '../scripts/build.mjs';
 
 const pub = new URL('../public/', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(pub, 'manifest.webmanifest'), 'utf8'));
@@ -72,7 +76,7 @@ test('index.html links the manifest and icons and keeps a strict CSP', () => {
 test('service worker template is same-origin only and has build slots', () => {
   const sw = readFileSync(join(pub, 'sw.js'), 'utf8');
   assert.ok(sw.includes("'__VERSION__'"));
-  assert.ok(sw.includes('__FILES__'));
+  assert.ok(sw.includes('const FILES = __FILES__;'));
   assert.ok(sw.includes('url.origin !== self.location.origin'));
   assert.ok(!/https?:\/\//.test(sw.replace(/\/\*[\s\S]*?\*\//, '')), 'no absolute URLs');
 });
@@ -100,4 +104,21 @@ test('service worker registration is guarded', () => {
   assert.equal(shouldRegister({ ...base, loc: { ...base.loc, search: '?autostart' } }), false);
   assert.equal(shouldRegister({ ...base, nav: { serviceWorker: {}, webdriver: true }, loc: { ...base.loc, search: '?pwa' } }), true);
   assert.equal(shouldRegister({ ...base, loc: { protocol: 'http:', hostname: 'example.com', search: '' } }), false);
+});
+
+test('the build writes a valid service worker with the file list filled in', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'rw-pwa-'));
+  try {
+    await buildGame({ outDir: out });
+    const sw = readFileSync(join(out, 'sw.js'), 'utf8');
+    new vm.Script(sw); // throws on a syntax error
+    assert.ok(!sw.includes("'__VERSION__'"), 'version filled');
+    assert.match(sw, /const VERSION = '[0-9a-f]{12}';/);
+    const list = JSON.parse(sw.match(/const FILES = (\[.*\]);/)[1]);
+    for (const f of ['./', 'index.html', 'game.js', 'manifest.webmanifest', 'privacy.html', 'icons/icon-192.png']) assert.ok(list.includes(f), f);
+    for (const f of list) if (f !== './') assert.ok(existsSync(join(out, f)), `listed file missing: ${f}`);
+    for (const icon of manifest.icons) assert.ok(existsSync(join(out, icon.src)), icon.src);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

@@ -3,6 +3,9 @@
 // check the game still starts and nothing was fetched from outside.
 // usage: node scripts/offline-test.mjs
 import { createRequire } from 'node:module';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildGame, serve } from './build.mjs';
 
 let chromium;
@@ -11,8 +14,10 @@ try {
 } catch {
   ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
 }
-await buildGame();
-const server = await serve(0);
+// Own output folder: dist/ is shared with other test scripts that rebuild it.
+const out = await mkdtemp(join(tmpdir(), 'rw-offline-'));
+await buildGame({ outDir: out });
+const server = await serve(0, out);
 const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const context = await browser.newContext({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true });
@@ -64,5 +69,6 @@ try {
 } finally {
   await browser.close();
   server.close();
+  await rm(out, { recursive: true, force: true });
 }
 process.exit(failed ? 1 : 0);

@@ -31,7 +31,7 @@ async function writeServiceWorker(dist) {
   for (const f of all) hash.update(f).update(await read(join(dist, f)));
   const list = ['./', ...all];
   const template = await read(join(root, 'public/sw.js'), 'utf8');
-  const out = template.replace('__VERSION__', hash.digest('hex').slice(0, 12)).replace('__FILES__', JSON.stringify(list));
+  const out = template.replace('__VERSION__', hash.digest('hex').slice(0, 12)).replace('const FILES = __FILES__;', `const FILES = ${JSON.stringify(list)};`);
   await writeFile(join(dist, 'sw.js'), out);
 }
 
@@ -58,13 +58,13 @@ export async function buildGame({ minify = true, prod = minify, outDir = default
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css' };
 
-export function serve(port = 8080) {
+export function serve(port = 8080, dir = defaultDist) {
   const server = createServer(async (req, res) => {
     try {
       let p = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
       if (p.endsWith('/') || p === '\\') p = join(p, 'index.html');
-      const file = join(defaultDist, p);
-      if (!file.startsWith(defaultDist)) throw new Error('outside');
+      const file = join(dir, p);
+      if (!file.startsWith(dir)) throw new Error('outside');
       const data = await readFile(file);
       res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
       res.end(data);

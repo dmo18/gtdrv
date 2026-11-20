@@ -46,13 +46,16 @@ float rwFade(vec2 p) {
 }
 
 function makeNearMaterial(color, uniforms) {
-  const mat = new THREE.MeshLambertMaterial({ color });
+  // PBR so the sea mirrors the sky (scene.environment) with a Fresnel
+  // edge and a sun glint; a few small ripples perturb the normal near
+  // the camera.
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.16, metalness: 0, envMapIntensity: 1.15 });
   mat.onBeforeCompile = (shader) => {
     try {
       const vs = shader.vertexShader;
       const fs = shader.fragmentShader;
       if (!vs.includes('#include <beginnormal_vertex>') || !vs.includes('#include <begin_vertex>') ||
-          !fs.includes('#include <color_fragment>')) return;
+          !fs.includes('#include <color_fragment>') || !fs.includes('#include <normal_fragment_maps>')) return;
       shader.uniforms.uTime = uniforms.uTime;
       shader.uniforms.uCentre = uniforms.uCentre;
       shader.vertexShader = waveGlsl() + vs
@@ -70,7 +73,9 @@ function makeNearMaterial(color, uniforms) {
           vRwH = rwRaw;
           vRwP = rwXZ;
           transformed.y += mix(${glslFloat(FAR_Y)}, rwRaw, rwF);`);
+      shader.uniforms.uTime = uniforms.uTime;
       shader.fragmentShader = `
+uniform float uTime;
 varying float vRwH;
 varying vec2 vRwP;
 ` + fs.replace('#include <color_fragment>', `
@@ -84,12 +89,26 @@ varying vec2 vRwP;
             diffuseColor.rgb *= 1.0 + 0.06 * rwPatch;
             float rwFoam = smoothstep(0.19, 0.24, vRwH);
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.93, 0.95), rwFoam * 0.35);
+          }`).replace('#include <normal_fragment_maps>', `
+          #include <normal_fragment_maps>
+          {
+            float rwD = length(vViewPosition);
+            float rwK = 1.0 - smoothstep(30.0, 140.0, rwD);
+            vec2 q = vRwP;
+            float t = uTime;
+            vec2 g = vec2(0.0);
+            g += vec2(0.9, 0.4) * cos(dot(q, vec2(0.9, 0.4)) * 1.7 + t * 2.1) * 0.05;
+            g += vec2(-0.3, 1.0) * cos(dot(q, vec2(-0.3, 1.0)) * 2.9 + t * 2.7) * 0.035;
+            g += vec2(0.7, -0.7) * cos(dot(q, vec2(0.7, -0.7)) * 4.3 + t * 3.3) * 0.025;
+            g += vec2(-0.95, -0.2) * cos(dot(q, vec2(-0.95, -0.2)) * 6.1 + t * 4.1) * 0.018;
+            vec3 rwOff = (viewMatrix * vec4(-g.x, 0.0, -g.y, 0.0)).xyz;
+            normal = normalize(normal + rwOff * rwK);
           }`);
     } catch {
       // Leave the stock Lambert shader: a flat coloured plane.
     }
   };
-  mat.customProgramCacheKey = () => 'rustwater-sea-v1';
+  mat.customProgramCacheKey = () => 'rustwater-sea-v2';
   return mat;
 }
 
@@ -102,7 +121,7 @@ export function createWater({ size = 9000, color = 0x2a7c9e } = {}) {
   farGeo.rotateX(-Math.PI / 2);
   // Slightly darker than the near patch average so the hand-off is soft.
   const farCol = col.clone().multiplyScalar(0.92);
-  const far = new THREE.Mesh(farGeo, new THREE.MeshLambertMaterial({ color: farCol }));
+  const far = new THREE.Mesh(farGeo, new THREE.MeshStandardMaterial({ color: farCol, roughness: 0.2, metalness: 0, envMapIntensity: 1.1 }));
   far.position.y = FAR_Y;
   far.name = 'sea-far';
   far.renderOrder = -2;
@@ -136,19 +155,30 @@ export function createWater({ size = 9000, color = 0x2a7c9e } = {}) {
 }
 
 // ---- wake foam ------------------------------------------------------------
-// Soft oval: white centre fading to black at the rim, drawn additively,
-// so black adds nothing and fading the instance colour fades the foam.
+// One wake slice: a soft oval of churned water on the track plus two
+// foam crests at z = +-1 (the arms of the V). Instances are scaled
+// sideways as they age, so consecutive slices fan out into a V wake.
+// White centres fade to black at the rims, drawn additively, so black
+// adds nothing and fading the instance colour fades the foam.
 function foamGeometry() {
   const seg = 12;
-  const pos = [0, 0, 0];
-  const colr = [1, 1, 1];
-  for (let i = 0; i < seg; i++) {
-    const a = (i / seg) * Math.PI * 2;
-    pos.push(Math.cos(a) * 0.5, 0, Math.sin(a) * 0.5);
-    colr.push(0, 0, 0);
-  }
+  const pos = [];
+  const colr = [];
   const idx = [];
-  for (let i = 0; i < seg; i++) idx.push(0, 1 + ((i + 1) % seg), 1 + i);
+  const blob = (cz, rx, rz, c) => {
+    const base = pos.length / 3;
+    pos.push(0, 0, cz);
+    colr.push(c, c, c);
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      pos.push(Math.cos(a) * rx, 0, cz + Math.sin(a) * rz);
+      colr.push(0, 0, 0);
+    }
+    for (let i = 0; i < seg; i++) idx.push(base, base + 1 + ((i + 1) % seg), base + 1 + i);
+  };
+  blob(0, 0.5, 0.5, 1);
+  blob(1, 0.35, 0.14, 0.8);
+  blob(-1, 0.35, 0.14, 0.8);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
@@ -156,7 +186,7 @@ function foamGeometry() {
   return g;
 }
 
-export function createWakeTrail(scene, max = 64) {
+export function createWakeTrail(scene, max = 160) {
   const mat = new THREE.MeshBasicMaterial({
     vertexColors: true, transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending, fog: false,
@@ -191,7 +221,7 @@ export function createWakeTrail(scene, max = 64) {
     ph[i] = heading;
     str[i] = s;
     age[i] = 0;
-    life[i] = 1.6 + 2.4 * s;
+    life[i] = 2.2 + 3.6 * s;
   }
 
   function update(dt, time) {
@@ -207,8 +237,9 @@ export function createWakeTrail(scene, max = 64) {
         colors[i * 3] = c * 0.92;
         colors[i * 3 + 1] = c;
         colors[i * 3 + 2] = c;
-        // Long along the track, spreading sideways as it ages.
-        sc.set(3 + 2 * t, 1, (0.8 + 3.2 * t) * (0.5 + 0.5 * str[i]));
+        // Long along the track; the crests run out sideways as it ages
+        // (about the Kelvin angle behind a boat moving at full wake).
+        sc.set(3 + 2 * t, 1, (1.2 + 14 * t * life[i] * 0.35) * (0.4 + 0.6 * str[i]));
       }
       q.setFromAxisAngle(up, -ph[i]);
       p.set(px[i], waveHeight(px[i], pz[i], time) + 0.08, pz[i]);

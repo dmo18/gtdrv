@@ -624,7 +624,7 @@ const BUILDERS = {
 // ---- extras: afterburner glow, light bar, spotlight beam ----------------------
 const EXTRA_MAT = {
   glow: new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide,
+    vertexColors: true, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide, fog: false,
   }),
   lamp: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
   beam: new THREE.MeshBasicMaterial({
@@ -645,17 +645,17 @@ function plumeGeometry() {
       for (let j = 0; j <= seg; j++) {
         const a = (j / seg) * Math.PI * 2;
         pos.push(x, Math.sin(a) * r, Math.cos(a) * r);
-        col.push(c[0], c[1], c[2]);
+        col.push(c[0], c[1], c[2], c[3]);
       }
     }
     for (let j = 0; j < seg; j++) idx.push(base + j, base + seg + 1 + j, base + j + 1, base + j + 1, base + seg + 1 + j, base + seg + 2 + j);
   };
-  add(1, 0.95, 0.15, [0.3, 0.11, 0.035], [0, 0, 0]);
-  add(0.45, 0.6, 0.05, [0.24, 0.2, 0.3], [0.02, 0.01, 0.03]);
-  for (let d = 0; d < 3; d++) add(0.07, 0.42 - d * 0.08, 0.3 - d * 0.06, [0.35, 0.25, 0.15], [0.3, 0.18, 0.08], -0.16 - d * 0.18);
+  add(1, 0.95, 0.15, [1, 0.5, 0.16, 0.42], [1, 0.3, 0.08, 0]);
+  add(0.45, 0.6, 0.05, [1, 0.92, 0.75, 0.75], [1, 0.6, 0.3, 0]);
+  for (let d = 0; d < 3; d++) add(0.07, 0.42 - d * 0.08, 0.3 - d * 0.06, [1, 0.8, 0.55, 0.55], [1, 0.7, 0.4, 0.45], -0.16 - d * 0.18);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
   g.setIndex(idx);
   return g;
 }

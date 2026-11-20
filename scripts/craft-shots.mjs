@@ -258,6 +258,8 @@ for (const [id, [spd, back, up, side]] of Object.entries(BOATS)) {
     v.speed = spd;
     v.wake = 1;
     v.pitch = v.ppitch = id === 'speedboat' || id === 'jetski' ? 0.06 : 0.02;
+    const rf = g.renderFrame;
+    g.renderFrame = () => {};
     for (let i = 0; i < 180; i++) {
       v.px = v.x;
       v.pz = v.z;
@@ -267,6 +269,7 @@ for (const [id, [spd, back, up, side]] of Object.entries(BOATS)) {
       g.time += 1 / 60;
       g.draw(1, 1 / 60);
     }
+    g.renderFrame = rf;
     S.cam(v, -back * 0.2, up, side, 0, 0.6, 0);
     return S.render(48);
   };

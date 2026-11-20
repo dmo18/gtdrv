@@ -200,6 +200,11 @@ export function createVehicleMesh(spec, color) {
     seed: (Math.abs(col * 0.618) % 97) + 1,
   };
   linkLod(group.userData);
+  // Only the body casts a sun shadow (wheels and lamps add draw calls to
+  // the shadow pass and barely change the shadow). The flag tells the
+  // graphics system the casters are already marked.
+  body.castShadow = bodyMid.castShadow = far.castShadow = true;
+  group.userData.rwShadow = true;
   return group;
 }
 

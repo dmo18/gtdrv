@@ -1,389 +1,514 @@
-// Stylised low-poly boat meshes. Every boat is one merged, vertex-coloured
-// mesh: a V-bottomed hull built from cross-sections plus deck furniture.
-// Materials and geometries are shared. Origin is the waterline centre;
-// the bow points along local +x, up is +y.
+// Boat meshes: lofted planing and displacement hulls (deadrise V, chine
+// flats, flared topsides, raked stem, boot stripe, rubbing strake), open
+// cockpits with inner walls and sole, deck furniture, chrome rails and
+// cleats, outboards with a spinning prop, nav lights. One rigged skin
+// draw call (hullkit.js) plus windscreen glass and, under way, one
+// additive bow spray / stern wash mesh. Past LOD_FAR a coarse hull only.
+// Origin is the waterline centre; the bow points along local +x, up +y.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { angleDiff } from '../core/rng.js';
-import { craftMaterial, classifyByColor, CLS } from './vehiclemats.js';
+import { Kit, RIG, CLS, createSkin, skinLook, glassMaterial, buildKit } from './hullkit.js';
+import { wrapAngle } from './craftmath.js';
 
-
-const GLASS = 0x22364a;
+const GLASS = 0x18242e;
 const TRIM = 0x26292e;
 const TEAK = 0x9a6a3e;
 const ANTIFOUL = 0x7a2420;
 const ENGINE = 0x2b2e33;
 const SEAT = 0xe9e4d6;
+const NONSKID = 0xc9c6bd;
+const STEEL = 0xc4c8cc;
+const RED_L = 0xff2a1a;
+const GREEN_L = 0x22ff5a;
+const WHITE_L = 0xfff6e0;
+const L = CLS.LIVERY, T = CLS.TRIM, G = CLS.GLASS, R = CLS.RUBBER, A = CLS.ALLOY, CH = CLS.CHROME, P = CLS.PLATE, GL = CLS.GLOW;
+const LOD_FAR = 140;
 
-const tmpColor = new THREE.Color();
+const smooth = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
-// ---- geometry helpers -----------------------------------------------------
-function colorize(g, hex) {
-  tmpColor.setHex(hex);
-  const n = g.attributes.position.count;
-  const col = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    col[i * 3] = tmpColor.r;
-    col[i * 3 + 1] = tmpColor.g;
-    col[i * 3 + 2] = tmpColor.b;
+// Hull station at u (0 transom .. 1 stem).
+function station(o, u) {
+  const xs = -o.L / 2 + u * o.L;
+  const xk = -o.L / 2 + u * (o.L - o.rake);
+  let f = o.beamStern + (1 - o.beamStern) * smooth(0, 0.42, u);
+  if (u > o.bowAt) {
+    const t = (u - o.bowAt) / (1 - o.bowAt);
+    f *= Math.pow(Math.max(0, 1 - t * t), 0.55);
   }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  return g;
+  const hb = (o.W / 2) * f;
+  const hc = hb * o.chineK;
+  const ys = o.fb + o.sheer * u * u;
+  const yk = -o.D + (o.D + o.fb * 0.55) * Math.pow(Math.max(0, (u - 0.5) / 0.5), 1.7);
+  const dr = (o.dr0 + (o.dr1 - o.dr0) * u * u) * (Math.PI / 180);
+  const ych = Math.min(yk + hc * Math.tan(dr), ys - 0.12 - o.fb * 0.2);
+  const cw = o.chineW * f;
+  return { u, xs, xk, hb, hc, ys, yk, ych, cw, dr };
 }
 
-// Non-indexed, position + normal + colour only, so parts merge.
-function finish(geo, hex) {
-  const g = geo.index ? geo.toNonIndexed() : geo;
-  if (g.attributes.uv) g.deleteAttribute('uv');
-  if (!g.attributes.normal) g.computeVertexNormals();
-  colorize(g, hex);
-  if (g !== geo) geo.dispose();
-  return g;
+// Section points of one side (z >= 0), keel to sheer.
+function sectionPts(st) {
+  const X = (y) => st.xk + (st.xs - st.xk) * Math.min(1, Math.max(0, (y - st.yk) / Math.max(0.01, st.ys - st.yk)));
+  const p = (z, y) => [X(y), y, z];
+  const zc = st.hc + st.cw;
+  const yb = st.ych + Math.min(0.14, (st.ys - st.ych) * 0.3);
+  const bow = st.hb < 0.02;
+  return {
+    bottom: [p(0, st.yk), p(st.hc * 0.5, st.yk + st.hc * 0.5 * Math.tan(st.dr) * 0.92), p(st.hc, st.ych)],
+    chine: [p(st.hc, st.ych), p(zc, st.ych + 0.01)],
+    boot: [p(zc, st.ych + 0.01), p(bow ? 0 : zc + (st.hb - zc) * 0.3, yb)],
+    top: [p(bow ? 0 : zc + (st.hb - zc) * 0.3, yb), p(zc + (st.hb - zc) * 0.82, yb + (st.ys - yb) * 0.6), p(st.hb, st.ys)],
+  };
 }
 
-function box(parts, hex, sx, sy, sz, x, y, z, rz = 0) {
-  const g = new THREE.BoxGeometry(sx, sy, sz);
-  if (rz) g.rotateZ(rz);
-  g.translate(x, y, z);
-  parts.push(finish(g, hex));
-}
-
-// Cylinder along local x (rx = true) or upright.
-function cyl(parts, hex, r, len, x, y, z, along = 'x', seg = 8) {
-  const g = new THREE.CylinderGeometry(r, r, len, seg);
-  if (along === 'x') g.rotateZ(Math.PI / 2);
-  else if (along === 'z') g.rotateX(Math.PI / 2);
-  g.translate(x, y, z);
-  parts.push(finish(g, hex));
-}
-
-// Flat-shaded triangle soup with each face oriented away from an inside
-// reference point, so winding mistakes cannot turn faces inside out.
-class Soup {
-  constructor() {
-    this.pos = [];
-    this.nor = [];
-    this.col = [];
-  }
-
-  tri(a, b, c, hex, ref) {
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const len = Math.hypot(nx, ny, nz);
-    if (len < 1e-9) return; // degenerate (hull points meet at the bow)
-    nx /= len; ny /= len; nz /= len;
-    const cx = (a[0] + b[0] + c[0]) / 3 - ref[0];
-    const cy = (a[1] + b[1] + c[1]) / 3 - ref[1];
-    const cz = (a[2] + b[2] + c[2]) / 3 - ref[2];
-    if (nx * cx + ny * cy + nz * cz < 0) {
-      const t = b; b = c; c = t;
-      nx = -nx; ny = -ny; nz = -nz;
-    }
-    this.pos.push(...a, ...b, ...c);
-    tmpColor.setHex(hex);
-    for (let i = 0; i < 3; i++) {
-      this.nor.push(nx, ny, nz);
-      this.col.push(tmpColor.r, tmpColor.g, tmpColor.b);
+// o: L, W, fb, D, sheer, rake, bowAt, beamStern, chineK, chineW, dr0, dr1,
+// bottom, boot, top, deck, cap, cockpit: [ua, ub, inset, wallHex, soleHex].
+function hull(k, o) {
+  const N = k.seg(26, 10);
+  const us = [];
+  for (let i = 0; i <= N; i++) us.push(Math.pow(i / N, 0.92));
+  const S = us.map((u) => station(o, u));
+  const parts = ['bottom', 'chine', 'boot', 'top'];
+  const hexOf = { bottom: o.bottom, chine: o.bottom, boot: o.boot, top: o.top };
+  for (const side of [1, -1]) {
+    for (const part of parts) {
+      const G2 = S.map((st) => sectionPts(st)[part].map((q) => [q[0], q[1], q[2] * side]));
+      k.grid(G2, hexOf[part], part === 'bottom' || part === 'chine' ? P : L, {
+        expect: (i, j, c) => [0, c[1] - (S[i].yk + S[i].ys) / 2, c[2]],
+      });
     }
   }
-
-  quad(a, b, c, d, hex, ref) {
-    this.tri(a, b, c, hex, ref);
-    this.tri(a, c, d, hex, ref);
-  }
-
-  build() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    return g;
-  }
-}
-
-// V-bottomed hull from cross-sections, stern (u = 0) to bow (u = 1).
-// o: { L, W, fb (deck height at stern), D (keel depth), sheer (extra deck
-// height at the bow), bowAt (where the plan view starts to narrow),
-// beamStern (stern width factor), top, stripe, bottom, deck colours,
-// deckInset: if set, the deck is drawn this far below the gunwale with a
-// thin rail (an open cockpit look) }
-function hull(parts, o) {
-  const N = 12;
-  const S = new Soup();
-  const st = [];
-  for (let i = 0; i <= N; i++) {
-    const u = i / N;
-    const x = -o.L / 2 + u * o.L;
-    let f = o.beamStern + (1 - o.beamStern) * Math.min(1, u / Math.max(0.01, o.bowAt * 0.6));
-    if (u > o.bowAt) {
-      const t = (u - o.bowAt) / (1 - o.bowAt);
-      f *= Math.pow(Math.max(0, 1 - t * t), 0.6);
-    }
-    const hw = (o.W / 2) * f;
-    const yd = o.fb + o.sheer * u * u;
-    const kt = Math.max(0, (u - 0.62) / 0.38);
-    const yk = -o.D + (o.D + o.fb * 0.55) * Math.pow(kt, 1.6);
-    const yc = yk + (yd - yk) * 0.28;
-    const ys = yk + (yd - yk) * 0.62; // top of the stripe band
-    st.push({ x, hw, yd, yk, yc, ys, wc: hw * 0.86, wsx: hw * 0.97 });
-  }
-  for (let i = 0; i < N; i++) {
-    const a = st[i], b = st[i + 1];
-    const ref = [(a.x + b.x) / 2, (a.yd + a.yk) / 2, 0];
-    for (const s of [-1, 1]) {
-      const a0 = [a.x, a.yd, s * a.hw], b0 = [b.x, b.yd, s * b.hw];
-      const a1 = [a.x, a.ys, s * a.wsx], b1 = [b.x, b.ys, s * b.wsx];
-      const a2 = [a.x, a.yc, s * a.wc], b2 = [b.x, b.yc, s * b.wc];
-      const a3 = [a.x, a.yk, 0], b3 = [b.x, b.yk, 0];
-      S.quad(a0, b0, b1, a1, o.top, ref);
-      S.quad(a1, b1, b2, a2, o.stripe, ref);
-      S.quad(a2, b2, b3, a3, o.bottom, ref);
-    }
-    // Deck.
-    const dy = o.deckInset || 0;
-    const up = [(a.x + b.x) / 2, Math.min(a.yd, b.yd) - 5, 0];
-    S.quad([a.x, a.yd - dy, -a.hw], [b.x, b.yd - dy, -b.hw], [b.x, b.yd - dy, b.hw], [a.x, a.yd - dy, a.hw], o.deck, up);
-    if (dy > 0) {
-      // Inner faces of the gunwale above the sunk deck, and its top rail.
-      for (const s of [-1, 1]) {
-        const inner = [(a.x + b.x) / 2, a.yd, 0];
-        const r0 = [a.x, a.yd, s * a.hw * 0.94], r1 = [b.x, b.yd, s * b.hw * 0.94];
-        const d0 = [a.x, a.yd - dy, s * a.hw * 0.94], d1 = [b.x, b.yd - dy, s * b.hw * 0.94];
-        // Normal faces the centre line: use a reference outside the hull.
-        S.quad(r0, r1, d1, d0, o.inner || o.deck, [inner[0], inner[1], s * o.W * 2]);
-        S.quad([a.x, a.yd, s * a.hw], [b.x, b.yd, s * b.hw], r1, r0, o.rail || o.top, up);
-      }
+  // Rubbing strake along the sheer.
+  if (k.q > 0.8) {
+    for (const side of [1, -1]) {
+      const pts = S.filter((st) => st.hb > 0.05).map((st) => [st.xs, st.ys - 0.05, (st.hb + 0.025) * side]);
+      k.sweep(pts, 0.035, o.cap || STEEL, o.cap ? L : CH, 5);
     }
   }
   // Transom.
-  const t = st[0];
-  const ref = [t.x + 1, (t.yd + t.yk) / 2, 0];
-  const L0 = [t.x, t.yd, -t.hw], L1 = [t.x, t.ys, -t.wsx], L2 = [t.x, t.yc, -t.wc];
-  const R0 = [t.x, t.yd, t.hw], R1 = [t.x, t.ys, t.wsx], R2 = [t.x, t.yc, t.wc];
-  const K = [t.x, t.yk, 0];
-  S.quad(L0, R0, R1, L1, o.top, ref);
-  S.quad(L1, R1, R2, L2, o.stripe, ref);
-  S.tri(L2, R2, K, o.bottom, ref);
-  parts.push(S.build());
-  return st;
-}
-
-// Box with a smaller top than bottom (cabins, consoles).
-function taper(parts, hex, bx0, bx1, tx0, tx1, y0, y1, bw, tw) {
-  const S = new Soup();
-  const v = [
-    [bx0, y0, -bw], [bx1, y0, -bw], [bx1, y0, bw], [bx0, y0, bw],
-    [tx0, y1, -tw], [tx1, y1, -tw], [tx1, y1, tw], [tx0, y1, tw],
-  ];
-  const ref = [(bx0 + bx1 + tx0 + tx1) / 4, (y0 + y1) / 2, 0];
-  const quads = [[0, 1, 2, 3], [7, 6, 5, 4], [3, 2, 6, 7], [1, 0, 4, 5], [2, 1, 5, 6], [0, 3, 7, 4]];
-  for (const q of quads) S.quad(v[q[0]], v[q[1]], v[q[2]], v[q[3]], hex, ref);
-  parts.push(S.build());
-}
-
-function outboard(parts, x, deckY, scale, cowl = ENGINE) {
-  const s = scale;
-  box(parts, cowl, 0.42 * s, 0.5 * s, 0.36 * s, x - 0.2 * s, deckY + 0.15 * s, 0);
-  box(parts, 0xd8d8d8, 0.44 * s, 0.06 * s, 0.38 * s, x - 0.2 * s, deckY - 0.08 * s, 0);
-  box(parts, TRIM, 0.16 * s, deckY + 0.5 * s, 0.1 * s, x - 0.22 * s, deckY / 2 - 0.3 * s, 0);
-  box(parts, TRIM, 0.3 * s, 0.06 * s, 0.14 * s, x - 0.22 * s, -0.5 * s, 0);
-}
-
-// ---- per-type builders ----------------------------------------------------
-function buildRunabout(spec, color, parts) {
-  const L = spec.length, W = spec.width;
-  const fb = 0.62;
-  hull(parts, {
-    L, W, fb, D: spec.draft, sheer: 0.28, bowAt: 0.55, beamStern: 0.9,
-    top: color, stripe: color === 0xf4f4f0 ? 0x1e5fa8 : 0xf4f4f0, bottom: 0xeeeeea, deck: 0x8a8f96,
-    deckInset: 0.32, inner: SEAT, rail: 0xf4f4f0,
-  });
-  const fy = fb - 0.32;
-  // Bow deck cover in front of the windscreen.
-  taper(parts, color, 0.55, L * 0.43, 0.55, L * 0.3, fb, fb + 0.1, W * 0.44, W * 0.25);
-  // Windscreen, leaning back.
-  box(parts, GLASS, 0.05, 0.42, W * 0.82, 0.48, fb + 0.28, 0, 0.75);
-  box(parts, TRIM, 0.07, 0.04, W * 0.84, 0.36, fb + 0.45, 0, 0.75);
-  // Console with dash and wheel.
-  box(parts, SEAT, 0.5, 0.55, 0.6, 0.1, fy + 0.27, W * 0.22);
-  box(parts, TRIM, 0.06, 0.24, 0.24, -0.15, fy + 0.6, W * 0.22, 0.4);
-  // Seats.
-  for (const zz of [W * 0.22, -W * 0.22]) {
-    box(parts, SEAT, 0.5, 0.3, 0.55, -0.6, fy + 0.15, zz);
-    box(parts, SEAT, 0.12, 0.45, 0.55, -0.88, fy + 0.4, zz, 0.15);
+  const t0 = sectionPts(S[0]);
+  const ring = [];
+  for (const part of parts) for (const q of t0[part]) ring.push(q);
+  const back = ring.slice().reverse().map((q) => [q[0], q[1], -q[2]]);
+  k.cap(ring.concat(back), o.top, L, [S[0].xs + 1, 0, 0]);
+  // Deck: gunwale cap all round, deck over the closed parts, cockpit.
+  const cw = o.capW || 0.1;
+  const ck = o.cockpit;
+  const deckAt = (u0, u1) => {
+    const D = [];
+    const n = Math.max(2, Math.round((u1 - u0) * N));
+    for (let i = 0; i <= n; i++) {
+      const st = station(o, u0 + (u1 - u0) * (i / n));
+      const row = [];
+      for (let j = 0; j <= 6; j++) {
+        const z = (-1 + (2 * j) / 6) * st.hb;
+        row.push([st.xs, st.ys + 0.006 + (o.crown || 0.06) * (1 - (z / Math.max(0.01, st.hb)) ** 2) * Math.min(1, st.hb), z]);
+      }
+      D.push(row);
+    }
+    k.grid(D, o.deck, o.deckCls == null ? L : o.deckCls, { expect: () => [0, 1, 0] });
+  };
+  if (!ck) {
+    deckAt(0, 1);
+    return S;
   }
-  box(parts, SEAT, 0.6, 0.32, W * 0.8, -L * 0.36, fy + 0.16, 0);
-  outboard(parts, -L / 2, fb, 1.25);
+  const [ua, ub, inset, wallHex, soleHex] = ck;
+  deckAt(0, ua);
+  deckAt(ub, 1);
+  const n = Math.max(2, Math.round((ub - ua) * N));
+  const sts = [];
+  for (let i = 0; i <= n; i++) sts.push(station(o, ua + (ub - ua) * (i / n)));
+  for (const side of [1, -1]) {
+    k.grid(sts.map((st) => [[st.xs, st.ys + 0.01, st.hb * side], [st.xs, st.ys + 0.01, (st.hb - cw) * side]]), o.deck, o.deckCls == null ? L : o.deckCls, { expect: () => [0, 1, 0] });
+    k.grid(sts.map((st) => [[st.xs, st.ys + 0.01, (st.hb - cw) * side], [st.xs, st.ys - inset, (st.hb - cw - 0.03) * side]]), wallHex, P, { expect: () => [0, 0, -side] });
+  }
+  k.grid(sts.map((st) => [[st.xs, st.ys - inset, -(st.hb - cw - 0.03)], [st.xs, st.ys - inset, st.hb - cw - 0.03]]), soleHex, P, { expect: () => [0, 1, 0] });
+  for (const [st, dir] of [[sts[0], 1], [sts[sts.length - 1], -1]]) {
+    const z = st.hb - cw - 0.03;
+    k.fquad([st.xs, st.ys - inset, -z], [st.xs, st.ys - inset, z], [st.xs, st.ys + 0.02, z], [st.xs, st.ys + 0.02, -z], wallHex, P, [st.xs - dir, st.ys, 0]);
+  }
+  return S;
 }
 
-function buildJetski(spec, color, parts) {
-  const L = spec.length, W = spec.width;
-  const fb = 0.38;
-  hull(parts, {
-    L, W, fb, D: spec.draft, sheer: 0.12, bowAt: 0.4, beamStern: 0.85,
-    top: color, stripe: 0xf2f2f2, bottom: 0x2a2d33, deck: 0x8a8f96,
-  });
-  // Front hood rising toward the handlebars.
-  taper(parts, color, -0.05, L * 0.42, 0.0, 0.5, fb, fb + 0.36, W * 0.36, W * 0.2);
-  // Seat, long and raised.
-  taper(parts, 0x2a3140, -L * 0.42, 0.02, -L * 0.39, -0.02, fb, fb + 0.3, W * 0.19, W * 0.16);
-  // Short column and handlebars just above the hood.
-  box(parts, 0x1b1d22, 0.12, 0.16, 0.12, 0.08, fb + 0.42, 0, 0.4);
-  box(parts, 0x1b1d22, 0.06, 0.05, 0.72, 0.04, fb + 0.5, 0);
-  box(parts, 0x50555c, 0.08, 0.08, 0.12, 0.04, fb + 0.5, 0.36);
-  box(parts, 0x50555c, 0.08, 0.08, 0.12, 0.04, fb + 0.5, -0.36);
-  // Small tinted visor on the hood.
-  box(parts, GLASS, 0.04, 0.1, 0.34, 0.24, fb + 0.4, 0, 0.9);
-  // Foot-well rails and the jet nozzle.
-  box(parts, 0x1b1d22, L * 0.55, 0.05, 0.07, -0.25, fb + 0.02, W * 0.44);
-  box(parts, 0x1b1d22, L * 0.55, 0.05, 0.07, -0.25, fb + 0.02, -W * 0.44);
-  cyl(parts, 0x50555c, 0.08, 0.2, -L / 2 - 0.05, -0.05, 0);
+function cleat(k, x, y, z) {
+  if (k.q < 0.8) return;
+  k.box(x, y + 0.03, z, 0.06, 0.05, 0.04, STEEL, CH);
+  k.box(x, y + 0.065, z, 0.2, 0.025, 0.035, STEEL, CH);
 }
 
-function buildFisher(spec, color, parts) {
-  const L = spec.length, W = spec.width;
-  const fb = 1.1;
-  hull(parts, {
-    L, W, fb, D: spec.draft, sheer: 0.55, bowAt: 0.58, beamStern: 0.88,
-    top: color, stripe: 0xe8e4d8, bottom: ANTIFOUL, deck: 0x8c8678,
-    deckInset: 0.45, inner: 0xd8d2c0, rail: 0xe8e4d8,
-  });
-  const dy = fb - 0.45;
-  // Wheelhouse forward of midships.
-  const x0 = 0.1, x1 = 2.6, hw = W * 0.34;
-  box(parts, 0xefeadc, x1 - x0, 1.7, hw * 2, (x0 + x1) / 2, dy + 0.85, 0);
-  // Window band all round.
-  box(parts, GLASS, x1 - x0 + 0.04, 0.5, hw * 2 + 0.04, (x0 + x1) / 2, dy + 1.35, 0);
-  taper(parts, color, x0 - 0.15, x1 + 0.25, x0, x1 + 0.1, dy + 1.7, dy + 1.9, hw + 0.12, hw + 0.05);
-  // Mast with crosstree and a lamp.
-  box(parts, 0xd8d2c0, 0.12, 2.2, 0.12, 1.6, dy + 3.0, 0);
-  box(parts, 0xd8d2c0, 0.08, 0.08, 1.4, 1.6, dy + 3.5, 0);
-  box(parts, 0xf2c230, 0.14, 0.14, 0.14, 1.6, dy + 4.15, 0);
-  // Stern gantry for nets.
-  box(parts, 0xd8862a, 0.14, 1.9, 0.14, -L / 2 + 0.5, dy + 0.95, W * 0.36);
-  box(parts, 0xd8862a, 0.14, 1.9, 0.14, -L / 2 + 0.5, dy + 0.95, -W * 0.36);
-  box(parts, 0xd8862a, 0.16, 0.16, W * 0.8, -L / 2 + 0.5, dy + 1.9, 0);
-  // Net drum, fish boxes, life ring.
-  cyl(parts, 0x3a5f8a, 0.38, 1.3, -L * 0.22, dy + 0.42, 0, 'z');
-  box(parts, 0x2f8fd0, 0.6, 0.35, 0.5, -L * 0.33, dy + 0.18, W * 0.27);
-  box(parts, 0xd84a2a, 0.6, 0.35, 0.5, -L * 0.33, dy + 0.18, -W * 0.27);
-  box(parts, 0xf0f0f0, 0.06, 0.35, 0.35, x1 + 0.03, dy + 0.8, 0);
-  // Exhaust stack behind the wheelhouse.
-  cyl(parts, TRIM, 0.1, 0.9, x0 + 0.3, dy + 2.2, hw * 0.6, 'y', 6);
+function navLights(k, bowX, y, z, sternX, sternY) {
+  k.box(bowX, y, -z, 0.08, 0.06, 0.05, RED_L, GL);
+  k.box(bowX, y, z, 0.08, 0.06, 0.05, GREEN_L, GL);
+  if (sternX != null) {
+    k.tube([sternX, sternY - 0.6, 0], [sternX, sternY, 0], 0.015, 0.015, STEEL, CH, 5);
+    k.box(sternX, sternY + 0.03, 0, 0.06, 0.07, 0.06, WHITE_L, GL);
+  }
 }
 
-function buildYacht(spec, color, parts) {
-  const L = spec.length, W = spec.width;
-  const fb = 1.45;
-  hull(parts, {
-    L, W, fb, D: spec.draft, sheer: 0.5, bowAt: 0.5, beamStern: 0.92,
-    top: color, stripe: 0x1c2a44, bottom: 0x1c2a44, deck: TEAK,
-  });
+// Bow rail on stanchions along the foredeck edge (u range of the hull).
+function bowRail(k, o, u0, h = 0.42) {
+  if (k.q < 0.8) return;
+  for (const side of [1, -1]) {
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const st = station(o, u0 + (0.985 - u0) * (i / 8));
+      pts.push([st.xs - 0.02, st.ys + h, (st.hb - 0.06) * side]);
+      if (i % 3 === 0) k.tube([st.xs, st.ys, (st.hb - 0.06) * side], [st.xs - 0.02, st.ys + h, (st.hb - 0.06) * side], 0.012, 0.012, STEEL, CH, 5);
+    }
+    k.sweep(pts, 0.016, STEEL, CH, 5);
+  }
+}
+
+// Outboard motor hung on the transom at x, deck height y, scale s.
+function outboard(k, x, y, s, cowl = ENGINE) {
+  const top = y + 0.3 * s;
+  k.rbox(x - 0.25 * s, top, 0, 0.55 * s, 0.5 * s, 0.38 * s, cowl, L, 0.4, 3);
+  if (k.q > 0.8) k.box(x - 0.25 * s, top - 0.02 * s, 0, 0.56 * s, 0.03 * s, 0.39 * s, 0xd8d8d8, CH);
+  k.hexa([[x - 0.12 * s, top - 0.2 * s, -0.09 * s], [x - 0.38 * s, top - 0.2 * s, -0.09 * s], [x - 0.38 * s, top - 0.2 * s, 0.09 * s], [x - 0.12 * s, top - 0.2 * s, 0.09 * s],
+    [x - 0.16 * s, -0.42 * s, -0.05 * s], [x - 0.34 * s, -0.42 * s, -0.05 * s], [x - 0.34 * s, -0.42 * s, 0.05 * s], [x - 0.16 * s, -0.42 * s, 0.05 * s]], TRIM, T);
+  k.box(x - 0.28 * s, -0.12 * s, 0, 0.42 * s, 0.025 * s, 0.24 * s, TRIM, T);
+  k.lathe([{ pts: [[0, 0], [0, 0.06 * s], [0.3 * s, 0.065 * s], [0.42 * s, 0.03 * s], [0.48 * s, 0]], hex: TRIM, cls: T }], 8, [x - 0.48 * s, -0.5 * s, 0], [1, 0, 0]);
+  const hub = [x - 0.5 * s, -0.5 * s, 0];
+  k.setRig(RIG.SPIN, hub, [1, 0, 0]);
+  for (let b = 0; b < 3; b++) {
+    const a = (b / 3) * Math.PI * 2;
+    const c = Math.cos(a), sn = Math.sin(a);
+    k.hexa([[hub[0] - 0.03 * s, hub[1] + sn * 0.05 * s, c * 0.05 * s], [hub[0] + 0.03 * s, hub[1] + sn * 0.05 * s + c * 0.04 * s, c * 0.05 * s - sn * 0.04 * s],
+      [hub[0] + 0.03 * s, hub[1] + sn * 0.05 * s + c * 0.04 * s + 0.005, c * 0.05 * s - sn * 0.04 * s], [hub[0] - 0.03 * s, hub[1] + sn * 0.05 * s + 0.005, c * 0.05 * s],
+      [hub[0] - 0.03 * s, hub[1] + sn * 0.17 * s, c * 0.17 * s], [hub[0] + 0.03 * s, hub[1] + sn * 0.17 * s + c * 0.05 * s, c * 0.17 * s - sn * 0.05 * s],
+      [hub[0] + 0.03 * s, hub[1] + sn * 0.17 * s + c * 0.05 * s + 0.005, c * 0.17 * s - sn * 0.05 * s], [hub[0] - 0.03 * s, hub[1] + sn * 0.17 * s + 0.005, c * 0.17 * s]], 0x9aa0a6, A);
+  }
+  k.noRig();
+}
+
+// ---- per-type builders (k body kit, gk glass kit or null) ----------------------
+function buildRunabout(k, gk, spec, color) {
+  const Ln = spec.length, W = spec.width;
+  const white = color === 0xf4f4f0;
+  const o = {
+    L: Ln, W, fb: 0.62, D: spec.draft, sheer: 0.3, rake: 0.9, bowAt: 0.56, beamStern: 0.93, chineK: 0.84, chineW: 0.07, dr0: 19, dr1: 42,
+    bottom: 0xf0efe9, boot: white ? 0x1e5fa8 : 0xf4f4f0, top: color, deck: 0xf4f4f0, cap: null, crown: 0.09,
+    cockpit: [0.16, 0.6, 0.42, SEAT, NONSKID],
+  };
+  hull(k, o);
+  const fy = o.fb - 0.42;
+  const sa = station(o, 0.6);
+  // Wrap-round windscreen with a chrome top rail.
+  const ws = (t, up) => {
+    const a = (t - 0.5) * 2;
+    const z = a * sa.hb * 0.9;
+    const x = sa.xs - 0.05 - 0.4 * a * a - up * 0.35;
+    return [x, o.fb + 0.08 + up * 0.42, z];
+  };
+  const rows = [];
+  for (let i = 0; i <= 10; i++) rows.push([ws(i / 10, 0), ws(i / 10, 1)]);
+  if (gk) gk.grid(rows, 0xffffff, L, { expect: () => [1, 0.4, 0] });
+  else k.grid(rows, GLASS, G, { expect: () => [1, 0.4, 0] });
+  k.sweep(rows.map((r) => r[1]), 0.018, STEEL, CH, 5);
+  // Console, wheel, seats, rear bench, engine well.
+  const cz = W * 0.2;
+  k.rbox(sa.xs - 0.55, fy + 0.36, cz, 0.5, 0.72, 0.62, SEAT, P, 0.3, 4);
+  k.box(sa.xs - 0.7, fy + 0.74, cz, 0.22, 0.04, 0.5, 0x1b1d22, T);
+  if (k.q > 0.8) {
+    k.lathe([{ pts: [[0, 0.17], [0.02, 0.18], [0.04, 0.17]], hex: 0x1b1d22, cls: T }], 14, [sa.xs - 0.88, fy + 0.8, cz], [0.6, 0.8, 0]);
+    k.tube([sa.xs - 0.82, fy + 0.72, cz], [sa.xs - 0.88, fy + 0.82, cz], 0.025, 0.025, STEEL, CH, 5);
+  }
+  for (const zz of [cz, -cz]) {
+    k.rbox(-0.55, fy + 0.22, zz, 0.6, 0.18, 0.58, SEAT, P, 0.4, 4);
+    k.rbox(-0.86, fy + 0.52, zz, 0.14, 0.55, 0.56, SEAT, P, 0.4, 4);
+    k.tube([-0.55, fy, zz], [-0.55, fy + 0.13, zz], 0.05, 0.05, STEEL, CH, 6);
+  }
+  k.rbox(-Ln * 0.31, fy + 0.2, 0, 0.6, 0.38, W * 0.74, SEAT, P, 0.3, 4);
+  k.rbox(-Ln * 0.31 - 0.25, fy + 0.5, 0, 0.14, 0.5, W * 0.72, SEAT, P, 0.3, 4);
+  k.box(-Ln / 2 - 0.25, 0.14, 0, 0.5, 0.06, W * 0.7, TEAK, P);
+  outboard(k, -Ln / 2 + 0.02, o.fb, 1.35);
+  bowRail(k, o, 0.66, 0.3);
+  const s0 = station(o, 0.08), s1 = station(o, 0.55), s2 = station(o, 0.9);
+  for (const side of [1, -1]) {
+    cleat(k, s0.xs, s0.ys, (s0.hb - 0.06) * side);
+    cleat(k, s1.xs, s1.ys, (s1.hb - 0.05) * side);
+  }
+  cleat(k, s2.xs - 0.1, s2.ys + 0.03, 0);
+  const sb = station(o, 0.82);
+  navLights(k, sb.xs, sb.ys + 0.05, sb.hb - 0.02, -Ln * 0.38, o.fb + 1.0);
+  return { spray: { L: Ln, W, bowX: Ln * 0.12, sternX: -Ln / 2 - 0.5, rooster: 1 }, prop: true };
+}
+
+function buildJetski(k, gk, spec, color) {
+  const Ln = spec.length, W = spec.width;
+  const o = {
+    L: Ln, W, fb: 0.36, D: spec.draft, sheer: 0.1, rake: 0.5, bowAt: 0.45, beamStern: 0.86, chineK: 0.8, chineW: 0.04, dr0: 20, dr1: 40,
+    bottom: 0x2a2d33, boot: 0xf2f2f2, top: color, deck: 0x2a2d33, crown: 0.02,
+    cockpit: [0.08, 0.5, 0.12, 0x2a2d33, 0x23262a],
+  };
+  hull(k, o);
+  const fb = o.fb;
+  k.loft([[-0.05, fb + 0.08, W * 0.3, 0.12, 0.1, 2.6], [0.45, fb + 0.2, W * 0.34, 0.2, 0.12, 2.8], [Ln * 0.3, fb + 0.12, W * 0.26, 0.12, 0.1, 2.6], [Ln * 0.46, fb, 0.05, 0.03, 0.03, 2]], color, L, { steps: 10, seg: 18, capEnds: true });
+  k.loft([[-Ln * 0.45, fb + 0.2, W * 0.17, 0.1, 0.12, 3.2], [-Ln * 0.1, fb + 0.26, W * 0.2, 0.12, 0.14, 3.4], [0.05, fb + 0.3, W * 0.16, 0.1, 0.12, 3]], 0x2a3140, R, { steps: 8, seg: 16, capEnds: true });
+  k.tube([0.25, fb + 0.3, 0], [0.12, fb + 0.55, 0], 0.05, 0.05, 0x1b1d22, T, 6);
+  k.sweep([[0.12, fb + 0.6, -0.36], [0.1, fb + 0.58, 0], [0.12, fb + 0.6, 0.36]], 0.022, 0x1b1d22, T, 6);
+  for (const s of [1, -1]) k.tube([0.12, fb + 0.6, 0.3 * s], [0.12, fb + 0.6, 0.4 * s], 0.035, 0.035, 0x2a2d33, R, 6);
+  if (gk) gk.hexa([[0.32, fb + 0.36, -0.2], [0.32, fb + 0.36, 0.2], [0.18, fb + 0.52, 0.16], [0.18, fb + 0.52, -0.16],
+    [0.335, fb + 0.36, -0.2], [0.335, fb + 0.36, 0.2], [0.195, fb + 0.52, 0.16], [0.195, fb + 0.52, -0.16]], 0xffffff, L);
+  k.lathe([{ pts: [[0, 0.1], [0.2, 0.12]], hex: 0x50555c, cls: A }, { pts: [[0, 0], [0, 0.1]], hex: 0x121314, cls: T }], 10, [-Ln / 2 - 0.12, -0.04, 0], [1, 0, 0]);
+  const sb = station(o, 0.7);
+  navLights(k, sb.xs, sb.ys + 0.02, sb.hb - 0.01, null, 0);
+  return { spray: { L: Ln, W, bowX: Ln * 0.08, sternX: -Ln / 2 - 0.2, rooster: 1.3 } };
+}
+
+function buildFisher(k, gk, spec, color) {
+  const Ln = spec.length, W = spec.width;
+  const o = {
+    L: Ln, W, fb: 1.15, D: spec.draft, sheer: 0.6, rake: 1.4, bowAt: 0.52, beamStern: 0.86, chineK: 0.9, chineW: 0.02, dr0: 28, dr1: 50,
+    bottom: ANTIFOUL, boot: 0xe8e4d8, top: color, deck: 0x8c8678, deckCls: P, crown: 0.06,
+    cockpit: [0.03, 0.52, 0.5, 0xd8d2c0, 0x8c8678],
+  };
+  hull(k, o);
+  const dy = o.fb - 0.5;
+  const x0 = 0.15, x1 = 2.6, hw = W * 0.34;
+  k.slab([[x0, -hw], [x1, -hw * 0.92], [x1, hw * 0.92], [x0, hw]], [[x0 + 0.05, -hw], [x1 - 0.15, -hw * 0.9], [x1 - 0.15, hw * 0.9], [x0 + 0.05, hw]], dy, dy + 1.15, 0xefeadc, L);
+  k.slab([[x0 + 0.02, -hw - 0.01], [x1 - 0.12, -hw * 0.91], [x1 - 0.12, hw * 0.91], [x0 + 0.02, hw + 0.01]], [[x0 + 0.06, -hw - 0.01], [x1 - 0.38, -hw * 0.88], [x1 - 0.38, hw * 0.88], [x0 + 0.06, hw + 0.01]], dy + 1.15, dy + 1.65, GLASS, G);
+  k.slab([[x0 - 0.15, -hw - 0.12], [x1 - 0.15, -hw - 0.05], [x1 - 0.15, hw + 0.05], [x0 - 0.15, hw + 0.12]], [[x0 - 0.12, -hw - 0.1], [x1 - 0.2, -hw - 0.04], [x1 - 0.2, hw + 0.04], [x0 - 0.12, hw + 0.1]], dy + 1.65, dy + 1.8, color, L);
+  k.tube([1.6, dy + 1.8, 0], [1.6, dy + 4.0, 0], 0.07, 0.05, 0xd8d2c0, L, 8);
+  k.tube([1.6, dy + 3.4, -0.75], [1.6, dy + 3.4, 0.75], 0.04, 0.04, 0xd8d2c0, L, 6);
+  k.box(1.6, dy + 4.08, 0, 0.12, 0.12, 0.12, WHITE_L, GL);
+  if (k.q > 0.8) k.lathe([{ pts: [[0, 0.25], [0.08, 0.25], [0.08, 0]], hex: 0xf0f0f0, cls: L }], 12, [1.9, dy + 1.8, 0], [0, 1, 0]);
+  k.sweep([[-Ln / 2 + 0.5, dy, W * 0.36], [-Ln / 2 + 0.5, dy + 1.9, W * 0.36], [-Ln / 2 + 0.6, dy + 2.1, 0], [-Ln / 2 + 0.5, dy + 1.9, -W * 0.36], [-Ln / 2 + 0.5, dy, -W * 0.36]], 0.07, 0xd8862a, L, 8);
+  k.lathe([{ pts: [[-0.65, 0.12], [-0.65, 0.42]], hex: 0x3a5f8a, cls: L }, { pts: [[-0.65, 0.42], [0.65, 0.42]], hex: 0x4a7aa8, cls: R }, { pts: [[0.65, 0.42], [0.65, 0.12]], hex: 0x3a5f8a, cls: L }], 14, [-Ln * 0.22, dy + 0.45, 0], [0, 0, 1]);
+  k.box(-Ln * 0.33, dy + 0.18, W * 0.27, 0.6, 0.35, 0.5, 0x2f8fd0, P);
+  k.box(-Ln * 0.33, dy + 0.18, -W * 0.27, 0.6, 0.35, 0.5, 0xd84a2a, P);
+  k.tube([x0 + 0.3, dy + 1.6, hw * 0.6], [x0 + 0.3, dy + 2.6, hw * 0.6], 0.08, 0.08, TRIM, T, 8);
+  for (const s of [1, -1]) {
+    const st = station(o, 0.35);
+    if (k.q > 0.8) {
+      k.lathe([{ pts: [[0, 0.24], [0.06, 0.24], [0.06, 0.15], [0, 0.15]], hex: 0xf06020, cls: L }], 12, [st.xs, dy + 0.9, (st.hb + 0.02) * s], [0, 0, s]);
+    }
+    cleat(k, st.xs, st.ys, (st.hb - 0.08) * s);
+    for (let i = 0; i < 3; i++) {
+      const tt = station(o, 0.62 + i * 0.12);
+      k.tube([tt.xs, tt.ys, (tt.hb - 0.06) * s], [tt.xs, tt.ys + 0.6, (tt.hb - 0.06) * s], 0.03, 0.03, STEEL, CH, 5);
+    }
+    const rail = [];
+    for (let i = 0; i <= 6; i++) {
+      const tt = station(o, 0.6 + i * 0.065);
+      rail.push([tt.xs, tt.ys + 0.6, (tt.hb - 0.06) * s]);
+    }
+    k.sweep(rail, 0.03, STEEL, CH, 5);
+  }
+  navLights(k, x1 - 0.2, dy + 1.72, hw + 0.08, null, 0);
+  return { spray: { L: Ln, W, bowX: Ln * 0.42, sternX: -Ln / 2 - 0.3, rooster: 0 } };
+}
+
+function buildYacht(k, gk, spec, color) {
+  const Ln = spec.length, W = spec.width;
+  const o = {
+    L: Ln, W, fb: 1.5, D: spec.draft, sheer: 0.55, rake: 1.9, bowAt: 0.5, beamStern: 0.93, chineK: 0.86, chineW: 0.06, dr0: 17, dr1: 45,
+    bottom: 0x1c2a44, boot: 0x1c2a44, top: color, deck: TEAK, deckCls: P, crown: 0.05, cap: color,
+  };
+  hull(k, o);
   const hw = W / 2;
-  // Main saloon: tapered, glass band, then flybridge on top.
-  taper(parts, color, -L * 0.33, L * 0.2, -L * 0.3, L * 0.08, fb, fb + 1.25, hw * 0.82, hw * 0.75);
-  taper(parts, GLASS, -L * 0.31, L * 0.17, -L * 0.29, L * 0.1, fb + 0.45, fb + 1.0, hw * 0.83, hw * 0.79);
-  taper(parts, color, -L * 0.2, L * 0.02, -L * 0.17, -L * 0.03, fb + 1.25, fb + 1.65, hw * 0.72, hw * 0.66);
-  // Flybridge windscreen and rails.
-  box(parts, GLASS, 0.05, 0.4, W * 0.62, -L * 0.03 + 0.08, fb + 1.85, 0, 0.6);
-  box(parts, 0xd0d0d0, L * 0.15, 0.04, 0.04, -L * 0.13, fb + 2.05, hw * 0.66);
-  box(parts, 0xd0d0d0, L * 0.15, 0.04, 0.04, -L * 0.13, fb + 2.05, -hw * 0.66);
-  // Radar arch and mast.
-  box(parts, color, 0.25, 0.9, 0.18, -L * 0.18, fb + 2.05, hw * 0.55, -0.25);
-  box(parts, color, 0.25, 0.9, 0.18, -L * 0.18, fb + 2.05, -hw * 0.55, -0.25);
-  box(parts, color, 0.32, 0.16, W * 0.62, -L * 0.2, fb + 2.5, 0);
-  box(parts, 0x9a9a9a, 0.5, 0.06, 0.12, -L * 0.2, fb + 2.62, 0);
-  // Sun loungers on the foredeck, swim platform at the stern.
-  box(parts, SEAT, 1.4, 0.18, W * 0.42, L * 0.3, fb + 0.29, 0);
-  box(parts, TEAK, 0.9, 0.12, W * 0.86, -L / 2 - 0.42, 0.35, 0);
-  box(parts, SEAT, 1.0, 0.3, W * 0.6, -L * 0.42, fb + 0.15, 0);
-  // Porthole strip on the hull side.
-  for (const zz of [hw * 0.97, -hw * 0.97]) {
-    box(parts, GLASS, L * 0.28, 0.14, 0.04, L * 0.02, fb * 0.72, zz);
+  const fb = o.fb;
+  // Saloon, glass band, hardtop, flybridge, radar arch.
+  k.slab([[-Ln * 0.34, -hw * 0.84], [Ln * 0.2, -hw * 0.78], [Ln * 0.2, hw * 0.78], [-Ln * 0.34, hw * 0.84]],
+    [[-Ln * 0.32, -hw * 0.8], [Ln * 0.12, -hw * 0.74], [Ln * 0.12, hw * 0.74], [-Ln * 0.32, hw * 0.8]], fb, fb + 0.5, color, L);
+  k.slab([[-Ln * 0.32, -hw * 0.8], [Ln * 0.12, -hw * 0.74], [Ln * 0.12, hw * 0.74], [-Ln * 0.32, hw * 0.8]],
+    [[-Ln * 0.31, -hw * 0.78], [Ln * 0.02, -hw * 0.7], [Ln * 0.02, hw * 0.7], [-Ln * 0.31, hw * 0.78]], fb + 0.5, fb + 1.15, GLASS, G);
+  k.slab([[-Ln * 0.35, -hw * 0.84], [Ln * 0.04, -hw * 0.74], [Ln * 0.04, hw * 0.74], [-Ln * 0.35, hw * 0.84]],
+    [[-Ln * 0.34, -hw * 0.82], [Ln * 0.02, -hw * 0.72], [Ln * 0.02, hw * 0.72], [-Ln * 0.34, hw * 0.82]], fb + 1.15, fb + 1.3, color, L);
+  k.slab([[-Ln * 0.22, -hw * 0.7], [-Ln * 0.02, -hw * 0.66], [-Ln * 0.02, hw * 0.66], [-Ln * 0.22, hw * 0.7]],
+    [[-Ln * 0.21, -hw * 0.66], [-Ln * 0.06, -hw * 0.6], [-Ln * 0.06, hw * 0.6], [-Ln * 0.21, hw * 0.66]], fb + 1.3, fb + 1.7, color, L);
+  const wsr = [];
+  for (let i = 0; i <= 6; i++) {
+    const z = (-1 + i / 3) * hw * 0.6;
+    wsr.push([[-Ln * 0.06 - 0.05 * Math.abs(z), fb + 1.7, z], [-Ln * 0.06 - 0.3 - 0.05 * Math.abs(z), fb + 2.05, z]]);
   }
+  if (gk) gk.grid(wsr, 0xffffff, L, { expect: () => [1, 0.6, 0] });
+  for (const s of [1, -1]) {
+    k.sweep([[-Ln * 0.2, fb + 1.3, hw * 0.62 * s], [-Ln * 0.21, fb + 2.4, hw * 0.55 * s], [-Ln * 0.215, fb + 2.55, 0]], [0.12, 0.1, 0.09], color, L, 8, false);
+    k.box(Ln * 0.02, fb * 0.72, (hw * 0.955) * s, Ln * 0.3, 0.16, 0.06, GLASS, G);
+    k.box(-Ln * 0.2, fb + 1.95, hw * 0.62 * s, Ln * 0.14, 0.03, 0.03, STEEL, CH);
+  }
+  k.box(-Ln * 0.215, fb + 2.62, 0, 0.6, 0.06, 0.14, 0x9a9a9a, CH);
+  k.rbox(Ln * 0.3, fb + 0.2, 0, 1.6, 0.2, W * 0.46, SEAT, P, 0.3, 4);
+  k.box(-Ln / 2 - 0.45, 0.32, 0, 0.9, 0.1, W * 0.86, TEAK, P);
+  k.rbox(-Ln * 0.42, fb + 0.2, 0, 1.0, 0.36, W * 0.64, SEAT, P, 0.3, 4);
+  bowRail(k, o, 0.45, 0.55);
+  for (const side of [1, -1]) {
+    const pts = [];
+    for (let i = 0; i <= 6; i++) {
+      const st = station(o, 0.05 + i * 0.06);
+      pts.push([st.xs, st.ys + 0.6, (st.hb - 0.06) * side]);
+      k.tube([st.xs, st.ys, (st.hb - 0.06) * side], [st.xs, st.ys + 0.6, (st.hb - 0.06) * side], 0.015, 0.015, STEEL, CH, 5);
+    }
+    k.sweep(pts, 0.02, STEEL, CH, 5);
+  }
+  const sb = station(o, 0.62);
+  navLights(k, sb.xs, sb.ys + 0.06, sb.hb - 0.02, null, 0);
+  k.box(-Ln * 0.215, fb + 2.72, 0, 0.08, 0.1, 0.08, WHITE_L, GL);
+  return { spray: { L: Ln, W, bowX: Ln * 0.3, sternX: -Ln / 2 - 0.6, rooster: 0.3 } };
 }
 
-function buildInflatable(spec, color, parts) {
-  const L = spec.length, W = spec.width;
-  const tr = 0.24; // tube radius
+function buildInflatable(k, gk, spec, color) {
+  const Ln = spec.length, W = spec.width;
+  const tr = 0.23;
   const tz = W / 2 - tr;
-  const ty = 0.18;
-  // Shallow rigid floor shell.
-  hull(parts, {
-    L: L * 0.92, W: W * 0.8, fb: 0.12, D: spec.draft, sheer: 0.08, bowAt: 0.6, beamStern: 1,
-    top: 0x55595f, stripe: 0x55595f, bottom: 0x3a3d42, deck: 0x6a6e74,
-  });
-  // Side tubes, ending a little past the transom, and a curved bow tube.
-  const bowX = L / 2 - tz - tr;
-  const sx0 = -L / 2 - 0.1;
-  const len = bowX - sx0;
-  cyl(parts, color, tr, len, sx0 + len / 2, ty, tz, 'x', 10);
-  cyl(parts, color, tr, len, sx0 + len / 2, ty, -tz, 'x', 10);
-  const g = new THREE.TorusGeometry(tz, tr, 8, 10, Math.PI);
-  g.rotateX(Math.PI / 2);
-  g.rotateY(Math.PI / 2);
-  g.translate(bowX, ty, 0);
-  parts.push(finish(g, color));
-  // End caps and grab line.
-  for (const zz of [tz, -tz]) {
-    const cap = new THREE.SphereGeometry(tr, 8, 6);
-    cap.scale(0.5, 1, 1);
-    cap.translate(sx0, ty, zz);
-    parts.push(finish(cap, 0x3a3d42));
-    box(parts, 0x2a2d32, len * 0.8, 0.03, 0.03, sx0 + len / 2, ty + tr + 0.01, zz);
+  const ty = 0.2;
+  const o = {
+    L: Ln * 0.9, W: W * 0.78, fb: 0.14, D: spec.draft, sheer: 0.08, rake: 0.5, bowAt: 0.6, beamStern: 1, chineK: 0.85, chineW: 0.03, dr0: 14, dr1: 30,
+    bottom: 0x3a3d42, boot: 0x3a3d42, top: 0x3a3d42, deck: 0x6a6e74, deckCls: P,
+  };
+  hull(k, o);
+  // Side tubes round a U through the bow, tapered cones aft.
+  const pts = [];
+  const bowX = Ln / 2 - tz - tr * 0.6;
+  const sx0 = -Ln / 2 - 0.1;
+  pts.push([sx0, ty + 0.03, tz]);
+  for (let i = 0; i <= 6; i++) pts.push([sx0 + (bowX - sx0) * (i / 6), ty, tz]);
+  for (let i = 1; i < 10; i++) {
+    const a = (i / 10) * Math.PI;
+    pts.push([bowX + Math.sin(a) * tz * 1.05, ty + Math.sin(a) * 0.12, Math.cos(a) * tz]);
   }
-  // Transom board, thwart seat, small outboard.
-  box(parts, 0x3a3d42, 0.08, 0.42, W * 0.72, -L * 0.46 + 0.04, 0.08, 0);
-  box(parts, 0xd8d0b8, 0.3, 0.06, tz * 2, -L * 0.05, ty + 0.12, 0);
-  outboard(parts, -L * 0.46, 0.3, 0.75, 0x3a3d42);
+  for (let i = 0; i <= 6; i++) pts.push([bowX - (bowX - sx0) * (i / 6), ty, -tz]);
+  pts.push([sx0, ty + 0.03, -tz]);
+  const rr = pts.map((p, i) => (i === 0 || i === pts.length - 1 ? tr * 0.7 : tr));
+  k.sweep(pts, rr, color, R, 12);
+  if (k.q > 0.8) {
+    k.sweep(pts.slice(2, -2).map((p) => [p[0], p[1] + tr * 0.98, p[2]]), 0.012, 0x2a2d32, T, 4, false);
+    for (const s of [1, -1]) k.box(0, ty, (tz + tr * 0.95) * s, Ln * 0.5, 0.06, 0.02, 0x2a2d32, R);
+  }
+  k.box(-Ln * 0.45, 0.12, 0, 0.08, 0.42, W * 0.68, 0x3a3d42, P);
+  k.box(-Ln * 0.05, ty + 0.12, 0, 0.3, 0.05, tz * 2, 0xd8d0b8, P);
+  outboard(k, -Ln * 0.45, 0.32, 0.8, 0x3a3d42);
+  return { spray: { L: Ln, W, bowX: Ln * 0.2, sternX: -Ln / 2 - 0.3, rooster: 0.4 }, prop: true };
 }
 
-const BUILDERS = {
-  runabout: buildRunabout,
-  jetski: buildJetski,
-  fisher: buildFisher,
-  yacht: buildYacht,
-  inflatable: buildInflatable,
-};
+const BUILDERS = { runabout: buildRunabout, jetski: buildJetski, fisher: buildFisher, yacht: buildYacht, inflatable: buildInflatable };
 
-// ---- caches ---------------------------------------------------------------
-const geoCache = new Map();
-
-function boatGeometry(spec, color) {
-  const key = spec.id + ':' + color;
-  let g = geoCache.get(key);
-  if (!g) {
-    const parts = [];
-    (BUILDERS[spec.hull] || buildRunabout)(spec, color, parts);
-    g = mergeGeometries(parts, false);
-    classifyByColor(g, {
-      [GLASS]: CLS.GLASS, [TRIM]: CLS.TRIM, [ENGINE]: CLS.TRIM, [TEAK]: CLS.PLATE, [SEAT]: CLS.PLATE,
-      [ANTIFOUL]: CLS.PLATE, 0xd8d8d8: CLS.CHROME, 0xd0d0d0: CLS.CHROME, 0x9a9a9a: CLS.CHROME,
-      0x1b1d22: CLS.TRIM, 0x50555c: CLS.ALLOY, 0x3a3d42: CLS.RUBBER, 0x2a2d32: CLS.TRIM, 0x55595f: CLS.RUBBER, 0x6a6e74: CLS.PLATE, 0x8a8f96: CLS.PLATE, 0x8c8678: CLS.PLATE,
-    });
-    for (const p of parts) p.dispose();
-    g.computeBoundingSphere();
-    geoCache.set(key, g);
+// ---- spray: bow sheets and a stern wash, additive, vertex colour = strength
+function sprayGeometry(sp) {
+  const pos = [], col = [], idx = [];
+  const quadStrip = (rows, c0, c1) => {
+    const base = pos.length / 3;
+    const n = rows.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < 2; j++) {
+        const p = rows[i][j];
+        pos.push(p[0], p[1], p[2]);
+        const t = i / (n - 1);
+        const c = (j === 0 ? c0 : c1) * Math.sin(Math.PI * Math.min(1, t * 1.2)) * (1 - t * 0.6);
+        col.push(c * 0.95, c, c);
+      }
+    }
+    for (let i = 0; i < n - 1; i++) idx.push(base + i * 2, base + i * 2 + 1, base + i * 2 + 2, base + i * 2 + 1, base + i * 2 + 3, base + i * 2 + 2);
+  };
+  const hw = sp.W / 2;
+  for (const s of [1, -1]) {
+    // Bow sheet: from the hull side, flaring out and up, falling back.
+    const rows = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const x = sp.bowX - t * sp.L * 0.55;
+      const z = (hw * 0.75 + t * hw * 1.5) * s;
+      rows.push([[x, 0.02, z * 0.95], [x - 0.3, 0.12 + Math.sin(t * Math.PI) * hw * 0.55, z * 1.12]]);
+    }
+    quadStrip(rows, 0.55, 0.15);
+    // Flat foam fan alongside the hull.
+    const fan = [];
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      const x = sp.bowX - t * sp.L * 0.9;
+      fan.push([[x, 0.04, hw * 0.9 * s], [x - 0.4, 0.04, (hw * 1.0 + t * hw * 1.4) * s]]);
+    }
+    quadStrip(fan, 0.45, 0.05);
   }
+  // Stern wash and (planing boats) a rooster tail plume.
+  const wash = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    const x = sp.sternX - t * sp.L * 1.2;
+    wash.push([[x, 0.05, -hw * (0.5 + t * 0.6)], [x, 0.05, hw * (0.5 + t * 0.6)]]);
+  }
+  quadStrip(wash, 0.6, 0.6);
+  if (sp.rooster > 0) {
+    const rt = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const x = sp.sternX - 0.2 - t * sp.L * 0.7;
+      const h = Math.sin(t * Math.PI) * sp.rooster * 0.9;
+      rt.push([[x, 0.05 + h * 0.2, -0.12 - t * 0.4], [x, 0.05 + h, 0.12 + t * 0.4]]);
+    }
+    quadStrip(rt, 0.5, 0.25);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
   return g;
 }
+const SPRAY_MAT = new THREE.MeshBasicMaterial({
+  vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+});
 
-// ---- public API -----------------------------------------------------------
+// ---- caches -----------------------------------------------------------------------
+const geoCache = new Map();
+function boatEntry(spec, color) {
+  const key = spec.id + ':' + color;
+  let e = geoCache.get(key);
+  if (!e) {
+    const build = BUILDERS[spec.hull] || buildRunabout;
+    const k = new Kit(1), gk = new Kit(1), kf = new Kit(0.45);
+    const lay = build(k, gk, spec, color);
+    build(kf, null, spec, color);
+    e = {
+      body: buildKit(k), glass: gk.count ? buildKit(gk) : null, far: buildKit(kf), lay,
+      spray: sprayGeometry(lay.spray), tris: (k.i.length + gk.i.length) / 3, farTris: kf.i.length / 3,
+    };
+    geoCache.set(key, e);
+  }
+  return e;
+}
+
+// Triangle counts (near, far) for tools and tests.
+export function boatStats(spec, color) {
+  const e = boatEntry(spec, color == null ? spec.colors[0] : color);
+  return { tris: e.tris, farTris: e.farTris };
+}
+
+// ---- public API -------------------------------------------------------------------
 export function createBoatMesh(spec, color) {
   const group = new THREE.Group();
   const col = color == null ? spec.colors[0] : color;
-  const body = new THREE.Mesh(boatGeometry(spec, col), craftMaterial(spec.hull === 'inflatable' ? 'matte' : 'gloss'));
-  group.add(body);
+  const e = boatEntry(spec, col);
+  const skin = createSkin(spec.hull === 'inflatable' ? 'rib' : 'boat');
+  const near = new THREE.Group();
+  const body = new THREE.Mesh(e.body, skin);
+  near.add(body);
+  let glass = null;
+  if (e.glass) {
+    glass = new THREE.Mesh(e.glass, glassMaterial());
+    glass.renderOrder = 2;
+    near.add(glass);
+  }
+  const lod = new THREE.LOD();
+  lod.addLevel(near, 0);
+  lod.addLevel(new THREE.Mesh(e.far, skin), LOD_FAR);
+  const spray = new THREE.Mesh(e.spray, SPRAY_MAT);
+  spray.visible = false;
+  spray.renderOrder = 3;
+  group.add(lod, spray);
   // Euler order YZX: yaw about world up, then pitch about the boat's own
   // beam axis (z), then roll about its own (pitched) fore-aft axis (x).
   group.rotation.order = 'YZX';
-  group.userData = { spec, body };
+  group.userData = { spec, body, glass, lod, skin, spray, spin: 0, lastT: NaN, look: -1, tris: e.tris };
   return group;
 }
 
 // Place the mesh between the previous and current simulation state.
 export function updateBoatMesh(mesh, b, alpha = 1, time = 0) {
+  const ud = mesh.userData;
   const x = b.px + (b.x - b.px) * alpha;
   const z = b.pz + (b.z - b.pz) * alpha;
   const py = Number.isFinite(b.py) ? b.py : b.y;
@@ -393,10 +518,30 @@ export function updateBoatMesh(mesh, b, alpha = 1, time = 0) {
   const h = b.pheading + angleDiff(b.heading, b.pheading) * alpha;
   const pp = Number.isFinite(b.ppitch) ? b.ppitch : b.pitch;
   const pr = Number.isFinite(b.proll) ? b.proll : b.roll;
-  const pitch = pp + (b.pitch - pp) * alpha;
-  const roll = pr + (b.roll - pr) * alpha;
   mesh.position.set(x, y, z);
   // rotation.x = roll (right side, +z, goes down for positive roll),
   // rotation.y = -heading, rotation.z = pitch (nose up positive).
-  mesh.rotation.set(roll, -h, pitch);
+  mesh.rotation.set(pr + (b.roll - pr) * alpha, -h, pp + (b.pitch - pp) * alpha);
+  const t = Number.isFinite(time) ? time : 0;
+  const dt = Number.isFinite(ud.lastT) ? Math.min(0.1, Math.max(0, t - ud.lastT)) : 0;
+  ud.lastT = t;
+  const thr = b.wrecked ? 0 : b.throttle || 0;
+  ud.spin = wrapAngle(ud.spin + dt * (8 + 90 * thr) * (b.speed < -0.2 ? -1 : 1) * (thr > 0.02 ? 1 : 0));
+  ud.skin.userData.rig.r2.set(ud.spin, 0, 0, 0);
+  // Spray grows with speed (share of top speed), flickers a little.
+  const sp = Math.abs(b.speed || 0) / Math.max(1, ud.spec.maxSpeed || 20);
+  const on = !b.wrecked && sp > 0.12;
+  ud.spray.visible = on;
+  if (on) {
+    const k = Math.min(1, sp) * (0.92 + 0.08 * Math.sin(t * 23 + ud.spec.length));
+    ud.spray.scale.set(0.6 + 0.4 * k, 0.3 + 0.9 * k, 0.5 + 0.6 * k);
+  }
+  const hp = ud.spec.health || 1;
+  const wear = Math.min(1, Math.max(0, 1 - (b.health == null ? hp : b.health) / hp)) * 0.8;
+  const look = wear * 10 + (b.wrecked ? 100 : 0) + (b.hitT > 0 ? 1000 + b.hitT : 0);
+  if (look !== ud.look) {
+    ud.look = look;
+    skinLook(ud.skin, wear, !!b.wrecked, b.hitT || 0);
+  }
 }
+
