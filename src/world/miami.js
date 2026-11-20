@@ -8,6 +8,9 @@
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W } from './citygen.js';
 import { MIAMI_CROP, LAND_MARGIN, MIAMI_SPOTS } from './miami-spots.js';
+import { buildCourses } from './courses.js';
+import { placeSecrets } from './secrets.js';
+import { placeRamps } from './stunts.js';
 
 export { MIAMI_CROP, MIAMI_SPOTS };
 
@@ -1010,6 +1013,19 @@ export function createMiamiCity(data, opts = {}) {
     const c = cellOf(dist, x, z);
     return c < 0 ? 'midtown' : DKEYS[dist.data[c]];
   }
+  // Real neighbourhood names for the HUD (placeOf, below), baked at 16 m:
+  // index into placeNames, 0 = none.
+  const placeNames = [''];
+  const landPlace = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, 16);
+  const waterPlace = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, 16);
+  for (const [R, list] of [[landPlace, S.places || []], [waterPlace, S.waterPlaces || []]]) {
+    for (const p of list) {
+      let k = placeNames.indexOf(p.name);
+      if (k < 0) k = placeNames.push(p.name) - 1;
+      if (p.line) stampCapsule(R, p.line[0], p.line[1], p.line[2], p.line[3], p.line[4], k);
+      else stampRect(R, p.x0, p.z0, p.x1, p.z1, k);
+    }
+  }
 
   // ---- 6. Blocks: road-free land regions that are nearly rectangles. ----
   const blocks = [];
@@ -1424,7 +1440,7 @@ export function createMiamiCity(data, opts = {}) {
   const roofPads = [];
   {
     let best = null, bd = Infinity;
-    const ax = -1100, az = 600;
+    const ax = S.roofPadAnchor ? S.roofPadAnchor.x : -1100, az = S.roofPadAnchor ? S.roofPadAnchor.z : 600;
     for (const b of buildings) {
       if (b.district !== 'midtown' || b.kind !== 'building' || b.x1 - b.x0 < 16 || b.z1 - b.z0 < 16 || b.h < 12 || b.h > 30) continue;
       const d = Math.hypot((b.x0 + b.x1) / 2 - ax, (b.z0 + b.z1) / 2 - az);
@@ -1434,8 +1450,44 @@ export function createMiamiCity(data, opts = {}) {
     for (const r of roofPads) aircraftSpots.push({ x: r.x, z: r.z, heading: 0, spec: 'patrolheli', roof: true });
   }
 
-  // Landmarks: windsock and runway lights only on this map so far.
+  // Landmarks: windsock, runway lights and the port cranes.
   const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: { x: runway.x0 + 70, z: runway.z0 - 14 }, runwayLights: [] };
+  // Each crane steps south from its point to the quay edge: legs (x +-7,
+  // z +-6) on land, clear of buildings and roads, the boom (to z + 40)
+  // out over the water.
+  (S.cranes || []).forEach((c, k) => {
+    const x = c.x;
+    let z = c.z;
+    while (Math.min(mainShore(x - 7, z + 6), mainShore(x + 7, z + 6)) > 4 && z < c.z + 600) z += 1;
+    for (const ox of [-7, 7]) {
+      for (const oz of [-6, 6]) {
+        if (mainShore(x + ox, z + oz) < 2 || inBuilding(x + ox, z + oz, 1.5) || onRoad(x + ox, z + oz)) return;
+      }
+    }
+    if (shoreDist(x, z + 30) > -2) return;
+    landmarks.cranes.push({ x, z, rot: Math.PI / 2, v: k % 2 ? 0.7 : 0.3 });
+  });
+  // The Cinder tank: open ground in a Wynwood yard (no car parks in the
+  // data); kerb spaces within 6 m are cleared, as in citygen.
+  if (S.cinder) {
+    let spot = null;
+    for (let r = 0; r <= 400 && !spot; r += 4) {
+      const n = r ? Math.max(8, Math.round((TAU * r) / 4)) : 1;
+      for (let k = 0; k < n && !spot; k++) {
+        const x = S.cinder.x + Math.cos((k / n) * TAU) * r, z = S.cinder.z + Math.sin((k / n) * TAU) * r;
+        if (districtOf(x, z) !== 'industrial' || mainShore(x, z) < 8 || inBuilding(x, z, 4.5)) continue;
+        let road = onRoad(x, z);
+        for (let a = 0; a < 8 && !road; a++) road = onRoad(x + Math.cos((a / 8) * TAU) * 5, z + Math.sin((a / 8) * TAU) * 5);
+        if (!road) spot = { x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10 };
+      }
+    }
+    if (spot) {
+      tankSpots.push({ x: spot.x, z: spot.z, heading: 0, spec: 'rustback', place: 'cinder' });
+      for (let i = parkingSpots.length - 1; i >= 0; i--) {
+        if (Math.hypot(parkingSpots[i].x - spot.x, parkingSpots[i].z - spot.z) < 6) parkingSpots.splice(i, 1);
+      }
+    }
+  }
   for (let x = runway.x0; x <= runway.x1 + 0.1; x += 35.5) {
     landmarks.runwayLights.push({ x, z: runway.z0 - 1.4, color: 0xfff2d0 }, { x, z: runway.z1 + 1.4, color: 0xfff2d0 });
   }
@@ -1517,10 +1569,33 @@ export function createMiamiCity(data, opts = {}) {
     }
     return out;
   }
+  // The real neighbourhood (or water, or bridge) name at a point, for the
+  // HUD. No allocation: the edge scratch list is reused.
+  const placeEdges = [];
+  function placeOf(x, z) {
+    if (x > islet.x0 - 60 && x < islet.x1 + 60 && z > islet.z0 - 60 && z < islet.z1 + 60) return DISTRICTS.airfield.name;
+    if (mainShore(x, z) > 0) {
+      const c = cellOf(landPlace, x, z);
+      const k = c < 0 ? 0 : landPlace.data[c];
+      if (k) return placeNames[k];
+    }
+    if (shoreDist(x, z) > 0) {
+      // A road strip over the water: the bridge's own street name.
+      edgesNear(x, z, 2, placeEdges);
+      for (let i = 0; i < placeEdges.length; i++) {
+        const e = edges[placeEdges[i]];
+        if (e.name && (e.bridge || e.causeway)) return e.name;
+      }
+      if (mainShore(x, z) > 0) return 'Miami';
+    }
+    const c = cellOf(waterPlace, x, z);
+    const k = c < 0 ? 0 : waterPlace.data[c];
+    return k ? placeNames[k] : 'Biscayne Bay';
+  }
   lap('extras');
 
   const span = Math.max(Math.abs(cut.x0), Math.abs(cut.x1), Math.abs(cut.z0), Math.abs(cut.z1));
-  return {
+  const city = {
     map: 'miami',
     seed, N: 1, xs: [0], zs: [0], wx: [STREET_W], wz: [STREET_W],
     nodes, edges, blocks, buildings,
@@ -1529,9 +1604,9 @@ export function createMiamiCity(data, opts = {}) {
     extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
     tankSpots, roofPads, depot,
     airfield: { islet, runway, apron, gate },
-    // Activities, secrets and stunt ramps come in milestone 2.
-    courses: [], secretSpots: [], rampSpots: [],
-    shoreDist, mainShore, isLand, isGround, districtOf, onRoad,
+    // Activities, secrets and stunt ramps: filled in below, from the spots.
+    courses: [], secretSpots: [], secretGarage: null, rampSpots: [], courseSpec: S.courses || null, texts: S.texts || null,
+    shoreDist, mainShore, isLand, isGround, districtOf, onRoad, placeOf, placeNames: placeNames.slice(1),
     nodeAt: () => null,
     blockAt, edgesNear, buildingsNear, landRuns, landTarget, inBuilding,
     // Drawn land (no road strips): 1 = land, sampled at cell centres.
@@ -1540,9 +1615,31 @@ export function createMiamiCity(data, opts = {}) {
     attribution: data.attribution,
     size: span,
     mapHalf: span + 100,
-    buildMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart),
+    buildMs: 0,
     timings, graphStats,
   };
+
+  // ---- 12. Places and activities (docs/MAP.md milestone 2). ----
+  if (S.ramps) {
+    city.rampSpots = placeRamps(city, S.ramps);
+    // No parked car on a street ramp.
+    for (const r of city.rampSpots) {
+      if (r.water) continue;
+      for (let i = parkingSpots.length - 1; i >= 0; i--) {
+        if (Math.hypot(parkingSpots[i].x - r.x, parkingSpots[i].z - r.z) < r.r + 6) parkingSpots.splice(i, 1);
+      }
+    }
+  }
+  if (S.secrets) {
+    const sec = placeSecrets(city, S.secrets);
+    for (const sp of sec.spots) if (S.secretNotes && S.secretNotes[sp.id]) sp.note = S.secretNotes[sp.id];
+    city.secretSpots = sec.spots;
+    city.secretGarage = sec.garage;
+  }
+  if (city.courseSpec) city.courses = buildCourses(city);
+  lap('places');
+  city.buildMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart);
+  return city;
 }
 
 export { DISTRICTS };

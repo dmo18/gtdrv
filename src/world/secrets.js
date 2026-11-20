@@ -230,6 +230,174 @@ function findGarage(city, rng, taken) {
   return null;
 }
 
+// ---- a real map: hand-placed spots (world/miami-spots.js) ---------------------
+// The same open-ground test, with the building grid of a real map.
+const NEAR = [];
+function openGroundNear(city, x, z, r, shore = 0) {
+  if (city.districtOf(x, z) === 'airfield') return false;
+  if (city.mainShore(x, z) < Math.max(shore, 3)) return false;
+  city.buildingsNear(x - r - 1, z - r - 1, x + r + 1, z + r + 1, NEAR);
+  for (let i = 0; i < NEAR.length; i++) if (rectDist(city.buildings[NEAR[i]], x, z) < r) return false;
+  const p = city.props;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[i];
+    if (q.type === 'lamp') continue;
+    if (Math.abs(q.x - x) < r + 1 && Math.abs(q.z - z) < r + 1 && DIST(q.x, q.z, x, z) < r + (q.r || 0.5)) return false;
+  }
+  const f = city.furniture;
+  for (let i = 0; i < f.length; i++) {
+    if (Math.abs(f[i].x - x) < r && Math.abs(f[i].z - z) < r && DIST(f[i].x, f[i].z, x, z) < r) return false;
+  }
+  if (city.onRoad(x, z)) return false;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * TAU;
+    if (city.onRoad(x + Math.cos(a) * r, z + Math.sin(a) * r)) return false;
+  }
+  if (city.piers && nearList(city.piers, x, z, r + 6)) return false;
+  return true;
+}
+
+// Heading from (x, z) straight out to sea (down the shore field).
+function seaward(city, x, z) {
+  const gx = city.shoreDist(x + 3, z) - city.shoreDist(x - 3, z);
+  const gz = city.shoreDist(x, z + 3) - city.shoreDist(x, z - 3);
+  return Math.atan2(-gz, -gx);
+}
+
+// Spiral out from (x, z) in 4 m steps to `maxR`; the first point `ok`
+// accepts wins (nearest ring first, then by angle).
+function nearestWhere(x, z, maxR, ok) {
+  if (ok(x, z)) return { x, z };
+  for (let r = 4; r <= maxR; r += 4) {
+    const n = Math.max(8, Math.round((TAU * r) / 4));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU;
+      const px = Math.round((x + Math.cos(a) * r) * 10) / 10, pz = Math.round((z + Math.sin(a) * r) * 10) / 10;
+      if (ok(px, pz)) return { x: px, z: pz };
+    }
+  }
+  return null;
+}
+
+// A spot on open ground `want` metres in from the shore, facing the sea.
+function shoreSpot(city, x, z, want, extra = null) {
+  const p = nearestWhere(x, z, 220, (px, pz) => {
+    const s = city.mainShore(px, pz);
+    if (s < want - 1.5 || s > want + 1.5 || !openGroundNear(city, px, pz, 8, 0)) return false;
+    return !extra || extra(px, pz, seaward(city, px, pz));
+  });
+  return p ? { x: p.x, z: p.z, heading: seaward(city, p.x, p.z) } : null;
+}
+
+// Buildings whose centre is inside `region` (a rect), by the grid.
+function buildingsIn(city, region) {
+  city.buildingsNear(region.x0, region.z0, region.x1, region.z1, NEAR);
+  const out = [];
+  for (let i = 0; i < NEAR.length; i++) {
+    const b = city.buildings[NEAR[i]];
+    const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    if (cx > region.x0 && cx < region.x1 && cz > region.z0 && cz < region.z1) out.push(b);
+  }
+  return out.sort((p, q) => p.x0 - q.x0 || p.z0 - q.z0);
+}
+
+// The longest 3 to 8 m gap between two buildings of the region, with
+// nothing else in it (the tag-alley rule of findAlley, on a region).
+function alleyIn(city, region) {
+  const bl = buildingsIn(city, region).filter((b) => b.kind !== 'container' && b.h >= 5);
+  let best = null;
+  const near = [];
+  const clearGap = (x0, z0, x1, z1, a, b) => {
+    city.buildingsNear(x0, z0, x1, z1, near);
+    for (let i = 0; i < near.length; i++) {
+      const o = city.buildings[near[i]];
+      if (o !== a && o !== b && o.x0 < x1 && o.x1 > x0 && o.z0 < z1 && o.z1 > z0) return false;
+    }
+    return !city.onRoad((x0 + x1) / 2, (z0 + z1) / 2);
+  };
+  const nb = [];
+  for (const A of bl) {
+    city.buildingsNear(A.x0 - 9, A.z0 - 9, A.x1 + 9, A.z1 + 9, nb);
+    for (let i = 0; i < nb.length; i++) {
+      const B = city.buildings[nb[i]];
+      if (B === A || B.h < 5 || B.kind === 'container' || !(A.x0 < B.x0 || (A.x0 === B.x0 && A.z0 < B.z0))) continue;
+      // Side by side along x (the alley runs along z).
+      const gx = B.x0 - A.x1, ovz = Math.min(A.z1, B.z1) - Math.max(A.z0, B.z0);
+      if (gx >= 3 && gx <= 8 && ovz >= 14 && (!best || ovz > best.len) && clearGap(A.x1, Math.max(A.z0, B.z0), B.x0, Math.min(A.z1, B.z1), A, B)) {
+        const z = (Math.max(A.z0, B.z0) + Math.min(A.z1, B.z1)) / 2;
+        best = { x: (A.x1 + B.x0) / 2, z, heading: Math.PI / 2, gap: gx, len: ovz, tag: { x: A.x1, z, nx: 1, nz: 0 } };
+      }
+      // One above the other along z (the alley runs along x).
+      const lo = A.z0 <= B.z0 ? A : B, hi = lo === A ? B : A;
+      const gz = hi.z0 - lo.z1, ovx = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
+      if (gz >= 3 && gz <= 8 && ovx >= 14 && (!best || ovx > best.len) && clearGap(Math.max(A.x0, B.x0), lo.z1, Math.min(A.x1, B.x1), hi.z0, A, B)) {
+        const x = (Math.max(A.x0, B.x0) + Math.min(A.x1, B.x1)) / 2;
+        best = { x, z: (lo.z1 + hi.z0) / 2, heading: 0, gap: gz, len: ovx, tag: { x, z: lo.z1, nx: 0, nz: 1 } };
+      }
+    }
+  }
+  return best;
+}
+
+// A 9 to 20 m flat roof in the region, nearest 12 m high, then nearest
+// the region's centre.
+function roofIn(city, region, rng) {
+  const cx = (region.x0 + region.x1) / 2, cz = (region.z0 + region.z1) / 2;
+  const pool = buildingsIn(city, region).filter((b) => b.kind === 'building' && b.h >= 9 && b.h <= 20 && b.x1 - b.x0 >= 14 && b.z1 - b.z0 >= 14);
+  if (!pool.length) return null;
+  const d = (b) => Math.abs(b.h - 12) * 40 + DIST((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, cx, cz);
+  pool.sort((p, q) => d(p) - d(q));
+  const b = pool[0];
+  return { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2, roofY: b.h, heading: rng.range(0, TAU), roof: { x0: b.x0, z0: b.z0, x1: b.x1, z1: b.z1 } };
+}
+
+// The lock-up garage on open ground nearest (x, z), door out to open ground.
+function garageNear(city, x, z, rng) {
+  const dirs = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+  let g = null;
+  nearestWhere(x, z, 400, (px, pz) => {
+    if (!openGroundNear(city, px, pz, 12, 12)) return false;
+    const turn = rng.int(0, 3);
+    for (let q = 0; q < 4; q++) {
+      const h = dirs[(q + turn) % 4];
+      const ox = px + Math.cos(h) * 4.5, oz = pz + Math.sin(h) * 4.5;
+      if (!openGroundNear(city, ox + Math.cos(h) * 8, oz + Math.sin(h) * 8, 5, 5)) continue;
+      g = garageGeometry(ox, oz, h);
+      return true;
+    }
+    return false;
+  });
+  return g;
+}
+
+// { spots, garage } from a spec: drowned-box, the-gullet and rustlamp near
+// a shore point; roof-garden and tag-alley found inside a region;
+// lone-ride on open park ground near a point; the garage near a point.
+export function placeSecrets(city, spec, seed = SECRETS_SEED) {
+  const rng = createRng(seed);
+  const out = {};
+  const put = (id, p, extra = {}) => {
+    if (!p) throw new Error('secrets: no place for ' + id);
+    const def = SECRET_DEFS.find((d) => d.id === id);
+    out[id] = { id, kind: def.kind, name: def.name, x: p.x, z: p.z, heading: p.heading || 0, minY: null, ...extra };
+  };
+  // The container lies 23 m out along the heading: that must be open water.
+  const wet = (px, pz, h) => city.shoreDist(px + Math.cos(h) * 23, pz + Math.sin(h) * 23) < -4 && city.shoreDist(px + Math.cos(h) * 30, pz + Math.sin(h) * 30) < -6;
+  put('drowned-box', shoreSpot(city, spec['drowned-box'].x, spec['drowned-box'].z, 5, wet));
+  const roof = roofIn(city, spec['roof-garden'].region, rng);
+  if (roof) put('roof-garden', roof, { minY: roof.roofY - 3.5, roofY: roof.roofY, roof: roof.roof });
+  put('the-gullet', shoreSpot(city, spec['the-gullet'].x, spec['the-gullet'].z, 5, wet));
+  put('rustlamp', shoreSpot(city, spec.rustlamp.x, spec.rustlamp.z, 6));
+  const alley = alleyIn(city, spec['tag-alley'].region);
+  if (alley) put('tag-alley', alley, { tag: alley.tag, gap: alley.gap, len: alley.len });
+  const lr = spec['lone-ride'];
+  const ride = nearestWhere(lr.x, lr.z, 200, (px, pz) => openGroundNear(city, px, pz, 7, 10));
+  put('lone-ride', ride && { x: ride.x, z: ride.z, heading: rng.range(0, TAU) });
+  const spots = SECRET_IDS.map((id) => out[id]).filter(Boolean);
+  const garage = spec.garage ? garageNear(city, spec.garage.x, spec.garage.z, rng) : null;
+  return { spots, garage };
+}
+
 // The whole hidden layout: { spots: [six secrets in SECRET_DEFS order],
 // garage }. Each spot has id, x, z, heading and `minY` (null, or the
 // height you must be at to count: the rooftop).

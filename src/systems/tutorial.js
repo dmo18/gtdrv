@@ -24,8 +24,11 @@ export function createTutorial(game) {
     game.events.emit('progress');
   };
 
+  // A real map words the place hints for itself (city.texts).
+  const texts = (game.city && game.city.texts) || {};
   function offer(mode) {
-    const list = HINTS[mode];
+    let list = HINTS[mode];
+    if (list && mode === 'foot' && texts.craft) list = [list[0], list[1], texts.craft];
     if (!list || seen(mode)) return;
     mark(mode);
     for (const text of list) queue.push(text);

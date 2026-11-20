@@ -127,7 +127,13 @@ export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
     used.add(name);
     out.push(makeSpot('stunt_' + slug(name), name, c.x, c.z, c.heading, RAMP_LAND, false));
   }
-  // The airfield dock: the last pier is the dock off the islet's south edge.
+  dockRamps(city, out);
+  return out;
+}
+
+// The two ramps at the airfield dock (the last pier is the dock off the
+// islet's south edge): one on the quay, one in the water.
+function dockRamps(city, out) {
   const af = city.airfield;
   const dock = city.piers && city.piers.length ? city.piers[city.piers.length - 1] : null;
   if (af && af.islet && dock) {
@@ -144,5 +150,35 @@ export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
     // In the water beside the dock, along the dock (north-south).
     out.push(makeSpot('stunt_dock_splash', 'Dock Splash', dock.x1 + 34, dock.z1 - 18, Math.PI / 2, RAMP_WATER, true));
   }
+}
+
+// A real map: hand-placed street ramps, each on the named street nearest
+// its point, in the middle of a straight stretch (along the street, both
+// ways), then the dock ramps. Spec: [{ name, street, x, z }].
+export function placeRamps(city, spec) {
+  const out = [];
+  const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6; // m of straight road each side of the centre
+  for (const r of spec) {
+    let best = null, bd = Infinity;
+    for (const e of city.edges) {
+      if (e.name !== r.street || e.bridge || e.causeway || e.avenue) continue;
+      const a = city.nodes[e.a], b = city.nodes[e.b];
+      const t0 = Math.max(a.hx, a.hz) + need, t1 = e.length - Math.max(b.hx, b.hz) - need;
+      for (let t = t0; t <= t1; t += 2) {
+        const x = a.x + e.ux * t, z = a.z + e.uz * t;
+        const d = Math.hypot(x - r.x, z - r.z);
+        if (d >= bd) continue;
+        const hx = e.ux * RAMP_LAND.slope * 2, hz = e.uz * RAMP_LAND.slope * 2;
+        if (!city.isLand(x + hx, z + hz) || !city.isLand(x - hx, z - hz) || city.shoreDist(x, z) < 30) continue;
+        if (city.inBuilding && city.inBuilding(x, z, RAMP_LAND.width)) continue;
+        bd = d;
+        best = { x, z, heading: Math.atan2(e.uz, e.ux) };
+      }
+    }
+    if (!best || bd > 200) throw new Error('stunts: no straight stretch of ' + r.street);
+    const x = Math.round(best.x * 10) / 10, z = Math.round(best.z * 10) / 10;
+    out.push(makeSpot('stunt_' + slug(r.name), r.name, x, z, Math.round(best.heading * 1000) / 1000, RAMP_LAND, false));
+  }
+  dockRamps(city, out);
   return out;
 }

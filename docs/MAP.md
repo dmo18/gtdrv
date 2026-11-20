@@ -46,8 +46,9 @@ shapes, 58 coastline lines, 607 parks, 82 labels. Checked by `test/mapdata.test.
 
 ## Integration plan
 
-Status: milestone 1 (core crop) is in the game behind `?map=miami`; see
-"Milestone 1: done" at the end. The rest of this section is the plan as
+Status: milestones 1 (core crop) and 2 (places and activities) are in
+the game behind `?map=miami`; see "Milestone 1: done" and "Milestone 2:
+done" at the end. The rest of this section is the plan as
 written before it, from a read of
 `src/world/citygen.js` and every consumer of its return value
 (src/systems, src/render, src/ui, src/world, src/entities, src/game.js,
@@ -462,4 +463,121 @@ Deviations from the plan:
    signs, stop signs, crossing paint and road decals on Miami, a saved
    map id (a Miami session is not restored, but saving still writes the
    shared session record), perf budget on the phone profile.
+
+### Milestone 2: done (2026-11-20)
+
+On `?map=miami` the activities, secrets, stunt ramps and the other hand
+places work; the HUD shows real neighbourhood names; the tutorial and
+menu texts name Miami places; Settings shows "Map data (c) OpenStreetMap
+contributors, ODbL" on any map built from the data (`city.attribution`).
+
+What changed:
+
+- `src/world/miami-spots.js`: the course spec (`MIAMI_COURSES`), the six
+  secrets and the garage, four street ramps, the roof pad anchor, the
+  Cinder tank and crane points, the HUD place tables (`places`,
+  `waterPlaces`, each entry with the `src` data name it comes from), the
+  place texts (`texts`) and secret notes (`secretNotes`).
+- `src/world/miami.js`: step 12 at the end of `createMiamiCity` fills
+  `courses` (`buildCourses`, through `city.courseSpec`), `secretSpots`
+  and `secretGarage` (`placeSecrets`), `rampSpots` (`placeRamps`, kerb
+  cars cleared off them); also `placeOf(x, z)` (land and water names
+  baked at 16 m, a bridge's own street name on a bridge, Gullwing Airfield
+  on the islet, "Miami" where no entry covers), `placeNames`, `texts`,
+  cranes in `landmarks.cranes`, the Cinder tank in `tankSpots`, the roof
+  pad from `roofPadAnchor`. Build about 0.6 s CPU in node (places 50 ms).
+- `src/world/courses.js`: `buildSpecCourses(city, spec)` (called by
+  `buildCourses` when the city has a `courseSpec`); street waypoints are
+  points snapped to junctions and checkpoints are picked at junctions
+  (not bends); boat gates are pushed down the shore field (`pushToSea`)
+  instead of out from an island centre; canyon rings are found on a named
+  avenue where the ring's full width is clear. The islet courses (First
+  Feathers, Rooftop Hopper, the Causeway Dash walk, Air Mail) are shared
+  functions used by both maps. `roadPath` uses a binary heap on graphs of
+  more than 400 nodes; `avenueAt` and canyon ring facing work on edges in
+  any direction (`ux, uz`); `tallestNear` uses `buildingsNear`. The
+  island's courses are byte-identical to before (checked).
+- `src/world/secrets.js`: `placeSecrets(city, spec)`: shore spots
+  (container, culvert, lighthouse) on open ground 5 to 6 m in from the
+  shore near a point, facing the sea (the container's spot needs open
+  water 23 and 30 m out); roof and alley searched inside a region with
+  `buildingsNear`; playground and garage on open ground nearest a point.
+- `src/world/stunts.js`: `placeRamps(city, spec)` (a straight stretch of
+  the named street nearest the point, heading along the edge); the dock
+  ramps are a shared function.
+- `src/world/maps.js`: `hudPlace(city, x, z, out)` gives the HUD name and
+  the district key; `SHORE_NAME`. `src/game.js` uses it and emits
+  `district` with the key; `src/systems/economy.js` takes the key (known
+  keys only) and falls back to the name map.
+- `src/systems/tutorial.js`, `src/ui/menu.js`, `src/main.js`: place texts
+  from `city.texts` when present; secret notes from the spot; the OSM
+  credit at the end of Settings (`data-role="map-credit"`).
+
+Places (checked against the data by `test/miami-places.test.js`):
+
+- Courses (ids kept): Downtown Loop (2 laps), Calle Ocho Loop (2 laps),
+  Bay Bridges Rally (Biscayne Boulevard, Venetian Causeway with a lap of
+  Di Lido Island, MacArthur Causeway with a lap of Palm Island), Causeway
+  Dash (Edgewater to the airfield gate); Palm Island Sprint, Venetian
+  Slalom, Fisherman's Channel Round; First Feathers, Biscayne Threader (7
+  canyon rings on Biscayne Boulevard and Northeast 2nd Avenue), Rooftop
+  Hopper (Edgewater roofs); Port Parcel Dash (Wynwood to the PortMiami
+  gate), Fare and Square (Downtown to Little Havana, Brickell and
+  Edgewater), Brickell Key Parcel (boat, Bayfront Marina to Brickell
+  Key), Gullwing Air Mail (to the Watson Island helipad).
+- Secrets: drowned box off the PortMiami south quay, roof garden on a
+  Wynwood roof, The Gullet in the Brickell Key seawall, Rustlamp Rock on
+  the east tip of Palm Island, Tag Alley in Wynwood, The Lone Ride in
+  Margaret Pace Park; the Ghostwake lock-up by the Miami River.
+- Ramps: Wynwood Kicker (Northwest 24th Street), Little Havana Hop
+  (Southwest 4th Street), Edgewater Launch (Northeast 19th Street), Palm
+  Island Skip (Palm Avenue); Dock Kicker and Dock Splash at the islet.
+- Roof pad on a 20 m Park West roof; Cinder tank on open ground in a
+  Wynwood yard; three gantry cranes on the PortMiami south quay.
+
+Tests: `test/miami-places.test.js` runs the course, secret and stunt
+assertions of the island tests on Miami (plus a teleport run of every
+course through the start offer, the secrets system to Ghostwake, a car
+off every street ramp), checks each place against the data, the HUD
+names, and the district flags on both maps; `test/miami.test.js` now
+expects the lists filled. Smoke (`scripts/smoke-extra.mjs`): on Miami a
+car off the Wynwood Kicker, then the Downtown Loop, the Venetian Slalom
+and First Feathers each offered at the start, started with START and run
+to a medal, all in simulated steps. Screenshots:
+`node scripts/miami-m2-shots.mjs` writes `docs/preview/miami-m2-*.png`.
+
+Deviations from the plan:
+
+1. Bridges are solid to boats until milestone 4, and the Port Boulevard
+   bridge and the MacArthur Causeway close the water round Dodge Island,
+   so there is no "Dodge Island Round": boat-island is Fisherman's Channel
+   Round, an open-water lap of the south bay along the port's south quay.
+   The Main Channel narrows to nothing inside the crop and Government Cut
+   is outside it, so boat-saltyard is the Palm Island Sprint (north of
+   Hibiscus Island). The slalom runs north of the Venetian Causeway.
+2. Both causeways end at the crop edge before Miami Beach, so the Bay
+   Bridges Rally runs out and back on each (with a lap of Di Lido Island
+   and of Palm Island at the far end). Alton Road is not in the crop.
+3. Brickell Avenue is not an avenue in the data (no 18 m width) and has no
+   stretch where a 14 m canyon ring clears the towers: the threader is the
+   Biscayne Threader on Biscayne Boulevard and Northeast 2nd Avenue.
+4. Miami Beach is outside the crop: the deliveries go to the PortMiami
+   gate, Little Havana, Brickell, Edgewater and Brickell Key instead.
+5. Several first estimates in 3.3 were inland or outside the crop: the
+   drowned box is at the south quay near (1300, 1160), the cranes near
+   x 1700 to 1860 on the same quay, Rustlamp Rock on Palm Island (Dodge
+   Island's east tip is past the crop), the garage by the river near
+   (-2350, 420), the Cinder tank in Wynwood (Allapattah is outside), and
+   Sunset Harbour Skip (Purdy Avenue, outside) is the Palm Island Skip.
+   The roof pad anchor moved to Park West (-1150, -350).
+6. HUD names come from a hand table of rects and capsules (each naming
+   the data feature it is taken from), not from nearest labels: the data
+   has neighbourhood labels for only a few areas. Some names come from
+   street, park, building or water names (Palm Island from Palm Avenue,
+   Hibiscus Island from the Hibiscus drives, Little Havana from building
+   names, Dodge Island from Dodge Island Cut). On Miami the 'shore' key
+   is reported out on the water (the island uses its 34 m coastal strip).
+7. Not done: The Gullet keeps the sea-cave mesh (the culvert re-dress
+   is render only and left for later); the Records "Areas explored" count
+   is still the number of district keys seen, not of named places.
 

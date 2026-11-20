@@ -6,6 +6,7 @@ import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
 import { setHandlingMode } from '../entities/vehicle.js';
 import { RULES } from '../core/weapons.js';
 import { DISTRICTS } from '../world/citygen.js';
+import { SHORE_NAME } from '../world/maps.js';
 
 const SAVE_EVERY = 20; // seconds, at most, when something changed
 const MAX_STEP = 120; // a bigger jump in one step is a teleport, not travel
@@ -26,7 +27,9 @@ function assignInPlace(dst, src) {
 export function createEconomy(game, storage) {
   const events = game.events;
   const progress = game.progress;
-  const districtKeys = { 'The Strand': 'shore' };
+  // The HUD sends the district key with the name; the name map is the
+  // fallback for a sender without the key (the island's names).
+  const districtKeys = { [SHORE_NAME]: 'shore' };
   for (const k of Object.keys(DISTRICTS)) districtKeys[DISTRICTS[k].name] = k;
 
   let dirty = false;
@@ -75,8 +78,8 @@ export function createEconomy(game, storage) {
   applySettings();
 
   events.on('progress', save);
-  events.on('district', (name) => {
-    const key = districtKeys[name];
+  events.on('district', (name, k) => {
+    const key = typeof k === 'string' && (k === 'shore' || Object.hasOwn(DISTRICTS, k)) ? k : districtKeys[name];
     if (!key) return;
     const flag = 'seen_' + key;
     if (progress.medals[flag]) return;

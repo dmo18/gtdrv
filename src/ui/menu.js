@@ -319,7 +319,10 @@ export function createMenu(root, game, economy) {
     for (const d of SECRET_DEFS) {
       const got = foundIds.includes(d.id);
       const row = h('div', 'rw-menu-row' + (got ? '' : ' rw-menu-dim'));
-      row.append(h('span', '', got ? d.name : '???'), h('span', 'rw-menu-dim', got ? d.note : 'Not found yet'));
+      // A real map words the note for its own spot (world/miami-spots.js).
+      const spot = game.secrets && Array.isArray(game.secrets.spots) ? game.secrets.spots.find((q) => q.id === d.id) : null;
+      const note = spot && spot.note ? spot.note : d.note;
+      row.append(h('span', '', got ? d.name : '???'), h('span', 'rw-menu-dim', got ? note : 'Not found yet'));
       list.appendChild(row);
     }
     body.appendChild(list);
@@ -576,6 +579,14 @@ export function createMenu(root, game, economy) {
       reset.appendChild(c);
     }
     body.appendChild(reset);
+
+    // Licence condition of the real-map data (docs/MAP.md): shown on
+    // any map built from it.
+    if (game.city && game.city.attribution) {
+      const credit = h('p', 'rw-menu-dim', 'Map data (c) OpenStreetMap contributors, ODbL');
+      credit.dataset.role = 'map-credit';
+      body.appendChild(credit);
+    }
   }
 
   function renderHowto() {
@@ -596,7 +607,7 @@ export function createMenu(root, game, economy) {
       ['Map and races', ['Open the map to place a waypoint and see race starts.',
         'Finish races and challenges for medals and points. Everything is open from the start.']],
       ['Scores', ['Stunts, wrecks and takedowns of the rival crew earn points. Keep scoring within 4 seconds to build a combo. A hard crash or going down loses the points you have not banked yet.',
-        'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
+        (game.city && game.city.texts && game.city.texts.fleet) || 'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
     ];
     for (const [t, items] of sections) {
       body.appendChild(h('div', 'rw-menu-group', t));

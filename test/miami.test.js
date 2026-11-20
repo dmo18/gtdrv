@@ -73,10 +73,15 @@ test('same object shape as the procedural city', () => {
   for (let x = MIAMI_CROP.x0; x <= MIAMI_CROP.x1; x += 97) {
     for (let z = MIAMI_CROP.z0; z <= MIAMI_CROP.z1; z += 97) assert.ok(DISTRICTS[city.districtOf(x, z)], `${x}, ${z}`);
   }
-  // Activities, secrets and ramps are off on this map for now (milestone 2).
-  assert.deepEqual(city.courses, []);
-  assert.deepEqual(findSecrets(city), { spots: [], garage: null });
-  assert.deepEqual(generateStuntSpots(city), []);
+  // Activities, secrets and ramps come from the city's own hand-placed
+  // lists (milestone 2; checked in detail in test/miami-places.test.js).
+  assert.equal(city.courses.length, 14);
+  assert.deepEqual(findSecrets(city), { spots: city.secretSpots, garage: city.secretGarage });
+  assert.equal(city.secretSpots.length, 6);
+  assert.ok(city.secretGarage);
+  assert.deepEqual(generateStuntSpots(city), city.rampSpots);
+  assert.equal(city.rampSpots.length, MIAMI_SPOTS.ramps.length + 2);
+  assert.equal(typeof city.placeOf, 'function');
 });
 
 test('road graph: one network with at least 95 % of the junctions; the airfield is linked', () => {

@@ -331,3 +331,21 @@ None critical or high.
   night after warm-up.
 - Screenshots: docs/preview/night-before-*.png and night-after-*.png
   (`node scripts/night-shots.mjs <prefix> [views]`).
+
+## 2026-11-20: Miami map, milestone 2 (places and activities)
+- On `?map=miami`: all 14 activities (same ids as the island, Miami
+  names and routes: Downtown Loop, Calle Ocho Loop, Bay Bridges Rally,
+  Causeway Dash, Palm Island Sprint, Venetian Slalom, Fisherman's Channel
+  Round, First Feathers, Biscayne Threader, Rooftop Hopper and four
+  deliveries), the six secrets and the Ghostwake garage, four street stunt
+  ramps plus the two dock ramps, the roof pad, the Cinder tank and three
+  port cranes, all from `src/world/miami-spots.js`.
+- HUD shows real neighbourhood, bridge and water names (`city.placeOf`,
+  names taken from the map data); the HUD sends the district key with
+  the name, so the economy's `seen_` flags keep working.
+- Tutorial and menu place texts are Miami's on that map; Settings shows
+  "Map data (c) OpenStreetMap contributors, ODbL".
+- Tests: `test/miami-places.test.js` (courses, secrets, stunts, places,
+  HUD names and district flags on Miami). Smoke: a land race, a boat
+  course, a sky course and a stunt ramp on Miami. Details and
+  deviations: docs/MAP.md, "Milestone 2: done".

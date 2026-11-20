@@ -1118,6 +1118,106 @@ export default async function extra(page, check) {
     }
     check(ok && m && m.map === 'miami', `?map=miami starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
     check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);
+
+    // Milestone 2: on Miami, start one land race, one boat course and one
+    // sky course through the start offer (stopped in the zone, START), run
+    // each to the finish, and drive a street stunt ramp. All simulated
+    // steps (the page loop is stopped), so nothing depends on frame rate.
+    let acts = null;
+    if (ok) {
+      acts = await mp.evaluate(() => {
+        const g = window.__rw;
+        const run = (n) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
+        const leave = () => {
+          const v = g.player.vehicle;
+          if (!v) return;
+          v.vx = v.vz = 0;
+          v.speed = 0;
+          v.driver = null;
+          g.player.vehicle = null;
+          g.setPlayerMode('foot');
+        };
+        const place = (c, p, y = 0) => {
+          c.x = c.px = p.x;
+          c.z = c.pz = p.z;
+          c.y = c.py = y;
+          c.vx = c.vz = 0;
+          if ('vy' in c) c.vy = 0;
+          c.speed = 0;
+          if (Number.isFinite(p.heading)) c.heading = p.heading;
+          if ('onGround' in c) c.onGround = !(y > 0); // an aircraft put in the air is flying
+        };
+        const board = (pick) => {
+          leave();
+          const c = g.vehicles.find(pick);
+          if (!c) return null;
+          c.wrecked = false;
+          c.health = c.spec.health;
+          const w = g.player.walker;
+          w.x = w.px = c.x;
+          w.z = w.pz = c.z;
+          g.enterVehicle(c);
+          return g.player.vehicle === c ? c : null;
+        };
+        const race = (id, pick) => {
+          const course = g.activities.courses.find((c) => c.id === id);
+          const craft = board(pick);
+          if (!course || !craft) return { id, error: 'no ' + (course ? 'craft' : 'course') };
+          const score0 = g.progress.score.total;
+          place(craft, course.start);
+          run(30);
+          const offered = g.activities.offer;
+          const accepted = g.activities.acceptOffer();
+          run(240); // countdown
+          const running = !!g.activities.active && g.activities.active.phase === 'running';
+          for (let lap = 0; lap < (course.laps || 1); lap++) {
+            for (const cp of course.checkpoints) {
+              place(craft, cp, cp.y || 0);
+              run(cp.kind === 'pad' ? 30 : 12);
+            }
+          }
+          run(30);
+          return {
+            id, name: course.name, offered: offered === id, accepted, running, done: !g.activities.active,
+            medal: g.progress.medals[id] || null, gained: g.progress.score.total - score0,
+          };
+        };
+        const out = {};
+        // First a street ramp, in the car from the drive above: 30 m short
+        // of the Wynwood Kicker at 25 m/s along the street, it flies off
+        // the ramp and lands.
+        const ramp = g.city.rampSpots.find((s) => s.id === 'stunt_wynwood_kicker');
+        const car = g.player.vehicle && g.player.vehicle.kind === 'car' ? g.player.vehicle : board((v) => v.kind === 'car' && !v.ai && !v.wrecked && v.spec.id !== 'ghostwake');
+        const jumps = [];
+        g.events.on('stunt', (e) => jumps.push({ id: e.spot && e.spot.id, ok: e.ok, air: Math.round(e.air * 100) / 100, points: e.points }));
+        let airborne = false, peak = 0;
+        if (ramp && car) {
+          if (g.traffic && g.traffic.clear) g.traffic.clear();
+          place(car, { x: ramp.x - ramp.ax * 30, z: ramp.z - ramp.az * 30, heading: Math.atan2(ramp.az, ramp.ax) });
+          car.vx = ramp.ax * 25;
+          car.vz = ramp.az * 25;
+          car.speed = 25;
+          for (let i = 0; i < 240; i++) {
+            g.step(1 / 60);
+            if (car.air && car.air.on) airborne = true;
+            peak = Math.max(peak, car.y);
+          }
+        }
+        out.ramp = { name: ramp && ramp.name, airborne, peak: Math.round(peak * 10) / 10, jumps };
+        out.street = race('street-glasswell', (v) => v.kind === 'car' && !v.ai && !v.wrecked && v.spec.id !== 'ghostwake');
+        out.boat = race('boat-slalom', (v) => v.kind === 'boat' && v.spec.id === 'speedboat');
+        out.sky = race('sky-gull', (v) => v.kind === 'plane' && v.spec.id === 'prop');
+        g.draw(1, 1 / 60);
+        return out;
+      });
+    }
+    const raceOk = (r) => !!r && r.offered && r.accepted && r.running && r.done && !!r.medal && r.gained > 0;
+    for (const k of ['street', 'boat', 'sky']) {
+      const r = acts && acts[k];
+      check(raceOk(r), `Miami: the ${k} course "${r && r.name}" is offered at its start, runs and finishes (${JSON.stringify(r)})`);
+    }
+    const rj = acts && acts.ramp;
+    check(!!rj && rj.airborne && rj.peak > 2 && rj.jumps.length >= 1 && rj.jumps[0].ok, `Miami: a car flies off the ${rj && rj.name} stunt ramp and lands (${JSON.stringify(rj)})`);
     check(outside.length === 0, `Miami: no outside network requests (${outside.length})`);
     check(errs.length === 0, `Miami: no page errors (${errs.length})`);
     for (const e of errs.slice(0, 10)) console.log('   ', e);

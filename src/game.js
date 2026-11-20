@@ -1,7 +1,8 @@
 // The game itself: owns the world, the vehicles, the player and the
 // list of systems, and runs them each step.
 import * as THREE from 'three';
-import { generateCity, DISTRICTS } from './world/citygen.js';
+import { generateCity } from './world/citygen.js';
+import { hudPlace } from './world/maps.js';
 import { createCollisionWorld } from './world/collision.js';
 import { buildCityMesh } from './render/citymesh.js';
 import { createInput, attachKeyboard } from './core/input.js';
@@ -522,7 +523,8 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // --- Drawing step. ---
   let sweepTimer = 3;
   let wasFlying = false;
-  let lastDistrict = '';
+  let lastDistrict = '', lastDistrictKey = '';
+  const placeNow = { key: '', name: '' };
   let promptFor = null;
   let wakeTick = 0;
   function render(alpha, dt) {
@@ -623,11 +625,13 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     h.stars = game.police ? game.police.stars : p.wanted;
     h.cooling = game.police ? game.police.heat.cooldown : 0;
     h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
-    const dKey = city.shoreDist(p.x, p.z) < 34 && !city.onRoad(p.x, p.z) ? 'shore' : city.districtOf(p.x, p.z);
-    h.district = dKey === 'shore' ? 'The Strand' : DISTRICTS[dKey].name;
-    if (h.district !== lastDistrict) {
+    // Name on the HUD; the key goes with it for the first-visit flags.
+    hudPlace(city, p.x, p.z, placeNow);
+    h.district = placeNow.name;
+    if (h.district !== lastDistrict || placeNow.key !== lastDistrictKey) {
       lastDistrict = h.district;
-      events.emit('district', h.district);
+      lastDistrictKey = placeNow.key;
+      events.emit('district', h.district, placeNow.key);
     }
     hud.update(h);
     // A graphics module may take over the final draw (post effects).

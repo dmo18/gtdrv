@@ -32,7 +32,7 @@ async function startUp() {
   });
   window.__rw = game;
   game.draw(1, 0);
-  msg.textContent = 'An island of rust, salt and bad ideas.';
+  msg.textContent = (city && city.texts && city.texts.boot) || 'An island of rust, salt and bad ideas.';
   play.disabled = false;
   play.addEventListener('click', async () => {
     game.audio.unlock();
