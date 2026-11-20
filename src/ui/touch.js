@@ -1,6 +1,20 @@
 // On-screen touch controls. Feeds one source on the shared input object.
 // Every control tracks its own pointerId so several fingers work at once.
 //
+// HUD modes (setHudMode, settings.hud): 'minimal' (default) keeps the
+// primary controls on screen (steering, pedals/thrust, FIRE, LOCK, ENTER,
+// EXIT, pause), draws them a little smaller and dimmer while untouched, and
+// folds the secondary ones (VIEW, HORN, HAND, SWAP, RELOAD, RUN, MAP) into
+// one round "more" button that fans them out for a few seconds. 'full'
+// shows everything un-collapsed. docs/UI.md has the layout rules.
+//
+// Extension point, see registerAction() below and docs/UI.md:
+//   const h = touch.registerAction({ id: 'grenade', label: 'Throw grenade',
+//     icon: '<path d="..."/>' (24x24 line art) | a built-in icon name,
+//     text: 'NADE', group: 'primary' | 'secondary', modes: ['foot'],
+//     press() {}, release() {}, visible() { return true; } });
+//   h.remove();
+//
 // Car and boat steering comes in four styles (setSteering):
 //   wheel   an on-screen steering wheel turned by the thumb (default)
 //   buttons two arrow pads; holding ramps toward full lock
@@ -44,7 +58,12 @@ const ICONS = {
   fire: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1.2"/>',
   lock: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+  reload: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  more: '<circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>',
 };
+const FAN_MS = 4000; // the fan folds away this long after the last use
+const FAN_ROWS = 4; // fan items per column before it wraps to a second column
+const LOW_AMMO = 0.25; // show the reload chip at or below this magazine fraction
 // Weapon icons (24x24, original line drawings).
 export const WEAPON_ICONS = {
   wrench: '<path d="M14.5 4.5a4 4 0 0 0-4.8 5.3L4 15.5 6.5 18l5.7-5.7a4 4 0 0 0 5.3-4.8l-2.4 2.4-2.3-.5-.5-2.3z"/>',
@@ -68,7 +87,8 @@ const WHEEL_SVG = '<svg viewBox="0 0 150 150" aria-hidden="true">'
   + '</svg>';
 
 function svg(name) {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  const body = ICONS[name] || name || '';
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 }
 
 function el(tag, cls, parent) {
@@ -141,7 +161,10 @@ export function createTouchControls(root, input, opts = {}) {
     b.type = 'button';
     b.tabIndex = -1;
     b.setAttribute('aria-label', label);
-    b.innerHTML = (icon ? svg(icon) : '') + (text ? `<span>${text}</span>` : '');
+    // The button box is the hit area and never changes size; the face
+    // inside is what shrinks and dims while idle.
+    const f = el('span', 'rw-face', b);
+    f.innerHTML = (icon ? svg(icon) : '') + (text ? `<span>${text}</span>` : '');
     track(b, {
       down() { b.classList.add('rw-down'); if (buzz) vibrate(); onDown(); },
       move() {},
@@ -332,20 +355,21 @@ export function createTouchControls(root, input, opts = {}) {
     if (btn.left && btn.right) return btn.last;
     return btn.right ? 1 : btn.left ? -1 : 0;
   };
-  const sb = (b) => { b.classList.add('rw-st-buttons'); return gate(b, 'car', 'boat'); };
+  const sb = (b) => { b.classList.add('rw-st-buttons', 'rw-pri'); return gate(b, 'car', 'boat'); };
   sb(makeButton('rw-steerbtn rw-sleft', 'Steer left', 'left', '',
     () => { btn.left = true; btn.last = -1; }, () => { btn.left = false; }, false));
   sb(makeButton('rw-steerbtn rw-sright', 'Steer right', 'right', '',
     () => { btn.right = true; btn.last = 1; }, () => { btn.right = false; }, false));
 
   // ----- tilt (style 'tilt') -----
-  const tiltBar = gate(el('button', 'rw-btn rw-tiltbar rw-st-tilt', layer), 'car', 'boat');
+  const tiltBar = gate(el('button', 'rw-btn rw-tiltbar rw-st-tilt rw-pri', layer), 'car', 'boat');
   tiltBar.type = 'button';
   tiltBar.tabIndex = -1;
   tiltBar.setAttribute('aria-label', 'Tilt steering (tap to re-centre)');
-  const tiltTrack = el('span', 'rw-tilt-track', tiltBar);
+  const tiltFace = el('span', 'rw-face', tiltBar);
+  const tiltTrack = el('span', 'rw-tilt-track', tiltFace);
   const tiltDot = el('span', 'rw-tilt-dot', tiltTrack);
-  el('span', 'rw-tilt-label', tiltBar).textContent = 'TILT';
+  el('span', 'rw-tilt-label', tiltFace).textContent = 'TILT';
   const tilt = {
     listening: false, gotEvent: false, asked: false, timer: 0,
     deg: 0, smooth: 0, zero: 0, onFallback: opts.onSteerFallback || null,
@@ -407,45 +431,154 @@ export function createTouchControls(root, input, opts = {}) {
     tiltDot.style.transform = `translateX(${(x * 60).toFixed(1)}px)`;
   }
 
-  // ----- car / boat buttons -----
-  const cb = (b) => gate(b, 'car', 'boat');
+  // ----- action registry, the "more" fan and the layout slots -----
+  // pri: stays on screen. sec: folds into the fan behind the "more" button.
+  // Positions come from CSS slots (see styles.js): the code only numbers
+  // the fan items (--c column, --r row) and the extra primary slots (--k).
+  const pri = (b) => { b.classList.add('rw-pri'); return b; };
+  const actions = [];
+  let fanOpen = false, fanTimer = 0, fanHeld = 0, hudFull = false;
+  let fanDirty = true;
+  const more = pri(makeButton('rw-more', 'More controls', 'more', '', () => {
+    setFan(!fanOpen);
+    armFan();
+  }, () => {}, false));
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-haspopup', 'true');
+  function setFan(open) {
+    if (open === fanOpen) return;
+    fanOpen = open;
+    layer.classList.toggle('rw-fan-open', open);
+    more.setAttribute('aria-expanded', String(open));
+    if (!open) { clearTimeout(fanTimer); fanTimer = 0; }
+  }
+  // (Re)start the fold-away timer; it waits while a fan button is held.
+  function armFan() {
+    clearTimeout(fanTimer);
+    fanTimer = 0;
+    if (fanOpen && !fanHeld) fanTimer = setTimeout(() => setFan(false), FAN_MS);
+  }
+  // Keyboard users: Enter or Space on the focused more button.
+  on(more, 'click', (e) => { if (e.detail === 0) { setFan(!fanOpen); armFan(); } });
+  // A touch anywhere else folds the fan; the touch itself still goes through.
+  on(document, 'pointerdown', (e) => {
+    if (!fanOpen || fanHeld) return; // a held fan button keeps it open
+    const t = e.target;
+    if (t && t.closest && t.closest('.rw-more, .rw-sec')) return;
+    setFan(false);
+  }, true);
+
+  // Register a control. Returns { id, el, remove() }. See docs/UI.md.
+  function addAction(def) {
+    const sec = def.group !== 'primary';
+    const named = def.input;
+    const press = def.press || (named ? () => input.press(named) : () => {});
+    const release = def.release || (named ? () => input.release(named) : () => {});
+    const a = {
+      id: String(def.id), sec, visible: typeof def.visible === 'function' ? def.visible : null,
+      modes: Array.isArray(def.modes) && def.modes.length ? def.modes.filter((m) => MODES.includes(m)) : MODES.slice(),
+      vis: true, c: -1, r: -1, k: -1, el: null,
+    };
+    const idc = a.id.replace(/[^a-z0-9_-]/gi, '');
+    const b = makeButton(`rw-act ${sec ? 'rw-sec' : 'rw-pri rw-extra'} rw-a-${idc}`,
+      def.label || a.id, def.icon || null, def.text || '',
+      () => { if (sec) { fanHeld++; armFan(); } press(); },
+      () => {
+        release();
+        if (sec) { fanHeld = Math.max(0, fanHeld - 1); if (!fanHeld) setFan(false); }
+      }, def.buzz !== false);
+    b.dataset.action = a.id;
+    gate(b, ...a.modes);
+    if (sec) b.tabIndex = 0;
+    // Keyboard: Enter or Space is a quick press.
+    on(b, 'click', (e) => {
+      if (e.detail !== 0) return;
+      press();
+      setTimeout(release, 60);
+      if (sec) setFan(false);
+    });
+    a.el = b;
+    if (a.visible) a.vis = !!a.visible();
+    b.classList.toggle('rw-off', !a.vis);
+    actions.push(a);
+    fanDirty = true;
+    return {
+      id: a.id,
+      el: b,
+      remove() {
+        const i = actions.indexOf(a);
+        if (i < 0) return;
+        actions.splice(i, 1);
+        b.remove();
+        fanDirty = true;
+      },
+    };
+  }
+
+  // Re-evaluate visible() callbacks (cheap; allocation free), then renumber.
+  function refreshActions() {
+    for (let i = 0; i < actions.length; i++) {
+      const a = actions[i];
+      if (!a.visible) continue;
+      const v = !!a.visible();
+      if (v !== a.vis) {
+        a.vis = v;
+        a.el.classList.toggle('rw-off', !v);
+        fanDirty = true;
+      }
+    }
+    if (fanDirty) layoutActions();
+  }
+
+  // Number the fan items and the extra primary slots for the current mode.
+  function layoutActions() {
+    fanDirty = false;
+    let n = 0, e = 0;
+    for (const a of actions) {
+      if (!a.vis || !a.modes.includes(mode)) continue;
+      if (a.sec) {
+        const r = n % FAN_ROWS, c = (n / FAN_ROWS) | 0;
+        n++;
+        if (c !== a.c) { a.c = c; a.el.style.setProperty('--c', c); }
+        if (r !== a.r) { a.r = r; a.el.style.setProperty('--r', r); }
+      } else {
+        if (e !== a.k) { a.k = e; a.el.style.setProperty('--k', e); }
+        e++;
+      }
+    }
+    more.classList.toggle('rw-off', n === 0);
+  }
+
+  // ----- primary: car / boat buttons -----
+  const cb = (b) => gate(pri(b), 'car', 'boat');
   cb(makeButton('rw-pedal rw-brake', 'Brake / reverse', 'brake', 'BRAKE',
     () => { src.brake = 1; }, () => { src.brake = 0; }, false));
   cb(makeButton('rw-pedal rw-gas', 'Gas', 'gas', 'GAS',
     () => { src.throttle = 1; }, () => { src.throttle = 0; }, false));
-  gate(makeButton('rw-handbrake', 'Handbrake', 'handbrake', 'HAND',
-    () => { src.handbrake = true; }, () => { src.handbrake = false; }), 'car');
-  cb(nameButton('rw-horn', 'Horn', 'horn', 'HORN', 'horn'));
   cb(nameButton('rw-exit', 'Exit car', 'exit', 'EXIT', 'enter'));
-  cb(nameButton('rw-cam', 'Change camera', 'camera', 'VIEW', 'camera'));
 
-  // ----- plane / heli buttons -----
-  const pedals = (mode2, cls, label, icon, text, axis, value) => gate(makeButton(
+  // ----- primary: plane / heli buttons -----
+  const pedals = (mode2, cls, label, icon, text, axis, value) => gate(pri(makeButton(
     `rw-pedal ${cls}`, label, icon, text,
-    () => { src[axis] = value; }, () => { src[axis] = 0; }, false), mode2);
+    () => { src[axis] = value; }, () => { src[axis] = 0; }, false)), mode2);
   pedals('plane', 'rw-brake', 'Plane brake', 'brake', 'BRAKE', 'brake', 1);
   pedals('plane', 'rw-gas', 'Thrust', 'gas', 'THRUST', 'throttle', 1);
   pedals('heli', 'rw-brake rw-tall', 'Descend', 'down', 'DOWN', 'brake', 1);
   pedals('heli', 'rw-gas rw-tall', 'Climb', 'gas', 'UP', 'throttle', 1);
-  for (const m of ['plane', 'heli']) {
-    gate(nameButton('rw-exit', 'Exit aircraft', 'exit', 'EXIT', 'enter'), m);
-    gate(nameButton('rw-cam', 'Change camera (air)', 'camera', 'VIEW', 'camera'), m);
-  }
+  for (const m of ['plane', 'heli']) gate(pri(nameButton('rw-exit', 'Exit aircraft', 'exit', 'EXIT', 'enter')), m);
 
-  // ----- foot buttons -----
-  gate(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter'), 'foot');
-  gate(makeButton('rw-run', 'Run', 'run', 'RUN',
-    () => { src.sprint = true; }, () => { src.sprint = false; }, false), 'foot');
+  // ----- primary: foot -----
+  gate(pri(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter')), 'foot');
 
   // ----- combat (docs/COMBAT.md "Touch controls", "Drive-by") -----
   // FIRE: hold for automatic fire. The same finger may slide to aim:
   // moving it feeds the camera drag like the look area does.
   function fireButton(cls, label, text) {
-    const b = el('button', 'rw-btn rw-cmb ' + cls, layer);
+    const b = el('button', 'rw-btn rw-cmb rw-pri ' + cls, layer);
     b.type = 'button';
     b.tabIndex = -1;
     b.setAttribute('aria-label', label);
-    b.innerHTML = svg('fire') + `<span>${text}</span><b class="rw-fire-mag"></b>`;
+    el('span', 'rw-face', b).innerHTML = svg('fire') + `<span>${text}</span><b class="rw-fire-mag"></b>`;
     const last = { x: 0, y: 0 };
     track(b, {
       down(e) { b.classList.add('rw-down'); vibrate(); last.x = e.clientX; last.y = e.clientY; input.press('fire'); },
@@ -461,11 +594,12 @@ export function createTouchControls(root, input, opts = {}) {
   }
   const fireFoot = gate(fireButton('rw-fire', 'Fire', 'FIRE'), 'foot');
   const fireCar = gate(fireButton('rw-dbfire', 'Drive-by fire', 'FIRE'), 'car', 'boat');
-  const lockBtn = gate(nameButton('rw-cmb rw-lock', 'Lock on', 'lock', 'LOCK', 'lock'), 'foot');
-  const swapBtn = gate(nameButton('rw-cmb rw-swap', 'Swap weapon', 'swap', 'SWAP', 'swap'), 'foot');
-  // The ammo counter: tap to reload early. Shows the weapon too.
-  const ammoBtn = gate(nameButton('rw-cmb rw-ammo', 'Reload', null, '', 'reload'), 'foot', 'car', 'boat');
-  ammoBtn.innerHTML = '<i class="rw-ammo-icon"></i><span class="rw-ammo-txt"><b class="rw-ammo-n">-</b><small class="rw-ammo-of"></small></span>'
+  const lockBtn = gate(pri(nameButton('rw-cmb rw-lock', 'Lock on', 'lock', 'LOCK', 'lock')), 'foot');
+  // Reload chip next to FIRE: only while the magazine is low or empty.
+  gate(pri(nameButton('rw-cmb rw-chipbtn', 'Reload (magazine low)', 'reload', 'RELOAD', 'reload')), 'foot');
+  // The ammo counter (HUD Full only): tap to reload early. Shows the weapon too.
+  const ammoBtn = gate(nameButton('rw-cmb rw-ammo', 'Ammo, tap to reload', null, '', 'reload'), 'foot', 'car', 'boat');
+  ammoBtn.querySelector('.rw-face').innerHTML = '<i class="rw-ammo-icon"></i><span class="rw-ammo-txt"><b class="rw-ammo-n">-</b><small class="rw-ammo-of"></small></span>'
     + '<em class="rw-ammo-name"></em><i class="rw-ammo-bar"><i></i></i>';
   const ammoIcon = ammoBtn.querySelector('.rw-ammo-icon');
   const ammoN = ammoBtn.querySelector('.rw-ammo-n');
@@ -474,11 +608,24 @@ export function createTouchControls(root, input, opts = {}) {
   const ammoBar = ammoBtn.querySelector('.rw-ammo-bar i');
   const fireMags = [fireFoot.querySelector('.rw-fire-mag'), fireCar.querySelector('.rw-fire-mag')];
   // Last shown values, so per-frame calls only touch the DOM on change.
-  const shown = { weapon: '', mag: -2, max: -2, reload: -1, locked: null, show: null, drive: null };
+  const shown = { weapon: '', mag: -2, max: -2, reload: -1, locked: null, show: null, drive: null, chip: null };
 
-  // ----- both modes -----
-  nameButton('rw-pause', 'Pause', 'pause', '', 'pause');
-  nameButton('rw-map', 'Map', 'map', '', 'map');
+  // ----- secondary: folded into the fan -----
+  const armed = () => shown.show !== false;
+  addAction({ id: 'handbrake', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
+    press() { src.handbrake = true; }, release() { src.handbrake = false; } });
+  addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
+  addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli'], input: 'camera' });
+  addAction({ id: 'swap', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed });
+  addAction({ id: 'reload', label: 'Reload', icon: 'reload', text: 'RELOAD', modes: ['foot', 'car', 'boat'], input: 'reload',
+    visible: () => armed() && (mode === 'foot' || shown.drive === true) });
+  addAction({ id: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
+    press() { src.sprint = true; }, release() { src.sprint = false; }, buzz: false });
+  addAction({ id: 'map', label: 'Map', icon: 'map', text: 'MAP', input: 'map' });
+  const swapBtn = actions.find((a) => a.id === 'swap').el;
+
+  // ----- pause: always on screen -----
+  pri(nameButton('rw-pause', 'Pause', 'pause', '', 'pause'));
 
   // ----- global guards -----
   function releaseAll() {
@@ -513,6 +660,7 @@ export function createTouchControls(root, input, opts = {}) {
   }
 
   placeRest();
+  refreshActions();
 
   return {
     setMode(m) {
@@ -522,6 +670,9 @@ export function createTouchControls(root, input, opts = {}) {
       mode = next;
       for (const k of MODES) layer.classList.toggle('rw-mode-' + k, k === mode);
       stick.classList.toggle('rw-flight', mode === 'plane' || mode === 'heli');
+      setFan(false);
+      fanDirty = true;
+      refreshActions();
       placeRest();
     },
     // style: 'wheel' | 'buttons' | 'tilt' | 'slider'; sensitivity 0.5..1.5.
@@ -541,21 +692,38 @@ export function createTouchControls(root, input, opts = {}) {
       return style;
     },
     getSteering: () => ({ style, sensitivity, leftHanded }),
+    registerAction: addAction,
+    // 'minimal' (default): idle-shrunk primaries and the "more" fan.
+    // 'full': every control shown, nothing folded or dimmed.
+    setHudMode(m) {
+      const full = m === 'full';
+      if (full === hudFull) return;
+      hudFull = full;
+      setFan(false);
+      layer.classList.toggle('rw-full', full);
+    },
+    getHudMode: () => (hudFull ? 'full' : 'minimal'),
+    // The "more" fan, for the game and tests.
+    isFanOpen: () => fanOpen,
     // Combat panel state, called each frame by the combat HUD (cheap when
     // nothing changed). c: { show, weapon (id), name, mag, max (0 = no
     // magazine), reload (0..1 progress, 0 = not reloading), locked,
     // drive (drive-by available in this craft) }.
     setCombat(c) {
       const show = !!c.show;
+      let flipped = false;
       if (show !== shown.show) {
         shown.show = show;
+        flipped = true;
         layer.classList.toggle('rw-nocombat', !show);
       }
       const drive = !!c.drive;
       if (drive !== shown.drive) {
         shown.drive = drive;
+        flipped = true;
         layer.classList.toggle('rw-nodrive', !drive);
       }
+      if (flipped) refreshActions();
       if (c.weapon !== shown.weapon) {
         shown.weapon = c.weapon;
         const ic = WEAPON_ICONS[c.weapon] || ICONS.fire;
@@ -579,6 +747,12 @@ export function createTouchControls(root, input, opts = {}) {
         ammoBtn.classList.toggle('rw-reloading', r > 0);
         ammoBar.style.transform = `scaleX(${r.toFixed(3)})`;
       }
+      // Reload chip: only when the magazine is low or empty (or reloading).
+      const chip = show && c.max > 0 && (c.mag <= c.max * LOW_AMMO || r > 0);
+      if (chip !== shown.chip) {
+        shown.chip = chip;
+        layer.classList.toggle('rw-chip-on', chip);
+      }
       const locked = !!c.locked;
       if (locked !== shown.locked) {
         shown.locked = locked;
@@ -595,6 +769,7 @@ export function createTouchControls(root, input, opts = {}) {
     },
     // Once per simulation step: ramps the arrow buttons and smooths tilt.
     update(dt) {
+      refreshActions();
       if (!(dt > 0) || !steerMode()) return;
       if (style === 'buttons') {
         setRaw(rampSteer(raw, btnTarget(), dt));
@@ -607,12 +782,13 @@ export function createTouchControls(root, input, opts = {}) {
       }
     },
     setVisible(v) {
-      if (!v) releaseAll();
+      if (!v) { releaseAll(); setFan(false); }
       layer.classList.toggle('rw-hidden', !v);
       if (v) placeRest();
     },
     dispose() {
       releaseAll();
+      clearTimeout(fanTimer);
       stopTilt();
       for (const [t, type, fn, o] of listeners) t.removeEventListener(type, fn, o);
       listeners.length = 0;

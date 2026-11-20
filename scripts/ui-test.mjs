@@ -186,6 +186,16 @@ try {
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
   }, label);
   const shot = (name) => page.screenshot({ path: path.join(out, name) });
+  // The "more" button toggles on a real tap; wait out the 160 ms ease.
+  const tapMore = async () => {
+    const m = await center('More controls');
+    await down(30, m.x, m.y);
+    await up(30);
+    await page.waitForTimeout(240);
+  };
+  const fanIsOpen = () => page.evaluate(() => document.querySelector('.rw-more').getAttribute('aria-expanded') === 'true'
+    && rw.touch.isFanOpen());
+  const openFan = async () => { if (!(await fanIsOpen())) await tapMore(); };
 
   // Static layout: sizes and labels.
   const gas = await center('Gas');
@@ -388,8 +398,11 @@ try {
   const lw = await wheelBox();
   check('lefty: pedals on the left', lg.x < 150 && lbk.x > lg.x && lbk.x < 260, JSON.stringify([lg.x, lbk.x]));
   check('lefty: wheel on the right', lw.x > 915 - 200, JSON.stringify(lw));
+  await openFan();
   const lh = await center('Handbrake');
-  check('lefty: handbrake on the left', lh.x < 150);
+  const lmore = await center('More controls');
+  check('lefty: more button and fan on the left, fan grows upward from it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y < lmore.y, JSON.stringify([lh.x, lmore.x]));
+  await tapMore();
   p0 = rimPt(lw, 0);
   await down(1, p0.x, p0.y);
   await turn(1, lw, 0, 60);
@@ -429,6 +442,7 @@ try {
   await down(3, brake.x, brake.y);
   check('brake held -> 1', (await read('rw.input.brake')) === 1);
   await up(3);
+  await openFan();
   const hb = await center('Handbrake');
   await down(3, hb.x, hb.y);
   check('handbrake true while held', (await read('rw.input.handbrake')) === true);
@@ -496,12 +510,14 @@ try {
     return !!e && !!e.offsetParent;
   }));
   check('foot: no attack/weapon/jump buttons', gone.every((v) => !v), JSON.stringify(gone));
+  await openFan();
   const run = await center('Run');
   const ent = await center('Enter car');
   check('foot: ENTER still large', ent.w >= 64, `${ent.w}`);
   await down(7, run.x, run.y);
   check('foot: RUN sets sprint', (await read('rw.input.sprint')) === true);
   await up(7);
+  check('fan folds after using RUN', !(await fanIsOpen()));
   check('foot: RUN release clears sprint', (await read('rw.input.sprint')) === false);
   await down(7, ent.x, ent.y);
   check('foot: ENTER held', (await read("rw.input.held('enter')")) === true);
@@ -621,6 +637,7 @@ try {
   await down(17, pz.x, pz.y);
   check('pause works', (await read("rw.input.held('pause')")) === true);
   await up(17);
+  await openFan();
   const mp = await center('Map');
   await down(17, mp.x, mp.y);
   check('map works', (await read("rw.input.held('map')")) === true);
@@ -652,7 +669,7 @@ try {
   const hudFor = (m) => page.evaluate((mm) => {
     try {
       rw.hud.update({ mode: mm === 'foot' ? 'foot' : 'car', speedKmh: mm === 'foot' ? 0 : 87, health: 80, armor: 0, money: 12345, wanted: 3,
-        district: 'Cinder Flats', time: 13.5, vehicleHealth: mm === 'foot' ? null : 0.7, weapon: null, ammo: null, score: 12345, heat: 3 });
+        pending: 450, combo: 2.5, district: 'Cinder Flats', time: 13.5, vehicleHealth: mm === 'foot' ? null : 0.7, weapon: null, ammo: null, score: 12345, heat: 3 });
       rw.hud.setPrompt(mm === 'foot' ? 'Tap ENTER: Sedan' : null);
     } catch { /* hud shape owned by another task */ }
   }, m);
@@ -663,7 +680,9 @@ try {
       const r = e.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) out.push({ name, l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, btn: e.classList.contains('rw-btn') });
     };
-    for (const e of document.querySelectorAll('.rw-touch .rw-btn')) if (e.offsetParent) add(e, e.getAttribute('aria-label'));
+    for (const e of document.querySelectorAll('.rw-touch .rw-btn')) {
+      if (e.offsetParent && getComputedStyle(e).visibility !== 'hidden') add(e, e.getAttribute('aria-label'));
+    }
     for (const sel of ['.rw-wheel', '.rw-stick', '.rw-pad', '.rw-hud .rw-tl', '.rw-hud .rw-tr', '.rw-prompt', '.rw-speedbox', '.rw-chp']) {
       for (const e of document.querySelectorAll(sel)) if (e.offsetParent && getComputedStyle(e).display !== 'none') add(e, sel);
     }
@@ -685,28 +704,277 @@ try {
     }
     check(`layout ${label}: ${out.length} blocks in view, >=56px, no overlaps`, bad.length === 0, bad.join(', '));
   };
+  // Visible controls (buttons) right now, not counting folded ones.
+  const buttonCount = () => page.evaluate(() => [...document.querySelectorAll('.rw-touch .rw-btn')]
+    .filter((e) => e.offsetParent && getComputedStyle(e).visibility !== 'hidden').length);
+  const counts = {};
   for (const [vw, vh] of [[915, 412], [780, 360]]) {
     await page.setViewportSize({ width: vw, height: vh });
     await page.waitForTimeout(120);
     for (const lefty of [false, true]) {
       await page.evaluate((l) => rw.touch.setLeftHanded(l), lefty);
       for (const m of ['foot', 'car', 'boat', 'plane', 'heli']) {
-        await page.evaluate((mm) => rw.touch.setMode(mm), m);
+        const tag = `${m} ${vw}x${vh}${lefty ? ' lefty' : ''}`;
+        const fileTag = `${m}${lefty ? '-lefty' : ''}-${vw}x${vh}`;
+        await page.evaluate((mm) => {
+          rw.touch.setHudMode('minimal');
+          rw.hud.setHudMode('minimal');
+          rw.touch.setMode(mm);
+          rw.touch.setCombat({ show: true, weapon: 'pistol', name: 'Pocket Rattler', mag: 2, max: 12, reload: 0, locked: false, drive: true });
+        }, m);
         await hudFor(m);
-        await page.waitForTimeout(30);
-        await checkLayout(`${m} ${vw}x${vh}${lefty ? ' lefty' : ''}`);
-        if (!lefty || m === 'foot' || m === 'car') await shot(`combat-${m}${lefty ? '-lefty' : ''}-${vw}x${vh}.png`);
+        await page.waitForTimeout(260);
+        await checkLayout(`minimal ${tag}`);
+        const n = await buttonCount();
+        counts[m] = Math.max(counts[m] || 0, n);
+        check(`minimal ${tag}: at most 6 buttons at once (${n})`, n <= 6, String(n));
+        await shot(`min-${fileTag}-idle.png`);
+        await tapMore();
+        check(`minimal ${tag}: more button opens the fan`, await fanIsOpen());
+        await checkLayout(`minimal ${tag} fan open`);
+        if (!lefty || m === 'foot' || m === 'car') await shot(`min-${fileTag}-fan.png`);
+        await tapMore();
+        check(`minimal ${tag}: more button folds the fan`, !(await fanIsOpen()));
+        await page.evaluate(() => { rw.touch.setHudMode('full'); rw.hud.setHudMode('full'); });
+        await hudFor(m);
+        await page.waitForTimeout(320);
+        await checkLayout(`full ${tag}`);
+        check(`full ${tag}: nothing folded, more button gone`, await page.evaluate(() => !document.querySelector('.rw-more').offsetParent
+          && [...document.querySelectorAll('.rw-sec')].every((e) => getComputedStyle(e).visibility === 'visible' && getComputedStyle(e).opacity === '1')));
+        if (!lefty || m === 'foot' || m === 'car') await shot(`full-${fileTag}.png`);
       }
-      await page.evaluate(() => { rw.touch.setMode('car'); rw.touch.setSteering('buttons'); });
+      await page.evaluate(() => { rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); rw.touch.setMode('car'); rw.touch.setSteering('buttons'); });
       await checkLayout(`car buttons-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
       await page.evaluate(() => rw.touch.setSteering('slider'));
       await checkLayout(`car slider-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
       await page.evaluate(() => rw.touch.setSteering('wheel'));
     }
   }
+  console.log('simultaneous buttons in Minimal (max over sizes, idle):', JSON.stringify(counts));
   await page.setViewportSize({ width: 915, height: 412 });
   await page.evaluate(() => { rw.touch.setLeftHanded(false); rw.touch.setMode('car'); });
   await page.waitForTimeout(100);
+
+  // ======== task: calmer UI (more button, idle shrink, small map, fading text) ========
+  check('HUD is Minimal by default', (await page.evaluate(() => [rw.touch.getHudMode(), rw.hud.getHudMode()])).join() === 'minimal,minimal');
+  await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'pistol', name: 'Pocket Rattler', mag: 9, max: 12, reload: 0, locked: false, drive: true }));
+  await page.waitForTimeout(350);
+  check('fan folded at rest: every secondary control hidden',
+    await page.evaluate(() => [...document.querySelectorAll('.rw-sec')].every((e) => getComputedStyle(e).visibility === 'hidden'))
+    && !(await fanIsOpen()));
+  check('more button label and aria-expanded', await page.evaluate(() => {
+    const m = document.querySelector('.rw-more');
+    return m.getAttribute('aria-label') === 'More controls' && m.getAttribute('aria-expanded') === 'false' && m.offsetWidth >= 56;
+  }));
+  // Open, check the ease length, let it fold by itself 4 s after the last use.
+  const tOpen = Date.now();
+  await tapMore();
+  check('tap opens the fan, items visible', await fanIsOpen() && (await page.locator('[aria-label="Horn"]').isVisible()));
+  check('fan ease is about 160 ms', await page.evaluate(() => getComputedStyle(document.querySelector('.rw-sec')).transitionDuration.startsWith('0.16')));
+  await page.waitForTimeout(3000 - (Date.now() - tOpen));
+  check('fan still open at about 3 s', await fanIsOpen());
+  await page.waitForTimeout(1500);
+  check('fan folded by itself after 4 s', !(await fanIsOpen()));
+  // Using one control folds it at once.
+  await tapMore();
+  const hornB = await center('Horn');
+  await down(31, hornB.x, hornB.y);
+  await up(31);
+  await page.waitForTimeout(40);
+  check('horn tap pressed horn', (await read("[rw.input.consume('horn'), rw.input.held('horn')]")).join() === 'true,false');
+  check('fan folds right after using one control', !(await fanIsOpen()));
+  // A touch outside folds it too (and still reaches what it hit).
+  await tapMore();
+  await down(31, 500, 100);
+  await up(31);
+  check('touch outside folds the fan', !(await fanIsOpen()));
+  // Reduced motion: no ease.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  check('prefers-reduced-motion removes the ease', await page.evaluate(() => getComputedStyle(document.querySelector('.rw-sec')).transitionDuration === '0s'));
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  // Handbrake held while steering and on the gas: the fan stays open until release.
+  await tapMore();
+  const hb2 = await center('Handbrake');
+  const wbh = await wheelBox();
+  const gs = await center('Gas');
+  await down(1, hb2.x, hb2.y);
+  const ph = rimPt(wbh, 0);
+  await down(2, ph.x, ph.y);
+  await turn(2, wbh, 0, 130);
+  await down(3, gs.x, gs.y);
+  await page.waitForTimeout(4600);
+  check('hold HAND + steer + gas together past 4 s: fan still open', await fanIsOpen());
+  const trio = await read('[rw.input.handbrake, rw.input.steer, rw.input.throttle]');
+  check('handbrake, steer 1 and gas all held', trio.join() === 'true,1,1', trio.join());
+  await shot('car-handbrake-hold-915x412.png');
+  await up(1);
+  await page.waitForTimeout(40);
+  check('releasing HAND folds the fan, steer and gas stay', !(await fanIsOpen())
+    && (await read('[rw.input.handbrake, rw.input.steer, rw.input.throttle]')).join() === 'false,1,1');
+  await up(2); await up(3);
+  check('steer and gas released', (await read('[rw.input.steer, rw.input.throttle]')).join() === '0,0');
+
+  // Idle shrink: ~85 percent and ~70 percent opacity, full under a finger within 120 ms.
+  await page.waitForTimeout(200);
+  const face = (label) => page.evaluate((l) => {
+    const b = document.querySelector(`[aria-label="${l}"]`);
+    const f = b.querySelector('.rw-face');
+    const r = f.getBoundingClientRect();
+    return { ratio: r.width / b.offsetWidth, op: parseFloat(getComputedStyle(f).opacity), hit: Math.min(b.offsetWidth, b.offsetHeight) };
+  }, label);
+  for (const label of ['Gas', 'Brake / reverse', 'Exit car', 'Drive-by fire', 'Pause', 'More controls']) {
+    const f = await face(label);
+    check(`idle ${label}: ~85% size, ~70% opacity, hit area >= 56`, Math.abs(f.ratio - 0.85) < 0.02 && Math.abs(f.op - 0.7) < 0.03 && f.hit >= 56, JSON.stringify(f));
+  }
+  const gc = await center('Gas');
+  await down(32, gc.x, gc.y);
+  await page.waitForTimeout(140);
+  const fg = await face('Gas');
+  check('Gas grows to full size and opacity within 140 ms of a touch', fg.ratio > 0.99 && fg.op > 0.99, JSON.stringify(fg));
+  await up(32);
+  await page.waitForTimeout(160);
+  const fg2 = await face('Gas');
+  check('Gas shrinks back when the finger lifts', Math.abs(fg2.ratio - 0.85) < 0.02, JSON.stringify(fg2));
+
+  // Mini-map: small, tap to expand, shrinks after 5 s without a touch.
+  const mmSize = () => page.evaluate(() => Math.round(rw.hud.minimapCanvas.getBoundingClientRect().width));
+  check('mini-map about 84 px by default', Math.abs((await mmSize()) - 84) <= 2, String(await mmSize()));
+  check('no clock text under the map in Minimal', !(await page.locator('.rw-clock').isVisible()));
+  const mmc = await page.evaluate(() => { const r = rw.hud.minimapCanvas.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await down(33, mmc.x, mmc.y);
+  await up(33);
+  await page.waitForTimeout(260);
+  check('tap expands the mini-map to about 170 px', Math.abs((await mmSize()) - 170) <= 3, String(await mmSize()));
+  check('mini-map aria-expanded true', (await page.getAttribute('canvas.rw-minimap', 'aria-expanded')) === 'true');
+  await shot('minimap-expanded-915x412.png');
+  await page.waitForTimeout(4000);
+  check('still expanded at about 4.3 s', (await mmSize()) > 160);
+  await page.waitForTimeout(1300);
+  check('shrinks back after 5 s without touch', Math.abs((await mmSize()) - 84) <= 2, String(await mmSize()));
+  await down(33, mmc.x, mmc.y);
+  await up(33);
+  await page.waitForTimeout(260);
+  await down(33, mmc.x, mmc.y);
+  await up(33);
+  await page.waitForTimeout(260);
+  check('second tap shrinks it again at once', Math.abs((await mmSize()) - 84) <= 2, String(await mmSize()));
+  // District: small text for 3 s after a change.
+  await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 40, health: 80, score: 5, pending: 0, combo: 1, wanted: 0, district: 'Saltmarsh Docks', time: 9, vehicleHealth: 0.7 }));
+  await page.waitForTimeout(500);
+  const dOp = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.rw-district')).opacity));
+  check('district name shows as small text after a change', (await dOp()) > 0.5);
+  await page.waitForTimeout(3000);
+  check('district text gone after 3 s', (await dOp()) < 0.05);
+
+  // Score, combo and heat: dim to ~35 percent after 4 s, back on change or when hurt.
+  const trOp = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.rw-tr')).opacity));
+  const hudNow = (o) => page.evaluate((x) => rw.hud.update({ mode: 'car', speedKmh: 40, health: 80, score: 5, pending: 0, combo: 1, wanted: 0,
+    district: 'Saltmarsh Docks', time: 9, vehicleHealth: 0.7, ...x }), o);
+  await page.waitForTimeout(1400);
+  check('score block dimmed to about 35% when nothing changed', Math.abs((await trOp()) - 0.35) < 0.03, String(await trOp()));
+  await hudNow({ score: 50 });
+  await page.waitForTimeout(500);
+  check('score change brings it back to full', (await trOp()) > 0.97);
+  await page.waitForTimeout(4900);
+  check('dims again after 4 s', (await trOp()) < 0.4);
+  await hudNow({ score: 50, health: 60 });
+  await page.waitForTimeout(500);
+  check('being hurt brings it back to full', (await trOp()) > 0.97);
+  check('speed readout small, bottom-centre, in a craft only', await page.evaluate(() => {
+    const e = document.querySelector('.rw-speed');
+    const r = e.getBoundingClientRect();
+    return parseFloat(getComputedStyle(e).fontSize) <= 24 && Math.abs(r.left + r.width / 2 - innerWidth / 2) < 40 && r.top > innerHeight * 0.7;
+  }));
+  await page.waitForTimeout(4500);
+
+  // HUD Full: everything shown, nothing dim.
+  await page.evaluate(() => { rw.touch.setHudMode('full'); rw.hud.setHudMode('full'); });
+  await page.waitForTimeout(500);
+  check('Full: score block stays at full strength', (await trOp()) > 0.97);
+  check('Full: clock and district text shown', await page.locator('.rw-clock').isVisible() && (await dOp()) > 0.95);
+  check('Full: idle buttons not shrunk or dimmed', await (async () => { const f = await face('Gas'); return f.ratio > 0.99 && f.op > 0.99; })());
+  check('Full: all secondary controls visible, more button gone',
+    (await page.locator('[aria-label="Handbrake"]').isVisible()) && (await page.locator('[aria-label="Horn"]').isVisible())
+    && (await page.locator('[aria-label="Change camera"]').isVisible()) && (await page.locator('[aria-label="Map"]').isVisible())
+    && !(await page.locator('[aria-label="More controls"]').isVisible()));
+  check('Full: ammo panel shown, no reload chip', await page.locator('.rw-ammo').isVisible() && !(await page.locator('[aria-label="Reload (magazine low)"]').isVisible()));
+  check('Full: mini-map 116 px', Math.abs((await mmSize()) - 116) <= 2, String(await mmSize()));
+  const hbF = await center('Handbrake');
+  await down(34, hbF.x, hbF.y);
+  check('Full: handbrake works without opening anything', (await read('rw.input.handbrake')) === true);
+  await up(34);
+  await shot('full-car-915x412-live.png');
+  await page.evaluate(() => { rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); });
+  await page.waitForTimeout(300);
+
+  // Reload chip: foot, only when the magazine is low or empty.
+  await page.evaluate(() => { rw.touch.setMode('foot'); rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 30, max: 30, reload: 0, locked: false, drive: false }); });
+  check('foot: chip hidden with a full magazine', !(await page.locator('[aria-label="Reload (magazine low)"]').isVisible()));
+  await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 5, max: 30, reload: 0, locked: false, drive: false }));
+  check('foot: chip shown when the magazine is low', await page.locator('[aria-label="Reload (magazine low)"]').isVisible());
+  const chip = await center('Reload (magazine low)');
+  const fireB = await center('Fire');
+  check('chip sits next to FIRE and is >= 56 px', chip.w >= 56 && Math.abs(chip.x - fireB.x) < 140 && chip.x < fireB.x, JSON.stringify([chip, fireB]));
+  await down(35, chip.x, chip.y);
+  await up(35);
+  check('chip tap presses reload', (await read("[rw.input.consume('reload'), rw.input.held('reload')]")).join() === 'true,false');
+  check('foot: Minimal shows <= 6 buttons', (await buttonCount()) <= 6, String(await buttonCount()));
+  await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 0, max: 30, reload: 0.4, locked: false, drive: false }));
+  check('foot: chip stays while reloading', await page.locator('[aria-label="Reload (magazine low)"]').isVisible());
+
+  // Extension point: register actions without touching the layout code.
+  const reg = await page.evaluate(() => {
+    window.__reg = { press: 0, release: 0, on: true };
+    const sec = rw.touch.registerAction({ id: 'grenade', label: 'Throw grenade', icon: 'fire', text: 'NADE', group: 'secondary', modes: ['foot'],
+      press() { window.__reg.press++; }, release() { window.__reg.release++; }, visible: () => window.__reg.on });
+    const pri = rw.touch.registerAction({ id: 'bomb', label: 'Drop bomb', icon: 'down', text: 'BOMB', group: 'primary', modes: ['plane'],
+      press() { window.__reg.bomb = true; }, release() { window.__reg.bomb = false; } });
+    window.__regH = [sec, pri];
+    return !!sec.el && !!pri.el;
+  });
+  check('registerAction returns handles', reg);
+  await page.evaluate(() => rw.touch.update(1 / 60));
+  check('registered secondary joins the fan (foot only)', !(await page.locator('[aria-label="Throw grenade"]').isVisible()));
+  await tapMore();
+  check('registered secondary visible once the fan opens', await page.locator('[aria-label="Throw grenade"]').isVisible());
+  await checkLayout('foot fan with a registered action');
+  const gb = await center('Throw grenade');
+  await down(36, gb.x, gb.y);
+  const gPress = await page.evaluate(() => window.__reg.press);
+  await up(36);
+  check('registered action press and release called', gPress === 1 && (await page.evaluate(() => window.__reg.release)) === 1);
+  await page.evaluate(() => { window.__reg.on = false; rw.touch.update(1 / 60); });
+  check('visible() false hides it', !(await page.locator('[aria-label="Throw grenade"]').count() && await page.locator('[aria-label="Throw grenade"]').isVisible()));
+  await page.evaluate(() => rw.touch.setMode('plane'));
+  await checkLayout('plane with a registered primary action');
+  await page.waitForTimeout(350);
+  check('registered primary shows only in its mode, >= 56 px', await page.evaluate(() => {
+    const b = document.querySelector('[aria-label="Drop bomb"]');
+    return !!b.offsetParent && Math.min(b.offsetWidth, b.offsetHeight) >= 56;
+  }));
+  const bb = await center('Drop bomb');
+  await down(37, bb.x, bb.y);
+  const bombDown = await page.evaluate(() => window.__reg.bomb);
+  await up(37);
+  check('registered primary press and release', bombDown === true && (await page.evaluate(() => window.__reg.bomb)) === false);
+  await page.waitForTimeout(250);
+  await checkLayout('plane with a registered primary action (settled)');
+  await page.evaluate(() => { for (const h of window.__regH) h.remove(); rw.touch.setMode('car'); });
+  check('remove() takes the buttons away', (await page.locator('[aria-label="Drop bomb"]').count()) === 0 && (await page.locator('[aria-label="Throw grenade"]').count()) === 0);
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.evaluate(() => { rw.touch.setMode('plane'); rw.touch.registerAction({ id: 'missile', label: 'Fire missile', icon: 'fire', text: 'MSL', group: 'primary', modes: ['plane'] }); });
+  await page.waitForTimeout(350);
+  await checkLayout('plane 780x360 with a registered primary action');
+  await page.evaluate(() => { rw.touch.setLeftHanded(true); });
+  await checkLayout('plane 780x360 lefty with a registered primary action');
+  await page.evaluate(() => { rw.touch.setLeftHanded(false); });
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.evaluate(() => {
+    rw.touch.setMode('car');
+    rw.touch.setCombat({ show: true, weapon: 'pistol', name: 'Pocket Rattler', mag: 9, max: 12, reload: 0, locked: false, drive: true });
+  });
+  await page.waitForTimeout(350);
 
   // ---- drive-by: steer, gas and fire with three fingers at once ----
   const dbf = await center('Drive-by fire');
@@ -762,20 +1030,25 @@ try {
   check('foot: stick, FIRE and look drag together', fw[0] > 0.6 && fw[1] === true && Math.abs(fw[2] - 60) < 3, fw.join());
   await up(3); await up(2); await up(1);
   check('foot: all released', (await read("[rw.input.moveY, rw.input.held('fire')]")).join() === '0,false');
-  for (const [label, name] of [['Lock on', 'lock'], ['Swap weapon', 'swap'], ['Reload', 'reload']]) {
+  for (const [label, name, fan] of [['Lock on', 'lock', false], ['Swap weapon', 'swap', true], ['Reload', 'reload', true]]) {
+    if (fan) await openFan();
     const b = await center(label);
     await down(4, b.x, b.y);
     await up(4);
     check(`foot: ${label} tap presses '${name}'`, (await read(`[rw.input.consume('${name}'), rw.input.held('${name}')]`)).join() === 'true,false');
   }
   await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 0, max: 30, reload: 0.5, locked: true, drive: false }));
-  check('ammo panel shows weapon, count and reload', (await page.textContent('.rw-ammo')).includes('Buzzbox')
+  check('ammo panel (Full only) holds weapon, count and reload', (await page.textContent('.rw-ammo')).includes('Buzzbox')
     && (await page.textContent('.rw-ammo-n')) === '0' && await page.locator('.rw-ammo.rw-reloading').count() === 1
     && await page.locator('.rw-lock.rw-on').count() === 1);
+  check('Minimal: ammo panel hidden, reload chip shown for an empty magazine',
+    !(await page.locator('.rw-ammo').isVisible()) && await page.locator('[aria-label="Reload (magazine low)"]').isVisible());
   // Left-handed: every combat control mirrors and still works.
   await page.evaluate(() => rw.touch.setLeftHanded(true));
-  const lf = await center('Fire'), ll = await center('Lock on'), ls = await center('Swap weapon'), la = await center('Reload');
-  check('lefty: FIRE, LOCK, SWAP, ammo on the left', lf.x < 150 && ll.x < 300 && ls.x < 300 && la.x < 350, JSON.stringify([lf.x, ll.x, ls.x, la.x]));
+  await openFan();
+  const lf = await center('Fire'), ll = await center('Lock on'), ls = await center('Swap weapon'), la = await center('Reload (magazine low)');
+  check('lefty: FIRE, LOCK, chip, SWAP on the left', lf.x < 150 && ll.x < 300 && ls.x < 500 && la.x < 300, JSON.stringify([lf.x, ll.x, ls.x, la.x]));
+  await tapMore();
   await down(1, 780, 320);
   await drag(1, 780, 320, 780, 260);
   await down(2, lf.x, lf.y);

@@ -39,7 +39,7 @@ const CSS = `
 /* on-screen steering wheel (touches anywhere in the zone turn it) */
 .rw-wheel {
   position: absolute; left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 16px);
-  width: 150px; height: 150px; pointer-events: none; opacity: 0.78; transition: opacity 0.12s;
+  width: 150px; height: 150px; pointer-events: none; opacity: 0.7; transition: opacity 0.12s;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
 }
 .rw-wheel.rw-active { opacity: 1; }
@@ -78,8 +78,9 @@ const CSS = `
 /* tilt indicator (style 'tilt'); tap to re-centre */
 .rw-btn.rw-tiltbar {
   left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 30px);
-  width: 168px; height: 64px; border-radius: 20px; gap: 7px;
+  width: 168px; height: 64px; border-radius: 20px;
 }
+.rw-tiltbar .rw-face { gap: 7px; }
 .rw-tilt-track {
   position: relative; display: block; width: 132px; height: 10px; border-radius: 5px;
   background: rgba(0, 0, 0, 0.45); border: 1px solid var(--rw-panel-edge);
@@ -107,28 +108,36 @@ const CSS = `
   border: 2px solid rgba(255, 255, 255, 0.5); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
-/* buttons */
+/* buttons: the box is the hit area; the .rw-face inside is what you see */
 .rw-btn {
-  position: absolute; pointer-events: auto; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 1px; padding: 0; margin: 0;
-  width: 58px; height: 58px; border-radius: 50%;
-  background: var(--rw-panel); color: var(--rw-text);
-  border: 2px solid var(--rw-panel-edge); outline: none;
+  position: absolute; pointer-events: auto; display: block; padding: 0; margin: 0;
+  width: 58px; height: 58px; border-radius: 50%; background: transparent; color: var(--rw-text);
+  border: 0; outline: none;
   font: 700 10px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.06em;
+}
+.rw-face {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  transition: transform 0.06s, background 0.06s;
+  transition: transform 0.12s ease-out, opacity 0.12s ease-out, background 0.08s;
 }
 .rw-btn svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .rw-btn span { pointer-events: none; }
-.rw-btn.rw-down { background: var(--rw-accent-soft); border-color: #ffd0b5; transform: scale(0.92); }
-.rw-btn.rw-big { width: 76px; height: 76px; }
-.rw-btn.rw-big svg { width: 32px; height: 32px; }
+.rw-btn:focus-visible .rw-face { outline: 3px solid #fff; outline-offset: 3px; }
+.rw-btn.rw-down .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
+.rw-off { display: none !important; }
 
-.rw-pedal {
-  width: 84px; height: 110px; border-radius: 22px; font-size: 13px; gap: 6px;
-}
+/* idle: a little smaller and dimmer until a finger is on it (hit box unchanged) */
+.rw-pri .rw-face { transform: scale(0.85); opacity: 0.7; }
+.rw-pri.rw-down .rw-face, .rw-pri:focus-visible .rw-face { transform: none; opacity: 1; }
+.rw-full .rw-pri .rw-face { transform: none; opacity: 1; }
+
+.rw-pedal { width: 84px; height: 110px; border-radius: 22px; font-size: 13px; }
+.rw-pedal .rw-face { gap: 6px; }
 .rw-pedal svg { width: 30px; height: 30px; }
-.rw-pedal.rw-gas { border-color: rgba(226, 115, 58, 0.7); }
+.rw-pedal.rw-gas .rw-face { border-color: rgba(226, 115, 58, 0.7); }
+.rw-pedal.rw-tall { height: 122px; }
 
 /* per-mode groups: a gated element shows only in the modes it lists */
 .rw-mode-foot .rw-gated:not(.rw-m-foot),
@@ -145,47 +154,71 @@ const CSS = `
 .rw-stick.rw-flight::before { left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; }
 .rw-stick.rw-flight::after { top: 50%; left: 10px; right: 10px; height: 2px; margin-top: -1px; }
 
-.rw-pedal.rw-tall { height: 122px; }
-
-/* placement (offsets from the safe area) */
-.rw-gas { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 14px); }
-.rw-brake { right: calc(var(--rw-sr) + 112px); bottom: calc(var(--rw-sb) + 14px); }
-.rw-handbrake { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 138px); }
-.rw-horn { right: calc(var(--rw-sr) + 84px); bottom: calc(var(--rw-sb) + 138px); }
-.rw-exit { right: calc(var(--rw-sr) + 152px); bottom: calc(var(--rw-sb) + 138px); }
-.rw-cam { right: calc(var(--rw-sr) + 220px); bottom: calc(var(--rw-sb) + 138px); }
-.rw-mode-plane .rw-exit, .rw-mode-heli .rw-exit { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 150px); }
-.rw-mode-plane .rw-cam, .rw-mode-heli .rw-cam { right: calc(var(--rw-sr) + 84px); bottom: calc(var(--rw-sb) + 150px); }
-
-.rw-enter { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 136px); width: 72px; height: 72px; }
+/* placement slots: --x from the thumb side edge, --y from the bottom.
+   Left-handed swaps the side. docs/UI.md draws the whole layout. */
+.rw-gas, .rw-brake, .rw-exit, .rw-enter, .rw-fire, .rw-dbfire, .rw-lock, .rw-chipbtn, .rw-more,
+.rw-sec, .rw-extra {
+  right: calc(var(--rw-sr) + var(--x)); bottom: calc(var(--rw-sb) + var(--y));
+}
+.rw-lefty .rw-gas, .rw-lefty .rw-brake, .rw-lefty .rw-exit, .rw-lefty .rw-enter, .rw-lefty .rw-fire,
+.rw-lefty .rw-dbfire, .rw-lefty .rw-lock, .rw-lefty .rw-chipbtn, .rw-lefty .rw-more,
+.rw-lefty .rw-sec, .rw-lefty .rw-extra {
+  right: auto; left: calc(var(--rw-sl) + var(--x));
+}
+.rw-touch { --dir: 1; }
+.rw-touch.rw-lefty { --dir: -1; }
+.rw-gas { --x: 16px; --y: 14px; }
+.rw-brake { --x: 112px; --y: 14px; }
+.rw-dbfire { --x: 16px; --y: 134px; width: 72px; height: 72px; }
+.rw-exit { --x: 100px; --y: 134px; width: 64px; height: 64px; }
+.rw-mode-plane .rw-exit, .rw-mode-heli .rw-exit { --x: 16px; --y: 150px; }
+.rw-enter { --x: 26px; --y: 132px; width: 72px; height: 72px; }
 .rw-enter svg { width: 32px; height: 32px; }
 .rw-enter span { font-size: 12px; }
-.rw-run { right: calc(var(--rw-sr) + 140px); bottom: calc(var(--rw-sb) + 16px); width: 64px; height: 64px; }
+.rw-lock { --x: 142px; --y: 30px; width: 62px; height: 62px; }
+.rw-chipbtn { --x: 142px; --y: 98px; width: 56px; height: 56px; }
+.rw-chipbtn .rw-face { background: rgba(120, 30, 22, 0.7); border-color: rgba(255, 150, 120, 0.85); font-size: 9px; }
+.rw-chipbtn svg { width: 22px; height: 22px; }
+.rw-touch:not(.rw-chip-on) .rw-chipbtn, .rw-full .rw-chipbtn { display: none; }
+.rw-more { --x: 216px; --y: 30px; width: 56px; height: 56px; }
+.rw-full .rw-more { display: none; }
+.rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
+.rw-extra { --x: 16px; --y: calc(214px + var(--k, 0) * 72px); width: 64px; height: 64px; }
 
-/* combat: FIRE under the right thumb, LOCK / SWAP around it, ammo above */
-.rw-btn.rw-fire {
-  right: calc(var(--rw-sr) + 26px); bottom: calc(var(--rw-sb) + 24px); width: 100px; height: 100px;
-  background: rgba(120, 30, 22, 0.55); border: 3px solid rgba(255, 120, 96, 0.75); font-size: 13px;
+/* the fan: secondary buttons grow upward out of the more button, one
+   column of four (--r = place in the column, --c = column) */
+.rw-sec {
+  --x: calc(216px + var(--c, 0) * 64px); --y: calc(30px + (var(--r, 0) + 1) * 64px);
+  width: 56px; height: 56px;
+  transform: translate(calc(var(--dir) * var(--c, 0) * 64px), calc((var(--r, 0) + 1) * 64px)) scale(0.3);
+  opacity: 0; visibility: hidden;
+  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1), opacity 0.16s ease, visibility 0s linear 0.16s;
+}
+.rw-fan-open .rw-sec, .rw-full .rw-sec {
+  transform: none; opacity: 1; visibility: visible; transition-delay: 0s;
+}
+.rw-sec span { font-size: 9px; }
+.rw-sec svg { width: 22px; height: 22px; }
+
+/* combat: FIRE under the right thumb, LOCK beside it, reload chip above LOCK */
+.rw-btn.rw-fire { --x: 26px; --y: 24px; width: 100px; height: 100px; font-size: 13px; }
+.rw-btn.rw-fire .rw-face, .rw-btn.rw-dbfire .rw-face {
+  background: rgba(120, 30, 22, 0.62); border: 3px solid rgba(255, 120, 96, 0.8);
 }
 .rw-btn.rw-fire svg { width: 38px; height: 38px; }
-.rw-btn.rw-fire.rw-down { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
-.rw-btn.rw-dbfire {
-  right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 208px); width: 74px; height: 74px;
-  background: rgba(120, 30, 22, 0.55); border: 3px solid rgba(255, 120, 96, 0.75); font-size: 11px;
-}
+.rw-btn.rw-dbfire { font-size: 11px; }
 .rw-btn.rw-dbfire svg { width: 28px; height: 28px; }
-.rw-btn.rw-dbfire.rw-down { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
+.rw-btn.rw-fire.rw-down .rw-face, .rw-btn.rw-dbfire.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
 .rw-fire-mag { position: absolute; right: 10%; top: 8%; font: 800 11px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; }
 .rw-dbfire .rw-fire-mag { right: 14%; top: 12%; }
-.rw-lock { right: calc(var(--rw-sr) + 138px); bottom: calc(var(--rw-sb) + 92px); width: 62px; height: 62px; }
-.rw-lock.rw-on { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
-.rw-swap { right: calc(var(--rw-sr) + 98px); bottom: calc(var(--rw-sb) + 162px); width: 62px; height: 62px; }
-.rw-btn.rw-ammo {
-  right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 230px); width: 112px; height: 56px;
-  border-radius: 16px; flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; flex-wrap: wrap;
+.rw-lock.rw-on .rw-face { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
+/* ammo counter: HUD Full only (Minimal reads the count off FIRE) */
+.rw-btn.rw-ammo { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 88px); width: 112px; height: 56px; border-radius: 16px; }
+.rw-ammo .rw-face {
+  flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; flex-wrap: wrap;
   align-content: center; row-gap: 2px;
 }
-.rw-mode-car .rw-ammo, .rw-mode-boat .rw-ammo { right: calc(var(--rw-sr) + 100px); bottom: calc(var(--rw-sb) + 216px); }
+.rw-touch:not(.rw-full) .rw-ammo { display: none; }
 .rw-ammo-icon svg { width: 24px; height: 24px; display: block; }
 .rw-ammo-txt { display: flex; align-items: baseline; gap: 1px; }
 .rw-ammo-n { font-size: 20px; font-weight: 800; color: #ffe2cc; font-variant-numeric: tabular-nums; }
@@ -199,8 +232,7 @@ const CSS = `
 .rw-nocombat .rw-cmb, .rw-nodrive .rw-dbfire,
 .rw-nodrive.rw-mode-car .rw-ammo, .rw-nodrive.rw-mode-boat .rw-ammo { display: none; }
 
-.rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
-.rw-map { right: calc(var(--rw-sr) + 70px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
+.rw-btn.rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
 
 /* left-handed: steering and stick on the right, pedals and buttons left */
 .rw-lefty .rw-look { left: 0; right: 40%; }
@@ -208,41 +240,37 @@ const CSS = `
 .rw-lefty .rw-wheel, .rw-lefty .rw-tiltbar { left: auto; right: calc(var(--rw-sr) + 20px); }
 .rw-lefty .rw-sright { left: auto; right: calc(var(--rw-sr) + 18px); }
 .rw-lefty .rw-sleft { left: auto; right: calc(var(--rw-sr) + 124px); }
-.rw-lefty .rw-gas { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty .rw-brake { right: auto; left: calc(var(--rw-sl) + 112px); }
-.rw-lefty .rw-handbrake { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty .rw-horn { right: auto; left: calc(var(--rw-sl) + 84px); }
-.rw-lefty .rw-exit { right: auto; left: calc(var(--rw-sl) + 152px); }
-.rw-lefty .rw-cam { right: auto; left: calc(var(--rw-sl) + 220px); }
-.rw-lefty.rw-mode-plane .rw-exit, .rw-lefty.rw-mode-heli .rw-exit { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty.rw-mode-plane .rw-cam, .rw-lefty.rw-mode-heli .rw-cam { right: auto; left: calc(var(--rw-sl) + 84px); }
-.rw-lefty .rw-enter { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty .rw-run { right: auto; left: calc(var(--rw-sl) + 140px); }
-.rw-lefty .rw-btn.rw-fire { right: auto; left: calc(var(--rw-sl) + 26px); }
-.rw-lefty .rw-btn.rw-dbfire { right: auto; left: calc(var(--rw-sl) + 16px); }
-.rw-lefty .rw-lock { right: auto; left: calc(var(--rw-sl) + 138px); }
-.rw-lefty .rw-swap { right: auto; left: calc(var(--rw-sl) + 98px); }
-.rw-lefty .rw-btn.rw-ammo { right: auto; left: calc(var(--rw-sl) + 16px); }
-/* the minimap stays top-left, so the upper controls move inward instead */
-.rw-lefty .rw-swap { left: calc(var(--rw-sl) + 214px); bottom: calc(var(--rw-sb) + 92px); }
-.rw-lefty .rw-btn.rw-ammo { left: calc(var(--rw-sl) + 214px); bottom: calc(var(--rw-sb) + 164px); }
-.rw-lefty .rw-btn.rw-dbfire { left: calc(var(--rw-sl) + 208px); bottom: calc(var(--rw-sb) + 26px); }
-.rw-lefty.rw-mode-car .rw-ammo, .rw-lefty.rw-mode-boat .rw-ammo { right: auto; left: calc(var(--rw-sl) + 290px); bottom: calc(var(--rw-sb) + 140px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rw-face, .rw-sec, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
+}
 
 /* ---------- HUD ---------- */
-.rw-hud { z-index: 10; pointer-events: none; }
-.rw-hud .rw-tl { position: absolute; left: calc(var(--rw-sl) + 10px); top: calc(var(--rw-st) + 8px); width: 116px; }
+.rw-hud { z-index: 21; pointer-events: none; --map: 84px; --map-big: 170px; }
+.rw-hud .rw-tl { position: absolute; left: calc(var(--rw-sl) + 10px); top: calc(var(--rw-st) + 8px); width: var(--map); transition: width 0.16s ease; }
+.rw-hud .rw-tl.rw-big { width: var(--map-big); }
 .rw-minimap {
-  display: block; width: 116px; height: 116px; border-radius: 50%;
+  display: block; width: 100%; aspect-ratio: 1; height: auto; border-radius: 50%; cursor: pointer;
+  pointer-events: auto; touch-action: none;
   background: rgba(24, 18, 15, 0.7); border: 3px solid var(--rw-accent);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
 }
+.rw-minimap:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+/* district: small text beside the map for 3 s after a change (Full: always, below) */
 .rw-district {
-  margin: 4px -30px 0; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  position: absolute; left: calc(100% + 8px); top: 6px; white-space: nowrap; opacity: 0;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
 }
-.rw-clock { font-size: 12px; text-align: center; color: var(--rw-dim); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+.rw-district.rw-show { animation: rw-district 3s ease-out; }
+@keyframes rw-district { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.rw-clock { display: none; font-size: 12px; text-align: center; color: var(--rw-dim); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+.rw-full .rw-clock { display: block; }
+.rw-full .rw-district {
+  position: static; opacity: 1; animation: none; margin: 4px -30px 0; text-align: center;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.rw-full { --map: 116px; }
 
 .rw-toasts {
   position: absolute; left: 50%; top: calc(var(--rw-st) + 10px); transform: translateX(-50%);
@@ -257,19 +285,28 @@ const CSS = `
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
 .rw-tr {
-  position: absolute; right: calc(var(--rw-sr) + 134px); top: calc(var(--rw-st) + 8px);
-  display: flex; flex-direction: column; align-items: flex-end; gap: 5px;
-  padding: 7px 10px; border-radius: 14px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
-  min-width: 128px;
+  position: absolute; right: calc(var(--rw-sr) + 72px); top: calc(var(--rw-st) + 8px);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+  padding: 2px 4px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
+  transition: opacity 0.4s ease;
 }
-.rw-money { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: #ffe2cc; }
-.rw-wanted { display: flex; gap: 4px; }
+.rw-tr.rw-faded { opacity: 0.35; }
+.rw-full .rw-tr {
+  padding: 7px 10px; border-radius: 14px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
+  min-width: 128px; gap: 3px;
+}
+.rw-money { font-size: 17px; font-weight: 800; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: #ffe2cc; }
+.rw-combo { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: #ffb48a; }
+.rw-full .rw-money { font-size: 22px; }
+.rw-full .rw-combo { font-size: 14px; }
+.rw-wanted { display: flex; gap: 3px; }
 .rw-wanted.rw-none { display: none; }
 .rw-badge {
-  width: 16px; height: 16px; background: rgba(246, 239, 230, 0.22);
+  width: 12px; height: 12px; background: rgba(246, 239, 230, 0.22);
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 .rw-badge.rw-on { background: var(--rw-accent); }
+.rw-full .rw-badge { width: 16px; height: 16px; }
 .rw-bars { display: flex; flex-direction: column; gap: 4px; width: 128px; }
 .rw-bar { height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
 .rw-fill { height: 100%; width: 100%; border-radius: 5px; background: #6fd18b; }
@@ -289,9 +326,12 @@ const CSS = `
 }
 .rw-prompt.rw-none, .rw-speedbox.rw-none { display: none; }
 .rw-speedbox { display: flex; flex-direction: column; align-items: center; gap: 3px; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-.rw-speed { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-.rw-speed small { font-size: 12px; font-weight: 700; color: var(--rw-dim); margin-left: 3px; letter-spacing: 0.06em; }
-.rw-vehbar { width: 90px; height: 6px; }
+.rw-speed { font-size: 22px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.rw-speed small { font-size: 10px; font-weight: 700; color: var(--rw-dim); margin-left: 3px; letter-spacing: 0.06em; }
+.rw-vehbar { width: 64px; height: 5px; }
+.rw-full .rw-speed { font-size: 34px; }
+.rw-full .rw-speed small { font-size: 12px; }
+.rw-full .rw-vehbar { width: 90px; height: 6px; }
 
 .rw-title {
   position: absolute; left: 0; right: 0; top: 32%; text-align: center; opacity: 0;
@@ -362,8 +402,9 @@ const CSS = `
 .rw-cfade-text.rw-on { opacity: 1; }
 
 @media (max-height: 380px) {
-  .rw-minimap { width: 96px; height: 96px; }
-  .rw-hud .rw-tl { width: 96px; }
+  .rw-hud { --map: 76px; --map-big: 140px; }
+  .rw-hud .rw-tl { top: calc(var(--rw-st) + 4px); }
+  .rw-full { --map: 96px; }
   .rw-title { font-size: 32px; top: 28%; }
 }
 `;

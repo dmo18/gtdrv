@@ -367,6 +367,11 @@ export function createCombatHud(game, uiRoot) {
     return scr;
   }
 
+  // HUD mode: 'minimal' shows the health bar only when hurt or fighting,
+  // 'full' keeps it up. Follows settings.hud (also set by setHudMode).
+  let fullHud = false;
+  const setHudMode = (m) => { fullHud = m === 'full'; };
+
   const view = {
     xhair: false, xx: -1, xy: -1, hot: null, lock: null, tgt: false, tx: -1, ty: -1, ts: -1,
     hp: null, hpw: -1, mark: -1, ring: -1, down: -1, downText: null, noT: null,
@@ -378,6 +383,8 @@ export function createCombatHud(game, uiRoot) {
     const p = game.player;
     const w = p && p.walker;
     const d = dt > 0 ? dt : 0;
+    const cfg = game.progress && game.progress.settings;
+    if (cfg && (cfg.hud === 'full') !== fullHud) fullHud = cfg.hud === 'full';
     st.hitMarkT = Math.max(0, st.hitMarkT - d);
     if (st.downT >= 0) st.downT += d;
     if (st.upT >= 0) {
@@ -500,7 +507,7 @@ export function createCombatHud(game, uiRoot) {
     // Health bar: only while hurt or in a fight.
     const maxHp = w.maxHp || 100;
     const hp = Math.max(0, Number.isFinite(w.hp) ? w.hp : (p.health ?? maxHp));
-    const hpOn = (hp < maxHp - 0.5 || st.fightT > 0 || !!st.lock) && !(v && !drive);
+    const hpOn = (fullHud || hp < maxHp - 0.5 || st.fightT > 0 || !!st.lock) && !(v && !drive);
     if (hpOn !== view.hp) {
       view.hp = hpOn;
       ui.hp.classList.toggle('rw-on', hpOn);
@@ -588,6 +595,7 @@ export function createCombatHud(game, uiRoot) {
     },
     fixedUpdate: step,
     render,
+    setHudMode,
     // For tests: what the controller decided last step.
     get target() { return st.target; },
     get lock() { return st.lock; },
