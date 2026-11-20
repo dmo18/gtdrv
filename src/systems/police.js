@@ -30,6 +30,7 @@ const PED_POINTS = 0.5;
 const SPEED_DELAY = 3; // seconds of seen speeding before it counts
 const SPEED_RATE = 0.15; // points per second after that
 const POINT_DECAY = 0.03;
+const CALM_TIME = 10;
 const BUST_TIME = 2.5;
 const BUST_SPEED = 2;
 const BUST_DIST_CAR = 7;
@@ -39,6 +40,7 @@ export function createHeat() {
   return {
     level: 0,
     points: 0, // pending infractions; 1 point = one level step
+    calm: 0, // seconds since the last infraction
     grace: 0,
     unseen: 0, // seconds continuously out of sight
     cooldown: 0, // 0..1 progress toward escaping (HUD blink)
@@ -51,6 +53,7 @@ export function createHeat() {
 export function resetHeat(heat, grace = 0) {
   heat.level = 0;
   heat.points = 0;
+  heat.calm = 0;
   heat.grace = grace;
   heat.unseen = 0;
   heat.cooldown = 0;
@@ -83,8 +86,11 @@ export function updateHeat(heat, dt, facts) {
   } else {
     heat.speedTime = Math.max(0, heat.speedTime - dt * 0.5);
   }
-  if (add > 0) heat.points = Math.min(heat.points + add, heat.level >= MAX_HEAT ? 1 : 1.5);
-  else heat.points = Math.max(0, heat.points - POINT_DECAY * dt);
+  // Pending points fade only after a calm spell.
+  if (add > 0) {
+    heat.points = Math.min(heat.points + add, heat.level >= MAX_HEAT ? 1 : 1.5);
+    heat.calm = 0;
+  } else if ((heat.calm += dt) > CALM_TIME) heat.points = Math.max(0, heat.points - POINT_DECAY * dt);
 
   if (heat.points >= 1 && heat.grace <= 0 && heat.level < MAX_HEAT) {
     heat.level++;
