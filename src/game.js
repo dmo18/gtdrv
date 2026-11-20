@@ -32,6 +32,7 @@ import { createScore } from './systems/score.js';
 import { createCombatFx } from './render/combatfx.js';
 import { createCombatHud } from './ui/combathud.js';
 import { createTutorial } from './systems/tutorial.js';
+import { createObjective } from './systems/objective.js';
 import { createEffects } from './render/effects.js';
 import { createGraphics } from './render/graphics.js';
 import { createMenu } from './ui/menu.js';
@@ -306,6 +307,7 @@ export function createGame({ canvas, uiRoot }) {
     snapCam = true;
   });
   game.addSystem(createTutorial(game));
+  game.objective = game.addSystem(createObjective(game, uiRoot));
   game.graphics = game.addSystem(createGraphics(game));
   game.effects = game.addSystem(createEffects(game));
   game.combatFx = game.addSystem(createCombatFx(game));

@@ -185,6 +185,10 @@ const CSS = `
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
 .rw-extra { --x: 16px; --y: calc(214px + var(--k, 0) * 72px); width: 64px; height: 64px; }
+.rw-extra.rw-a-handbrake { --x: 206px; --y: 14px; width: 56px; height: 56px; }
+/* in a car the more button and its fan sit one step higher, over the HAND button */
+.rw-mode-car .rw-more { --y: 80px; }
+.rw-mode-car .rw-sec { --y: calc(80px + (var(--r, 0) + 1) * 64px); }
 .rw-a-detonate .rw-face { border-color: rgba(255, 120, 90, 0.95); animation: rw-pulse 0.9s ease-in-out infinite; }
 @keyframes rw-pulse { 50% { box-shadow: 0 0 14px rgba(255, 90, 60, 0.9); } }
 

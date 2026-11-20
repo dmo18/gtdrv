@@ -3,6 +3,9 @@
 // carried at once and reserves are unlimited: magazines only set the
 // rhythm (fire, run dry, reload). See docs/COMBAT.md.
 const DEG = Math.PI / 180;
+// Everything is unlimited: weapons never run dry and never need a reload.
+// Tests switch these off to check the classic rules.
+export const RULES = { unlimitedAmmo: true, invulnerable: true };
 
 // type: 'melee' | 'hitscan' | 'rocket' | 'thrown' | 'sticky'
 // spread: half-angle in radians (melee: half of the hit arc)
@@ -73,12 +76,12 @@ export const MOUNTS = {
     range: 120, mag: 60, reload: 2.0, bend: 40 * DEG,
   },
   missile: {
-    id: 'missile', name: 'Gullseeker', type: 'missile', dmg: 260, rate: 1, spread: 0,
-    range: 600, mag: 2, reload: 3.0, speed: 95, turn: 2.4, life: 6, blast: 7, blastScale: 1.3,
+    id: 'missile', name: 'Gullseeker', type: 'missile', dmg: 900, rate: 1, spread: 0,
+    range: 600, mag: 2, reload: 3.0, speed: 95, turn: 2.4, life: 6, blast: 9, blastScale: 6,
   },
   bomb: {
     id: 'bomb', name: 'Pelican Drop', type: 'bomb', dmg: 0, rate: 3, spread: 0,
-    range: 0, mag: 6, magHeli: 4, reload: 5.0, blast: 11, blastScale: 1.6,
+    range: 0, mag: 6, magHeli: 4, reload: 5.0, blast: 14, blastScale: 9,
   },
 };
 export const MOUNT_IDS = Object.keys(MOUNTS);
@@ -146,6 +149,7 @@ export function mountReady(arms, id) {
 export function tryMount(arms, id) {
   if (!mountReady(arms, id)) return USE_NO;
   arms.cool[id] = 1 / MOUNTS[id].rate;
+  if (RULES.unlimitedAmmo) return USE_OK;
   arms.mag[id]--;
   if (arms.mag[id] <= 0) {
     arms.mag[id] = 0;
@@ -232,7 +236,7 @@ export function tryUse(arms, id = arms.weapon) {
   }
   arms.cool = 1 / w.rate;
   if (id === 'pistol' || id === 'smg') arms.lastGun = id;
-  if (w.mag > 0) {
+  if (w.mag > 0 && !RULES.unlimitedAmmo) {
     arms.mag[id]--;
     if (arms.mag[id] <= 0) {
       arms.mag[id] = 0;

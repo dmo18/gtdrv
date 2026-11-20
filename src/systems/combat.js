@@ -24,7 +24,7 @@
 import { createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
 import {
-  WEAPONS, MOUNTS, createArms, nextWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
+  RULES, WEAPONS, MOUNTS, createArms, nextWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker } from '../core/seeker.js';
@@ -266,6 +266,8 @@ export function damage(game, target, amount, source = null, kind = 'bullet') {
   PUSH.x = PUSH.z = 0;
   if (!target || !(amount > 0) || !Number.isFinite(amount)) return 0;
   const p = game && game.player;
+  // The player cannot die: nothing that hurts them, or the craft they sit in, counts.
+  if (RULES.invulnerable && p && (target === p.walker || (p.vehicle && target === p.vehicle))) return 0;
   // The player in a craft is not hit directly: the craft takes it.
   if (p && target === p.walker && p.vehicle) {
     PUSH.x = px;

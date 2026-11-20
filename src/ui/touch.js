@@ -559,7 +559,7 @@ export function createTouchControls(root, input, opts = {}) {
     // Over an armed-craft arc the fan starts higher: three per column, so
     // a fourth item (police heli SPOT) wraps instead of leaving a 360 px screen.
     for (const a of actions) if (a.slot && a.vis && a.modes.includes(mode)) arc = true;
-    const rows = arc && (mode === 'plane' || mode === 'heli') ? 3 : FAN_ROWS;
+    const rows = (arc && (mode === 'plane' || mode === 'heli')) || mode === 'car' ? 3 : FAN_ROWS;
     for (const a of actions) {
       if (!a.vis || !a.modes.includes(mode)) continue;
       if (a.slot) {

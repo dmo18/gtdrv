@@ -635,8 +635,8 @@ export default async function extra(page, check) {
     off();
     return { launches, mag: f.arms && f.arms.mag };
   });
-  check(jetMsl.launches.includes('missile') && jetMsl.mag && jetMsl.mag.nosegun < 120,
-    `the fighter fires a missile (MSL) and the nose gun (${JSON.stringify(jetMsl)})`);
+  check(jetMsl.launches.includes('missile') && jetMsl.mag && jetMsl.mag.nosegun === 120 && jetMsl.mag.missile === 2,
+    `the fighter fires a missile (MSL) and the nose gun, with unlimited ammo (${JSON.stringify(jetMsl)})`);
   await snapFrame();
   await page.screenshot({ path: 'shots/fighter-missile.png' });
 
@@ -765,6 +765,6 @@ export default async function extra(page, check) {
       const w = g.player.walker;
       return { wrecked: !!c.wrecked, onFoot: !g.player.vehicle && g.player.mode === 'foot', shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
     });
-    check(boarded2 && boom.wrecked && boom.onFoot && boom.shore > 0, `a craft exploding over the sea leaves the player on land (${JSON.stringify(boom)})`);
+    check(boarded2 && !boom.wrecked && !boom.onFoot, `the player cannot die: a blast over the sea leaves the craft and pilot unharmed (${JSON.stringify(boom)})`);
   }
 }

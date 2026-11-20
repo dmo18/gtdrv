@@ -19,7 +19,7 @@ const COL = {
   text: '#f6efe6',
   panel: 'rgba(24, 18, 15, 0.82)',
 };
-export const PLAYER_COLOR = COL.accent;
+export const PLAYER_COLOR = '#5fe0ff';
 
 const POI_STYLE = {
   airfield: { color: '#8ec5e8', name: 'Airfield' },
@@ -631,7 +631,61 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
       drawPin(g, tmpS.x, tmpS.y, 18);
     }
     toScreen(st.x, st.z, tmpS);
-    drawArrow(g, tmpS.x, tmpS.y, st.heading + Math.PI / 2, 13);
+    const px = tmpS.x, py = tmpS.y;
+    // The current objective (race checkpoint) or the waypoint: a bold ring,
+    // a "GO" label and a dashed line from the player, so the way is obvious.
+    let goal = null;
+    if (marks) for (let i = 0; i < marks.length; i++) if (marks[i].type === 'checkpoint') goal = marks[i];
+    if (!goal && waypoint) goal = waypoint;
+    if (goal) {
+      toScreen(goal.x, goal.z, tmpS);
+      g.save();
+      g.setLineDash([8, 7]);
+      g.strokeStyle = '#ffd34d';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(px, py);
+      g.lineTo(tmpS.x, tmpS.y);
+      g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = 'rgba(255, 211, 77, 0.28)';
+      g.strokeStyle = '#ffd34d';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.arc(tmpS.x, tmpS.y, 17, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.font = '800 13px system-ui, sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'bottom';
+      g.lineWidth = 4;
+      g.strokeStyle = 'rgba(14, 26, 32, 0.95)';
+      g.fillStyle = '#ffd34d';
+      g.strokeText('GO HERE', tmpS.x, tmpS.y - 22);
+      g.fillText('GO HERE', tmpS.x, tmpS.y - 22);
+      g.restore();
+    }
+    // You: a big cyan halo, the arrow and a label, unlike every other icon.
+    g.save();
+    g.fillStyle = 'rgba(80, 220, 255, 0.28)';
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.arc(px, py, 24, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.restore();
+    drawArrow(g, px, py, st.heading + Math.PI / 2, 18);
+    g.save();
+    g.font = '800 14px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'top';
+    g.lineWidth = 4;
+    g.strokeStyle = 'rgba(14, 26, 32, 0.95)';
+    g.fillStyle = '#7fe8ff';
+    g.strokeText('YOU', px, py + 28);
+    g.fillText('YOU', px, py + 28);
+    g.restore();
   }
 
   function schedule() {

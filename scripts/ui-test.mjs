@@ -413,7 +413,7 @@ try {
   check('lefty: pedals on the left', lg.x < 150 && lbk.x > lg.x && lbk.x < 260, JSON.stringify([lg.x, lbk.x]));
   check('lefty: wheel on the right', lw.x > 915 - 200, JSON.stringify(lw));
   await openFan();
-  const lh = await center('Handbrake');
+  const lh = await center('Horn');
   const lmore = await center('More controls');
   check('lefty: more button and fan on the left, fan grows upward from it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y < lmore.y, JSON.stringify([lh.x, lmore.x]));
   await tapMore();
@@ -456,8 +456,7 @@ try {
   await down(3, brake.x, brake.y);
   check('brake held -> 1', (await read('rw.input.brake')) === 1);
   await up(3);
-  await openFan();
-  const hb = await center('Handbrake');
+  const hb = await center('Handbrake'); // a main button now, no fan needed
   await down(3, hb.x, hb.y);
   check('handbrake true while held', (await read('rw.input.handbrake')) === true);
   await up(3);
@@ -742,7 +741,7 @@ try {
         await checkLayout(`minimal ${tag}`);
         const n = await buttonCount();
         counts[m] = Math.max(counts[m] || 0, n);
-        check(`minimal ${tag}: at most 6 buttons at once (${n})`, n <= 6, String(n));
+        check(`minimal ${tag}: at most 6 buttons at once (7 in a car with the handbrake) (${n})`, n <= (m === 'car' ? 7 : 6), String(n));
         await shot(`min-${fileTag}-idle.png`);
         await tapMore();
         check(`minimal ${tag}: more button opens the fan`, await fanIsOpen());
@@ -813,7 +812,6 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   // Handbrake held while steering and on the gas: the fan stays open until release.
-  await tapMore();
   const hb2 = await center('Handbrake');
   const wbh = await wheelBox();
   const gs = await center('Gas');
@@ -823,14 +821,13 @@ try {
   await turn(2, wbh, 0, 130);
   await down(3, gs.x, gs.y);
   await page.waitForTimeout(4600);
-  check('hold HAND + steer + gas together past 4 s: fan still open', await fanIsOpen());
+  check('hold HAND + steer + gas together past 4 s: HAND is a main button, always visible', await page.locator('[aria-label="Handbrake"]').isVisible());
   const trio = await read('[rw.input.handbrake, rw.input.steer, rw.input.throttle]');
   check('handbrake, steer 1 and gas all held', trio.join() === 'true,1,1', trio.join());
   await shot('car-handbrake-hold-915x412.png');
   await up(1);
   await page.waitForTimeout(40);
-  check('releasing HAND folds the fan, steer and gas stay', !(await fanIsOpen())
-    && (await read('[rw.input.handbrake, rw.input.steer, rw.input.throttle]')).join() === 'false,1,1');
+  check('releasing HAND: steer and gas stay', (await read('[rw.input.handbrake, rw.input.steer, rw.input.throttle]')).join() === 'false,1,1');
   await up(2); await up(3);
   check('steer and gas released', (await read('[rw.input.steer, rw.input.throttle]')).join() === '0,0');
 

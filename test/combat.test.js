@@ -1,3 +1,6 @@
+import { RULES as CLASSIC } from '../src/core/weapons.js';
+CLASSIC.unlimitedAmmo = false; // these tests check the classic rules
+CLASSIC.invulnerable = false;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEvents } from '../src/core/events.js';

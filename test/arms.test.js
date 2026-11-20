@@ -1,4 +1,7 @@
 // Explosives and craft weapons (docs/ARMS.md sections 1, 2, 7).
+import { RULES as CLASSIC } from '../src/core/weapons.js';
+CLASSIC.unlimitedAmmo = false; // these tests check the classic rules
+CLASSIC.invulnerable = false;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEvents } from '../src/core/events.js';
@@ -76,14 +79,14 @@ test('weapons: sticky row, blastScale, mounts table with invented names', () => 
   const rows = {
     cannon: ['Thudder', 'shell', 220, 0.4, 300, 1, 2.5], coax: ['Rattlecoax', 'hitscan', 14, 10, 60, 50, 2],
     nosegun: ['Hailbox', 'hitscan', 18, 15, 220, 120, 2], chingun: ['Chatter Pod', 'hitscan', 10, 8, 120, 60, 2],
-    missile: ['Gullseeker', 'missile', 260, 1, 600, 2, 3], bomb: ['Pelican Drop', 'bomb', 0, 3, 0, 6, 5],
+    missile: ['Gullseeker', 'missile', 900, 1, 600, 2, 3], bomb: ['Pelican Drop', 'bomb', 0, 3, 0, 6, 5],
   };
   for (const id of Object.keys(rows)) {
     const m = MOUNTS[id];
     assert.deepEqual([m.name, m.type, m.dmg, m.rate, m.range, m.mag, m.reload], rows[id], id);
   }
-  assert.deepEqual([MOUNTS.missile.speed, MOUNTS.missile.turn, MOUNTS.missile.life, MOUNTS.missile.blast], [95, 2.4, 6, 7]);
-  assert.deepEqual([MOUNTS.bomb.blast, MOUNTS.bomb.blastScale, MOUNTS.cannon.aiSpeed], [11, 1.6, 45]);
+  assert.deepEqual([MOUNTS.missile.speed, MOUNTS.missile.turn, MOUNTS.missile.life, MOUNTS.missile.blast], [95, 2.4, 6, 9]);
+  assert.deepEqual([MOUNTS.bomb.blast, MOUNTS.bomb.blastScale, MOUNTS.cannon.aiSpeed], [14, 9, 45]);
   assert.deepEqual(TYPE_CAPS, { missile: 4, bomb: 6, shell: 4, thrown: 6 });
   assert.equal(explosionSize(5), 'small');
   assert.equal(explosionSize(8), 'big');
@@ -322,7 +325,7 @@ test('bomb: ballistic from the craft velocity, predictDrop within 1 m, huge blas
   for (let i = 0; i < 600 && !ex.length; i++) steps(g, 1);
   assert.equal(ex.length, 1);
   assert.ok(Math.hypot(ex[0].x - pd.hx, ex[0].z - pd.hz) < 1, `hit ${ex[0].x},${ex[0].z} vs ${pd.hx},${pd.hz}`);
-  assert.equal(ex[0].radius, 11);
+  assert.equal(ex[0].radius, 14);
   assert.equal(ex[0].size, 'huge');
   assert.ok(target.health < target.spec.health || Math.abs(target.x - pd.hx) > 11);
   // Over the sea: splash, no explosion.
@@ -543,4 +546,10 @@ test('determinism and no NaN over thousands of steps of mixed fire', () => {
     return [cars.map((c) => +c.health.toFixed(6)), g.actors.map((a) => +a.hp.toFixed(6)), jet.health];
   };
   assert.deepEqual(run(), run());
+});
+
+test('bombs and missiles wreck an ordinary car (700 to 1100 health) near the blast centre', () => {
+  const car = (k) => 120 * k * 1.5;
+  assert.ok(car(0.7) * MOUNTS.bomb.blastScale >= 1100, 'bomb within 30% of the radius');
+  assert.ok(MOUNTS.missile.dmg + car(1) * MOUNTS.missile.blastScale >= 1100, 'missile direct hit');
 });
