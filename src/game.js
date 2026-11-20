@@ -291,6 +291,9 @@ export function createGame({ canvas, uiRoot }) {
     }
     game.time += dt;
     game.world.time = game.time;
+    if (input.consume('camera')) {
+      hud.toast('Camera: ' + chase.cycleView(), 1.2);
+    }
     const p = game.player;
     const vs = game.vehicles;
 

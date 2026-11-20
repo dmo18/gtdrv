@@ -18,6 +18,36 @@ const MODES = {
   heli: { dist: 15, height: 6.5, lookHeight: 1.8, lookAhead: 3, baseFov: 62, follow: 6, turn: 0.55, pitchShare: 0, rollShare: 0.1 },
 };
 
+// Selectable views for the VIEW button. Each view overrides parts of the
+// mode above. A negative `dist` puts the camera AHEAD of the target (bumper
+// or cockpit view); those views skip the building pull-in.
+const VIEWS = {
+  car: [
+    { name: 'Chase' },
+    { name: 'Far chase', dist: 12.5, height: 4.8, lookHeight: 1.0, lookAhead: 7, baseFov: 66 },
+    { name: 'Bumper', dist: -2.2, height: -0.55, lookHeight: -0.45, lookAhead: 40, baseFov: 74, follow: 40, turn: 2.4 },
+  ],
+  foot: [
+    { name: 'Chase' },
+    { name: 'Close', dist: 2.8, height: 1.7, lookHeight: 1.4, lookAhead: 0.4 },
+  ],
+  boat: [
+    { name: 'Chase' },
+    { name: 'Far chase', dist: 18, height: 6.5, lookHeight: 1.2, lookAhead: 8, baseFov: 66 },
+    { name: 'Bow', dist: -2.4, height: -0.1, lookHeight: -0.2, lookAhead: 40, baseFov: 74, follow: 30, turn: 1.6 },
+  ],
+  plane: [
+    { name: 'Chase' },
+    { name: 'Far chase', dist: 28, height: 7, lookHeight: 1.8, lookAhead: 20, baseFov: 66 },
+    { name: 'Cockpit', dist: -1.4, height: 0.5, lookHeight: 0.4, lookAhead: 60, baseFov: 78, follow: 40, turn: 1.2, pitchShare: 0.9, rollShare: 0.8 },
+  ],
+  heli: [
+    { name: 'Chase' },
+    { name: 'Far chase', dist: 26, height: 10, lookHeight: 2, lookAhead: 6, baseFov: 66 },
+    { name: 'Cockpit', dist: -1.8, height: 0.7, lookHeight: 0.3, lookAhead: 50, baseFov: 80, follow: 30, turn: 0.9, rollShare: 0.5 },
+  ],
+};
+
 const MIN_CLEAR = 0.6; // camera never gets closer than this to ground/sea
 const SAMPLES = 10;
 // Feel tuning per mode: turn look (metres of look shift per rad/s at
@@ -35,6 +65,19 @@ const MAX_BUZZ = 0.0035; // radians at very high speed
 
 export function createChaseCamera(camera) {
   let mode = MODES.car;
+  let modeKey = 'car';
+  const viewIdx = { car: 0, foot: 0, boat: 0, plane: 0, heli: 0 }; // remembered per kind
+  let viewName = 'Chase';
+  // Build the active mode from the base mode plus the chosen view.
+  function applyMode() {
+    const base = MODES[modeKey] || MODES.car;
+    const list = VIEWS[modeKey] || VIEWS.car;
+    const view = list[viewIdx[modeKey] % list.length] || list[0];
+    mode = Object.assign({}, base, view);
+    viewName = view.name;
+    feel = FEEL[modeKey] || FEEL.car;
+    curDist = mode.dist;
+  }
   let camHeading = 0; // smoothed follow heading
   let camPitch = 0; // smoothed share of the target's climb angle
   let camRoll = 0; // smoothed share of the target's bank
@@ -87,7 +130,7 @@ export function createChaseCamera(camera) {
     const rise = mode.height + orbitPitch;
     // Pull in when something solid is between the target and the camera.
     let want = mode.dist;
-    if (collision) {
+    if (collision && mode.dist > 0.5) {
       const reach = mode.dist + 0.5;
       const hit = clearDist(collision, target.x, baseY + mode.lookHeight, target.z, bx, bz, reach, baseY + rise - sp * reach);
       if (hit < reach) want = Math.max(1.2, hit - 0.6);
@@ -195,7 +238,7 @@ export function createChaseCamera(camera) {
       // Drag to orbit.
       if (input && (input.lookX || input.lookY)) {
         orbitYaw += input.lookX * 0.006;
-        orbitPitch = clamp(orbitPitch + input.lookY * 0.01, -mode.height + 0.6, 6);
+        orbitPitch = clamp(orbitPitch + input.lookY * 0.01, Math.min(0, -mode.height + 0.6), 6);
         input.lookX = 0;
         input.lookY = 0;
         sinceDrag = 0;
@@ -240,8 +283,21 @@ export function createChaseCamera(camera) {
       updateFov(Math.abs(target.speed || 0), 0, true);
     },
     setMode(m) {
-      mode = MODES[m] || MODES.car;
-      feel = FEEL[m] || FEEL.car;
+      modeKey = MODES[m] ? m : 'car';
+      applyMode();
+    },
+    // The VIEW button: next camera view for the current kind of craft.
+    // Returns the new view's name for a toast.
+    cycleView() {
+      const list = VIEWS[modeKey] || VIEWS.car;
+      viewIdx[modeKey] = (viewIdx[modeKey] + 1) % list.length;
+      applyMode();
+      orbitYaw = 0;
+      orbitPitch = 0;
+      return viewName;
+    },
+    getView() {
+      return viewName;
     },
     // Impact shake: strength is the closing speed in m/s.
     kick(strength) {
