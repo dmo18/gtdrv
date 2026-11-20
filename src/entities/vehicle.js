@@ -103,7 +103,7 @@ export function damageVehicle(v, amount) {
 function impactDamage(c) {
   if (c <= 4) return 0;
   const e = c - 4;
-  return e * 12 + e * e * 0.3;
+  return e * 8 + e * e * 0.15;
 }
 
 // Offset of collision circle i (0 front, 1 middle, 2 rear) along the car.
@@ -169,7 +169,7 @@ export function stepVehicle(v, controls, dt, world) {
   const driving = throttle > 0.02 || (brake > 0.02 && vf <= 0.8 && !v.wrecked);
   if (!driving) {
     // Engine braking and rolling resistance; settles to a full stop.
-    vf = approach(vf, 0, (1.6 + 0.02 * Math.abs(vf)) * dt);
+    vf = approach(vf, 0, ((v.wrecked ? 3 : 1.6) + 0.02 * Math.abs(vf)) * dt);
   }
   if (handbrake) vf = approach(vf, 0, 5 * dt);
 
@@ -279,7 +279,8 @@ function collideStatic(v, col) {
     if (vn >= 0) continue;
     const close = -vn;
     if (close > maxClose) maxClose = close;
-    const j = -(1 + 0.2) * vn; // change in normal velocity
+    // Restitution ~0.2, softer for big crashes so wrecks do not rebound far.
+    const j = -(1 + 0.2 / (1 + close / 25)) * vn; // change in normal velocity
     let dvx = j * nx, dvz = j * nz;
     // Scrape: lose some tangential speed.
     const tx = -nz, tz = nx;
