@@ -576,6 +576,9 @@ const SHOTS = {
 // Low-frequency beds rendered at half rate (less memory and work).
 const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tail']);
 
+// Made after the bank is playable: ambience beds and calls, the siren.
+const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh']);
+
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = { thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2 };
 
@@ -610,7 +613,8 @@ function impulse(ctx, rng) {
 
 // ---- offline filtering ----
 const WARM = 0.25; // seconds of filter run-in rendered before each loop
-const MAX_CH = 32;
+const MAX_CH = 16;
+const ENGINE_SR = 16000; // engine loops: content stays below 7 kHz
 
 function offlineCtor() {
   if (typeof window === 'undefined') return null;
@@ -678,13 +682,17 @@ function renderOffline(Off, specs, sr) {
 }
 
 // ---- the bank ----
-// Build the job list. `first` is an engine character to make first.
-export function createBank(ctx, { first = null } = {}) {
+// Build the job list. Engines are made per character on request (the
+// player's and the common traffic engine at unlock, others when first
+// heard), so the start-up cost stays small.
+export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
   const rng = createRng(0x5a17);
   const buffers = Object.create(null);
   const loops = [];
   let bytes = 0;
   const jobs = [];
+  let next = 0;
+  let waiting = null;
   const put = (name, data, loop, sr = SR) => {
     const b = ctx.createBuffer(1, data.length, sr);
     if (b.copyToChannel) b.copyToChannel(data, 0);
@@ -694,110 +702,145 @@ export function createBank(ctx, { first = null } = {}) {
     if (loop) loops.push(name);
   };
   const Off = offlineCtor();
-  const pending = []; // { spec, done(data) }
-  const stats = { offline: 0, js: 0, offlineMs: 0 };
+  const stats = { offline: 0, js: 0, offlineMs: 0, engines: [] };
+  const flags = { essential: false, extras: false };
 
-  // Engines: 4 rpm points x 2 loads per character, normalised together.
-  const chars = Object.keys(ENGINES);
-  if (first && chars.includes(first)) {
-    chars.splice(chars.indexOf(first), 1);
-    chars.unshift(first);
+  // A batch: jobs that each make one filter spec, a job that starts the
+  // offline renders, and (later in the queue) a wait plus one finishing
+  // job per spec (JS filtering for any the offline pass could not do).
+  function batch(makers) {
+    const items = [];
+    const renders = [];
+    let t0 = 0;
+    for (const mk of makers) {
+      jobs.push(() => {
+        const it = mk();
+        if (it) items.push(it);
+      });
+    }
+    jobs.push(() => {
+      if (!Off) return;
+      t0 = nowMs();
+      const groups = new Map();
+      for (const it of items) {
+        const k = it.spec.sr;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(it);
+      }
+      const kicks = [];
+      for (const [sr, list] of groups) {
+        for (let i = 0; i < list.length; i += MAX_CH) {
+          const chunk = list.slice(i, i + MAX_CH);
+          kicks.push(() => {
+            try {
+              renders.push(renderOffline(Off, chunk.map((it) => it.spec), sr).then((datas) => {
+                chunk.forEach((it, j) => {
+                  it.data = datas[j];
+                });
+              }, () => {}));
+            } catch {
+              /* falls back to JS */
+            }
+          });
+        }
+      }
+      jobs.splice(next, 0, ...kicks);
+    });
+    // returns the jobs that complete the batch, to queue where wanted
+    return () => {
+      jobs.push(() => (renders.length ? Promise.all(renders).then(() => {
+        stats.offlineMs += nowMs() - t0;
+      }) : null));
+      jobs.push(() => {
+        const fin = items.map((it) => () => {
+          let data = it.data;
+          if (data) {
+            stats.offline++;
+            data = it.spec.finish ? it.spec.finish(data) : data;
+          } else {
+            stats.js++;
+            data = runSpecJS(it.spec);
+          }
+          it.spec = null;
+          it.done(data);
+        });
+        jobs.splice(next, 0, ...fin);
+      });
+    };
   }
-  for (const ch of chars) {
+
+  // Engines: 6 rpm points x 2 loads per character, normalised together.
+  const requested = new Set();
+  function engineMakers(ch) {
     const pts = pointsFor(ch);
     const set = [];
     const total = pts.length * 2;
+    const makers = [];
     for (let i = 0; i < pts.length; i++) {
       for (const load of [1, 0]) {
-        jobs.push(() => {
+        makers.push(() => {
+          R.sr = ENGINE_SR;
+          const sp = engineSpec(ch, pts[i], load, rng, ENGINE_SR);
           R.sr = SR;
-          const sp = engineSpec(ch, pts[i], load, rng, SR);
-          pending.push({
+          return {
             spec: sp,
             done(data) {
               set.push({ i, load, data });
               if (set.length < total) return;
               normalizeSet(set.map((q) => q.data));
-              for (const q of set) put(`eng:${ch}:${q.i}:${q.load ? 'on' : 'off'}`, q.data, true);
+              for (const q of set) put(`eng:${ch}:${q.i}:${q.load ? 'on' : 'off'}`, q.data, true, ENGINE_SR);
+              stats.engines.push(ch);
             },
-          });
+          };
         });
       }
     }
+    return makers;
   }
-  for (const name of Object.keys(LOOPS)) {
+  const initial = [];
+  for (const ch of [first, ...engines]) {
+    if (ch && ENGINES[ch] && !requested.has(ch)) {
+      requested.add(ch);
+      initial.push(...engineMakers(ch));
+    }
+  }
+  const loopMaker = (name) => {
     const sr = LOW_RATE.has(name) ? SR / 2 : SR;
-    jobs.push(() => {
+    return () => {
       R.sr = sr;
       const r = LOOPS[name](rng);
       R.sr = SR;
-      if (r instanceof Float32Array) put(name, r, true, sr);
-      else pending.push({ spec: r, done: (data) => put(name, data, true, sr) });
-    });
-  }
-
-  // Kick off the offline renders, then make the one-shots meanwhile.
-  let renders = null;
-  jobs.push(() => {
-    if (!Off) return;
-    const t0 = nowMs();
-    const groups = new Map();
-    for (const p of pending) {
-      const k = p.spec.sr;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(p);
-    }
-    const all = [];
-    for (const [sr, list] of groups) {
-      for (let i = 0; i < list.length; i += MAX_CH) {
-        const chunk = list.slice(i, i + MAX_CH);
-        let pr;
-        try {
-          pr = renderOffline(Off, chunk.map((p) => p.spec), sr);
-        } catch {
-          continue;
-        }
-        all.push(pr.then((datas) => {
-          chunk.forEach((p, j) => {
-            p.data = datas[j];
-          });
-        }, () => {}));
+      if (r instanceof Float32Array) {
+        put(name, r, true, sr);
+        return null;
       }
-    }
-    renders = Promise.all(all).then(() => {
-      stats.offlineMs = nowMs() - t0;
-    });
-  });
-  for (const name of Object.keys(SHOTS)) {
+      return { spec: r, done: (data) => put(name, data, true, sr) };
+    };
+  };
+  const shotJobs = (name) => {
     const v = SHOT_VARIANTS[name] || 1;
     for (let k = 0; k < v; k++) jobs.push(() => put(v > 1 ? `${name}${k}` : name, SHOTS[name](rng), false));
-  }
+  };
+  for (const name of Object.keys(LOOPS)) if (!EXTRA.has(name)) initial.push(loopMaker(name));
+  const complete = batch(initial);
+  // one-shots are made while the offline renders run
+  for (const name of Object.keys(SHOTS)) if (!EXTRA.has(name)) shotJobs(name);
   jobs.push(() => {
     buffers.ir = impulse(ctx, rng);
     bytes += buffers.ir.length * 2 * 4;
   });
-  // Wait for the renders, then finish every spec (JS filtering for any
-  // the offline pass could not do).
-  jobs.push(() => renders);
+  complete();
+  // everything needed to play is ready here; ambience extras follow
   jobs.push(() => {
-    for (const p of pending) {
-      jobs.push(() => {
-        let data = p.data;
-        if (data) {
-          stats.offline++;
-          data = p.spec.finish ? p.spec.finish(data) : data;
-        } else {
-          stats.js++;
-          data = runSpecJS(p.spec);
-        }
-        p.spec.parts = null;
-        p.done(data);
-      });
-    }
+    flags.essential = true;
+  });
+  const completeExtra = batch(Object.keys(LOOPS).filter((n) => EXTRA.has(n)).map(loopMaker));
+  for (const name of Object.keys(SHOTS)) if (EXTRA.has(name)) shotJobs(name);
+  completeExtra();
+  jobs.push(() => {
+    flags.extras = true;
   });
 
-  let next = 0;
-  let waiting = null;
   return {
     buffers,
     loops,
@@ -805,8 +848,21 @@ export function createBank(ctx, { first = null } = {}) {
     get bytes() {
       return bytes;
     },
+    get essential() {
+      return flags.essential;
+    },
+    get extras() {
+      return flags.extras;
+    },
     get done() {
       return next >= jobs.length && !waiting;
+    },
+    // Queue an engine character; returns true if it was newly queued.
+    request(ch) {
+      if (!ch || !ENGINES[ch] || requested.has(ch)) return false;
+      requested.add(ch);
+      batch(engineMakers(ch))();
+      return true;
     },
     // Run jobs for about budgetMs. Returns true when everything is done,
     // false when there is more, or a promise to wait for.
@@ -814,12 +870,7 @@ export function createBank(ctx, { first = null } = {}) {
       if (waiting) return waiting;
       const t0 = nowMs();
       while (next < jobs.length) {
-        const j0 = nowMs();
         const r = jobs[next++]();
-        const jt = nowMs() - j0;
-        const cat = next <= 64 ? 'eng' : next <= 85 ? 'loops' : next === 86 ? 'kick' : next <= 108 ? 'shots' : 'fin';
-        stats.cat = stats.cat || {};
-        stats.cat[cat] = Math.round(((stats.cat[cat] || 0) + jt) * 10) / 10;
         if (r && typeof r.then === 'function') {
           waiting = r.then(() => {
             waiting = null;

@@ -83,7 +83,7 @@ function makeMaterials(T) {
     plainMat: std({ roughness: 0.82 }),
     detailMat: std({ map: T.details.map, emissiveMap: T.details.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7 }),
     glowMat: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
-    glass: std({ map: T.glass.map, emissiveMap: T.glass.emissiveMap, roughnessMap: T.glass.roughnessMap, metalnessMap: T.glass.metalnessMap, roughness: 1, metalness: 1, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.25 }),
+    glass: std({ map: T.glass.map, emissiveMap: T.glass.emissiveMap, roughnessMap: T.glass.roughnessMap, metalnessMap: T.glass.metalnessMap, roughness: 1, metalness: 0.6, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.7 }),
     brick: std({ map: T.brick.map, emissiveMap: T.brick.emissiveMap, normalMap: T.brick.normalMap, normalScale: ns(0.5), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.9 }),
     office: std({ map: T.office.map, emissiveMap: T.office.emissiveMap, roughnessMap: T.office.roughnessMap, metalnessMap: T.office.metalnessMap, roughness: 1, metalness: 1, emissive: 0xffffff, emissiveIntensity: 0 }),
     stucco: std({ map: T.stucco.map, emissiveMap: T.stucco.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
@@ -123,6 +123,7 @@ function makeMaterials(T) {
 }
 
 export function buildCityMesh(city, collision) {
+  const tStart = typeof performance !== 'undefined' ? performance.now() : 0;
   const rng = createRng(city.seed + 99);
   const group = new THREE.Group();
   group.name = 'city';
@@ -519,6 +520,7 @@ export function buildCityMesh(city, collision) {
     windsock,
     tiered,
     textures: T,
+    buildMs: (typeof performance !== 'undefined' ? performance.now() : 0) - tStart,
   };
   return group;
 }

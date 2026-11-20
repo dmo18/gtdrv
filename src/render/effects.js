@@ -45,6 +45,10 @@ function makeAtlas() {
   const g = c.getContext('2d');
   g.clearRect(0, 0, S * 2, S * 2);
   // Puff: a few overlapping soft blobs for a billowy edge.
+  g.save();
+  g.beginPath();
+  g.rect(0, 0, S, S);
+  g.clip();
   for (let k = 0; k < 9; k++) {
     const a = (k / 9) * Math.PI * 2;
     const r = k === 0 ? 0 : S * 0.16;
@@ -57,6 +61,7 @@ function makeAtlas() {
     g.fillStyle = gr;
     g.fillRect(0, 0, S, S);
   }
+  g.restore();
   // Ring.
   {
     const x = S * 1.5, y = S / 2;
@@ -68,24 +73,21 @@ function makeAtlas() {
     g.fillStyle = gr;
     g.fillRect(S, 0, S, S);
   }
-  // Spark streak: horizontal soft line.
+  // Spark streak: a radial glow squashed into a horizontal line.
   {
-    const y = S * 1.5;
-    const gr = g.createLinearGradient(0, y - S * 0.12, 0, y + S * 0.12);
-    gr.addColorStop(0, 'rgba(255,255,255,0)');
-    gr.addColorStop(0.5, 'rgba(255,255,255,1)');
+    g.save();
+    g.beginPath();
+    g.rect(0, S, S, S);
+    g.clip();
+    g.translate(S / 2, S * 1.5);
+    g.scale(1, 0.14);
+    const gr = g.createRadialGradient(0, 0, 0, 0, 0, S * 0.46);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.5, 'rgba(255,255,255,0.6)');
     gr.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = gr;
-    g.fillRect(S * 0.05, y - S * 0.12, S * 0.9, S * 0.24);
-    g.globalCompositeOperation = 'destination-in';
-    const gx = g.createLinearGradient(0, 0, S, 0);
-    gx.addColorStop(0, 'rgba(0,0,0,0)');
-    gx.addColorStop(0.3, 'rgba(0,0,0,1)');
-    gx.addColorStop(0.8, 'rgba(0,0,0,1)');
-    gx.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gx;
-    g.fillRect(0, S, S, S);
-    g.globalCompositeOperation = 'source-over';
+    g.fillRect(-S / 2, -S * 3.5, S, S * 7);
+    g.restore();
   }
   // Glow.
   {
@@ -98,10 +100,19 @@ function makeAtlas() {
     g.fillStyle = gr;
     g.fillRect(S, S, S, S);
   }
-  const t = new THREE.CanvasTexture(c);
+  return toData(g, S * 2);
+}
+
+// Copy a canvas into a DataTexture (row 0 = canvas top, no flip), which
+// uploads reliably everywhere.
+function toData(g, S) {
+  const img = g.getImageData(0, 0, S, S);
+  const t = new THREE.DataTexture(new Uint8Array(img.data.buffer.slice(0)), S, S, THREE.RGBAFormat);
   t.colorSpace = THREE.NoColorSpace;
   t.generateMipmaps = true;
   t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
   return t;
 }
 
@@ -117,9 +128,7 @@ function makeShadowTex() {
   if (g.roundRect) g.roundRect(m, m, S - 2 * m, S - 2 * m, 10);
   else g.rect(m, m, S - 2 * m, S - 2 * m);
   g.fill();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.NoColorSpace;
-  return t;
+  return toData(g, S);
 }
 
 // ---- billboard particle system ---------------------------------------------------
@@ -146,7 +155,7 @@ void main() {
     float l = length(d);
     d = l > 1e-4 ? d / l : vec2(1.0, 0.0);
     vec2 p = vec2(-d.y, d.x);
-    mv.xy += d * c.x * (size + l * 0.045) + p * c.y * size * 0.22;
+    mv.xy += d * c.x * (size + l * 0.06) + p * c.y * size * 0.35;
   } else if (mode > 0.5) {
     mv = viewMatrix * vec4(iPos + vec3(r.x, 0.0, r.y), 1.0);
   } else {
@@ -154,7 +163,7 @@ void main() {
     mv.xy += r;
   }
   gl_Position = projectionMatrix * mv;
-  vUv = (c + 0.5) * 0.5 + vec2(mod(cell, 2.0), 1.0 - floor(cell / 2.0)) * 0.5;
+  vUv = vec2(c.x + 0.5, 0.5 - c.y) * 0.5 + vec2(mod(cell, 2.0), floor(cell / 2.0)) * 0.5;
   vCol = vec4(iCol, iData.y);
 }
 `;
@@ -623,7 +632,7 @@ export function createEffects(game) {
     for (let i = 0; i < k; i++) {
       const sp = speed * (0.3 + rnd() * 0.8);
       const vx = nx * sp * 0.5 + rs() * sp, vz = nz * sp * 0.5 + rs() * sp;
-      const j = emitP(B, x + rs() * 0.15, y + rnd() * 0.25, z + rs() * 0.15, vx, 1 + rnd() * sp * 0.6, vz, 0.25 + rnd() * 0.45, 0.06, 0.03, 1.6, 1, 0.62 + rnd() * 0.25, 0.25, 2 + 8, 9.8, 0.4);
+      const j = emitP(B, x + rs() * 0.15, y + rnd() * 0.25, z + rs() * 0.15, vx, 1 + rnd() * sp * 0.6, vz, 0.3 + rnd() * 0.5, 0.16, 0.08, 3, 1, 0.62 + rnd() * 0.25, 0.25, 2 + 8, 9.8, 0.4);
       if (j >= 0) {
         B.fadeIn[j] = 0;
         B.floor[j] = 0.02;
@@ -752,8 +761,8 @@ export function createEffects(game) {
       // Tyre smoke from sliding / burnouts on tarmac, dust off it.
       if (d2 < FX_RANGE * FX_RANGE) {
         if (road && (sliding || hand) && rnd() < (slip * 1.3 + (hand ? 0.4 : 0)) * qq * 0.9) {
-          smoke(p.x + rs() * 0.2, 0.25, p.z + rs() * 0.2, -fwdx * spd * 0.12 + rs() * 0.6, 0.5 + rnd() * 0.5, -fwdz * spd * 0.12 + rs() * 0.6,
-            1.8 + rnd() * 1.4, 0.7, 3.4 + slip * 1.6, 0.34, 0.86, 0.86, 0.87, 0.35, 1.7);
+          smoke(p.x + rs() * 0.2, 0.3, p.z + rs() * 0.2, (v.vx || 0) * 0.25 + rs() * 0.7, 0.9 + rnd() * 1.1, (v.vz || 0) * 0.25 + rs() * 0.7,
+            1.6 + rnd() * 1.4, 0.5, 3.6 + slip * 1.8, 0.2, 0.88, 0.88, 0.9, 0.7, 1.3);
         }
         if (!road && spd > 4 && rnd() < clamp(spd / 22, 0, 1) * qq * 0.7) {
           smoke(p.x + rs() * 0.3, 0.2, p.z + rs() * 0.3, -fwdx * spd * 0.2 + rs(), 0.6 + rnd() * 0.6, -fwdz * spd * 0.2 + rs(),
@@ -812,7 +821,7 @@ export function createEffects(game) {
     const fwdx = Math.cos(v.heading), fwdz = Math.sin(v.heading);
     // Bow spray to both sides.
     if (spd > 4) {
-      s.spray += dt * clamp(spd / 14, 0, 1.6) * 30 * qq * (1 - 0.5 * (v.planing || 0) + 0.2);
+      s.spray += dt * clamp(spd / 14, 0, 1.6) * 55 * qq * (1 - 0.5 * (v.planing || 0) + 0.2);
       while (s.spray > 1) {
         s.spray -= 1;
         const side = rnd() < 0.5 ? 1 : -1;
@@ -820,20 +829,21 @@ export function createEffects(game) {
         const p = toWorld(v, fx_, side * Wd * 0.48);
         const out = 1.2 + spd * 0.12;
         const rx = -Math.sin(v.heading) * side, rz = Math.cos(v.heading) * side;
-        spray(p.x, wy + 0.15, p.z, rx * out + fwdx * spd * 0.3, 1.2 + rnd() * 1.4 + spd * 0.06, rz * out + fwdz * spd * 0.3,
-          0.55 + rnd() * 0.35, 0.25 + L * 0.02, 0.9 + L * 0.06, 0.5);
+        spray(p.x, wy + 0.1, p.z, rx * out + fwdx * spd * 0.7, 0.8 + rnd() * 1.0 + spd * 0.03, rz * out + fwdz * spd * 0.7,
+          0.35 + rnd() * 0.3, 0.25 + L * 0.02, 1.0 + L * 0.07, 0.6);
       }
     }
     // Rooster tail behind fast small boats.
     const small = spec.hull === 'jetski' || spec.hull === 'runabout' || spec.hull === 'inflatable';
     if (small && (v.planing || 0) > 0.4 && spd > 9 && (v.throttle || 0) > 0.3) {
-      s.acc += dt * 34 * qq * (v.planing || 0);
+      s.acc += dt * 75 * qq * (v.planing || 0);
       while (s.acc > 1) {
         s.acc -= 1;
         const p = toWorld(v, -L * 0.5 - 0.2, rs() * 0.15);
         const up = 3 + rnd() * 3 + spd * 0.08;
-        spray(p.x, wy + 0.1, p.z, fwdx * (spd * 0.55 - 2 - rnd() * 3) + rs() * 0.6, up, fwdz * (spd * 0.55 - 2 - rnd() * 3) + rs() * 0.6,
-          0.8 + rnd() * 0.5, 0.3, 1.5, 0.55);
+        const back = spd * 0.6 - 2 - rnd() * 4;
+        spray(p.x, wy + 0.1, p.z, fwdx * back + rs() * 1.4, up, fwdz * back + rs() * 1.4,
+          0.7 + rnd() * 0.6, 0.45, 2.4, 0.38);
       }
     }
     // Landing after a hop.

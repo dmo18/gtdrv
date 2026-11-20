@@ -72,7 +72,7 @@ export function createAudio(game) {
   const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1 };
   let disposed = false;
   const unsubs = [];
-  const gen = { startMs: 0, wallMs: 0, cpuMs: 0, maxSliceMs: 0, slices: 0 };
+  const gen = { startMs: 0, wallMs: 0, fullMs: 0, cpuMs: 0, lazyMs: 0, maxSliceMs: 0, slices: 0 };
 
   let acc = 0;
   let placeAcc = PLACE_EVERY;
@@ -258,6 +258,8 @@ export function createAudio(game) {
         if (st.gear > 0 && c.gear > st.gear) st.shiftT = 0.14;
         st.gear = c.gear;
       }
+      // the gearbox reports its own shift: cut the load layer meanwhile
+      if (Number.isFinite(c.shiftT) && c.shiftT > 0 && st.shiftT <= 0) st.shiftT = Math.min(0.2, c.shiftT);
       rate = 10;
     } else if (c.kind === 'car') {
       const G = e.gears || 5;
@@ -301,7 +303,7 @@ export function createAudio(game) {
   // ---- the player's craft ----
   const pv = {
     key: '', craft: null, rig: null, ch: null, sim: newSim(), startT: 0, started: true,
-    spool: 0, prevY: 0, prevVy: 0, slapT: 0, popT: 0, offRoad: false,
+    spool: 0, prevY: 0, prevVy: 0, slapT: 0, popT: 0, offRoad: false, pending: false,
   };
   let enterT = -9;
   let enterCrank = false;
@@ -370,13 +372,18 @@ export function createAudio(game) {
       pv.spool = 0;
       pv.prevY = c ? fin(c.y) : 0;
       pv.prevVy = 0;
+      pv.pending = !!(c && c.spec);
       if (c && c.spec) {
-        pv.rig = buildPlayerRig(c);
         pv.ch = engineFor(c);
         const fresh = now - enterT < 0.6;
         pv.startT = fresh && enterCrank ? enterT + 1.55 : now;
         pv.started = !(fresh && enterCrank);
       }
+    }
+    if (pv.pending && engineReady(pv.ch)) {
+      pv.pending = false;
+      pv.rig = buildPlayerRig(c);
+      if (now > pv.startT) pv.startT = now;
     }
     updateHorn(c, now);
     const r = pv.rig;
@@ -559,7 +566,7 @@ export function createAudio(game) {
     }
     for (let i = 0; i < OTHERS; i++) {
       const v = near[i];
-      if (!v || slots.some((s) => s.v === v)) continue;
+      if (!v || slots.some((s) => s.v === v) || !engineReady(engineFor(v))) continue;
       const s = slots.find((q) => !q.v);
       if (!s) break;
       s.v = v;
@@ -725,6 +732,7 @@ export function createAudio(game) {
     place.enclosure += (enc - place.enclosure) * 0.5;
   }
   function updateAmbience(now) {
+    if (!amb) return;
     const p = game.player;
     const c = p.mode === 'foot' ? null : p.vehicle;
     const W = game.weather || null;
@@ -907,8 +915,27 @@ export function createAudio(game) {
   }
   const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
+  let pumping = false;
+  let extrasBuilt = false;
+  function ensurePump() {
+    if (!pumping && bank && !disposed) {
+      pumping = true;
+      schedule(pump);
+    }
+  }
+  // An engine character's loops, generating them on first use.
+  function engineReady(ch) {
+    if (!ch) return true;
+    if (buf(`eng:${ch}:0:off`)) return true;
+    if (bank && bank.request(ch)) ensurePump();
+    return false;
+  }
+
   function pump() {
-    if (disposed || !ctx || !bank) return;
+    if (disposed || !ctx || !bank) {
+      pumping = false;
+      return;
+    }
     const t0 = nowMs();
     let r;
     try {
@@ -918,7 +945,8 @@ export function createAudio(game) {
       return;
     }
     const e = nowMs() - t0;
-    gen.cpuMs += e;
+    if (ready) gen.lazyMs += e;
+    else gen.cpuMs += e;
     gen.slices++;
     if (e > gen.maxSliceMs) gen.maxSliceMs = e;
     if (r && typeof r.then === 'function') {
@@ -926,24 +954,31 @@ export function createAudio(game) {
       r.then(() => schedule(pump));
       return;
     }
+    try {
+      if (!ready && bank.essential) {
+        gen.wallMs = nowMs() - gen.startMs;
+        onBankReady();
+      }
+      if (ready && !extrasBuilt && bank.extras) {
+        extrasBuilt = true;
+        gen.fullMs = nowMs() - gen.startMs;
+        buildSiren();
+        buildAmbience();
+      }
+    } catch {
+      /* keep going without the failed part */
+    }
     if (!r) {
       schedule(pump);
       return;
     }
-    gen.wallMs = nowMs() - gen.startMs;
-    try {
-      onBankReady();
-    } catch {
-      ready = false;
-    }
+    pumping = false;
   }
 
   function onBankReady() {
     if (convolver && bank.buffers.ir) convolver.buffer = bank.buffers.ir;
     buildFx();
     buildSlots();
-    buildSiren();
-    buildAmbience();
     ready = true;
   }
 
@@ -976,8 +1011,11 @@ export function createAudio(game) {
       const curve = new Float32Array(1024);
       for (let i = 0; i < curve.length; i++) curve[i] = (Math.tanh(((i / (curve.length - 1)) * 2 - 1) * 1.2) / Math.tanh(1.2)) * 0.98;
       shaper.curve = curve;
+      // the compressors add make-up gain; trim it back so the mix sits
+      // around -20 dBFS instead of shouting
+      const trim = gainNode(0.42, limiter);
       master.connect(comp);
-      comp.connect(limiter);
+      comp.connect(trim);
       limiter.connect(shaper);
       shaper.connect(ctx.destination);
       // reverb shared by all buses through per-bus sends
@@ -1014,7 +1052,7 @@ export function createAudio(game) {
       bank = null;
     }
     gen.startMs = nowMs();
-    if (bank) schedule(pump);
+    ensurePump();
 
     const ev = game.events;
     if (ev && !unsubs.length) {
@@ -1118,6 +1156,8 @@ export function createAudio(game) {
         ready,
         genWallMs: gen.wallMs,
         genCpuMs: gen.cpuMs,
+        lazyMs: gen.lazyMs,
+        fullMs: gen.fullMs,
         maxSliceMs: gen.maxSliceMs,
         slices: gen.slices,
         bankStats: bank ? bank.stats : null,

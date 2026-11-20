@@ -5,10 +5,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { angleDiff } from '../core/rng.js';
+import { craftMaterial, classifyByColor, CLS } from './vehiclemats.js';
 
-const MAT = {
-  body: new THREE.MeshLambertMaterial({ vertexColors: true }),
-};
 
 const GLASS = 0x22364a;
 const TRIM = 0x26292e;
@@ -359,6 +357,11 @@ function boatGeometry(spec, color) {
     const parts = [];
     (BUILDERS[spec.hull] || buildRunabout)(spec, color, parts);
     g = mergeGeometries(parts, false);
+    classifyByColor(g, {
+      [GLASS]: CLS.GLASS, [TRIM]: CLS.TRIM, [ENGINE]: CLS.TRIM, [TEAK]: CLS.PLATE, [SEAT]: CLS.PLATE,
+      [ANTIFOUL]: CLS.PLATE, 0xd8d8d8: CLS.CHROME, 0xd0d0d0: CLS.CHROME, 0x9a9a9a: CLS.CHROME,
+      0x1b1d22: CLS.TRIM, 0x50555c: CLS.ALLOY, 0x3a3d42: CLS.RUBBER, 0x2a2d32: CLS.TRIM, 0x55595f: CLS.RUBBER, 0x6a6e74: CLS.PLATE, 0x8a8f96: CLS.PLATE, 0x8c8678: CLS.PLATE,
+    });
     for (const p of parts) p.dispose();
     g.computeBoundingSphere();
     geoCache.set(key, g);
@@ -370,7 +373,7 @@ function boatGeometry(spec, color) {
 export function createBoatMesh(spec, color) {
   const group = new THREE.Group();
   const col = color == null ? spec.colors[0] : color;
-  const body = new THREE.Mesh(boatGeometry(spec, col), MAT.body);
+  const body = new THREE.Mesh(boatGeometry(spec, col), craftMaterial(spec.hull === 'inflatable' ? 'matte' : 'gloss'));
   group.add(body);
   // Euler order YZX: yaw about world up, then pitch about the boat's own
   // beam axis (z), then roll about its own (pitched) fore-aft axis (x).

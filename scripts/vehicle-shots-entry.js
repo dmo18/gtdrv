@@ -239,6 +239,7 @@ function drift() {
   const v = addCar(g, 'sports', 0, 0, 0, 0xd81e2a);
   g.player.vehicle = v;
   const other = addCar(g, 'muscle', -9, 7, 0.4, 0x14213d);
+  camera.position.set(0, 4, 0);
   const R = 11, w = 1.25;
   let t = 0;
   const dt = 1 / 60;
@@ -270,6 +271,8 @@ function drift() {
   camera.lookAt(v.x, 0.8, v.z);
   fx.render(1, dt);
   renderer.render(scene, camera);
+  const sm = scene.getObjectByName('fx-smoke');
+  return { ...fx.counts(), vis: sm.visible, ic: sm.geometry.instanceCount, d: Array.from(sm.geometry.attributes.iData.array.slice(0, 8)).map((x) => +x.toFixed(2)), p: Array.from(sm.geometry.attributes.iPos.array.slice(0, 3)).map((x) => +x.toFixed(1)), cam: camera.position.toArray().map((x) => +x.toFixed(1)), calls: renderer.info.render.calls };
 }
 
 function damage() {
@@ -288,6 +291,7 @@ function damage() {
   c.health = 0;
   c.wrecked = true;
   noteVehicleHit(c.mesh, 1, 0, 0, 26);
+  camera.position.set(2, 4.5, 11);
   const dt = 1 / 60;
   for (let i = 0; i < 200; i++) fx.fixedUpdate(dt);
   for (const v of g.vehicles) syncCar(v, 3.3);
@@ -307,6 +311,7 @@ function sparksShot() {
   wall.position.set(0, 0.6, 1.25);
   holder.add(wall);
   const v = addCar(g, 'police', -10, 0, 0, 0x1b2433);
+  camera.position.set(0, 2.4, -7.5);
   const b = addCar(g, 'pickup', 8, -3.5, Math.PI - 0.5, 0x7a4b2a);
   const dt = 1 / 60;
   let t = 0;
@@ -350,12 +355,14 @@ function boatSpray() {
     g.vehicles.push(b);
     boats.push(b);
   }
+  camera.position.set(0, 3, 0);
   for (let i = 0; i < 360; i++) {
     world.time += dt;
     for (const b of boats) {
       stepBoat(b, b.spec.id === 'yacht' ? { throttle: 0.5, steer: 0, brake: 0 } : { throttle: 1, steer: i > 300 && b.spec.id === 'jetski' ? 0.6 : 0, brake: 0 }, dt, world);
       updateBoatMesh(b.mesh, b, 1, world.time);
     }
+    camera.position.set(boats[0].x + 6, 3.2, boats[0].z - 9);
     fx.fixedUpdate(dt);
   }
   const p = boats[0];
@@ -366,6 +373,7 @@ function boatSpray() {
   fx.render(1, dt);
   renderer.render(scene, camera);
   water.mesh.visible = false;
+  return { spd: boats.map((b) => +b.speed.toFixed(1)), plan: boats.map((b) => +(b.planing || 0).toFixed(2)), ...fx.counts() };
 }
 
 function night() {
@@ -470,7 +478,23 @@ function detail(id, far = false) {
   return tiles(items, 2, 2);
 }
 
+function ptest() {
+  clear();
+  ground.visible = true; sea.visible = false;
+  const g = fakeGame();
+  const fx = startFx(g);
+  full();
+  camera.position.set(0, 2, 10);
+  camera.lookAt(0, 1, 0);
+  g.events.emit('splash', 0, 0);
+  for (let i = 0; i < 20; i++) fx.fixedUpdate(1 / 60);
+  fx.render(1, 1 / 60);
+  renderer.render(scene, camera);
+  return fx.counts();
+}
+
 const SHOTS = {
+  ptest,
   'cars-front': () => carLine('front'),
   'cars-rear': () => carLine('rear'),
   'cars-side': () => carLine('side'),
@@ -494,4 +518,5 @@ window.stats = () => {
   for (const id of CAR_IDS) out[id] = vehicleStats(VEHICLE_SPECS[id]);
   return out;
 };
+window.__scene = scene;
 window.__ready = true;

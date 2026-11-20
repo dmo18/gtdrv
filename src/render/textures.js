@@ -291,7 +291,7 @@ function makePaint(rng, N) {
       const i = (y * S + x) * 4;
       const v = 215 + 40 * a;
       d[i] = v; d[i + 1] = v; d[i + 2] = v;
-      d[i + 3] = wear < 0.47 ? 0 : wear < 0.52 ? 150 : 255;
+      d[i + 3] = wear < 0.4 ? 0 : wear < 0.44 ? 150 : 255;
     }
   }
   g.putImageData(img, 0, 0);

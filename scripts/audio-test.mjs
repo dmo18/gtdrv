@@ -115,6 +115,7 @@ try {
 
     // Every loop is seamless: the step across the loop point is no bigger
     // than the steps right next to it, and there is no DC offset.
+    function checkLoops(tag) {
     let worstSeam = 0;
     let worstSeamName = '';
     let worstDc = 0;
@@ -141,9 +142,11 @@ try {
         if (ratio > 1 || dc > 0.02) badLoops.push(`${name} jump ${jump.toFixed(3)} local ${local.toFixed(3)} dc ${dc.toFixed(3)}`);
       }
     }
-    check('loops seamless', badLoops.length === 0 && dbg.loops.length > 20,
+    check(`loops seamless (${tag})`, badLoops.length === 0 && dbg.loops.length > 20,
       `${dbg.loops.length} loops, worst seam ${worstSeam.toFixed(2)} of limit (${worstSeamName}) ${badLoops.slice(0, 3).join('; ')}`);
-    check('loops have no DC offset', worstDc < 0.02, `worst ${worstDc.toExponential(1)}`);
+    check(`loops have no DC offset (${tag})`, worstDc < 0.02, `worst ${worstDc.toExponential(1)}`);
+    }
+    checkLoops('at unlock');
 
     const an = ctx.createAnalyser();
     an.fftSize = 2048;
@@ -189,7 +192,7 @@ try {
     const saw = (t, n) => 0.5 + 0.5 * Math.sin(t * n * Math.PI * 2);
 
     // Car: sweep speed and throttle, with horn and slip.
-    for (const id of ['sedan', 'truck', 'sports']) {
+    for (const id of ['sedan', 'truck', 'sports', 'compact', 'muscle']) {
       car.spec = { id, maxSpeed: 45 };
       await run(220, (t, i) => {
         car.speed = t * 50;
@@ -273,6 +276,7 @@ try {
     dbg.buses.engine.connect(fan);
     const spec = new Float32Array(fan.frequencyBinCount);
     async function peakAt(rpm) {
+      await run(10, () => {});
       car.rpm = rpm;
       car.gear = 3;
       car.speed = 15;
@@ -280,15 +284,16 @@ try {
       await run(70, () => {});
       fan.getFloatFrequencyData(spec);
       const hz = ctx.sampleRate / fan.fftSize;
+      // fundamental: the lowest spectral peak within 10 dB of the loudest
+      const i0 = Math.floor(20 / hz);
+      const i1 = Math.ceil(700 / hz);
       let best = -Infinity;
-      let bi = 0;
-      for (let i = Math.floor(20 / hz); i < 700 / hz; i++) {
-        if (spec[i] > best) {
-          best = spec[i];
-          bi = i;
-        }
+      for (let i = i0; i < i1; i++) best = Math.max(best, spec[i]);
+      for (let i = i0 + 2; i < i1 - 2; i++) {
+        const v = spec[i];
+        if (v > best - 10 && v >= spec[i - 1] && v >= spec[i + 1] && v >= spec[i - 2] && v >= spec[i + 2]) return i * hz;
       }
-      return bi * hz;
+      return 0;
     }
     const fLow = await peakAt(0.2);
     const fHigh = await peakAt(0.6);
@@ -303,7 +308,8 @@ try {
     game.vehicles.push(cop);
     const san = ctx.createAnalyser();
     san.fftSize = 2048;
-    dbg.siren.connect(san);
+    for (let i = 0; i < 200 && !audio.debug.siren; i++) await sleep(20);
+    audio.debug.siren.connect(san);
     const sbuf = new Float32Array(san.fftSize);
     const sirenRms = () => {
       san.getFloatTimeDomainData(sbuf);
@@ -386,6 +392,13 @@ try {
     check('peak <= 1', peak <= 1.0, `peak ${peak.toFixed(4)}`);
     check('peak sane', peak > 0.01, `peak ${peak.toFixed(4)}`);
     check('max voices <= 8', maxVoices <= 8, `max ${maxVoices}`);
+
+    // Engines made on first use: all characters are in the bank now.
+    const fin = audio.debug;
+    check('all engines generated', fin.bankStats.engines.length === 8, fin.bankStats.engines.join(' '));
+    checkLoops('all engines');
+    const mb2 = fin.bytes / 1048576;
+    check('total buffer memory < 12 MB', mb2 < 12, `${mb2.toFixed(2)} MB in ${Object.keys(fin.buffers).length} buffers; whole bank after ${fin.fullMs.toFixed(0)} ms; background generation (extras + later engines) ${fin.lazyMs.toFixed(0)} ms main-thread`);
 
     audio.dispose();
     check('dispose', true);

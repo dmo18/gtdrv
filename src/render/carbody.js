@@ -31,8 +31,8 @@ const STYLES = {
     bottom: [[-0.5, 0.22], [-0.46, 0.13], [0.44, 0.13], [0.5, 0.2]],
     gh: { xC: -0.345, xR0: -0.175, xR1: 0.055, xA: 0.235, roof: 1, base: 0.9, tumble: 0.16, crown: 0.03, side: [-0.275, 0.15], b: [-0.075, -0.05], rear: true },
     seams: [0.205, -0.062, -0.205], hood: 0.22, boot: -0.36,
-    head: { bands: [3], z: [0.5, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.42, 0.97], rev: 0.56 },
-    grille: { bands: [1, 2], z: 0.4 }, intake: 0.7, exhaust: { n: 1, z: 0.3 },
+    head: { bands: [3], z: [0.46, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.42, 0.97], rev: 0.56 },
+    grille: { bands: [1, 2], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.3 },
   },
   hatch: {
     pF: 4.6, pR: 7, flare: 0.02, drop: 0.07,
@@ -40,17 +40,17 @@ const STYLES = {
     bottom: [[-0.5, 0.2], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.19]],
     gh: { xC: -0.478, xR0: -0.43, xR1: 0.03, xA: 0.205, roof: 1, base: 0.9, tumble: 0.15, crown: 0.03, side: [-0.395, 0.125], b: [-0.095, -0.07], rear: true },
     seams: [0.185, -0.085, -0.215], hood: 0.19, boot: null,
-    head: { bands: [3], z: [0.48, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.55, 0.98], rev: 0.68 },
-    grille: { bands: [2], z: 0.45 }, intake: 0.72, exhaust: { n: 1, z: 0.32 }, roofSpoiler: true,
+    head: { bands: [3], z: [0.46, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.55, 0.98], rev: 0.68 },
+    grille: { bands: [2], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.32 }, roofSpoiler: true,
   },
   sports: {
-    pF: 4, pR: 5.5, flare: 0.06, drop: 0.11,
-    top: [[-0.5, 0.52], [-0.485, 0.6], [-0.45, 0.66], [-0.38, 0.68], [-0.3, 0.675], [-0.12, 0.64], [0.1, 0.6], [0.24, 0.56], [0.36, 0.5], [0.45, 0.43], [0.49, 0.38], [0.5, 0.35]],
+    pF: 4, pR: 5.5, flare: 0.05, drop: 0.085,
+    top: [[-0.5, 0.52], [-0.485, 0.6], [-0.45, 0.66], [-0.38, 0.69], [-0.3, 0.685], [-0.12, 0.65], [0.1, 0.62], [0.24, 0.6], [0.36, 0.56], [0.45, 0.48], [0.49, 0.42], [0.5, 0.38]],
     bottom: [[-0.5, 0.2], [-0.46, 0.11], [0.44, 0.11], [0.5, 0.13]],
     gh: { xC: -0.34, xR0: -0.115, xR1: -0.01, xA: 0.175, roof: 1, base: 0.85, tumble: 0.2, crown: 0.025, side: [-0.25, 0.135], b: null, rear: true },
     seams: [0.15, -0.19], hood: 0.165, boot: -0.37,
-    head: { bands: [3], z: [0.45, 0.94], ind: 0.86 }, tail: { bands: [3], z: [0.3, 0.97], rev: 0.4 },
-    grille: { bands: [1, 2], z: 0.55 }, intake: 0.85, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
+    head: { bands: [3], z: [0.46, 0.94], ind: 0.86 }, tail: { bands: [3], z: [0.3, 0.97], rev: 0.4 },
+    grille: { bands: [1, 2], z: 0.46 }, intake: 0.75, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
   },
   muscle: {
     pF: 7, pR: 7, flare: 0.05, drop: 0.085,
@@ -58,8 +58,8 @@ const STYLES = {
     bottom: [[-0.5, 0.21], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.18]],
     gh: { xC: -0.335, xR0: -0.19, xR1: -0.04, xA: 0.105, roof: 1, base: 0.88, tumble: 0.18, crown: 0.025, side: [-0.26, 0.075], b: null, rear: true },
     seams: [0.085, -0.225], hood: 0.09, boot: -0.37,
-    head: { bands: [3], z: [0.5, 0.9], ind: 2 }, tail: { bands: [3], z: [0.2, 0.96], rev: 0.32 },
-    grille: { bands: [2], z: 0.42 }, intake: 0.6, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
+    head: { bands: [3], z: [0.46, 0.9], ind: 2 }, tail: { bands: [3], z: [0.2, 0.96], rev: 0.32 },
+    grille: { bands: [2], z: 0.46 }, intake: 0.75, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
   },
   pickup: {
     pF: 6.5, pR: 10, flare: 0.035, drop: 0.07,
@@ -68,8 +68,8 @@ const STYLES = {
     bed: [-0.478, -0.112], floor: 0.45,
     gh: { xC: -0.106, xR0: -0.096, xR1: 0.07, xA: 0.205, roof: 1, base: 0.92, tumble: 0.1, crown: 0.025, side: [-0.085, 0.145], b: [0.015, 0.035], rear: true },
     seams: [0.15, 0.025, -0.095], hood: 0.19, boot: null,
-    head: { bands: [2, 3], z: [0.55, 0.95], ind: 0.88 }, tail: { bands: [2, 3], z: [0.78, 0.99], rev: 0.86 },
-    grille: { bands: [1, 2, 3], z: 0.52 }, intake: 0.8, exhaust: { n: 1, z: 0.5 }, skirt: true,
+    head: { bands: [2, 3], z: [0.46, 0.95], ind: 0.88 }, tail: { bands: [2, 3], z: [0.78, 0.99], rev: 0.86 },
+    grille: { bands: [1, 2, 3], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.5 }, skirt: true,
   },
   van: {
     pF: 4.5, pR: 11, flare: 0.012, drop: 0.05,
@@ -77,8 +77,8 @@ const STYLES = {
     bottom: [[-0.5, 0.17], [-0.47, 0.14], [0.44, 0.14], [0.5, 0.19]],
     gh: { xC: -0.495, xR0: -0.485, xR1: 0.19, xA: 0.37, roof: 1, base: 0.94, tumble: 0.07, crown: 0.02, side: [0.15, 0.33], b: null, rear: true, rearSide: [-0.46, -0.24] },
     seams: [0.15, 0.1, -0.2], hood: 0.355, boot: null,
-    head: { bands: [3], z: [0.5, 0.95], ind: 0.86 }, tail: { bands: [2, 3], z: [0.8, 0.99], rev: 0.88 },
-    grille: { bands: [2, 3], z: 0.45 }, intake: 0.75, exhaust: { n: 1, z: 0.5 },
+    head: { bands: [3], z: [0.46, 0.95], ind: 0.86 }, tail: { bands: [2, 3], z: [0.8, 0.99], rev: 0.88 },
+    grille: { bands: [2, 3], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.5 },
   },
   truck: {
     range: [0.2, 0.5], pF: 12, pR: 14, flare: 0.02, drop: 0.035,
@@ -86,8 +86,8 @@ const STYLES = {
     bottom: [[0.2, 0.22], [0.5, 0.22]],
     gh: { xC: 0.207, xR0: 0.213, xR1: 0.44, xA: 0.487, roof: 0.88, base: 0.95, tumble: 0.06, crown: 0.02, side: [0.36, 0.445], b: null, rear: false },
     seams: [0.36, 0.265], hood: null, boot: null,
-    head: { bands: [1], z: [0.55, 0.94], ind: 0.86 }, tail: null,
-    grille: { bands: [2, 3], z: 0.6 }, intake: 0.8, exhaust: null,
+    head: { bands: [1], z: [0.46, 0.94], ind: 0.86 }, tail: null,
+    grille: { bands: [2, 3], z: 0.61 }, intake: 0.75, exhaust: null,
   },
 };
 STYLES.compact = STYLES.hatch;
@@ -139,9 +139,24 @@ function shape(spec) {
     }
     return w;
   };
-  const top = (x) => topC(x / L) * H;
   const drop = S.drop * H;
-  const yc = (x) => top(x) - drop * Math.min(1, 0.4 + 0.6 * Math.min(1, planW(x) / (hw * 0.5)));
+  // Fenders rise over the wheels where the body is lower than the arch.
+  const archTop = wr + R;
+  const need = (x) => {
+    let n = 0;
+    for (const wx of wheels) {
+      const u = Math.abs(x - wx) / (R * 1.7);
+      if (u < 1) {
+        const f = Math.max(0, (u - 0.3) / 0.7);
+        const k = 1 - f * f * (3 - 2 * f);
+        n = Math.max(n, (archTop + 0.05) * k);
+      }
+    }
+    return n;
+  };
+  const ycBase = (x) => topC(x / L) * H - drop * Math.min(1, 0.4 + 0.6 * Math.min(1, planW(x) / (hw * 0.5)));
+  const yc = (x) => Math.max(ycBase(x), need(x));
+  const top = (x) => Math.max(topC(x / L) * H, yc(x) - 0.1);
   const bottom = (x) => {
     let y = botC(x / L) * H;
     for (const wx of wheels) {
@@ -695,7 +710,7 @@ function farDetails(acc, sh, spec) {
 export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2) {
   const acc = new Acc();
   const rimR = wr * 0.64;
-  const seg = 16;
+  const seg = 14;
   const tread = [lin(0x1d1d1e), lin(0x0f0f10)];
   const wall = lin(0x1f1f21), wallHi = lin(0x2c2c2e);
   const o = { col: wall, cls: CLS.RUBBER };
@@ -709,7 +724,7 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2) {
   // Barrel (faces inward), outer lip, recessed dark dish.
   lathe(acc, [[rimR, tw * 0.42], [rimR, -tw / 2 + 0.01]], seg, () => ({ col: dark, cls: CLS.ALLOY }));
   lathe(acc, [[rimR * 1.02, tw / 2 + 0.002], [rimR * 0.9, tw / 2 - 0.01], [rimR * 0.86, tw * 0.3]], seg, () => ({ col: rimC, cls: CLS.ALLOY }), { crease: 0.4 });
-  lathe(acc, [[rimR * 0.9, tw * 0.02], [rimR * 0.3, tw * 0.02]], 12, () => ({ col: lin(0x3c3d40), cls: CLS.ALLOY }));
+  lathe(acc, [[rimR * 0.9, tw * 0.02], [rimR * 0.3, tw * 0.02]], 10, () => ({ col: lin(0x3c3d40), cls: CLS.ALLOY }));
   // Spokes and hub.
   const zs = tw * 0.36;
   const len = rimR * 0.66;
@@ -719,7 +734,7 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2) {
     const width = spokes > 6 ? rimR * 0.13 : rimR * 0.22;
     acc.geo(new THREE.BoxGeometry(len, width, tw * 0.22), rimHex, CLS.ALLOY, place(Math.cos(a) * rm, Math.sin(a) * rm, zs, 0, 0, a));
   }
-  acc.geo(new THREE.CylinderGeometry(rimR * 0.3, rimR * 0.34, tw * 0.2, 10), rimHex, CLS.ALLOY, place(0, 0, tw * 0.38, Math.PI / 2, 0, 0));
+  acc.geo(new THREE.CylinderGeometry(rimR * 0.3, rimR * 0.34, tw * 0.2, 8, 1, true), rimHex, CLS.ALLOY, place(0, 0, tw * 0.38, Math.PI / 2, 0, 0));
   acc.geo(new THREE.CylinderGeometry(rimR * 0.12, rimR * 0.12, 0.012, 8), 0x2a2a2a, CLS.CHROME, place(0, 0, tw * 0.49, Math.PI / 2, 0, 0));
   return acc.build();
 }

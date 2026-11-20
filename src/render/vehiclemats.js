@@ -115,21 +115,21 @@ if (rwC < 0.5) {
   // Scuffs and scrapes on the struck sides.
   vec3 q = vec3(vObj.x / uBox.x, (vObj.y - uBox.z * 0.45) / uBox.z, vObj.z / uBox.y);
   vec3 qd = normalize(q + vec3(0.0001));
-  float h0 = smoothstep(0.35, 0.9, dot(qd, uHit0.xyz)) * smoothstep(-0.2, 0.5, dot(vObjN, uHit0.xyz)) * uHit0.w;
-  float h1 = smoothstep(0.35, 0.9, dot(qd, uHit1.xyz)) * smoothstep(-0.2, 0.5, dot(vObjN, uHit1.xyz)) * uHit1.w;
+  float h0 = smoothstep(0.35, 0.9, dot(qd, uHit0.xyz)) * smoothstep(0.15, 0.65, dot(vObjN, uHit0.xyz)) * uHit0.w;
+  float h1 = smoothstep(0.35, 0.9, dot(qd, uHit1.xyz)) * smoothstep(0.15, 0.65, dot(vObjN, uHit1.xyz)) * uHit1.w;
   float hit = clamp(h0 + h1, 0.0, 1.0);
   float scuff = smoothstep(0.42, 0.62, n1 * 0.7 + n2 * 0.45 + hit * 0.55 - 0.25) * hit;
   float metal = smoothstep(0.75, 0.95, n2) * scuff;
   rwCol = mix(rwCol, vec3(0.055, 0.05, 0.048), scuff * (rwC < 3.5 ? 0.85 : 0.3));
-  rwCol = mix(rwCol, vec3(0.42, 0.42, 0.43), metal * paintLike);
+  rwCol = mix(rwCol, vec3(0.2, 0.2, 0.21), metal * paintLike);
   roughnessFactor = mix(roughnessFactor, 0.8, scuff);
   metalnessFactor = mix(metalnessFactor, 0.7, metal * paintLike);
   rwCC *= 1.0 - scuff;
   // Crazed glass on the struck side.
-  if (rwC > 3.5 && rwC < 4.5) rwCol = mix(rwCol, vec3(0.2, 0.22, 0.24), hit * smoothstep(0.45, 0.7, n2) * 0.8);
+  if (rwC > 3.5 && rwC < 4.5) rwCol = mix(rwCol, vec3(0.12, 0.13, 0.14), hit * smoothstep(0.5, 0.75, n2) * 0.6);
   // Soot from a fire: everything goes near black and matte.
-  float soot = uDmg.y * (0.8 + 0.2 * n1);
-  rwCol = mix(rwCol, vec3(0.022, 0.02, 0.019) + vec3(0.03) * n2, soot);
+  float soot = uDmg.y * (0.9 + 0.1 * n1);
+  rwCol = mix(rwCol, vec3(0.016, 0.015, 0.014) + vec3(0.025, 0.02, 0.016) * n2, soot);
   roughnessFactor = mix(roughnessFactor, 0.95, uDmg.y);
   metalnessFactor *= 1.0 - uDmg.y;
   rwCC *= 1.0 - uDmg.y;
@@ -407,3 +407,28 @@ export function isLampNight() {
 }
 
 export { LAMP };
+
+// Give a merged vertex-coloured geometry an `aCls` attribute by matching
+// each vertex colour against a table of { hex: class } (boats, aircraft).
+// Unmatched colours stay paint-like gloss (class 1: own colour, clearcoat).
+export function classifyByColor(geo, table) {
+  const col = geo.attributes.color;
+  const n = col.count;
+  const cls = new Float32Array(n).fill(CLS.LIVERY);
+  const keys = [];
+  for (const hex in table) {
+    tmp.setHex(+hex);
+    keys.push([tmp.r, tmp.g, tmp.b, table[hex]]);
+  }
+  for (let i = 0; i < n; i++) {
+    const r = col.getX(i), g = col.getY(i), b = col.getZ(i);
+    for (const k of keys) {
+      if (Math.abs(r - k[0]) + Math.abs(g - k[1]) + Math.abs(b - k[2]) < 0.004) {
+        cls[i] = k[3];
+        break;
+      }
+    }
+  }
+  geo.setAttribute('aCls', new THREE.BufferAttribute(cls, 1));
+  return geo;
+}

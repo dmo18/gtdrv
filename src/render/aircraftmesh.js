@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { angleDiff } from '../core/rng.js';
+import { craftMaterial, classifyByColor, CLS } from './vehiclemats.js';
 
 // ---- shared materials -----------------------------------------------------
 const MAT = {
@@ -422,6 +423,7 @@ function bodyEntry(spec, color) {
     const build = BUILDERS[spec.id] || (spec.kind === 'heli' ? buildHeli : buildProp);
     const layout = build(color, trimFor(color), parts);
     const geometry = mergeGeometries(parts, false);
+    classifyByColor(geometry, { [GLASS]: CLS.GLASS, [DARK]: CLS.TRIM, [TYRE]: CLS.RUBBER, [METAL]: CLS.ALLOY });
     for (const p of parts) p.dispose();
     geometry.computeBoundingSphere();
     e = { geometry, layout };
@@ -472,7 +474,7 @@ export function createAircraftMesh(spec, color) {
   const group = new THREE.Group();
   const col = color == null ? spec.colors[0] : color;
   const entry = bodyEntry(spec, col);
-  const body = new THREE.Mesh(entry.geometry, MAT.body);
+  const body = new THREE.Mesh(entry.geometry, craftMaterial('gloss'));
   group.add(body);
 
   const lay = entry.layout;

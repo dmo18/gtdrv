@@ -11,7 +11,7 @@ import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS } from './d
 
 // Normalised rpm points (fraction of redline) shared by all characters;
 // the first point is replaced by each character's idle.
-export const RPM_POINTS = [0, 0.36, 0.6, 0.86];
+export const RPM_POINTS = [0, 0.2, 0.32, 0.46, 0.64, 0.88];
 
 // Exhaust "bank" pattern for a cross-plane V8: the two banks fire at
 // uneven intervals, and the nearer exhaust dominates. This gives the
@@ -125,7 +125,7 @@ function pulseShape(t, tau) {
 // Describe one loop as a filter spec (see dsp.js runSpecJS): the pulse
 // excitation is built here; the filtering runs in JS or offline.
 // rpmNorm: fraction of redline; load: 1 = on throttle, 0 = overrun.
-export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.3) {
+export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.26) {
   const e = ENGINES[ch];
   const rpm = Math.max(200, rpmNorm * e.red);
   const cycleS = 120 / rpm;
@@ -236,9 +236,22 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.3) {
     const wAmp = e.whine * (0.5 + rpmNorm) * (on ? 1 : 0.7);
     const h2 = Math.round(h * 1.5);
     const g2 = (h2 * rpm) / 120 < sr * 0.3 ? 0.4 : 0;
+    // two-pole sine recursions (no trig per sample)
     const w1 = (TAU * h) / cs;
     const w2 = (TAU * h2) / cs;
-    for (let i = 0; i < N; i++) out[i] += wAmp * (Math.sin(w1 * i) + g2 * Math.sin(w2 * i + 1.3));
+    const k1 = 2 * Math.cos(w1);
+    const k2 = 2 * Math.cos(w2);
+    let a1 = 0, a0 = -Math.sin(w1) * wAmp;
+    let b1 = Math.sin(1.3) * wAmp * g2, b0 = Math.sin(1.3 - w2) * wAmp * g2;
+    for (let i = 0; i < N; i++) {
+      out[i] += a1 + b1;
+      const an = k1 * a1 - a0;
+      a0 = a1;
+      a1 = an;
+      const bn = k2 * b1 - b0;
+      b0 = b1;
+      b1 = bn;
+    }
     if (bub) {
       const bp = peak(bub) || 1;
       for (let i = 0; i < N; i++) out[i] *= 1 - e.wet * 0.35 * (0.5 + 0.5 * bub[i] / bp);
