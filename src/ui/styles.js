@@ -30,9 +30,33 @@ const CSS = `
 .rw-look { left: 40%; right: 0; top: 0; bottom: 0; }
 .rw-stickzone { left: 0; width: 40%; top: 35%; bottom: 0; }
 
-/* floating steering pad (car) */
+/* steering styles: only the chosen one shows (car and boat) */
+.rw-touch:not(.rw-steer-wheel) .rw-st-wheel,
+.rw-touch:not(.rw-steer-slider) .rw-st-slider,
+.rw-touch:not(.rw-steer-buttons) .rw-st-buttons,
+.rw-touch:not(.rw-steer-tilt) .rw-st-tilt { display: none; }
+
+/* on-screen steering wheel (touches anywhere in the zone turn it) */
+.rw-wheel {
+  position: absolute; left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 16px);
+  width: 150px; height: 150px; pointer-events: none; opacity: 0.78; transition: opacity 0.12s;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+.rw-wheel.rw-active { opacity: 1; }
+.rw-wheel-rot { width: 100%; height: 100%; will-change: transform; }
+.rw-wheel.rw-spring .rw-wheel-rot { transition: transform 0.24s cubic-bezier(0.3, 1.45, 0.55, 1); }
+.rw-wheel svg { display: block; width: 100%; height: 100%; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.rw-w-rim { stroke: rgba(30, 23, 19, 0.88); stroke-width: 15; }
+.rw-w-grip { stroke: var(--rw-accent); stroke-width: 15; }
+.rw-w-spoke { stroke: rgba(30, 23, 19, 0.88); stroke-width: 11; }
+.rw-w-hub { fill: rgba(30, 23, 19, 0.92); stroke: var(--rw-panel-edge); stroke-width: 2; }
+.rw-w-mark { stroke: var(--rw-accent); stroke-width: 3; }
+.rw-w-top { fill: #ffd0b5; stroke: none; }
+.rw-wheel.rw-active .rw-w-rim { stroke: rgba(46, 33, 26, 0.95); }
+
+/* floating steering slider (car, style 'slider') */
 .rw-pad {
-  position: absolute; left: 0; top: 0; width: 176px; height: 60px; border-radius: 30px;
+  position: absolute; left: 0; top: 0; width: 272px; height: 60px; border-radius: 30px;
   background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
   opacity: 0.55; pointer-events: none; transition: opacity 0.12s;
 }
@@ -44,6 +68,28 @@ const CSS = `
 .rw-pad::before { left: 12px; border-right-color: var(--rw-dim); border-left-width: 0; }
 .rw-pad::after { right: 12px; border-left-color: var(--rw-dim); border-right-width: 0; }
 .rw-pad .rw-knob { left: 50%; top: 50%; margin: -24px 0 0 -24px; width: 48px; height: 48px; }
+
+/* steering arrow pads (style 'buttons') */
+.rw-btn.rw-steerbtn { width: 92px; height: 104px; border-radius: 24px; bottom: calc(var(--rw-sb) + 16px); }
+.rw-btn.rw-steerbtn svg { width: 40px; height: 40px; stroke-width: 2.6; }
+.rw-sleft { left: calc(var(--rw-sl) + 18px); }
+.rw-sright { left: calc(var(--rw-sl) + 124px); }
+
+/* tilt indicator (style 'tilt'); tap to re-centre */
+.rw-btn.rw-tiltbar {
+  left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 30px);
+  width: 168px; height: 64px; border-radius: 20px; gap: 7px;
+}
+.rw-tilt-track {
+  position: relative; display: block; width: 132px; height: 10px; border-radius: 5px;
+  background: rgba(0, 0, 0, 0.45); border: 1px solid var(--rw-panel-edge);
+}
+.rw-tilt-track::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--rw-dim); }
+.rw-tilt-dot {
+  position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f3a173, var(--rw-accent) 70%); border: 2px solid rgba(255, 255, 255, 0.6);
+}
+.rw-tilt-label { font-size: 11px; color: var(--rw-dim); }
 
 /* floating 2-axis stick (foot) */
 .rw-stick {
@@ -118,6 +164,23 @@ const CSS = `
 
 .rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
 .rw-map { right: calc(var(--rw-sr) + 70px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
+
+/* left-handed: steering and stick on the right, pedals and buttons left */
+.rw-lefty .rw-look { left: 0; right: 40%; }
+.rw-lefty .rw-stickzone { left: auto; right: 0; }
+.rw-lefty .rw-wheel, .rw-lefty .rw-tiltbar { left: auto; right: calc(var(--rw-sr) + 20px); }
+.rw-lefty .rw-sright { left: auto; right: calc(var(--rw-sr) + 18px); }
+.rw-lefty .rw-sleft { left: auto; right: calc(var(--rw-sr) + 124px); }
+.rw-lefty .rw-gas { right: auto; left: calc(var(--rw-sl) + 16px); }
+.rw-lefty .rw-brake { right: auto; left: calc(var(--rw-sl) + 112px); }
+.rw-lefty .rw-handbrake { right: auto; left: calc(var(--rw-sl) + 16px); }
+.rw-lefty .rw-horn { right: auto; left: calc(var(--rw-sl) + 84px); }
+.rw-lefty .rw-exit { right: auto; left: calc(var(--rw-sl) + 152px); }
+.rw-lefty .rw-cam { right: auto; left: calc(var(--rw-sl) + 220px); }
+.rw-lefty.rw-mode-plane .rw-exit, .rw-lefty.rw-mode-heli .rw-exit { right: auto; left: calc(var(--rw-sl) + 16px); }
+.rw-lefty.rw-mode-plane .rw-cam, .rw-lefty.rw-mode-heli .rw-cam { right: auto; left: calc(var(--rw-sl) + 84px); }
+.rw-lefty .rw-enter { right: auto; left: calc(var(--rw-sl) + 24px); }
+.rw-lefty .rw-run { right: auto; left: calc(var(--rw-sl) + 140px); }
 
 /* ---------- HUD ---------- */
 .rw-hud { z-index: 10; pointer-events: none; }

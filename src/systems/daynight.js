@@ -153,6 +153,7 @@ void main() {
   float m = dot(d, uMoonDir);
   col += vec3(0.75, 0.8, 0.9) * uMoon * (smoothstep(0.99965, 0.9998, m) + pow(max(m, 0.0), 300.0) * 0.12);
   gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
   // Tiny dither so the gradient does not band.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -248,35 +249,6 @@ void main() {
 }`;
 
 // ---- builders ---------------------------------------------------------------
-// Same 4x4-per-repeat window grid as the facade texture in citymesh.js,
-// but 8x8 windows (used at repeat 0.5) so the lit pattern repeats less.
-function makeWindowGlowTexture(rng) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = '#000';
-  g.fillRect(0, 0, 256, 256);
-  for (let fy = 0; fy < 8; fy++) {
-    for (let fx = 0; fx < 8; fx++) {
-      if (!rng.chance(0.42)) continue;
-      const k = rng.range(0.55, 1);
-      const cool = rng.chance(0.18);
-      const r = cool ? 190 * k : 255 * k, gg = cool ? 215 * k : 196 * k, b = cool ? 235 * k : 118 * k;
-      g.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
-      g.fillRect(fx * 32 + 6, fy * 32 + 7, 20, 19);
-      // Blind or curtain hint across the top.
-      g.fillStyle = 'rgba(0,0,0,0.35)';
-      g.fillRect(fx * 32 + 6, fy * 32 + 7, 20, rng.int(2, 8));
-    }
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(0.5, 0.5);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-
 function makeCloudGeometry(rng) {
   const parts = [];
   const n = 6;
@@ -461,28 +433,30 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       vis.cloudR[i] = rng.range(0, TAU);
     }
 
-    // Windows: our own emissive pattern on the facade material.
-    const mats = game.cityMesh && game.cityMesh.userData && game.cityMesh.userData.materials;
-    vis.windowMat = mats && mats.windowMat ? mats.windowMat : null;
-    vis.plainMat = mats && mats.plainMat ? mats.plainMat : null;
-    vis.plainBase = vis.plainMat ? vis.plainMat.color.clone() : null;
-    if (vis.windowMat && typeof document !== 'undefined') {
-      try {
-        vis.windowMat.emissiveMap = makeWindowGlowTexture(rng);
-        vis.windowMat.emissive.setHex(0xffffff);
-        vis.windowMat.emissiveIntensity = 0;
-        vis.windowMat.needsUpdate = true;
-      } catch {
-        // No canvas: windows simply do not glow.
-      }
-    }
+    // Windows and signs: the city mesh brings its own lit-window maps
+    // (one per facade style); we only turn them up at dusk.
+    const ud = (game.cityMesh && game.cityMesh.userData) || {};
+    const mats = ud.materials || {};
+    vis.glowMats = ud.glowMats || [];
+    vis.wet = ud.wet || null;
+    vis.mats = mats;
+    vis.dimMats = [mats.plainMat, mats.pavementMat, mats.grassMat, mats.landMat].filter(Boolean);
+    vis.dimBase = vis.dimMats.map((m) => m.color.clone());
 
-    // Street lamps and car headlamp bulbs: one additive points cloud.
-    const lamps = (game.cityMesh && game.cityMesh.userData && game.cityMesh.userData.lamps) || [];
-    const NL = lamps.length, NB = MAX_CARS * 2 + 2;
+    // Street lamps, other fixed lights (beacons, runway edge lights) and
+    // car headlamp bulbs: one additive points cloud.
+    const lamps = ud.lamps || [];
+    const extra = ud.glows || [];
+    const NL = lamps.length + extra.length, NB = MAX_CARS * 2 + 2;
     const lp = new Float32Array((NL + NB) * 3), lc = new Float32Array((NL + NB) * 3), ls = new Float32Array(NL + NB);
     const pool = [], poolCol = [], poolUv = [], poolIdx = [];
-    for (let i = 0; i < NL; i++) {
+    for (let i = 0; i < extra.length; i++) {
+      const e = extra[i], k = lamps.length + i;
+      lp[k * 3] = e.x; lp[k * 3 + 1] = e.y; lp[k * 3 + 2] = e.z;
+      lc[k * 3] = e.r; lc[k * 3 + 1] = e.g; lc[k * 3 + 2] = e.b;
+      ls[k] = e.size;
+    }
+    for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i];
       const rot = l.rot || 0, h = l.h || 7;
       const x = l.x + Math.cos(rot) * 1.75, z = l.z + Math.sin(rot) * 1.75;
@@ -526,7 +500,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     vis.bulbPos = lg.attributes.position;
     vis.bulbSize = lg.attributes.size;
 
-    if (NL) {
+    if (lamps.length) {
       const pg = new THREE.BufferGeometry();
       pg.setAttribute('position', new THREE.Float32BufferAttribute(pool, 3));
       pg.setAttribute('uv', new THREE.Float32BufferAttribute(poolUv, 2));
@@ -663,24 +637,56 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     if (scene.background && scene.background.isColor) scene.background.copy(fogC);
     else if (!scene.background) scene.background = V.bg.copy(fogC);
 
+    // The graphics module (tone mapping, shadows, sky reflections) asks
+    // for a stronger sun and less flat fill light through game.lightScale,
+    // so shadows read; without it the plain look is kept.
+    const LS = game.lightScale || null;
+    const sunK = LS ? LS.sun * (1 - S.night) + LS.moon * S.night : 1;
+    const hemiK = LS ? LS.hemi * (1 - S.night) + LS.hemiNight * S.night : 1;
     const L = game.lights;
     if (L && L.sun) {
       setLin(L.sun.color, S.sunColor);
       if (S.night > 0.5) greyed(L.sun.color, ov * 0.5, 1);
-      L.sun.intensity = S.sunIntensity * (1 - 0.68 * ov - 0.1 * rn - 0.2 * fg);
+      L.sun.intensity = S.sunIntensity * sunK * (1 - 0.68 * ov - 0.1 * rn - 0.2 * fg);
       L.sun.position.set(S.sunDirX * 100, S.sunDirY * 100, S.sunDirZ * 100);
     }
     if (L && L.hemi) {
       greyed(setLin(L.hemi.color, S.hemiSky), ov * 0.6, 1);
       setLin(L.hemi.groundColor, S.hemiGround);
-      L.hemi.intensity = S.hemiIntensity * (1 + 0.1 * ov - 0.12 * rn);
+      L.hemi.intensity = S.hemiIntensity * hemiK * (1 + 0.1 * ov - 0.12 * rn);
     }
 
     const night = S.night;
     V.night = night;
     V.lit = clamp(Math.max(smoothstep(0.15, 0.6, night), rn * 0.6, fg * 0.5), 0, 1);
-    if (V.windowMat) V.windowMat.emissiveIntensity = S.windowGlow * 0.95;
-    if (V.plainMat && V.plainBase) V.plainMat.color.copy(V.plainBase).multiplyScalar(1 - 0.14 * rn);
+    const glow = S.windowGlow * (LS ? LS.glow : 0.95);
+    for (let i = 0; i < V.glowMats.length; i++) V.glowMats[i].emissiveIntensity = glow;
+    // Rain: everything darkens a little, roads and pavements go glossy.
+    for (let i = 0; i < V.dimMats.length; i++) V.dimMats[i].color.copy(V.dimBase[i]).multiplyScalar(1 - 0.16 * rn);
+    if (V.wet) V.wet.value = rn;
+    if (V.mats.pavementMat) V.mats.pavementMat.roughness = 0.88 - 0.42 * rn;
+    if (V.mats.asphaltMat) V.mats.asphaltMat.roughness = 0.93;
+
+    // Shared sky state for the graphics module (reflections, shadows).
+    const K = sys.sky;
+    K.zenith.copy(U.uZenith.value);
+    K.horizon.copy(U.uHorizon.value);
+    K.fog.copy(fogC);
+    K.sunColor.copy(U.uSunCol.value);
+    K.sunDir.set(S.sunX, S.sunY, S.sunZ);
+    K.lightDir.set(S.sunDirX, S.sunDirY, S.sunDirZ);
+    K.sunDisc = U.uSun.value;
+    K.glow = U.uGlow.value;
+    K.night = night;
+    K.lit = V.lit;
+    K.overcast = ov;
+    K.rain = rn;
+    K.fogAmount = fg;
+    // How crisp cast shadows should be: full in clear daylight, soft by
+    // moonlight, gone while the light swings from sun to moon and back.
+    const sunUp = smoothstep(-0.08, 0.14, S.sunY);
+    K.shadow = Math.abs(2 * sunUp - 1) * (sunUp > 0.5 ? 1 : 0.55) * (1 - 0.8 * ov) * (1 - 0.7 * fg);
+    K.version++;
 
     const starA = night * clearSky;
     V.stars.material.opacity = starA;
@@ -914,6 +920,17 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     },
     get weather() {
       return W.name;
+    },
+    // Current sky colours and light state, refreshed whenever they change
+    // (version counts the changes). Colours are linear.
+    sky: {
+      zenith: new THREE.Color(), horizon: new THREE.Color(), fog: new THREE.Color(), sunColor: new THREE.Color(),
+      sunDir: new THREE.Vector3(0, 1, 0), lightDir: new THREE.Vector3(0, 1, 0),
+      sunDisc: 1, glow: 1, night: 0, lit: 0, overcast: 0, rain: 0, fogAmount: 0, shadow: 1, version: 0,
+    },
+    // Re-apply sky and lights on the next frame (after a settings change).
+    refresh() {
+      forceApply = true;
     },
   };
   return sys;

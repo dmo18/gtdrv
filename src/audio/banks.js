@@ -1,30 +1,20 @@
 // The sound library: every sample buffer the game plays, generated once
-// at unlock. Work is split into small jobs (one buffer each) that the
-// audio system runs a few milliseconds at a time, so the page never
-// freezes. Loops are seamless; one-shots fade in and out cleanly.
+// at unlock. Work is split into small jobs that the audio system runs a
+// few milliseconds at a time, so the page never freezes. Excitations
+// (pulse trains, noise, tones) are made in JS; the heavy filtering of
+// loops runs in OfflineAudioContexts on the audio thread (JS fallback
+// when that is missing). Loops are seamless; one-shots fade cleanly.
 
 import { createRng } from '../core/rng.js';
 import {
-  SR, TAU, biquad, filter, lp1, svf, white, gauss, smoothRandom, removeDC, normalize,
-  fadeEdges, soft, addMode, addBurst,
+  SR, R, TAU, biquad, filter, lp1, svf, white, gauss, smoothRandom, removeDC, normalize, peak,
+  fadeEdges, soft, addMode, addBurst, runSpecJS,
 } from './dsp.js';
-import { ENGINES, pointsFor, renderEngineLoop, normalizeSet } from './engines.js';
+import { ENGINES, pointsFor, engineSpec, normalizeSet } from './engines.js';
 
-const len = (s) => Math.round(s * SR);
+const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
-
-// Add a decaying sine at a possibly wrapping position (for loops).
-function modeWrap(buf, at, f, decay, amp, phase = 0) {
-  const n = buf.length;
-  const L = Math.ceil(decay * SR * 7);
-  const w = (TAU * f) / SR;
-  const d = Math.exp(-1 / (decay * SR));
-  let e = amp;
-  for (let i = 0; i < L; i++) {
-    buf[(at + i) % n] += Math.sin(w * i + phase) * e;
-    e *= d;
-  }
-}
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 // Band-limited buzzy wave as a one-period table (K harmonics), read
 // with linear interpolation by phase in cycles.
@@ -40,36 +30,49 @@ function buzzTable(K, evenGain = 0.5) {
   t[TBL] = t[0];
   return t;
 }
+function harmTable(amps) {
+  const t = z(TBL + 1);
+  for (let i = 0; i < TBL; i++) {
+    let v = 0;
+    for (let k = 0; k < amps.length; k++) v += amps[k] * Math.sin((TAU * (k + 1) * i) / TBL);
+    t[i] = v;
+  }
+  t[TBL] = t[0];
+  return t;
+}
+let gullTable = null;
 function look(t, cyc) {
   const x = (cyc - Math.floor(cyc)) * TBL;
   const i = x | 0;
   return t[i] + (t[i + 1] - t[i]) * (x - i);
 }
 
+
 // ---------------------------------------------------------------- loops
+// Each loop returns either a finished Float32Array (pure JS synthesis)
+// or a filter spec (see dsp.js) whose filtering runs offline.
+const spec = (n, parts, finish, post = []) => ({ sr: R.sr, n, loop: true, parts, post, finish });
+const am = (out, m, base, depth) => {
+  for (let i = 0; i < out.length; i++) out[i] *= base + depth * m[i];
+  return out;
+};
+const done = (to) => (out) => normalize(removeDC(out), to);
+
 const LOOPS = {
   road(rng) {
     const n = len(2);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('lp', 240, 0.7), { gain: 1.8 });
-    filter(src, out, biquad('bp', 780, 0.8), { gain: 0.55, add: true });
-    filter(src, out, biquad('bp', 2500, 1), { gain: 0.14, add: true });
     const m = smoothRandom(n, 36, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.8 + 0.2 * m[i];
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [{ x: white(n, rng), bands: [['lp', 240, 0.7, 1.8], ['bp', 780, 0.8, 0.55], ['bp', 2500, 1, 0.14]] }],
+      (out) => normalize(removeDC(am(out, m, 0.8, 0.2)), 0.8));
   },
   squeal(rng) {
     const n = len(1.6);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('bp', 1185, 36), { gain: 6 });
-    filter(src, out, biquad('bp', 1793, 30), { gain: 4.4, add: true });
-    filter(src, out, biquad('bp', 2716, 24), { gain: 1.5, add: true });
     const m = smoothRandom(n, 21, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.7 + 0.18 * Math.sin((TAU * 5 * i) / n) + 0.12 * m[i];
-    soft(normalize(out, 1), 1.4);
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 1185, 36, 6], ['bp', 1793, 30, 4.4], ['bp', 2716, 24, 1.5]] }], (out) => {
+      for (let i = 0; i < n; i++) out[i] *= 0.7 + 0.18 * Math.sin((TAU * 5 * i) / n) + 0.12 * m[i];
+      soft(normalize(out, 1), 1.4);
+      return normalize(removeDC(out), 0.8);
+    });
   },
   gravel(rng) {
     const n = len(2);
@@ -78,183 +81,159 @@ const LOOPS = {
       const a = rng.next();
       addBurst(g, Math.floor(rng.next() * n), 0.0004 + rng.next() * 0.0012, a * a, rng, { loop: true, attack: 0 });
     }
-    const out = z(n);
-    filter(g, out, biquad('bp', 2300, 0.6), { gain: 1.4 });
-    filter(g, out, biquad('bp', 850, 0.8), { gain: 0.7, add: true });
-    filter(white(n, rng), out, biquad('lp', 170, 0.7), { gain: 0.9, add: true });
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [
+      { x: g, bands: [['bp', 2300, 0.6, 1.4], ['bp', 850, 0.8, 0.7]] },
+      { x: white(n, rng), bands: [['lp', 170, 0.7, 0.9]] },
+    ], done(0.8));
   },
   wet(rng) {
     const n = len(2);
-    const out = white(n, rng);
-    filter(out, out, biquad('hp', 1500, 0.7));
-    filter(out, out, biquad('lp', 6500, 0.7));
     const m = smoothRandom(n, 70, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.75 + 0.25 * m[i];
-    return normalize(removeDC(out), 0.75);
+    return spec(n, [{ x: white(n, rng), bands: [['hp', 1500, 0.7, 1]] }],
+      (out) => normalize(removeDC(am(out, m, 0.75, 0.25)), 0.75), [['lp', 6500, 0.7]]);
   },
   wind(rng) {
-    const n = len(3);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('lp', 420, 0.6), { gain: 2 });
-    filter(src, out, biquad('bp', 950, 0.7), { gain: 0.35, add: true });
+    const n = len(2.5);
     const m = smoothRandom(n, 7, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.62 + 0.38 * m[i];
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [{ x: white(n, rng), bands: [['lp', 420, 0.6, 2], ['bp', 950, 0.7, 0.35]] }],
+      (out) => normalize(removeDC(am(out, m, 0.62, 0.38)), 0.8));
   },
   wash(rng) {
     const n = len(2);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('bp', 1100, 0.6), { gain: 1 });
-    filter(src, out, biquad('hp', 3500, 0.7), { gain: 0.35, add: true });
-    filter(src, out, biquad('lp', 260, 0.7), { gain: 1, add: true });
     const m = smoothRandom(n, 90, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.55 + 0.45 * Math.abs(m[i]);
-    return normalize(removeDC(out), 0.8);
+    for (let i = 0; i < n; i++) m[i] = Math.abs(m[i]);
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 1100, 0.6, 1], ['hp', 3500, 0.7, 0.35], ['lp', 260, 0.7, 1]] }],
+      (out) => normalize(removeDC(am(out, m, 0.55, 0.45)), 0.8));
   },
   rain(rng) {
-    const n = len(3);
-    const out = z(n);
-    for (let k = 0; k < 3200; k++) {
+    const n = len(2);
+    const imp = z(n);
+    for (let k = 0; k < 2600; k++) {
       const a = rng.next();
-      modeWrap(out, Math.floor(rng.next() * n), 2200 + rng.next() * 4200, 0.0015 + rng.next() * 0.004, a * a * 0.5, rng.next() * TAU);
+      imp[Math.floor(rng.next() * n)] += (rng.next() < 0.5 ? -1 : 1) * a * a;
     }
-    filter(white(n, rng), out, biquad('hp', 900, 0.7), { gain: 0.22, add: true });
-    lp1(out, 7000);
-    return normalize(removeDC(out), 0.75);
+    return spec(n, [
+      { x: imp, bands: [['bp', 2900, 3, 1], ['bp', 5200, 4, 0.6], ['bp', 1300, 2, 0.3]] },
+      { x: white(n, rng), bands: [['hp', 900, 0.7, 0.08]] },
+    ], done(0.75));
   },
   buffet(rng) {
     const n = len(1.5);
-    const out = z(n);
-    filter(white(n, rng), out, biquad('lp', 85, 1.2), { gain: 3 });
-    for (let k = 0; k < 16; k++) modeWrap(out, Math.floor(rng.next() * n), 32 + rng.next() * 30, 0.04, 0.4 + rng.next() * 0.5);
     const m = smoothRandom(n, 17, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.6 + 0.4 * m[i];
-    return normalize(removeDC(out), 0.85);
+    const thumps = [];
+    for (let k = 0; k < 16; k++) thumps.push([Math.floor(rng.next() * n), 32 + rng.next() * 30, 0.4 + rng.next() * 0.5]);
+    return spec(n, [{ x: white(n, rng), bands: [['lp', 85, 1.2, 3]] }], (out) => {
+      for (const [at, f, a] of thumps) addMode(out, at, f, 0.04, a, R.sr, 0, true);
+      return normalize(removeDC(am(out, m, 0.6, 0.4)), 0.85);
+    });
   },
   jetroar(rng) {
     const n = len(2);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('lp', 900, 0.6), { gain: 1.6 });
-    filter(src, out, biquad('bp', 330, 0.8), { gain: 0.6, add: true });
-    filter(src, out, biquad('hp', 2600, 0.7), { gain: 0.2, add: true });
     const m = smoothRandom(n, 11, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.9 + 0.1 * m[i];
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [{ x: white(n, rng), bands: [['lp', 900, 0.6, 1.6], ['bp', 330, 0.8, 0.6], ['hp', 2600, 0.7, 0.2]] }],
+      (out) => normalize(removeDC(am(out, m, 0.9, 0.1)), 0.8));
   },
   turbine(rng) {
-    const n = SR; // exactly 1 s, so whole-Hz tones loop
-    const out = z(n);
+    const n = R.sr; // exactly 1 s, so whole-Hz tones loop
     const tones = [[1730, 1], [2617, 0.45], [3481, 0.3], [4409, 0.16], [871, 0.22]];
-    for (const [f, a] of tones) {
-      const w = (TAU * f) / SR;
-      const ph = rng.next() * TAU;
-      for (let i = 0; i < n; i++) out[i] += Math.sin(w * i + ph) * a * 0.5;
-    }
-    const src = white(n, rng);
-    for (const [f, a] of tones) filter(src, out, biquad('bp', f, 70), { gain: a * 2.5, add: true });
-    filter(src, out, biquad('hp', 5000, 0.7), { gain: 0.06, add: true });
-    return normalize(removeDC(out), 0.8);
+    const phases = tones.map(() => rng.next() * TAU);
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 1730, 70, 2.5], ['bp', 2617, 70, 1.1], ['hp', 5000, 0.7, 0.06]] }], (out) => {
+      for (let k = 0; k < tones.length; k++) {
+        const w = (TAU * tones[k][0]) / R.sr;
+        const a = tones[k][1] * 0.5;
+        for (let i = 0; i < n; i++) out[i] += Math.sin(w * i + phases[k]) * a;
+      }
+      return normalize(removeDC(out), 0.8);
+    });
   },
   rotor(rng) {
     // 8 blade passes at a reference rate of 14 Hz
     const passes = 8;
-    const n = Math.round((passes / 14) * SR);
+    const n = Math.round((passes / 14) * R.sr);
     const per = n / passes;
-    const out = z(n);
-    const swish = white(n, rng);
-    const sw = z(n);
-    filter(swish, sw, biquad('bp', 520, 0.7));
-    for (let i = 0; i < n; i++) {
-      const u = (i % per) / per;
-      out[i] += sw[i] * 0.35 * u * u * u;
-    }
-    const sig = 0.0012 * SR;
-    for (let k = 0; k < passes; k++) {
-      const at = Math.floor(k * per);
-      const a = k % 2 ? 0.85 : 1;
-      for (let j = -Math.ceil(sig * 5); j < sig * 5; j++) {
-        const x = j / sig;
-        out[(at + j + n) % n] += -x * Math.exp(-0.5 * x * x) * a * 1.4;
+    const sr = R.sr;
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 520, 0.7, 1]] }], (out) => {
+      for (let i = 0; i < n; i++) {
+        const u = (i % per) / per;
+        out[i] *= 0.35 * u * u * u;
       }
-      modeWrap(out, at, 46, 0.03, 0.9 * a);
-      modeWrap(out, at, 110, 0.012, 0.4 * a);
-    }
-    filter(out, out, biquad('lp', 2800, 0.7));
-    return normalize(removeDC(out), 0.85);
+      const sig = 0.0012 * sr;
+      for (let k = 0; k < passes; k++) {
+        const at = Math.floor(k * per);
+        const a = k % 2 ? 0.85 : 1;
+        for (let j = -Math.ceil(sig * 5); j < sig * 5; j++) {
+          const x = j / sig;
+          out[(at + j + n) % n] += -x * Math.exp(-0.5 * x * x) * a * 1.4;
+        }
+        addMode(out, at, 46, 0.03, 0.9 * a, sr, 0, true);
+        addMode(out, at, 110, 0.012, 0.4 * a, sr, 0, true);
+      }
+      return normalize(removeDC(out), 0.85);
+    });
   },
   tail(rng) {
     const pulses = 22;
-    const n = Math.round((pulses / 88) * SR);
+    const n = Math.round((pulses / 88) * R.sr);
     const exc = z(n);
     for (let k = 0; k < pulses; k++) exc[Math.floor((k * n) / pulses)] += 1 + 0.1 * gauss(rng);
-    const out = z(n);
-    filter(exc, out, biquad('bp', 640, 2), { gain: 3 });
-    filter(exc, out, biquad('bp', 1350, 3), { gain: 1.5, add: true });
-    filter(exc, out, biquad('lp', 240, 0.8), { gain: 1, add: true });
-    filter(white(n, rng), out, biquad('bp', 900, 1), { gain: 0.05, add: true });
-    return normalize(removeDC(out), 0.8);
+    return spec(n, [
+      { x: exc, bands: [['bp', 640, 2, 3], ['bp', 1350, 3, 1.5], ['lp', 240, 0.8, 1]] },
+      { x: white(n, rng), bands: [['bp', 900, 1, 0.05]] },
+    ], done(0.8));
   },
   scrape(rng) {
     const n = len(1.2);
-    const src = white(n, rng);
-    const out = z(n);
-    const modes = [[1350, 22, 1], [2240, 28, 0.8], [3650, 20, 0.6], [5100, 24, 0.35]];
-    for (const [f, q, g] of modes) filter(src, out, biquad('bp', f, q), { gain: g * 4, add: true });
-    filter(src, out, biquad('bp', 520, 1), { gain: 0.5, add: true });
-    const am = z(n);
-    for (let k = 0; k < 42; k++) am[Math.floor(rng.next() * n)] += 0.5 + rng.next();
-    lp1(am, 18);
-    let p = 0;
-    for (let i = 0; i < n; i++) p = Math.max(p, am[i]);
-    for (let i = 0; i < n; i++) out[i] *= 0.4 + 0.6 * (am[i] / (p || 1));
-    return normalize(removeDC(out), 0.8);
+    const a = z(n);
+    for (let k = 0; k < 42; k++) a[Math.floor(rng.next() * n)] += 0.5 + rng.next();
+    lp1(a, 18);
+    const p = peak(a) || 1;
+    for (let i = 0; i < n; i++) a[i] /= p;
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 1350, 22, 4], ['bp', 2240, 28, 3.2], ['bp', 3650, 20, 2.4], ['bp', 5100, 24, 1.4], ['bp', 520, 1, 0.5]] }],
+      (out) => normalize(removeDC(am(out, a, 0.4, 0.6)), 0.8));
   },
   city(rng) {
-    const n = len(4);
-    const src = white(n, rng);
-    const out = z(n);
-    filter(src, out, biquad('lp', 130, 0.7), { gain: 3.2 });
-    filter(src, out, biquad('bp', 380, 0.7), { gain: 0.55, add: true });
-    filter(src, out, biquad('hp', 2200, 0.7), { gain: 0.05, add: true });
+    const n = len(3);
+    const m = smoothRandom(n, 5, rng);
     // a couple of distant vehicles passing within the bed
     const pass = white(n, rng);
-    filter(pass, pass, biquad('bp', 620, 0.9));
+    const env = z(n);
     for (let k = 0; k < 3; k++) {
       const c = rng.next() * n;
-      const w = (0.5 + rng.next() * 0.6) * SR;
+      const w = (0.5 + rng.next() * 0.6) * R.sr;
       for (let i = 0; i < n; i++) {
         let d = Math.abs(i - c);
         if (d > n / 2) d = n - d;
-        out[i] += pass[i] * 0.35 * Math.exp(-(d * d) / (w * w));
+        const q = d / w;
+        if (q < 3) env[i] += Math.exp(-q * q);
       }
     }
-    const m = smoothRandom(n, 5, rng);
-    for (let i = 0; i < n; i++) out[i] *= 0.75 + 0.25 * m[i];
-    return normalize(removeDC(out), 0.8);
+    for (let i = 0; i < n; i++) pass[i] *= env[i];
+    return spec(n, [
+      { x: white(n, rng), bands: [['lp', 130, 0.7, 3.2], ['bp', 380, 0.7, 0.55], ['hp', 2200, 0.7, 0.05]] },
+      { x: pass, bands: [['bp', 620, 0.9, 0.35]] },
+    ], (out) => normalize(removeDC(am(out, m, 0.75, 0.25)), 0.8));
   },
   crickets(rng) {
-    const n = len(4);
+    const n = len(3);
     const out = z(n);
     const kinds = [[4150, 0.6, 1], [4420, 0.72, 0.7], [4760, 0.85, 0.55], [3920, 1.0, 0.4]];
+    const pl = Math.round(0.016 * R.sr);
+    const env = z(pl);
+    for (let j = 0; j < pl; j++) env[j] = Math.sin((Math.PI * j) / pl) ** 2;
     for (const [f, period, amp] of kinds) {
-      const chirps = Math.max(1, Math.round(4 / period));
+      const chirps = Math.max(1, Math.round(3 / period));
       const step = n / chirps;
       const off = rng.next() * step;
       const pulses = 3 + Math.floor(rng.next() * 2);
-      const pl = Math.round(0.016 * SR);
-      const gap = Math.round(0.036 * SR);
+      const gap = Math.round(0.036 * R.sr);
       for (let c = 0; c < chirps; c++) {
         const a0 = amp * (0.8 + 0.2 * rng.next());
         for (let p = 0; p < pulses; p++) {
           const at = Math.floor(off + c * step + p * gap);
-          const ff = f * (1 + 0.004 * gauss(rng));
-          for (let j = 0; j < pl; j++) {
-            const e = Math.sin((Math.PI * j) / pl);
-            out[(at + j) % n] += Math.sin((TAU * ff * j) / SR) * e * e * a0;
+          const w = (TAU * f * (1 + 0.004 * gauss(rng))) / R.sr;
+          for (let j = 0, i = at % n; j < pl; j++) {
+            out[i] += Math.sin(w * j) * env[j] * a0;
+            if (++i >= n) i = 0;
           }
         }
       }
@@ -262,50 +241,61 @@ const LOOPS = {
     return normalize(removeDC(out), 0.7);
   },
   surf(rng) {
-    const n = len(8);
-    const crash = white(n, rng);
-    filter(crash, crash, biquad('lp', 2200, 0.6));
-    const fizz = white(n, rng);
-    filter(fizz, fizz, biquad('hp', 3200, 0.7));
+    const n = len(5.5);
+    const sr = R.sr;
     const eC = z(n);
     const eF = z(n);
-    const waves = [0.2, 2.9, 5.4];
-    for (const w0 of waves) {
-      const at = (w0 + rng.next() * 0.4) * SR;
+    for (const w0 of [0.2, 2.4]) {
+      const at = Math.floor((w0 + rng.next() * 0.4) * sr);
       const amp = 0.7 + rng.next() * 0.3;
-      for (let i = 0; i < n; i++) {
-        let t = (i - at) / SR;
-        if (t < 0) t += n / SR;
-        const rise = t < 0.5 ? t / 0.5 : 1;
-        eC[i] += amp * rise * rise * (t < 0.5 ? 1 : Math.exp(-(t - 0.5) / 1.1));
-        const tf = t - 0.7;
-        eF[i] += tf > 0 ? amp * Math.min(1, tf / 0.3) * Math.exp(-tf / 1.6) : 0;
+      const rise = Math.floor(0.5 * sr);
+      const dc = Math.exp(-1 / (1.1 * sr));
+      const df = Math.exp(-1 / (1.6 * sr));
+      let c = amp;
+      let f = amp;
+      for (let j = 0, i = at; j < n; j++) {
+        if (j < rise) {
+          const r = j / rise;
+          eC[i] += amp * r * r;
+        } else {
+          eC[i] += c;
+          c *= dc;
+        }
+        const tf = j - Math.floor(0.7 * sr);
+        if (tf > 0) {
+          eF[i] += f * Math.min(1, tf / (0.3 * sr));
+          f *= df;
+        }
+        if (++i >= n) i = 0;
       }
     }
-    const out = z(n);
-    for (let i = 0; i < n; i++) out[i] = crash[i] * (0.12 + eC[i]) + fizz[i] * eF[i] * 0.6;
-    filter(white(n, rng), out, biquad('lp', 160, 0.7), { gain: 0.6, add: true });
-    return normalize(removeDC(out), 0.8);
+    const a = white(n, rng);
+    for (let i = 0; i < n; i++) a[i] *= 0.12 + eC[i];
+    const b = white(n, rng);
+    for (let i = 0; i < n; i++) b[i] *= eF[i];
+    return spec(n, [
+      { x: a, bands: [['lp', 2200, 0.6, 1]] },
+      { x: b, bands: [['hp', 3200, 0.7, 0.6]] },
+      { x: white(n, rng), bands: [['lp', 160, 0.7, 0.6]] },
+    ], done(0.8));
   },
   lap(rng) {
-    const n = len(4);
+    const n = len(3);
     const g = z(n);
-    for (let k = 0; k < 16; k++) addBurst(g, Math.floor(rng.next() * n), 0.04 + rng.next() * 0.08, 0.5 + rng.next() * 0.5, rng, { loop: true, attack: 0.01 });
-    const out = z(n);
-    filter(g, out, biquad('bp', 340, 2), { gain: 2 });
-    filter(g, out, biquad('bp', 760, 3), { gain: 1, add: true });
-    filter(g, out, biquad('hp', 2500, 0.7), { gain: 0.15, add: true });
-    filter(white(n, rng), out, biquad('lp', 120, 0.7), { gain: 0.5, add: true });
-    return normalize(removeDC(out), 0.75);
+    for (let k = 0; k < 12; k++) addBurst(g, Math.floor(rng.next() * n), 0.04 + rng.next() * 0.08, 0.5 + rng.next() * 0.5, rng, { loop: true, attack: 0.01 });
+    return spec(n, [
+      { x: g, bands: [['bp', 340, 2, 2], ['bp', 760, 3, 1], ['hp', 2500, 0.7, 0.15]] },
+      { x: white(n, rng), bands: [['lp', 120, 0.7, 0.5]] },
+    ], done(0.75));
   },
   hornA() {
-    return horn([[415, 417], [523, 525]], [[1800, 1.3, 2], [650, 1, 1]], 2);
+    return horn([[415, 417], [523, 525]], [['bp', 1800, 1.3, 2], ['bp', 650, 1, 1]], 2);
   },
   hornB() {
-    return horn([[155, 156], [196, 197]], [[850, 1, 2], [1700, 2, 0.8]], 2.6);
+    return horn([[155, 156], [196, 197]], [['bp', 850, 1, 2], ['bp', 1700, 2, 0.8]], 2.6);
   },
   sirenWail() {
-    return siren(3.4, (u) => (u < 0.56 ? 620 + 760 * Math.sin((u / 0.56) * Math.PI * 0.5) : 1380 - 760 * Math.pow((u - 0.56) / 0.44, 1.6)));
+    return siren(3.0, (u) => (u < 0.56 ? 620 + 760 * Math.sin((u / 0.56) * Math.PI * 0.5) : 1380 - 760 * Math.pow((u - 0.56) / 0.44, 1.6)));
   },
   sirenYelp() {
     return siren(0.62, (u) => {
@@ -315,42 +305,42 @@ const LOOPS = {
   },
 };
 
+// Two detuned pairs of buzzy tones through a honky band-pass.
 function horn(pairs, bands, drive) {
-  const n = SR; // 1 s, whole-Hz tones loop
+  const n = R.sr; // 1 s, whole-Hz tones loop
   const raw = z(n);
   for (const pair of pairs) {
     for (const f of pair) {
-      const t = buzzTable(Math.max(1, Math.floor(9000 / f)), 0.55);
-      for (let i = 0; i < n; i++) raw[i] += look(t, (f * i) / SR) * 0.5;
+      const t = buzzTable(Math.max(1, Math.floor(6500 / f)), 0.55);
+      for (let i = 0; i < n; i++) raw[i] += look(t, (f * i) / R.sr) * 0.5;
     }
   }
-  const out = z(n);
-  for (const [f, q, g] of bands) filter(raw, out, biquad('bp', f, q), { gain: g, add: true });
-  for (let i = 0; i < n; i++) out[i] += raw[i] * 0.15;
-  soft(normalize(out, 1), drive);
-  return normalize(removeDC(out), 0.8);
+  return spec(n, [{ x: raw, bands: [...bands, ['gain', 0, 0, 0.15]] }], (out) => {
+    soft(normalize(out, 1), drive);
+    return normalize(removeDC(out), 0.8);
+  });
 }
 
+// A swept buzzy tone through a small loudspeaker band.
 function siren(T, fOf) {
   const n = len(T);
   // integrate phase, then stretch slightly so the loop ends on a whole cycle
   let total = 0;
-  for (let i = 0; i < n; i++) total += (TAU * fOf(i / n)) / SR;
-  const k = (Math.round(total / TAU) * TAU) / total;
+  for (let i = 0; i < n; i++) total += fOf(i / n) / R.sr;
+  const k = Math.round(total) / total;
   const raw = z(n);
   const tb = buzzTable(5, 0.3);
   let ph = 0;
   for (let i = 0; i < n; i++) {
-    const f = fOf(i / n) * k;
-    raw[i] = look(tb, ph / TAU);
-    ph += (TAU * f) / SR;
+    raw[i] = look(tb, ph);
+    ph += (fOf(i / n) * k) / R.sr;
   }
-  const out = z(n);
-  filter(raw, out, biquad('bp', 1500, 0.7), { gain: 1.6 });
-  for (let i = 0; i < n; i++) out[i] += raw[i] * 0.35;
-  soft(normalize(out, 1), 1.8);
-  return normalize(removeDC(out), 0.8);
+  return spec(n, [{ x: raw, bands: [['bp', 1500, 0.7, 1.6], ['gain', 0, 0, 0.35]] }], (out) => {
+    soft(normalize(out, 1), 1.8);
+    return normalize(removeDC(out), 0.8);
+  });
 }
+
 
 // ------------------------------------------------------------ one-shots
 const SHOTS = {
@@ -360,9 +350,9 @@ const SHOTS = {
     const f0 = 80 + rng.next() * 45;
     let ph = 0;
     for (let i = 0; i < n; i++) {
-      const t = i / SR;
+      const t = i / R.sr;
       const f = 36 + (f0 - 36) * Math.exp(-t / 0.05);
-      ph += (TAU * f) / SR;
+      ph += (TAU * f) / R.sr;
       const e = Math.min(1, t / 0.002) * Math.exp(-t / 0.075);
       out[i] = Math.sin(ph) * e;
     }
@@ -377,13 +367,13 @@ const SHOTS = {
     for (let k = 0; k < 240; k++) {
       const t = Math.min(0.6, -Math.log(1 - rng.next() * 0.999) * 0.11);
       const a = rng.next();
-      addBurst(g, Math.floor(t * SR), 0.0005 + rng.next() * 0.0035, a * (1 - t), rng);
+      addBurst(g, Math.floor(t * R.sr), 0.0005 + rng.next() * 0.0035, a * (1 - t), rng);
     }
     const out = z(n);
     filter(g, out, biquad('bp', 1800, 0.8), { gain: 1, loop: false });
     filter(g, out, biquad('hp', 3000, 0.7), { gain: 0.4, add: true, loop: false });
     filter(g, out, biquad('lp', 500, 0.7), { gain: 0.6, add: true, loop: false });
-    for (let k = 0; k < 6; k++) addMode(out, Math.floor(rng.next() * 0.1 * SR), 300 + rng.next() * 2900, 0.05 + rng.next() * 0.15, 0.06);
+    for (let k = 0; k < 6; k++) addMode(out, Math.floor(rng.next() * 0.1 * R.sr), 300 + rng.next() * 2900, 0.05 + rng.next() * 0.15, 0.06);
     return fadeEdges(normalize(out, 0.9));
   },
   glass(rng) {
@@ -394,7 +384,7 @@ const SHOTS = {
     filter(crack, out, biquad('hp', 2000, 0.7), { gain: 0.7, loop: false });
     for (let k = 0; k < 42; k++) {
       const t = Math.min(0.85, 0.004 + -Math.log(1 - rng.next() * 0.999) * 0.12);
-      addMode(out, Math.floor(t * SR), 2400 + rng.next() * 5800, 0.01 + rng.next() * 0.04, (0.2 + 0.5 * rng.next()) * (1 - t * 0.8), SR, rng.next() * TAU);
+      addMode(out, Math.floor(t * R.sr), 2400 + rng.next() * 5800, 0.01 + rng.next() * 0.04, (0.2 + 0.5 * rng.next()) * (1 - t * 0.8), R.sr, rng.next() * TAU);
     }
     filter(out, out, biquad('hp', 1500, 0.7), { loop: false });
     return fadeEdges(normalize(out, 0.8));
@@ -405,8 +395,8 @@ const SHOTS = {
     const c = z(n);
     addBurst(c, 0, 0.003, 1, rng);
     filter(c, out, biquad('hp', 2000, 0.7), { gain: 0.6, loop: false });
-    addMode(out, Math.floor(0.012 * SR), 130, 0.03, 0.5);
-    addMode(out, Math.floor(0.012 * SR), 610, 0.015, 0.15);
+    addMode(out, Math.floor(0.012 * R.sr), 130, 0.03, 0.5);
+    addMode(out, Math.floor(0.012 * R.sr), 610, 0.015, 0.15);
     return fadeEdges(normalize(out, 0.7));
   },
   doorClose(rng) {
@@ -418,10 +408,10 @@ const SHOTS = {
     addBurst(b, 0, 0.03, 0.9, rng);
     filter(b, out, biquad('lp', 800, 0.7), { gain: 1, add: true, loop: false });
     const c = z(n);
-    addBurst(c, Math.floor(0.035 * SR), 0.003, 0.6, rng);
+    addBurst(c, Math.floor(0.035 * R.sr), 0.003, 0.6, rng);
     filter(c, out, biquad('hp', 2200, 0.7), { gain: 1, add: true, loop: false });
-    addMode(out, Math.floor(0.035 * SR), 470, 0.02, 0.15);
-    addMode(out, Math.floor(0.035 * SR), 790, 0.02, 0.1);
+    addMode(out, Math.floor(0.035 * R.sr), 470, 0.02, 0.15);
+    addMode(out, Math.floor(0.035 * R.sr), 790, 0.02, 0.1);
     return fadeEdges(normalize(out, 0.9));
   },
   crank(rng) {
@@ -432,12 +422,12 @@ const SHOTS = {
     const chug = white(n, rng);
     filter(chug, chug, biquad('lp', 300, 0.7), { loop: false });
     for (let i = 0; i < n; i++) {
-      const t = i / SR;
+      const t = i / R.sr;
       const fc = 7 + 5 * (t / 1.15);
-      pc += (TAU * fc) / SR;
+      pc += (TAU * fc) / R.sr;
       const comp = 0.5 + 0.5 * Math.cos(pc);
       const f = (150 + 55 * (t / 1.15)) * (0.85 + 0.15 * comp);
-      ph += (TAU * f) / SR;
+      ph += (TAU * f) / R.sr;
       const m = 0.45 + 0.55 * comp * comp;
       out[i] = (look(tb, ph / TAU) * 0.25 + chug[i] * 1.6) * m;
     }
@@ -449,7 +439,7 @@ const SHOTS = {
     const out = z(n);
     const b = z(n);
     addBurst(b, 0, 0.0015, 1, rng);
-    for (let k = 0; k < 4; k++) addBurst(b, Math.floor(rng.next() * 0.06 * SR), 0.0008, 0.4 * rng.next(), rng);
+    for (let k = 0; k < 4; k++) addBurst(b, Math.floor(rng.next() * 0.06 * R.sr), 0.0008, 0.4 * rng.next(), rng);
     filter(b, out, biquad('bp', 1600, 0.8), { gain: 1.5, loop: false });
     addMode(out, 0, 70 + rng.next() * 40, 0.02, 0.7);
     return fadeEdges(normalize(out, 0.9), 8, 200);
@@ -462,7 +452,7 @@ const SHOTS = {
     addBurst(b, 0, 0.06, 1, rng, { attack: 0.003 });
     filter(b, out, biquad('bp', 700, 0.9), { gain: 0.8, add: true, loop: false });
     const h = z(n);
-    addBurst(h, Math.floor(0.01 * SR), 0.1, 0.5, rng, { attack: 0.01 });
+    addBurst(h, Math.floor(0.01 * R.sr), 0.1, 0.5, rng, { attack: 0.01 });
     filter(h, out, biquad('hp', 2500, 0.7), { gain: 0.5, add: true, loop: false });
     return fadeEdges(normalize(out, 0.85));
   },
@@ -472,20 +462,20 @@ const SHOTS = {
     addBurst(b, 0, 0.25, 1, rng, { attack: 0.01 });
     const out = svf(b, z(n), (u) => 4000 * Math.exp(-u * 2) + 400, 0.8, 'lp');
     for (let k = 0; k < 26; k++) {
-      const at = Math.floor(Math.min(1.1, -Math.log(1 - rng.next() * 0.99) * 0.25) * SR);
-      const L = Math.floor(0.02 * SR);
+      const at = Math.floor(Math.min(1.1, -Math.log(1 - rng.next() * 0.99) * 0.25) * R.sr);
+      const L = Math.floor(0.02 * R.sr);
       const f0 = 400 + rng.next() * 500;
       let ph = 0;
       for (let j = 0; j < L && at + j < n; j++) {
         const u = j / L;
-        ph += (TAU * f0 * (1 + 1.5 * u)) / SR;
+        ph += (TAU * f0 * (1 + 1.5 * u)) / R.sr;
         out[at + j] += Math.sin(ph) * (1 - u) * 0.25;
       }
     }
     return fadeEdges(normalize(out, 0.85));
   },
   whoosh(rng) {
-    const n = len(2.6);
+    const n = len(2.2);
     const src = white(n, rng);
     const c = 0.45 + rng.next() * 0.1;
     const out = svf(src, z(n), (u) => (u < c ? 1500 : 650) + 300 * Math.tanh((c - u) * 12), 1.2, 'bp');
@@ -499,23 +489,24 @@ const SHOTS = {
     return fadeEdges(normalize(out, 0.8), 200, 2000);
   },
   gull(rng) {
-    const n = len(1.5);
+    const n = len(1.2);
     const out = z(n);
     const cries = 2 + Math.floor(rng.next() * 3);
     const f0 = 950 + rng.next() * 350;
+    const tb = gullTable || (gullTable = harmTable([1, 0.6, 0.35, 0.18]));
     let t0 = 0.02;
     for (let c = 0; c < cries; c++) {
       const dur = 0.16 + rng.next() * 0.16;
-      const at = Math.floor(t0 * SR);
-      const L = Math.floor(dur * SR);
+      const at = Math.floor(t0 * R.sr);
+      const L = Math.floor(dur * R.sr);
       let ph = 0;
       const fc = f0 * (1 + 0.06 * gauss(rng));
       for (let j = 0; j < L && at + j < n; j++) {
         const u = j / L;
         const f = fc * (0.8 + 0.6 * Math.sin(Math.PI * Math.min(1, u * 1.25)) - 0.2 * u);
-        ph += (TAU * f) / SR;
-        const e = Math.pow(Math.sin(Math.PI * u), 0.6) * (1 + 0.3 * Math.sin((TAU * 72 * j) / SR));
-        out[at + j] += (Math.sin(ph) + 0.6 * Math.sin(2 * ph) + 0.35 * Math.sin(3 * ph) + 0.18 * Math.sin(4 * ph)) * e * 0.4;
+        ph += f / R.sr;
+        const e = Math.sqrt(Math.sin(Math.PI * u)) * (1 + 0.3 * Math.sin((TAU * 72 * j) / R.sr));
+        out[at + j] += look(tb, ph) * e * 0.4;
       }
       t0 += dur + 0.05 + rng.next() * 0.12;
     }
@@ -529,14 +520,14 @@ const SHOTS = {
       const ratios = [1, 2.31, 3.98, 5.43, 7.1];
       const dec = [0.35, 0.22, 0.15, 0.1, 0.07];
       const amp = [1, 0.7, 0.5, 0.35, 0.2];
-      for (let k = 0; k < ratios.length; k++) addMode(out, at, base * ratios[k] * (1 + 0.01 * gauss(rng)), dec[k], amp[k] * a, SR, rng.next() * TAU);
+      for (let k = 0; k < ratios.length; k++) addMode(out, at, base * ratios[k] * (1 + 0.01 * gauss(rng)), dec[k], amp[k] * a, R.sr, rng.next() * TAU);
       const b = z(n);
       addBurst(b, at, 0.002, a, rng);
       filter(b, out, biquad('hp', 2500, 0.7), { gain: 0.5, add: true, loop: false });
     };
     const base = 220 + rng.next() * 300;
     hit(0, base, 1);
-    if (rng.next() < 0.6) hit(Math.floor((0.11 + rng.next() * 0.1) * SR), base * 1.07, 0.45);
+    if (rng.next() < 0.6) hit(Math.floor((0.11 + rng.next() * 0.1) * R.sr), base * 1.07, 0.45);
     return fadeEdges(normalize(out, 0.8));
   },
   click(rng) {
@@ -554,7 +545,7 @@ const SHOTS = {
     const out = z(n);
     const notes = [[0, 698.5], [0.085, 880], [0.19, 1174.7]];
     for (const [t, f] of notes) {
-      const at = Math.floor(t * SR);
+      const at = Math.floor(t * R.sr);
       addMode(out, at, f, 0.32, 0.6);
       addMode(out, at, f * 3.01, 0.06, 0.12);
       addMode(out, at, f * 4.17, 0.03, 0.06);
@@ -565,7 +556,7 @@ const SHOTS = {
     const n = len(0.75);
     const out = z(n);
     for (const [t, f] of [[0, 330], [0.17, 262]]) {
-      const at = Math.floor(t * SR);
+      const at = Math.floor(t * R.sr);
       addMode(out, at, f, 0.18, 0.6);
       addMode(out, at, f * 2, 0.08, 0.15);
     }
@@ -581,35 +572,112 @@ const SHOTS = {
   },
 };
 
+
+// Low-frequency beds rendered at half rate (less memory and work).
+const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tail']);
+
 // variants: how many copies of each one-shot to make
-const SHOT_VARIANTS = { thud: 3, crunch: 3, glass: 2, pop: 4, slap: 3, whoosh: 2, gull: 3, clank: 3 };
+const SHOT_VARIANTS = { thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2 };
 
 // Stereo impulse response of a street: a few early wall reflections and
 // a short darkening tail. Built at the context's own rate.
 function impulse(ctx, rng) {
   const sr = ctx.sampleRate;
-  const n = Math.round(0.85 * sr);
+  const n = Math.round(0.6 * sr);
   const buf = ctx.createBuffer(2, n, sr);
   for (let ch = 0; ch < 2; ch++) {
     const d = buf.getChannelData(ch);
+    const nz = white(n, rng);
     for (let k = 0; k < 10; k++) {
       const t = 0.009 + rng.next() * 0.07;
       const g = (0.55 - t * 4) * (rng.next() < 0.5 ? -1 : 1);
       d[Math.floor(t * sr)] += g;
     }
     let y = 0;
+    let e = 1;
+    const de = Math.exp(-1 / (0.16 * sr));
+    const att = 0.02 * sr;
     for (let i = 0; i < n; i++) {
-      const t = i / sr;
-      const a = 0.65 * Math.exp(-t / 0.25) + 0.06;
-      y += a * ((rng.next() * 2 - 1) - y);
-      const e = Math.min(1, t / 0.02) * Math.exp(-t / 0.16);
-      d[i] += y * e * 0.5;
+      const a = 0.65 * Math.exp(-i / (0.25 * sr)) + 0.06;
+      y += a * (nz[i] - y);
+      d[i] += y * e * 0.5 * (i < att ? i / att : 1);
+      e *= de;
     }
     lp1(d, 6000, { loop: false, sr });
   }
   return buf;
 }
 
+// ---- offline filtering ----
+const WARM = 0.25; // seconds of filter run-in rendered before each loop
+const MAX_CH = 32;
+
+function offlineCtor() {
+  if (typeof window === 'undefined') return null;
+  return window.OfflineAudioContext || window.webkitOfflineAudioContext || null;
+}
+
+// Render up to 32 specs of one sample rate in one OfflineAudioContext,
+// one spec per output channel. Each excitation loops, so after the
+// run-in the filters are in their periodic steady state; the period is
+// cut out aligned to the excitation's own start. Resolves to filtered
+// arrays (before finish), or rejects.
+function renderOffline(Off, specs, sr) {
+  const warm = Math.round(WARM * sr);
+  let maxN = 0;
+  for (const s of specs) maxN = Math.max(maxN, s.n + warm);
+  const oc = new Off(specs.length, maxN, sr);
+  const merger = oc.createChannelMerger(specs.length);
+  merger.connect(oc.destination);
+  const node = (type, f, q) => {
+    const b = oc.createBiquadFilter();
+    b.type = type === 'lp' ? 'lowpass' : type === 'hp' ? 'highpass' : 'bandpass';
+    b.frequency.value = Math.min(f, sr * 0.45);
+    // low/high-pass Q is in dB in Web Audio; band-pass Q is linear
+    b.Q.value = type === 'bp' ? q : 20 * Math.log10(q);
+    return b;
+  };
+  specs.forEach((s, ch) => {
+    const sum = oc.createGain();
+    let tail = sum;
+    for (const [type, f, q] of s.post || []) {
+      const b = node(type, f, q);
+      tail.connect(b);
+      tail = b;
+    }
+    tail.connect(merger, 0, ch);
+    const offset = ((s.n - (warm % s.n)) % s.n) / sr;
+    for (const part of s.parts) {
+      const b = oc.createBuffer(1, s.n, sr);
+      if (b.copyToChannel) b.copyToChannel(part.x, 0);
+      else b.getChannelData(0).set(part.x);
+      const src = oc.createBufferSource();
+      src.buffer = b;
+      src.loop = true;
+      for (const [type, f, q, g] of part.bands) {
+        const gn = oc.createGain();
+        gn.gain.value = g;
+        gn.connect(sum);
+        if (type === 'gain') src.connect(gn);
+        else {
+          const bq = node(type, f, q);
+          src.connect(bq);
+          bq.connect(gn);
+        }
+      }
+      src.start(0, offset);
+    }
+  });
+  const p = oc.startRendering();
+  const finish = (rendered) => specs.map((s, ch) => rendered.getChannelData(ch).slice(warm, warm + s.n));
+  if (p && p.then) return p.then(finish);
+  return new Promise((resolve, reject) => {
+    oc.oncomplete = (e) => resolve(finish(e.renderedBuffer));
+    setTimeout(() => reject(new Error('offline render timeout')), 8000);
+  });
+}
+
+// ---- the bank ----
 // Build the job list. `first` is an engine character to make first.
 export function createBank(ctx, { first = null } = {}) {
   const rng = createRng(0x5a17);
@@ -617,15 +685,19 @@ export function createBank(ctx, { first = null } = {}) {
   const loops = [];
   let bytes = 0;
   const jobs = [];
-  const put = (name, data, loop) => {
-    const b = ctx.createBuffer(1, data.length, SR);
+  const put = (name, data, loop, sr = SR) => {
+    const b = ctx.createBuffer(1, data.length, sr);
     if (b.copyToChannel) b.copyToChannel(data, 0);
     else b.getChannelData(0).set(data);
     buffers[name] = b;
     bytes += data.length * 4;
     if (loop) loops.push(name);
   };
+  const Off = offlineCtor();
+  const pending = []; // { spec, done(data) }
+  const stats = { offline: 0, js: 0, offlineMs: 0 };
 
+  // Engines: 4 rpm points x 2 loads per character, normalised together.
   const chars = Object.keys(ENGINES);
   if (first && chars.includes(first)) {
     chars.splice(chars.indexOf(first), 1);
@@ -634,15 +706,68 @@ export function createBank(ctx, { first = null } = {}) {
   for (const ch of chars) {
     const pts = pointsFor(ch);
     const set = [];
+    const total = pts.length * 2;
     for (let i = 0; i < pts.length; i++) {
-      for (const load of [1, 0]) jobs.push(() => set.push({ i, load, data: renderEngineLoop(ch, pts[i], load, rng) }));
+      for (const load of [1, 0]) {
+        jobs.push(() => {
+          R.sr = SR;
+          const sp = engineSpec(ch, pts[i], load, rng, SR);
+          pending.push({
+            spec: sp,
+            done(data) {
+              set.push({ i, load, data });
+              if (set.length < total) return;
+              normalizeSet(set.map((q) => q.data));
+              for (const q of set) put(`eng:${ch}:${q.i}:${q.load ? 'on' : 'off'}`, q.data, true);
+            },
+          });
+        });
+      }
     }
+  }
+  for (const name of Object.keys(LOOPS)) {
+    const sr = LOW_RATE.has(name) ? SR / 2 : SR;
     jobs.push(() => {
-      normalizeSet(set.map((s) => s.data));
-      for (const s of set) put(`eng:${ch}:${s.i}:${s.load ? 'on' : 'off'}`, s.data, true);
+      R.sr = sr;
+      const r = LOOPS[name](rng);
+      R.sr = SR;
+      if (r instanceof Float32Array) put(name, r, true, sr);
+      else pending.push({ spec: r, done: (data) => put(name, data, true, sr) });
     });
   }
-  for (const name of Object.keys(LOOPS)) jobs.push(() => put(name, LOOPS[name](rng), true));
+
+  // Kick off the offline renders, then make the one-shots meanwhile.
+  let renders = null;
+  jobs.push(() => {
+    if (!Off) return;
+    const t0 = nowMs();
+    const groups = new Map();
+    for (const p of pending) {
+      const k = p.spec.sr;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(p);
+    }
+    const all = [];
+    for (const [sr, list] of groups) {
+      for (let i = 0; i < list.length; i += MAX_CH) {
+        const chunk = list.slice(i, i + MAX_CH);
+        let pr;
+        try {
+          pr = renderOffline(Off, chunk.map((p) => p.spec), sr);
+        } catch {
+          continue;
+        }
+        all.push(pr.then((datas) => {
+          chunk.forEach((p, j) => {
+            p.data = datas[j];
+          });
+        }, () => {}));
+      }
+    }
+    renders = Promise.all(all).then(() => {
+      stats.offlineMs = nowMs() - t0;
+    });
+  });
   for (const name of Object.keys(SHOTS)) {
     const v = SHOT_VARIANTS[name] || 1;
     for (let k = 0; k < v; k++) jobs.push(() => put(v > 1 ? `${name}${k}` : name, SHOTS[name](rng), false));
@@ -651,31 +776,59 @@ export function createBank(ctx, { first = null } = {}) {
     buffers.ir = impulse(ctx, rng);
     bytes += buffers.ir.length * 2 * 4;
   });
+  // Wait for the renders, then finish every spec (JS filtering for any
+  // the offline pass could not do).
+  jobs.push(() => renders);
+  jobs.push(() => {
+    for (const p of pending) {
+      jobs.push(() => {
+        let data = p.data;
+        if (data) {
+          stats.offline++;
+          data = p.spec.finish ? p.spec.finish(data) : data;
+        } else {
+          stats.js++;
+          data = runSpecJS(p.spec);
+        }
+        p.spec.parts = null;
+        p.done(data);
+      });
+    }
+  });
 
   let next = 0;
-  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  let waiting = null;
   return {
     buffers,
     loops,
-    variants: SHOT_VARIANTS,
+    stats,
     get bytes() {
       return bytes;
     },
     get done() {
-      return next >= jobs.length;
+      return next >= jobs.length && !waiting;
     },
-    get progress() {
-      return next / jobs.length;
-    },
-    // Run jobs until about budgetMs has passed. Returns true when done.
+    // Run jobs for about budgetMs. Returns true when everything is done,
+    // false when there is more, or a promise to wait for.
     step(budgetMs) {
-      const t0 = now();
+      if (waiting) return waiting;
+      const t0 = nowMs();
       while (next < jobs.length) {
-        jobs[next++]();
-        if (now() - t0 >= budgetMs) break;
+        const j0 = nowMs();
+        const r = jobs[next++]();
+        const jt = nowMs() - j0;
+        if (jt > 4) (stats.slow || (stats.slow = [])).push(`${next - 1}:${jt.toFixed(0)}:${Object.keys(buffers).length}`);
+        if (r && typeof r.then === 'function') {
+          waiting = r.then(() => {
+            waiting = null;
+          }, () => {
+            waiting = null;
+          });
+          return waiting;
+        }
+        if (nowMs() - t0 >= budgetMs) break;
       }
       return next >= jobs.length;
     },
   };
 }
-

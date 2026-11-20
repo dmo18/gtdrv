@@ -5,12 +5,15 @@
 // the tail of the buffer before the real pass, so its state at sample 0
 // matches the state it would have after the last sample.
 
-export const SR = 22050; // sample rate of generated mono buffers
+export const SR = 22050; // default sample rate of generated mono buffers
+// Rate used by the helpers below when none is passed; the bank sets it
+// per buffer (quiet low-frequency beds use half the rate).
+export const R = { sr: SR };
 export const TAU = Math.PI * 2;
 
 // ---- filter coefficients (RBJ cookbook) ----
 // type: 'lp' | 'hp' | 'bp' (0 dB peak) | 'peak'
-export function biquad(type, f, q, sr = SR, gainDb = 0) {
+export function biquad(type, f, q, sr = R.sr, gainDb = 0) {
   const w = (TAU * Math.min(f, sr * 0.45)) / sr;
   const cw = Math.cos(w);
   const sw = Math.sin(w);
@@ -41,7 +44,7 @@ function warmFor(c, sr) {
 
 // Filter src into dst (may be the same array). gain scales the output;
 // add=true sums into dst instead of overwriting. loop=true for loops.
-export function filter(src, dst, c, { gain = 1, add = false, loop = true, sr = SR } = {}) {
+export function filter(src, dst, c, { gain = 1, add = false, loop = true, sr = R.sr } = {}) {
   const n = src.length;
   let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
   const { b0, b1, b2, a1, a2 } = c;
@@ -66,7 +69,7 @@ export function filter(src, dst, c, { gain = 1, add = false, loop = true, sr = S
 }
 
 // One-pole low-pass in place (cheap smoothing); loop-aware.
-export function lp1(buf, fc, { loop = true, sr = SR, passes = 1 } = {}) {
+export function lp1(buf, fc, { loop = true, sr = R.sr, passes = 1 } = {}) {
   const n = buf.length;
   const a = 1 - Math.exp((-TAU * fc) / sr);
   const w = Math.min(60000, Math.ceil((6 * sr) / (TAU * fc)) + 16);
@@ -89,7 +92,7 @@ export function lp1(buf, fc, { loop = true, sr = SR, passes = 1 } = {}) {
 
 // Sweepable state-variable filter for one-shots: fFn(t01) gives the
 // cut-off in Hz along the buffer; mode 'lp' | 'bp' | 'hp'.
-export function svf(src, dst, fFn, q, mode = 'lp', sr = SR) {
+export function svf(src, dst, fFn, q, mode = 'lp', sr = R.sr) {
   const n = src.length;
   let low = 0, band = 0;
   const damp = 1 / q;
@@ -105,8 +108,16 @@ export function svf(src, dst, fFn, q, mode = 'lp', sr = SR) {
 }
 
 // ---- generators ----
+// Bulk noise uses a xorshift stream seeded from the game's seeded rng:
+// still deterministic, but many times faster per sample.
 export function white(n, rng, out = new Float32Array(n)) {
-  for (let i = 0; i < n; i++) out[i] = rng.next() * 2 - 1;
+  let s = (Math.floor(rng.next() * 4294967295) | 0) || 0x2545f491;
+  for (let i = 0; i < n; i++) {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    out[i] = s / 2147483648;
+  }
   return out;
 }
 
@@ -122,12 +133,11 @@ export function smoothRandom(n, cycles, rng, out = new Float32Array(n)) {
   for (let i = 0; i < cycles; i++) pts[i] = rng.next() * 2 - 1;
   for (let i = 0; i < n; i++) {
     const p = (i / n) * cycles;
-    const k = Math.floor(p);
+    const k = p | 0;
     const t = p - k;
     const a = pts[k % cycles];
     const b = pts[(k + 1) % cycles];
-    const s = (1 - Math.cos(t * Math.PI)) / 2;
-    out[i] = a + (b - a) * s;
+    out[i] = a + (b - a) * t * t * (3 - 2 * t);
   }
   return out;
 }
@@ -176,34 +186,71 @@ export function soft(buf, drive = 1) {
   return buf;
 }
 
-// Add a decaying sine "ping" (a struck mode) at sample `at`.
-export function addMode(buf, at, f, decay, amp, sr = SR, phase = 0) {
+// Add a decaying sine "ping" (a struck mode) at sample `at`, by a
+// two-pole recursion (no trig per sample). loop=true wraps around.
+export function addMode(buf, at, f, decay, amp, sr = R.sr, phase = 0, loop = false) {
   const n = buf.length;
-  const len = Math.min(n - at, Math.ceil(decay * sr * 7));
+  let len = Math.ceil(decay * sr * 7);
+  if (!loop) len = Math.min(n - at, len);
   const w = (TAU * f) / sr;
-  const d = Math.exp(-1 / (decay * sr));
-  let e = amp;
+  const r = Math.exp(-1 / (decay * sr));
+  const c1 = 2 * r * Math.cos(w);
+  const c2 = r * r;
+  let y2 = amp * Math.sin(phase - w) / r;
+  let y1 = amp * Math.sin(phase);
+  let j = at % n;
   for (let i = 0; i < len; i++) {
-    buf[at + i] += Math.sin(w * i + phase) * e;
-    e *= d;
+    buf[j] += y1;
+    const y = c1 * y1 - c2 * y2;
+    y2 = y1;
+    y1 = y;
+    if (++j >= n) j = 0;
   }
 }
 
 // Add an exponentially decaying noise burst at `at` (wraps if loop).
-export function addBurst(buf, at, decay, amp, rng, { loop = false, attack = 0.001, sr = SR } = {}) {
+export function addBurst(buf, at, decay, amp, rng, { loop = false, attack = 0.001, sr = R.sr } = {}) {
   const n = buf.length;
   const len = Math.ceil(decay * sr * 6);
   const att = Math.max(1, attack * sr);
   const d = Math.exp(-1 / (decay * sr));
   let e = amp;
+  let s = (Math.floor(rng.next() * 4294967295) | 0) || 0x1b873593;
   for (let i = 0; i < len; i++) {
     let j = at + i;
     if (j >= n) {
       if (!loop) break;
       j %= n;
     }
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
     const a = i < att ? i / att : 1;
-    buf[j] += (rng.next() * 2 - 1) * e * a;
+    buf[j] += (s / 2147483648) * e * a;
     if (i >= att) e *= d;
   }
+}
+
+// ---- filter specs ----
+// A spec describes a buffer as excitation parts run through parallel
+// filters, summed, then a serial post chain, then a JS finishing step:
+//   { name, sr, n, loop, parts: [{ x, bands: [[type, f, q, gain]] }],
+//     post: [[type, f, q]], finish(out) -> Float32Array }
+// type: 'lp' | 'hp' | 'bp' | 'gain' (straight through). The same spec
+// can be rendered here in JS or by an OfflineAudioContext (banks.js).
+export function runSpecJS(spec) {
+  const sr = spec.sr;
+  const out = new Float32Array(spec.n);
+  const loop = spec.loop !== false;
+  for (const part of spec.parts) {
+    for (const [type, f, q, g] of part.bands) {
+      if (type === 'gain') {
+        for (let i = 0; i < out.length; i++) out[i] += part.x[i] * g;
+      } else {
+        filter(part.x, out, biquad(type, f, q, sr), { gain: g, add: true, loop, sr });
+      }
+    }
+  }
+  for (const [type, f, q] of spec.post || []) filter(out, out, biquad(type, f, q, sr), { loop, sr });
+  return spec.finish ? spec.finish(out) : out;
 }

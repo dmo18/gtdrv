@@ -1,286 +1,329 @@
-// Stylised low-poly vehicle meshes. Static body parts are merged into one
-// vertex-coloured mesh per vehicle; wheels and lights are separate so they
-// can move or change brightness. Materials are shared by every vehicle.
+// Car meshes. Each spec's geometry is built once (smooth lofted body with
+// glass, trim and details merged into one geometry; head lamps; tail
+// lamps; one wheel) and shared by every car of that spec. Paint materials
+// are shared by colour. Near model draw calls: body, head, tail, 4 wheels
+// (+1 light bar on police cars). Far model: one call.
 // Origin is the ground centre of the car; the car points along local +x.
+//
+// Hierarchy: group (position, yaw) -> rig (body pitch / roll) -> body,
+// far, head, tail, bar; group -> 4 wheel pivots (steer) -> mount -> wheel
+// (spin). Wheels stay planted while the body leans over them.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { angleDiff } from '../core/rng.js';
+import { buildCar, buildWheel, wheelLayout, styleFor } from './carbody.js';
+import { paintMaterial, ownPaintMaterial, releaseMaterial, farMaterial, wheelMaterial, LAMP } from './vehiclemats.js';
 
-// ---- shared materials -----------------------------------------------------
-const MAT = {
-  body: new THREE.MeshLambertMaterial({ vertexColors: true }),
-  wheel: new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
-  head: new THREE.MeshLambertMaterial({ color: 0xfff6d8, emissive: 0xfff2c0, emissiveIntensity: 0.9 }),
-  tailDim: new THREE.MeshLambertMaterial({ color: 0x5a0a0a, emissive: 0x900000, emissiveIntensity: 0.5 }),
-  tailBright: new THREE.MeshLambertMaterial({ color: 0xff3030, emissive: 0xff1010, emissiveIntensity: 1.6 }),
-  redOn: new THREE.MeshLambertMaterial({ color: 0xff2020, emissive: 0xff0000, emissiveIntensity: 2 }),
-  redOff: new THREE.MeshLambertMaterial({ color: 0x501010, emissive: 0x200000 }),
-  blueOn: new THREE.MeshLambertMaterial({ color: 0x2050ff, emissive: 0x0030ff, emissiveIntensity: 2 }),
-  blueOff: new THREE.MeshLambertMaterial({ color: 0x101850, emissive: 0x000020 }),
-};
+// ---- per-spec geometry cache ------------------------------------------------------
+const specCache = new Map();
+const wheelCache = new Map();
+const EMPTY = new THREE.BufferGeometry();
+EMPTY.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
 
-const GLASS = 0x1b2530;
-const TRIM = 0x222222;
-const CHROME = 0x9a9a9a;
-
-// ---- geometry helpers -----------------------------------------------------
-const tmpColor = new THREE.Color();
-
-// Give a geometry a flat vertex colour and a consistent attribute set.
-function finish(geo, hex) {
-  let g = geo.index ? geo.toNonIndexed() : geo;
-  g.deleteAttribute('uv');
-  if (!g.attributes.normal) g.computeVertexNormals();
-  tmpColor.setHex(hex);
-  const n = g.attributes.position.count;
-  const col = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    col[i * 3] = tmpColor.r;
-    col[i * 3 + 1] = tmpColor.g;
-    col[i * 3 + 2] = tmpColor.b;
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  if (g !== geo) geo.dispose();
-  return g;
-}
-
-function box(parts, hex, sx, sy, sz, x, y, z) {
-  const g = new THREE.BoxGeometry(sx, sy, sz);
-  g.translate(x, y, z);
-  parts.push(finish(g, hex));
-}
-
-// A box whose top face is smaller than its bottom (a cabin / greenhouse).
-// Bottom spans x in [bx0, bx1], top [tx0, tx1]; half widths bw and tw.
-function taper(parts, hex, bx0, bx1, tx0, tx1, y0, y1, bw, tw) {
-  const v = [
-    [bx0, y0, -bw], [bx1, y0, -bw], [bx1, y0, bw], [bx0, y0, bw],
-    [tx0, y1, -tw], [tx1, y1, -tw], [tx1, y1, tw], [tx0, y1, tw],
-  ];
-  // Faces as quads, counter-clockwise seen from outside.
-  const quads = [
-    [0, 1, 2, 3], // bottom
-    [7, 6, 5, 4], // top
-    [3, 2, 6, 7], // +z side
-    [1, 0, 4, 5], // -z side
-    [2, 1, 5, 6], // front (+x)
-    [0, 3, 7, 4], // rear (-x)
-  ];
-  const pos = [];
-  for (const q of quads) {
-    const [a, b, c, d] = q;
-    pos.push(...v[a], ...v[b], ...v[c], ...v[a], ...v[c], ...v[d]);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  parts.push(finish(g, hex));
-}
-
-// ---- body builders per silhouette ----------------------------------------
-// Each adds parts for a spec with length L, width W, height H.
-function buildBody(spec, color, parts) {
-  const L = spec.length, W = spec.width, H = spec.height;
-  const hw = W / 2;
-  const wr = spec.wheelRadius || 0.33;
-  const sill = wr * 0.9; // bottom of the body
-  const t = spec.body;
-
-  if (t === 'van') {
-    const top = H;
-    box(parts, color, L * 0.82, top - sill, W, -L * 0.09, (top + sill) / 2, 0);
-    // Sloped nose with windscreen.
-    taper(parts, color, L * 0.32, L / 2, L * 0.32, L * 0.36, sill, H * 0.55, hw, hw);
-    taper(parts, GLASS, L * 0.31, L * 0.37, L * 0.31, L * 0.32, H * 0.55, top - 0.08, hw * 0.96, hw * 0.96);
-    box(parts, GLASS, L * 0.35, H * 0.25, W + 0.02, L * 0.08, H * 0.75, 0);
-  } else if (t === 'truck') {
-    // Cab at the front, tall cargo box behind.
-    const cabL = L * 0.26;
-    const cabX = L / 2 - cabL / 2;
-    box(parts, color, cabL, H * 0.78 - sill, W, cabX, (H * 0.78 + sill) / 2, 0);
-    box(parts, GLASS, cabL * 0.25, H * 0.22, W * 0.92, L / 2 - cabL * 0.12, H * 0.62, 0);
-    box(parts, TRIM, L * 0.7, 0.25, W * 0.9, -L * 0.13, sill + 0.12, 0);
-    box(parts, 0xe6e6e0, L * 0.7, H - sill - 0.25, W * 1.02, -L * 0.15, (H + sill + 0.25) / 2, 0);
-  } else if (t === 'pickup') {
-    const bodyTop = H * 0.55;
-    box(parts, color, L, bodyTop - sill, W, 0, (bodyTop + sill) / 2, 0);
-    // Cab.
-    taper(parts, GLASS, -L * 0.12, L * 0.18, -L * 0.1, L * 0.06, bodyTop, H - 0.06, hw * 0.95, hw * 0.88);
-    box(parts, color, L * 0.17, 0.07, W * 0.88, -L * 0.02, H - 0.03, 0);
-    // Open bed: floor slightly sunk, side walls stand up.
-    box(parts, TRIM, L * 0.36, 0.05, W * 0.9, -L * 0.31, bodyTop + 0.01, 0);
-    box(parts, color, L * 0.38, 0.28, 0.08, -L * 0.31, bodyTop + 0.14, hw - 0.04);
-    box(parts, color, L * 0.38, 0.28, 0.08, -L * 0.31, bodyTop + 0.14, -hw + 0.04);
-    box(parts, color, 0.08, 0.28, W, -L / 2 + 0.04, bodyTop + 0.14, 0);
-  } else {
-    // Cars: sedan, hatch, coupe.
-    const beltY = t === 'coupe' ? H * 0.58 : H * 0.6;
-    box(parts, color, L, beltY - sill, W, 0, (beltY + sill) / 2, 0);
-    // Slight bonnet/boot rise so the side is not a plain slab.
-    box(parts, color, L * 0.94, 0.06, W * 0.96, 0, beltY + 0.03, 0);
-    let b0, b1, t0, t1;
-    if (t === 'hatch') {
-      b0 = -L * 0.47; b1 = L * 0.2; t0 = -L * 0.43; t1 = L * 0.02;
-    } else if (t === 'coupe') {
-      b0 = -L * 0.3; b1 = L * 0.12; t0 = -L * 0.16; t1 = -L * 0.03;
-    } else {
-      b0 = -L * 0.3; b1 = L * 0.18; t0 = -L * 0.2; t1 = L * 0.03;
-    }
-    const tw = t === 'coupe' ? hw * 0.8 : hw * 0.86;
-    taper(parts, GLASS, b0, b1, t0, t1, beltY + 0.06, H - 0.05, hw * 0.94, tw);
-    box(parts, color, (t1 - t0) * 1.02, 0.06, tw * 2.02, (t0 + t1) / 2, H - 0.03, 0);
-    if (t === 'coupe') {
-      // Small rear lip spoiler.
-      box(parts, TRIM, 0.12, 0.08, W * 0.85, -L / 2 + 0.12, beltY + 0.1, 0);
-    }
-  }
-
-  // Bumpers and grille, shared by all.
-  box(parts, TRIM, 0.12, 0.22, W * 1.01, L / 2 - 0.04, sill + 0.08, 0);
-  box(parts, TRIM, 0.12, 0.22, W * 1.01, -L / 2 + 0.04, sill + 0.08, 0);
-  box(parts, CHROME, 0.04, 0.14, W * 0.4, L / 2 + 0.01, sill + 0.32, 0);
-  // Dark wheel arches read as the underside.
-  box(parts, 0x111111, L * 0.96, 0.12, W * 0.9, 0, sill - 0.02, 0);
-
-  if (spec.id === 'taxi') {
-    box(parts, 0xf8f4e0, 0.5, 0.18, 0.28, -L * 0.08, H + 0.09, 0);
-    box(parts, 0x202020, 0.52, 0.04, 0.3, -L * 0.08, H + 0.02, 0);
-  }
-  if (spec.id === 'police') {
-    // White doors band.
-    box(parts, 0xf2f2f2, L * 0.36, (beltYFor(spec) - sill) * 0.7, W * 1.005, 0, sill + (beltYFor(spec) - sill) * 0.5, 0);
-    box(parts, 0x202020, 0.3, 0.06, W * 0.7, -L * 0.08, H + 0.03, 0);
-  }
-}
-
-function beltYFor(spec) {
-  return spec.body === 'coupe' ? spec.height * 0.58 : spec.height * 0.6;
-}
-
-// ---- caches ---------------------------------------------------------------
-const bodyCache = new Map();
-const wheelGeoCache = new Map();
-const lightGeoCache = new Map();
-
-function bodyGeometry(spec, color) {
-  const key = spec.id + ':' + color;
-  let g = bodyCache.get(key);
+function wheelGeo(spec) {
+  const { wr, tw } = wheelLayout(spec);
+  const spokes = spec.body === 'truck' ? 8 : spec.body === 'van' ? 7 : spec.body === 'pickup' ? 6 : 5;
+  const rim = spec.body === 'truck' || spec.body === 'van' ? 0xa9adb2 : spec.id === 'police' ? 0x8e9298 : spec.id === 'muscle' ? 0xd6d8dc : 0xc6cad0;
+  const key = wr.toFixed(3) + ':' + tw.toFixed(3) + ':' + spokes + ':' + rim;
+  let g = wheelCache.get(key);
   if (!g) {
-    const parts = [];
-    buildBody(spec, color, parts);
-    g = mergeGeometries(parts, false);
-    for (const p of parts) p.dispose();
-    g.computeBoundingSphere();
-    bodyCache.set(key, g);
-  }
-  return g;
-}
-
-function wheelGeometry(r, w) {
-  const key = r.toFixed(2) + ':' + w.toFixed(2);
-  let g = wheelGeoCache.get(key);
-  if (!g) {
-    g = new THREE.CylinderGeometry(r, r, w, 10);
-    g.rotateX(Math.PI / 2); // axle along z
-    wheelGeoCache.set(key, g);
-  }
-  return g;
-}
-
-// Two small boxes at +z and -z, used for head and tail lights.
-function lightPairGeometry(spec, front) {
-  const key = spec.id + (front ? ':f' : ':r');
-  let g = lightGeoCache.get(key);
-  if (!g) {
-    const L = spec.length, W = spec.width;
-    const sill = (spec.wheelRadius || 0.33) * 0.9;
-    const y = spec.body === 'truck' && !front ? sill + 0.35 : sill + 0.38;
-    const x = front ? L / 2 + 0.01 : -L / 2 - 0.01;
-    const a = new THREE.BoxGeometry(0.06, 0.12, W * 0.2);
-    a.translate(x, y, W * 0.36);
-    const b = new THREE.BoxGeometry(0.06, 0.12, W * 0.2);
-    b.translate(x, y, -W * 0.36);
-    g = mergeGeometries([a, b], false);
-    a.dispose();
-    b.dispose();
-    lightGeoCache.set(key, g);
+    g = buildWheel(wr, tw, spokes, rim);
+    wheelCache.set(key, g);
   }
   return g;
 }
 
 let barGeo = null;
 function lightBarGeometry() {
-  if (!barGeo) barGeo = new THREE.BoxGeometry(0.22, 0.1, 0.32);
+  if (barGeo) return barGeo;
+  const parts = [];
+  // Two lamp blocks (u picks red / blue cell) on a dark base.
+  const mk = (sx, sy, sz, x, y, z, u) => {
+    const g = new THREE.BoxGeometry(sx, sy, sz);
+    g.translate(x, y, z);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, u, 0.5);
+    parts.push(g);
+  };
+  mk(0.22, 0.09, 0.5, 0, 0.07, 0.27, 0.125);
+  mk(0.22, 0.09, 0.5, 0, 0.07, -0.27, 0.375);
+  mk(0.26, 0.05, 1.12, 0, 0.02, 0, 0.875);
+  mk(0.2, 0.06, 0.06, 0, 0.07, 0, 0.625);
+  const pos = [], nor = [], uvs = [], idx = [];
+  let base = 0;
+  for (const g of parts) {
+    pos.push(...g.attributes.position.array);
+    nor.push(...g.attributes.normal.array);
+    uvs.push(...g.attributes.uv.array);
+    for (const i of g.index.array) idx.push(base + i);
+    base += g.attributes.position.count;
+    g.dispose();
+  }
+  barGeo = new THREE.BufferGeometry();
+  barGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  barGeo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  barGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  barGeo.setIndex(idx);
   return barGeo;
 }
 
-// ---- public API -----------------------------------------------------------
+function specEntry(spec) {
+  let e = specCache.get(spec.id);
+  if (e) return e;
+  const near = buildCar(spec, true);
+  const far = buildCar(spec, false);
+  const sh = near.shape, gs = near.gh;
+  const S = styleFor(spec);
+  const { wr, ax, az } = wheelLayout(spec);
+  // Anchor points the effects system uses (car local frame).
+  const exY = sh.bottom(sh.x0 + 0.3) + 0.04;
+  const exZ = S.exhaust ? S.exhaust.z * sh.hw * 2 * (S.exhaust.n === 2 ? 1 : -1) : -0.4;
+  const anchors = {
+    exhaust: [spec.body === 'truck' ? sh.x0 - 0.2 : sh.x0 - 0.05, spec.body === 'truck' ? spec.height + 0.2 : exY, exZ],
+    exhaust2: S.exhaust && S.exhaust.n === 2 ? [sh.x0 - 0.05, exY, -exZ] : null,
+    bonnet: [spec.body === 'van' || spec.body === 'truck' ? sh.x1 - 0.5 : (gs.xA + sh.x1) / 2, sh.top((gs.xA + sh.x1) / 2) + 0.05],
+    head: [sh.x1 + 0.05, sh.yc(sh.x1 - 0.1) - 0.06, sh.hw * 0.68],
+    tail: spec.body === 'truck' ? [-spec.length / 2 - 0.05, 0.55, spec.width / 2 - 0.22] : [sh.x0 - 0.05, sh.yc(sh.x0 + 0.1) - 0.06, sh.hw * 0.7],
+    roofY: gs.roofY + gs.crown,
+    wr, ax, az,
+    bodyTris: near.body.index.count / 3, farTris: far.body.index.count / 3,
+  };
+  e = { body: near.body, head: near.head || EMPTY, tail: near.tail || EMPTY, far: far.body, wheel: wheelGeo(spec), anchors };
+  specCache.set(spec.id, e);
+  return e;
+}
+
+// Triangle counts per spec (near body, far body, one wheel), for tools.
+export function vehicleStats(spec) {
+  const e = specEntry(spec);
+  return { body: e.anchors.bodyTris, far: e.anchors.farTris, wheel: e.wheel.index.count / 3, head: e.head.index ? e.head.index.count / 3 : 0, tail: e.tail.index ? e.tail.index.count / 3 : 0 };
+}
+
+// ---- LOD ----------------------------------------------------------------------------
+// game.js toggles `userData.head.visible` (with wheels and tail) for
+// distance LOD; the head lamp mesh forwards that to the near / far bodies
+// so sleeping cars switch too without any per-frame work.
+function linkLod(ud) {
+  const head = ud.head;
+  let vis = true;
+  Object.defineProperty(head, 'visible', {
+    get() { return vis; },
+    set(v) {
+      vis = !!v;
+      ud.body.visible = vis;
+      ud.far.visible = !vis;
+      if (ud.bar) ud.bar.visible = vis;
+      ud.lodFar = !vis;
+    },
+    configurable: true,
+  });
+}
+
+// Switch a car mesh between the near model and the one-call far model.
+export function setVehicleLod(mesh, far) {
+  const ud = mesh.userData;
+  if (ud.lodFar === !!far) return;
+  ud.head.visible = !far;
+  ud.tail.visible = !far;
+  for (let i = 0; i < ud.wheels.length; i++) ud.wheels[i].visible = !far;
+}
+
+// ---- public API -------------------------------------------------------------------
 export function createVehicleMesh(spec, color) {
-  const group = new THREE.Group();
   const col = color == null ? spec.colors[0] : color;
+  const e = specEntry(spec);
+  const group = new THREE.Group();
+  const rig = new THREE.Group();
+  group.add(rig);
 
-  const body = new THREE.Mesh(bodyGeometry(spec, col), MAT.body);
-  group.add(body);
+  const body = new THREE.Mesh(e.body, paintMaterial(col));
+  const far = new THREE.Mesh(e.far, farMaterial(col));
+  far.visible = false;
+  const head = new THREE.Mesh(e.head, LAMP.head);
+  const tail = new THREE.Mesh(e.tail, LAMP.tail0);
+  rig.add(body, far, head, tail);
 
-  const head = new THREE.Mesh(lightPairGeometry(spec, true), MAT.head);
-  const tail = new THREE.Mesh(lightPairGeometry(spec, false), MAT.tailDim);
-  group.add(head, tail);
-
-  // Wheels: pivot (steer) -> mesh (spin).
-  const wr = spec.wheelRadius || 0.33;
-  const wgeo = wheelGeometry(wr, spec.body === 'truck' ? 0.4 : 0.26);
+  const { wr, ax, az } = e.anchors;
   const wheels = [];
   const frontWheels = [];
-  const ax = spec.wheelBase / 2;
-  const az = spec.width / 2 - 0.12;
+  const pivots = [];
+  const wmat = wheelMaterial();
   for (let i = 0; i < 4; i++) {
     const front = i < 2;
+    const right = i % 2 === 0;
     const pivot = new THREE.Group();
-    pivot.position.set(front ? ax : -ax, wr, i % 2 === 0 ? az : -az);
-    const m = new THREE.Mesh(wgeo, MAT.wheel);
-    pivot.add(m);
+    pivot.position.set(front ? ax : -ax, wr, right ? az : -az);
+    const mount = new THREE.Group();
+    if (!right) mount.rotation.y = Math.PI;
+    const m = new THREE.Mesh(e.wheel, wmat);
+    m.userData.sign = right ? -1 : 1;
+    mount.add(m);
+    pivot.add(mount);
     group.add(pivot);
     wheels.push(m);
+    pivots.push(pivot);
     if (front) frontWheels.push(pivot);
   }
 
-  let barRed = null, barBlue = null;
+  let bar = null;
   if (spec.id === 'police') {
-    barRed = new THREE.Mesh(lightBarGeometry(), MAT.redOff);
-    barBlue = new THREE.Mesh(lightBarGeometry(), MAT.blueOff);
-    const y = spec.height + 0.11;
-    barRed.position.set(-spec.length * 0.08, y, 0.2);
-    barBlue.position.set(-spec.length * 0.08, y, -0.2);
-    group.add(barRed, barBlue);
+    bar = new THREE.Mesh(lightBarGeometry(), LAMP.bar0);
+    bar.position.set(-spec.length * 0.08, e.anchors.roofY - 0.01, 0);
+    rig.add(bar);
   }
 
   group.rotation.order = 'YXZ';
-  group.userData = { spec, body, head, tail, wheels, frontWheels, barRed, barBlue };
+  const L = spec.length;
+  group.userData = {
+    spec, color: col, rig, body, far, head, tail, wheels, frontWheels, pivots, bar,
+    barRed: bar, barBlue: bar,
+    anchors: e.anchors,
+    lodFar: false,
+    hf: 1, wrecked: false, ownPaint: null,
+    hits: [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(-1, 0, 0, 0)], hitN: 0, hitDirty: false,
+    crushF: 0, crushR: 0,
+    box: new THREE.Vector4(L / 2, spec.width / 2, spec.height, 0),
+    brakeOn: false, sirenOn: false, sirenPhase: -1, reverseOn: false, tailState: 0, headState: 'head',
+    seed: (Math.abs(col * 0.618) % 97) + 1,
+  };
+  linkLod(group.userData);
   return group;
 }
 
+// Remember a hit for damage decals. (lx, ly, lz) is the direction from
+// the car centre to the struck point in the car's local frame; strength
+// the closing speed in m/s.
+export function noteVehicleHit(mesh, lx, ly, lz, strength) {
+  const ud = mesh && mesh.userData;
+  if (!ud || !ud.hits) return;
+  const l = Math.hypot(lx, ly, lz) || 1;
+  // Merge with the last hit if it is on the same side.
+  const last = ud.hits[(ud.hitN + 1) % 2];
+  const amt = Math.min(1, strength / 16);
+  if (last.w > 0 && (last.x * lx + last.y * ly + last.z * lz) / l > 0.8) {
+    last.w = Math.min(1, last.w + amt * 0.6);
+  } else {
+    const h = ud.hits[ud.hitN];
+    h.set(lx / l, ly / l, lz / l, Math.max(h.w * 0.5, amt));
+    ud.hitN = (ud.hitN + 1) % 2;
+  }
+  // Big frontal / rear hits crumple the body a little.
+  if (strength > 13) {
+    const c = Math.min(0.3, (strength - 13) * 0.018);
+    if (lx / l > 0.6) ud.crushF = Math.min(0.32, ud.crushF + c);
+    else if (lx / l < -0.6) ud.crushR = Math.min(0.32, ud.crushR + c);
+  }
+  ud.hitDirty = true;
+}
+
+// Drop the car's private damage material (call when the car is removed).
+export function releaseVehicleMesh(mesh) {
+  const ud = mesh && mesh.userData;
+  if (!ud || !ud.ownPaint) return;
+  releaseMaterial(ud.ownPaint);
+  ud.ownPaint = null;
+}
+
+function applyDamage(ud, v) {
+  const hf = ud.hf;
+  const wear = 1 - hf;
+  const needOwn = wear > 0.02 || ud.wrecked || ud.hits[0].w > 0 || ud.hits[1].w > 0;
+  if (needOwn && !ud.ownPaint) {
+    ud.ownPaint = ownPaintMaterial(ud.color, ud.box);
+    ud.body.material = ud.ownPaint;
+  }
+  if (ud.ownPaint) {
+    const u = ud.ownPaint.userData.rw;
+    u.uDmg.value.set(Math.min(1, wear * 1.1), ud.wrecked ? 1 : 0, Math.min(1, 0.15 + wear * 1.3), ud.seed);
+    u.uHit0.value.copy(ud.hits[0]);
+    u.uHit1.value.copy(ud.hits[1]);
+    u.uCrush.value.set(ud.crushF, ud.crushR, ud.box.x, -ud.box.x);
+  }
+  ud.head.position.x = -ud.crushF * 0.9;
+  ud.tail.position.x = ud.crushR * 0.9;
+  ud.far.material = farMaterial(ud.color, ud.wrecked);
+  const wm = wheelMaterial(ud.wrecked);
+  for (let i = 0; i < ud.wheels.length; i++) ud.wheels[i].material = wm;
+  void v;
+}
+
+function hash(n) {
+  const s = Math.sin(n * 12.9898) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function applyLamps(ud, time) {
+  if (ud.wrecked) {
+    ud.head.material = LAMP.headOff;
+    ud.tail.material = LAMP.tailOff;
+  } else {
+    // A damaged car's left headlight flickers.
+    let h = LAMP.head;
+    if (ud.hf < 0.5) {
+      const k = Math.floor(time * 14);
+      if (hash(k + ud.seed * 7) < 0.25 + (0.5 - ud.hf) * 1.2) h = LAMP.headFlickL;
+    }
+    ud.head.material = h;
+    const haz = ud.hf < 0.25 && Math.floor(time * 2.6) % 2 === 0;
+    ud.tail.material = LAMP['tail' + ((ud.brakeOn ? 1 : 0) | (ud.reverseOn ? 2 : 0) | (haz ? 4 : 0))];
+  }
+  if (ud.bar) ud.bar.material = ud.sirenPhase === 0 ? LAMP.bar1 : ud.sirenPhase === 1 ? LAMP.bar2 : LAMP.bar0;
+}
+
+const MAX_ROLL = 0.075, MAX_PITCH = 0.055;
+
 // Place the mesh between the previous and current simulation state.
-export function updateVehicleMesh(mesh, v, alpha = 1) {
+export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   const x = v.px + (v.x - v.px) * alpha;
   const z = v.pz + (v.z - v.pz) * alpha;
   const h = v.pheading + angleDiff(v.heading, v.pheading) * alpha;
-  mesh.position.set(x, 0, z);
-  // Euler order YXZ: yaw, then roll about forward (x), then pitch about z.
-  mesh.rotation.set(v.roll, -h, v.pitch);
   const ud = mesh.userData;
-  for (let i = 0; i < ud.wheels.length; i++) ud.wheels[i].rotation.z = -v.wheelSpin;
-  const steer = v.steerAngle != null ? v.steerAngle : v.steer * v.spec.steerMax;
+  mesh.position.set(x, Number.isFinite(v.y) ? v.y : 0, z);
+  mesh.rotation.set(0, -h, 0);
+
+  // Body lean about a roll / pitch centre a little above the ground.
+  const roll = Math.max(-MAX_ROLL, Math.min(MAX_ROLL, v.roll || 0));
+  const pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, v.pitch || 0));
+  const p = 0.45;
+  const rig = ud.rig;
+  rig.rotation.set(roll, 0, pitch, 'XZY');
+  rig.position.set(p * Math.sin(pitch), p * (2 - Math.cos(roll) - Math.cos(pitch)), -p * Math.sin(roll));
+
+  // Wheels: spin, steer, and follow part of the body's travel.
+  const spin = v.wheelSpin || 0;
+  for (let i = 0; i < ud.wheels.length; i++) {
+    const w = ud.wheels[i];
+    w.rotation.z = w.userData.sign * spin;
+    const pv = ud.pivots[i];
+    const dy = -roll * pv.position.z + pitch * pv.position.x;
+    pv.position.y = ud.anchors.wr + Math.max(-0.03, Math.min(0.035, dy * 0.45));
+  }
+  const steer = v.steerAngle != null ? v.steerAngle : (v.steer || 0) * (v.spec.steerMax || 0.6);
   for (let i = 0; i < ud.frontWheels.length; i++) ud.frontWheels[i].rotation.y = -steer;
+
+  // Distance LOD (also driven by game.js through head.visible).
+  if (v.lodFar != null && !!v.lodFar !== ud.lodFar) setVehicleLod(mesh, v.lodFar);
+
+  // Damage state.
+  const max = (v.spec && v.spec.health) || 1000;
+  const hf = Math.max(0, Math.min(1, (Number.isFinite(v.health) ? v.health : max) / max));
+  const wrecked = !!v.wrecked;
+  if (Math.abs(hf - ud.hf) > 0.004 || wrecked !== ud.wrecked || ud.hitDirty) {
+    ud.hf = hf;
+    ud.wrecked = wrecked;
+    ud.hitDirty = false;
+    applyDamage(ud, v);
+  }
+  ud.brakeOn = (v.brake || 0) > 0.1 || !!v.handbrake;
+  ud.reverseOn = (v.speed || 0) < -0.4 && !!(v.driver || v.controls);
+  applyLamps(ud, time);
 }
 
 // Brake lights and police light bar.
 export function setVehicleLights(mesh, opts) {
   const ud = mesh.userData;
-  ud.tail.material = opts && opts.brake ? MAT.tailBright : MAT.tailDim;
-  if (ud.barRed) {
-    const on = !!(opts && opts.siren);
-    const phase = on ? Math.floor((opts.time || 0) * 6) % 2 : -1;
-    ud.barRed.material = phase === 0 ? MAT.redOn : MAT.redOff;
-    ud.barBlue.material = phase === 1 ? MAT.blueOn : MAT.blueOff;
-  }
+  ud.brakeOn = !!(opts && opts.brake);
+  const on = !!(opts && opts.siren);
+  ud.sirenOn = on;
+  ud.sirenPhase = on ? Math.floor((opts.time || 0) * 6) % 2 : -1;
+  applyLamps(ud, (opts && opts.time) || 0);
 }

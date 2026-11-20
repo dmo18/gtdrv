@@ -17,7 +17,7 @@ test('round trip keeps valid progress', () => {
   p.medals = { race1: 'gold', seen_docks: 'bronze' };
   p.bestTimes = { race1: 61.5 };
   p.stats = { distance: 5000.5, flights: 2, races: 3 };
-  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false };
+  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false, steering: 'tilt', steerSensitivity: 1.25 };
   const s = memory();
   assert.equal(saveProgress(s, p), true);
   assert.deepEqual(loadProgress(s, IDS), p);
@@ -50,12 +50,12 @@ test('field checks', () => {
     medals: { a: 'platinum', b: 'gold', 'Bad Key': 'gold' },
     bestTimes: { a: -1, b: 90000, c: 12, d: NaN },
     stats: { distance: -1, flights: 4, races: 'x' },
-    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0 },
+    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0, steering: 'joystick', steerSensitivity: 9 },
   }, IDS);
   assert.deepEqual(p.medals, { b: 'gold' });
   assert.deepEqual(p.bestTimes, { c: 12 });
   assert.deepEqual(p.stats, { distance: 0, flights: 4, races: 0 });
-  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true });
+  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true, steering: 'wheel', steerSensitivity: 1.5 });
 });
 
 test('prototype pollution is ignored', () => {

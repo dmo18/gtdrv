@@ -77,9 +77,9 @@ float rwNoise(vec3 p) {
 const FRAG_BODY = /* glsl */`
 float rwC = floor(vCls + 0.5);
 float rwCC = 0.0;
-vec3 rwCol = vColor;
+vec3 rwCol = vColor.rgb;
 if (rwC < 0.5) {
-  rwCol = diffuse * vColor;
+  rwCol = diffuse * vColor.rgb;
   rwCC = 1.0;
 } else if (rwC < 1.5) {
   rwCC = 1.0;
@@ -147,7 +147,7 @@ material.clearcoat *= rwCC;
 
 const FRAG_EMIT = /* glsl */`
 #include <emissivemap_fragment>
-if (rwC > 7.5) totalEmissiveRadiance += vColor * (0.15 + 1.6 * uLamp);
+if (rwC > 7.5) totalEmissiveRadiance += vColor.rgb * (0.15 + 1.6 * uLamp);
 `;
 
 function patch(mat, damage) {

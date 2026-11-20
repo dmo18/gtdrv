@@ -43,10 +43,24 @@ export function createEconomy(game, storage) {
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
     if (game.input) game.input.invertPitch = s.invertPitch;
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
+    if (game.touch && game.touch.setSteering) {
+      const used = game.touch.setSteering(s.steering, s.steerSensitivity, steerFallback);
+      if (used && used !== s.steering) steerFallback(used);
+    }
     if (game.quality !== s.quality) {
       game.quality = s.quality;
       if (game.resize) game.resize();
     }
+  }
+
+  // Tilt asked for but the phone cannot do it: remember the wheel instead.
+  function steerFallback(style) {
+    const s = progress.settings;
+    if (s.steering !== 'tilt' || style === 'tilt') return;
+    s.steering = style || 'wheel';
+    if (game.hud && game.hud.toast) game.hud.toast('Tilt steering is not available here, using the wheel', 3);
+    save();
+    events.emit('progress');
   }
 
   function save() {

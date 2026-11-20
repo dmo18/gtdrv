@@ -73,6 +73,32 @@ const CSS = `
 .rw-menu ul { margin: 0 0 10px; padding-left: 20px; }
 .rw-menu li { margin-bottom: 4px; }
 .rw-menu-resume { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.rw-menu-steer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 6px 0 8px; }
+.rw-menu-btn.rw-menu-choice {
+  min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  gap: 3px; padding: 8px 14px; text-align: left; line-height: 1.2;
+}
+.rw-menu-choice b { font-size: 17px; }
+.rw-menu-choice span { font-size: 13px; font-weight: 500; color: var(--rw-dim); }
+.rw-menu-choice[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; border-color: #ffd9a8; }
+.rw-menu-choice[aria-checked="true"] span { color: rgba(27,18,13,0.8); }
+.rw-menu-sens { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+.rw-menu-ask {
+  position: fixed; inset: 0; z-index: 41; display: flex; align-items: center; justify-content: center;
+  padding: calc(8px + var(--rw-st)) calc(10px + var(--rw-sr)) calc(8px + var(--rw-sb)) calc(10px + var(--rw-sl));
+  background: rgba(12,9,8,0.72);
+}
+.rw-menu-askbox {
+  width: min(680px, 100%); max-height: 100%; overflow-y: auto; padding: 12px 16px 14px;
+  border-radius: 18px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
+}
+.rw-menu-askbox h2 { margin: 0 0 2px; font-size: 20px; }
+.rw-menu-askbox p { margin: 0; }
+@media (max-height: 380px) {
+  .rw-menu-btn.rw-menu-choice { min-height: 60px; padding: 6px 12px; }
+  .rw-menu-askbox { padding: 8px 14px 10px; }
+  .rw-menu-askbox h2 { font-size: 18px; }
+}
 .rw-menu-resume .rw-menu-btn { min-width: 220px; font-size: 20px; }
 @media (prefers-reduced-motion: no-preference) {
   .rw-menu.rw-menu-open { animation: rw-menu-in 0.15s ease-out; }
@@ -89,6 +115,12 @@ const CSS = `
 const TABS = [
   ['resume', 'Resume'], ['showroom', 'Showroom'], ['records', 'Records'],
   ['settings', 'Settings'], ['howto', 'How to play'],
+];
+const STEER_CHOICES = [
+  ['wheel', 'Wheel', 'Turn the on-screen wheel with your thumb.'],
+  ['buttons', 'Buttons', 'Hold the left or right arrow; the turn builds up.'],
+  ['tilt', 'Tilt', 'Tilt your phone like a steering wheel.'],
+  ['slider', 'Slider', 'Slide your thumb left and right on a pad.'],
 ];
 const MEDAL_COLORS = { bronze: '#c9803f', silver: '#c4cbd2', gold: '#f0c24a' };
 const MAX_BY_KIND = {
@@ -185,6 +217,7 @@ export function createMenu(root, game, economy) {
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
     if (game.input) game.input.invertPitch = s.invertPitch;
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
+    if (game.touch && game.touch.setSteering) game.touch.setSteering(s.steering, s.steerSensitivity);
     if (game.quality !== s.quality) {
       game.quality = s.quality;
       if (game.resize) game.resize();
@@ -275,7 +308,7 @@ export function createMenu(root, game, economy) {
     const names = new Map();
     for (const c of courses) if (c && typeof c.id === 'string') names.set(c.id, String(c.name || ''));
     const ids = new Set();
-    for (const k of Object.keys(p.medals)) if (!k.startsWith('seen_')) ids.add(k);
+    for (const k of Object.keys(p.medals)) if (!k.startsWith('seen_') && !k.startsWith('hint_')) ids.add(k);
     for (const k of Object.keys(p.bestTimes)) ids.add(k);
     const seen = Object.keys(p.medals).filter((k) => k.startsWith('seen_')).length;
     body.appendChild(h('p', 'rw-menu-dim', 'Areas explored: ' + seen));
@@ -324,8 +357,58 @@ export function createMenu(root, game, economy) {
     return row;
   }
 
+  // The four steering styles as big radio buttons; onPick(style) on tap.
+  function steeringChooser(current, onPick) {
+    const grid = h('div', 'rw-menu-steer');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', 'Steering style');
+    for (const [id, label, desc] of STEER_CHOICES) {
+      const b = h('button', 'rw-menu-btn rw-menu-choice');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(current === id));
+      b.setAttribute('aria-label', label + ' steering: ' + desc);
+      b.dataset.steering = id;
+      b.append(h('b', '', label), h('span', '', desc));
+      b.addEventListener('click', () => onPick(id));
+      grid.appendChild(b);
+    }
+    return grid;
+  }
+  // Apply a steering style now (setSteering runs inside this tap, which
+  // tilt needs for its permission question).
+  function pickSteering(id) {
+    settings().steering = id;
+    commit();
+  }
+
+  function renderSteering() {
+    const s = settings();
+    body.appendChild(h('div', 'rw-menu-group', 'Steering'));
+    body.appendChild(steeringChooser(s.steering, (id) => { pickSteering(id); render(); }));
+    const row = h('div', 'rw-menu-setting');
+    row.appendChild(h('span', '', 'Steering sensitivity'));
+    const val = h('span', 'rw-menu-sens', Math.round(s.steerSensitivity * 100) + '%');
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '50'; slider.max = '150'; slider.step = '5';
+    slider.value = String(Math.round(s.steerSensitivity * 100));
+    slider.setAttribute('aria-label', 'Steering sensitivity');
+    slider.dataset.setting = 'steerSensitivity';
+    slider.addEventListener('input', () => {
+      settings().steerSensitivity = Math.max(0.5, Math.min(1.5, Number(slider.value) / 100));
+      val.textContent = slider.value + '%';
+      applySettings();
+    });
+    slider.addEventListener('change', () => commit());
+    row.append(slider, val);
+    body.appendChild(row);
+    body.appendChild(h('div', 'rw-menu-group', 'Other'));
+  }
+
   function renderSettings() {
     const s = settings();
+    renderSteering();
     const vol = h('div', 'rw-menu-setting');
     vol.appendChild(h('span', '', 'Master volume'));
     const slider = document.createElement('input');
@@ -389,8 +472,9 @@ export function createMenu(root, game, economy) {
   function renderHowto() {
     const inv = settings().invertPitch;
     const sections = [
-      ['Driving', ['Drag the steering pad on the left to turn. Use the pedals for gas and brake.',
-        'Tap the handbrake to slide round tight corners.']],
+      ['Driving', ['Turn the steering wheel on the left with your thumb (or pick buttons, tilt or a slider under Settings). Use the pedals for gas and brake.',
+        'Ease off the gas to turn in sharper. Hold the brake when stopped to reverse.',
+        'Hold the handbrake to slide round tight corners, then let go to straighten up.']],
       ['Boating', ['Throttle up to plane across the water. Steer gently; boats keep sliding after you turn.',
         'Pull up to a pier to get out.']],
       ['Flying a plane', ['Hold THRUST to speed up. Pick up speed on the runway before you climb.',
@@ -481,5 +565,36 @@ export function createMenu(root, game, economy) {
   game.events.on('progress', refresh);
   game.events.on('purchase', refresh);
 
-  return { open, close, isOpen: () => opened };
+  // First run: ask once how the player wants to steer. Pauses the game
+  // while the question is up; remembered in the save. Returns true if shown.
+  let ask = null;
+  function maybeAskSteering() {
+    const medals = game.progress.medals;
+    if (medals.hint_steer === 'bronze' || ask || opened) return false;
+    const wasPaused = game.paused;
+    game.paused = true;
+    if (game.touch && game.touch.setVisible) game.touch.setVisible(false);
+    ask = h('div', 'rw-menu rw-menu-ask');
+    ask.setAttribute('role', 'dialog');
+    ask.setAttribute('aria-modal', 'true');
+    ask.setAttribute('aria-label', 'Choose steering');
+    const box = h('div', 'rw-menu-askbox');
+    box.appendChild(h('h2', '', 'How do you want to steer?'));
+    box.appendChild(steeringChooser(settings().steering, (id) => {
+      medals.hint_steer = 'bronze';
+      pickSteering(id);
+      ask.remove();
+      ask = null;
+      if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
+      if (!wasPaused) game.paused = false;
+    }));
+    box.appendChild(h('p', 'rw-menu-dim', 'You can change this any time under Settings.'));
+    ask.appendChild(box);
+    root.appendChild(ask);
+    const first = ask.querySelector('[aria-checked="true"]') || ask.querySelector('button');
+    if (first) first.focus({ preventScroll: true });
+    return true;
+  }
+
+  return { open, close, isOpen: () => opened, maybeAskSteering, isAsking: () => !!ask };
 }

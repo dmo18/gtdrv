@@ -2,6 +2,9 @@
 // orbits on drag, eases back behind after a pause and pulls in when a
 // building would block the view. The target may carry `y` (height above
 // ground/sea), `pitch` and `roll` (aircraft). No allocations per frame.
+// Feel: a short shake on impacts (`kick(strength)`), a faint buzz at very
+// high speed, a little look into turns and a small FOV kick under hard
+// acceleration. All capped; `setShake(0)` turns the shakes off.
 import { angleDiff, clamp } from '../core/rng.js';
 
 // follow: position spring rate. turn: heading spring factor.
@@ -17,6 +20,18 @@ const MODES = {
 
 const MIN_CLEAR = 0.6; // camera never gets closer than this to ground/sea
 const SAMPLES = 10;
+// Feel tuning per mode: turn look (metres of look shift per rad/s at
+// speed), accel FOV kick (degrees per m/s^2), speed buzz on or off.
+const FEEL = {
+  car: { turnLook: 0.9, fovKick: 0.32, buzz: 1 },
+  foot: { turnLook: 0, fovKick: 0, buzz: 0 },
+  boat: { turnLook: 0.6, fovKick: 0.2, buzz: 0.6 },
+  plane: { turnLook: 0.4, fovKick: 0.12, buzz: 0.4 },
+  heli: { turnLook: 0.3, fovKick: 0.1, buzz: 0.2 },
+};
+const MAX_SHAKE_ROT = 0.022; // radians at full trauma
+const MAX_SHAKE_POS = 0.06; // metres at full trauma
+const MAX_BUZZ = 0.0035; // radians at very high speed
 
 export function createChaseCamera(camera) {
   let mode = MODES.car;
@@ -29,6 +44,14 @@ export function createChaseCamera(camera) {
   let curDist = mode.dist;
   let curFov = camera.fov || mode.baseFov;
   let px = 0, py = 0, pz = 0; // smoothed camera position
+  let feel = FEEL.car;
+  let shakeScale = 1;
+  let trauma = 0; // 0..1, from impacts
+  let shakeT = 0;
+  let lastHeading = null, lastSpeed = 0;
+  let turnLook = 0; // smoothed sideways look shift (m)
+  let accel = 0; // smoothed forward acceleration (m/s^2)
+  let fovKick = 0;
 
   // Distance at which the view line from the target back to the camera
   // is first blocked, or `dist` if it is clear. Height-aware: roofs below
@@ -95,17 +118,70 @@ export function createChaseCamera(camera) {
 
     const spd = Math.abs(target.speed || 0);
     const ahead = mode.lookAhead * Math.min(1, 0.3 + spd / 25);
+    const ch = Math.cos(target.heading), sh = Math.sin(target.heading);
     camera.lookAt(
-      target.x + Math.cos(target.heading) * ahead,
+      target.x + ch * ahead - sh * turnLook,
       baseY + mode.lookHeight + sp * ahead,
-      target.z + Math.sin(target.heading) * ahead,
+      target.z + sh * ahead + ch * turnLook,
     );
     // A little bank with the craft (right side down = clockwise from behind).
     if (camRoll > 1e-4 || camRoll < -1e-4) camera.rotateZ(-camRoll);
+    applyShake(spd);
+  }
+
+  // Smooth pseudo-noise from a few incommensurate sines (no allocation).
+  function wobble(t, a, b, c) {
+    return Math.sin(t * a) * 0.5 + Math.sin(t * b + 1.3) * 0.3 + Math.sin(t * c + 2.1) * 0.2;
+  }
+  function applyShake(spd) {
+    if (!(shakeScale > 0)) return;
+    const k = trauma * trauma * shakeScale;
+    let rx = 0, ry = 0, rz = 0;
+    if (k > 1e-4) {
+      rx = wobble(shakeT, 31, 47, 71) * MAX_SHAKE_ROT * k;
+      ry = wobble(shakeT, 27, 53, 67) * MAX_SHAKE_ROT * k;
+      rz = wobble(shakeT, 23, 41, 61) * MAX_SHAKE_ROT * 0.6 * k;
+      camera.position.x += wobble(shakeT, 37, 59, 83) * MAX_SHAKE_POS * k;
+      camera.position.y += wobble(shakeT, 29, 43, 79) * MAX_SHAKE_POS * k;
+    }
+    // Faint buzz above ~35 m/s (126 km/h), full by ~65 m/s.
+    const b = feel.buzz * shakeScale * Math.max(0, Math.min(1, (spd - 35) / 30));
+    if (b > 0) {
+      rx += wobble(shakeT, 61, 89, 113) * MAX_BUZZ * b;
+      ry += wobble(shakeT, 57, 97, 127) * MAX_BUZZ * b * 0.6;
+    }
+    if (rx || ry || rz) {
+      camera.rotateX(rx);
+      camera.rotateY(ry);
+      camera.rotateZ(rz);
+    }
+  }
+
+  // Look-into-turn and acceleration estimates from the target's motion.
+  function updateFeel(target, dt) {
+    if (!(dt > 0)) return;
+    shakeT += dt;
+    if (shakeT > 1000) shakeT -= 1000;
+    trauma = Math.max(0, trauma - dt * 1.7);
+    const spd = target.speed || 0;
+    if (lastHeading === null) {
+      lastHeading = target.heading;
+      lastSpeed = spd;
+    }
+    const yawRate = angleDiff(target.heading, lastHeading) / dt;
+    lastHeading = target.heading;
+    const fwd = Math.max(0, spd);
+    const wantLook = clamp(yawRate * Math.min(fwd, 30) * 0.06 * feel.turnLook, -1.4, 1.4);
+    turnLook += (wantLook - turnLook) * Math.min(1, 2.5 * dt);
+    const a = clamp((spd - lastSpeed) / dt, -30, 30);
+    lastSpeed = spd;
+    accel += (a - accel) * Math.min(1, 4 * dt);
+    const wantKick = clamp(accel * feel.fovKick, 0, 4);
+    fovKick += (wantKick - fovKick) * Math.min(1, (wantKick > fovKick ? 3 : 1.5) * dt);
   }
 
   function updateFov(spd, dt, snap) {
-    const want = mode.baseFov + Math.min(spd, 50) * 0.22;
+    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
     const next = snap ? want : curFov + (want - curFov) * Math.min(1, 3 * dt);
     if (Math.abs(next - camera.fov) > 0.01) {
       camera.fov = next;
@@ -144,6 +220,7 @@ export function createChaseCamera(camera) {
       const ks = Math.min(1, 3 * dt);
       camPitch += (clamp((target.pitch || 0) * mode.pitchShare, -0.6, 0.6) - camPitch) * ks;
       camRoll += (clamp((target.roll || 0) * mode.rollShare, -0.35, 0.35) - camRoll) * ks;
+      updateFeel(target, dt);
       place(target, dt, collision, false);
       updateFov(spd, dt, false);
     },
@@ -154,11 +231,26 @@ export function createChaseCamera(camera) {
       orbitYaw = 0;
       orbitPitch = 0;
       sinceDrag = 99;
+      lastHeading = null;
+      turnLook = 0;
+      accel = 0;
+      fovKick = 0;
+      trauma = 0;
       place(target, 0, null, true);
       updateFov(Math.abs(target.speed || 0), 0, true);
     },
     setMode(m) {
       mode = MODES[m] || MODES.car;
+      feel = FEEL[m] || FEEL.car;
+    },
+    // Impact shake: strength is the closing speed in m/s.
+    kick(strength) {
+      if (!(strength > 1.5)) return;
+      trauma = Math.min(1, trauma + Math.min(0.85, (strength - 1.5) / 18));
+    },
+    // 0 turns shakes off, 1 is normal (clamped to 0..1.5).
+    setShake(scale) {
+      shakeScale = clamp(+scale || 0, 0, 1.5);
     },
   };
 }

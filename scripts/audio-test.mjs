@@ -1,6 +1,9 @@
 // Audio system test in headless Chromium. Bundles a harness with esbuild,
 // serves it locally, drives createAudio with a fake game and measures the
-// master output with an AnalyserNode. Exits non-zero on any failure.
+// master output (and the engine bus) with AnalyserNodes. Also checks the
+// generated sound bank: generation time, memory, seamless loops without
+// DC offset, engine pitch rising with rpm, and the police siren.
+// Exits non-zero on any failure.
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -99,13 +102,61 @@ try {
     check('context created', !!ctx);
     await sleep(100);
     check('context running', ctx && ctx.state === 'running', ctx && ctx.state);
+
+    // The sound bank is generated in slices after unlock.
+    const t0 = performance.now();
+    while (!audio.debug.ready && performance.now() - t0 < 10000) await sleep(20);
+    const dbg = audio.debug;
+    check('bank ready', dbg.ready);
+    check('generation time < 1500 ms', dbg.genWallMs > 0 && dbg.genWallMs < 1500,
+      `wall ${dbg.genWallMs.toFixed(0)} ms, main-thread cpu ${dbg.genCpuMs.toFixed(0)} ms in ${dbg.slices} slices, longest slice ${dbg.maxSliceMs.toFixed(1)} ms, offline ${JSON.stringify(dbg.bankStats)}`);
+    const mb = dbg.bytes / 1048576;
+    check('buffer memory < 12 MB', mb > 0.5 && mb < 12, `${mb.toFixed(2)} MB in ${Object.keys(dbg.buffers).length} buffers`);
+
+    // Every loop is seamless: the step across the loop point is no bigger
+    // than the steps right next to it, and there is no DC offset.
+    let worstSeam = 0;
+    let worstSeamName = '';
+    let worstDc = 0;
+    let badLoops = [];
+    for (const name of dbg.loops) {
+      const b = dbg.buffers[name];
+      for (let c = 0; c < b.numberOfChannels; c++) {
+        const d = b.getChannelData(c);
+        const n = d.length;
+        const jump = Math.abs(d[n - 1] - d[0]);
+        let local = 0;
+        for (let k = 1; k <= 3; k++) {
+          local = Math.max(local, Math.abs(d[k] - d[k - 1]), Math.abs(d[n - k] - d[n - k - 1]));
+        }
+        let sum = 0;
+        for (let i = 0; i < n; i++) sum += d[i];
+        const dc = Math.abs(sum / n);
+        const ratio = jump / (0.01 + 2.5 * local);
+        if (ratio > worstSeam) {
+          worstSeam = ratio;
+          worstSeamName = name;
+        }
+        if (dc > worstDc) worstDc = dc;
+        if (ratio > 1 || dc > 0.02) badLoops.push(`${name} jump ${jump.toFixed(3)} local ${local.toFixed(3)} dc ${dc.toFixed(3)}`);
+      }
+    }
+    check('loops seamless', badLoops.length === 0 && dbg.loops.length > 20,
+      `${dbg.loops.length} loops, worst seam ${worstSeam.toFixed(2)} of limit (${worstSeamName}) ${badLoops.slice(0, 3).join('; ')}`);
+    check('loops have no DC offset', worstDc < 0.02, `worst ${worstDc.toExponential(1)}`);
+
     const an = ctx.createAnalyser();
     an.fftSize = 2048;
     audio.output.connect(an);
+    const ean = ctx.createAnalyser();
+    ean.fftSize = 2048;
+    dbg.buses.engine.connect(ean);
     const buf = new Float32Array(an.fftSize);
+    const ebuf = new Float32Array(ean.fftSize);
     let peak = 0;
     let maxVoices = 0;
     let rmsMax = 0;
+    let engMax = 0;
     function sample() {
       an.getFloatTimeDomainData(buf);
       let s = 0;
@@ -116,11 +167,17 @@ try {
       }
       const rms = Math.sqrt(s / buf.length);
       if (rms > rmsMax) rmsMax = rms;
+      ean.getFloatTimeDomainData(ebuf);
+      s = 0;
+      for (let i = 0; i < ebuf.length; i++) s += ebuf[i] * ebuf[i];
+      const er = Math.sqrt(s / ebuf.length);
+      if (er > engMax) engMax = er;
       if (audio.activeVoices > maxVoices) maxVoices = audio.activeVoices;
       return rms;
     }
     async function run(frames, fn) {
       rmsMax = 0;
+      engMax = 0;
       for (let i = 0; i < frames; i++) {
         game.time += 1 / 60;
         fn(i / frames, i);
@@ -141,15 +198,43 @@ try {
         if (i === 100) held.add('horn');
         if (i === 140) held.delete('horn');
       });
-      check(`car ${id} audible`, rmsMax > 0.003, `rms ${rmsMax.toFixed(4)}`);
+      check(`car ${id} audible`, rmsMax > 0.003 && engMax > 0.003, `rms ${rmsMax.toFixed(4)} engine ${engMax.toFixed(4)}`);
     }
-    // Idle and hard throttle differ in level.
+    // Idle and hard throttle differ in level (engine bus, once settled).
     car.speed = 0; car.throttle = 0; car.slip = 0;
-    await run(60, () => {});
-    const idle = rmsMax;
+    await run(120, () => {});
+    await run(40, () => {});
+    const idle = engMax;
     car.throttle = 1;
     await run(60, () => {});
-    check('throttle louder than idle', rmsMax > idle, `${idle.toFixed(4)} -> ${rmsMax.toFixed(4)}`);
+    await run(40, () => {});
+    check('throttle louder than idle', engMax > idle * 1.1, `${idle.toFixed(4)} -> ${engMax.toFixed(4)}`);
+
+    // Mix balance while cruising: per-bus levels; the engine must not
+    // drown everything else.
+    {
+      const taps = {};
+      const nodes = { ...dbg.buses, reverb: dbg.reverb, master: dbg.master };
+      for (const k of Object.keys(nodes)) {
+        const a = ctx.createAnalyser();
+        a.fftSize = 2048;
+        nodes[k].connect(a);
+        taps[k] = { a, max: 0, node: nodes[k] };
+      }
+      const tb = new Float32Array(2048);
+      car.speed = 25; car.throttle = 0.6;
+      await run(90, () => {
+        for (const k of Object.keys(taps)) {
+          taps[k].a.getFloatTimeDomainData(tb);
+          let s2 = 0;
+          for (let i = 0; i < tb.length; i++) s2 += tb[i] * tb[i];
+          taps[k].max = Math.max(taps[k].max, Math.sqrt(s2 / tb.length));
+        }
+      });
+      const line = Object.keys(taps).map((k) => `${k} ${taps[k].max.toFixed(3)}`).join(', ');
+      check('mix balanced', taps.engine.max < 0.7 * rmsMax * 2 && rmsMax < 0.35, `out ${rmsMax.toFixed(3)}; ${line}`);
+      for (const k of Object.keys(taps)) taps[k].node.disconnect(taps[k].a);
+    }
 
     // Boat, plane (prop), jet, heli.
     const crafts = [
@@ -157,6 +242,8 @@ try {
       mk('plane', 'propplane', 80),
       mk('plane', 'jet', 200),
       mk('heli', 'chopper', 60),
+      mk('boat', 'fisher', 12, { y: 0 }),
+      mk('plane', 'stunt', 72, { stalled: true }),
     ];
     for (const c of crafts) {
       game.player.vehicle = c;
@@ -168,8 +255,73 @@ try {
         c.rotorSpeed = Math.min(1, t * 2);
         c.y = t * 60;
       });
-      check(`${c.kind}/${c.spec.id} audible`, rmsMax > 0.003, `rms ${rmsMax.toFixed(4)}`);
+      check(`${c.kind}/${c.spec.id} audible`, rmsMax > 0.003 && engMax > 0.003, `rms ${rmsMax.toFixed(4)} engine ${engMax.toFixed(4)}`);
     }
+
+    // Engine pitch follows rpm (v.rpm given by the car): FFT peak of the
+    // engine bus at two rpm values.
+    game.player.vehicle = car;
+    game.vehicles[0] = car;
+    game.player.y = 0;
+    car.spec = { id: 'sedan', maxSpeed: 45 };
+    const otherSpeed = other.speed;
+    other.speed = 0;
+    far.speed = 0;
+    const fan = ctx.createAnalyser();
+    fan.fftSize = 16384;
+    fan.smoothingTimeConstant = 0.6;
+    dbg.buses.engine.connect(fan);
+    const spec = new Float32Array(fan.frequencyBinCount);
+    async function peakAt(rpm) {
+      car.rpm = rpm;
+      car.gear = 3;
+      car.speed = 15;
+      car.throttle = 0.6;
+      await run(70, () => {});
+      fan.getFloatFrequencyData(spec);
+      const hz = ctx.sampleRate / fan.fftSize;
+      let best = -Infinity;
+      let bi = 0;
+      for (let i = Math.floor(20 / hz); i < 700 / hz; i++) {
+        if (spec[i] > best) {
+          best = spec[i];
+          bi = i;
+        }
+      }
+      return bi * hz;
+    }
+    const fLow = await peakAt(0.2);
+    const fHigh = await peakAt(0.6);
+    check('engine pitch rises with rpm', fHigh > fLow * 1.4, `${fLow.toFixed(0)} Hz at 0.2 -> ${fHigh.toFixed(0)} Hz at 0.6`);
+    delete car.rpm;
+    delete car.gear;
+    other.speed = otherSpeed;
+    far.speed = 20;
+
+    // Police siren starts and stops with the event, at the police car.
+    const cop = mk('car', 'police', 52, { x: 25, z: 8, speed: 10, police: true, siren: true });
+    game.vehicles.push(cop);
+    const san = ctx.createAnalyser();
+    san.fftSize = 2048;
+    dbg.siren.connect(san);
+    const sbuf = new Float32Array(san.fftSize);
+    const sirenRms = () => {
+      san.getFloatTimeDomainData(sbuf);
+      let s = 0;
+      for (let i = 0; i < sbuf.length; i++) s += sbuf[i] * sbuf[i];
+      return Math.sqrt(s / sbuf.length);
+    };
+    await run(20, () => {});
+    const sOff0 = sirenRms();
+    events.emit('siren', true);
+    let sOn = 0;
+    await run(60, () => { sOn = Math.max(sOn, sirenRms()); });
+    events.emit('siren', false);
+    await run(90, () => {});
+    const sOff = sirenRms();
+    check('siren starts with event', audio.debug.sirenOn === false && sOn > 0.01 && sOff0 < 0.001, `off ${sOff0.toExponential(1)} on ${sOn.toFixed(4)}`);
+    check('siren stops with event', sOff < 0.001, `after ${sOff.toExponential(1)}`);
+    game.vehicles.pop();
 
     // Back to the car for the event tests.
     game.player.vehicle = car;

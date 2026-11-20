@@ -283,7 +283,9 @@ export class MeshBuilder {
 }
 
 // A set of builders split over a grid of map tiles, so tiles outside
-// the camera's view are skipped when drawing.
+// the camera's view are skipped when drawing. Each tile can hold up to
+// three quality tiers (0 always drawn, 1 normal, 2 high): they share one
+// mesh and the draw range decides how much of it is shown.
 export class ChunkedBuilder {
   constructor(size, tiles, withUv = false, uvScale = 1) {
     this.size = size;
@@ -293,11 +295,11 @@ export class ChunkedBuilder {
     this.map = new Map();
   }
 
-  at(x, z) {
+  at(x, z, q = 0) {
     const t = this.tiles, s = this.size;
     const cx = Math.max(0, Math.min(t - 1, Math.floor(((x + s) / (2 * s)) * t)));
     const cz = Math.max(0, Math.min(t - 1, Math.floor(((z + s) / (2 * s)) * t)));
-    const k = cz * t + cx;
+    const k = (cz * t + cx) * 3 + q;
     let b = this.map.get(k);
     if (!b) this.map.set(k, (b = new MeshBuilder(this.withUv, this.uvScale)));
     return b;
@@ -307,16 +309,31 @@ export class ChunkedBuilder {
   buildInto(group, material, opts = 0) {
     const o = typeof opts === 'number' ? { order: opts } : opts;
     const made = [];
-    for (const b of this.map.values()) {
-      const m = b.build(material);
-      if (m) {
-        m.renderOrder = o.order || 0;
-        m.castShadow = !!o.cast;
-        m.receiveShadow = !!o.receive;
-        if (o.name) m.name = o.name;
-        group.add(m);
-        made.push(m);
+    const n = this.tiles * this.tiles;
+    for (let k = 0; k < n; k++) {
+      const parts = [this.map.get(k * 3), this.map.get(k * 3 + 1), this.map.get(k * 3 + 2)];
+      let b = parts[0];
+      let counts = null;
+      if (parts[1] || parts[2]) {
+        b = new MeshBuilder(this.withUv, this.uvScale);
+        counts = [];
+        for (const p of parts) {
+          if (p) b.add(p, 0, 0, 0);
+          counts.push(b.idx.length);
+        }
       }
+      const m = b ? b.build(material) : null;
+      if (!m) continue;
+      if (counts) {
+        m.userData.tierCounts = counts;
+        m.geometry.setDrawRange(0, counts[1]);
+      }
+      m.renderOrder = o.order || 0;
+      m.castShadow = !!o.cast;
+      m.receiveShadow = !!o.receive;
+      if (o.name) m.name = o.name;
+      group.add(m);
+      made.push(m);
     }
     return made;
   }

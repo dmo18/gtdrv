@@ -13,6 +13,23 @@
 - Fixes from the final review (race start button, map markers, HUD
   leftovers)
 
+## Paused: usage limit reached
+The account's 5-hour usage limit stopped three Milestone 5 helpers
+part-way (limit resets 02:50 UTC). Their partial work is committed and
+the game runs with no errors, but these are unfinished:
+- City graphics and lighting: roads, pavements, shopfronts and props
+  are in; shadows, tone mapping, reflections (src/render/graphics.js)
+  are NOT built yet, so building walls look too dark.
+- Vehicle looks and effects: smooth car bodies are in; effects
+  (src/render/effects.js exists, not yet registered in game.js),
+  damage, boat/aircraft materials and camera feel unfinished/unverified.
+- Sound overhaul: new sample-based engine is partly in; one check
+  fails (engine pitch does not rise with revs). scripts/audio-test.mjs.
+To resume: message each of the three stopped helpers to continue from
+where it stopped, then wire createGraphics and createEffects into
+src/game.js, run all checks, look at screenshots, and publish.
+Steering and driving physics (task 19) are complete and wired in.
+
 ## Decisions
 - Name: Rustwater (original setting, an island harbour city).
 - 3D, flat ground, physics in 2D (x,z) for speed and testability.

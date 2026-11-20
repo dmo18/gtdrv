@@ -28,16 +28,17 @@ await build({
     resolveDir: repo,
     sourcefile: 'harness-entry.js',
     contents: `
-      import { createInput } from './src/core/input.js';
+      import { createInput, shapeSteer, tiltAngle, tiltToSteer } from './src/core/input.js';
       import { createTouchControls } from './src/ui/touch.js';
       import { createHud } from './src/ui/hud.js';
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0';
       document.body.appendChild(root);
       const input = createInput();
-      const touch = createTouchControls(root, input);
+      const fallbacks = [];
+      const touch = createTouchControls(root, input, { onSteerFallback: (s, why) => fallbacks.push(why) });
       const hud = createHud(root);
-      window.rw = { input, touch, hud };
+      window.rw = { input, touch, hud, shapeSteer, tiltAngle, tiltToSteer, fallbacks };
     `,
   },
   bundle: true, platform: 'browser', format: 'esm', outfile: path.join(out, 'harness.js'),
@@ -111,29 +112,234 @@ try {
     .filter((b) => b.offsetParent).map((b) => Math.min(b.offsetWidth, b.offsetHeight)));
   check('all visible buttons >= 56px', Math.min(...small) >= 56, `min ${Math.min(...small)}`);
 
-  // ---- car: steering ----
-  await down(1, 120, 330);
-  await drag(1, 120, 330, 200, 330);
-  check('steer right ~+1', (await read('rw.input.steer')) > 0.95);
-  await drag(1, 200, 330, 40, 330, 16);
-  check('steer left ~-1', (await read('rw.input.steer')) < -0.95);
-  await move(1, 120, 330);
-  check('steer centre ~0', Math.abs(await read('rw.input.steer')) < 0.01);
+  // Wheel helpers: touch the rim at an angle (0 = top, clockwise +) and turn.
+  const wheelBox = () => page.evaluate(() => {
+    const r = document.querySelector('.rw-wheel').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, vis: r.width > 0 };
+  });
+  const rimPt = (w, deg, rad = 62) => ({
+    x: w.x + Math.sin(deg * Math.PI / 180) * rad, y: w.y - Math.cos(deg * Math.PI / 180) * rad,
+  });
+  const turn = async (id, w, from, to, step = 6) => {
+    const n = Math.max(1, Math.ceil(Math.abs(to - from) / step));
+    for (let i = 1; i <= n; i++) {
+      const p = rimPt(w, from + (to - from) * i / n);
+      await move(id, p.x, p.y);
+    }
+  };
+  const wheelRot = () => page.evaluate(() => document.querySelector('.rw-wheel-rot').style.transform);
+  const shape = (x, s = 1) => page.evaluate(([a, b]) => rw.shapeSteer(a, b), [x, s]);
+  const tick = (n, dt = 1 / 60) => page.evaluate(([k, d]) => { for (let i = 0; i < k; i++) rw.touch.update(d); }, [n, dt]);
+  const near = (a, b, tol = 0.02) => Math.abs(a - b) <= tol;
+
+  // ---- car: steering wheel (default style) ----
+  check('default steering style is wheel', (await page.evaluate(() => rw.touch.getSteering().style)) === 'wheel');
+  const wb = await wheelBox();
+  check('wheel ~150px bottom-left', wb.vis && Math.abs(wb.w - 150) < 2 && wb.x < 200 && wb.y > 412 - 140, JSON.stringify(wb));
+  let p0 = rimPt(wb, 0);
+  await down(1, p0.x, p0.y);
+  check('touching the wheel alone does not steer', (await read('rw.input.steer')) === 0);
+  await turn(1, wb, 0, 60);
+  let st60 = await read('rw.input.steer');
+  check('wheel 60 deg -> half input through the curve', near(st60, await shape(0.5)), `${st60}`);
+  check('wheel graphic rotates', /rotate\(6\d(\.\d)?deg\)|rotate\(59\.\ddeg\)/.test(await wheelRot()), await wheelRot());
+  await turn(1, wb, 60, 150);
+  check('wheel past 120 deg -> full right', (await read('rw.input.steer')) === 1);
+  await turn(1, wb, 150, -150, 8);
+  check('wheel turned back past centre -> full left', (await read('rw.input.steer')) === -1);
+  // The finger went 30 deg past the stop; turning back moves the wheel at once.
+  await turn(1, wb, -150, -60);
+  const stm30 = await read('rw.input.steer');
+  check('wheel back to -30 deg -> proportional left', near(stm30, await shape(-0.25)), `${stm30}`);
+  await shot('car-wheel-active-915x412.png');
+  await up(1);
+  check('wheel released -> steer 0', (await read('rw.input.steer')) === 0);
+  check('wheel springs back to centre', (await wheelRot()) === '' && await page.evaluate(() => document.querySelector('.rw-wheel').classList.contains('rw-spring')));
+  // Grabbing the wheel off-centre (anywhere in the zone) is relative to the touch.
+  await down(1, wb.x + 120, wb.y - 20);
+  check('grab away from the rim: no jump', (await read('rw.input.steer')) === 0);
+  await move(1, wb.x + 115, wb.y + 30);
+  check('drag down on the right side turns right', (await read('rw.input.steer')) > 0.05);
   await up(1);
 
   // ---- gas + simultaneous steer ----
   await down(2, gas.x, gas.y);
   check('gas held -> throttle 1', (await read('rw.input.throttle')) === 1);
-  await down(1, 120, 330);
-  await drag(1, 120, 330, 190, 330);
+  p0 = rimPt(wb, 0);
+  await down(1, p0.x, p0.y);
+  await turn(1, wb, 0, 130);
   const both = await read('[rw.input.throttle, rw.input.steer]');
-  check('throttle 1 while steering', both[0] === 1 && both[1] > 0.95, JSON.stringify(both));
+  check('throttle 1 while steering', both[0] === 1 && both[1] === 1, JSON.stringify(both));
   await shot('car-active-915x412.png');
   await up(1);
   const rel = await read('[rw.input.steer, rw.input.throttle]');
   check('steer released -> 0, gas still 1', rel[0] === 0 && rel[1] === 1, JSON.stringify(rel));
   await up(2);
   check('gas released -> 0', (await read('rw.input.throttle')) === 0);
+
+  // ---- steering style: buttons (ramped in update(dt)) ----
+  check('setSteering returns style', (await page.evaluate(() => rw.touch.setSteering('buttons', 1))) === 'buttons');
+  check('wheel hidden for buttons', !(await wheelBox()).vis);
+  const sr = await center('Steer right');
+  const sl = await center('Steer left');
+  check('arrow pads large', sr.w >= 88 && sr.h >= 100 && sl.x < sr.x, JSON.stringify([sl, sr]));
+  await down(3, sr.x, sr.y);
+  check('button: no steer before update', (await read('rw.input.steer')) === 0);
+  await tick(6);
+  const b1 = await read('rw.input.steer');
+  check('button ramp 0.1 s -> 0.4 raw', near(b1, await shape(0.4)), `${b1}`);
+  await tick(9);
+  check('button ramp 0.25 s -> full lock', (await read('rw.input.steer')) === 1);
+  await up(3);
+  await tick(5);
+  const b2 = await read('rw.input.steer');
+  check('button release returns over 0.15 s', b2 > 0.05 && b2 < 0.4, `${b2}`);
+  await tick(5);
+  check('button back at centre', (await read('rw.input.steer')) === 0);
+  await tick(15, 1 / 30); // frame-rate independent: 0.25 s at 30 Hz
+  await down(3, sl.x, sl.y);
+  await tick(8, 1 / 30);
+  check('button ramp same at 30 Hz', (await read('rw.input.steer')) === -1);
+  await up(3);
+  await tick(10);
+  await shot('car-buttons-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(150);
+  await shot('car-buttons-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- steering style: slider (110 px throw, curved) ----
+  await page.evaluate(() => rw.touch.setSteering('slider', 1));
+  await down(1, 140, 330);
+  await drag(1, 140, 330, 195, 330);
+  const s55 = await read('rw.input.steer');
+  check('slider 55 px -> curved half', near(s55, await shape((0.5 - 0.04) / 0.96)), `${s55}`);
+  await drag(1, 195, 330, 260, 330);
+  check('slider 110+ px -> full right', (await read('rw.input.steer')) === 1);
+  await drag(1, 260, 330, 20, 330, 16);
+  check('slider far left -> full left', (await read('rw.input.steer')) === -1);
+  await move(1, 140, 330);
+  check('slider centre -> 0', (await read('rw.input.steer')) === 0);
+  await page.evaluate(() => rw.touch.setSteering('slider', 1.5));
+  await move(1, 195, 330);
+  const s55b = await read('rw.input.steer');
+  check('higher sensitivity -> more steer', s55b > s55 + 0.1 && near(s55b, await shape((0.5 - 0.04) / 0.96, 1.5)), `${s55b} vs ${s55}`);
+  await up(1);
+  check('slider released -> 0', (await read('rw.input.steer')) === 0);
+  await down(1, 140, 330);
+  await drag(1, 140, 330, 200, 330);
+  await shot('car-slider-active-915x412.png');
+  await up(1);
+  await page.evaluate(() => rw.touch.setSteering('slider', 1));
+  await shot('car-slider-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(150);
+  await shot('car-slider-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- steering style: tilt ----
+  check('tilt accepted when the API exists', (await page.evaluate(() => rw.touch.setSteering('tilt', 1))) === 'tilt');
+  const tb = await center('Tilt steering (tap to re-centre)');
+  check('tilt indicator where the wheel was', tb.x < 200 && tb.y > 300, JSON.stringify(tb));
+  const tiltNow = async (beta, gamma) => {
+    await page.evaluate(([b, g]) => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { beta: b, gamma: g, alpha: 0 })), [beta, gamma]);
+    await tick(40);
+    return page.evaluate(([b, g]) => {
+      const so = screen.orientation && Number.isFinite(screen.orientation.angle) ? screen.orientation.angle : 0;
+      rw.input.poll();
+      return { steer: rw.input.steer, want: rw.shapeSteer(rw.tiltToSteer(rw.tiltAngle(b, g, so)), 1), deg: rw.tiltAngle(b, g, so) };
+    }, [beta, gamma]);
+  };
+  const so = await page.evaluate(() => (screen.orientation ? screen.orientation.angle : 0));
+  // A pose about 12 deg right of upright for whichever way the screen is.
+  const pose = so === 90 ? [12, -80] : so === 270 ? [-12, 80] : [80, 14];
+  const t1 = await tiltNow(...pose);
+  check('tilt steers smoothly toward the pose', t1.steer > 0.1 && near(t1.steer, t1.want, 0.03), JSON.stringify({ so, ...t1 }));
+  const t0 = await tiltNow(so === 90 ? 0.5 : so === 270 ? -0.5 : 90, so === 90 ? -89 : so === 270 ? 89 : 0.5);
+  check('tilt dead zone near upright', t0.steer === 0, JSON.stringify(t0));
+  await tiltNow(...pose);
+  await shot('car-tilt-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(150);
+  await shot('car-tilt-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+  // Tap the bar to re-centre on the current pose.
+  await down(3, tb.x, tb.y);
+  await up(3);
+  const tc = await tiltNow(...pose);
+  check('tap re-centres tilt', Math.abs(tc.steer) < 0.02, JSON.stringify(tc));
+  // No sensor events: falls back to the wheel and reports it.
+  await page.evaluate(() => { rw.touch.setSteering('wheel'); rw.fallbacks.length = 0; rw.touch.setSteering('tilt'); });
+  await page.waitForTimeout(2800);
+  check('no tilt events -> wheel + callback', (await page.evaluate(() => rw.touch.getSteering().style)) === 'wheel'
+    && (await page.evaluate(() => rw.fallbacks.join())) === 'no-sensor', await page.evaluate(() => rw.fallbacks.join()));
+  // API missing entirely: immediate fallback.
+  const miss = await page.evaluate(() => {
+    const keep = window.DeviceOrientationEvent;
+    delete window.DeviceOrientationEvent;
+    window.DeviceOrientationEvent = undefined;
+    rw.fallbacks.length = 0;
+    const got = rw.touch.setSteering('tilt', 1);
+    window.DeviceOrientationEvent = keep;
+    return { got, why: rw.fallbacks.join(), now: rw.touch.getSteering().style };
+  });
+  check('tilt API missing -> wheel at once', miss.got === 'wheel' && miss.why === 'unsupported' && miss.now === 'wheel', JSON.stringify(miss));
+  // Permission denied (iOS style): fallback too.
+  const denied = await page.evaluate(async () => {
+    const D = window.DeviceOrientationEvent;
+    D.requestPermission = () => Promise.resolve('denied');
+    rw.fallbacks.length = 0;
+    rw.touch.setSteering('tilt', 1);
+    await new Promise((r) => setTimeout(r, 50));
+    delete D.requestPermission;
+    return { why: rw.fallbacks.join(), now: rw.touch.getSteering().style };
+  });
+  check('tilt permission denied -> wheel', denied.why === 'denied' && denied.now === 'wheel', JSON.stringify(denied));
+  await page.evaluate(() => rw.touch.setSteering('wheel', 1));
+
+  // ---- left-handed layout mirrors every mode ----
+  await page.evaluate(() => rw.touch.setLeftHanded(true));
+  const lg = await center('Gas');
+  const lbk = await center('Brake / reverse');
+  const lw = await wheelBox();
+  check('lefty: pedals on the left', lg.x < 150 && lbk.x > lg.x && lbk.x < 260, JSON.stringify([lg.x, lbk.x]));
+  check('lefty: wheel on the right', lw.x > 915 - 200, JSON.stringify(lw));
+  const lh = await center('Handbrake');
+  check('lefty: handbrake on the left', lh.x < 150);
+  p0 = rimPt(lw, 0);
+  await down(1, p0.x, p0.y);
+  await turn(1, lw, 0, 60);
+  check('lefty: wheel steers', near(await read('rw.input.steer'), await shape(0.5)));
+  await up(1);
+  await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
+  await down(4, 420, 120);
+  await drag(4, 420, 120, 480, 120, 4);
+  await up(4);
+  check('lefty: look drag on the left side', Math.abs((await read('rw.input.lookX')) - 60) < 3);
+  await shot('car-lefty-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(150);
+  await shot('car-lefty-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.evaluate(() => rw.touch.setSteering('buttons'));
+  const lsr = await center('Steer right'), lsl = await center('Steer left');
+  check('lefty: arrow pads on the right', lsl.x > 600 && lsr.x > lsl.x, JSON.stringify([lsl.x, lsr.x]));
+  await shot('car-lefty-buttons-915x412.png');
+  await page.evaluate(() => rw.touch.setSteering('wheel'));
+  for (const [m, label] of [['foot', 'Enter car'], ['plane', 'Thrust'], ['heli', 'Climb']]) {
+    await page.evaluate((mm) => rw.touch.setMode(mm), m);
+    const b = await center(label);
+    check(`lefty ${m}: ${label} on the left`, b.x < 250, `${b.x}`);
+    await down(6, 760, 320);
+    await drag(6, 760, 320, 760, 250);
+    const ax = await read(m === 'foot' ? 'rw.input.moveY' : 'rw.input.pitch');
+    check(`lefty ${m}: stick on the right`, ax > 0.9, `${ax}`);
+    await up(6);
+  }
+  await page.evaluate(() => rw.touch.setMode('foot'));
+  await shot('foot-lefty-915x412.png');
+  await page.evaluate(() => { rw.touch.setMode('car'); rw.touch.setLeftHanded(false); });
+  check('right-handed again: gas on the right', (await center('Gas')).x > 800);
 
   // ---- brake + handbrake ----
   await down(3, brake.x, brake.y);
@@ -221,7 +427,7 @@ try {
     rw.hud.setPrompt('Tap ENTER to get in');
   });
   check('speed hidden on foot', !(await page.locator('.rw-speedbox').isVisible()));
-  check('weapon text', (await page.textContent('.rw-weapon')).includes('Revolver'));
+  check('no weapon HUD (combat removed)', (await page.locator('.rw-weapon').count()) === 0);
   await page.waitForTimeout(3300);
   await shot('foot-915x412.png');
   await page.setViewportSize({ width: 780, height: 360 });
@@ -295,9 +501,12 @@ try {
   await page.evaluate(() => rw.touch.setMode('boat'));
   check('boat: no handbrake button', !(await page.locator('[aria-label="Handbrake"]').isVisible()));
   check('boat: gas, exit visible', (await page.locator('[aria-label="Gas"]').isVisible()) && (await page.locator('[aria-label="Exit car"]').isVisible()));
-  await down(14, 120, 330);
-  await drag(14, 120, 330, 200, 330);
-  check('boat: steer right', (await read('rw.input.steer')) > 0.95);
+  const bw = await wheelBox();
+  check('boat: same steering wheel', bw.vis);
+  const bp = rimPt(bw, 0);
+  await down(14, bp.x, bp.y);
+  await turn(14, bw, 0, 130);
+  check('boat: steer right', (await read('rw.input.steer')) === 1);
   await shot('boat-active-915x412.png');
   await up(14);
   await page.waitForTimeout(100);

@@ -34,12 +34,21 @@ await build({
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0;background:linear-gradient(#9fc8e8,#6d8f5a)';
       document.body.appendChild(root);
-      const log = { resizes: 0, volume: null, toasts: [], touchVisible: true };
+      const log = { resizes: 0, volume: null, toasts: [], touchVisible: true, steer: [], lefty: null, noTilt: false };
       const game = {
         events: createEvents(), progress: defaultProgress(), paused: false, quality: 1,
         player: { x: 0, z: 0 }, input: {},
         hud: { toast: (t) => log.toasts.push(t) },
-        touch: { setVisible: (v) => { log.touchVisible = v; } },
+        touch: {
+          setVisible: (v) => { log.touchVisible = v; },
+          setLeftHanded: (v) => { log.lefty = v; },
+          // Like the real controls: tilt without a sensor falls back to the wheel.
+          setSteering: (st, sens, onFallback) => {
+            log.steer.push([st, sens]);
+            if (st === 'tilt' && log.noTilt) { if (onFallback) onFallback('wheel', 'unsupported'); return 'wheel'; }
+            return st;
+          },
+        },
         audio: { setVolume: (v) => { log.volume = v.master; } },
         resize: () => { log.resizes++; },
         activities: { courses: [{ id: 'race_harbour', name: 'Harbour Dash', type: 'race' }] },
@@ -100,6 +109,36 @@ try {
   await ev(() => localStorage.clear());
   await load();
   check('starts closed', !(await isOpen()));
+  const lastSteer = () => ev(() => window.rw.log.steer[window.rw.log.steer.length - 1]);
+  check('steering applied at load', JSON.stringify(await lastSteer()) === '["wheel",1]', JSON.stringify(await lastSteer()));
+
+  // First run: ask how to steer, paused, once.
+  check('first run asks how to steer', (await ev(() => window.rw.menu.maybeAskSteering())) === true);
+  check('ask pauses the game', (await ev(() => window.rw.game.paused)) === true && (await ev(() => window.rw.log.touchVisible)) === false);
+  check('ask shows four choices', (await page.locator('.rw-menu-ask [data-steering]').count()) === 4);
+  check('ask not stacked', (await ev(() => window.rw.menu.maybeAskSteering())) === false);
+  await page.screenshot({ path: path.join(out, 'ask-steer-915x412.png') });
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(100);
+  const askFit = await ev(() => {
+    const b = document.querySelector('.rw-menu-askbox').getBoundingClientRect();
+    const bad = [...document.querySelectorAll('.rw-menu-ask button')].filter((e) => {
+      const q = e.getBoundingClientRect();
+      return q.height < 55.5 || q.bottom > innerHeight || q.right > innerWidth || q.left < 0;
+    }).length;
+    return { bad, fits: b.bottom <= innerHeight && b.top >= 0 && document.documentElement.scrollWidth <= innerWidth };
+  });
+  check('ask fits 780x360', askFit.bad === 0 && askFit.fits, JSON.stringify(askFit));
+  await page.screenshot({ path: path.join(out, 'ask-steer-780x360.png') });
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.locator('.rw-menu-ask [data-steering="buttons"]').tap();
+  check('ask: pick applies at once', JSON.stringify(await lastSteer()) === '["buttons",1]', JSON.stringify(await lastSteer()));
+  check('ask: closes and unpauses', !(await ev(() => window.rw.menu.isAsking())) && (await ev(() => window.rw.game.paused)) === false
+    && (await ev(() => window.rw.log.touchVisible)) === true);
+  check('ask: saved choice + seen flag', (await stored()).settings.steering === 'buttons' && (await stored()).medals.hint_steer === 'bronze');
+  await load();
+  check('ask: only once', (await ev(() => window.rw.menu.maybeAskSteering())) === false);
+  check('ask: choice restored', JSON.stringify(await lastSteer()) === '["buttons",1]');
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   check('pause opens menu', await isOpen());
   check('touch hidden while open', (await ev(() => window.rw.log.touchVisible)) === false);
@@ -168,6 +207,29 @@ try {
   // Settings persist.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
+  check('settings: four steering choices', (await page.locator('.rw-menu-body [data-steering]').count()) === 4);
+  check('settings: current style marked', (await page.locator('.rw-menu-body [data-steering="buttons"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('.rw-menu-body [data-steering="slider"]').tap();
+  check('settings: steering applied at once', JSON.stringify(await lastSteer()) === '["slider",1]', JSON.stringify(await lastSteer()));
+  check('settings: choice marked', (await page.locator('.rw-menu-body [data-steering="slider"]').getAttribute('aria-checked')) === 'true');
+  await ev(() => {
+    const s = document.querySelector('[data-setting="steerSensitivity"]');
+    s.value = '130';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  check('settings: sensitivity applied', JSON.stringify(await lastSteer()) === '["slider",1.3]', JSON.stringify(await lastSteer()));
+  check('settings: sensitivity shown', (await page.locator('.rw-menu-sens').innerText()) === '130%');
+  // Tilt where the phone cannot: back to the wheel with a message.
+  await ev(() => { window.rw.log.noTilt = true; });
+  await page.locator('.rw-menu-body [data-steering="tilt"]').tap();
+  let fb = (await progress()).settings.steering;
+  check('settings: tilt unavailable falls back to wheel', fb === 'wheel' && (await ev(() => window.rw.log.toasts.join())).includes('Tilt'), fb);
+  check('settings: fallback shown in menu', (await page.locator('.rw-menu-body [data-steering="wheel"]').getAttribute('aria-checked')) === 'true');
+  await ev(() => { window.rw.log.noTilt = false; });
+  await page.locator('.rw-menu-body [data-steering="tilt"]').tap();
+  check('settings: tilt kept where it works', (await progress()).settings.steering === 'tilt');
+  await page.screenshot({ path: path.join(out, 'settings-steering-915x412.png') });
   await page.locator('[data-setting="invertPitch"]').tap();
   await page.locator('[data-setting="leftHanded"]').tap();
   await page.locator('[data-setting="police"]').tap();
@@ -180,6 +242,7 @@ try {
   });
   let st = (await progress()).settings;
   check('settings applied', st.invertPitch && st.leftHanded && !st.police && st.quality === 1.25 && Math.abs(st.master - 0.35) < 1e-9, JSON.stringify(st));
+  check('left-handed applied to controls', (await ev(() => window.rw.log.lefty)) === true);
   check('quality applied to game', (await ev(() => window.rw.game.quality)) === 1.25 && (await ev(() => window.rw.log.resizes)) > 0);
   check('volume applied', Math.abs((await ev(() => window.rw.log.volume)) - 0.35) < 1e-9);
   check('invert applied', (await ev(() => window.rw.game.input.invertPitch)) === true);
@@ -188,6 +251,8 @@ try {
   await load();
   st = (await progress()).settings;
   check('settings persist', st.invertPitch && st.leftHanded && !st.police && st.quality === 1.25 && Math.abs(st.master - 0.35) < 1e-9, JSON.stringify(st));
+  check('steering settings persist', st.steering === 'tilt' && st.steerSensitivity === 1.3, JSON.stringify(st));
+  check('steering restored to controls', JSON.stringify(await lastSteer()) === '["tilt",1.3]' && (await ev(() => window.rw.log.lefty)) === true);
   check('quality restored to game', (await ev(() => window.rw.game.quality)) === 1.25);
 
   // Reset needs two steps.
@@ -199,7 +264,9 @@ try {
   await page.screenshot({ path: path.join(out, 'settings-confirm-915x412.png') });
   await page.locator('[data-role="reset-confirm"]').tap();
   pr = await progress();
-  check('reset clears', pr.money === 250 && pr.owned.length === 0 && pr.settings.quality === 1 && pr.settings.police === true, JSON.stringify(pr));
+  check('reset clears', pr.money === 250 && pr.owned.length === 0 && pr.settings.quality === 1 && pr.settings.police === true
+    && pr.settings.steering === 'wheel' && pr.settings.steerSensitivity === 1, JSON.stringify(pr));
+  check('reset re-applies steering', JSON.stringify(await lastSteer()) === '["wheel",1]');
   const sv = await stored();
   check('reset saved', sv && sv.money === 250 && sv.owned.length === 0);
   check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.owned === window.refO));

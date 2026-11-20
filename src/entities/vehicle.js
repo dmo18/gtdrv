@@ -32,7 +32,7 @@ export const VEHICLE_SPECS = {
     health: 700, colors: [0xc8402e, 0x3a7bd5, 0xe8e2d0, 0x6bbf59, 0xf0a030],
   },
   sedan: {
-    id: 'sedan', label: 'Corvane', body: 'sedan',
+    id: 'sedan', label: 'Selwick', body: 'sedan',
     length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
     mass: 1400, maxSpeed: 42, reverseSpeed: 9, accel: 4.5, brake: 14, grip: 1.0, steerMax: 0.6,
     drive: 'fwd', gears: 5, power: 88, firstGear: 14, cgFront: 0.6,
@@ -60,21 +60,21 @@ export const VEHICLE_SPECS = {
     health: 1100, colors: [0x7a4b2a, 0x3d5a40, 0xb8b8b0, 0x1c3f75, 0x8c1c13],
   },
   van: {
-    id: 'van', label: 'Movaro', body: 'van',
+    id: 'van', label: 'Portaby', body: 'van',
     length: 5.0, width: 2.0, height: 2.2, wheelBase: 3.0, wheelRadius: 0.36,
     mass: 2200, maxSpeed: 33, reverseSpeed: 7, accel: 3, brake: 11, grip: 0.85, steerMax: 0.56,
     drive: 'fwd', gears: 4, power: 98, firstGear: 12, cgFront: 0.58,
     health: 1100, colors: [0xf0f0ea, 0x5b6770, 0x2a5d8a, 0xc9a227],
   },
   taxi: {
-    id: 'taxi', label: 'Corvane Cab', body: 'sedan',
+    id: 'taxi', label: 'Selwick Cab', body: 'sedan',
     length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
     mass: 1450, maxSpeed: 42, reverseSpeed: 9, accel: 4.5, brake: 14, grip: 1.0, steerMax: 0.6,
     drive: 'fwd', gears: 5, power: 88, firstGear: 14, cgFront: 0.6,
     health: 900, colors: [0xf2c21b],
   },
   police: {
-    id: 'police', label: 'Corvane Patrol', body: 'sedan',
+    id: 'police', label: 'Selwick Patrol', body: 'sedan',
     length: 4.8, width: 1.9, height: 1.45, wheelBase: 2.85, wheelRadius: 0.34,
     mass: 1600, maxSpeed: 52, reverseSpeed: 10, accel: 6, brake: 16, grip: 1.1, steerMax: 0.6,
     drive: 'awd', gears: 6, power: 140, firstGear: 16, cgFront: 0.56,
@@ -335,7 +335,6 @@ export function stepVehicle(v, controls, dt, world) {
   const a = d.a, b = d.b, L = d.L;
   let spinMax = 0, absOn = false, slideF = 0, slideR = 0, hbSlide = 0;
   let sumAx = 0, sumAy = 0;
-  let driveScale = 1;
   for (let k = 0; k < NSUB; k++) {
     ch = Math.cos(v.heading);
     sh = Math.sin(v.heading);
@@ -352,7 +351,7 @@ export function stepVehicle(v, controls, dt, world) {
     // Stability assist (off while the handbrake is held).
     const beta = Math.atan2(vl, Math.max(avf, V0));
     let assistMz = 0;
-    driveScale = 1;
+    let driveScale = 1;
     if (!handbrake && avf > 4 && !v.wrecked) {
       let yawRef = vf * Math.tan(delta) / L;
       const yLim = mu * G / Math.max(avf, 1);
@@ -465,13 +464,12 @@ export function stepVehicle(v, controls, dt, world) {
   ch = Math.cos(v.heading);
   sh = Math.sin(v.heading);
   let vf = v.vx * ch + v.vz * sh;
-  let vl = -v.vx * sh + v.vz * ch;
+  const vl = -v.vx * sh + v.vz * ch;
   const vfc = clamp(vf, -s.reverseSpeed, s.maxSpeed);
   // Come to a clean rest when nothing drives the car.
   const driving = driveF !== 0;
   if (!driving && Math.abs(vfc) < 0.12 && Math.abs(vl) < 0.12 && (Math.abs(v.yawRate) < 0.08 || Math.abs(vf) < 0.02)) {
     vf = 0;
-    vl = 0;
     v.yawRate = 0;
     v.vx = 0;
     v.vz = 0;

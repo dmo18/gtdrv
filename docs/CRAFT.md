@@ -41,7 +41,26 @@ Step functions: `step<Kind>(craft, controls, dt, world)`
     land (main island, airfield islet, causeway), negative at sea.
   - `city.isGround(x, z)`: true on land or on a pier.
   - `time`: simulated seconds.
+  - Cars also read `steerMode`: `'proportional'` (the player's input
+    object) means steer is a share of the speed-dependent lock; absent
+    (AI) means steer x `steerMax / (1 + |speed| / 20)` is the wanted wheel
+    angle. Both are clipped to the same lock, which shrinks with speed so
+    full input asks for about 0.85 of tyre grip.
 - Fixed step dt = 1/60. No allocations in step functions. Never NaN.
+
+Car-only fields (src/entities/vehicle.js)
+- Specs add `drive` (`'fwd' | 'rwd' | 'awd'`), `gears` (4..6), `power`
+  (kW), `firstGear` (m/s at the redline in 1st), `cgFront` (front weight
+  share). `accel` is informative; `brake` is the pedal's decel request
+  (the tyres and ABS limit it); `steerMax` is the lock at walking pace.
+- `gear`: 0 = reverse, 1..spec.gears forward (automatic, brief torque dip
+  while `shiftT > 0`). `rpm`: engine speed as a share of the redline,
+  0..1 (idle about 0.14), for the engine sound.
+- `steer` smoothed input, `steerAngle` front wheel angle (rad).
+- `pitch`/`roll`: body dive/squat and lean from damped springs (visual).
+  `suspension` 0..1: extra travel after an impact, decays in ~1 s.
+- `slip` 0..1 tyre squeal / skid amount, `spin` wheelspin 0..1, `abs`
+  true while ABS is working, `accelX`/`accelY` body-frame acceleration.
 - Game logic files must not import three.js or touch the DOM.
 
 Mesh functions (three.js), per kind:

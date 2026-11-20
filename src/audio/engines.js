@@ -7,7 +7,7 @@
 // repeats without a seam. Every character is rendered at a few rpm
 // points, each with an on-load and an off-load layer.
 
-import { SR, TAU, biquad, filter, lp1, white, gauss, removeDC, peak, scale } from './dsp.js';
+import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS } from './dsp.js';
 
 // Normalised rpm points (fraction of redline) shared by all characters;
 // the first point is replaced by each character's idle.
@@ -122,9 +122,10 @@ function pulseShape(t, tau) {
   return u * Math.exp(1 - u) - 0.31 * u3 * Math.exp(1 - u3);
 }
 
-// Render one loop into a new Float32Array. rpmNorm: fraction of redline;
-// load: 1 = on throttle, 0 = overrun.
-export function renderEngineLoop(ch, rpmNorm, load, rng, sr = SR, target = 0.42) {
+// Describe one loop as a filter spec (see dsp.js runSpecJS): the pulse
+// excitation is built here; the filtering runs in JS or offline.
+// rpmNorm: fraction of redline; load: 1 = on throttle, 0 = overrun.
+export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.3) {
   const e = ENGINES[ch];
   const rpm = Math.max(200, rpmNorm * e.red);
   const cycleS = 120 / rpm;
@@ -134,16 +135,21 @@ export function renderEngineLoop(ch, rpmNorm, load, rng, sr = SR, target = 0.42)
   const exc = new Float32Array(N);
   const comb = new Float32Array(N);
   const env = new Float32Array(N);
-  const out = new Float32Array(N);
 
   const on = load > 0.5;
   const tau = Math.max(0.00022, (e.tauK * 60) / rpm / 3);
+  // one pulse and one roughness envelope, reused for every firing
   const pulseLen = Math.ceil(tau * 30 * sr);
+  const pulse = new Float32Array(pulseLen);
+  for (let j = 0; j < pulseLen; j++) pulse[j] = pulseShape(j / sr, tau);
+  const noiseLen = Math.ceil(tau * 8 * sr);
+  const nEnv = new Float32Array(noiseLen);
+  for (let j = 0; j < noiseLen; j++) nEnv[j] = Math.exp(-j / (noiseLen * 0.25));
+  const noise = white(noiseLen * 7 + 13, rng);
   const cylBias = new Float32Array(e.cyl);
   for (let k = 0; k < e.cyl; k++) cylBias[k] = rng.next() * 2 - 1;
   const fireN = e.cyl;
   const jitterAmp = on ? e.jitter : e.jitter * (1 + 3 * e.burble);
-  const noiseLen = Math.ceil(tau * 8 * sr);
   for (let c = 0; c < nCyc; c++) {
     for (let k = 0; k < fireN; k++) {
       const bank = e.bank ? e.bank[k % e.bank.length] : 1;
@@ -154,21 +160,19 @@ export function renderEngineLoop(ch, rpmNorm, load, rng, sr = SR, target = 0.42)
         if (e.burble > 0 && rng.next() < 0.25 * e.burble) amp *= 0.2 + 1.8 * rng.next();
       }
       const timing = (rng.next() - 0.5) * 0.012;
-      const pos = (c + (k + timing) / fireN) * cs;
-      const start = Math.floor(pos);
-      const frac = pos - start;
-      for (let j = 0; j < pulseLen; j++) {
-        const t = (j - frac) / sr;
-        const v = pulseShape(t, tau) * amp;
-        const i = (start + j) % N;
+      const start = Math.round((c + (k + timing) / fireN) * cs);
+      for (let j = 0, i = start % N; j < pulseLen; j++) {
+        const v = pulse[j] * amp;
         exc[i] += v;
-        env[i] += Math.abs(v);
+        env[i] += v < 0 ? -v : v;
+        if (++i >= N) i = 0;
       }
       // combustion roughness: a short noise burst with each firing
       const ca = amp * (on ? 1 : 0.35);
-      for (let j = 0; j < noiseLen; j++) {
-        const i = (start + j) % N;
-        comb[i] += (rng.next() * 2 - 1) * ca * Math.exp(-j / (noiseLen * 0.25));
+      const no = Math.floor(rng.next() * noiseLen * 6);
+      for (let j = 0, i = start % N; j < noiseLen; j++) {
+        comb[i] += noise[no + j] * ca * nEnv[j];
+        if (++i >= N) i = 0;
       }
     }
   }
@@ -178,67 +182,75 @@ export function renderEngineLoop(ch, rpmNorm, load, rng, sr = SR, target = 0.42)
     const bt = (60 / rpm / e.blades) * 0.18;
     const len = Math.ceil(bt * 12 * sr);
     const amp = 0.9 * (0.45 + 0.55 * rpmNorm);
+    const shape = new Float32Array(len);
+    for (let j = 0; j < len; j++) {
+      const u = j / sr / bt;
+      shape[j] = Math.sin(Math.min(u, 2) * Math.PI) * Math.exp(-u * 0.6) * amp;
+    }
     for (let c = 0; c < nCyc; c++) {
       for (let k = 0; k < passes; k++) {
-        const pos = (c + k / passes) * cs + cs * 0.37;
-        const start = Math.floor(pos);
-        for (let j = 0; j < len; j++) {
-          const t = (j - (pos - start)) / sr;
-          const u = t / bt;
-          const v = u > 0 ? Math.sin(Math.min(u, 2) * Math.PI) * Math.exp(-u * 0.6) * amp : 0;
-          exc[(start + j) % N] += v * (k % 2 ? 0.9 : 1);
+        const g = k % 2 ? 0.9 : 1;
+        for (let j = 0, i = Math.round((c + k / passes + 0.37) * cs) % N; j < len; j++) {
+          exc[i] += shape[j] * g;
+          if (++i >= N) i = 0;
         }
       }
     }
   }
 
   const firingHz = (e.cyl * rpm) / 120;
-  // body: the low pulse train itself, carries the firing fundamental
-  filter(exc, out, biquad('lp', Math.min(1400, firingHz * 2.6), 0.8, sr), { gain: e.body, sr });
-  // exhaust and body resonances, brighter on load
-  const bright = on ? 1 : 0.45;
-  for (let f = 0; f < e.formants.length; f++) {
-    const [fq, q, g] = e.formants[f];
-    const gg = g * (f === 0 ? 1 : bright) * 2.2;
-    filter(exc, out, biquad('bp', fq, q, sr), { gain: gg, add: true, sr });
-  }
-  // combustion clatter (diesel knock), high-passed
-  filter(comb, out, biquad('hp', 1100, 0.7, sr), { gain: e.clatter * (on ? 1.6 : 0.5), add: true, sr });
-  filter(comb, out, biquad('bp', 450, 1.2, sr), { gain: 0.25, add: true, sr });
   // intake noise breathing with the firing rhythm
   lp1(env, Math.min(400, firingHz * 0.9), { sr });
   const ep = peak(env) || 1;
   const nz = white(N, rng);
   for (let i = 0; i < N; i++) nz[i] *= 0.35 + 0.65 * (env[i] / ep);
-  filter(nz, out, biquad('bp', e.intakeF * (0.8 + 0.4 * rpmNorm), 1.1, sr), {
-    gain: e.intake * (on ? 1 : 0.3) * (0.4 + 0.8 * rpmNorm), add: true, sr,
-  });
-  // mechanical whine: an exact harmonic of the cycle rate so it loops
-  const h = Math.max(1, Math.round(e.whineMul * 2));
-  const wAmp = e.whine * (0.5 + rpmNorm) * (on ? 1 : 0.7);
-  const h2 = Math.round(h * 1.5);
-  const g2 = (h2 * rpm) / 120 < sr * 0.3 ? 0.4 : 0;
-  for (let i = 0; i < N; i++) {
-    const ph = (TAU * i) / cs;
-    out[i] += wAmp * (Math.sin(ph * h) + g2 * Math.sin(ph * h2 + 1.3));
+
+  const bright = on ? 1 : 0.45;
+  const bands = [
+    // body: the low pulse train itself, carries the firing fundamental
+    ['lp', Math.min(1200, firingHz * 1.7), 0.9, e.body * 2.6],
+  ];
+  // exhaust and body resonances, brighter on load
+  for (let f = 0; f < e.formants.length; f++) {
+    const [fq, q, g] = e.formants[f];
+    bands.push(['bp', fq, q, g * (f === 0 ? 1 : bright) * 2.2]);
   }
-  // boats: exhaust through water, bubbling and muffled
+  const parts = [
+    { x: exc, bands },
+    // combustion clatter (diesel knock), high-passed
+    { x: comb, bands: [['hp', 1100, 0.7, e.clatter * (on ? 1.6 : 0.5)]] },
+    { x: nz, bands: [['bp', e.intakeF * (0.8 + 0.4 * rpmNorm), 1.1, e.intake * (on ? 1 : 0.3) * (0.4 + 0.8 * rpmNorm)]] },
+  ];
+  let bub = null;
   if (e.wet > 0) {
-    const bub = white(N, rng);
-    lp1(bub, 18, { sr });
-    const bp = peak(bub) || 1;
-    for (let i = 0; i < N; i++) out[i] *= 1 - e.wet * 0.35 * (0.5 + 0.5 * bub[i] / bp);
+    // boats: exhaust through water, bubbling
     const gurgle = white(N, rng);
     for (let i = 0; i < N; i++) gurgle[i] *= env[i] / ep;
-    filter(gurgle, out, biquad('bp', 320, 1.5, sr), { gain: 0.35 * e.wet, add: true, sr });
+    parts.push({ x: gurgle, bands: [['bp', 320, 1.5, 0.35 * e.wet]] });
+    bub = white(N, rng);
+    lp1(bub, 18, { sr });
   }
-  // band-limit and clean up
-  filter(out, out, biquad('hp', 28, 0.7, sr), { sr });
-  const lpf = on ? e.lpOn : e.lpOff;
-  filter(out, out, biquad('lp', lpf, 0.6, sr), { sr });
-  lp1(out, Math.min(sr * 0.4, lpf * 1.6), { sr });
-  removeDC(out);
-  return out;
+  const finish = (out) => {
+    // mechanical whine: an exact harmonic of the cycle rate so it loops
+    const h = Math.max(1, Math.round(e.whineMul * 2));
+    const wAmp = e.whine * (0.5 + rpmNorm) * (on ? 1 : 0.7);
+    const h2 = Math.round(h * 1.5);
+    const g2 = (h2 * rpm) / 120 < sr * 0.3 ? 0.4 : 0;
+    const w1 = (TAU * h) / cs;
+    const w2 = (TAU * h2) / cs;
+    for (let i = 0; i < N; i++) out[i] += wAmp * (Math.sin(w1 * i) + g2 * Math.sin(w2 * i + 1.3));
+    if (bub) {
+      const bp = peak(bub) || 1;
+      for (let i = 0; i < N; i++) out[i] *= 1 - e.wet * 0.35 * (0.5 + 0.5 * bub[i] / bp);
+    }
+    return removeDC(out);
+  };
+  return { sr, n: N, loop: true, parts, post: [['lp', on ? e.lpOn : e.lpOff, 0.6]], finish };
+}
+
+// Render one loop in JS (used when OfflineAudioContext is missing).
+export function renderEngineLoop(ch, rpmNorm, load, rng, sr = R.sr, target = 0.3) {
+  return runSpecJS(engineSpec(ch, rpmNorm, load, rng, sr, target));
 }
 
 // Scale a set of loops of one character together to a common peak.

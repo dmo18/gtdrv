@@ -8,6 +8,9 @@ function start(game) {
   boot.style.display = 'none';
   game.resize();
   game.loop.start();
+  // First visit only: let the player pick how they want to steer.
+  // (Skipped for the automated checks, which start with ?autostart.)
+  if (!new URLSearchParams(location.search).has('autostart')) game.menu.maybeAskSteering();
 }
 
 try {

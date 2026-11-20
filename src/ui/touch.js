@@ -1,12 +1,30 @@
 // On-screen touch controls. Feeds one source on the shared input object.
 // Every control tracks its own pointerId so several fingers work at once.
+//
+// Car and boat steering comes in four styles (setSteering):
+//   wheel   an on-screen steering wheel turned by the thumb (default)
+//   buttons two arrow pads; holding ramps toward full lock
+//   tilt    turn the phone like a wheel (DeviceOrientation)
+//   slider  a wide floating horizontal pad
+// All of them go through shapeSteer() (src/core/input.js), which applies
+// the sensitivity and the response curve. Buttons and tilt are smoothed in
+// update(dt), which the game calls once per simulation step.
 import { injectStyles } from './styles.js';
+import {
+  shapeSteer, rampSteer, angleDelta, tiltAngle, tiltToSteer, clampSensitivity,
+  STEER_STYLES, WHEEL_LOCK_DEG,
+} from '../core/input.js';
 
-const STEER_RANGE = 60; // px of drag for full lock
-const STEER_DEAD = 0.08;
+const SLIDER_RANGE = 110; // px of drag for full lock
+const SLIDER_DEAD = 0.04;
 const STICK_RANGE = 56; // px of drag for full stick
 const STICK_DEAD = 0.1;
 const SPRINT_AT = 0.85;
+const WHEEL_CORE = 16; // px around the wheel centre where angle is ignored
+const PAD_W = SLIDER_RANGE * 2 + 52, PAD_H = 60;
+const STICK_W = 128;
+const TILT_WAIT_MS = 2500; // no orientation events by then: no sensor
+const TILT_SMOOTH = 0.07; // s, low-pass time constant
 
 // Hand-drawn 24x24 line icons.
 const ICONS = {
@@ -21,7 +39,21 @@ const ICONS = {
   map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
   gas: '<path d="M6 15l6-6 6 6"/><path d="M6 20l6-6 6 6"/>',
   brake: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  left: '<path d="M15 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7" opacity="0.5"/>',
+  right: '<path d="M9 5l7 7-7 7"/><path d="M4 5l7 7-7 7" opacity="0.5"/>',
 };
+
+// The steering wheel: an original three-spoke design drawn here.
+const WHEEL_SVG = '<svg viewBox="0 0 150 150" aria-hidden="true">'
+  + '<circle cx="75" cy="75" r="64" class="rw-w-rim"/>'
+  + '<path d="M26 52 A56 56 0 0 1 52 26" class="rw-w-grip"/>'
+  + '<path d="M98 26 A56 56 0 0 1 124 52" class="rw-w-grip"/>'
+  + '<path d="M19 82 L57 78 L75 90 L93 78 L131 82" class="rw-w-spoke"/>'
+  + '<path d="M75 90 L75 131" class="rw-w-spoke"/>'
+  + '<circle cx="75" cy="78" r="17" class="rw-w-hub"/>'
+  + '<path d="M67 76 l8 -7 l8 7" class="rw-w-mark"/>'
+  + '<rect x="70" y="5" width="10" height="16" rx="3" class="rw-w-top"/>'
+  + '</svg>';
 
 function svg(name) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -36,7 +68,9 @@ function el(tag, cls, parent) {
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
-export function createTouchControls(root, input) {
+// opts.onSteerFallback(style, reason): tilt was asked for but cannot work
+// (no sensor, permission denied); the controls have switched to 'wheel'.
+export function createTouchControls(root, input, opts = {}) {
   injectStyles();
   if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
 
@@ -44,16 +78,16 @@ export function createTouchControls(root, input) {
     steer: 0, throttle: 0, brake: 0, handbrake: false,
     moveX: 0, moveY: 0, sprint: false, pitch: 0,
   });
-  const layer = el('div', 'rw-touch rw-mode-car', root);
+  const layer = el('div', 'rw-touch rw-mode-car rw-steer-wheel', root);
   const MODES = ['foot', 'car', 'boat', 'plane', 'heli'];
   // Gated elements show only in the modes listed by their rw-m-* classes.
   const gate = (b, ...modes) => { b.classList.add('rw-gated', ...modes.map((m) => 'rw-m-' + m)); return b; };
   const cleanups = []; // functions run on releaseAll()
   const listeners = [];
 
-  function on(target, type, fn, opts) {
-    target.addEventListener(type, fn, opts);
-    listeners.push([target, type, fn, opts]);
+  function on(target, type, fn, o) {
+    target.addEventListener(type, fn, o);
+    listeners.push([target, type, fn, o]);
   }
 
   // Generic tracker: one pointer per control, with capture.
@@ -109,7 +143,19 @@ export function createTouchControls(root, input) {
     return makeButton(cls, label, icon, text, () => input.press(name), () => input.release(name));
   }
 
-  // ----- camera drag (right 60% of the screen, under the buttons) -----
+  // ----- state -----
+  let mode = 'car';
+  let style = 'wheel';
+  let sensitivity = 1;
+  let leftHanded = false;
+  let raw = 0; // raw steering -1..1 before the response curve
+  const steerMode = () => mode === 'car' || mode === 'boat';
+  const setRaw = (x) => {
+    raw = clamp(x, -1, 1);
+    src.steer = steerMode() ? shapeSteer(raw, sensitivity) : 0;
+  };
+
+  // ----- camera drag (60% of the screen away from the stick, under the buttons) -----
   const look = el('div', 'rw-zone rw-look', layer);
   const lastLook = { x: 0, y: 0 };
   track(look, {
@@ -123,54 +169,115 @@ export function createTouchControls(root, input) {
     up() {},
   });
 
-  // ----- floating stick zone (left side), mode decides the style -----
+  // ----- steering / stick zone: mode and style decide what it does -----
   const zone = el('div', 'rw-zone rw-stickzone', layer);
-  const pad = gate(el('div', 'rw-pad', layer), 'car', 'boat');
+  const pad = gate(el('div', 'rw-pad rw-st-slider', layer), 'car', 'boat');
   const padKnob = el('div', 'rw-knob', pad);
+  const wheel = gate(el('div', 'rw-wheel rw-st-wheel', layer), 'car', 'boat');
+  const wheelRot = el('div', 'rw-wheel-rot', wheel);
+  wheelRot.innerHTML = WHEEL_SVG;
   const stick = gate(el('div', 'rw-stick', layer), 'foot', 'plane', 'heli');
   const stickKnob = el('div', 'rw-knob', stick);
   const origin = { x: 0, y: 0 };
-  let mode = 'car';
-  const padMode = () => mode === 'car' || mode === 'boat';
+  // Wheel tracking: centre, last touch angle, accumulated wheel angle (deg).
+  const wh = { cx: 0, cy: 0, last: 0, angle: 0, have: false };
 
-  // Rest positions (bottom-left) so the control is visible before touching.
+  function safeInset(name) {
+    return parseFloat(getComputedStyle(layer).getPropertyValue(name)) || 0;
+  }
+  // Rest positions (bottom corner) so the control is visible before touching.
   function restPosition() {
     const r = root.getBoundingClientRect();
-    const w = padMode() ? 176 : 128;
-    const h = padMode() ? 60 : 128;
-    const sl = parseFloat(getComputedStyle(layer).getPropertyValue('--rw-sl')) || 0;
-    return { x: r.left + sl + 24 + w / 2, y: r.bottom - 28 - h / 2 - (padMode() ? 6 : 0) };
+    const slider = steerMode();
+    const w = slider ? PAD_W : STICK_W;
+    const h = slider ? PAD_H : STICK_W;
+    const y = r.bottom - 28 - h / 2 - (slider ? 6 : 0);
+    if (leftHanded) return { x: r.right - safeInset('--rw-sr') - 24 - w / 2, y };
+    return { x: r.left + safeInset('--rw-sl') + 24 + w / 2, y };
   }
   function placeBase(base, cx, cy) {
     const r = root.getBoundingClientRect();
-    const w = base === pad ? 176 : 128;
-    const h = base === pad ? 60 : 128;
+    const w = base === pad ? PAD_W : STICK_W;
+    const h = base === pad ? PAD_H : STICK_W;
     base.style.transform = `translate(${Math.round(cx - r.left - w / 2)}px, ${Math.round(cy - r.top - h / 2)}px)`;
   }
   function placeRest() {
     const p = restPosition();
-    placeBase(padMode() ? pad : stick, p.x, p.y);
+    placeBase(steerMode() ? pad : stick, p.x, p.y);
+  }
+
+  function setWheelAngle(deg, spring) {
+    wh.angle = clamp(deg, -WHEEL_LOCK_DEG, WHEEL_LOCK_DEG);
+    wheel.classList.toggle('rw-spring', !!spring);
+    wheelRot.style.transform = wh.angle ? `rotate(${wh.angle.toFixed(1)}deg)` : '';
+  }
+  function wheelPoint(e) {
+    const dx = e.clientX - wh.cx, dy = e.clientY - wh.cy;
+    if (dx * dx + dy * dy < WHEEL_CORE * WHEEL_CORE) return false;
+    // Screen y grows downward, so atan2 grows clockwise: right turn positive.
+    const a = Math.atan2(dy, dx);
+    if (wh.have) {
+      setWheelAngle(wh.angle + angleDelta(a, wh.last) * 180 / Math.PI, false);
+      setRaw(wh.angle / WHEEL_LOCK_DEG);
+    }
+    wh.last = a;
+    wh.have = true;
+    return true;
   }
 
   track(zone, {
     down(e) {
+      maybeAskTilt();
+      if (steerMode()) {
+        if (style === 'wheel') {
+          const b = wheel.getBoundingClientRect();
+          wh.cx = b.left + b.width / 2;
+          wh.cy = b.top + b.height / 2;
+          wh.have = false;
+          wheel.classList.add('rw-active');
+          setWheelAngle(wh.angle, false);
+          wheelPoint(e);
+        } else if (style === 'slider') {
+          const r = root.getBoundingClientRect();
+          // Steering is measured from the touch-down point; the drawn base
+          // is nudged so it stays fully on screen.
+          origin.x = e.clientX;
+          origin.y = e.clientY;
+          placeBase(pad,
+            clamp(e.clientX, r.left + PAD_W / 2 + 6, r.right - PAD_W / 2 - 6),
+            clamp(e.clientY, r.top + PAD_H / 2 + 6, r.bottom - PAD_H / 2 - 6));
+          pad.classList.add('rw-active');
+          applySlider(e.clientX);
+        }
+        return;
+      }
       const r = root.getBoundingClientRect();
-      // Steering is measured from the touch-down point; the drawn base is
-      // nudged so it stays fully on screen.
       origin.x = e.clientX;
       origin.y = e.clientY;
-      const halfW = padMode() ? 88 : 64;
-      const halfH = padMode() ? 30 : 64;
-      const base = padMode() ? pad : stick;
-      placeBase(base,
-        clamp(e.clientX, r.left + halfW + 6, r.left + r.width * 0.4 - 6),
-        clamp(e.clientY, r.top + halfH + 6, r.bottom - halfH - 6));
-      base.classList.add('rw-active');
+      const half = STICK_W / 2;
+      const zl = leftHanded ? r.left + r.width * 0.6 : r.left;
+      const zr = leftHanded ? r.right : r.left + r.width * 0.4;
+      placeBase(stick,
+        clamp(e.clientX, zl + half + 6, zr - half - 6),
+        clamp(e.clientY, r.top + half + 6, r.bottom - half - 6));
+      stick.classList.add('rw-active');
       applyStick(e.clientX, e.clientY);
     },
-    move(e) { applyStick(e.clientX, e.clientY); },
+    move(e) {
+      if (steerMode()) {
+        if (style === 'wheel') wheelPoint(e);
+        else if (style === 'slider') applySlider(e.clientX);
+        return;
+      }
+      applyStick(e.clientX, e.clientY);
+    },
     up() {
-      src.steer = 0; src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
+      if (style === 'wheel' || style === 'slider') setRaw(0);
+      src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
+      if (!steerMode()) src.steer = 0;
+      wh.have = false;
+      wheel.classList.remove('rw-active');
+      setWheelAngle(0, true);
       padKnob.style.transform = '';
       stickKnob.style.transform = '';
       pad.classList.remove('rw-active');
@@ -179,32 +286,113 @@ export function createTouchControls(root, input) {
     },
   });
 
+  function applySlider(x) {
+    const v = clamp((x - origin.x) / SLIDER_RANGE, -1, 1);
+    const a = Math.abs(v);
+    setRaw(a < SLIDER_DEAD ? 0 : Math.sign(v) * (a - SLIDER_DEAD) / (1 - SLIDER_DEAD));
+    padKnob.style.transform = `translateX(${(v * SLIDER_RANGE).toFixed(1)}px)`;
+  }
+
   function applyStick(x, y) {
     const dx = x - origin.x;
     const dy = y - origin.y;
-    if (padMode()) {
-      const v = clamp(dx / STEER_RANGE, -1, 1);
-      const a = Math.abs(v);
-      src.steer = a < STEER_DEAD ? 0 : Math.sign(v) * (a - STEER_DEAD) / (1 - STEER_DEAD);
-      padKnob.style.transform = `translateX(${(v * STEER_RANGE).toFixed(1)}px)`;
+    const rawMag = Math.hypot(dx, dy) / STICK_RANGE;
+    const k = rawMag > 1 ? 1 / rawMag : 1; // clamp vector to the unit circle
+    const nx = dx / STICK_RANGE * k;
+    const ny = dy / STICK_RANGE * k;
+    const mag = Math.min(rawMag, 1);
+    const live = mag >= STICK_DEAD;
+    if (mode === 'foot') {
+      src.moveX = live ? nx : 0;
+      src.moveY = live ? -ny : 0; // screen y grows downward; up is forward
+      src.sprint = rawMag > SPRINT_AT;
+      stick.classList.toggle('rw-sprint', src.sprint);
     } else {
-      const raw = Math.hypot(dx, dy) / STICK_RANGE;
-      const k = raw > 1 ? 1 / raw : 1; // clamp vector to the unit circle
-      const nx = dx / STICK_RANGE * k;
-      const ny = dy / STICK_RANGE * k;
-      const mag = Math.min(raw, 1);
-      const live = mag >= STICK_DEAD;
-      if (mode === 'foot') {
-        src.moveX = live ? nx : 0;
-        src.moveY = live ? -ny : 0; // screen y grows downward; up is forward
-        src.sprint = raw > SPRINT_AT;
-        stick.classList.toggle('rw-sprint', src.sprint);
-      } else {
-        src.steer = live ? nx : 0;
-        src.pitch = live ? -ny : 0; // stick up the screen = +1
-      }
-      stickKnob.style.transform = `translate(${(nx * STICK_RANGE).toFixed(1)}px, ${(ny * STICK_RANGE).toFixed(1)}px)`;
+      src.steer = live ? nx : 0;
+      src.pitch = live ? -ny : 0; // stick up the screen = +1
     }
+    stickKnob.style.transform = `translate(${(nx * STICK_RANGE).toFixed(1)}px, ${(ny * STICK_RANGE).toFixed(1)}px)`;
+  }
+
+  // ----- steering buttons (style 'buttons') -----
+  const btn = { left: false, right: false, last: 0 };
+  const btnTarget = () => {
+    if (btn.left && btn.right) return btn.last;
+    return btn.right ? 1 : btn.left ? -1 : 0;
+  };
+  const sb = (b) => { b.classList.add('rw-st-buttons'); return gate(b, 'car', 'boat'); };
+  sb(makeButton('rw-steerbtn rw-sleft', 'Steer left', 'left', '',
+    () => { btn.left = true; btn.last = -1; }, () => { btn.left = false; }, false));
+  sb(makeButton('rw-steerbtn rw-sright', 'Steer right', 'right', '',
+    () => { btn.right = true; btn.last = 1; }, () => { btn.right = false; }, false));
+
+  // ----- tilt (style 'tilt') -----
+  const tiltBar = gate(el('button', 'rw-btn rw-tiltbar rw-st-tilt', layer), 'car', 'boat');
+  tiltBar.type = 'button';
+  tiltBar.tabIndex = -1;
+  tiltBar.setAttribute('aria-label', 'Tilt steering (tap to re-centre)');
+  const tiltTrack = el('span', 'rw-tilt-track', tiltBar);
+  const tiltDot = el('span', 'rw-tilt-dot', tiltTrack);
+  el('span', 'rw-tilt-label', tiltBar).textContent = 'TILT';
+  const tilt = {
+    listening: false, gotEvent: false, asked: false, timer: 0,
+    deg: 0, smooth: 0, zero: 0, onFallback: opts.onSteerFallback || null,
+  };
+  track(tiltBar, {
+    down() { maybeAskTilt(); tilt.zero += tilt.smooth; tilt.smooth = 0; vibrate(); },
+    move() {},
+    up() {},
+  });
+  function onOrientation(e) {
+    if (e.beta == null && e.gamma == null) return;
+    tilt.gotEvent = true;
+    const so = typeof screen !== 'undefined' && screen.orientation && Number.isFinite(screen.orientation.angle)
+      ? screen.orientation.angle : Number(window.orientation) || 0;
+    tilt.deg = tiltAngle(e.beta, e.gamma, so);
+  }
+  function stopTilt() {
+    if (tilt.listening) window.removeEventListener('deviceorientation', onOrientation);
+    tilt.listening = false;
+    clearTimeout(tilt.timer);
+  }
+  function tiltFails(reason) {
+    stopTilt();
+    if (style !== 'tilt') return;
+    applyStyle('wheel');
+    if (tilt.onFallback) tilt.onFallback('wheel', reason);
+  }
+  function listenTilt() {
+    if (tilt.listening) return;
+    tilt.listening = true;
+    tilt.gotEvent = false;
+    window.addEventListener('deviceorientation', onOrientation);
+    clearTimeout(tilt.timer);
+    tilt.timer = setTimeout(() => { if (!tilt.gotEvent) tiltFails('no-sensor'); }, TILT_WAIT_MS);
+  }
+  // iOS-style permission needs a user gesture: called from taps and the menu.
+  function maybeAskTilt() {
+    if (style !== 'tilt' || tilt.listening) return;
+    const D = window.DeviceOrientationEvent;
+    if (!D) { tiltFails('unsupported'); return; }
+    if (typeof D.requestPermission === 'function') {
+      if (tilt.asked) return;
+      // The browser only shows the question during a tap: wait for one.
+      const ua = navigator.userActivation;
+      if (ua && !ua.isActive) return;
+      tilt.asked = true;
+      let p;
+      try { p = D.requestPermission(); } catch { tilt.asked = false; return; }
+      Promise.resolve(p).then((res) => {
+        if (style !== 'tilt') return;
+        if (res === 'denied') tiltFails('denied');
+        else listenTilt(); // 'granted' or undecided: the event timeout decides
+      }, () => { tilt.asked = false; }); // no gesture after all: ask on the next tap
+      return;
+    }
+    listenTilt();
+  }
+  function drawTilt(x) {
+    tiltDot.style.transform = `translateX(${(x * 60).toFixed(1)}px)`;
   }
 
   // ----- car / boat buttons -----
@@ -246,17 +434,32 @@ export function createTouchControls(root, input) {
     for (const c of cleanups) c();
     src.steer = 0; src.throttle = 0; src.brake = 0; src.handbrake = false;
     src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
+    raw = 0;
+    btn.left = false; btn.right = false;
+    tilt.smooth = 0;
+    setWheelAngle(0, false);
     padKnob.style.transform = '';
     stickKnob.style.transform = '';
+    drawTilt(0);
   }
   const stop = (e) => e.preventDefault();
   on(layer, 'contextmenu', stop);
   on(layer, 'touchstart', stop, { passive: false });
   on(layer, 'touchmove', stop, { passive: false });
   on(layer, 'dblclick', stop);
+  // Any touch is a user gesture: the moment to ask for tilt permission.
+  on(layer, 'pointerdown', maybeAskTilt, true);
   on(window, 'blur', releaseAll);
   on(window, 'resize', placeRest);
   on(document, 'visibilitychange', () => { if (document.hidden) releaseAll(); });
+
+  function applyStyle(next) {
+    releaseAll();
+    style = next;
+    for (const k of STEER_STYLES) layer.classList.toggle('rw-steer-' + k, k === style);
+    if (style !== 'tilt') stopTilt();
+    placeRest();
+  }
 
   placeRest();
 
@@ -270,6 +473,44 @@ export function createTouchControls(root, input) {
       stick.classList.toggle('rw-flight', mode === 'plane' || mode === 'heli');
       placeRest();
     },
+    // style: 'wheel' | 'buttons' | 'tilt' | 'slider'; sensitivity 0.5..1.5.
+    // Returns the style in use: 'wheel' at once if tilt has no API here.
+    // A later tilt failure (no sensor events, permission denied) switches
+    // to 'wheel' and calls onFallback (or opts.onSteerFallback).
+    setSteering(nextStyle, nextSens, onFallback) {
+      const st = STEER_STYLES.includes(nextStyle) ? nextStyle : 'wheel';
+      if (nextSens !== undefined) sensitivity = clampSensitivity(+nextSens);
+      if (typeof onFallback === 'function') tilt.onFallback = onFallback;
+      if (st !== style) applyStyle(st);
+      else setRaw(raw);
+      if (st === 'tilt') {
+        tilt.asked = false;
+        maybeAskTilt();
+      }
+      return style;
+    },
+    getSteering: () => ({ style, sensitivity, leftHanded }),
+    setLeftHanded(v) {
+      const next = !!v;
+      if (next === leftHanded) return;
+      releaseAll();
+      leftHanded = next;
+      layer.classList.toggle('rw-lefty', leftHanded);
+      placeRest();
+    },
+    // Once per simulation step: ramps the arrow buttons and smooths tilt.
+    update(dt) {
+      if (!(dt > 0) || !steerMode()) return;
+      if (style === 'buttons') {
+        setRaw(rampSteer(raw, btnTarget(), dt));
+      } else if (style === 'tilt') {
+        const k = 1 - Math.exp(-dt / TILT_SMOOTH);
+        const target = tilt.gotEvent ? angleDelta(tilt.deg * Math.PI / 180, tilt.zero * Math.PI / 180) * 180 / Math.PI : 0;
+        tilt.smooth += (target - tilt.smooth) * k;
+        setRaw(tiltToSteer(tilt.smooth));
+        drawTilt(raw);
+      }
+    },
     setVisible(v) {
       if (!v) releaseAll();
       layer.classList.toggle('rw-hidden', !v);
@@ -277,7 +518,8 @@ export function createTouchControls(root, input) {
     },
     dispose() {
       releaseAll();
-      for (const [t, type, fn, opts] of listeners) t.removeEventListener(type, fn, opts);
+      stopTilt();
+      for (const [t, type, fn, o] of listeners) t.removeEventListener(type, fn, o);
       listeners.length = 0;
       layer.remove();
     },

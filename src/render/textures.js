@@ -251,24 +251,6 @@ function makeSand(rng, N) {
   return { map: toTexture(c) };
 }
 
-function makeConcrete(rng, N) {
-  const S = 256;
-  const c = canvas(S);
-  const g = c.getContext('2d');
-  g.fillStyle = grey(214);
-  g.fillRect(0, 0, S, S);
-  for (let i = 0; i < 10; i++) {
-    g.fillStyle = grey(120, rng.range(0.05, 0.12));
-    g.fillRect(rng.range(0, S), 0, rng.range(3, 14), S);
-  }
-  grain(c, N.fine, 512, 0.24, rng, 0.14, 31, 77);
-  grain(c, N.coarse, 512, 0.2, rng, 0, 200, 120);
-  g.strokeStyle = grey(110, 0.7);
-  g.lineWidth = 2;
-  g.strokeRect(0, 0, S, S);
-  return { map: toTexture(c) };
-}
-
 function makeWood(rng, N) {
   const S = 256, n = 8, w = S / n;
   const c = canvas(S);
@@ -467,6 +449,13 @@ function makeDecals(rng) {
       g.ellipse(128 + (rng.next() + rng.next() - 1) * 110, 128 + (rng.next() + rng.next() - 1) * 110, 5, 2.5, rng.range(0, 3), 0, TAU);
       g.fill();
     }
+  });
+  A.add('slab', C, C, (g) => {
+    g.fillStyle = 'rgb(214,212,206)';
+    g.fillRect(6, 0, C - 12, C);
+    g.fillStyle = 'rgba(90,90,90,0.5)';
+    for (let y = 0; y < C; y += 64) g.fillRect(6, y, C - 12, 3);
+    for (let i = 0; i < 500; i++) { g.fillStyle = grey(rng.range(150, 240), 0.5); g.fillRect(rng.range(6, C - 8), rng.range(0, C), 2, 2); }
   });
   const map = toTexture(A.c, { repeat: false });
   return { map, rects: A.rects };
@@ -1184,7 +1173,6 @@ export function createTextures(seed, streetNames = []) {
     pavement: makePavement(rng, N),
     grass: makeGrass(rng, N),
     sand: makeSand(rng, N),
-    concrete: makeConcrete(rng, N),
     wood: makeWood(rng, N),
     paint: makePaint(rng, N),
     decals: makeDecals(rng),

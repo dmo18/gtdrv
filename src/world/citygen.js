@@ -434,9 +434,180 @@ export function generateCity(seed = 20261) {
   const centre = nodes.reduce((best, n) => (Math.hypot(n.x, n.z) < Math.hypot(best.x, best.z) ? n : best), nodes[0]);
   const spawn = { x: centre.x + 30, z: centre.z + (wz[centre.j] / 2 - 2.6), heading: 0 };
 
+
+  // --- Extra detail for drawing (facade styles, street furniture,
+  // landmarks). Uses its own random stream so nothing above changes. ---
+  const dr = createRng(seed ^ 0x5eed51);
+  const blockAt = (x, z) => blocks.find((b) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) || null;
+  const GLASS_TINTS = [0x7fa6cc, 0x6fae9f, 0xb89264, 0x9fb2c4, 0x5f7f9c, 0x86b8c8, 0xa8a090];
+  for (const b of buildings) {
+    const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    const blk = blockAt(cx, cz);
+    b.block = blk ? blk.id : -1;
+    // Which sides look onto a street: 1 north, 2 south, 4 west, 8 east.
+    let street = 0;
+    if (blk) {
+      const lim = b.kind === 'house' ? 12.5 : 9;
+      if (b.z0 - blk.z0 < lim) street |= 1;
+      if (blk.z1 - b.z1 < lim) street |= 2;
+      if (b.x0 - blk.x0 < lim) street |= 4;
+      if (blk.x1 - b.x1 < lim) street |= 8;
+    }
+    b.street = street;
+    let style;
+    if (b.kind === 'house') style = 'house';
+    else if (b.kind === 'container') style = 'container';
+    else if (b.kind === 'warehouse') style = !blk ? 'hangar' : dr.chance(0.25) ? 'brick' : 'shed';
+    else if (b.district === 'beach') style = 'stucco';
+    else if (b.district === 'downtown') style = !blk ? 'office' : b.h > 58 ? (dr.chance(0.85) ? 'glass' : 'office') : dr.chance(0.6) ? 'glass' : 'office';
+    else if (b.h >= 24) style = dr.pick(['office', 'office', 'brick', 'glass']);
+    else style = dr.chance(0.68) ? 'brick' : 'office';
+    b.style = style;
+    b.tint = style === 'glass' ? dr.pick(GLASS_TINTS) : b.color;
+    b.vseed = dr.int(1, 1e9);
+  }
+
+  // Street names: avenues run north-south, numbered streets east-west.
+  const AVE = ['Marrow', 'Glasswell', 'Saltyard', 'Fern', 'Cinder', 'Gull', 'Tide', 'Kelp', 'Rust', 'Pale', 'Heron', 'Lantern', 'Brine', 'Otter', 'Quay', 'Ember'];
+  const ORD = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th', '14th', '15th', '16th'];
+  const streetNames = {
+    x: xs.map((_, i) => `${AVE[i % 16]} ${isAvenue(i) ? 'Ave' : 'St'}`),
+    z: zs.map((_, j) => `${ORD[j % 16]} St`),
+  };
+
+  // Street furniture: { type, x, z, rot, q, v }. rot is the way it
+  // faces; q is the quality tier it appears at (0 always, 1 normal,
+  // 2 high); v is a spare random number for variety.
+  const furniture = [];
+  const tier = () => { const r = dr.next(); return r < 0.35 ? 0 : r < 0.75 ? 1 : 2; };
+  const SMALL = {
+    downtown: ['bench', 'bin', 'planter', 'bikes', 'planter', 'meter', 'mailbox'],
+    midtown: ['bench', 'bin', 'hydrant', 'mailbox', 'bikes', 'meter', 'planter'],
+    residential: ['hydrant', 'mailbox', 'bin'],
+    beach: ['bench', 'bin', 'bikes', 'planter', 'bench'],
+    docks: ['hydrant', 'bin', 'barrier'],
+    industrial: ['hydrant', 'bin', 'barrier'],
+    park: ['bench', 'bench', 'bin'],
+  };
+  const TREE_P = { downtown: 0.8, midtown: 0.65, residential: 0.85, beach: 0.85, docks: 0.12, industrial: 0.15, park: 0.75 };
+  for (const e of edges) {
+    if (e.causeway) continue;
+    const a = nodes[e.a], b = nodes[e.b];
+    const half = e.width / 2;
+    const startPad = (e.horizontal ? a.hx : a.hz) + 6;
+    const endPad = (e.horizontal ? b.hx : b.hz) + 6;
+    for (const side of [-1, 1]) {
+      const at = (d, off) => (e.horizontal ? { x: a.x + d, z: a.z + side * (half + off) } : { x: a.x + side * (half + off), z: a.z + d });
+      // Facing away from the road, toward the buildings.
+      const away = e.horizontal ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : (side > 0 ? 0 : Math.PI);
+      const probe = at(e.length / 2, 8);
+      const blk = blockAt(probe.x, probe.z);
+      const district = blk ? blk.district : null;
+      const list = district ? SMALL[district] : null;
+      const treeP = district ? TREE_P[district] : 0.25;
+      let shelter = e.avenue && blk && district !== 'park' && dr.chance(0.3);
+      for (let d = startPad; d + 28 <= e.length - endPad + 0.01; d += 28) {
+        if (dr.chance(treeP)) {
+          const p = at(d + 14, 1.15);
+          furniture.push({ type: district === 'beach' ? 'palmtree' : 'streettree', x: p.x, z: p.z, rot: dr.range(0, TAU), q: 0, v: dr.next() });
+        }
+        if (!list) continue;
+        for (const dd of [7, 21]) {
+          if (shelter && dd === 7) {
+            shelter = false;
+            const p = at(d + dd, 1.5);
+            furniture.push({ type: 'shelter', x: p.x, z: p.z, rot: away + Math.PI, q: 0, v: dr.next() });
+            continue;
+          }
+          if (!dr.chance(0.5)) continue;
+          const type = dr.pick(list);
+          const p = at(d + dd + dr.range(-1.5, 1.5), type === 'bench' || type === 'bikes' ? 1.2 : 0.75);
+          furniture.push({ type, x: p.x, z: p.z, rot: type === 'bench' ? (district === 'park' ? away : away + Math.PI) : away, q: tier(), v: dr.next() });
+        }
+      }
+    }
+  }
+  // Junction corners: traffic lights where there are signals, stop
+  // signs elsewhere, and a street-name post.
+  const signals = []; // { node, x, z, face, armDir, armLen, horizontal }
+  for (const n of nodes) {
+    if (n.edges.length < 3 || n.i < 0) continue;
+    for (const eid of n.edges) {
+      const e = edges[eid];
+      const o = nodes[e.a === n.id ? e.b : e.a];
+      const l = Math.hypot(n.x - o.x, n.z - o.z);
+      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l; // travelling toward the junction
+      const rx = -tz, rz = tx; // the driver's right
+      const along = e.horizontal ? n.hx : n.hz, across = e.horizontal ? n.hz : n.hx;
+      const x = n.x - tx * (along + 0.9) + rx * (across + 0.9);
+      const z = n.z - tz * (along + 0.9) + rz * (across + 0.9);
+      if (n.signal) {
+        signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rz, -rx), armLen: across * 0.5 + 0.9, horizontal: e.horizontal });
+      } else if (!e.avenue) {
+        furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
+      }
+    }
+    furniture.push({ type: 'namesign', x: n.x + n.hx + 0.7, z: n.z + n.hz + 0.7, rot: 0, q: 0, v: 0, nx: n.i % 16, nz: n.j % 16 });
+  }
+
+  // Landmarks.
+  const clear = (x, z, r) => !onRoad(x, z) && !buildings.some((b) => x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r);
+  const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: null, runwayLights: [] };
+  {
+    // Lighthouse on the headland that sticks out furthest, away from piers.
+    let best = -1, bestTh = 0;
+    for (let k = 0; k < 360; k++) {
+      const th = (k / 360) * TAU;
+      const r = radiusAt(th);
+      const x = Math.cos(th) * (r - 22), z = Math.sin(th) * (r - 22);
+      if (piers.some((p) => Math.hypot(x - (p.x0 + p.x1) / 2, z - (p.z0 + p.z1) / 2) < 160)) continue;
+      if (Math.abs(z - anchor.z) < 120 && x > 0) continue;
+      if (r > best && clear(x, z, 8)) {
+        best = r;
+        bestTh = th;
+      }
+    }
+    if (best > 0) landmarks.lighthouse = { x: Math.cos(bestTh) * (best - 22), z: Math.sin(bestTh) * (best - 22), h: 30, r: 3.4 };
+  }
+  // Gantry cranes on the quay east of the marina, booms out to sea.
+  for (let k = 0; k < 3; k++) {
+    const x = xs[9] + 70 + k * 62;
+    let z = 200;
+    while (mainShore(x, z) > 13 && z < 900) z += 1;
+    if (z < 900 && clear(x, z, 12)) landmarks.cranes.push({ x, z, rot: Math.PI / 2, v: dr.next() });
+  }
+  // Rooftop billboards on low street-side buildings.
+  {
+    const cand = buildings.filter((b) => b.kind !== 'house' && b.kind !== 'container' && b.block >= 0 && b.h >= 9 && b.h <= 26 &&
+      b.x1 - b.x0 > 13 && b.z1 - b.z0 > 13 && b.street && (b.district === 'midtown' || b.district === 'industrial' || b.district === 'docks'));
+    for (let k = 0; k < 9 && cand.length; k++) {
+      const b = cand.splice(dr.int(0, cand.length - 1), 1)[0];
+      const side = [1, 2, 4, 8].filter((m) => b.street & m)[0];
+      b.billboard = { side, ad: k % 4 };
+      landmarks.billboards.push({ building: buildings.indexOf(b), side, ad: k % 4 });
+    }
+  }
+  landmarks.windsock = { x: runway.x0 + 70, z: runway.z0 - 14 };
+  for (let x = runway.x0; x <= runway.x1 + 0.1; x += 35.5) {
+    landmarks.runwayLights.push({ x, z: runway.z0 - 1.4, color: 0xfff2d0 }, { x, z: runway.z1 + 1.4, color: 0xfff2d0 });
+  }
+  for (let k = 0; k < 6; k++) {
+    const z = runway.z0 + 2.5 + k * ((runway.z1 - runway.z0 - 5) / 5);
+    landmarks.runwayLights.push({ x: runway.x0 - 1.5, z, color: 0x40ff70 }, { x: runway.x1 + 1.5, z, color: 0xff4030 });
+  }
+  // Umbrellas on the sand at Pale Shore.
+  for (let k = 0; k < 80; k++) {
+    const th = Math.PI + dr.range(-0.95, 0.95);
+    const r = radiusAt(th) - dr.range(3, 20);
+    const x = Math.cos(th) * r, z = Math.sin(th) * r;
+    if (x > -330 || piers.some((p) => x > p.x0 - 6 && x < p.x1 + 6 && z > p.z0 - 6 && z < p.z1 + 6)) continue;
+    furniture.push({ type: 'umbrella', x, z, rot: dr.range(0, TAU), q: k % 3 === 0 ? 0 : 1, v: dr.next() });
+  }
+
   return {
     seed, N, xs, zs, wx, wz, nodes, edges, blocks, buildings,
     props: cleanProps, parkingSpots, spawn,
+    furniture, signals, landmarks, streetNames,
     extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
     airfield: { islet, runway, apron, gate },
     radiusAt, shoreDist, mainShore, isLand, isGround, districtOf, nodeAt, onRoad,

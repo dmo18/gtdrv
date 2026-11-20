@@ -1,0 +1,422 @@
+// Street life: trees, lamps, traffic lights, benches, signs and the
+// island's landmarks. Small things are stamped from a handful of
+// template shapes into the per-tile prop meshes, so the whole lot costs
+// a few draw calls. Only big things get colliders.
+import { MeshBuilder } from './meshbuilder.js';
+import { createRng, TAU } from '../core/rng.js';
+
+const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
+const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
+const BIKE = [0xd8452c, 0x2c7fb8, 0x2f2f33, 0x3f9a5a, 0xe0b030, 0xf2f2f2];
+
+function hexShade(hex, f) {
+  const r = Math.min(255, ((hex >> 16) & 255) * f) | 0;
+  const g = Math.min(255, ((hex >> 8) & 255) * f) | 0;
+  const b = Math.min(255, (hex & 255) * f) | 0;
+  return (r << 16) | (g << 8) | b;
+}
+
+// ---- template shapes (built once) ------------------------------------------
+function makeTemplates(rng) {
+  const T = { trees: [], conifers: [], palms: [] };
+  const jit = () => rng.next() - 0.5;
+  const bark = 0x6b4a33;
+  for (let v = 0; v < 6; v++) {
+    const t = new MeshBuilder();
+    const g = GREENS[v % GREENS.length];
+    if (v % 3 === 0) {
+      // Round crown: one big ball and a couple of smaller ones.
+      t.cyl(0, 0, 0, 0.45, 0.04, 0.026, 5, bark, false, 0.7, 1);
+      t.blob(0, 0.68, 0, 0.26, 0.24, 0.26, g, 6, 4, 0.55, 1.08, jit);
+      for (let i = 0; i < 2; i++) {
+        const a = rng.range(0, TAU), d = rng.range(0.13, 0.18);
+        t.blob(Math.cos(a) * d, rng.range(0.52, 0.62), Math.sin(a) * d, 0.17, 0.15, 0.17, hexShade(g, rng.range(0.85, 1.1)), 5, 3, 0.55, 1.05, jit);
+      }
+    } else if (v % 3 === 1) {
+      // Tall oval crown.
+      t.cyl(0, 0, 0, 0.36, 0.035, 0.024, 5, bark, false, 0.7, 1);
+      t.blob(0, 0.63, 0, 0.17, 0.36, 0.17, g, 6, 5, 0.55, 1.08, jit);
+      t.blob(rng.range(-0.05, 0.05), 0.42, rng.range(-0.05, 0.05), 0.15, 0.14, 0.15, hexShade(g, 0.9), 5, 3, 0.55, 1, jit);
+    } else {
+      // Wide spreading crown in layers.
+      t.cyl(0, 0, 0, 0.5, 0.05, 0.03, 5, bark, false, 0.7, 1);
+      t.blob(0, 0.72, 0, 0.3, 0.16, 0.3, g, 7, 3, 0.5, 1.08, jit);
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * TAU + rng.range(0, 1), d = rng.range(0.14, 0.2);
+        t.blob(Math.cos(a) * d, rng.range(0.56, 0.64), Math.sin(a) * d, 0.2, 0.11, 0.2, hexShade(g, rng.range(0.82, 1.05)), 5, 3, 0.5, 1.05, jit);
+      }
+    }
+    T.trees.push(t);
+  }
+  for (let v = 0; v < 2; v++) {
+    const t = new MeshBuilder();
+    const g = v ? 0x2f5f3a : 0x35684a;
+    t.cyl(0, 0, 0, 0.22, 0.03, 0.025, 5, bark, false, 0.7, 1);
+    t.cyl(0, 0, 0.16, 0.56, 0.25, 0.03, 7, g, false, 0.55, 1);
+    t.cyl(0, 0, 0.4, 0.8, 0.19, 0.02, 7, g, false, 0.6, 1.05);
+    t.cyl(0, 0, 0.66, 1.0, 0.12, 0, 6, g, false, 0.7, 1.1);
+    T.conifers.push(t);
+  }
+  for (let v = 0; v < 3; v++) {
+    const t = new MeshBuilder();
+    const lean = rng.range(0.03, 0.09), la = rng.range(0, TAU);
+    const lx = Math.cos(la) * lean, lz = Math.sin(la) * lean;
+    const trunk = 0x8a7458;
+    for (let i = 0; i < 4; i++) {
+      const k0 = i / 4, k1 = (i + 1) / 4;
+      const ox = lx * k1 * k1, oz = lz * k1 * k1;
+      t.cyl(ox, oz, k0 * 0.92, k1 * 0.92 + 0.01, 0.03 - k0 * 0.008, 0.03 - k1 * 0.008, 5, hexShade(trunk, i % 2 ? 0.9 : 1.05), false, 0.8, 1);
+    }
+    const tx = lx, tz = lz, ty = 0.92;
+    t.blob(tx, ty - 0.01, tz, 0.035, 0.03, 0.035, 0x4a3a22, 4, 2, 0.8, 1);
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + rng.range(-0.2, 0.2);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const droop = rng.range(0.08, 0.2), reach = rng.range(0.34, 0.44), up = rng.range(0.03, 0.1);
+      const g = GREENS[(i + v) % GREENS.length];
+      // Three ribs along the frond: at the crown, at the arch, at the tip.
+      const P = [[0.02, 0, 0.035], [reach * 0.5, up, 0.06], [reach, up - droop, 0.012]];
+      for (let s = 0; s < 2; s++) {
+        const [d0, h0, w0] = P[s], [d1, h1, w1] = P[s + 1];
+        const ax = tx + ca * d0 - sa * w0, az = tz + sa * d0 + ca * w0, bx = tx + ca * d0 + sa * w0, bz = tz + sa * d0 - ca * w0;
+        const cx = tx + ca * d1 + sa * w1, cz = tz + sa * d1 - ca * w1, dx = tx + ca * d1 - sa * w1, dz = tz + sa * d1 + ca * w1;
+        t.quad(ax, ty + h0, az, bx, ty + h0, bz, cx, ty + h1, cz, dx, ty + h1, dz, g, 0, 1, 0, 0, 0, 1, 1, s ? 1.05 : 0.9, s ? 1.05 : 0.9, s ? 0.8 : 1.05, s ? 0.8 : 1.05);
+        t.quad(bx, ty + h0, bz, ax, ty + h0, az, dx, ty + h1, dz, cx, ty + h1, cz, hexShade(g, 0.55), 0, -1, 0);
+      }
+    }
+    T.palms.push(t);
+  }
+
+  // Street lamp, 7 m tall, arm along +x.
+  const lamp = (T.lamp = new MeshBuilder());
+  lamp.cyl(0, 0, 0, 0.9, 0.15, 0.11, 6, 0x3a3e42, false, 0.6, 1);
+  lamp.cyl(0, 0, 0.9, 6.7, 0.085, 0.06, 5, 0x4a4e52);
+  lamp.box(-0.06, -0.05, 2.0, 0.05, 6.62, 6.72, 0x4a4e52);
+  lamp.box(1.35, -0.17, 2.12, 0.17, 6.68, 6.82, 0x3a3e42);
+  lamp.quad(1.4, 6.675, -0.13, 2.08, 6.675, -0.13, 2.08, 6.675, 0.13, 1.4, 6.675, 0.13, 0xfff2c4, 0, -1, 0);
+
+  // Bench facing +x.
+  const bench = (T.bench = new MeshBuilder());
+  bench.box(-0.22, -0.8, 0.22, 0.8, 0.4, 0.47, 0x8a6a48, 0x9a7a55);
+  bench.box(-0.27, -0.8, -0.21, 0.8, 0.47, 0.92, 0x8a6a48, 0x9a7a55, 0.85, 1);
+  bench.box(-0.2, -0.72, 0.2, -0.64, 0, 0.4, 0x33363a);
+  bench.box(-0.2, 0.64, 0.2, 0.72, 0, 0.4, 0x33363a);
+
+  const bin = (T.bin = new MeshBuilder());
+  bin.cyl(0, 0, 0, 0.92, 0.25, 0.29, 7, 0x2f4a3a, true, 0.6, 1, 0x1c1e20);
+
+  const hyd = (T.hydrant = new MeshBuilder());
+  hyd.cyl(0, 0, 0, 0.52, 0.13, 0.12, 6, 0xc8382c, false, 0.65, 1);
+  hyd.cyl(0, 0, 0.52, 0.7, 0.15, 0.05, 6, 0xc8382c, true);
+  hyd.box(-0.2, -0.06, 0.2, 0.06, 0.3, 0.42, 0xb0b4b8);
+
+  const mail = (T.mailbox = new MeshBuilder());
+  mail.box(-0.22, -0.24, 0.22, 0.24, 0.12, 1.1, 0x2c4f8a, 0x3a62a6, 0.7, 1);
+  mail.box(-0.18, -0.2, 0.18, 0.2, 0, 0.12, 0x202428);
+
+  const meter = (T.meter = new MeshBuilder());
+  meter.box(-0.035, -0.035, 0.035, 0.035, 0, 1.1, 0x55585c);
+  meter.box(-0.07, -0.1, 0.07, 0.1, 1.1, 1.38, 0x30343a, 0x50545a);
+
+  const planter = (T.planter = new MeshBuilder());
+  planter.box(-0.6, -0.6, 0.6, 0.6, 0, 0.55, 0xa8a49c, 0x4a3a2c, 0.65, 1);
+  planter.blob(0, 0.72, 0, 0.58, 0.34, 0.58, 0x4a8a3e, 6, 3, 0.6, 1.1, jit);
+
+  const barrier = (T.barrier = new MeshBuilder());
+  barrier.box(-0.3, -1.0, 0.3, 1.0, 0, 0.3, 0xb8b4ac, 0xb8b4ac, 0.6, 0.9);
+  barrier.box(-0.16, -1.0, 0.16, 1.0, 0.3, 0.82, 0xd8762c, 0xc8c4bc);
+
+  // Bus shelter facing +x: roof, glazed back, posts and a seat.
+  const sh = (T.shelter = new MeshBuilder());
+  sh.box(-0.75, -1.75, 0.8, 1.75, 2.45, 2.56, 0x3c4046, 0x5a5e64);
+  sh.box(-0.7, -1.65, -0.64, 1.65, 0.25, 2.3, 0x9fb8c6, 0x9fb8c6, 0.85, 1);
+  for (const z of [-1.68, 1.6]) {
+    sh.box(-0.72, z, -0.62, z + 0.08, 0, 2.45, 0x3c4046);
+    sh.box(0.62, z, 0.72, z + 0.08, 0, 2.45, 0x3c4046);
+  }
+  sh.box(-0.58, -1.2, -0.2, 1.2, 0.42, 0.5, 0x8a6a48, 0x9a7a55);
+  sh.box(-0.5, -1.1, -0.3, -1.0, 0, 0.42, 0x33363a);
+  sh.box(-0.5, 1.0, -0.3, 1.1, 0, 0.42, 0x33363a);
+
+  const bol = (T.bollard = new MeshBuilder());
+  bol.cyl(0, 0, 0, 0.42, 0.16, 0.14, 6, 0x2a2c30, false, 0.7, 1);
+  bol.cyl(0, 0, 0.42, 0.55, 0.22, 0.2, 6, 0x2a2c30, true);
+
+  const rack = (T.rack = new MeshBuilder());
+  rack.box(-0.03, -1.3, 0.03, 1.3, 0.72, 0.78, 0x9aa0a6);
+  for (const z of [-1.3, 0, 1.27]) rack.box(-0.03, z, 0.03, z + 0.05, 0, 0.72, 0x9aa0a6);
+
+  return T;
+}
+
+// Upright picture centred at (x, z), facing direction `rot`.
+function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
+  const dx = Math.sin(rot) * w * 0.5, dz = -Math.cos(rot) * w * 0.5;
+  D.wall(x - dx, z - dz, x + dx, z + dz, y0, y1, color, r.u0, r.v0, r.u1, r.v1, sh);
+}
+
+export function addProps(C) {
+  const { city, collision } = C;
+  const rng = createRng(city.seed + 4242);
+  const T = makeTemplates(rng);
+  const R = C.R;
+  const L = city.landmarks || { cranes: [], billboards: [], runwayLights: [] };
+  const hash = (x, z) => {
+    const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  };
+  // Keep trees off the landmarks.
+  const blocked = (x, z) => {
+    for (const c of L.cranes) if (Math.abs(x - c.x) < 11 && z > c.z - 18 && z < c.z + 42) return true;
+    if (L.lighthouse && Math.hypot(x - L.lighthouse.x, z - L.lighthouse.z) < 8) return true;
+    return false;
+  };
+
+  function tree(x, z, h, q, autumn) {
+    const P = C.plain.at(x, z, q);
+    const k = hash(x, z);
+    const conifer = hash(z, x) < 0.14;
+    const t = conifer ? T.conifers[(k * 2) | 0] : T.trees[(k * T.trees.length) | 0];
+    const v = 0.82 + hash(x + 3, z) * 0.36;
+    const warm = autumn && hash(x, z + 9) < 0.12 ? 1.5 : 1;
+    const gy = C.groundY(x, z);
+    P.add(t, x, gy - 0.04, z, k * TAU, h, h * (0.9 + hash(x, z + 1) * 0.2), h, v * warm, v * (warm > 1 ? 1.05 : 1), v * (warm > 1 ? 0.55 : 1));
+    C.ao.at(x, z).aoDisc(x, z, h * (conifer ? 0.2 : 0.3), gy + 0.012, 0.6, 6);
+  }
+  function palm(x, z, h, q) {
+    const k = hash(x, z);
+    const v = 0.85 + hash(x + 3, z) * 0.3;
+    const gy = C.groundY(x, z);
+    C.plain.at(x, z, q).add(T.palms[(k * 3) | 0], x, gy - 0.04, z, k * TAU, h * 1.15, h, h * 1.15, v, v, v);
+    C.ao.at(x, z).aoDisc(x, z, h * 0.22, gy + 0.012, 0.72, 6);
+  }
+
+  // ---- the original scattered trees, palms and lamps ----
+  const lamps = [];
+  for (const p of city.props) {
+    if (p.type === 'lamp') {
+      lamps.push(p);
+      C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
+      continue;
+    }
+    if (blocked(p.x, p.z)) continue;
+    if (p.type === 'tree') {
+      collision.addCircle(p.x, p.z, p.r, p.h, 'tree');
+      tree(p.x, p.z, p.h, 0, true);
+    } else if (p.type === 'palm') {
+      collision.addCircle(p.x, p.z, 0.3, p.h, 'tree');
+      palm(p.x, p.z, p.h, 0);
+    }
+  }
+
+  // ---- street furniture ----
+  for (const f of city.furniture || []) {
+    const { x, z, rot, q, v } = f;
+    const P = C.plain.at(x, z, q), D = C.detail.at(x, z, q);
+    const y = C.groundY(x, z);
+    const ay = y + 0.012;
+    switch (f.type) {
+      case 'streettree':
+        tree(x, z, 5 + v * 3, 0, false);
+        collision.addCircle(x, z, 0.22, 5, 'tree');
+        // Tree pit: a square of bare earth in the pavement.
+        if (y > 0) C.decal.at(x, z).flatRect(x - 0.7, z - 0.7, x + 0.7, z + 0.7, y + 0.015, 0x6a5a48, C.DR.stain1);
+        break;
+      case 'palmtree':
+        palm(x, z, 6.5 + v * 3, 0);
+        collision.addCircle(x, z, 0.22, 6, 'tree');
+        break;
+      case 'bench':
+        P.add(T.bench, x, y, z, rot);
+        C.ao.at(x, z).aoDisc(x, z, 1.0, ay, 0.7, 6);
+        break;
+      case 'bin':
+        P.add(T.bin, x, y, z, rot, 1, 1, 1, v < 0.5 ? 1 : 1.6, v < 0.5 ? 1 : 1.2, 1);
+        break;
+      case 'hydrant':
+        P.add(T.hydrant, x, y, z, rot, 1, 1, 1, 1, v < 0.3 ? 2.6 : 1, 1);
+        break;
+      case 'mailbox':
+        P.add(T.mailbox, x, y, z, rot);
+        break;
+      case 'meter':
+        P.add(T.meter, x, y, z, rot);
+        break;
+      case 'planter': {
+        const fl = v < 0.35;
+        P.add(T.planter, x, y, z, rot, 1, 1, 1, fl ? 1.5 : 1, fl ? 0.9 : 1, fl ? 1.3 : 1);
+        C.ao.at(x, z).aoDisc(x, z, 1.15, ay, 0.68, 6);
+        break;
+      }
+      case 'barrier':
+        P.add(T.barrier, x, y, z, rot + Math.PI / 2);
+        break;
+      case 'shelter':
+        P.add(T.shelter, x, y, z, rot);
+        C.ao.at(x, z).aoDisc(x, z, 2.2, ay, 0.66, 8);
+        // Advert on the end panel and a stop flag on a post.
+        sign(D, x + Math.sin(rot) * 1.72, z - Math.cos(rot) * 1.72, rot + Math.PI / 2, 1.2, y + 0.5, y + 2.2, R['poster' + ((v * 4) | 0)]);
+        P.box(x - Math.sin(rot) * 2.3 - 0.04, z + Math.cos(rot) * 2.3 - 0.04, x - Math.sin(rot) * 2.3 + 0.04, z + Math.cos(rot) * 2.3 + 0.04, y, y + 2.7, 0x55585c);
+        sign(D, x - Math.sin(rot) * 2.3 + Math.cos(rot) * 0.05, z + Math.cos(rot) * 2.3 + Math.sin(rot) * 0.05, rot, 0.5, y + 2.15, y + 2.65, R.busstop);
+        break;
+      case 'bikes': {
+        P.add(T.rack, x, y, z, rot);
+        const n = 1 + ((v * 3) | 0);
+        for (let i = 0; i < n; i++) {
+          const o = -0.85 + i * 0.75 + (v - 0.5) * 0.2;
+          const bx = x - Math.sin(rot) * o, bz = z + Math.cos(rot) * o;
+          sign(D, bx, bz, rot + Math.PI / 2 + (i - 1) * 0.12, 1.75, y, y + 0.98, R.bike, BIKE[(i + ((v * 17) | 0)) % BIKE.length]);
+        }
+        break;
+      }
+      case 'stopsign': {
+        P.box(x - 0.035, z - 0.035, x + 0.035, z + 0.035, y, y + 2.65, 0x8a9096);
+        const ox = Math.cos(rot) * 0.045, oz = Math.sin(rot) * 0.045;
+        sign(D, x + ox, z + oz, rot, 0.76, y + 1.95, y + 2.71, R.stop);
+        sign(D, x - ox * 0.6, z - oz * 0.6, rot + Math.PI, 0.7, y + 1.98, y + 2.68, R.white, 0x8a9096);
+        break;
+      }
+      case 'namesign': {
+        P.box(x - 0.04, z - 0.04, x + 0.04, z + 0.04, y, y + 3.4, 0x6a7076);
+        // The plate for the north-south road runs north-south, and so on.
+        sign(D, x + 0.05, z, 0, 1.0, y + 3.1, y + 3.35, R['plate' + f.nx]);
+        sign(D, x - 0.05, z, Math.PI, 1.0, y + 3.1, y + 3.35, R['plate' + f.nx]);
+        sign(D, x, z + 0.05, Math.PI / 2, 1.0, y + 2.8, y + 3.05, R['plate' + (16 + f.nz)]);
+        sign(D, x, z - 0.05, -Math.PI / 2, 1.0, y + 2.8, y + 3.05, R['plate' + (16 + f.nz)]);
+        break;
+      }
+      case 'umbrella': {
+        const col = UMBRELLA[(v * UMBRELLA.length) | 0];
+        const yy = -0.1;
+        P.cyl(x, z, yy, yy + 2.15, 0.03, 0.03, 4, 0xe8e4dc);
+        P.cyl(x, z, yy + 1.8, yy + 2.25, 1.45, 0.04, 8, col, false, 0.8, 1.1);
+        for (const s of [-1, 1]) {
+          const lx = x + Math.cos(rot) * 0.2 - Math.sin(rot) * s * 0.75, lz = z + Math.sin(rot) * 0.2 + Math.cos(rot) * s * 0.75;
+          P.obox(lx, lz, 0.95, 0.3, yy + 0.05, yy + 0.32, rot, 0xf4f0e6, s > 0 ? col : 0xf4f0e6, 0.7, 1);
+        }
+        C.ao.at(x, z).aoDisc(x, z, 1.7, -0.1, 0.66, 8);
+        break;
+      }
+      default:
+    }
+  }
+
+  // ---- traffic lights: poles here, the lamps as one instanced mesh ----
+  const bulbs = [];
+  for (const s of city.signals || []) {
+    const P = C.plain.at(s.x, s.z);
+    const y = C.groundY(s.x, s.z);
+    P.cyl(s.x, s.z, y, y + 0.8, 0.16, 0.12, 6, 0x2c3034, false, 0.6, 1);
+    P.cyl(s.x, s.z, y + 0.8, y + 5.7, 0.09, 0.07, 5, 0x3a3e42);
+    const ax = Math.cos(s.armDir), az = Math.sin(s.armDir);
+    P.obox(s.x + ax * s.armLen * 0.5, s.z + az * s.armLen * 0.5, s.armLen * 0.5, 0.05, y + 5.4, y + 5.52, s.armDir, 0x3a3e42);
+    const fx = Math.cos(s.face), fz = Math.sin(s.face);
+    const heads = [
+      [s.x + fx * 0.2, s.z + fz * 0.2, y + 3.05],
+      [s.x + ax * s.armLen, s.z + az * s.armLen, y + 4.86],
+    ];
+    for (const [hx, hz, hy] of heads) {
+      P.obox(hx, hz, 0.13, 0.18, hy - 0.52, hy + 0.52, s.face, 0x1c1e20, 0x1c1e20);
+      P.obox(hx - fx * 0.02, hz - fz * 0.02, 0.02, 0.27, hy - 0.62, hy + 0.62, s.face, 0xd8b030, 0xd8b030);
+      for (let k = 0; k < 3; k++) {
+        bulbs.push({ x: hx + fx * 0.14, y: hy + 0.33 - k * 0.33, z: hz + fz * 0.14, face: s.face, node: s.node, horizontal: s.horizontal, lamp: k });
+      }
+    }
+  }
+
+  // ---- parks: a fountain and benches where the paths cross ----
+  for (const b of city.blocks) {
+    if (b.district !== 'park') continue;
+    const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    const P = C.plain.at(cx, cz);
+    P.cyl(cx, cz, 0.16, 0.62, 3.3, 3.3, 12, 0xb4b0a6, false, 0.6, 1);
+    P.cyl(cx, cz, 0.16, 0.5, 3.0, 3.0, 12, 0x3f8fae, true, 1, 1, 0x4fa6c4);
+    P.cyl(cx, cz, 0.5, 0.62, 3.0, 3.3, 12, 0xc4c0b6);
+    P.cyl(cx, cz, 0.16, 1.5, 0.45, 0.3, 8, 0xb4b0a6, true, 0.7, 1);
+    P.cyl(cx, cz, 1.5, 1.62, 0.9, 1.0, 8, 0xc4c0b6, true);
+    C.ao.at(cx, cz).aoDisc(cx, cz, 4.6, 0.172, 0.6, 12);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * TAU + Math.PI / 4;
+      const bx = cx + Math.cos(a) * 5.6, bz = cz + Math.sin(a) * 5.6;
+      C.plain.at(bx, bz, i % 2).add(T.bench, bx, 0.16, bz, a + Math.PI);
+    }
+    // Flower beds.
+    for (let i = 0; i < 6; i++) {
+      const fx = rng.range(b.x0 + 8, b.x1 - 8), fz = rng.range(b.z0 + 8, b.z1 - 8);
+      if (Math.abs(fx - cx) < 6 || Math.abs(fz - cz) < 6) continue;
+      const col = rng.pick([0xd84a6a, 0xf0c030, 0xe8e0f0, 0xd86a2c, 0x9a5ac8]);
+      C.plain.at(fx, fz, 1).blob(fx, 0.2, fz, rng.range(1, 2), 0.3, rng.range(1, 2), col, 6, 3, 0.7, 1.1);
+    }
+  }
+
+  // ---- piers: mooring bollards ----
+  for (const r of city.piers || []) {
+    const alongX = r.x1 - r.x0 > r.z1 - r.z0;
+    const len = alongX ? r.x1 - r.x0 : r.z1 - r.z0;
+    for (let d = 6; d < len; d += 8) {
+      for (const side of [0, 1]) {
+        const bx = alongX ? r.x0 + d : side ? r.x1 - 0.45 : r.x0 + 0.45;
+        const bz = alongX ? (side ? r.z1 - 0.45 : r.z0 + 0.45) : r.z0 + d;
+        C.plain.at(bx, bz).add(T.bollard, bx, 0.1, bz, 0);
+      }
+    }
+  }
+
+  // ---- dock cranes ----
+  for (const c of L.cranes) {
+    const P = C.plain.at(c.x, c.z);
+    const col = c.v < 0.5 ? 0xc8502c : 0xd8a030, dark = hexShade(col, 0.7);
+    const H = 27;
+    for (const ox of [-7, 7]) {
+      for (const oz of [-6, 6]) {
+        P.box(c.x + ox - 0.6, c.z + oz - 0.6, c.x + ox + 0.6, c.z + oz + 0.6, -0.3, H, col, col, 0.6, 1);
+        collision.addCircle(c.x + ox, c.z + oz, 0.9, H, 'crane');
+        C.ao.at(c.x, c.z).aoDisc(c.x + ox, c.z + oz, 2.2, C.groundY(c.x + ox, c.z + oz) + 0.012, 0.6, 6);
+      }
+      P.box(c.x + ox - 0.4, c.z - 6, c.x + ox + 0.4, c.z + 6, 11.5, 12.5, dark);
+      P.box(c.x + ox - 0.5, c.z - 6.6, c.x + ox + 0.5, c.z + 6.6, H - 1.2, H, dark);
+    }
+    for (const oz of [-6, 6]) P.box(c.x - 7, c.z + oz - 0.4, c.x + 7, c.z + oz + 0.4, H - 1.2, H, dark);
+    // Boom out over the water, machinery house, A-frame and cab.
+    P.box(c.x - 1.1, c.z - 16, c.x + 1.1, c.z + 40, H, H + 2.2, col, dark, 0.8, 1);
+    P.box(c.x - 3.5, c.z - 13, c.x + 3.5, c.z - 5, H + 2.2, H + 6, 0xd8d4c8, 0x9a968c, 0.8, 1);
+    P.box(c.x - 0.7, c.z - 0.7, c.x + 0.7, c.z + 0.7, H + 2.2, H + 12, col);
+    P.box(c.x - 1.4, c.z + 14, c.x + 1.4, c.z + 17.5, H - 3.2, H, 0xe8e4d8, 0x8a8880, 0.8, 1);
+    P.box(c.x - 0.12, c.z + 30, c.x + 0.12, c.z + 30.24, H - 12, H, 0x2a2c30);
+    P.box(c.x - 1.3, c.z + 28.9, c.x + 1.3, c.z + 31.3, H - 12.6, H - 12, 0x8a2c22);
+    C.glows.push({ x: c.x, y: H + 12.3, z: c.z, r: 1, g: 0.12, b: 0.08, size: 2.6 });
+  }
+
+  // ---- lighthouse ----
+  if (L.lighthouse) {
+    const { x, z } = L.lighthouse;
+    const P = C.plain.at(x, z);
+    P.cyl(x, z, -0.2, 1.2, 4.6, 4.4, 12, 0x9a968c, true, 0.6, 1);
+    const bands = 5, H = 24;
+    for (let i = 0; i < bands; i++) {
+      const k0 = i / bands, k1 = (i + 1) / bands;
+      P.cyl(x, z, 1.2 + k0 * (H - 1.2), 1.2 + k1 * (H - 1.2), 3.4 - k0 * 1.3, 3.4 - k1 * 1.3, 12, i % 2 ? 0xc03a2e : 0xf2efe6, false, i === 0 ? 0.7 : 1, 1);
+    }
+    P.cyl(x, z, H, H + 0.4, 3.0, 3.0, 12, 0x33363a, true);
+    P.cyl(x, z, H + 0.4, H + 1.4, 2.9, 2.9, 12, 0x33363a);
+    P.cyl(x, z, H + 0.4, H + 3.2, 1.7, 1.7, 10, 0xa8c4d0);
+    P.cyl(x, z, H + 3.2, H + 5.4, 2.0, 0.1, 10, 0xc03a2e);
+    C.glow.at(x, z).cyl(x, z, H + 0.9, H + 2.8, 0.7, 0.7, 6, 0xfff0c0);
+    C.glows.push({ x, y: H + 1.9, z, r: 1, g: 0.92, b: 0.7, size: 7 });
+    collision.addCircle(x, z, 3.7, H + 5, 'lighthouse');
+    C.ao.at(x, z).aoDisc(x, z, 7.5, C.groundY(x, z) + 0.012, 0.55, 12);
+  }
+
+  // ---- airfield: runway edge lights and the windsock pole ----
+  for (const l of L.runwayLights) {
+    C.glow.at(l.x, l.z).box(l.x - 0.14, l.z - 0.14, l.x + 0.14, l.z + 0.14, 0.02, 0.3, l.color);
+    C.glows.push({ x: l.x, y: 0.4, z: l.z, r: ((l.color >> 16) & 255) / 255, g: ((l.color >> 8) & 255) / 255, b: (l.color & 255) / 255, size: 1.5 });
+  }
+  if (L.windsock) {
+    const { x, z } = L.windsock;
+    C.plain.at(x, z).cyl(x, z, -0.1, 6.2, 0.09, 0.06, 5, 0xe8e4dc);
+  }
+
+  return { lamps, bulbs };
+}

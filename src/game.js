@@ -270,6 +270,8 @@ export function createGame({ canvas, uiRoot }) {
 
   // --- Simulation step. ---
   function fixedUpdate(dt) {
+    // Lets button and tilt steering ramp smoothly, independent of frame rate.
+    touch.update(dt);
     input.poll();
     if (input.consume('pause') && !(game.map && game.map.fullMap.isOpen())) {
       game.paused = !game.paused;
