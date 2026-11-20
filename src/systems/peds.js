@@ -1,12 +1,14 @@
-// Pedestrians: harmless townsfolk who stroll the pavements, chat, jog in
-// parks and always jump clear of anything coming their way. Nobody can
-// be hurt; the worst that happens is a startled hop.
+// Pedestrians: townsfolk who stroll the pavements, chat, jog in parks
+// and try to jump clear of anything coming their way. They are combat
+// actors (team 'civ'): a hit or a car at speed knocks them down
+// (cartoon style, no gore), and they run from gunfire and blasts.
 //
 // The first half of this file is a pure core (createPed / stepPed) that
 // runs in node tests. The second half is the game system that spawns,
 // recycles and draws them.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
 import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from '../render/personmesh.js';
+import { initActor, resetActor, addActor, removeActor, layDown } from './combat.js';
 
 const INSET = 2; // walking line, metres inside the block edge
 const RADIUS = 0.35;
@@ -61,8 +63,11 @@ function nearestS(b, x, z) {
 // ---------------------------------------------------------------------
 // Creation and placement
 // ---------------------------------------------------------------------
+export const PANIC_T = 6; // seconds a ped runs from gunfire or a blast
+export const SHOT_SCARE = 40, DOWN_SCARE = 25; // metres
+
 export function createPed(rng) {
-  return {
+  const ped = {
     rng,
     active: false,
     state: 'walking', // walking | jogging | paused | chatting | fleeing
@@ -81,7 +86,31 @@ export function createPed(rng) {
     timer: 0, // pause / chat time left
     fleeT: 0, fdx: 0, fdz: 0, fleeSpeed: FLEE_SPEED,
     stuckT: 0,
+    panicT: 0, // running away from gunfire (seconds left)
   };
+  return initActor(ped, 'civ');
+}
+
+// Run away from (x, z) for `time` seconds (gunfire, someone downed).
+export function scarePed(ped, x, z, time = PANIC_T) {
+  if (!ped.active || (ped.life && ped.life !== 'ok')) return false;
+  let dx = ped.x - x, dz = ped.z - z;
+  const d = Math.sqrt(dx * dx + dz * dz);
+  if (d > 1e-3) {
+    dx /= d;
+    dz /= d;
+  } else {
+    dx = Math.cos(ped.heading);
+    dz = Math.sin(ped.heading);
+  }
+  ped.panicT = Math.max(ped.panicT, time);
+  ped.fdx = dx;
+  ped.fdz = dz;
+  ped.fleeSpeed = FLEE_SPEED - ped.rng.next() * 1.5;
+  ped.state = 'fleeing';
+  ped.fleeT = 0;
+  ped.timer = 0;
+  return true;
 }
 
 function setPos(ped, x, z) {
@@ -92,6 +121,8 @@ function setPos(ped, x, z) {
   ped.startled = false;
   ped.fleeT = 0;
   ped.stuckT = 0;
+  ped.panicT = 0;
+  resetActor(ped);
 }
 
 function pickJogTarget(ped) {
@@ -224,10 +255,23 @@ export function stepPed(ped, dt, ctx) {
   ped.pheading = ped.heading;
   ped.startled = false;
   if (!ped.active || !(dt > 0)) return ped;
+  // Knocked down, out or getting up: combat moves them, not their legs.
+  if (ped.life && ped.life !== 'ok') {
+    ped.vx = ped.vz = ped.speed = 0;
+    ped.moving = false;
+    return ped;
+  }
   const { city, collision, vehicles, player } = ctx;
 
   // --- Decide what to do. ---
-  if (ped.state === 'fleeing') {
+  if (ped.panicT > 0) {
+    ped.panicT -= dt;
+    ped.state = 'fleeing';
+    if (ped.panicT <= 0) {
+      ped.panicT = 0;
+      resumeWalking(ped);
+    }
+  } else if (ped.state === 'fleeing') {
     ped.fleeT += dt;
     scanThreat(ped, vehicles, HYSTERESIS);
     if (!TH.found && ped.fleeT > 0.4) resumeWalking(ped);
@@ -239,7 +283,20 @@ export function stepPed(ped, dt, ctx) {
   // --- Wanted velocity. ---
   let wvx = 0, wvz = 0, accel = 8;
   const st = ped.state;
-  if (st === 'fleeing') {
+  if (st === 'fleeing' && ped.panicT > 0) {
+    accel = 12;
+    // Running from gunfire: away from the source, sliding along walls.
+    wvx = ped.fdx * ped.fleeSpeed;
+    wvz = ped.fdz * ped.fleeSpeed;
+    if (ped.speed < 1 && ped.fleeT > 0.3) {
+      // Blocked: turn a quarter away and keep going.
+      const t = ped.fdx;
+      ped.fdx = -ped.fdz * ped.dir;
+      ped.fdz = t * ped.dir;
+      ped.fleeT = 0;
+    }
+    ped.fleeT += dt;
+  } else if (st === 'fleeing') {
     accel = 40;
     // Keep jumping until clear of the path; then stand still.
     scanThreat(ped, vehicles, 0);
@@ -337,6 +394,12 @@ export function stepPed(ped, dt, ctx) {
       const fast = c.vx * c.vx + c.vz * c.vz > MOVING * MOVING;
       const push = fast ? rr - d : Math.min(rr - d, 5 * dt);
       if (d > 1e-6) {
+        // Remember a hard hit for combat (closing speed along the push).
+        const closing = ((c.vx || 0) - ped.vx) * (ex / d) + ((c.vz || 0) - ped.vz) * (ez / d);
+        if (closing > (ped.bumpV || 0)) {
+          ped.bumpBy = c;
+          ped.bumpV = closing;
+        }
         nx += (ex / d) * push;
         nz += (ez / d) * push;
       } else nx += push;
@@ -405,6 +468,7 @@ export function createPeds(game, { max = 22 } = {}) {
     if (slots.length >= max) return null;
     const mesh = createPersonMesh(game.rng.pick(PERSON_PALETTES));
     mesh.visible = false;
+    if (mesh.rotation) mesh.rotation.order = 'YXZ'; // lets layDown tip it over
     if (game.scene) game.scene.add(mesh);
     const slot = { ped: createPed(game.rng), mesh };
     slots.push(slot);
@@ -414,6 +478,7 @@ export function createPeds(game, { max = 22 } = {}) {
   function deactivate(slot) {
     const p = slot.ped;
     if (p.block) onBlock[p.block.id]--;
+    removeActor(game, p);
     p.active = false;
     p.block = null;
     slot.mesh.visible = false;
@@ -492,6 +557,10 @@ export function createPeds(game, { max = 22 } = {}) {
     }
     ped.active = ok;
     if (!ok) return false;
+    if (game.actors && !addActor(game, ped)) {
+      ped.active = false;
+      return false;
+    }
     if (kind === 'jog') {
       const r = game.collision.resolveCircle(ped.x, ped.z, RADIUS, 0);
       setPos(ped, r.x, r.z);
@@ -500,7 +569,7 @@ export function createPeds(game, { max = 22 } = {}) {
     active++;
     if (kind === 'chat') {
       const other = freeSlot();
-      if (other) {
+      if (other && (!game.actors || addActor(game, other.ped))) {
         pairWith(ped, other.ped);
         onBlock[block.id]++;
         active++;
@@ -518,7 +587,7 @@ export function createPeds(game, { max = 22 } = {}) {
     for (let i = 0; i < slots.length; i++) {
       const p = slots[i].ped;
       if (!p.active) continue;
-      if (Math.hypot(p.x - px, p.z - pz) > RECYCLE) deactivate(slots[i]);
+      if (Math.hypot(p.x - px, p.z - pz) > RECYCLE || p.fade >= 1) deactivate(slots[i]);
       else active++;
     }
     const limit = cap();
@@ -538,6 +607,24 @@ export function createPeds(game, { max = 22 } = {}) {
     let budget = first ? limit : 1;
     while (active < limit && budget-- > 0) if (!spawnOne(px, pz, first)) break;
     first = false;
+  }
+
+  // Gunfire nearby or someone knocked down: everyone close runs.
+  function scareAround(x, z, r) {
+    const r2 = r * r;
+    for (let i = 0; i < slots.length; i++) {
+      const p = slots[i].ped;
+      if (!p.active) continue;
+      const dx = p.x - x, dz = p.z - z;
+      if (dx * dx + dz * dz < r2) scarePed(p, x, z);
+    }
+  }
+  if (game.events && game.events.on) {
+    game.events.on('shot', (s) => scareAround(s.x, s.z, SHOT_SCARE));
+    game.events.on('down', (d) => {
+      if (d && d.target) scareAround(d.target.x, d.target.z, DOWN_SCARE);
+    });
+    game.events.on('explosion', (e) => scareAround(e.x, e.z, SHOT_SCARE));
   }
 
   return {
@@ -567,6 +654,8 @@ export function createPeds(game, { max = 22 } = {}) {
         if (!ped.active) continue;
         stepPed(ped, dt, ctx);
         if (ped.startled) game.events.emit('pedStartled', ped);
+        // Faded out after a knock-out: free the slot (respawns out of view).
+        if (ped.fade >= 1) deactivate(slots[i]);
       }
     },
     render(alpha) {
@@ -575,6 +664,8 @@ export function createPeds(game, { max = 22 } = {}) {
         const s = slots[i];
         if (!s.ped.active) continue;
         updatePersonMesh(s.mesh, s.ped, alpha);
+        if (s.ped.life !== 'ok') layDown(s.mesh, s.ped);
+        else if (s.mesh.rotation.z !== 0) s.mesh.rotation.z = 0;
       }
     },
   };

@@ -19,6 +19,11 @@ export function createWalker(x, z, heading = 0) {
     moving: false, sprinting: false,
     stride: 0, radius: 0.35, stamina: 1,
     winded: false,
+    // Combat actor fields (docs/COMBAT.md; systems/combat.js runs them).
+    team: 'player', hp: 100, maxHp: 100, height: 1.8,
+    life: 'ok', lifeT: 0, fade: 0, hitT: 0, kx: 0, kz: 0,
+    lastHitBy: null, sinceHit: 99, bonks: 0, bumpBy: null, bumpV: 0,
+    arms: null,
   };
 }
 
@@ -31,6 +36,14 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
   w.px = w.x;
   w.pz = w.z;
   w.pheading = w.heading;
+
+  // Knocked down (or getting up): no walking of our own.
+  if (w.life && w.life !== 'ok') {
+    w.vx = w.vz = w.speed = 0;
+    w.moving = false;
+    w.sprinting = false;
+    return w;
+  }
 
   // Stick to a world direction, relative to the camera.
   let mx = 0, my = 0;
@@ -92,6 +105,12 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
       if (d2 >= rr * rr) continue;
       const d = Math.sqrt(d2);
       if (d > 1e-6) {
+        // Remember a hard hit for combat (closing speed along the push).
+        const closing = ((c.vx || 0) - w.vx) * (ex / d) + ((c.vz || 0) - w.vz) * (ez / d);
+        if (closing > w.bumpV) {
+          w.bumpBy = c;
+          w.bumpV = closing;
+        }
         nx = c.x + (ex / d) * rr;
         nz = c.z + (ez / d) * rr;
       } else {

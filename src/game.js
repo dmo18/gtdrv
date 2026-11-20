@@ -23,7 +23,13 @@ import { createEconomy } from './systems/economy.js';
 import { createTraffic } from './systems/traffic.js';
 import { createDayNight } from './systems/daynight.js';
 import { createActivities } from './systems/activities.js';
-import { createPolice } from './systems/police.js';
+import { createPolice, resetHeat } from './systems/police.js';
+import { createCombat, layDown } from './systems/combat.js';
+import { createCrew } from './systems/crew.js';
+import { createMissions } from './systems/missions.js';
+import { createScore } from './systems/score.js';
+import { createCombatFx } from './render/combatfx.js';
+import { createCombatHud } from './ui/combathud.js';
 import { createTutorial } from './systems/tutorial.js';
 import { createEffects } from './render/effects.js';
 import { createGraphics } from './render/graphics.js';
@@ -93,6 +99,8 @@ export function createGame({ canvas, uiRoot }) {
       heli: { step: stepAircraft, createMesh: createAircraftMesh, updateMesh: updateAircraftMesh },
     },
     vehicles: [],
+    actors: [], // every live person (combat actors, see docs/COMBAT.md)
+    aim: { dx: 1, dy: 0, dz: 0, manual: false }, // set by the aiming controls
     systems: [],
     resizeHooks: [], // functions (width, height, pixelRatio) called on resize
     renderFrame: null, // optional replacement for the final draw call
@@ -174,6 +182,7 @@ export function createGame({ canvas, uiRoot }) {
   p0.walker = createWalker(p0.x, p0.z, p0.heading);
   const personMesh = createPersonMesh({ shirt: 0xe2733a, trousers: 0x2b3440, skin: 0xc68e62, hair: 0x2a1c14 });
   personMesh.visible = false;
+  personMesh.rotation.order = 'YXZ'; // lets the knock-down pose tip it over
   scene.add(personMesh);
   const exitSpot = { x: 0, z: 0, ok: false };
   const uiModeFor = (kind) => kind;
@@ -267,9 +276,24 @@ export function createGame({ canvas, uiRoot }) {
   game.seaY = SEA_Y;
   game.activities = game.addSystem(createActivities(game, uiRoot));
   game.police = game.addSystem(createPolice(game));
+  // Combat core and the systems built on it. Registered once here; the
+  // later combat tasks fill these files without touching this one.
+  game.combat = game.addSystem(createCombat(game));
+  game.crew = game.addSystem(createCrew(game));
+  game.missions = game.addSystem(createMissions(game, uiRoot));
+  game.score = game.addSystem(createScore(game));
+  // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
+  let snapCam = false;
+  events.on('respawn', () => {
+    if (game.police && game.police.heat) resetHeat(game.police.heat, 3);
+    game.player.wanted = 0;
+    snapCam = true;
+  });
   game.addSystem(createTutorial(game));
   game.graphics = game.addSystem(createGraphics(game));
   game.effects = game.addSystem(createEffects(game));
+  game.combatFx = game.addSystem(createCombatFx(game));
+  game.combatHud = game.addSystem(createCombatHud(game, uiRoot));
   game.menu = createMenu(uiRoot, game, game.economy);
 
   // --- Simulation step. ---
@@ -367,7 +391,8 @@ export function createGame({ canvas, uiRoot }) {
       p.z = w.z;
       p.y = 0;
       p.heading = w.heading;
-      p.near = findEnterable(w, vs);
+      const up = !w.life || w.life === 'ok';
+      p.near = up ? findEnterable(w, vs) : null;
       if (input.consume('enter') && p.near) game.enterVehicle(p.near);
     }
     // Every few seconds, clear away craft nobody is using or tracking
@@ -444,6 +469,11 @@ export function createGame({ canvas, uiRoot }) {
     } else {
       const w = p.walker;
       updatePersonMesh(personMesh, w, alpha);
+      if (w.life && w.life !== 'ok') layDown(personMesh, w);
+      else if (personMesh.rotation.z !== 0 || !personMesh.visible) {
+        personMesh.rotation.z = 0;
+        personMesh.visible = true;
+      }
       camTarget.x = w.px + (w.x - w.px) * alpha;
       camTarget.z = w.pz + (w.z - w.pz) * alpha;
       camTarget.y = 0;
@@ -456,6 +486,10 @@ export function createGame({ canvas, uiRoot }) {
         promptFor = p.near;
         hud.setPrompt(p.near ? `Tap ENTER: ${p.near.spec.label}` : null);
       }
+    }
+    if (snapCam) {
+      snapCam = false;
+      chase.snap(camTarget);
     }
     chase.update(camTarget, dt, input, collision);
     game.camHeading = Math.atan2(camTarget.z - camera.position.z, camTarget.x - camera.position.x);
