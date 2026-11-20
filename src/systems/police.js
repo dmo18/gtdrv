@@ -1,29 +1,46 @@
-// Police: a light, optional cat-and-mouse chase. Reckless driving (ramming
-// traffic, making pedestrians dive, heavy speeding in sight of a patrol
-// car) raises "heat" 0..3. Patrol cars then give chase with their light
-// bars on; slip out of sight long enough and they give up. Stop next to
-// one and you are pulled over for a small fine. Nobody is hurt and
-// wrecking the player's car is never a goal.
+// Police: reckless driving (ramming traffic, making pedestrians dive,
+// heavy speeding in sight of a patrol car) and violence (docs/COMBAT.md
+// "Police": shots near witnesses, hurting people, explosions) raise
+// "heat" 0..4. Level 1: a car follows. 2: officers step out when close
+// or stopped and shoot pistols. 3: more cars, ramming, SMGs. 4: a
+// roadblock ahead. Slip out of sight long enough and they give up; stop
+// next to one and you are pulled over (no fine). The owner's
+// `settings.police` off means no police at all.
 //
 // The heat rules (createHeat / updateHeat / updateBust) and the pursuit
 // driver (createCop / chaseStep) are pure logic, tested in node.
-// createPolice is the game system that spawns and removes police cars.
+// createPolice is the game system that spawns cars and officers.
 import { lanePoint, lanesPerDirection } from '../world/citygen.js';
 import { createVehicle } from '../entities/vehicle.js';
 import { createDriver, placeDriver, driveStep, LANE_SPEED } from './traffic.js';
 import { setVehicleLights } from '../render/vehiclemesh.js';
-import { clamp } from '../core/rng.js';
+import { clamp, createRng } from '../core/rng.js';
+import { exitPosition } from '../entities/onfoot.js';
+import { createPersonMesh, updatePersonMesh } from '../render/personmesh.js';
+import { addActor, removeActor, isPlayerSource, isCraft, canBeHit, layDown } from './combat.js';
+import {
+  createFootActor, placeFootActor, stepFoot, faceToward, aiShoot, hitChance,
+  takeSlot, releaseSlot, losRay, playerSpeedOf, playerUp,
+} from './crew.js';
+import { WEAPONS, selectWeapon } from '../core/weapons.js';
 
 // --- Heat rules. ---
 
 export const TOWN_LIMIT = 22; // m/s
 export const HEAVY_SPEEDING = 6; // m/s over the limit that counts
 export const RAM_SPEED = 6; // closing speed (m/s) that counts as ramming
-export const MAX_HEAT = 3;
+export const MAX_HEAT = 4;
 export const SIGHT = 90; // police see this far, given a clear line
-export const COOLDOWN = [0, 12, 18, 25]; // seconds out of sight to escape
-export const FINE_PER_LEVEL = 60;
-export const ESCAPE_REWARD_PER_LEVEL = 30;
+export const COOLDOWN = [0, 12, 18, 25, 32]; // seconds out of sight to escape
+export const FINE_PER_LEVEL = 60; // legacy helper only: busts no longer fine
+export const ESCAPE_REWARD_PER_LEVEL = 500; // score points (MISSIONS.md)
+// Violence heat (COMBAT.md "Police").
+export const VIOLENCE = {
+  shot: 0.3, civHit: 0.6, civDown: 1, officerHit: 1, officerDown: 1.5,
+  explosion: 1, craft: 0.7, crewSeen: 0.3,
+};
+export const WITNESS_DIST = 40;
+export const OFFICERS_MAX = 4;
 const GRACE = 4; // seconds between level steps
 const RAM_POINTS = 1;
 const PED_POINTS = 0.5;
@@ -65,7 +82,7 @@ export function resetHeat(heat, grace = 0) {
 // One step of the heat rules. Returns 'up' when the level rose,
 // 'escaped' (once) when the police lost the player, else null.
 // facts: { speeding, crashedTraffic, startledPed, seenByPolice, inCar,
-//          atSea, airborne, enabled }
+//          atSea, airborne, enabled, violence (heat points this step) }
 export function updateHeat(heat, dt, facts) {
   if (!facts || facts.enabled === false) {
     resetHeat(heat);
@@ -79,6 +96,7 @@ export function updateHeat(heat, dt, facts) {
   let add = 0;
   if (facts.crashedTraffic) add += RAM_POINTS;
   if (facts.startledPed) add += PED_POINTS;
+  if (facts.violence > 0 && Number.isFinite(facts.violence)) add += facts.violence;
   const speeding = facts.inCar && !away ? +facts.speeding || 0 : 0;
   if (speeding > HEAVY_SPEEDING && seen) {
     heat.speedTime += dt;
@@ -400,6 +418,8 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   else cop.lostTime += dt;
 
   const direct = cop.lostTime < 1 && dist < (cop.state === DIRECT ? DIRECT_OUT : DIRECT_IN);
+  // Heat 3: some cars ram a target craft instead of boxing it in.
+  const ram = !!cop.ram && direct && !!target.spec;
   let ax, az, vt;
   const tvx = target.vx || 0, tvz = target.vz || 0;
   const tsp = Math.hypot(tvx, tvz);
@@ -431,7 +451,8 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
     }
     const blend = clamp((28 - dist) / 14, 0, 1);
     let back = 0;
-    if (cop.blocked) {
+    if (ram) off = 0;
+    if (cop.blocked && !ram) {
       off = 0;
       back = tl / 2 + v.spec.length / 2 + 2.5; // no room beside: wait behind
     }
@@ -442,7 +463,11 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
     ax = sx + hx * ahead;
     az = sz + hz * ahead;
     const da = Math.hypot(sx - v.x, sz - v.z);
-    if (tsp < 1.5) {
+    if (ram) {
+      ax = tx + tvx * 0.25;
+      az = tz + tvz * 0.25;
+      vt = Math.max(tsp + 9, 14);
+    } else if (tsp < 1.5) {
       vt = Math.min(V_STREET, Math.sqrt(2 * 5 * Math.max(0, da - 0.8)));
       if (da < 2) {
         ax = v.x + ch * 5;
@@ -472,8 +497,8 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   }
   vt = Math.min(vt, V_AVENUE);
 
-  // Never ram the target: hold back when it is right in front.
-  {
+  // Never ram the target (unless told to): hold back when it is right in front.
+  if (!ram) {
     const rx = tx - v.x, rz = tz - v.z;
     const lx = rx * ch + rz * sh, ly = -rx * sh + rz * ch;
     if (lx > 0 && Math.abs(ly) < tw / 2 + v.spec.width / 2 + 0.6) {
@@ -556,24 +581,57 @@ const PATROL_DESPAWN = 280, CHASE_DESPAWN = 320;
 const LEAVE_GONE = 130;
 const CLEARANCE = 12;
 const PATROL_DELAY = 10; // seconds after a chase before a patrol returns
+const STEP_OUT = 22, STEP_OUT_BLOCK = 35; // officers get out this close
+const OUT_COOL = 8; // seconds after re-boarding before stepping out again
+const BLOCK_COOL = 20; // seconds between roadblocks
+const BLOCK_MIN = 100, BLOCK_MAX = 190;
+const OFFICER_THINK = 0.2;
 const extAt = (node, e) => (e.horizontal ? node.hx : node.hz);
+const OFFICER_LOOK = { shirt: 0x26406b, trousers: 0x1a2233, skin: 0xb98060, hair: 0x22180f };
 
-export function createPolice(game, { max = 3 } = {}) {
+export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   const city = game.city;
   const heat = createHeat();
-  const cars = []; // managed police vehicles (v.role: 'patrol' | 'chase' | 'leave')
+  const orng = createRng(seed); // officers' own dice (deterministic)
+  const cars = []; // managed police vehicles (v.role: 'patrol' | 'chase' | 'out' | 'block' | 'leave')
   const near = [];
   const facts = {
     speeding: 0, crashedTraffic: false, startledPed: false, seenByPolice: false,
-    inCar: false, atSea: false, airborne: false, enabled: true,
+    inCar: false, atSea: false, airborne: false, enabled: true, violence: 0,
   };
   const bustFacts = { playerSpeed: 0, copDist: Infinity, onFoot: false, inCar: false };
   const trafficCtx = { time: 0, vehicles: game.vehicles };
   const chaseCtx = { collision: game.collision, vehicles: game.vehicles, time: 0 };
   const footTarget = { x: 0, z: 0, vx: 0, vz: 0, heading: 0, y: 0, spec: null };
+  const officers = [];
+  for (let i = 0; i < OFFICERS_MAX; i++) {
+    const o = createFootActor('police', orng, 'pistol');
+    o.car = null;
+    officers.push(o);
+  }
+  const EXIT = { x: 0, z: 0, ok: false };
   let crashed = false, startled = false, pedCool = 0;
   let nearTimer = 0, spawnTimer = 0, patrolDelay = 3, seenTick = 0;
   let sirenOn = false, wasEnabled = true;
+  let violence = 0, lastShotStamp = NaN, officerSees = false;
+  let blockCool = 0, stepTick = 0, enabledNow = true;
+  const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0 };
+
+  // --- Witnesses for violence heat. ---
+  function civNear(x, z, r) {
+    const actors = game.actors;
+    if (!actors) return false;
+    const r2 = r * r;
+    for (let i = 0; i < actors.length; i++) {
+      const a = actors[i];
+      if (a.team !== 'civ' || !canBeHit(a)) continue;
+      const dx = a.x - x, dz = a.z - z;
+      if (dx * dx + dz * dz < r2) return true;
+    }
+    return false;
+  }
+  const policeSee = () => facts.seenByPolice || officerSees;
+  const witnessed = (x, z) => policeSee() || civNear(x, z, WITNESS_DIST);
 
   const ev = game.events;
   if (ev && ev.on) {
@@ -591,8 +649,196 @@ export function createPolice(game, { max = 3 } = {}) {
         pedCool = 1.5;
       }
     });
+    ev.on('shot', (s) => {
+      if (!enabledNow || !s || !isPlayerSource(game, s.shooter)) return;
+      if (lastShotStamp === game.time) return; // one trigger pull (pellets) counts once
+      lastShotStamp = game.time;
+      if (witnessed(s.x, s.z)) violence += VIOLENCE.shot;
+    });
+    ev.on('hit', (h) => {
+      if (!enabledNow || !h || !h.target || !isPlayerSource(game, h.source)) return;
+      const t = h.target;
+      if (t.team === 'civ') violence += VIOLENCE.civHit;
+      else if (t.team === 'police') violence += VIOLENCE.officerHit;
+      else if (t.team === 'crew' && policeSee()) violence += VIOLENCE.crewSeen;
+    });
+    ev.on('down', (d) => {
+      if (!enabledNow || !d || !d.target || !isPlayerSource(game, d.source)) return;
+      if (d.target.team === 'civ') violence += VIOLENCE.civDown;
+      else if (d.target.team === 'police') violence += VIOLENCE.officerDown;
+    });
+    ev.on('explosion', (e) => {
+      if (!enabledNow || !e || !isPlayerSource(game, e.source)) return;
+      if (witnessed(e.x, e.z)) violence += VIOLENCE.explosion;
+    });
+    ev.on('takedown', (t) => {
+      if (!enabledNow || !t || !isCraft(t.target)) return;
+      if (witnessed(t.target.x, t.target.z)) violence += VIOLENCE.craft;
+    });
   }
 
+  // --- Officers on foot. ---
+  function freeOfficer() {
+    for (let i = 0; i < officers.length; i++) if (!officers[i].active) return officers[i];
+    return null;
+  }
+  function officersOut() {
+    let n = 0;
+    for (let i = 0; i < officers.length; i++) if (officers[i].active) n++;
+    return n;
+  }
+
+  function stepOut(v) {
+    let n = 0;
+    for (let k = 0; k < 2; k++) {
+      const o = freeOfficer();
+      if (!o) break;
+      exitPosition(v, game.world || { collision: game.collision, city }, EXIT);
+      const side = k === 0 ? 1 : -1;
+      const h = v.heading;
+      let x = EXIT.ok ? EXIT.x : v.x - Math.sin(h) * 2;
+      let z = EXIT.ok ? EXIT.z : v.z + Math.cos(h) * 2;
+      if (k === 1) {
+        // The other side of the car.
+        x = 2 * v.x - x;
+        z = 2 * v.z - z;
+        if (game.collision && game.collision.resolveCircle(x, z, 0.4, 0).hit) {
+          x = v.x - Math.cos(h) * (v.spec.length / 2 + 0.8);
+          z = v.z - Math.sin(h) * (v.spec.length / 2 + 0.8);
+        }
+      }
+      placeFootActor(o, x, z, h + side * 1.2);
+      if (game.actors && !addActor(game, o)) break;
+      const wpn = heat.level >= 3 ? 'smg' : 'pistol';
+      selectWeapon(o.arms, wpn);
+      o.arms.mag[wpn] = WEAPONS[wpn].mag;
+      o.active = true;
+      o.car = v;
+      o.state = 'fight';
+      o.think = (k * OFFICER_THINK) / 2;
+      n++;
+    }
+    if (n) {
+      v.officers = (v.officers || 0) + n;
+      stats.stepOuts++;
+    }
+    return n;
+  }
+
+  function freeOfficerActor(o) {
+    releaseSlot(game, o);
+    removeActor(game, o);
+    o.active = false;
+    if (o.car) o.car.officers = Math.max(0, (o.car.officers || 0) - 1);
+    o.car = null;
+    if (o.mesh) o.mesh.visible = false;
+  }
+
+  function thinkOfficer(o) {
+    const p = game.player;
+    const dx = p.x - o.x, dz = p.z - o.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < SIGHT && (p.y || 0) < 6) {
+      const r = losRay(game, o.x, o.z, p.x, p.z);
+      if (r >= 0) o.los = r === 1;
+    } else o.los = false;
+    if (o.los) {
+      o.lastSeen = 0;
+      o.seenX = p.x;
+      o.seenZ = p.z;
+    }
+    const v = o.car;
+    const fast = p.vehicle && Math.abs(p.vehicle.speed) > 8 && d > 30;
+    if (heat.level < 2 || !playerUp(game) || fast || d > 90 || !v || v.removed) o.state = 'return';
+    if (o.state === 'return') {
+      o.shooting = false;
+      releaseSlot(game, o);
+      if (!v || v.removed) {
+        o.moveV = 0;
+        return;
+      }
+      o.tx = v.x;
+      o.tz = v.z;
+      o.moveV = 4.2;
+      return;
+    }
+    const want = heat.level >= 3 ? 14 : 9;
+    if (!o.los || d > want + 4) {
+      o.tx = o.lastSeen < 5 ? o.seenX : p.x;
+      o.tz = o.lastSeen < 5 ? o.seenZ : p.z;
+      o.moveV = 4.2;
+    } else if (d < want - 3) {
+      o.tx = o.x - (dx / d) * 3;
+      o.tz = o.z - (dz / d) * 3;
+      o.moveV = 2;
+    } else o.moveV = 0;
+    const w = WEAPONS[o.arms.weapon];
+    if (!o.shooting && o.los && d < w.range && o.burstCool <= 0 && takeSlot(game, o, game.time, 3)) {
+      o.shooting = true;
+      o.burst = 3 + Math.floor(orng.next() * 3);
+    }
+  }
+
+  function stepOfficer(o, dt) {
+    if (o.lastSeen < 99) o.lastSeen += dt;
+    if (o.burstCool > 0) o.burstCool -= dt;
+    if (o.life !== 'ok') {
+      o.shooting = false;
+      o.aimT = 0;
+      releaseSlot(game, o);
+      o.px = o.x;
+      o.pz = o.z;
+      if (o.fade >= 1) freeOfficerActor(o);
+      return;
+    }
+    o.think -= dt;
+    if (o.think <= 0) {
+      o.think += OFFICER_THINK;
+      thinkOfficer(o);
+    }
+    stepFoot(game, o, dt);
+    const p = game.player;
+    if (o.state === 'return') {
+      const v = o.car;
+      if (!v || v.removed || Math.hypot(v.x - o.x, v.z - o.z) < (v.radius || 2) * 0.7 + 1.3 || o.stuckT > 3) freeOfficerActor(o);
+      else if (o.moving) faceToward(o, o.x + o.vx, o.z + o.vz, dt);
+      return;
+    }
+    if (o.los) {
+      o.aimT += dt;
+      faceToward(o, p.x, p.z, dt, 12);
+      if (o.los) officerSees = true;
+    } else {
+      o.aimT = 0;
+      if (o.moving) faceToward(o, o.x + o.vx, o.z + o.vz, dt);
+    }
+    if (o.shooting) {
+      const d = Math.hypot(p.x - o.x, p.z - o.z);
+      if (!o.los || !playerUp(game)) {
+        if (o.lastSeen > 0.6) endOfficerBurst(o);
+      } else if (!o.arms.reloading) {
+        const w = WEAPONS[o.arms.weapon];
+        const r = aiShoot(game, o, hitChance(d, w.range, playerSpeedOf(game), o.aimT), orng, null, null);
+        if (r) {
+          stats.officerShots++;
+          if (r === 2) stats.officerHits++;
+          if (--o.burst <= 0) endOfficerBurst(o);
+        }
+      } else endOfficerBurst(o);
+    }
+  }
+  function endOfficerBurst(o) {
+    o.shooting = false;
+    o.burst = 0;
+    o.burstCool = 0.9 + orng.next() * 1.1;
+    releaseSlot(game, o);
+  }
+
+  function clearOfficers() {
+    for (let i = 0; i < officers.length; i++) if (officers[i].active) freeOfficerActor(officers[i]);
+  }
+
+  // --- Cars. ---
   function release(v) {
     v.ai = null;
     v.cop = null;
@@ -604,8 +850,13 @@ export function createPolice(game, { max = 3 } = {}) {
     if (v.mesh) setVehicleLights(v.mesh, { brake: false, siren: false, time: game.time });
   }
 
+  function dropOfficersOf(v) {
+    for (let i = 0; i < officers.length; i++) if (officers[i].active && officers[i].car === v) officers[i].car = null;
+  }
+
   function despawn(i) {
     const v = cars[i];
+    dropOfficersOf(v);
     game.removeVehicle(v);
     v.ai = null;
     v.cop = null;
@@ -629,10 +880,12 @@ export function createPolice(game, { max = 3 } = {}) {
     v.role = 'leave';
     v.siren = false;
     v.leaveTime = 0;
+    if (v.cop) v.cop.ram = false;
   }
 
   function endChase() {
-    for (let i = 0; i < cars.length; i++) if (cars[i].role !== 'leave') toLeave(cars[i]);
+    // Cars waiting for officers on foot leave once they are back in.
+    for (let i = 0; i < cars.length; i++) if (cars[i].role !== 'leave' && !cars[i].officers) toLeave(cars[i]);
     patrolDelay = PATROL_DELAY;
   }
 
@@ -646,6 +899,16 @@ export function createPolice(game, { max = 3 } = {}) {
       const far = Math.max(Math.hypot(a.x - px, a.z - pz), Math.hypot(b.x - px, b.z - pz));
       if (d < SPAWN_MAX && far > SPAWN_MIN) near.push(i);
     }
+  }
+
+  function spotClear(qx, qz, r) {
+    const vs = game.vehicles;
+    for (let i = 0; i < vs.length; i++) {
+      const o = vs[i];
+      if ((o.y || 0) > 5) continue;
+      if ((o.x - qx) * (o.x - qx) + (o.z - qz) * (o.z - qz) < r * r) return false;
+    }
+    return true;
   }
 
   function trySpawn(role) {
@@ -664,17 +927,7 @@ export function createPolice(game, { max = 3 } = {}) {
       const qx = LP.x, qz = LP.z;
       const dist = Math.hypot(qx - p.x, qz - p.z);
       if (dist < SPAWN_MIN || dist > SPAWN_MAX) continue;
-      let clear = true;
-      const vs = game.vehicles;
-      for (let i = 0; i < vs.length; i++) {
-        const o = vs[i];
-        if ((o.y || 0) > 5) continue;
-        if ((o.x - qx) * (o.x - qx) + (o.z - qz) * (o.z - qz) < CLEARANCE * CLEARANCE) {
-          clear = false;
-          break;
-        }
-      }
-      if (!clear) continue;
+      if (!spotClear(qx, qz, CLEARANCE)) continue;
       const hidden = col && col.lineClear ? !col.lineClear(p.x, p.z, qx, qz) : false;
       const toward = (Math.cos(LP.heading) * (p.x - qx) + Math.sin(LP.heading) * (p.z - qz)) / dist;
       const score = (hidden ? 2 : 0) + (role === 'chase' ? toward * 0.5 : 0) + rng.next() * 0.3;
@@ -690,6 +943,8 @@ export function createPolice(game, { max = 3 } = {}) {
     v.police = true;
     v.controls = { steer: 0, throttle: 0, brake: 0, handbrake: false };
     v.asleep = false;
+    v.officers = 0;
+    v.outCool = 0;
     let v0;
     if (role === 'chase') {
       toChase(v);
@@ -709,6 +964,77 @@ export function createPolice(game, { max = 3 } = {}) {
     game.addVehicle(v);
     cars.push(v);
     return v;
+  }
+
+  // Heat 4: two cars parked across a road the player is heading for.
+  function tryRoadblock() {
+    const p = game.player, pv = p.vehicle;
+    if (!pv || pv.kind !== 'car') return false;
+    const sp = Math.hypot(pv.vx || 0, pv.vz || 0);
+    if (sp < 5) return false;
+    const fx = pv.vx / sp, fz = pv.vz / sp;
+    const nodes = city.nodes, col = game.collision;
+    let best = -Infinity, bn = -1;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const dx = n.x - p.x, dz = n.z - p.z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d < BLOCK_MIN || d > BLOCK_MAX) continue;
+      const dot = (dx * fx + dz * fz) / d;
+      if (dot < 0.85) continue;
+      const s = dot - Math.abs(d - 140) / 300;
+      if (s > best) {
+        best = s;
+        bn = i;
+      }
+    }
+    if (bn < 0) return false;
+    const n = nodes[bn];
+    // The edge the player will most likely arrive on.
+    let be = -1, bd = Infinity;
+    for (let k = 0; k < n.edges.length; k++) {
+      const e = city.edges[n.edges[k]];
+      if (e.causeway) continue;
+      const o = nodes[otherEnd(e, bn)];
+      const d = Math.hypot(o.x - p.x, o.z - p.z);
+      if (d < bd) {
+        bd = d;
+        be = n.edges[k];
+      }
+    }
+    if (be < 0) return false;
+    const e = city.edges[be];
+    const o = nodes[otherEnd(e, bn)];
+    const ux = (o.x - n.x) / e.length, uz = (o.z - n.z) / e.length;
+    const at = Math.min(e.length * 0.5, extAt(n, e) + 8);
+    const cx = n.x + ux * at, cz = n.z + uz * at;
+    const nx = -uz, nz = ux;
+    const across = Math.atan2(nz, nx);
+    for (let k = 0; k < 2; k++) {
+      const s = k === 0 ? 1 : -1;
+      const x = cx + nx * 2.4 * s, z = cz + nz * 2.4 * s;
+      if (col && col.resolveCircle(x, z, 1.2, 0).hit) return false;
+      if (!spotClear(x, z, 7)) return false;
+    }
+    for (let k = 0; k < 2; k++) {
+      const s = k === 0 ? 1 : -1;
+      const x = cx + nx * 2.4 * s, z = cz + nz * 2.4 * s;
+      const v = createVehicle('police', x, z, across + (s > 0 ? 0.2 : Math.PI - 0.2), game.rng);
+      v.police = true;
+      v.role = 'block';
+      v.siren = true;
+      v.asleep = false;
+      v.officers = 0;
+      v.outCool = 0;
+      v.cop = createCop(city, game.rng);
+      v.ai = v.cop;
+      v.driver = v.cop;
+      v.controls = { steer: 0, throttle: 0, brake: 0, handbrake: true };
+      game.addVehicle(v);
+      cars.push(v);
+    }
+    stats.roadblocks++;
+    return true;
   }
 
   function playerTarget() {
@@ -731,16 +1057,27 @@ export function createPolice(game, { max = 3 } = {}) {
     }
   }
 
+  const hold = (c) => {
+    c.steer = 0;
+    c.throttle = 0;
+    c.brake = 0;
+    c.handbrake = true;
+  };
+
   const sys = {
     name: 'police',
     heat,
     cars,
+    officers,
+    stats,
     fixedUpdate(dt) {
       const p = game.player;
       const settings = game.progress && game.progress.settings;
       const enabled = !settings || settings.police !== false;
+      enabledNow = enabled;
       if (!enabled) {
         if (wasEnabled) {
+          clearOfficers();
           for (let i = cars.length - 1; i >= 0; i--) {
             if (cars[i].driver === 'player' || p.vehicle === cars[i]) {
               release(cars[i]);
@@ -751,15 +1088,18 @@ export function createPolice(game, { max = 3 } = {}) {
         }
         resetHeat(heat);
         crashed = startled = false;
+        violence = 0;
         p.wanted = 0;
         setSiren(false);
         return;
       }
       wasEnabled = true;
+      stepTick++;
       trafficCtx.time = chaseCtx.time = game.time;
       trafficCtx.vehicles = chaseCtx.vehicles = game.vehicles;
       chaseCtx.collision = game.collision;
       if (pedCool > 0) pedCool -= dt;
+      if (blockCool > 0) blockCool -= dt;
 
       const pv = p.vehicle;
       const target = playerTarget();
@@ -769,12 +1109,18 @@ export function createPolice(game, { max = 3 } = {}) {
       for (let i = cars.length - 1; i >= 0; i--) {
         const v = cars[i];
         if (v.removed) {
+          dropOfficersOf(v);
           cars.splice(i, 1);
         } else if (v.driver === 'player' || pv === v) {
+          dropOfficersOf(v);
           release(v);
           cars.splice(i, 1);
         }
       }
+
+      // Officers on foot first (they also tell us whether police see the player).
+      officerSees = false;
+      for (let i = 0; i < officers.length; i++) if (officers[i].active) stepOfficer(officers[i], dt);
 
       // Can any police car see the player?
       if (seenTick++ % 4 === 0) {
@@ -794,24 +1140,32 @@ export function createPolice(game, { max = 3 } = {}) {
       facts.speeding = facts.inCar && city.onRoad(p.x, p.z) ? Math.max(0, Math.abs(pv.speed) - TOWN_LIMIT) : 0;
       facts.crashedTraffic = crashed;
       facts.startledPed = startled;
+      facts.violence = violence;
+      const seenNow = facts.seenByPolice;
+      if (officerSees) facts.seenByPolice = true;
       crashed = startled = false;
+      violence = 0;
       const before = heat.level;
       const res = updateHeat(heat, dt, facts);
+      facts.seenByPolice = seenNow;
       if (res === 'up') {
-        if (game.hud && game.hud.toast) game.hud.toast(before === 0 ? 'The police want a word!' : 'More patrol cars on your tail', 2);
+        const msg = before === 0 ? 'The police want a word!' : heat.level === 2 ? 'Officers on foot!'
+          : heat.level === 3 ? 'They mean business now' : heat.level >= 4 ? 'Roadblocks ahead!' : 'More patrol cars on your tail';
+        if (game.hud && game.hud.toast) game.hud.toast(msg, 2);
         for (let i = 0; i < cars.length; i++) if (cars[i].role === 'patrol') toChase(cars[i]);
       } else if (res === 'escaped') {
         const r = escapeReward(heat.escapedLevel);
-        game.progress.money = Math.min(99999999, game.progress.money + r);
-        if (game.hud && game.hud.toast) game.hud.toast(`You lost them!  +$${r}`, 2.5);
+        if (game.score && game.score.add) game.score.add(r, 'Lost the police', p.x, p.z);
+        if (game.hud && game.hud.toast) game.hud.toast(`You lost them!  +${r}`, 2.5);
         if (ev && ev.emit) {
-          ev.emit('reward', r, 'Lost the police');
+          ev.emit('policeEscaped', heat.escapedLevel);
           ev.emit('progress');
         }
         endChase();
       }
 
-      // Pulled over?
+      // Pulled over? (Officers on foot count only while it is still an
+      // arrest, heat 2 or less; above that it is a shootout.)
       let copDist = Infinity;
       for (let i = 0; i < cars.length; i++) {
         const v = cars[i];
@@ -819,17 +1173,24 @@ export function createPolice(game, { max = 3 } = {}) {
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         if (d < copDist) copDist = d;
       }
+      if (heat.level <= 2) {
+        for (let i = 0; i < officers.length; i++) {
+          const o = officers[i];
+          if (!o.active || o.life !== 'ok') continue;
+          const d = Math.hypot(o.x - p.x, o.z - p.z);
+          if (d < copDist) copDist = d;
+        }
+      }
       bustFacts.copDist = copDist;
       bustFacts.onFoot = !pv;
       bustFacts.inCar = facts.inCar;
       bustFacts.playerSpeed = pv ? pv.speed : 0;
-      if (updateBust(heat, dt, bustFacts)) {
-        const fine = bustFine(heat.level, game.progress.money);
-        game.progress.money -= fine;
+      if (playerUp(game) && updateBust(heat, dt, bustFacts)) {
         resetHeat(heat, 6);
-        if (game.hud && game.hud.toast) game.hud.toast(`Pulled over! Fine $${fine}`, 3);
+        if (game.hud && game.hud.toast) game.hud.toast('Pulled over! Off with a warning.', 3);
         if (ev && ev.emit) {
           ev.emit('fail', 'Pulled over');
+          ev.emit('busted');
           ev.emit('progress');
         }
         endChase();
@@ -838,11 +1199,15 @@ export function createPolice(game, { max = 3 } = {}) {
 
       // Drive the cars, retire the ones no longer needed.
       const idle = city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150;
-      let chasing = 0, patrols = 0, anySiren = false;
+      const psp = pv ? Math.abs(pv.speed) : 0;
+      let chasing = 0, patrols = 0, blocks = 0, anySiren = false, chaseIx = 0;
       for (let i = cars.length - 1; i >= 0; i--) {
         const v = cars[i];
-        if (heat.level === 0 && v.role === 'chase') toLeave(v);
-        if (heat.level > 0 && v.role === 'chase') chasing++;
+        if (heat.level === 0 && (v.role === 'chase' || v.role === 'out' || v.role === 'block')) {
+          if (!v.officers) toLeave(v);
+        }
+        if (heat.level < MAX_HEAT && v.role === 'block' && !v.officers) toLeave(v);
+        if (heat.level > 0 && (v.role === 'chase' || v.role === 'out')) chasing++;
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         if (v.role === 'chase' && chasing > Math.min(heat.level, max)) {
           toLeave(v);
@@ -855,23 +1220,71 @@ export function createPolice(game, { max = 3 } = {}) {
             despawn(i);
             continue;
           }
-        } else if (d > (v.role === 'chase' ? CHASE_DESPAWN : PATROL_DESPAWN) ||
+        } else if (v.role === 'block') {
+          // Passed or left far behind: gone.
+          const behind = pv ? ((v.x - p.x) * (pv.vx || 0) + (v.z - p.z) * (pv.vz || 0)) < 0 : false;
+          if (d > 260 || (behind && d > 70 && (!col || !col.lineClear(v.x, v.z, p.x, p.z)))) {
+            despawn(i);
+            continue;
+          }
+          blocks++;
+        } else if (d > (v.role === 'chase' || v.role === 'out' ? CHASE_DESPAWN : PATROL_DESPAWN) ||
           (v.role === 'patrol' && v.ai && (v.ai.stuck || v.ai.dead) && d > 120)) {
           despawn(i);
-          if (v.role === 'chase') chasing--;
+          if (v.role === 'chase' || v.role === 'out') chasing--;
           continue;
         }
         if (v.role === 'patrol') patrols++;
+        if (v.outCool > 0) v.outCool -= dt;
         if (idle) {
+          hold(v.controls);
+          continue;
+        }
+        // Heat 2 and up: get out and fight when close, or when the player stops.
+        if ((v.role === 'chase' || v.role === 'block') && heat.level >= 2 && !v.wrecked && v.outCool <= 0 &&
+          stepTick % 15 === i % 15 && playerUp(game) && (p.y || 0) < 3) {
+          const reach = v.role === 'block' ? STEP_OUT_BLOCK : STEP_OUT;
+          if (d < reach && (!pv || psp < 3 || v.role === 'block' || (d < 12 && Math.abs(v.speed) < 1.5)) && officersOut() < OFFICERS_MAX) {
+            v.role = v.role === 'block' ? 'blockOut' : 'out';
+            v.outT = 0;
+          }
+        }
+        if (v.role === 'out' || v.role === 'blockOut') {
+          anySiren = true;
           const c = v.controls;
-          c.steer = 0;
-          c.throttle = 0;
-          c.brake = 0;
-          c.handbrake = true;
+          v.outT += dt;
+          if (Math.abs(v.speed) > 1.5) {
+            c.steer = 0;
+            c.throttle = 0;
+            c.brake = 1;
+            c.handbrake = false;
+          } else {
+            hold(c);
+            if (!v.officers && v.outT < 3 && !v.stepped) {
+              v.stepped = stepOut(v) > 0;
+              if (!v.stepped) v.outT = 99;
+            }
+          }
+          // Everyone back in: drive on.
+          if ((v.stepped && !v.officers) || (v.outT > 3 && !v.officers)) {
+            v.stepped = false;
+            v.outCool = OUT_COOL;
+            if (v.role === 'blockOut') v.role = 'block';
+            else if (heat.level > 0) toChase(v);
+            else toLeave(v);
+          }
+          continue;
+        }
+        if (v.role === 'block') {
+          anySiren = true;
+          hold(v.controls);
           continue;
         }
         if (v.role === 'chase') {
           anySiren = true;
+          // Heat 3: every other car rams for a few seconds at a time.
+          if (v.cop) v.cop.ram = heat.level >= 3 && chaseIx % 2 === 0 && (game.time % 7) < 4;
+          chaseIx++;
           chaseStep(v.cop, v, dt, target, chaseCtx);
         } else driveStep(v.ai, v, dt, trafficCtx);
       }
@@ -889,14 +1302,33 @@ export function createPolice(game, { max = 3 } = {}) {
       if (spawnTimer <= 0) {
         spawnTimer = 1.2;
         const want = Math.min(heat.level, max);
-        if (heat.level > 0 && chasing < want && !facts.atSea && !facts.airborne) trySpawn('chase');
+        if (heat.level >= MAX_HEAT && blocks === 0 && blockCool <= 0 && !facts.atSea && !facts.airborne) {
+          blockCool = tryRoadblock() ? BLOCK_COOL : 3;
+        } else if (heat.level > 0 && chasing < want && !facts.atSea && !facts.airborne) trySpawn('chase');
         else if (heat.level === 0 && patrols === 0 && patrolDelay <= 0 && max > 0) trySpawn('patrol');
       }
     },
-    render() {
+    render(alpha) {
       for (let i = 0; i < cars.length; i++) {
         const v = cars[i];
         if (v.mesh) setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: !!v.siren, time: game.time });
+      }
+      if (!game.scene) return;
+      for (let i = 0; i < officers.length; i++) {
+        const o = officers[i];
+        if (!o.active) {
+          if (o.mesh && o.mesh.visible) o.mesh.visible = false;
+          continue;
+        }
+        if (!o.mesh) {
+          o.mesh = createPersonMesh(OFFICER_LOOK);
+          if (o.mesh.rotation) o.mesh.rotation.order = 'YXZ';
+          game.scene.add(o.mesh);
+        }
+        o.mesh.visible = true;
+        updatePersonMesh(o.mesh, o, alpha);
+        if (o.life !== 'ok') layDown(o.mesh, o);
+        else if (o.mesh.rotation.z !== 0) o.mesh.rotation.z = 0;
       }
     },
   };

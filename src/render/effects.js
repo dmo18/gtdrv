@@ -38,7 +38,7 @@ function rs() {
 
 // ---- textures ------------------------------------------------------------------
 // 2x2 atlas: 0 soft noisy puff, 1 ring, 2 spark streak, 3 round glow.
-function makeAtlas() {
+export function makeAtlas() {
   const S = 128;
   const c = document.createElement('canvas');
   c.width = c.height = S * 2;
@@ -190,7 +190,7 @@ void main() {
 }
 `;
 
-function createPool(max, additive, atlas, scene) {
+export function createPool(max, additive, atlas, scene) {
   const geo = new THREE.InstancedBufferGeometry();
   const quad = new THREE.PlaneGeometry(1, 1);
   geo.index = quad.index;
@@ -240,7 +240,7 @@ function createPool(max, additive, atlas, scene) {
   return P;
 }
 
-function emitP(P, x, y, z, vx, vy, vz, life, s0, s1, a0, r, g, b, cell, grav, drag) {
+export function emitP(P, x, y, z, vx, vy, vz, life, s0, s1, a0, r, g, b, cell, grav, drag) {
   if (P.n >= P.cap) return -1;
   const i = P.n++;
   P.x[i] = x; P.y[i] = y; P.z[i] = z;
@@ -254,7 +254,7 @@ function emitP(P, x, y, z, vx, vy, vz, life, s0, s1, a0, r, g, b, cell, grav, dr
   return i;
 }
 
-function stepPool(P, dt) {
+export function stepPool(P, dt) {
   let i = 0;
   while (i < P.n) {
     P.age[i] += dt;
@@ -289,7 +289,7 @@ function stepPool(P, dt) {
 }
 
 // Write instance buffers, optionally sorted back to front (bucketed).
-function writePool(P, cam, sort, extra) {
+export function writePool(P, cam, sort, extra) {
   const n = P.n;
   const pos = P.iPos.array, dat = P.iData.array, col = P.iCol.array, vel = P.iVel.array;
   const ord = P.order;
@@ -510,7 +510,7 @@ function fallbackEnv(renderer) {
 }
 
 // Day/night level from the hour, matching the day/night system's table.
-function nightAt(h) {
+export function nightAt(h) {
   if (h < 4.6 || h >= 20.8) return 1;
   if (h < 5.8) return 1 - 0.35 * ((h - 4.6) / 1.2);
   if (h < 6.8) return 0.65 - 0.53 * ((h - 5.8) / 1.0);

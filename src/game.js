@@ -5,6 +5,7 @@ import { generateCity, DISTRICTS } from './world/citygen.js';
 import { createCollisionWorld } from './world/collision.js';
 import { buildCityMesh } from './render/citymesh.js';
 import { createInput, attachKeyboard } from './core/input.js';
+import { defaultProgress } from './core/save.js';
 import { createLoop } from './core/loop.js';
 import { createEvents } from './core/events.js';
 import { createRng } from './core/rng.js';
@@ -109,14 +110,10 @@ export function createGame({ canvas, uiRoot }) {
     cityMesh,
     waypoint: null,
     // Everything that is saved between sessions lives here.
-    progress: {
-      money: 250,
-      owned: [], // spec ids of bought craft
-      medals: {}, // activity id -> 'bronze' | 'silver' | 'gold'
-      bestTimes: {}, // activity id -> seconds
-      stats: { distance: 0, flights: 0, races: 0 },
-      settings: { master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true },
-    },
+    // Score, medals, best times and settings (no money: everything is
+    // available from the start). The economy system loads a saved copy
+    // into this same object when the game starts.
+    progress: defaultProgress(),
     paused: false,
     quality: 1,
     player: {
@@ -128,7 +125,7 @@ export function createGame({ canvas, uiRoot }) {
       health: 100, armor: 0, wanted: 0,
     },
     hudState: {
-      mode: 'car', speedKmh: 0, health: 100, armor: 0, money: 0, wanted: 0,
+      mode: 'car', speedKmh: 0, health: 100, armor: 0, wanted: 0,
       district: '', time: 9, vehicleHealth: 1, weapon: null, ammo: null,
     },
     addSystem(sys) {
@@ -261,7 +258,7 @@ export function createGame({ canvas, uiRoot }) {
   game.map = game.addSystem(createMapUi(game, uiRoot));
   game.audio = game.addSystem(createAudio(game));
   game.peds = game.addSystem(createPeds(game));
-  // Saved progress (money, bought craft, medals, settings) lives in the
+  // Saved progress (score, medals, best times, settings) lives in the
   // browser's own storage on this device. Some private modes forbid it.
   let storage;
   try {
@@ -504,7 +501,6 @@ export function createGame({ canvas, uiRoot }) {
     h.speedKmh = p.vehicle ? Math.abs(p.vehicle.speed) * 3.6 : 0;
     h.health = p.health;
     h.armor = p.armor;
-    h.money = game.progress.money;
     h.time = game.clock;
     h.wanted = p.wanted;
     h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;

@@ -393,6 +393,145 @@ try {
     check('peak sane', peak > 0.01, `peak ${peak.toFixed(4)}`);
     check('max voices <= 8', maxVoices <= 8, `max ${maxVoices}`);
 
+    // ---- Combat sounds: generated, bounded, positioned, drained ----
+    {
+      const names = ['gunPistol0', 'gunPistol1', 'gunSmg0', 'gunScatter', 'gunLobber', 'blast0', 'blast1', 'thwack0', 'bodyHit0',
+        'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick'];
+      const t1 = performance.now();
+      while (names.some((n) => !audio.debug.buffers[n]) && performance.now() - t1 < 8000) {
+        audio.render(1, 1 / 60);
+        await sleep(30);
+      }
+      const B = audio.debug.buffers;
+      const missing = names.filter((n) => !B[n]);
+      check('combat buffers generated', missing.length === 0, missing.join(' '));
+      const weak = [];
+      let cbytes = 0;
+      for (const n of names) {
+        const d = B[n] && B[n].getChannelData(0);
+        if (!d) continue;
+        let pk = 0;
+        let sum2 = 0;
+        let bad = false;
+        for (let i = 0; i < d.length; i++) {
+          const a = Math.abs(d[i]);
+          if (!(a <= 1)) bad = true;
+          if (a > pk) pk = a;
+          sum2 += d[i] * d[i];
+        }
+        cbytes += d.length * 4;
+        if (bad || pk < 0.3 || Math.sqrt(sum2 / d.length) < 0.01) weak.push(`${n} pk ${pk.toFixed(2)}`);
+      }
+      check('combat buffers have signal and no clipping', weak.length === 0, weak.join('; '));
+      check('combat buffer memory < 2 MB', cbytes < 2 * 1048576, `${(cbytes / 1048576).toFixed(2)} MB listed`);
+
+      game.vehicles.length = 0; // quiet street: no other engines
+      const walker = { x: 0, z: 0, hp: 100, team: 'player' };
+      game.player.walker = walker;
+      const other = { x: 20, z: 0, team: 'crew' };
+      const payload = (w, x, z, hk = 'none') => ({ shooter: other, weapon: w, x, y: 1.4, z, dx: 1, dy: 0, dz: 0, hx: x + 30, hy: 1.4, hz: z, hitKind: hk });
+      // Each event starts a voice (a gap between them clears rate limits).
+      const cases = [
+        ['shot pistol', 'shot', payload('pistol', 10, 6)],
+        ['shot smg', 'shot', payload('smg', 10, 6)],
+        ['shot scatter', 'shot', payload('scatter', 10, 6)],
+        ['shot lobber', 'shot', payload('lobber', 10, 6)],
+        ['shot fizz', 'shot', payload('fizz', 10, 6)],
+        ['shot wrench swing', 'shot', payload('wrench', 1, 0)],
+        ['hit bullet actor', 'hit', { target: other, source: walker, amount: 9, kind: 'bullet', x: 5, y: 1, z: 2 }],
+        ['hit bullet craft', 'hit', { target: car, source: other, amount: 9, kind: 'bullet', x: 5, y: 1, z: 2 }],
+        ['hit melee', 'hit', { target: other, source: walker, amount: 9, kind: 'melee', x: 1, y: 1, z: 0 }],
+        ['down', 'down', { target: other, source: walker, kind: 'bullet' }],
+        ['explosion', 'explosion', { x: 25, y: 1, z: 5, radius: 8, source: null, depth: 0 }],
+        ['burning', 'burning', { craft: car, on: true }],
+        ['reload', 'reload', { actor: walker, weapon: 'pistol' }],
+        ['empty', 'empty', { actor: walker, weapon: 'pistol' }],
+        ['weaponSwitch', 'weaponSwitch', { actor: walker, weapon: 'smg' }],
+        ['playerDown', 'playerDown', {}],
+      ];
+      // ricochet / impact strike on a wall
+      cases.push(['shot wall strike', 'shot', payload('pistol', 10, 6, 'wall')]);
+      for (const [label, name, pl] of cases) {
+        await sleep(260);
+        audio.render(1, 1 / 60);
+        const v0 = audio.activeVoices;
+        events.emit(name, pl);
+        check(`combat ${label} voice`, audio.activeVoices > v0, `${v0} -> ${audio.activeVoices}`);
+        sample();
+      }
+      // A strike on a wall may play an impact or a ricochet; both are voices. A far
+      // gunfight is silent.
+      await sleep(300);
+      let v0 = audio.activeVoices;
+      events.emit('shot', payload('smg', 900, 0));
+      events.emit('explosion', { x: 3000, y: 0, z: 0, radius: 8, source: null, depth: 0 });
+      check('far combat ignored', audio.activeVoices === v0, `${v0} -> ${audio.activeVoices}`);
+
+      // Distance: the same blast is quieter far away; pan follows the side.
+      const split = ctx.createChannelSplitter(2);
+      audio.output.connect(split);
+      const aL = ctx.createAnalyser();
+      const aR = ctx.createAnalyser();
+      aL.fftSize = aR.fftSize = 2048;
+      split.connect(aL, 0);
+      split.connect(aR, 1);
+      const bl = new Float32Array(2048);
+      const br = new Float32Array(2048);
+      async function measure(fn) {
+        let l = 0;
+        let r = 0;
+        for (let i = 0; i < 60 && audio.activeVoices > 0; i++) {
+          await sleep(100);
+          audio.render(1, 1 / 60);
+        }
+        await sleep(500);
+        fn();
+        for (let i = 0; i < 40; i++) {
+          audio.render(1, 1 / 60);
+          await sleep(15);
+          aL.getFloatTimeDomainData(bl);
+          aR.getFloatTimeDomainData(br);
+          for (let k = 0; k < 2048; k++) {
+            l = Math.max(l, Math.abs(bl[k]));
+            r = Math.max(r, Math.abs(br[k]));
+          }
+        }
+        return [l, r];
+      }
+      const exp = (x) => () => events.emit('explosion', { x, y: 0, z: 0, radius: 8, source: null, depth: 0 });
+      const nearB = await measure(exp(15));
+      const farB = await measure(exp(250));
+      check('explosion audible', Math.max(...nearB) > 0.02, `peak ${Math.max(...nearB).toFixed(3)}`);
+      check('explosion falls off with distance', Math.max(...farB) < Math.max(...nearB) * 0.6, `near ${Math.max(...nearB).toFixed(3)} far ${Math.max(...farB).toFixed(3)}`);
+      const quiet = await measure(() => {});
+      const rightB = await measure(() => events.emit('shot', payload('scatter', 25, 0)));
+      const leftB = await measure(() => events.emit('shot', payload('scatter', -25, 0)));
+      check('shot pans to its side', rightB[1] > rightB[0] * 1.5 && leftB[0] > leftB[1] * 1.5,
+        `quiet ${quiet.map((v) => v.toFixed(3))}; right src L ${rightB[0].toFixed(3)} R ${rightB[1].toFixed(3)}; left src L ${leftB[0].toFixed(3)} R ${leftB[1].toFixed(3)}`);
+
+      // A storm of events stays within the voice cap and the limiter.
+      peak = 0;
+      maxVoices = 0;
+      for (let i = 0; i < 60; i++) {
+        events.emit('shot', payload(i % 3 ? 'smg' : 'scatter', 8 + (i % 5), 3, i % 2 ? 'wall' : 'actor'));
+        events.emit('hit', { target: other, source: walker, amount: 5, kind: 'bullet', x: 4, y: 1, z: 1 });
+        if (i % 12 === 0) events.emit('explosion', { x: 10 + i, y: 0, z: 3, radius: 8, source: null, depth: 0 });
+        audio.render(1, 1 / 60);
+        sample();
+        await sleep(5);
+      }
+      check('combat storm within voice cap', maxVoices <= 8, `max ${maxVoices}`);
+      check('combat storm does not clip', peak <= 1.0, `peak ${peak.toFixed(3)}`);
+      let drained2 = false;
+      for (let i = 0; i < 60 && !drained2; i++) {
+        await sleep(100);
+        audio.render(1, 1 / 60);
+        drained2 = audio.activeVoices === 0;
+      }
+      check('combat voices drain to 0', drained2, `voices ${audio.activeVoices}`);
+      split.disconnect();
+    }
+
     // Engines made on first use: all characters are in the bank now.
     const fin = audio.debug;
     check('all engines generated', fin.bankStats.engines.length === 8, fin.bankStats.engines.join(' '));

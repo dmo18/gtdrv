@@ -34,12 +34,14 @@ export function createHud(root) {
   // top-centre: toasts
   const toasts = el('div', 'rw-toasts', hud);
 
-  // top-right: money and police attention (nobody can be hurt in this game)
+  // top-right: score, the points waiting on the combo, and police attention
   const tr = el('div', 'rw-tr', hud);
-  const moneyEl = el('div', 'rw-money', tr);
+  const scoreEl = el('div', 'rw-money rw-score', tr);
+  const comboEl = el('div', 'rw-combo', tr);
+  comboEl.style.cssText = 'display:none;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--rw-accent)';
   const wantedEl = el('div', 'rw-wanted rw-none', tr);
   wantedEl.setAttribute('aria-label', 'Police attention');
-  const BADGES = 3;
+  const BADGES = 4;
   const badges = [];
   for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', wantedEl));
 
@@ -58,7 +60,7 @@ export function createHud(root) {
   // cached last values (undefined forces the first write)
   const last = {
     mode: undefined, speed: undefined,
-    money: undefined, wanted: undefined, district: undefined, clock: undefined,
+    score: undefined, pending: undefined, combo: undefined, wanted: undefined, district: undefined, clock: undefined,
     veh: undefined, prompt: null,
   };
   const timers = new Set();
@@ -78,9 +80,18 @@ export function createHud(root) {
       last.speed = speed;
       speedNum.nodeValue = String(speed);
     }
-    if (s.money !== last.money) {
-      last.money = s.money;
-      moneyEl.textContent = '$' + s.money.toLocaleString('en-US');
+    const score = s.score > 0 ? Math.floor(s.score) : 0;
+    if (score !== last.score) {
+      last.score = score;
+      scoreEl.textContent = score.toLocaleString('en-US');
+    }
+    const pending = s.pending > 0 ? Math.floor(s.pending) : 0;
+    const combo = s.combo > 1 ? s.combo : 1;
+    if (pending !== last.pending || combo !== last.combo) {
+      last.pending = pending;
+      last.combo = combo;
+      comboEl.style.display = pending > 0 ? '' : 'none';
+      if (pending > 0) comboEl.textContent = '+' + pending.toLocaleString('en-US') + (combo > 1 ? '  x' + combo : '');
     }
     if (s.wanted !== last.wanted) {
       last.wanted = s.wanted;

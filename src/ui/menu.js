@@ -1,11 +1,7 @@
-// The pause menu: Resume, Showroom, Records, Settings and How to play.
+// The pause menu: Resume, Scores, Records, Settings and How to play.
 // All text goes through textContent / DOM APIs, never innerHTML.
-import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
-import { BOAT_SPECS } from '../entities/boat.js';
 import { setHandlingMode } from '../entities/vehicle.js';
-import { CATALOG } from '../systems/economy.js';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const STYLE_ID = 'rw-menu-style';
 
 const CSS = `
@@ -45,19 +41,10 @@ const CSS = `
 }
 .rw-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px 4px; }
 .rw-menu-title { margin: 0; font-size: 20px; }
-.rw-menu-money { font-weight: 700; color: #ffd08a; font-variant-numeric: tabular-nums; }
+.rw-menu-points { font-weight: 700; color: #ffd08a; font-variant-numeric: tabular-nums; }
 .rw-menu-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 8px 16px 16px; }
 .rw-menu-body p { margin: 0 0 8px; }
 .rw-menu-dim { color: var(--rw-dim); }
-.rw-menu-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
-.rw-menu-card { padding: 10px 12px; border-radius: 14px; background: rgba(246,239,230,0.07); border: 1px solid var(--rw-panel-edge); display: flex; flex-direction: column; gap: 6px; }
-.rw-menu-card h3 { margin: 0; font-size: 17px; }
-.rw-menu-card svg { width: 100%; max-width: 150px; height: 56px; color: var(--rw-accent); }
-.rw-menu-cardtop { display: flex; align-items: center; gap: 10px; }
-.rw-menu-bar { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 8px; font-size: 13px; color: var(--rw-dim); }
-.rw-menu-track { height: 8px; border-radius: 4px; background: rgba(246,239,230,0.14); overflow: hidden; }
-.rw-menu-fill { height: 100%; background: var(--rw-accent); border-radius: 4px; }
-.rw-menu-price { font-weight: 700; font-size: 18px; }
 .rw-menu-group { margin: 10px 0 4px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rw-accent); }
 .rw-menu-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 40px; padding: 4px 0; border-bottom: 1px solid rgba(246,239,230,0.1); }
 .rw-menu-medal { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
@@ -114,7 +101,7 @@ const CSS = `
 `;
 
 const TABS = [
-  ['resume', 'Resume'], ['showroom', 'Showroom'], ['records', 'Records'],
+  ['resume', 'Resume'], ['scores', 'Scores'], ['records', 'Records'],
   ['settings', 'Settings'], ['howto', 'How to play'],
 ];
 const STEER_CHOICES = [
@@ -128,19 +115,6 @@ const HANDLING_CHOICES = [
   ['sim', 'Realistic', 'Heavier, more grip-limited.'],
 ];
 const MEDAL_COLORS = { bronze: '#c9803f', silver: '#c4cbd2', gold: '#f0c24a' };
-const MAX_BY_KIND = {
-  plane: { speed: 130, tough: 1000, handle: 6 },
-  heli: { speed: 50, tough: 1000, handle: 1.6 },
-  boat: { speed: 30, tough: 2500, handle: 2.3 },
-};
-// Silhouettes: plain path data written here, never taken from outside.
-const ICONS = {
-  jet: 'M4 30 L40 26 L58 4 L70 4 L64 26 L100 24 L116 30 L100 36 L64 34 L70 56 L58 56 L40 34 Z',
-  stunt: 'M6 30 L30 27 L34 12 L44 12 L44 27 L88 25 L96 14 L104 14 L102 28 L114 30 L102 33 L100 46 L92 46 L88 35 L44 33 L44 48 L34 48 L30 33 Z',
-  heavyheli: 'M4 22 L116 22 M60 22 L60 28 M16 36 Q18 28 40 28 L84 28 Q100 28 104 36 L112 30 L116 34 L106 44 Q96 46 60 46 L24 46 Q12 46 16 36 Z M26 50 L90 50',
-  yacht: 'M4 38 L116 38 L100 54 L18 54 Z M26 38 L34 26 L82 26 L90 38 M44 26 L48 14 L72 14 L76 26',
-};
-
 const h = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -154,25 +128,13 @@ function button(text, cls, onClick, label) {
   b.addEventListener('click', onClick);
   return b;
 }
-function icon(id) {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 120 60');
-  svg.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS(SVG_NS, 'path');
-  p.setAttribute('d', ICONS[id]);
-  p.setAttribute('fill', 'currentColor');
-  p.setAttribute('stroke', 'currentColor');
-  p.setAttribute('stroke-width', id === 'heavyheli' ? '3' : '2');
-  p.setAttribute('stroke-linejoin', 'round');
-  svg.appendChild(p);
-  return svg;
-}
 const pretty = (id) => String(id).replace(/[_-]+/g, ' ').trim().replace(/\b[a-z]/g, (c) => c.toUpperCase());
 const fmtTime = (s) => {
   const m = Math.floor(s / 60);
   return m + ':' + (s - m * 60).toFixed(1).padStart(4, '0');
 };
-const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
+const num = (n) => Math.round(n).toLocaleString('en-US');
+const isFlag = (k) => k.startsWith('seen_') || k.startsWith('hint_');
 
 export function createMenu(root, game, economy) {
   if (!document.getElementById(STYLE_ID)) {
@@ -191,9 +153,9 @@ export function createMenu(root, game, economy) {
   const main = h('div', 'rw-menu-main');
   const head = h('div', 'rw-menu-head');
   const title = h('h2', 'rw-menu-title');
-  const moneyEl = h('span', 'rw-menu-money');
-  moneyEl.setAttribute('aria-label', 'Money');
-  head.append(title, moneyEl);
+  const pointsEl = h('span', 'rw-menu-points');
+  pointsEl.setAttribute('aria-label', 'Score');
+  head.append(title, pointsEl);
   const body = h('div', 'rw-menu-body');
   body.tabIndex = -1;
   main.append(head, body);
@@ -241,60 +203,77 @@ export function createMenu(root, game, economy) {
     body.appendChild(box);
   }
 
-  function bar(label, frac) {
-    const row = h('div', 'rw-menu-bar');
-    row.appendChild(h('span', '', label));
-    const track = h('div', 'rw-menu-track');
-    const fill = h('div', 'rw-menu-fill');
-    fill.style.width = Math.round(Math.max(0.05, Math.min(1, frac)) * 100) + '%';
-    track.appendChild(fill);
-    row.appendChild(track);
-    return row;
-  }
+  // Scores: the high scores, then every race and challenge with its
+  // best time, best score and medal (medals are the achievements).
+  function renderScores() {
+    const p = game.progress;
+    const sc = p.score;
+    const live = game.score;
+    const stats = h('div', 'rw-menu-stats');
+    const add = (v, label) => {
+      const s = h('div', 'rw-menu-stat');
+      s.append(h('b', '', v), h('span', 'rw-menu-dim', label));
+      stats.appendChild(s);
+    };
+    add(num(live ? live.total : sc.total), 'Total score');
+    add(num(sc.sessionBest), 'Best session');
+    add(sc.best.combo > 0 ? 'x' + sc.best.combo : '-', 'Best combo');
+    add(sc.best.jump > 0 ? Math.round(sc.best.jump) + ' m' : '-', 'Longest jump');
+    add(sc.best.airtime > 0 ? sc.best.airtime.toFixed(1) + ' s' : '-', 'Longest airtime');
+    add(sc.best.drift > 0 ? num(sc.best.drift) : '-', 'Best drift');
+    add(sc.best.nearMiss > 0 ? String(Math.round(sc.best.nearMiss)) : '-', 'Near misses in a row');
+    body.appendChild(stats);
 
-  function renderShowroom() {
-    const cards = h('div', 'rw-menu-cards');
-    for (const id of Object.keys(CATALOG)) {
-      const info = CATALOG[id];
-      const spec = AIRCRAFT_SPECS[id] || BOAT_SPECS[id];
-      if (!spec) continue;
-      const kind = BOAT_SPECS[id] ? 'boat' : spec.kind;
-      const cap = MAX_BY_KIND[kind];
-      const handle = kind === 'plane' ? spec.rollRate : kind === 'heli' ? spec.yawRate : spec.turnRate;
-      const card = h('div', 'rw-menu-card');
-      card.dataset.spec = id;
-      const top = h('div', 'rw-menu-cardtop');
-      const names = h('div');
-      names.append(h('h3', '', spec.label), h('div', 'rw-menu-dim', info.where));
-      top.append(icon(id), names);
-      card.append(top,
-        bar(Math.round(spec.maxSpeed * 3.6) + ' km/h', spec.maxSpeed / cap.speed),
-        bar('Handling', handle / cap.handle),
-        bar('Toughness', spec.health / cap.tough));
-      const foot = h('div', 'rw-menu-setting');
-      foot.style.borderBottom = '0';
-      foot.appendChild(h('span', 'rw-menu-price', money(info.price)));
-      const owned = economy.owns(id);
-      const need = info.price - game.progress.money;
-      let b;
-      if (owned) {
-        b = button('Owned', '', () => {}, spec.label + ' owned');
-        b.disabled = true;
-      } else if (need > 0) {
-        b = button('Need ' + money(need) + ' more', '', () => {}, 'Cannot buy ' + spec.label + ', need ' + money(need) + ' more');
-        b.disabled = true;
-      } else {
-        b = button('Buy', 'rw-menu-primary', () => {
-          if (economy.buy(id) && game.hud && game.hud.toast) game.hud.toast(spec.label + ' bought', 2);
-          render();
-        }, 'Buy ' + spec.label + ' for ' + money(info.price));
+    const courses = (game.activities && Array.isArray(game.activities.courses)) ? game.activities.courses : [];
+    const names = new Map();
+    for (const c of courses) if (c && typeof c.id === 'string') names.set(c.id, String(c.name || ''));
+    const medalIds = Object.keys(p.medals).filter((k) => !isFlag(k));
+    const ids = new Set(medalIds);
+    for (const k of Object.keys(p.bestTimes)) ids.add(k);
+    for (const k of Object.keys(sc.courses)) ids.add(k);
+    const count = (m) => medalIds.filter((k) => p.medals[k] === m).length;
+    body.appendChild(h('div', 'rw-menu-group', 'Achievements'));
+    body.appendChild(h('p', 'rw-menu-dim', medalIds.length
+      ? 'Medals: ' + count('gold') + ' gold, ' + count('silver') + ' silver, ' + count('bronze') + ' bronze'
+      : 'No medals yet. Finish a race or a flying challenge!'));
+
+    const missionIds = Object.keys(sc.missions);
+    if (missionIds.length) {
+      body.appendChild(h('div', 'rw-menu-group', 'Missions'));
+      for (const id of missionIds.sort()) {
+        const m = sc.missions[id];
+        const row = h('div', 'rw-menu-row');
+        row.appendChild(h('span', '', pretty(id)));
+        row.appendChild(h('span', 'rw-menu-dim', (m.done ? 'Done ' : '') + num(m.best) + (m.time > 0 ? '  ' + fmtTime(m.time) : '')));
+        body.appendChild(row);
       }
-      b.dataset.buy = id;
-      foot.appendChild(b);
-      card.appendChild(foot);
-      cards.appendChild(card);
     }
-    body.appendChild(cards);
+    if (!ids.size) return;
+    const groups = new Map();
+    for (const id of [...ids].sort()) {
+      const g = id.split(/[_-]/)[0];
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(id);
+    }
+    for (const [g, list] of groups) {
+      body.appendChild(h('div', 'rw-menu-group', pretty(g)));
+      for (const id of list) {
+        const row = h('div', 'rw-menu-row');
+        row.dataset.course = id;
+        row.appendChild(h('span', '', names.get(id) || pretty(id)));
+        const right = h('span', 'rw-menu-dim');
+        const medal = p.medals[id];
+        if (medal) {
+          const dot = h('span', 'rw-menu-medal');
+          dot.style.background = MEDAL_COLORS[medal];
+          right.append(dot, medal + '  ');
+        }
+        if (p.bestTimes[id]) right.appendChild(document.createTextNode(fmtTime(p.bestTimes[id]) + '  '));
+        if (sc.courses[id]) right.appendChild(document.createTextNode(num(sc.courses[id]) + ' pts'));
+        row.appendChild(right);
+        body.appendChild(row);
+      }
+    }
   }
 
   function renderRecords() {
@@ -310,41 +289,9 @@ export function createMenu(root, game, economy) {
     add(String(Math.floor(p.stats.flights)), 'Flights');
     body.appendChild(stats);
 
-    const courses = (game.activities && Array.isArray(game.activities.courses)) ? game.activities.courses : [];
-    const names = new Map();
-    for (const c of courses) if (c && typeof c.id === 'string') names.set(c.id, String(c.name || ''));
-    const ids = new Set();
-    for (const k of Object.keys(p.medals)) if (!k.startsWith('seen_') && !k.startsWith('hint_')) ids.add(k);
-    for (const k of Object.keys(p.bestTimes)) ids.add(k);
     const seen = Object.keys(p.medals).filter((k) => k.startsWith('seen_')).length;
     body.appendChild(h('p', 'rw-menu-dim', 'Areas explored: ' + seen));
-    if (!ids.size) {
-      body.appendChild(h('p', '', 'No records yet. Try a race or a flying challenge!'));
-      return;
-    }
-    const groups = new Map();
-    for (const id of [...ids].sort()) {
-      const g = id.split(/[_-]/)[0];
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(id);
-    }
-    for (const [g, list] of groups) {
-      body.appendChild(h('div', 'rw-menu-group', pretty(g)));
-      for (const id of list) {
-        const row = h('div', 'rw-menu-row');
-        row.appendChild(h('span', '', names.get(id) || pretty(id)));
-        const right = h('span', 'rw-menu-dim');
-        const medal = p.medals[id];
-        if (medal) {
-          const dot = h('span', 'rw-menu-medal');
-          dot.style.background = MEDAL_COLORS[medal];
-          right.append(dot, medal + ' ');
-        }
-        if (p.bestTimes[id]) right.appendChild(document.createTextNode(fmtTime(p.bestTimes[id])));
-        row.appendChild(right);
-        body.appendChild(row);
-      }
-    }
+    body.appendChild(h('p', 'rw-menu-dim', 'Scores, best times and medals are under Scores.'));
   }
 
   function toggleRow(label, key) {
@@ -477,7 +424,7 @@ export function createMenu(root, game, economy) {
     const reset = h('div', 'rw-menu-setting');
     reset.style.borderBottom = '0';
     if (!confirmReset) {
-      reset.appendChild(h('span', 'rw-menu-dim', 'Erase money, craft, records and settings.'));
+      reset.appendChild(h('span', 'rw-menu-dim', 'Erase scores, medals, records and settings.'));
       const b = button('Reset progress', 'rw-menu-danger', () => { confirmReset = true; render(); }, 'Reset progress');
       b.dataset.role = 'reset';
       reset.appendChild(b);
@@ -513,7 +460,9 @@ export function createMenu(root, game, economy) {
         'Heavy helicopters are slower to turn, so plan ahead.']],
       ['Getting in and out', ['Walk up to any craft and tap ENTER. Tap ENTER again to get out once you are slow enough.']],
       ['Map and races', ['Open the map to place a waypoint and see race starts.',
-        'Finish races and challenges to earn medals and money, then spend it in the Showroom.']],
+        'Finish races and challenges for medals and points. Everything is open from the start.']],
+      ['Scores', ['Stunts, wrecks and takedowns of the rival crew earn points. Keep scoring within 4 seconds to build a combo. A hard crash or going down loses the points you have not banked yet.',
+        'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
     ];
     for (const [t, items] of sections) {
       body.appendChild(h('div', 'rw-menu-group', t));
@@ -523,7 +472,7 @@ export function createMenu(root, game, economy) {
     }
   }
 
-  const RENDERERS = { resume: renderResume, showroom: renderShowroom, records: renderRecords, settings: renderSettings, howto: renderHowto };
+  const RENDERERS = { resume: renderResume, scores: renderScores, records: renderRecords, settings: renderSettings, howto: renderHowto };
 
   function render() {
     const top = body.scrollTop;
@@ -533,7 +482,7 @@ export function createMenu(root, game, economy) {
       tabButtons[id].tabIndex = id === active ? 0 : -1;
       if (id === active) title.textContent = label;
     }
-    moneyEl.textContent = money(game.progress.money);
+    pointsEl.textContent = num(game.score ? game.score.total : game.progress.score.total) + ' pts';
     RENDERERS[active]();
     body.scrollTop = top;
   }
@@ -591,7 +540,7 @@ export function createMenu(root, game, economy) {
   });
   const refresh = () => { if (opened) render(); };
   game.events.on('progress', refresh);
-  game.events.on('purchase', refresh);
+  game.events.on('scoreBanked', refresh);
 
   // First run: ask once how the player wants to steer. Pauses the game
   // while the question is up; remembered in the save. Returns true if shown.

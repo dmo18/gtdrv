@@ -117,7 +117,7 @@ export default async function extra(page, check) {
   const race = await page.evaluate(async () => {
     const g = window.__rw;
     const course = g.activities.courses.find((c) => c.type === 'street');
-    const money0 = g.progress.money;
+    const score0 = g.progress.score.total;
     const car = g.player.vehicle;
     const put = (p) => {
       car.x = car.px = p.x;
@@ -140,11 +140,11 @@ export default async function extra(page, check) {
       }
     }
     run(30);
-    return { id: course.id, name: course.name, medal: g.progress.medals[course.id] || null, gained: g.progress.money - money0, courses: g.activities.courses.length };
+    return { id: course.id, name: course.name, medal: g.progress.medals[course.id] || null, gained: g.progress.score.total - score0, courses: g.activities.courses.length };
   });
   await page.screenshot({ path: 'shots/race.png' });
   check(race.courses >= 10, `activities loaded (${race.courses})`);
-  check(!!race.medal && race.gained > 0, `finishing "${race.name}" awards a medal (${race.medal}) and $${race.gained}`);
+  check(!!race.medal && race.gained > 0, `finishing "${race.name}" awards a medal (${race.medal}) and ${race.gained} points`);
 
   // Combat core: on foot, hold fire at the nearest ped until it goes
   // down (cartoon knock-down, no gore), then it lies there and fades.

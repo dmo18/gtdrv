@@ -342,6 +342,24 @@ function siren(T, fOf) {
 }
 
 
+// ---- combat sounds: helpers ----
+// A noise burst through one filter, summed into out.
+function noiseBand(out, rng, at, decay, amp, type, f, q = 0.7, gain = 1) {
+  const t = z(out.length);
+  addBurst(t, at, decay, amp, rng);
+  filter(t, out, biquad(type, f, q), { gain, add: true, loop: false });
+}
+// A decaying sine whose pitch falls from f0 to f1 (time constant tc).
+function sweep(out, f0, f1, tc, amp, dur, at = 0) {
+  let ph = 0;
+  const n = Math.min(out.length - at, len(dur));
+  for (let i = 0; i < n; i++) {
+    const t = i / R.sr;
+    ph += (TAU * (f1 + (f0 - f1) * Math.exp(-t / tc))) / R.sr;
+    out[at + i] += Math.sin(ph) * amp * Math.min(1, t / 0.0015) * Math.exp(-t / (dur * 0.3));
+  }
+}
+
 // ------------------------------------------------------------ one-shots
 const SHOTS = {
   thud(rng) {
@@ -570,6 +588,153 @@ const SHOTS = {
     addMode(out, 0, 1480 * 2.76, 0.05, 0.15);
     return fadeEdges(normalize(out, 0.6), 8, 1000);
   },
+  // ---- combat (weapons, impacts, blasts) ----
+  gunPistol(rng) {
+    const out = z(len(0.4));
+    noiseBand(out, rng, 0, 0.0025, 1, 'hp', 1500);
+    noiseBand(out, rng, 0, 0.03, 0.7, 'bp', 1800, 0.8);
+    sweep(out, 260 + rng.next() * 30, 90, 0.02, 0.8, 0.15);
+    noiseBand(out, rng, len(0.004), 0.09, 0.25, 'lp', 900);
+    noiseBand(out, rng, len(0.06), 0.1, 0.08, 'lp', 700);
+    return fadeEdges(normalize(out, 0.9));
+  },
+  gunSmg(rng) {
+    const out = z(len(0.25));
+    noiseBand(out, rng, 0, 0.002, 1, 'hp', 2200);
+    noiseBand(out, rng, 0, 0.02, 0.7, 'bp', 2600, 1);
+    sweep(out, 330 + rng.next() * 40, 140, 0.012, 0.5, 0.08);
+    noiseBand(out, rng, len(0.003), 0.05, 0.15, 'lp', 1200);
+    return fadeEdges(normalize(out, 0.85));
+  },
+  gunScatter(rng) {
+    const out = z(len(1));
+    noiseBand(out, rng, 0, 0.006, 1, 'hp', 900);
+    noiseBand(out, rng, 0, 0.12, 1, 'lp', 1100);
+    sweep(out, 120, 40, 0.06, 1.2, 0.5);
+    noiseBand(out, rng, len(0.03), 0.3, 0.35, 'lp', 500);
+    noiseBand(out, rng, len(0.09), 0.08, 0.15, 'bp', 1000);
+    return fadeEdges(normalize(out, 0.95), 32, 600);
+  },
+  gunLobber(rng) {
+    const n = len(1.1);
+    const out = z(n);
+    sweep(out, 150, 50, 0.05, 1, 0.4);
+    noiseBand(out, rng, 0, 0.01, 0.6, 'hp', 800);
+    // whoosh: noise swept upward through a band-pass
+    const w = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      w[i] *= Math.min(1, t / 0.08) * Math.exp(-t / 0.35);
+    }
+    const sw = z(n);
+    svf(w, sw, (x) => 300 + 2600 * Math.pow(x, 0.6), 1.2, 'bp');
+    for (let i = 0; i < n; i++) out[i] += sw[i] * 2.2;
+    return fadeEdges(normalize(out, 0.9), 32, 800);
+  },
+  blast(rng) {
+    const n = len(2.4);
+    const out = z(n);
+    // body: noise whose low-pass closes as it dies
+    const body = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      body[i] *= Math.min(1, t / 0.004) * Math.exp(-t / 0.35);
+    }
+    const lowered = z(n);
+    svf(body, lowered, (x) => 80 + 1800 * Math.exp(-x * 9), 0.7, 'lp');
+    for (let i = 0; i < n; i++) out[i] += lowered[i] * 2;
+    sweep(out, 78, 26, 0.25, 1.4, 1.6);
+    noiseBand(out, rng, 0, 0.01, 1.2, 'hp', 600);
+    // rumble
+    const rum = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      rum[i] *= Math.min(1, t / 0.05) * Math.exp(-t / 0.9);
+    }
+    lp1(rum, 140, { loop: false, passes: 2 });
+    for (let i = 0; i < n; i++) out[i] += rum[i] * 5;
+    // debris: scattered ticks and a few clinks
+    const deb = z(n);
+    for (let k = 0; k < 36; k++) {
+      const t = Math.min(2.1, 0.25 - Math.log(1 - rng.next() * 0.999) * 0.5);
+      addBurst(deb, Math.floor(t * R.sr), 0.002 + rng.next() * 0.004, rng.next() * 0.4 * (1 - t / 2.4), rng);
+    }
+    filter(deb, out, biquad('hp', 1800, 0.7), { gain: 0.8, add: true, loop: false });
+    for (let k = 0; k < 4; k++) addMode(out, Math.floor((0.3 + rng.next() * 1.4) * R.sr), 500 + rng.next() * 2000, 0.04, 0.06);
+    return fadeEdges(normalize(out, 0.95), 16, 2000);
+  },
+  thwack(rng) {
+    const out = z(len(0.22));
+    noiseBand(out, rng, 0, 0.008, 1, 'lp', 2200);
+    sweep(out, 190, 110, 0.015, 1, 0.12);
+    addMode(out, 0, 420 + rng.next() * 80, 0.02, 0.5);
+    addMode(out, 0, 780 + rng.next() * 100, 0.012, 0.2);
+    return fadeEdges(normalize(out, 0.9));
+  },
+  bodyHit(rng) {
+    const out = z(len(0.25));
+    sweep(out, 150, 70, 0.03, 1, 0.15);
+    noiseBand(out, rng, 0, 0.02, 0.6, 'lp', 800);
+    addMode(out, 0, 240 + rng.next() * 40, 0.02, 0.3);
+    return fadeEdges(normalize(out, 0.8));
+  },
+  impact(rng) {
+    const out = z(len(0.15));
+    noiseBand(out, rng, 0, 0.004, 1, 'bp', 2800, 1);
+    noiseBand(out, rng, 0, 0.02, 0.5, 'lp', 600);
+    sweep(out, 220, 110, 0.02, 0.1, 0.08);
+    return fadeEdges(normalize(out, 0.7));
+  },
+  ricochet(rng) {
+    const n = len(0.5);
+    const out = z(n);
+    const f0 = 3600 + rng.next() * 600;
+    const f1 = 1300 + rng.next() * 300;
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      ph += (TAU * (f1 + (f0 - f1) * Math.exp(-t / 0.12))) / R.sr;
+      out[i] = Math.sin(ph) * 0.6 * Math.min(1, t / 0.003) * Math.exp(-t / 0.12);
+    }
+    noiseBand(out, rng, 0, 0.003, 0.8, 'hp', 2000);
+    return fadeEdges(normalize(out, 0.7), 16, 600);
+  },
+  whiz(rng) {
+    const n = len(0.35);
+    const w = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const s = Math.sin((Math.PI * i) / n);
+      w[i] *= s * s;
+    }
+    const out = z(n);
+    svf(w, out, (x) => 3800 - 2200 * x, 3, 'bp');
+    return fadeEdges(normalize(out, 0.7), 64, 400);
+  },
+  reloadA(rng) {
+    const out = z(len(0.16));
+    addMode(out, 0, 1900, 0.006, 0.6);
+    addMode(out, 0, 900, 0.01, 0.5);
+    noiseBand(out, rng, 0, 0.002, 0.6, 'hp', 3000);
+    addMode(out, len(0.07), 1500, 0.004, 0.3);
+    return fadeEdges(normalize(out, 0.7));
+  },
+  reloadB(rng) {
+    const out = z(len(0.3));
+    sweep(out, 200, 120, 0.01, 0.6, 0.08);
+    addMode(out, len(0.1), 2400, 0.004, 0.5);
+    addMode(out, len(0.1), 1100, 0.008, 0.4);
+    noiseBand(out, rng, len(0.2), 0.03, 0.4, 'bp', 1500);
+    addMode(out, len(0.22), 2100, 0.004, 0.4);
+    addMode(out, len(0.22), 950, 0.01, 0.4);
+    return fadeEdges(normalize(out, 0.7));
+  },
+  emptyClick(rng) {
+    const out = z(len(0.08));
+    addMode(out, 0, 2600, 0.003, 0.6);
+    addMode(out, 0, 1300, 0.006, 0.4);
+    noiseBand(out, rng, 0, 0.001, 0.4, 'hp', 3000);
+    return fadeEdges(normalize(out, 0.6), 4, 200);
+  },
 };
 
 
@@ -577,10 +742,15 @@ const SHOTS = {
 const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tail']);
 
 // Made after the bank is playable: ambience beds and calls, the siren.
-const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh']);
+const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
+  'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
+  'reloadA', 'reloadB', 'emptyClick']);
 
 // variants: how many copies of each one-shot to make
-const SHOT_VARIANTS = { thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2 };
+const SHOT_VARIANTS = {
+  thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2,
+  gunPistol: 2, gunSmg: 2, blast: 2, thwack: 2, bodyHit: 2, impact: 2, ricochet: 2, whiz: 2,
+};
 
 // Stereo impulse response of a street: a few early wall reflections and
 // a short darkening tail. Built at the context's own rate.

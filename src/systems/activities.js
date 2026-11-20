@@ -1,10 +1,11 @@
 // Races, sky courses and timed deliveries: start zones, countdown,
-// checkpoints, timing in fixed steps, medals and prize money.
+// checkpoints, timing in fixed steps, medals and points.
 // Drawing goes through src/render/markers.js (only when game.scene
 // exists) and a small DOM panel (only when `document` exists), so the
 // logic runs in node tests.
 import { buildCourses } from '../world/courses.js';
 import { createMarkers } from '../render/markers.js';
+import { racePoints } from './score.js';
 
 export const STILL_SPEED = 2; // m/s: slower than this in a start zone offers the race
 export const OFFER_HIDE_SPEED = 6; // m/s: faster than this withdraws the offer
@@ -15,7 +16,6 @@ export const STRAY_TIME = 10; // ...for this long abandons the run
 export const RESULT_TIME = 10; // result card hides itself after this
 export const START_RADIUS = { street: 9, boat: 14, sky: 12, delivery: 9 };
 export const MEDALS = ['bronze', 'silver', 'gold'];
-const MAX_MONEY = 99999999;
 const KIND_NAMES = { car: 'a car', boat: 'a boat', plane: 'a plane', heli: 'a helicopter' };
 const MAP_COLORS = { street: '#e2733a', boat: '#45c7dc', sky: '#ffcf5a', delivery: '#8bd66f' };
 
@@ -28,14 +28,6 @@ export function medalFor(course, time) {
   if (time <= t.silver) return 'silver';
   if (time <= t.bronze) return 'bronze';
   return null;
-}
-
-// Money paid for earning `medal` when `prev` was the best so far: only
-// the improvement is paid, so each medal's prize is earned once.
-export function payoutFor(course, prev, medal) {
-  if (rank(medal) <= rank(prev)) return 0;
-  const before = prev ? course.reward[prev] : 0;
-  return Math.max(0, course.reward[medal] - before);
 }
 
 export function needsText(kinds) {
@@ -169,16 +161,21 @@ export function createActivities(game, uiRoot = null) {
     const p = progress();
     const prev = p.medals[course.id] || null;
     const medal = medalFor(course, time);
-    const paid = payoutFor(course, prev, medal);
     const oldBest = p.bestTimes[course.id];
     const newBest = !(oldBest > 0) || time < oldBest;
     if (newBest) p.bestTimes[course.id] = time;
     if (rank(medal) > rank(prev)) p.medals[course.id] = medal;
     p.stats.races = (p.stats.races || 0) + 1;
-    p.money = Math.min(MAX_MONEY, p.money + paid);
-    result = { id: course.id, name: course.name, time, medal, paid, best: p.bestTimes[course.id], newBest, prev };
+    // Points: the placement plus a bonus for a new best time, every run.
+    const points = racePoints(medal, newBest);
+    const sc = game.score;
+    if (sc) {
+      sc.add(points, course.name + (medal ? ': ' + medal : ': finished'), game.player.x, game.player.z, true);
+      sc.recordCourse(course.id, points);
+    }
+    result = { id: course.id, name: course.name, time, medal, points, best: p.bestTimes[course.id], newBest, prev };
     resultTimer = RESULT_TIME;
-    events.emit('reward', paid, course.name + (medal ? ': ' + medal : ': finished'));
+    events.emit('reward', points, course.name + (medal ? ': ' + medal : ': finished'));
     events.emit('progress');
     endRun();
     if (ui) ui.showResult(result, course);
@@ -593,8 +590,8 @@ function createPanel(uiRoot, handlers) {
     m.textContent = r.medal ? r.medal + ' medal' : 'No medal';
     if (r.medal) m.style.background = MEDAL_BG[r.medal];
     el('div', 'rw-act-line', card).textContent = r.newBest ? 'New best time!' : 'Best: ' + formatTime(r.best);
-    el('div', 'rw-act-line', card).textContent = r.paid > 0 ? 'Prize: +$' + r.paid.toLocaleString('en-US')
-      : r.medal ? 'Already earned: beat it for a better medal' : 'Gold in ' + formatShort(course.medalTimes.gold);
+    el('div', 'rw-act-line', card).textContent = 'Score: +' + r.points.toLocaleString('en-US')
+      + (r.medal === 'gold' ? '' : '  (gold in ' + formatShort(course.medalTimes.gold) + ')');
     el('div', 'rw-act-tap', card).textContent = 'Tap to continue';
     card.classList.remove('rw-act-off');
   }

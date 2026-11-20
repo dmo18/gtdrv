@@ -80,8 +80,99 @@ export function createPersonMesh({ shirt, trousers, skin, hair } = {}) {
   const armL = limb(body, 0, SHOULDER_Y, -0.29, [[G.upperArm, mShirt], [G.forearm, mSkin], [G.hand, mSkin]]);
   const armR = limb(body, 0, SHOULDER_Y, 0.29, [[G.upperArm, mShirt], [G.forearm, mSkin], [G.hand, mSkin]]);
 
-  root.userData.person = { body, torso, head, legL, legR, armL, armR, amp: 0 };
+  root.userData.person = { body, torso, head, legL, legR, armL, armR, amp: 0, gun: null, gunId: '', raise: 0, flash: 0, fade: 0, op: 1, own: null };
   return root;
+}
+
+// ---- held weapon, hit flash and fade (combat) -----------------------------
+// The weapon is one small box mesh on the right hand whose geometry is
+// swapped per weapon id (shared, made once). Hits flash the whole person
+// white (never red); a person who is out fades away. Materials are
+// cloned per mesh the first time they are needed, because the cached
+// ones are shared by everybody.
+const GUN_DIMS = {
+  wrench: [0.05, 0.42, 0.05, 0x8a8f96],
+  pistol: [0.06, 0.2, 0.09, 0x2a2c30],
+  smg: [0.07, 0.34, 0.11, 0x2a2c30],
+  scatter: [0.07, 0.72, 0.09, 0x4a3524],
+  lobber: [0.14, 0.78, 0.14, 0x5d6b3a],
+  fizz: [0.09, 0.14, 0.09, 0xd6a436],
+};
+const GUN_GEO = {};
+function gunGeo(id) {
+  let g = GUN_GEO[id];
+  if (!g) {
+    const d = GUN_DIMS[id];
+    // Along the arm (local -y) from the palm, so a raised arm aims it.
+    g = GUN_GEO[id] = new THREE.BoxGeometry(d[0], d[1], d[2]).translate(0, -0.64 - d[1] / 2 + 0.04, 0);
+  }
+  return g;
+}
+const GUN_MAT = {};
+function gunMat(id) {
+  return GUN_MAT[id] || (GUN_MAT[id] = new THREE.MeshLambertMaterial({ color: GUN_DIMS[id][3] }));
+}
+
+function ownMaterials(mesh, P) {
+  if (P.own) return P.own;
+  const list = [];
+  mesh.traverse((o) => {
+    if (o.isMesh && o !== P.gun) {
+      o.material = o.material.clone();
+      list.push(o.material);
+    }
+  });
+  P.own = list;
+  return list;
+}
+
+function applyArms(mesh, P, w) {
+  const arms = w.arms;
+  const alive = !w.life || w.life === 'ok' || w.life === 'getup';
+  const id = arms && arms.weapon && GUN_DIMS[arms.weapon] ? arms.weapon : '';
+  if (id && alive) {
+    if (!P.gun) {
+      P.gun = new THREE.Mesh(gunGeo(id), gunMat(id));
+      P.armR.add(P.gun);
+    }
+    if (P.gunId !== id) {
+      P.gun.geometry = gunGeo(id);
+      P.gun.material = gunMat(id);
+      P.gunId = id;
+    }
+    P.gun.visible = true;
+  } else if (P.gun) {
+    P.gun.visible = false;
+  }
+  // Raise the arm to aim while a gun is out and fighting.
+  const gun = id && id !== 'wrench' && id !== 'fizz';
+  const aiming = gun && alive && (arms.cool > 0.04 || w.aiming || w.firing || w.state === 'engage');
+  P.raise += ((aiming ? 1 : 0) - P.raise) * 0.3;
+  if (P.raise > 0.01) {
+    P.armR.rotation.z = P.armR.rotation.z * (1 - P.raise) + 1.5 * P.raise;
+    P.armR.rotation.x *= 1 - P.raise;
+    P.torso.rotation.z *= 1 - P.raise;
+  }
+}
+
+function applyLook(mesh, P, w) {
+  const hit = w.hitT > 0 ? Math.min(1, w.hitT / 0.15) : 0;
+  const fade = w.fade > 0 ? Math.min(1, w.fade) : 0;
+  const flash = hit > 0 ? hit : 0;
+  if (flash === P.flash && (1 - fade) === P.op) return;
+  const mats = ownMaterials(mesh, P);
+  for (let i = 0; i < mats.length; i++) {
+    const m = mats[i];
+    m.emissive.setScalar(flash * 0.7);
+    if (fade !== P.fade) {
+      m.transparent = fade > 0;
+      m.opacity = 1 - fade;
+      m.depthWrite = fade < 0.5;
+    }
+  }
+  P.fade = fade;
+  P.flash = flash;
+  P.op = 1 - fade;
 }
 
 // Place and animate. `w` is a walker (see entities/onfoot.js).
@@ -108,4 +199,15 @@ export function updatePersonMesh(mesh, w, alpha = 1) {
   P.body.position.y = Math.abs(Math.cos(w.stride)) * 0.05 * a;
   P.torso.rotation.z = -0.12 * a * a; // lean into a run
   P.head.rotation.z = 0.08 * a * a;
+  if (w.arms) applyArms(mesh, P, w);
+  if (w.life === 'down' || w.life === 'out') {
+    // limbs flung out while lying down
+    P.armL.rotation.x = 0.9;
+    P.armR.rotation.x = -0.9;
+    P.legL.rotation.x = 0.15;
+    P.legR.rotation.x = -0.15;
+  } else if (P.legL.rotation.x !== 0) {
+    P.legL.rotation.x = P.legR.rotation.x = 0;
+  }
+  if (w.hitT > 0 || P.flash > 0 || w.fade > 0 || P.op < 1) applyLook(mesh, P, w);
 }

@@ -15,6 +15,7 @@
 
 import { createRng } from '../core/rng.js';
 import { createBank } from '../audio/banks.js';
+import { WEAPONS } from '../core/weapons.js';
 import { ENGINES, engineFor, isJet, pitchFor, pointsFor } from '../audio/engines.js';
 import { createVoices } from '../audio/voices.js';
 
@@ -869,6 +870,163 @@ export function createAudio(game) {
     spatial(x, z, HEARING);
     voices.play(bus.effects, sp.gain * 0.7, sp.pan, (v, t) => v.add('splash', t, 1, 0.9 + 0.2 * rng.next()));
   }
+
+  // ---- combat sounds (docs/COMBAT.md events) ----
+  // Weapon sounds are single shots; rattle comes from the fire rate.
+  // Everything is positioned: distance falloff, stereo pan, and a delay
+  // for sound travel. Quiet detail sounds give way when voices run low.
+  const GUNS = {
+    pistol: { buf: 'gunPistol', n: 2, g: 0.8, range: 160, gap: 0.03, last: -9 },
+    smg: { buf: 'gunSmg', n: 2, g: 0.62, range: 160, gap: 0.05, last: -9 },
+    scatter: { buf: 'gunScatter', n: 1, g: 1, range: 220, gap: 0.2, last: -9 },
+    lobber: { buf: 'gunLobber', n: 1, g: 0.9, range: 220, gap: 0.2, last: -9 },
+  };
+  const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9 };
+  const lowPriority = () => voices.count >= 6;
+  const SOUND_V = 340;
+  function combatGate(key, gap) {
+    const now = ctx.currentTime;
+    if (now - lastC[key] < gap) return false;
+    lastC[key] = now;
+    return true;
+  }
+  function ownShot(shooter) {
+    const pl = game.player;
+    return !!pl && (shooter === pl.walker || shooter === pl);
+  }
+  function onShot(e) {
+    if (!ready || !e) return;
+    const w = e.weapon;
+    const x = fin(e.x);
+    const z = fin(e.z);
+    if (w === 'wrench') {
+      if (e.hitKind === 'none' && combatGate('melee', 0.1)) {
+        spatial(x, z, 50);
+        voices.play(bus.effects, sp.gain * 0.35, sp.pan, (v, t) => v.add(`whoosh${Math.floor(rng.next() * 2)}`, t, 1, 1.5 + rng.next() * 0.3));
+      }
+      return;
+    }
+    if (w === 'fizz') {
+      spatial(x, z, 60);
+      voices.play(bus.effects, sp.gain * 0.5, sp.pan, (v, t) => v.add(`pop${Math.floor(rng.next() * 3)}`, t, 1, 0.8 + rng.next() * 0.2));
+      return;
+    }
+    const def = GUNS[w];
+    if (!def) return;
+    const own = ownShot(e.shooter);
+    const now = ctx.currentTime;
+    if (now - def.last >= def.gap && (own || !lowPriority())) {
+      def.last = now;
+      spatial(x, z, def.range);
+      const delay = own ? 0 : Math.min(0.35, sp.d / SOUND_V);
+      const name = def.n > 1 ? `${def.buf}${Math.floor(rng.next() * def.n)}` : def.buf;
+      voices.play(bus.effects, sp.gain * def.g, sp.pan, (v, t) => v.add(name, t + delay, 1, 0.95 + rng.next() * 0.1));
+    }
+    if (w === 'lobber') return;
+    // A bullet passing close to the player (not their own).
+    const hx = fin(e.hx, x);
+    const hz = fin(e.hz, z);
+    const pl = game.player;
+    if (!own && pl && !lowPriority()) {
+      const sx = hx - x;
+      const sz = hz - z;
+      const l2 = sx * sx + sz * sz;
+      if (l2 > 4) {
+        const t = clamp(((fin(pl.x) - x) * sx + (fin(pl.z) - z) * sz) / l2, 0, 1);
+        const cx = x + sx * t;
+        const cz = z + sz * t;
+        const dd = Math.hypot(cx - fin(pl.x), cz - fin(pl.z));
+        if (dd < 3.5 && t > 0.02 && combatGate('whiz', 0.08)) {
+          spatial(cx, cz, 60);
+          voices.play(bus.effects, 0.6 * (1 - dd / 3.5), sp.pan, (v, tt) => v.add(`whiz${Math.floor(rng.next() * 2)}`, tt, 1, 0.9 + rng.next() * 0.3));
+        }
+      }
+    }
+    // Strikes on walls and ground (people and craft sound from `hit`).
+    if ((e.hitKind === 'wall' || e.hitKind === 'ground') && !lowPriority() && combatGate('impact', 0.045)) {
+      spatial(hx, hz, 55);
+      const rico = rng.next() < 0.3;
+      voices.play(bus.effects, sp.gain * (rico ? 0.5 : 0.55), sp.pan, (v, t) => {
+        if (rico) v.add(`ricochet${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.3);
+        else v.add(`impact${Math.floor(rng.next() * 2)}`, t, 1, 0.85 + rng.next() * 0.3);
+      });
+    }
+  }
+  function onHit(e) {
+    if (!ready || !e || !e.target) return;
+    const k = e.kind;
+    if (k !== 'bullet' && k !== 'melee') return;
+    if (lowPriority() && !ownShot(e.source)) return;
+    if (!combatGate('hit', 0.035)) return;
+    const craft = !!(e.target.spec && e.target.hp === undefined);
+    spatial(fin(e.x), fin(e.z), 70);
+    const g = sp.gain;
+    voices.play(bus.effects, g * (k === 'melee' ? 1 : 0.7), sp.pan, (v, t) => {
+      if (k === 'melee') {
+        v.add(`thwack${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.2);
+        if (craft) v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.6, 0.8);
+      } else if (craft) {
+        v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.8, 1.1 + rng.next() * 0.3);
+        if (rng.next() < 0.3) v.add(`ricochet${Math.floor(rng.next() * 2)}`, t + 0.01, 0.5, 1);
+      } else {
+        v.add(`bodyHit${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.25);
+      }
+    });
+  }
+  function onDown(e) {
+    if (!ready || !e || !e.target || (e.target.spec && e.target.hp === undefined)) return;
+    if (lowPriority() || !combatGate('down', 0.08)) return;
+    spatial(fin(e.target.x), fin(e.target.z), 60);
+    voices.play(bus.effects, sp.gain * 0.6, sp.pan, (v, t) => v.add(`thud${Math.floor(rng.next() * 3)}`, t + 0.05, 1, 1.1));
+  }
+  function onExplosion(e) {
+    if (!ready || !e) return;
+    spatial(fin(e.x), fin(e.z), 400);
+    const k = clamp(fin(e.radius, 8) / 8, 0.6, 1.5);
+    const d = sp.d;
+    const g = Math.pow(Math.max(0, 1 - d / 400), 1.3) * (0.3 + 0.7 * Math.min(1, 30 / Math.max(1, d))) * (0.75 + 0.25 * k);
+    if (g < 0.01) return;
+    const delay = Math.min(1.2, d / SOUND_V);
+    const pan = sp.pan * (d < 6 ? d / 6 : 1);
+    const rate = 1.12 - 0.15 * k + rng.next() * 0.08;
+    voices.play(bus.effects, g, pan, (v, t) => {
+      v.add(`blast${Math.floor(rng.next() * 2)}`, t + delay, 1, rate);
+      if (d > 120) v.add('thud0', t + delay, 0.2, 0.6);
+    });
+  }
+  function onBurning(e) {
+    if (!ready || !e || !e.on || !e.craft) return;
+    spatial(fin(e.craft.x), fin(e.craft.z), 90);
+    voices.play(bus.effects, sp.gain * 0.45, sp.pan, (v, t) => v.add('whoosh0', t, 1, 0.55));
+  }
+  function onReload(e) {
+    if (!ready || !e || !e.actor || lowPriority() || !combatGate('reload', 0.05)) return;
+    const def = WEAPONS[e.weapon];
+    if (!def || !def.reload) return;
+    spatial(fin(e.actor.x), fin(e.actor.z), 45);
+    const g = sp.gain * 0.55;
+    const tEnd = Math.max(0.25, def.reload * 0.75);
+    voices.play(bus.effects, g, sp.pan, (v, t) => {
+      v.add('reloadA', t + 0.12, 1, 0.95 + rng.next() * 0.1);
+      v.add('reloadB', t + tEnd, 1, 0.95 + rng.next() * 0.1);
+    });
+  }
+  function onEmpty(e) {
+    if (!ready || !e || !e.actor || lowPriority()) return;
+    spatial(fin(e.actor.x), fin(e.actor.z), 35);
+    voices.play(bus.effects, sp.gain * 0.35, sp.pan, (v, t) => v.add('emptyClick', t + 0.1, 1, 1));
+  }
+  function onSwitch(e) {
+    if (!ready || !e || !e.actor || !ownShot(e.actor)) return;
+    voices.play(bus.effects, 0.3, 0, (v, t) => v.add('reloadA', t, 1, 1.25));
+  }
+  function onPlayerDown() {
+    if (!ready) return;
+    voices.play(bus.effects, 0.7, 0, (v, t) => {
+      v.add('thud0', t, 1, 0.8);
+      v.add('bodyHit0', t + 0.02, 0.8, 0.8);
+    });
+  }
   function guard(fn) {
     return (a, b, c) => {
       try {
@@ -1066,6 +1224,15 @@ export function createAudio(game) {
         ev.on('fail', guard(() => uiShot('fail', 0.6))),
         ev.on('checkpoint', guard(() => uiShot('checkpoint', 0.5))),
         ev.on('splash', guard(onSplash)),
+        ev.on('shot', guard(onShot)),
+        ev.on('hit', guard(onHit)),
+        ev.on('down', guard(onDown)),
+        ev.on('explosion', guard(onExplosion)),
+        ev.on('burning', guard(onBurning)),
+        ev.on('reload', guard(onReload)),
+        ev.on('empty', guard(onEmpty)),
+        ev.on('weaponSwitch', guard(onSwitch)),
+        ev.on('playerDown', guard(onPlayerDown)),
         ev.on('siren', guard((on) => {
           sirenOn = !!on;
         })),

@@ -1,4 +1,4 @@
-// Browser test of the pause menu and the economy, in headless Chromium.
+// Browser test of the pause menu, scores and saving, in headless Chromium.
 // Bundles a small harness with esbuild, serves it, drives it with touch.
 // Screenshots of every tab land in dist/menu-test/. Exits non-zero on failure.
 import { build } from 'esbuild';
@@ -30,6 +30,7 @@ await build({
       import { createEvents } from './src/core/events.js';
       import { defaultProgress } from './src/core/save.js';
       import { createEconomy } from './src/systems/economy.js';
+      import { createScore } from './src/systems/score.js';
       import { createMenu } from './src/ui/menu.js';
       import { getHandlingMode } from './src/entities/vehicle.js';
       const root = document.createElement('div');
@@ -55,8 +56,9 @@ await build({
         activities: { courses: [{ id: 'race_harbour', name: 'Harbour Dash', type: 'race' }] },
       };
       const economy = createEconomy(game, window.localStorage);
+      game.score = createScore(game);
       const menu = createMenu(root, game, economy);
-      window.rw = { game, economy, menu, log, getHandlingMode };
+      window.rw = { game, economy, menu, log, getHandlingMode, score: game.score };
     `,
   },
   bundle: true, platform: 'browser', format: 'esm', outfile: path.join(out, 'harness.js'),
@@ -90,9 +92,16 @@ try {
 
   await ctx.addInitScript(() => {
     // Runs on every new document, after the old page has saved on its way out.
+    if (window.name === 'v1') {
+      window.name = '';
+      localStorage.setItem('rustwater.save.v1', JSON.stringify({
+        money: 4321, owned: ['jet'], medals: { race_harbour: 'gold', seen_docks: 'bronze', hint_car: 'bronze' },
+        bestTimes: { race_harbour: 70.5 }, stats: { distance: 9000, flights: 3, races: 4 }, settings: { quality: 0.75, handling: 'sim', steering: 'slider' },
+      }));
+    }
     if (window.name === 'tamper') {
       window.name = '';
-      localStorage.setItem('rustwater.save.v1', '{"money":"1e999","owned":["jet","<img src=x onerror=alert(1)>"],"__proto__":{"polluted":1},"medals":{"<img src=x onerror=alert(2)>":"gold","bad_x":"<b>x</b>"}}');
+      localStorage.setItem('rustwater.save.v1', '{"money":"1e999","owned":["jet","<img src=x onerror=alert(1)>"],"__proto__":{"polluted":1},"score":{"total":99999},"medals":{"<img src=x onerror=alert(2)>":"gold","bad_x":"<b>x</b>"}}');
     }
   });
   const load = async () => {
@@ -147,7 +156,7 @@ try {
 
   // Every tab renders.
   const shots = async (size) => {
-    for (const [name, file] of [['Resume', 'resume'], ['Showroom', 'showroom'], ['Records', 'records'], ['Settings', 'settings'], ['How to play', 'howto']]) {
+    for (const [name, file] of [['Resume', 'resume'], ['Scores', 'scores'], ['Records', 'records'], ['Settings', 'settings'], ['How to play', 'howto']]) {
       await tab(name);
       const text = await page.locator('.rw-menu-body').innerText();
       check(`tab ${name} has content`, text.length > 20);
@@ -163,20 +172,38 @@ try {
     g.progress.stats.distance = 12345;
     window.rw.game.events.emit('progress');
   });
+  await ev(() => {
+    const sc = window.rw.game.progress.score;
+    sc.sessionBest = 4200;
+    sc.best.combo = 3.5;
+    sc.best.jump = 41.2;
+    sc.best.airtime = 2.4;
+    sc.best.drift = 800;
+    sc.best.nearMiss = 4;
+    sc.courses.race_harbour = 3500;
+    sc.missions.m1 = { best: 5200, time: 181.5, done: true };
+    window.rw.score.add(2000, 'test award', 0, 0, true);
+  });
   await shots('915x412');
+  check('no Showroom tab', (await page.getByRole('tab', { name: 'Showroom' }).count()) === 0);
+  check('five tabs', (await page.getByRole('tab').count()) === 5);
+  await tab('Scores');
+  const sco = await page.locator('.rw-menu-body').innerText();
+  check('scores show nice name', sco.includes('Harbour Dash'), sco);
+  check('scores prettify ids', sco.includes('Air Loop'), sco);
+  check('scores total', sco.includes('2,000'), sco);
+  check('scores best session and combo', sco.includes('4,200') && sco.includes('x3.5'), sco);
+  check('scores best time', sco.includes('1:23.4'), sco);
+  check('scores course high score', sco.includes('3,500 pts'), sco);
+  check('scores mission', sco.includes('5,200'), sco);
+  check('medals as achievements', /achievements/i.test(sco) && sco.includes('1 gold, 1 silver'), sco);
+  check('scores hide flags', !/hint|seen/i.test(sco), sco);
+  check('header shows points', (await page.locator('.rw-menu-points').innerText()) === '2,000 pts');
+  check('no money or buy anywhere', (await page.locator('.rw-menu button', { hasText: /buy|\$/i }).count()) === 0);
   await tab('Records');
   const rec = await page.locator('.rw-menu-body').innerText();
-  check('records show nice name', rec.includes('Harbour Dash'), rec);
-  check('records prettify ids', rec.includes('Air Loop'), rec);
   check('records distance km', rec.includes('12.3 km'), rec);
-
-  // Poor: cannot buy.
-  await tab('Showroom');
-  const yachtBtn = page.locator('[data-buy="yacht"]');
-  check('too poor is disabled', await yachtBtn.isDisabled());
-  check('too poor text', /Need \$6,\d+ more/.test(await yachtBtn.innerText()), await yachtBtn.innerText());
-  check('buy refused', (await ev(() => window.rw.economy.buy('jet'))) === false);
-  check('money unchanged', (await progress()).money === 250);
+  check('economy has no buy', await ev(() => window.rw.economy.buy === undefined));
 
   // Resume button unpauses.
   await tab('Resume');
@@ -185,26 +212,13 @@ try {
   check('resume unpauses', (await ev(() => window.rw.game.paused)) === false);
   check('touch back', (await ev(() => window.rw.log.touchVisible)) === true);
 
-  // Rich: buy persists across reload.
-  await ev(() => { window.rw.game.progress.money = 10000; window.rw.economy.save(); });
+  // Scores persist across reload.
+  await ev(() => { window.rw.economy.save(); });
   await load();
-  check('money restored', (await progress()).money === 10000);
-  await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
-  await tab('Showroom');
-  const purchases = await ev(() => { window.rw.log.bought = 0; window.rw.game.events.on('purchase', () => window.rw.log.bought++); });
-  void purchases;
-  await page.locator('[data-buy="jet"]').tap();
   let pr = await progress();
-  check('buy deducts', pr.money === 1000, String(pr.money));
-  check('buy owns', pr.owned.includes('jet'));
-  check('purchase event', (await ev(() => window.rw.log.bought)) === 1);
-  check('owned label', (await page.locator('[data-buy="jet"]').innerText()) === 'Owned');
-  check('owned disabled', await page.locator('[data-buy="jet"]').isDisabled());
-  check('double buy refused', (await ev(() => window.rw.economy.buy('jet'))) === false);
-  await page.screenshot({ path: path.join(out, 'showroom-bought-915x412.png') });
-  await load();
-  pr = await progress();
-  check('purchase persists', pr.owned.includes('jet') && pr.money === 1000, JSON.stringify(pr));
+  check('score persists', pr.score.total === 2000 && pr.score.sessionBest === 4200 && pr.score.courses.race_harbour === 3500, JSON.stringify(pr.score));
+  check('live score restored', (await ev(() => window.rw.score.total)) === 2000);
+  check('save is version 2 without money', (await stored()).version === 2 && (await stored()).money === undefined && (await stored()).owned === undefined);
 
   // Settings persist.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
@@ -273,30 +287,38 @@ try {
   // Reset needs two steps.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
-  await ev(() => { window.refP = window.rw.game.progress; window.refO = window.rw.game.progress.owned; });
+  await ev(() => { window.refP = window.rw.game.progress; window.refO = window.rw.game.progress.score; });
   await page.locator('[data-role="reset"]').tap();
-  check('reset first step keeps data', (await progress()).owned.includes('jet'));
+  check('reset first step keeps data', (await progress()).score.total === 2000);
   await page.screenshot({ path: path.join(out, 'settings-confirm-915x412.png') });
   await page.locator('[data-role="reset-confirm"]').tap();
   pr = await progress();
-  check('reset clears', pr.money === 250 && pr.owned.length === 0 && pr.settings.quality === 1 && pr.settings.police === true
+  check('reset clears', pr.score.total === 0 && pr.score.sessionBest === 0 && Object.keys(pr.score.courses).length === 0 && pr.settings.quality === 1 && pr.settings.police === true
     && pr.settings.steering === 'wheel' && pr.settings.steerSensitivity === 1 && pr.settings.handling === 'arcade', JSON.stringify(pr));
   check('reset re-applies arcade handling', (await ev(() => window.rw.getHandlingMode())) === 'arcade');
   check('reset re-applies steering', JSON.stringify(await lastSteer()) === '["wheel",1]');
   const sv = await stored();
-  check('reset saved', sv && sv.money === 250 && sv.owned.length === 0);
-  check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.owned === window.refO));
+  check('reset saved', sv && sv.version === 2 && sv.score.total === 0);
+  check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.score === window.refO));
+
+  // An old version 1 save migrates in the browser: nothing lost.
+  await page.evaluate(() => { window.name = 'v1'; });
+  await load();
+  pr = await progress();
+  check('v1 migrates: total money x 10', pr.score.total === 43210 && pr.version === 2, JSON.stringify(pr.score));
+  check('v1 migrates: nothing lost', pr.medals.race_harbour === 'gold' && pr.medals.seen_docks === 'bronze' && pr.medals.hint_car === 'bronze'
+    && pr.bestTimes.race_harbour === 70.5 && pr.stats.races === 4 && pr.settings.quality === 0.75 && pr.settings.handling === 'sim' && pr.settings.steering === 'slider', JSON.stringify(pr));
 
   // Tampered storage.
   await page.evaluate(() => { window.name = 'tamper'; });
   await load();
   pr = await progress();
-  check('tamper: money safe', pr.money === 250, String(pr.money));
-  check('tamper: owned filtered', JSON.stringify(pr.owned) === '["jet"]', JSON.stringify(pr.owned));
+  check('tamper: score safe', pr.score.total === 0 && pr.money === undefined, JSON.stringify(pr.score));
+  check('tamper: owned gone', pr.owned === undefined);
   check('tamper: medals clean', Object.keys(pr.medals).length === 0);
   check('tamper: no pollution', await ev(() => ({}).polluted === undefined));
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
-  for (const n of ['Showroom', 'Records', 'Settings']) await tab(n);
+  for (const n of ['Scores', 'Records', 'Settings']) await tab(n);
   check('tamper: nothing executed', await ev(() => !document.querySelector('.rw-menu img')));
   await page.waitForTimeout(200);
 
@@ -306,7 +328,7 @@ try {
   // Layout: nothing wider than the screen, content scrolls instead of being cut.
   for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }]) {
     await page.setViewportSize(size);
-    for (const n of ['Resume', 'Showroom', 'Records', 'Settings', 'How to play']) {
+    for (const n of ['Resume', 'Scores', 'Records', 'Settings', 'How to play']) {
       await tab(n);
       const m = await ev(() => {
         const b = document.querySelector('.rw-menu-body');

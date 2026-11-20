@@ -8,8 +8,12 @@
 // Look:    lookX / lookY accumulate camera drag in pixels; the camera
 //          reads them and sets them back to 0.
 // Buttons: 'enter' (get in/out), 'attack', 'horn', 'camera', 'map',
-//          'pause', 'weapon', 'jump'. Use pressed(name) for "was tapped
-//          this step" and held(name) for "is down now".
+//          'pause', 'weapon', 'jump', and for combat 'fire' (held =
+//          automatic), 'lock' (tap toggles lock-on), 'swap' (next weapon),
+//          'reload'. Use pressed(name) for "was tapped this step" and
+//          held(name) for "is down now".
+// Keyboard (desktop testing): F/Enter enter, G fire, T lock, X swap,
+//          R reload.
 //
 // `steerMode: 'proportional'` tells stepVehicle that steer is a share of
 // the speed-dependent lock (the player); AI controls leave it out.
@@ -75,7 +79,9 @@ export function createInput() {
 export function attachKeyboard(input, target = window) {
   const src = input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false, moveX: 0, moveY: 0, sprint: false, pitch: 0 });
   const down = new Set();
-  const buttons = { KeyF: 'enter', Enter: 'enter', KeyE: 'attack', KeyH: 'horn', KeyC: 'camera', KeyM: 'map', Escape: 'pause', KeyQ: 'weapon', KeyJ: 'jump' };
+  const buttons = { KeyF: 'enter', Enter: 'enter', KeyE: 'attack', KeyH: 'horn', KeyC: 'camera', KeyM: 'map', Escape: 'pause', KeyQ: 'weapon', KeyJ: 'jump',
+    // Combat (F stays 'enter'): G fire, T lock-on, X swap, R reload.
+    KeyG: 'fire', KeyT: 'lock', KeyX: 'swap', KeyR: 'reload' };
   const refresh = () => {
     const l = down.has('ArrowLeft') || down.has('KeyA');
     const r = down.has('ArrowRight') || down.has('KeyD');

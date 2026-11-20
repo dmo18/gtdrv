@@ -41,6 +41,18 @@ const ICONS = {
   brake: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   left: '<path d="M15 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7" opacity="0.5"/>',
   right: '<path d="M9 5l7 7-7 7"/><path d="M4 5l7 7-7 7" opacity="0.5"/>',
+  fire: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1.2"/>',
+  lock: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/>',
+  swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+};
+// Weapon icons (24x24, original line drawings).
+export const WEAPON_ICONS = {
+  wrench: '<path d="M14.5 4.5a4 4 0 0 0-4.8 5.3L4 15.5 6.5 18l5.7-5.7a4 4 0 0 0 5.3-4.8l-2.4 2.4-2.3-.5-.5-2.3z"/>',
+  pistol: '<path d="M3 8h17v4h-8l-1 2h-3l-1 5H4l1-7H3z"/><path d="M12 12v-1"/>',
+  smg: '<path d="M2 9h19v3h-6v2h-3l-1 5H8l1-5H6l-1-2H2z"/><path d="M14 14l1 4h-2"/>',
+  scatter: '<path d="M2 10h14l5-1v4l-5-1H8l-2 6H3l2-6H2z"/><path d="M10 10v2"/>',
+  lobber: '<rect x="3" y="9" width="15" height="5" rx="2"/><path d="M18 10l3-1v5l-3-1M7 14v4M12 14v3"/>',
+  fizz: '<rect x="7" y="7" width="10" height="13" rx="2"/><path d="M9 7V5h6v2M10 4l1-2M7 11h10"/>',
 };
 
 // The steering wheel: an original three-spoke design drawn here.
@@ -425,6 +437,45 @@ export function createTouchControls(root, input, opts = {}) {
   gate(makeButton('rw-run', 'Run', 'run', 'RUN',
     () => { src.sprint = true; }, () => { src.sprint = false; }, false), 'foot');
 
+  // ----- combat (docs/COMBAT.md "Touch controls", "Drive-by") -----
+  // FIRE: hold for automatic fire. The same finger may slide to aim:
+  // moving it feeds the camera drag like the look area does.
+  function fireButton(cls, label, text) {
+    const b = el('button', 'rw-btn rw-cmb ' + cls, layer);
+    b.type = 'button';
+    b.tabIndex = -1;
+    b.setAttribute('aria-label', label);
+    b.innerHTML = svg('fire') + `<span>${text}</span><b class="rw-fire-mag"></b>`;
+    const last = { x: 0, y: 0 };
+    track(b, {
+      down(e) { b.classList.add('rw-down'); vibrate(); last.x = e.clientX; last.y = e.clientY; input.press('fire'); },
+      move(e) {
+        input.lookX += e.clientX - last.x;
+        input.lookY += e.clientY - last.y;
+        last.x = e.clientX;
+        last.y = e.clientY;
+      },
+      up() { b.classList.remove('rw-down'); input.release('fire'); },
+    });
+    return b;
+  }
+  const fireFoot = gate(fireButton('rw-fire', 'Fire', 'FIRE'), 'foot');
+  const fireCar = gate(fireButton('rw-dbfire', 'Drive-by fire', 'FIRE'), 'car', 'boat');
+  const lockBtn = gate(nameButton('rw-cmb rw-lock', 'Lock on', 'lock', 'LOCK', 'lock'), 'foot');
+  const swapBtn = gate(nameButton('rw-cmb rw-swap', 'Swap weapon', 'swap', 'SWAP', 'swap'), 'foot');
+  // The ammo counter: tap to reload early. Shows the weapon too.
+  const ammoBtn = gate(nameButton('rw-cmb rw-ammo', 'Reload', null, '', 'reload'), 'foot', 'car', 'boat');
+  ammoBtn.innerHTML = '<i class="rw-ammo-icon"></i><span class="rw-ammo-txt"><b class="rw-ammo-n">-</b><small class="rw-ammo-of"></small></span>'
+    + '<em class="rw-ammo-name"></em><i class="rw-ammo-bar"><i></i></i>';
+  const ammoIcon = ammoBtn.querySelector('.rw-ammo-icon');
+  const ammoN = ammoBtn.querySelector('.rw-ammo-n');
+  const ammoOf = ammoBtn.querySelector('.rw-ammo-of');
+  const ammoName = ammoBtn.querySelector('.rw-ammo-name');
+  const ammoBar = ammoBtn.querySelector('.rw-ammo-bar i');
+  const fireMags = [fireFoot.querySelector('.rw-fire-mag'), fireCar.querySelector('.rw-fire-mag')];
+  // Last shown values, so per-frame calls only touch the DOM on change.
+  const shown = { weapon: '', mag: -2, max: -2, reload: -1, locked: null, show: null, drive: null };
+
   // ----- both modes -----
   nameButton('rw-pause', 'Pause', 'pause', '', 'pause');
   nameButton('rw-map', 'Map', 'map', '', 'map');
@@ -490,6 +541,50 @@ export function createTouchControls(root, input, opts = {}) {
       return style;
     },
     getSteering: () => ({ style, sensitivity, leftHanded }),
+    // Combat panel state, called each frame by the combat HUD (cheap when
+    // nothing changed). c: { show, weapon (id), name, mag, max (0 = no
+    // magazine), reload (0..1 progress, 0 = not reloading), locked,
+    // drive (drive-by available in this craft) }.
+    setCombat(c) {
+      const show = !!c.show;
+      if (show !== shown.show) {
+        shown.show = show;
+        layer.classList.toggle('rw-nocombat', !show);
+      }
+      const drive = !!c.drive;
+      if (drive !== shown.drive) {
+        shown.drive = drive;
+        layer.classList.toggle('rw-nodrive', !drive);
+      }
+      if (c.weapon !== shown.weapon) {
+        shown.weapon = c.weapon;
+        const ic = WEAPON_ICONS[c.weapon] || ICONS.fire;
+        ammoIcon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>`;
+        swapBtn.querySelector('svg').innerHTML = ic;
+        ammoName.textContent = c.name || '';
+      }
+      const mag = c.max > 0 ? Math.max(0, c.mag | 0) : -1;
+      if (mag !== shown.mag || c.max !== shown.max) {
+        shown.mag = mag;
+        shown.max = c.max;
+        const t = mag < 0 ? '' : String(mag);
+        ammoN.textContent = mag < 0 ? '\u221e' : t;
+        ammoOf.textContent = c.max > 0 ? '/' + c.max : '';
+        for (const m of fireMags) m.textContent = t;
+        ammoBtn.classList.toggle('rw-empty', mag === 0);
+      }
+      const r = c.reload > 0 ? Math.round(Math.min(1, c.reload) * 40) / 40 : 0;
+      if (r !== shown.reload) {
+        shown.reload = r;
+        ammoBtn.classList.toggle('rw-reloading', r > 0);
+        ammoBar.style.transform = `scaleX(${r.toFixed(3)})`;
+      }
+      const locked = !!c.locked;
+      if (locked !== shown.locked) {
+        shown.locked = locked;
+        lockBtn.classList.toggle('rw-on', locked);
+      }
+    },
     setLeftHanded(v) {
       const next = !!v;
       if (next === leftHanded) return;

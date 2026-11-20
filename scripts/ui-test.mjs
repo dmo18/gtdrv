@@ -369,21 +369,22 @@ try {
 
   // ---- HUD (car) ----
   await page.evaluate(() => {
-    rw.hud.update({ mode: 'car', speedKmh: 87.4, health: 80, armor: 40, money: 12345, wanted: 3,
+    rw.hud.update({ mode: 'car', speedKmh: 87.4, health: 80, armor: 40, score: 12345, pending: 450, combo: 2.5, wanted: 3,
       district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null });
     rw.hud.setPrompt('Tap ENTER to get in');
     rw.hud.toast('Welcome to Rustwater', 30);
   });
-  check('money text', (await page.textContent('.rw-money')) === '$12,345');
+  check('score text', (await page.textContent('.rw-score')) === '12,345');
+  check('pending combo text', (await page.textContent('.rw-combo')).replace(/\s+/g, ' ') === '+450 x2.5');
   check('3 wanted badges lit', (await page.locator('.rw-badge.rw-on').count()) === 3);
   check('wanted row visible', await page.locator('.rw-wanted').isVisible());
   check('speed text', (await page.textContent('.rw-speed')).startsWith('87'));
   check('clock text', (await page.textContent('.rw-clock')) === '13:30');
   check('minimap canvas 176', await page.evaluate(() => rw.hud.minimapCanvas.width === 176));
-  await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 0, health: 80, armor: 40, money: 1, wanted: 0,
+  await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 0, health: 80, armor: 40, score: 1, pending: 0, combo: 1, wanted: 0,
     district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null }));
   check('wanted hidden at 0', !(await page.locator('.rw-wanted').isVisible()));
-  await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 87.4, health: 80, armor: 40, money: 12345, wanted: 3,
+  await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 87.4, health: 80, armor: 40, score: 12345, pending: 450, combo: 2.5, wanted: 3,
     district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null }));
   await page.waitForTimeout(3300); // let the district title fade
   await shot('car-915x412.png');
@@ -422,7 +423,7 @@ try {
   check('foot: ENTER held', (await read("rw.input.held('enter')")) === true);
   await up(7);
   await page.evaluate(() => {
-    rw.hud.update({ mode: 'foot', speedKmh: 0, health: 20, armor: 0, money: 12345, wanted: 5,
+    rw.hud.update({ mode: 'foot', speedKmh: 0, health: 20, armor: 0, score: 12345, pending: 450, combo: 2.5, wanted: 5,
       district: 'Saltmarsh Docks', time: 22.25, vehicleHealth: null, weapon: 'Revolver', ammo: 24 });
     rw.hud.setPrompt('Tap ENTER to get in');
   });
@@ -465,7 +466,7 @@ try {
   await down(10, pex.x, pex.y);
   check('plane: EXIT presses enter', (await read("rw.input.held('enter')")) === true);
   await up(10);
-  await page.evaluate(() => rw.hud.update({ mode: 'plane', speedKmh: 210, health: 80, armor: 0, money: 1, wanted: 0,
+  await page.evaluate(() => rw.hud.update({ mode: 'plane', speedKmh: 210, health: 80, armor: 0, score: 1, pending: 0, combo: 1, wanted: 0,
     district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null }));
   await page.waitForTimeout(3300);
   await shot('plane-915x412.png');

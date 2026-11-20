@@ -7,8 +7,10 @@ import {
   buildCourses, roadDistance, avenueAt, tallestNear, REF_SPEED, MEDAL_FACTOR, CANYON_RING_R, START_SPOT_CLEAR,
 } from '../src/world/courses.js';
 import {
-  createActivities, medalFor, payoutFor, COUNTDOWN, STRAY_TIME,
+  createActivities, medalFor, COUNTDOWN, STRAY_TIME,
 } from '../src/systems/activities.js';
+import { createScore, racePoints } from '../src/systems/score.js';
+import { defaultProgress } from '../src/core/save.js';
 
 const DT = 1 / 60;
 const city = generateCity();
@@ -226,17 +228,17 @@ test('start zones keep clear of parked aircraft and boats (except the runway cou
   assert.ok(START_SPOT_CLEAR >= 14);
 });
 
-test('medal and payout rules', () => {
+test('medal rules and race points', () => {
   const c = byId['street-glasswell'];
   assert.equal(medalFor(c, c.medalTimes.gold), 'gold');
   assert.equal(medalFor(c, c.medalTimes.gold + 0.01), 'silver');
   assert.equal(medalFor(c, c.medalTimes.bronze), 'bronze');
   assert.equal(medalFor(c, c.medalTimes.bronze + 1), null);
-  assert.equal(payoutFor(c, null, 'silver'), c.reward.silver);
-  assert.equal(payoutFor(c, 'silver', 'silver'), 0);
-  assert.equal(payoutFor(c, 'silver', 'bronze'), 0);
-  assert.equal(payoutFor(c, 'silver', 'gold'), c.reward.gold - c.reward.silver);
-  assert.equal(payoutFor(c, 'gold', null), 0);
+  assert.equal(racePoints('gold', false), 3000);
+  assert.equal(racePoints('silver', false), 2000);
+  assert.equal(racePoints('bronze', false), 1000);
+  assert.equal(racePoints(null, false), 500);
+  assert.equal(racePoints('gold', true), 3500);
 });
 
 // ---------------------------------------------------------------------------
@@ -254,9 +256,10 @@ function fakeGame() {
     hud: { toast: (t) => toasts.push(t) },
     map: { addMarker: (m) => markers.push(m), removeMarker: (m) => { const i = markers.indexOf(m); if (i >= 0) markers.splice(i, 1); } },
     mapMarkers: markers,
-    progress: { money: 0, owned: [], medals: {}, bestTimes: {}, stats: { distance: 0, flights: 0, races: 0 } },
+    progress: defaultProgress(),
     player: { mode: 'foot', vehicle: null, x: 0, z: 0, y: 0 },
   };
+  game.score = createScore(game);
   return game;
 }
 const craftOf = (kind) => ({ kind, x: 0, z: 0, y: 0, speed: 0, wrecked: false });
@@ -380,7 +383,7 @@ test('activities: start only via the offer in an allowed craft, never on foot', 
   assert.equal(sys.start(boatRace.id), true);
 });
 
-test('activities: medals, pay once, pay only the improvement', () => {
+test('activities: medals, points every run, best score kept', () => {
   const game = fakeGame();
   const sys = createActivities(game);
   board(game, craftOf('car'));
@@ -393,40 +396,48 @@ test('activities: medals, pay once, pay only the improvement', () => {
   assert.equal(game.fired.slice(checks).filter((f) => f[0] === 'checkpoint').length, c.checkpoints.length * c.laps);
   assert.equal(sys.lastResult.medal, 'silver');
   assert.ok(Math.abs(sys.lastResult.time - (c.medalTimes.gold + 5)) < 0.05, `time ${sys.lastResult.time}`);
-  assert.equal(game.progress.money, c.reward.silver);
+  // Silver 2000 plus 500 for the first (new best) time, banked at once.
+  assert.equal(sys.lastResult.points, 2500);
+  assert.equal(game.progress.score.total, 2500);
+  assert.equal(game.progress.score.courses[c.id], 2500);
+  assert.equal(game.progress.money, undefined);
   assert.equal(game.progress.medals[c.id], 'silver');
   assert.equal(game.progress.stats.races, 1);
   const best1 = game.progress.bestTimes[c.id];
-  assert.ok(game.fired.some((f) => f[0] === 'reward' && f[1] === c.reward.silver));
+  assert.ok(game.fired.some((f) => f[0] === 'reward' && f[1] === 2500));
   assert.ok(game.fired.some((f) => f[0] === 'progress'));
 
   // Standing on the start again does not restart until the player leaves.
   put(game, sys, c.start.x, c.start.z, 0, secs(3));
   assert.equal(sys.active, null);
 
-  // Same medal again: nothing paid, slower time is not a best.
+  // Same medal, slower time: placement points only, best score kept.
   away();
   runCourse(game, sys, c, c.medalTimes.gold + 8);
   assert.equal(sys.lastResult.medal, 'silver');
-  assert.equal(sys.lastResult.paid, 0);
-  assert.equal(game.progress.money, c.reward.silver);
+  assert.equal(sys.lastResult.points, 2000);
+  assert.equal(game.progress.score.total, 4500);
+  assert.equal(game.progress.score.courses[c.id], 2500);
   assert.equal(game.progress.bestTimes[c.id], best1);
 
-  // Gold: only the difference is paid.
+  // Gold with a new best time.
   away();
   runCourse(game, sys, c, c.medalTimes.gold - 2);
   assert.equal(sys.lastResult.medal, 'gold');
-  assert.equal(game.progress.money, c.reward.gold);
+  assert.equal(sys.lastResult.points, 3500);
+  assert.equal(game.progress.score.total, 8000);
+  assert.equal(game.progress.score.courses[c.id], 3500);
   assert.equal(game.progress.medals[c.id], 'gold');
   assert.ok(game.progress.bestTimes[c.id] < best1);
   assert.equal(game.progress.stats.races, 3);
 
-  // Slower than bronze: finished, no medal lost, nothing paid.
+  // Slower than bronze: finished (500), no medal lost.
   away();
   runCourse(game, sys, c, c.medalTimes.bronze + 4);
   assert.equal(sys.lastResult.medal, null);
+  assert.equal(sys.lastResult.points, 500);
   assert.equal(game.progress.medals[c.id], 'gold');
-  assert.equal(game.progress.money, c.reward.gold);
+  assert.equal(game.progress.score.total, 8500);
 });
 
 test('activities: abort on leaving the craft, wrecking, straying, running late', () => {
@@ -474,7 +485,7 @@ test('activities: abort on leaving the craft, wrecking, straying, running late',
   put(game, sys, B.x, B.z - 300, 0, secs(d.timeLimit) + 2);
   assert.equal(sys.active, null);
   assert.ok(game.toasts.includes('Out of time'));
-  assert.equal(game.progress.money, 0);
+  assert.equal(game.progress.score.total, 0, "an abandoned run scores nothing");
 });
 
 test('activities: sky rings count in 3D', () => {

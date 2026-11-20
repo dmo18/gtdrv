@@ -62,6 +62,14 @@ const FEEL = {
 const MAX_SHAKE_ROT = 0.022; // radians at full trauma
 const MAX_SHAKE_POS = 0.06; // metres at full trauma
 const MAX_BUZZ = 0.0035; // radians at very high speed
+// Aim view (on foot, FIRE held or locked): over the right shoulder.
+// The view turns only with the drag (or a lock), never by itself.
+export const AIM = {
+  dist: 3.2, side: 0.6, pivot: 1.55, fov: 55, ease: 0.2,
+  drag: 0.0042, // radians per pixel of drag
+  pitchMin: -0.6, pitchMax: 0.7,
+};
+const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
 export function createChaseCamera(camera) {
   let mode = MODES.car;
@@ -95,6 +103,14 @@ export function createChaseCamera(camera) {
   let turnLook = 0; // smoothed sideways look shift (m)
   let accel = 0; // smoothed forward acceleration (m/s^2)
   let fovKick = 0;
+  // Aim view state: `aim.yaw/pitch` is where the crosshair points; the aim
+  // controller (combathud.js) may steer it for a lock-on.
+  // holdDrag: a lock is steering, the drag does not turn the aim.
+  // holdOrbit: drive-by fire is held, the orbit does not ease back.
+  const aim = { on: false, k: 0, yaw: 0, pitch: 0, dragScale: 1, holdDrag: false, holdOrbit: false };
+  // The crosshair ray of the last placed frame (camera position and the
+  // unit view direction before shake).
+  const ray = { x: 0, y: 0, z: 0, dx: 1, dy: 0, dz: 0 };
 
   // Distance at which the view line from the target back to the camera
   // is first blocked, or `dist` if it is clear. Height-aware: roofs below
@@ -157,16 +173,46 @@ export function createChaseCamera(camera) {
       if (gh > 0 && gh <= baseY + mode.lookHeight) floor = gh + MIN_CLEAR;
     }
     if (!(py >= floor)) py = floor;
-    camera.position.set(px, py, pz);
 
     const spd = Math.abs(target.speed || 0);
     const ahead = mode.lookAhead * Math.min(1, 0.3 + spd / 25);
     const ch = Math.cos(target.heading), sh = Math.sin(target.heading);
-    camera.lookAt(
-      target.x + ch * ahead - sh * turnLook,
-      baseY + mode.lookHeight + sp * ahead,
-      target.z + sh * ahead + ch * turnLook,
-    );
+    let lx = target.x + ch * ahead - sh * turnLook;
+    let ly = baseY + mode.lookHeight + sp * ahead;
+    let lz = target.z + sh * ahead + ch * turnLook;
+    let cx = px, cy = py, cz = pz;
+    const s = smooth01(aim.k);
+    if (s > 0) {
+      // Over the shoulder: pivot at the shoulder, back along the aim, out
+      // to the right. Rigid (no lag) so the crosshair stays put.
+      const cy0 = Math.cos(aim.yaw), sy0 = Math.sin(aim.yaw);
+      const cpa = Math.cos(aim.pitch), spa = Math.sin(aim.pitch);
+      const fx = cy0 * cpa, fy = spa, fz = sy0 * cpa;
+      const pivY = (target.y || 0) + AIM.pivot;
+      const sx = target.x - sy0 * AIM.side, sz = target.z + cy0 * AIM.side;
+      let back = AIM.dist;
+      if (collision) {
+        const hit = clearDist(collision, sx, pivY, sz, -cy0, -sy0, AIM.dist * cpa + 0.4, pivY - spa * (AIM.dist + 0.4));
+        if (hit < AIM.dist * cpa + 0.4) back = Math.max(0.5, (hit - 0.35) / Math.max(0.3, cpa));
+      }
+      let ax = sx - fx * back, ay = pivY - fy * back, az = sz - fz * back;
+      if (!(ay >= MIN_CLEAR)) ay = MIN_CLEAR;
+      cx += (ax - cx) * s;
+      cy += (ay - cy) * s;
+      cz += (az - cz) * s;
+      ax += fx * 30;
+      ay += fy * 30;
+      az += fz * 30;
+      lx += (ax - lx) * s;
+      ly += (ay - ly) * s;
+      lz += (az - lz) * s;
+    }
+    camera.position.set(cx, cy, cz);
+    camera.lookAt(lx, ly, lz);
+    const rdx = lx - cx, rdy = ly - cy, rdz = lz - cz;
+    const rl = Math.sqrt(rdx * rdx + rdy * rdy + rdz * rdz) || 1;
+    ray.x = cx; ray.y = cy; ray.z = cz;
+    ray.dx = rdx / rl; ray.dy = rdy / rl; ray.dz = rdz / rl;
     // A little bank with the craft (right side down = clockwise from behind).
     if (camRoll > 1e-4 || camRoll < -1e-4) camera.rotateZ(-camRoll);
     applyShake(spd);
@@ -224,7 +270,9 @@ export function createChaseCamera(camera) {
   }
 
   function updateFov(spd, dt, snap) {
-    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
+    let want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
+    const s = smooth01(aim.k);
+    if (s > 0) want += (AIM.fov - want) * s;
     const next = snap ? want : curFov + (want - curFov) * Math.min(1, 3 * dt);
     if (Math.abs(next - camera.fov) > 0.01) {
       camera.fov = next;
@@ -233,10 +281,37 @@ export function createChaseCamera(camera) {
     curFov = next;
   }
 
+  function setAim(on, instant = false) {
+    const next = !!on && modeKey === 'foot';
+    if (next && !aim.on && aim.k <= 0) {
+      aim.yaw = Math.atan2(ray.dz, ray.dx);
+      aim.pitch = 0;
+    }
+    if (!next && aim.on) {
+      camHeading = aim.yaw;
+      orbitYaw = 0;
+      orbitPitch = 0;
+      sinceDrag = 99;
+    }
+    aim.on = next;
+    if (instant) aim.k = next ? 1 : 0;
+  }
+
   return {
     update(target, dt, input, collision) {
-      // Drag to orbit.
-      if (input && (input.lookX || input.lookY)) {
+      // Ease the aim view in and out (AIM.ease seconds).
+      if (dt > 0) aim.k = clamp(aim.k + (aim.on ? dt : -dt) / AIM.ease, 0, 1);
+      if (aim.on && input && (input.lookX || input.lookY)) {
+        // Aiming: the drag turns the aim itself (slower over a target).
+        if (!aim.holdDrag) {
+          const g = AIM.drag * aim.dragScale;
+          aim.yaw = angleDiff(aim.yaw + input.lookX * g, 0);
+          aim.pitch = clamp(aim.pitch - input.lookY * g, AIM.pitchMin, AIM.pitchMax);
+        }
+        input.lookX = 0;
+        input.lookY = 0;
+        sinceDrag = 0;
+      } else if (input && (input.lookX || input.lookY)) {
         orbitYaw += input.lookX * 0.006;
         orbitPitch = clamp(orbitPitch + input.lookY * 0.01, Math.min(0, -mode.height + 0.6), 6);
         input.lookX = 0;
@@ -248,7 +323,7 @@ export function createChaseCamera(camera) {
       orbitYaw = angleDiff(orbitYaw, 0);
       const spd = Math.abs(target.speed || 0);
       // After ~2 s without drag while moving, ease back behind.
-      if (sinceDrag > 2 && spd > 1.5) {
+      if (sinceDrag > 2 && spd > 1.5 && !aim.holdOrbit) {
         const k = Math.min(1, 1.5 * dt);
         orbitYaw -= orbitYaw * k;
         orbitPitch -= orbitPitch * k;
@@ -256,7 +331,12 @@ export function createChaseCamera(camera) {
       // Heading spring, faster at speed. Only follow while moving forward
       // or standing, so reversing does not swing the camera around.
       const rate = (1.5 + Math.min(spd, 60) * 0.12) * mode.turn;
-      if ((target.speed || 0) > -2) {
+      if (aim.k > 0) {
+        // The chase view waits behind the aim, so leaving it is seamless.
+        camHeading = aim.yaw;
+        orbitYaw = 0;
+        orbitPitch = 0;
+      } else if ((target.speed || 0) > -2) {
         camHeading += angleDiff(target.heading, camHeading) * Math.min(1, rate * dt);
       }
       camHeading = angleDiff(camHeading, 0);
@@ -279,13 +359,23 @@ export function createChaseCamera(camera) {
       accel = 0;
       fovKick = 0;
       trauma = 0;
+      aim.on = false;
+      aim.k = 0;
       place(target, 0, null, true);
       updateFov(Math.abs(target.speed || 0), 0, true);
     },
     setMode(m) {
       modeKey = MODES[m] ? m : 'car';
       applyMode();
+      if (modeKey !== 'foot') setAim(false, true);
     },
+    // Aim view on or off (foot only). Turning it on starts the aim where
+    // the camera already looks (level), so nothing jumps.
+    setAim,
+    aim,
+    ray,
+    // Where the view points now, as yaw (heading convention).
+    viewYaw: () => Math.atan2(ray.dz, ray.dx),
     // The VIEW button: next camera view for the current kind of craft.
     // Returns the new view's name for a toast.
     cycleView() {
