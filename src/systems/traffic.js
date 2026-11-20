@@ -63,7 +63,7 @@ export function createDriver(city, rng) {
     yieldTime: 0, oncomingTime: 0, blockedTime: 0, waitTime: 0, noProgress: 0, nextAround: 6, pause: 0,
     nudge: 0, // small sideways shift away from things beside the lane
     mode: 0, // 0 normal, 1 backing up, 2 steering around
-    modeTime: 0, aroundVeh: null, offset: 0, override: 0,
+    modeTime: 0, tries: 0, aroundVeh: null, offset: 0, override: 0,
     junctions: 0, targetSpeed: 0, inJunction: false,
     stuck: false, dead: false,
   };
@@ -413,7 +413,7 @@ function scan(dr, v, ctx) {
     const os = o.spec;
     const oL = os ? os.length : 4, oW = os ? os.width : 2;
     if (rx * rx + rz * rz <= r2 && projectAhead(dr, o.x, o.z, range, PR)) {
-      const around = o === dr.aroundVeh && dr.mode === 2;
+      const around = o === dr.aroundVeh && dr.mode !== 0;
       const ch = Math.abs(Math.cos(o.heading) * PR.ux + Math.sin(o.heading) * PR.uz);
       const sh = Math.sqrt(Math.max(0, 1 - ch * ch));
       const oHalfL = ch * oL / 2 + sh * oW / 2;
@@ -430,7 +430,7 @@ function scan(dr, v, ctx) {
       }
       if (Math.abs(lat) < need && PR.along > dr.s + 0.5) {
         let g = PR.along - dr.s - halfL - oHalfL;
-        if (around) g += MIN_GAP - 0.8;
+        if (around && dr.mode === 2) g += MIN_GAP - 0.8;
         // Deadlock breaker: two cars waiting on each other.
         if (o.ai && o.ai.obsVeh === v && dr.waitTime > 1.5 && o.ai.waitTime > 1.5 && v.id < o.id) {
           dr.override = 2;
@@ -592,12 +592,13 @@ export function driveStep(dr, v, dt, ctx = {}) {
     dr.mode = 1;
     dr.modeTime = 0;
     dr.aroundVeh = ov;
+    dr.tries = 0;
     dr.nextAround = dr.blockedTime + 6;
   }
   dr.modeTime += dt;
   let reverse = false;
   if (dr.mode === 1) {
-    if (dr.obsGap > MIN_GAP + 3.5 || dr.modeTime > 2.5) {
+    if (dr.obsGap > MIN_GAP + 7 || dr.modeTime > 4) {
       dr.mode = 2;
       dr.modeTime = 0;
     } else reverse = true;
@@ -607,12 +608,18 @@ export function driveStep(dr, v, dt, ctx = {}) {
   if (dr.mode === 2) {
     offTarget = -3.2;
     vt = Math.min(vt, 3);
-    if (dr.modeTime > 15) {
+    if (Math.abs(sp) < 0.3 && vt < 0.5 && dr.modeTime > 1.5 && dr.tries < 3) {
+      // Wedged beside it: back up again and have another go.
+      dr.mode = 1;
+      dr.modeTime = 0;
+      dr.tries++;
+    } else if (dr.modeTime > 15) {
       dr.mode = 0;
       dr.aroundVeh = null;
     }
   }
-  dr.offset += clamp(offTarget - dr.offset, -1.5 * dt, 1.5 * dt);
+  const rate = dr.mode === 0 ? 1.5 : 3;
+  dr.offset += clamp(offTarget - dr.offset, -rate * dt, rate * dt);
   if (dr.mode === 0 && dr.offset === 0 && dr.blockedTime === 0) dr.aroundVeh = null;
 
   if (dr.pause > 0) {
