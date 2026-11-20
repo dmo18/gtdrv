@@ -35,7 +35,10 @@ export function createTutorial(game) {
     }
   }
 
-  game.events.on('mode', offer);
+  game.events.on('mode', (mode) => {
+    queue.length = 0; // stale hints for the previous craft or place
+    offer(mode);
+  });
   game.events.on('enter', (v) => {
     if (v && v.spec && (v.spec.id === 'fighter' || v.spec.id === 'patrolheli')) offer(v.spec.id);
   });

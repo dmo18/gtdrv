@@ -16,7 +16,7 @@ export const MARKER_COLORS = {
 };
 const MAX_STARTS = 20;
 const SLOTS = 3;
-const START_SHOW_DIST = 900;
+const START_SHOW_DIST = 320;
 
 // A vertical open tube whose alpha fades from `a0` at the bottom to 0 at the top.
 function fadeTube(radius = 1, height = 1, segs = 28, a0 = 1) {

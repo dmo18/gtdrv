@@ -3,8 +3,8 @@
 // feels full without simulating a thousand vehicles.
 import { createVehicle } from '../entities/vehicle.js';
 
-const SPAWN_R = 170;
-const DESPAWN_R = 230;
+const SPAWN_R = 135;
+const DESPAWN_R = 185;
 const MIN_R = 60; // never pop in right next to the player
 
 const MIX = {

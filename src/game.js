@@ -232,11 +232,20 @@ export function createGame({ canvas, uiRoot }) {
     game.setPlayerMode(v.kind);
     events.emit('enter', v);
   };
+  game.findRescueSpot = findRescueSpot;
+  // Test hook: put a fresh car on the map and keep it from being swept away.
+  game.debug = {
+    spawnCar(specId, x, z, heading = 0) {
+      const v = createVehicle(specId, x, z, heading, rng);
+      v.home = { craft: v };
+      return game.addVehicle(v);
+    },
+  };
   game.exitVehicle = () => {
     const p = game.player;
     const v = p.vehicle;
     if (!v) return false;
-    if (Math.abs(v.speed) > 3 || v.y > 0.6) {
+    if (!v.wrecked && (Math.abs(v.speed) > 3 || v.y > 0.6)) {
       hud.toast(v.y > 0.6 ? 'Land first' : 'Slow down to get out', 1.5);
       return false;
     }

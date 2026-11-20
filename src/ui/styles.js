@@ -308,8 +308,8 @@ const CSS = `
 .rw-clock { display: none; font-size: 12px; text-align: center; color: var(--rw-dim); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
 .rw-full .rw-clock { display: block; }
 .rw-full .rw-district {
-  position: static; opacity: 1; animation: none; margin: 4px -30px 0; text-align: center;
-  overflow: hidden; text-overflow: ellipsis;
+  position: static; opacity: 1; animation: none; margin: 4px 0 0; text-align: left;
+  white-space: nowrap; overflow: visible;
 }
 .rw-full { --map: 116px; }
 

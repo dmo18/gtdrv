@@ -563,6 +563,9 @@ export function createCombat(game, { seed = 23023 } = {}) {
     if (!w || p.vehicle !== c) return;
     if (c.spec && c.spec.width) exitPosition(c, game.world, EXIT);
     else EXIT.ok = false;
+    if (!EXIT.ok && game.findRescueSpot && game.city && game.city.shoreDist(c.x, c.z) < 1) {
+      game.findRescueSpot(c.x, c.z, EXIT);
+    }
     const x = EXIT.ok ? EXIT.x : c.x, z = EXIT.ok ? EXIT.z : c.z;
     w.x = w.px = x;
     w.z = w.pz = z;
