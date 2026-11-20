@@ -90,3 +90,7 @@ the afterburner, light bar and beam where they apply. A THREE.LOD swaps
 in a coarse body far away. Wear follows health, wrecks are sooted, hits
 flash (`craft.hitT`). `aircraftStats`, `boatStats`, `tankStats` report
 triangles; `scripts/craft-shots.mjs` renders close-ups to docs/preview.
+
+## Weather
+`stepVehicle` and `stepBoat` read `world.weather` (rain, wind, windDir) when
+present; with no weather or clear weather physics is identical to dry.

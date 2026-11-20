@@ -15,8 +15,10 @@ the final review and fix stage; nothing is in progress that blocks play.
   missiles from armed craft. People die in one hit and bleed; wrecks break apart and vanish.
 - Rival crew and police shootouts; police heat 1 to 4 with officers on
   foot, pursuit cars, roadblocks and a police helicopter.
-- Score and high scores only. No money, shop or unlocks: every vehicle
-  and weapon is available from the start.
+- Score and high scores only. No money or shop: every vehicle and weapon
+  is available from the start, except one reward car (Ghostwake, below).
+- Six hidden secrets and the Ghostwake, a secret car at the end of the chain
+  (replaces the old submarine easter egg).
 - Races, sky ring courses and timed deliveries with medals.
 - Day and night, weather, quality scaling, generated sound.
 - Calmer UI: a Minimal HUD (default) or Full HUD, one expanding "more"
@@ -151,6 +153,36 @@ the final review and fix stage; nothing is in progress that blocks play.
   back and aside for 1.5 s (`chase.fx`), cancelled at once by a camera drag.
 - Tests: `test/cinematic.test.js`. Screenshots: `scripts/wanted-shots.mjs`.
 
+## 2026-11-20: hidden secrets and the Ghostwake
+- The submarine easter egg is gone (double-tap on the version number,
+  `game.easterEgg`, the boat spec, mesh, test and screenshot script).
+- Six hidden secrets, placed from the city layout by `findSecrets`
+  (`src/world/secrets.js`, seed 4417): The Drowned Box (a half-sunk
+  container just off the Saltyard shore), Roof Garden (a lounge on a
+  midtown roof, counts only from about 3.5 m below the roof or higher, so a
+  jump, a helicopter or a stunt ramp), The Gullet (a sea cave in the cliff
+  on Pale Shore), Rustlamp Rock (a rusted lighthouse on the far headland),
+  Tag Alley (a Saltyard alley with a graffiti tag) and The Lone Ride (a
+  playground in a Greenmere park with a spinning one-off ride).
+- Reaching within 12 m the first time toasts "Secret found", banks 750
+  points and saves it (`progress.secrets.found`, allow-listed ids; old
+  saves load with none). Records shows "Secrets found n / 6" and the names
+  of the ones found. After the first find the full map and minimap show one
+  faint dot, off by about 55 m, for the next secret still hidden.
+- The sixth gives 2500 more points, toasts "Ghostwake unlocked" and puts a
+  teal dot on the map for a lock-up garage in Cinder Row. Its roller door
+  opens within 15 m. Ghostwake: teal and black coupe with an underbody
+  glow, top speed 68.2 m/s (about 10 percent over the Vexari R). It is
+  parked in the garage; if it is wrecked or removed it returns when the
+  player is 160 m away. It is saved like any parked car.
+- Files: `src/world/secrets.js`, `src/systems/secrets.js`,
+  `src/render/secretsmesh.js`, spec in `src/entities/vehicle.js`.
+  Tests: `test/secrets.test.js`. Screenshots: `scripts/secrets-shots.mjs`
+  (`docs/preview/secrets-*.png`).
+- Ramming people never damaged any car in this game, so "no collision
+  damage from pedestrians" holds for every car; the spec flag
+  `pedSafe: true` documents it for Ghostwake.
+
 ## Known issues
 - A fighter that leaves the depot at part thrust can get stuck on the
   shore (full thrust is fine).
@@ -173,3 +205,14 @@ None critical or high.
 - Earlier reviews: milestone 1 and 2 findings (player stuck at sea, pause
   with the map open, abandoned craft piling up) are fixed; the 212-minute
   soak test had 0 errors.
+
+## Weather that changes the drive
+- `src/core/weather.js` (pure, tested in `test/weather.test.js`): wet-road
+  grip, understeer, brake and top-speed factors from the blended
+  `game.weather.rain` (exactly 1 when clear, so dry numbers are unchanged),
+  a small wind push for light craft, and a fog sight scale.
+- Cars read `world.weather` (set each step in game.js); boats get the wind
+  push too. Police sight range shrinks in thick fog. Traffic has no sight
+  check, so it is unchanged. Wet-road lamp reflections already existed in
+  daynight.js; rain spray in effects.js is a bit stronger and adds droplets
+  in heavy rain. Aircraft are not pushed by wind yet.

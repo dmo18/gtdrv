@@ -9,6 +9,8 @@
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
 import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
+import { vehicleStats } from './vehiclemesh.js';
+import { VEHICLE_SPECS } from '../entities/vehicle.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -327,13 +329,39 @@ export function createGraphics(game) {
     warmed = true;
     const t = performance.now();
     try {
-      renderer.compile(scene, camera);
+      // The async form lets the driver compile in parallel where it can
+      // (KHR_parallel_shader_compile) instead of stalling this frame.
+      if (renderer.compileAsync) renderer.compileAsync(scene, camera).catch(() => {});
+      else renderer.compile(scene, camera);
     } catch {
       /* best effort */
     }
     sys.warmMs = performance.now() - t;
     sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
   }
+
+  // ---- car shapes ahead of time ----
+  // Lofting a car body takes tens of milliseconds the first time each
+  // model is seen (the police car at the first wanted star, say). Build
+  // any model not built yet, one per idle slot, while the title screen
+  // shows, so none of them costs a frame in play.
+  const prebuild = Object.keys(VEHICLE_SPECS).sort((a, b) => (a === 'police' ? -1 : b === 'police' ? 1 : 0));
+  function prebuildNext() {
+    const id = prebuild.shift();
+    if (!id) return;
+    try {
+      vehicleStats(VEHICLE_SPECS[id]);
+    } catch {
+      /* drawn on first use instead */
+    }
+    schedule();
+  }
+  function schedule() {
+    if (!prebuild.length || typeof window === 'undefined') return;
+    if (window.requestIdleCallback) window.requestIdleCallback(prebuildNext, { timeout: 2000 });
+    else setTimeout(prebuildNext, 30);
+  }
+  schedule();
 
   let frame = 0, skyVersion = -1;
   const sys = {

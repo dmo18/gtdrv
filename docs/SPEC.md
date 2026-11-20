@@ -54,3 +54,27 @@ existing game: own name, city, characters, art and missions.
 - BLAST CAMERA: a vehicle exploding within 40 m pulls the chase camera back
   and aside for about 1.5 s, eased; moving the camera cancels it.
 
+## Hidden secrets and the Ghostwake
+- Six secrets are hidden on the island (list and rules in
+  `src/world/secrets.js`, found from the city layout with a fixed seed so
+  they are in the same places on every device): a half-sunk shipping
+  container off the docks, a rooftop lounge, a sea cave, a rusted
+  lighthouse on a headland, a graffiti alley and a playground with a
+  one-off ride. None is in the sea or on the airfield islet.
+- Finding one: walk, drive, sail or fly within 12 m (the rooftop also needs
+  height, about 3.5 m under the roof or more). Once per secret: a toast, 750
+  points banked, saved in `progress.secrets.found`.
+- Pause menu, Records: "Secrets found n / 6" and the names found. The map
+  shows one faint dot, offset by about 55 m, only after the first find.
+- Finding all six unlocks Ghostwake (toast, 2500 bonus points, saved) and
+  marks a lock-up garage on the map. A roller door opens when you come near
+  and the car is parked inside. Ghostwake is a teal and black coupe with an
+  underbody light, top speed about 10 percent above the sports car.
+- There is no hidden menu trick any more (the submarine is removed).
+
+
+## Weather and driving
+Rain lowers grip (down to 72 percent in a downpour), adds slight
+understeer, lengthens stops and trims top speed above rain 0.6. Strong wind
+(above 5 m/s) gently pushes light cars and boats, at most 0.9 m/s squared.
+Thick fog cuts the distance police can spot you to 45 percent.

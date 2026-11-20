@@ -41,7 +41,7 @@ export const INST = {
 export const RADIO_BUFFERS = ['m:kick', 'r:stab', 'r:sub', 'r:clap', 'r:keys', 'r:dbass', 'r:brush', 'r:ride', 'r:feather', 'r:vocA', 'r:vocE', 'r:vocO', 'r:vocI'];
 
 // Level of each station against the others (set from measurements).
-export const STATION_TRIM = { chill: 1, dance: 0.8, jazz: 1.15, talk: 1 };
+export const STATION_TRIM = { chill: 1, dance: 1.45, jazz: 1.25, talk: 2.3 };
 
 // Schedule one bar of notes. st: { bus, panL, panR, flip }. Used by the
 // background music (audio.js) and by every station. Captions go to

@@ -5,6 +5,9 @@ phone browser. Cars, boats, planes, helicopters, a tank and a fighter
 jet, with on-foot combat in a violent sandbox (blood, no dismemberment). Best
 played on a phone turned sideways.
 
+Six hidden secrets are scattered over the island. Find them all (the
+Records tab counts them) and something special unlocks.
+
 ## Run it
 1. `npm install`
 2. `npm run dev`
@@ -33,10 +36,11 @@ Screenshots from the browser tests land in `dist/` and `shots/`.
 ## Look at it and measure it
 These helpers are for developers; none of them fails a build.
 1. `node scripts/shot.mjs name x z heading` takes a screenshot from a spot.
-2. `node scripts/perf.mjs` prints draw calls, triangles and step cost.
-3. `node scripts/vehicle-perf.mjs` prints the draw calls spent on vehicles.
-4. `node scripts/gfx-shots.mjs` takes city screenshots in different light.
-5. `node scripts/vehicle-shots.mjs`, `act-shots.mjs`, `combatfx-shots.mjs`
+2. `node scripts/secrets-shots.mjs` screenshots the secrets and the Records tab into `docs/preview/`.
+3. `node scripts/perf.mjs` prints draw calls, triangles and step cost.
+4. `node scripts/vehicle-perf.mjs` prints the draw calls spent on vehicles.
+5. `node scripts/gfx-shots.mjs` takes city screenshots in different light.
+6. `node scripts/vehicle-shots.mjs`, `act-shots.mjs`, `combatfx-shots.mjs`
    and the `*-preview.mjs` scripts (aircraft, boat, markers, sky) take
    screenshots of single features.
 
