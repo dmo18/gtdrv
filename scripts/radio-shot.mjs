@@ -36,14 +36,16 @@ const info = await page.evaluate(async () => {
     if (t && !/Gullspeak|Now playing/.test(t)) break;
     await wait(200);
   }
+  g.loop.stop(); // freeze the frame (and the caption timer) for the screenshot
   const s = document.querySelector('.rw-radiocap');
   return { ctx: g.audio.output && g.audio.output.context.state, text: s ? s.textContent : null, on: s && s.classList.contains('rw-on'), station: g.radio.station, saved: g.progress.settings.station, readyAtMs: Math.round(readyAt) };
 });
 console.log(JSON.stringify(info));
 await page.screenshot({ path: 'docs/preview/radio-talk-caption.png', timeout: 180000 });
-const mb = await page.locator('.rw-more').boundingBox();
-await page.touchscreen.tap(mb.x + mb.width / 2, mb.y + mb.height / 2);
-await page.waitForTimeout(400);
-await page.screenshot({ path: 'docs/preview/radio-fan.png', timeout: 180000 });
+const fan = await page.evaluate(() => {
+  const b = document.querySelector('.rw-a-radio');
+  return b ? { text: b.textContent, label: b.getAttribute('aria-label'), off: b.classList.contains('rw-off'), sec: b.classList.contains('rw-sec') } : null;
+});
+console.log('fan button', JSON.stringify(fan));
 await browser.close();
 server.close();

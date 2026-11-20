@@ -89,6 +89,7 @@ for (const [name, [where, hour, weather, lift]] of Object.entries(VIEWS)) {
     g.loop.start();
     const v = g.player.vehicle;
     v.x = v.px = x; v.z = v.pz = z; v.heading = v.pheading = heading; v.vx = v.vz = 0; v.speed = 0;
+    if (g.snapCam) g.snapCam(); // the chase camera jumps there even if few frames run
     g.daynight.setWeather(weather, true);
     g.daynight.setHour(hour);
     await new Promise((r) => setTimeout(r, 1600));

@@ -363,7 +363,7 @@ const CSS = `
 .rw-wanted.rw-none { display: none; }
 .rw-stars { display: flex; gap: 2px; }
 .rw-badge {
-  width: 14px; height: 14px; background: rgba(246, 239, 230, 0.22);
+  width: 16px; height: 16px; background: rgba(246, 239, 230, 0.22);
   clip-path: polygon(50% 0, 62% 35%, 98% 36%, 69% 57%, 80% 92%, 50% 71%, 20% 92%, 31% 57%, 2% 36%, 38% 35%);
 }
 .rw-badge.rw-on { background: #ffd24a; }
@@ -378,7 +378,7 @@ const CSS = `
 .rw-full .rw-cool { width: 98px; height: 5px; }
 .rw-slowmo {
   position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 3;
-  background: radial-gradient(ellipse at center, rgba(40, 60, 90, 0) 38%, rgba(20, 28, 48, 0.55) 100%), rgba(120, 130, 150, 0.14);
+  background: radial-gradient(ellipse at center, rgba(40, 60, 90, 0) 28%, rgba(16, 24, 44, 0.78) 100%), rgba(110, 120, 140, 0.22);
 }
 .rw-bars { display: flex; flex-direction: column; gap: 4px; width: 128px; }
 .rw-bar { height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
