@@ -97,9 +97,13 @@ export function createHud(root) {
   const wantedEl = el('div', 'rw-wanted rw-none', tr);
   wantedEl.setAttribute('role', 'img');
   wantedEl.setAttribute('aria-label', 'Police attention: none');
-  const BADGES = 4;
+  const BADGES = 5;
+  const starRow = el('div', 'rw-stars', wantedEl);
   const badges = [];
-  for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', wantedEl));
+  for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', starRow));
+  // Escape meter: fills while out of sight (stars start to blink as it nears full).
+  const coolBar = el('div', 'rw-cool', wantedEl);
+  const coolFill = el('div', 'rw-coolfill', coolBar);
 
   // bottom-centre: speed (car) and prompt
   const bottom = el('div', 'rw-bottom', hud);
@@ -117,7 +121,7 @@ export function createHud(root) {
   // cached last values (undefined forces the first write)
   const last = {
     mode: undefined, speed: undefined,
-    score: undefined, pending: undefined, combo: undefined, wanted: undefined, district: undefined, clock: undefined,
+    score: undefined, pending: undefined, combo: undefined, wanted: undefined, cool: undefined, district: undefined, clock: undefined,
     veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
   };
 
@@ -152,12 +156,22 @@ export function createHud(root) {
       if (pending > 0) comboEl.textContent = '+' + pending.toLocaleString('en-US') + (combo > 1 ? '  x' + combo : '');
       bump();
     }
-    if (s.wanted !== last.wanted) {
-      last.wanted = s.wanted;
-      wantedEl.classList.toggle('rw-none', s.wanted <= 0);
-      for (let i = 0; i < BADGES; i++) badges[i].classList.toggle('rw-on', i < s.wanted);
-      wantedEl.setAttribute('aria-label', 'Police attention: ' + (s.wanted > 0 ? s.wanted + ' of ' + BADGES : 'none'));
+    // Stars 0..5 (s.stars, else the heat level); shown only while wanted.
+    const stars = s.stars !== undefined ? s.stars : s.wanted;
+    if (stars !== last.wanted) {
+      last.wanted = stars;
+      wantedEl.classList.toggle('rw-none', !(stars > 0));
+      wantedEl.classList.toggle('rw-hot', stars >= 3);
+      for (let i = 0; i < BADGES; i++) badges[i].classList.toggle('rw-on', i < stars);
+      wantedEl.setAttribute('aria-label', 'Police attention: ' + (stars > 0 ? stars + ' of ' + BADGES + ' stars' : 'none'));
       bump();
+    }
+    const cool = stars > 0 && s.cooling > 0 ? Math.round(Math.min(1, s.cooling) * 50) : 0;
+    if (cool !== last.cool) {
+      last.cool = cool;
+      coolFill.style.transform = 'scaleX(' + (cool / 50).toFixed(2) + ')';
+      wantedEl.classList.toggle('rw-cooling', cool > 0);
+      if (cool > 0) bump(); // keep the meter in view while it fills
     }
     if (s.health !== last.health) {
       if (last.health !== undefined && s.health < last.health) bump(); // hurt

@@ -287,6 +287,7 @@ const CSS = `
 .rw-lefty .rw-sleft { left: auto; right: calc(var(--rw-sr) + 124px); }
 
 @media (prefers-reduced-motion: reduce) {
+  .rw-hot .rw-badge.rw-on { animation: none !important; background: #ff3b30; }
   .rw-face, .rw-sec, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
   .rw-a-detonate .rw-face { animation: none; }
 }
@@ -358,14 +359,27 @@ const CSS = `
 .rw-combo { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: #ffb48a; }
 .rw-full .rw-money { font-size: 22px; }
 .rw-full .rw-combo { font-size: 14px; }
-.rw-wanted { display: flex; gap: 3px; }
+.rw-wanted { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .rw-wanted.rw-none { display: none; }
+.rw-stars { display: flex; gap: 2px; }
 .rw-badge {
-  width: 12px; height: 12px; background: rgba(246, 239, 230, 0.22);
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  width: 14px; height: 14px; background: rgba(246, 239, 230, 0.22);
+  clip-path: polygon(50% 0, 62% 35%, 98% 36%, 69% 57%, 80% 92%, 50% 71%, 20% 92%, 31% 57%, 2% 36%, 38% 35%);
 }
-.rw-badge.rw-on { background: var(--rw-accent); }
-.rw-full .rw-badge { width: 16px; height: 16px; }
+.rw-badge.rw-on { background: #ffd24a; }
+.rw-hot .rw-badge.rw-on { animation: rw-siren 0.6s steps(1, end) infinite; }
+.rw-hot .rw-badge.rw-on:nth-child(even) { animation-delay: -0.3s; }
+@keyframes rw-siren { 0% { background: #ff3b30; } 50% { background: #3a7bff; } }
+.rw-cooling .rw-badge.rw-on { opacity: 0.8; }
+.rw-cool { display: none; width: 78px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+.rw-cooling .rw-cool { display: block; }
+.rw-coolfill { height: 100%; width: 100%; background: #6fd18b; transform-origin: left; transform: scaleX(0); }
+.rw-full .rw-badge { width: 18px; height: 18px; }
+.rw-full .rw-cool { width: 98px; height: 5px; }
+.rw-slowmo {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 3;
+  background: radial-gradient(ellipse at center, rgba(40, 60, 90, 0) 38%, rgba(20, 28, 48, 0.55) 100%), rgba(120, 130, 150, 0.14);
+}
 .rw-bars { display: flex; flex-direction: column; gap: 4px; width: 128px; }
 .rw-bar { height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
 .rw-fill { height: 100%; width: 100%; border-radius: 5px; background: #6fd18b; }

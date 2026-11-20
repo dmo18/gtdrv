@@ -23,6 +23,8 @@ import {
   takeSlot, releaseSlot, losRay, playerSpeedOf, playerUp,
 } from './crew.js';
 import { WEAPONS, selectWeapon } from '../core/weapons.js';
+import { fogSightScale } from '../core/weather.js';
+import { spawnPoliceHeli, setOrder as setHeliOrder } from './helipilot.js';
 
 // --- Heat rules. ---
 
@@ -31,6 +33,7 @@ export const HEAVY_SPEEDING = 6; // m/s over the limit that counts
 export const RAM_SPEED = 6; // closing speed (m/s) that counts as ramming
 export const MAX_HEAT = 4;
 export const SIGHT = 90; // police see this far, given a clear line
+let sightNow = SIGHT; // SIGHT shortened by fog (updated each tick)
 export const COOLDOWN = [0, 12, 18, 25, 32]; // seconds out of sight to escape
 export const FINE_PER_LEVEL = 60; // legacy helper only: busts no longer fine
 export const ESCAPE_REWARD_PER_LEVEL = 500; // score points (MISSIONS.md)
@@ -41,6 +44,27 @@ export const VIOLENCE = {
 };
 export const WITNESS_DIST = 40;
 export const OFFICERS_MAX = 4;
+// What each heat level brings. units: patrol cars on the chase; every: seconds
+// between spawn attempts (faster response); launch: m/s a new chase car starts
+// at (it arrives already moving); pace: top-speed multiplier of chase cars;
+// heli: a police helicopter joins (roadblocks come at the top level too).
+export const LEVEL_RULES = [
+  { units: 0, every: 1.2, launch: 12, pace: 1, heli: false },
+  { units: 1, every: 1.2, launch: 12, pace: 1, heli: false },
+  { units: 2, every: 1.0, launch: 14, pace: 1.05, heli: false },
+  { units: 3, every: 0.8, launch: 17, pace: 1.1, heli: false },
+  { units: 4, every: 0.6, launch: 21, pace: 1.16, heli: true },
+];
+const rulesFor = (level) => LEVEL_RULES[Math.max(0, Math.min(MAX_HEAT, level | 0))];
+// Chase cars wanted at a level. `max` is the system's base cap; the top
+// level may field one more car than it.
+export const unitsFor = (level, max = 3) => Math.min(rulesFor(level).units, max + (level >= MAX_HEAT ? 1 : 0));
+// HUD stars 0..5: one per heat level, the fifth once the helicopter is up.
+export const wantedStars = (level, heliUp = false) => {
+  const l = Math.max(0, Math.min(MAX_HEAT, level | 0));
+  return l >= MAX_HEAT && heliUp ? 5 : l;
+};
+const HELI_DELAY = 6, HELI_REPEAT = 30; // s after reaching the top level / after losing a heli
 const GRACE = 4; // seconds between level steps
 const RAM_POINTS = 1;
 const PED_POINTS = 0.5;
@@ -409,7 +433,7 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   if (cop.tick % 4 === 0) {
     // A car-wide clear line, not just a sight line, so it never cuts
     // across a building corner.
-    cop.los = dist < SIGHT && (target.y || 0) < 4 && (!col || wideClear(col, v.x, v.z, tx, tz, 1.2));
+    cop.los = dist < sightNow && (target.y || 0) < 4 && (!col || wideClear(col, v.x, v.z, tx, tz, 1.2));
   }
   if (cop.tick % 3 === 0 && ctx.vehicles) scanAhead(cop, v, target, ctx.vehicles);
   else if (cop.obsGap < Infinity) cop.obsGap -= (sp - cop.obsSpeed) * dt;
@@ -495,7 +519,7 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
     const pt = cop.passTarget || 0;
     cop.pass += clamp(pt - cop.pass, -4 * dt, 4 * dt);
   }
-  vt = Math.min(vt, V_AVENUE);
+  vt = Math.min(vt * (cop.pace || 1), V_AVENUE);
 
   // Never ram the target (unless told to): hold back when it is right in front.
   if (!ram) {
@@ -623,6 +647,12 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   let sirenOn = false, wasEnabled = true;
   let violence = 0, lastShotStamp = NaN, officerSees = false;
   let blockCool = 0, stepTick = 0, enabledNow = true;
+  let heliPilot = null, heliWait = HELI_DELAY;
+  function callOffHeli() {
+    if (heliPilot && heliPilot.state !== 'done' && heliPilot.state !== 'crash') setHeliOrder(heliPilot, 'leave');
+    heliPilot = null;
+    heliWait = HELI_DELAY;
+  }
   const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '' };
 
   // --- Witnesses for violence heat. ---
@@ -807,7 +837,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     const p = game.player;
     const dx = p.x - o.x, dz = p.z - o.z;
     const d = Math.sqrt(dx * dx + dz * dz);
-    if (d < SIGHT && (p.y || 0) < 6) {
+    if (d < sightNow && (p.y || 0) < 6) {
       const r = losRay(game, o.x, o.z, p.x, p.z);
       if (r >= 0) o.los = r === 1;
     } else o.los = false;
@@ -1021,7 +1051,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     let v0;
     if (role === 'chase') {
       toChase(v);
-      v0 = 12;
+      v0 = rulesFor(heat.level).launch;
     } else {
       const dr = createDriver(city, game.rng);
       placeDriver(dr, v, be, bf, bd, bl);
@@ -1152,6 +1182,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     bodies,
     crewUp,
     stats,
+    stars: 0,
     fixedUpdate(dt) {
       const p = game.player;
       const settings = game.progress && game.progress.settings;
@@ -1169,6 +1200,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
           wasEnabled = false;
         }
         resetHeat(heat);
+        callOffHeli();
+        sys.stars = 0;
         crashed = startled = false;
         violence = 0;
         p.wanted = 0;
@@ -1178,6 +1211,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       wasEnabled = true;
       stepTick++;
       trafficCtx.time = chaseCtx.time = game.time;
+      sightNow = SIGHT * fogSightScale(game.weather ? game.weather.fog : 0);
       trafficCtx.vehicles = chaseCtx.vehicles = game.vehicles;
       chaseCtx.collision = game.collision;
       if (pedCool > 0) pedCool -= dt;
@@ -1218,7 +1252,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
           const v = cars[i];
           if (v.role === 'leave' || v.role === 'dead') continue;
           const d = Math.hypot(v.x - p.x, v.z - p.z);
-          if (d < SIGHT && (!col || col.lineClear(v.x, v.z, p.x, p.z))) seen = true;
+          if (d < sightNow && (!col || col.lineClear(v.x, v.z, p.x, p.z))) seen = true;
         }
         facts.seenByPolice = seen;
       }
@@ -1285,6 +1319,23 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         endChase();
       }
       p.wanted = heat.level;
+      // The top level brings a helicopter (existing pilot code); it leaves
+      // when the heat drops. A downed one is replaced after a pause.
+      if (heliPilot && (heliPilot.state === 'done' || heliPilot.state === 'crash')) {
+        heliPilot = null;
+        heliWait = HELI_REPEAT;
+      }
+      if (heat.level < MAX_HEAT) {
+        if (heliPilot) callOffHeli();
+        heliWait = HELI_DELAY;
+      } else if (!heliPilot && rulesFor(heat.level).heli) {
+        heliWait -= dt;
+        if (heliWait <= 0 && !facts.atSea) {
+          heliPilot = spawnPoliceHeli(game, { order: 'orbit' });
+          heliWait = HELI_REPEAT;
+        }
+      }
+      sys.stars = wantedStars(heat.level, !!heliPilot);
 
       // Drive the cars, retire the ones no longer needed.
       const idle = city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150;
@@ -1298,7 +1349,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         if (heat.level < MAX_HEAT && v.role === 'block' && !v.officers) toLeave(v);
         if (heat.level > 0 && (v.role === 'chase' || v.role === 'out')) chasing++;
         const d = Math.hypot(v.x - p.x, v.z - p.z);
-        if (v.role === 'chase' && chasing > Math.min(heat.level, max)) {
+        if (v.role === 'chase' && chasing > unitsFor(heat.level, max)) {
           toLeave(v);
           chasing--;
         }
@@ -1385,7 +1436,10 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         if (v.role === 'chase') {
           anySiren = true;
           // Heat 3: every other car rams for a few seconds at a time.
-          if (v.cop) v.cop.ram = heat.level >= 3 && chaseIx % 2 === 0 && (game.time % 7) < 4;
+          if (v.cop) {
+            v.cop.ram = heat.level >= 3 && chaseIx % 2 === 0 && (game.time % 7) < 4;
+            v.cop.pace = rulesFor(heat.level).pace;
+          }
           chaseIx++;
           chaseStep(v.cop, v, dt, target, chaseCtx);
         } else driveStep(v.ai, v, dt, trafficCtx);
@@ -1402,8 +1456,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       if (patrolDelay > 0) patrolDelay -= dt;
       spawnTimer -= dt;
       if (spawnTimer <= 0) {
-        spawnTimer = 1.2;
-        const want = Math.min(heat.level, max);
+        spawnTimer = rulesFor(heat.level).every;
+        const want = unitsFor(heat.level, max);
         if (heat.level >= MAX_HEAT && blocks === 0 && blockCool <= 0 && !facts.atSea && !facts.airborne) {
           blockCool = tryRoadblock() ? BLOCK_COOL : 3;
         } else if (heat.level > 0 && chasing < want && !facts.atSea && !facts.airborne) trySpawn('chase');

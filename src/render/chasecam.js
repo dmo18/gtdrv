@@ -125,6 +125,10 @@ export function createChaseCamera(camera) {
   // Tank mode: world yaw / pitch the turret is asked to aim along. The
   // drag turns it; a lock (systems/armor.js) steers it with holdDrag.
   const tankAim = { yaw: 0, pitch: 0.1, holdDrag: false, dragScale: 1 };
+  // Effects hook (systems/cinematic.js): extra yaw (rad), distance and
+  // height (m) behind the target, and a FOV zoom fraction. `touched` is set
+  // whenever the player drags the camera, so an effect can cancel itself.
+  const fx = { yaw: 0, dist: 0, rise: 0, zoom: 0, touched: false };
 
   // Distance at which the view line from the target back to the camera
   // is first blocked, or `dist` if it is clear. Height-aware: roofs below
@@ -153,15 +157,16 @@ export function createChaseCamera(camera) {
   }
 
   function place(target, dt, collision, snap) {
-    const a = camHeading + orbitYaw;
+    const a = camHeading + orbitYaw + (mode.dist > 0.5 ? fx.yaw : 0);
     const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
     const bx = -Math.cos(a) * cp, bz = -Math.sin(a) * cp;
     const baseY = (target.y || 0) + (target.height || 0);
-    const rise = mode.height + orbitPitch;
+    const fxOn = mode.dist > 0.5; // the effects hook skips bumper and cockpit views
+    const rise = mode.height + orbitPitch + (fxOn ? fx.rise : 0);
     // Pull in when something solid is between the target and the camera.
-    let want = mode.dist;
+    let want = mode.dist + (fxOn ? fx.dist : 0);
     if (collision && mode.dist > 0.5) {
-      const reach = mode.dist + 0.5;
+      const reach = want + 0.5;
       const hit = clearDist(collision, target.x, baseY + mode.lookHeight, target.z, bx, bz, reach, baseY + rise - sp * reach);
       if (hit < reach) want = Math.max(1.2, hit - 0.6);
     }
@@ -289,7 +294,8 @@ export function createChaseCamera(camera) {
     curFov = next;
     // The aim view blends its own FOV in with the same 0.2 s ease.
     const s = smooth01(aim.k);
-    const fov = s > 0 ? next + (AIM.fov - next) * s : next;
+    let fov = s > 0 ? next + (AIM.fov - next) * s : next;
+    if (fx.zoom > 0) fov *= 1 - fx.zoom;
     if (Math.abs(fov - camera.fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
@@ -315,6 +321,7 @@ export function createChaseCamera(camera) {
   return {
     update(target, dt, input, collision) {
       // Ease the aim view in and out (AIM.ease seconds).
+      if (input && (input.lookX || input.lookY)) fx.touched = true;
       if (dt > 0) aim.k = clamp(aim.k + (aim.on ? dt : -dt) / AIM.ease, 0, 1);
       if (aim.on && input && (input.lookX || input.lookY)) {
         // Aiming: the drag turns the aim itself (slower over a target).
@@ -399,6 +406,7 @@ export function createChaseCamera(camera) {
     aim,
     ray,
     tankAim,
+    fx,
     // Where the view points now, as yaw (heading convention).
     viewYaw: () => Math.atan2(ray.dz, ray.dx),
     // The VIEW button: next camera view for the current kind of craft.

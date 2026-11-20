@@ -32,6 +32,7 @@ import { createMissions } from './systems/missions.js';
 import { createScore } from './systems/score.js';
 import { createCombatFx } from './render/combatfx.js';
 import { createCombatHud } from './ui/combathud.js';
+import { createCinematic } from './systems/cinematic.js';
 import { createTutorial } from './systems/tutorial.js';
 import { createObjective } from './systems/objective.js';
 import { createEffects } from './render/effects.js';
@@ -407,6 +408,8 @@ export function createGame({ canvas, uiRoot }) {
   game.combatFx = game.addSystem(createCombatFx(game));
   game.jetFx = game.addSystem(createJetFx(game));
   game.combatHud = game.addSystem(createCombatHud(game, uiRoot));
+  // Slow motion on big kills, pull-back camera on blasts (game.timeScale).
+  game.cinematic = game.addSystem(createCinematic(game, uiRoot));
   game.menu = createMenu(uiRoot, game, game.economy);
 
   // --- Simulation step. ---
@@ -428,6 +431,7 @@ export function createGame({ canvas, uiRoot }) {
     }
     game.time += dt;
     game.world.time = game.time;
+    game.world.weather = game.weather || null;
     if (input.consume('respawn')) game.respawnPlayer();
     if (input.consume('camera')) {
       hud.toast('Camera: ' + chase.cycleView(), 1.2);
@@ -637,6 +641,8 @@ export function createGame({ canvas, uiRoot }) {
     h.armor = p.armor;
     h.time = game.clock;
     h.wanted = p.wanted;
+    h.stars = game.police ? game.police.stars : p.wanted;
+    h.cooling = game.police ? game.police.heat.cooldown : 0;
     h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
     const dKey = city.shoreDist(p.x, p.z) < 34 && !city.onRoad(p.x, p.z) ? 'shore' : city.districtOf(p.x, p.z);
     h.district = dKey === 'shore' ? 'The Strand' : DISTRICTS[dKey].name;
@@ -678,7 +684,7 @@ export function createGame({ canvas, uiRoot }) {
   // Pick up where the player left off (a no-op on a new game).
   game.restoreSession();
 
-  game.loop = createLoop({ fixedUpdate, render });
+  game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1 });
   game.resize = resize;
   game.step = fixedUpdate; // for tests
   game.draw = render;

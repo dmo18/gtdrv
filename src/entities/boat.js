@@ -5,6 +5,9 @@
 // Heading 0 faces +x, forward vector (cos h, sin h) in (x, z), right
 // vector (-sin h, cos h).
 import { clamp, angleDiff } from '../core/rng.js';
+import { windPush } from '../core/weather.js';
+
+const WIND = { x: 0, z: 0 };
 
 const G = 9.81;
 
@@ -222,6 +225,13 @@ export function stepBoat(b, controls, dt, world) {
 
   b.vx = vf * nch - vl * nsh;
   b.vz = vf * nsh + vl * nch;
+  // Strong wind leans on a boat a little (zero in calm air).
+  const bw = world && world.weather;
+  if (bw && bw.wind > 5) {
+    windPush(bw.wind, bw.windDir || 0, 0.7, time, WIND);
+    b.vx += WIND.x * dt;
+    b.vz += WIND.z * dt;
+  }
 
   // Integrate position in sub-steps with collision.
   const move = Math.hypot(b.vx, b.vz) * dt;

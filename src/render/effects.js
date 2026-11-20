@@ -778,10 +778,14 @@ export function createEffects(game) {
           smoke(p.x + rs() * 0.3, 0.2, p.z + rs() * 0.3, -fwdx * spd * 0.2 + rs(), 0.6 + rnd() * 0.6, -fwdz * spd * 0.2 + rs(),
             1.6 + rnd(), 0.6, 3.2, 0.3, 0.62, 0.54, 0.42, 0.15, 1.4);
         }
-        if (game.weather && game.weather.rain > 0.3 && road && spd > 7 && rnd() < game.weather.rain * clamp(spd / 30, 0, 1) * qq * 0.9) {
+        if (game.weather && game.weather.rain > 0.25 && road && spd > 6 && rnd() < game.weather.rain * clamp(spd / 24, 0, 1) * qq * 1.1) {
           const w = toWorld(v, k === 0 ? -ax - 0.3 : ax - 0.3, side * az);
           smoke(w.x, 0.2, w.z, -fwdx * spd * 0.3 + rs() * 0.5, 0.4 + rnd() * 0.5, -fwdz * spd * 0.3 + rs() * 0.5,
             0.7 + rnd() * 0.4, 0.4, 2.0, 0.2, 0.8, 0.83, 0.86, 0.05, 2.2);
+          // Heavy rain also throws fine droplets up behind the wheel.
+          if (game.weather.rain > 0.6 && rnd() < 0.5) {
+            spray(w.x, 0.15, w.z, -fwdx * spd * 0.2 + rs() * 0.8, 1.2 + rnd() * 1.6, -fwdz * spd * 0.2 + rs() * 0.8, 0.5 + rnd() * 0.3, 0.07, 0.04, 0.55);
+          }
         }
       }
     }

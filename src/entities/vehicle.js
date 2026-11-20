@@ -13,6 +13,9 @@
 //   `suspension` 0..1 extra wheel travel after an impact (decays).
 // - `slip` 0..1 tyre squeal / skid amount, `abs` true while ABS works.
 import { clamp, angleDiff } from '../core/rng.js';
+import { wetGrip, wetUnderSteer, wetBrake, wetTopSpeed, windPush, lightnessOfMass } from '../core/weather.js';
+
+const WIND = { x: 0, z: 0 };
 
 const G = 9.81;
 
@@ -305,7 +308,10 @@ export function stepVehicle(v, controls, dt, world) {
   v.brake = brake;
   v.handbrake = handbrake;
 
-  const m = s.mass, mg = m * G, mu = s.grip, muLat = lateralGrip(s);
+  const wx = world && world.weather;
+  const rain = wx ? wx.rain || 0 : 0;
+  const wet = wetGrip(rain);
+  const m = s.mass, mg = m * G, mu = s.grip * wet, muLat = lateralGrip(s) * wet, fLat = wetUnderSteer(rain);
   let ch = Math.cos(v.heading), sh = Math.sin(v.heading);
   const vf0 = v.vx * ch + v.vz * sh;
   const avf0 = Math.abs(vf0);
@@ -385,7 +391,7 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.wrecked && brake > 0.02) brakeReq = Math.max(brakeReq, brake);
   // Hydraulic build-up: the pedal pressure rises over ~0.12 s.
   v.brakeP = approach(v.brakeP, brakeReq, 9 * dt);
-  const brakeF = v.brakeP * m * s.brake;
+  const brakeF = v.brakeP * m * s.brake * wetBrake(rain);
 
   // ---- Tyre dynamics in sub-steps.
   const h = dt / NSUB;
@@ -404,7 +410,7 @@ export function stepVehicle(v, controls, dt, world) {
     const fzF = clamp(mg * d.cgF - dFz, 0.2 * mg, 0.85 * mg);
     const fzR = mg - fzF;
     const capF = mu * fzF, capR = mu * fzR; // longitudinal limits
-    const capLF = muLat * fzF, capLR = muLat * H.rearLat * fzR; // lateral limits
+    const capLF = muLat * fLat * fzF, capLR = muLat * H.rearLat * fzR; // lateral limits
 
     // Stability assist (sim: off while the handbrake is held).
     const beta = Math.atan2(vl, Math.max(avf, V0));
@@ -529,12 +535,19 @@ export function stepVehicle(v, controls, dt, world) {
     }
   }
 
+  // Strong wind nudges light cars sideways (zero in calm air).
+  if (wx && wx.wind > 5 && !v.wrecked) {
+    windPush(wx.wind, wx.windDir || 0, lightnessOfMass(m), world.time || 0, WIND);
+    v.vx += WIND.x * dt;
+    v.vz += WIND.z * dt;
+  }
+
   // Never past the top speed or the reverse limit.
   ch = Math.cos(v.heading);
   sh = Math.sin(v.heading);
   let vf = v.vx * ch + v.vz * sh;
   const vl = -v.vx * sh + v.vz * ch;
-  const vfc = clamp(vf, -s.reverseSpeed, s.maxSpeed);
+  const vfc = clamp(vf, -s.reverseSpeed, s.maxSpeed * wetTopSpeed(rain));
   // Come to a clean rest when nothing drives the car.
   const driving = driveF !== 0;
   if (!driving && Math.abs(vfc) < 0.12 && Math.abs(vl) < 0.12 && (Math.abs(v.yawRate) < 0.08 || Math.abs(vf) < 0.02)) {
