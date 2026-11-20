@@ -145,4 +145,70 @@ export default async function extra(page, check) {
   await page.screenshot({ path: 'shots/race.png' });
   check(race.courses >= 10, `activities loaded (${race.courses})`);
   check(!!race.medal && race.gained > 0, `finishing "${race.name}" awards a medal (${race.medal}) and $${race.gained}`);
+
+  // Combat core: on foot, hold fire at the nearest ped until it goes
+  // down (cartoon knock-down, no gore), then it lies there and fades.
+  // The 'fire' action is pressed directly: the F key binding is task 26.
+  const fight = await page.evaluate(() => {
+    const g = window.__rw;
+    const run = (n) => {
+      for (let i = 0; i < n; i++) g.step(1 / 60);
+    };
+    if (g.player.vehicle) {
+      const v = g.player.vehicle;
+      v.vx = v.vz = 0;
+      v.speed = 0;
+      v.driver = null;
+      g.player.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    run(60);
+    const w = g.player.walker;
+    const peds = g.peds.slots.map((s) => s.ped).filter((p) => p.active && p.life === 'ok');
+    if (!peds.length) return { ok: false, why: 'no peds' };
+    peds.sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z));
+    const ped = peds[0];
+    // Stand 6 m from the ped.
+    w.x = w.px = ped.x - 6;
+    w.z = w.pz = ped.z;
+    w.heading = w.pheading = 0;
+    const events = { shot: 0, hit: 0, down: 0 };
+    const offs = ['shot', 'hit', 'down'].map((n) => g.events.on(n, () => events[n]++));
+    g.input.press('fire');
+    let steps = 0;
+    while (ped.life === 'ok' && steps < 240) {
+      const dx = ped.x - w.x, dz = ped.z - w.z, dy = 1.0 - 1.4;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      g.aim.dx = dx / l;
+      g.aim.dy = dy / l;
+      g.aim.dz = dz / l;
+      g.aim.manual = true;
+      w.heading = Math.atan2(dz, dx);
+      run(1);
+      steps++;
+    }
+    g.input.release('fire');
+    g.aim.manual = false;
+    run(30);
+    offs.forEach((f) => f());
+    window.__downed = ped;
+    return { ok: ped.life !== 'ok', life: ped.life, hp: ped.hp, steps, events, actors: g.actors.length };
+  });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'shots/combat-down.png' });
+  check(fight.ok, `holding fire downs a ped (${fight.life}, hp ${fight.hp}, ${fight.steps} steps, ${JSON.stringify(fight.events)})`);
+  check(fight.actors > 1 && fight.actors <= 36, `combat actors registered (${fight.actors})`);
+  const later = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = window.__downed;
+    let out = false, maxFade = 0, freed = false;
+    for (let i = 0; i < 60 * 6 && !freed; i++) {
+      g.step(1 / 60);
+      if (p.life === 'out') out = true;
+      if (p.fade > maxFade) maxFade = p.fade;
+      if (!p.active || !g.actors.includes(p)) freed = true;
+    }
+    return { out, maxFade: +maxFade.toFixed(2), freed };
+  });
+  check(later.out && later.maxFade > 0.9 && later.freed, `downed ped lies out, fades and its slot is freed (${JSON.stringify(later)})`);
 }

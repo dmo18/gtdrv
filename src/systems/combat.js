@@ -305,18 +305,15 @@ export function trace(game, x, y, z, dx, dy, dz, len, skipActor, skipCraft, out)
   out.craft = null;
   // Ground (y = 0 on land) or sea surface.
   if (dy < -1e-9) {
-    let t = -y / dy;
-    if (t >= 0 && t < out.t) {
-      const gx = x + dx * t, gz = z + dz * t;
-      if (isLand(game, gx, gz)) {
-        out.kind = 'ground';
-        out.t = t;
-      } else {
-        t = (seaYOf(game) - y) / dy;
-        if (t >= 0 && t < out.t) {
-          out.kind = 'water';
-          out.t = t;
-        }
+    const t = -y / dy;
+    if (t >= 0 && t < out.t && isLand(game, x + dx * t, z + dz * t)) {
+      out.kind = 'ground';
+      out.t = t;
+    } else {
+      const ts = (seaYOf(game) - y) / dy;
+      if (ts >= 0 && ts < out.t && !isLand(game, x + dx * ts, z + dz * ts)) {
+        out.kind = 'water';
+        out.t = ts;
       }
     }
   }
