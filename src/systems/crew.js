@@ -717,8 +717,9 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
   }
 
   // --- Behaviour helpers ---
-  function startFlee(m) {
+  function startFlee(m, why = 'order') {
     if (m.inCar) return;
+    m.fleeWhy = why;
     m.state = 'flee';
     m.flee = true;
     m.fleeT = 0;
@@ -880,7 +881,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
           break;
         }
         if (morale(m, 1.5 + (inCraft ? 1 : 0))) {
-          startFlee(m);
+          startFlee(m, 'outnumbered');
           break;
         }
         const car = carFor(m);
@@ -1338,7 +1339,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       }
       if (t.life === 'ok' && t.hp > 0 && t.hp < t.maxHp * FLEE_HP && !t.fleeRolled) {
         t.fleeRolled = true;
-        if (rng.next() < FLEE_CHANCE) startFlee(t);
+        if (rng.next() < FLEE_CHANCE) startFlee(t, 'hurt');
       }
     });
     ev.on('down', (d) => {
