@@ -272,7 +272,8 @@ export function createScore(game) {
     const speed = Math.abs(v.speed || 0);
 
     if (kind === 'car' || kind === 'boat') {
-      const up = (v.y || 0) > (kind === 'boat' ? AIR_Y_BOAT : AIR_Y) && !v.wrecked;
+      // Ramp jumps (systems/stunts.js, v.stuntRamp) score there instead.
+      const up = (v.y || 0) > (kind === 'boat' ? AIR_Y_BOAT : AIR_Y) && !v.wrecked && !v.stuntRamp;
       if (up && !air) {
         air = true;
         airT = 0;

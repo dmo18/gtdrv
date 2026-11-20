@@ -18,7 +18,7 @@ const DISTRICT_LABEL = {
   residential: 'Fernside', park: 'Greenmere', beach: 'Pale Shore', industrial: 'Cinder Row',
 };
 
-function makeSpot(id, name, x, z, heading, shape, water) {
+export function makeSpot(id, name, x, z, heading, shape = RAMP_LAND, water = false) {
   const half = shape.slope + shape.top / 2;
   return {
     id, name, x, z, heading, water,

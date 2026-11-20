@@ -17,8 +17,8 @@ await mkdir('docs/preview', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('pageerror', String(e)));
-await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
-await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 60000 });
+await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`, { timeout: 180000, waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 180000 });
 await page.evaluate(() => window.__rw.daynight?.setHour(14));
 await page.addStyleTag({ content: '.rw-toasts { display: none !important; }' });
 
@@ -48,19 +48,19 @@ const garage = await page.evaluate(() => { const g = window.__rw.secrets.garage;
 const by = Object.fromEntries(spots.map((s) => [s.id, s]));
 const which = process.argv[2] || 'all';
 const at = (s, back, up, side = 0) => [s.x - Math.cos(s.h) * back - Math.sin(s.h) * side, up, s.z - Math.sin(s.h) * back + Math.cos(s.h) * side];
-if (which === 'all' || which === 'world') {
+if (which === 'all' || which === 'world' || which === 'box') {
   const lh = by.rustlamp;
-  await look('secrets-lighthouse', at(lh, 26, 9), [lh.x, 8, lh.z]);
+  if (which !== 'box') await look('secrets-lighthouse', at(lh, 26, 9), [lh.x, 8, lh.z]);
   const bx = by['drowned-box'];
-  await look('secrets-container', at(bx, 14, 4.5, 3), [bx.x + Math.cos(bx.h) * 9, 0, bx.z + Math.sin(bx.h) * 9]);
+  await look('secrets-container', at(bx, 6, 5.5, 3), [bx.x + Math.cos(bx.h) * 23, 0, bx.z + Math.sin(bx.h) * 23]);
   const cv = by['the-gullet'];
-  await look('secrets-cave', at(cv, -20, 6), [cv.x, 2.5, cv.z]);
+  if (which !== 'box') await look('secrets-cave', at(cv, -20, 6), [cv.x, 2.5, cv.z]);
   const al = by['tag-alley'];
-  await look('secrets-alley', [al.tag.x + al.tag.nx * 8, 2.2, al.tag.z + al.tag.nz * 8], [al.tag.x, 2.4, al.tag.z]);
+  if (which !== 'box') await look('secrets-alley', [al.tag.x + al.tag.nx * 8, 2.2, al.tag.z + al.tag.nz * 8], [al.tag.x, 2.4, al.tag.z]);
   const pg = by['lone-ride'];
-  await look('secrets-playground', at(pg, 18, 7), [pg.x, 2.5, pg.z]);
+  if (which !== 'box') await look('secrets-playground', at(pg, 18, 7), [pg.x, 2.5, pg.z]);
   const rf = by['roof-garden'];
-  await look('secrets-roof', at(rf, 20, rf.roofY + 8), [rf.x, rf.roofY + 1, rf.z]);
+  if (which !== 'box') await look('secrets-roof', at(rf, 20, rf.roofY + 8), [rf.x, rf.roofY + 1, rf.z]);
 }
 if (which === 'all' || which === 'garage') {
   await page.evaluate(() => {
@@ -70,7 +70,8 @@ if (which === 'all' || which === 'garage') {
   });
   const fx = garage.ox + Math.cos(garage.h) * 6, fz = garage.oz + Math.sin(garage.h) * 6;
   await page.evaluate(([x, z]) => { const p = window.__rw.player; if (p.vehicle) { p.vehicle.x = x; p.vehicle.z = z; } }, [fx, fz]);
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(() => window.__rw.secrets.doorOpen >= 1, null, { timeout: 180000 });
+  await page.waitForTimeout(1500);
   await look('secrets-garage', [garage.ox + Math.cos(garage.h) * 10 - Math.sin(garage.h) * 3, 2.4, garage.oz + Math.sin(garage.h) * 10 + Math.cos(garage.h) * 3], [garage.cx, 0.8, garage.cz], 1800);
 }
 if (which === 'all' || which === 'records') {

@@ -183,6 +183,39 @@ the final review and fix stage; nothing is in progress that blocks play.
   damage from pedestrians" holds for every car; the spec flag
   `pedSafe: true` documents it for Ghostwake.
 
+## 2026-11-20: smoothness and look pass
+- Adaptive resolution (src/render/adaptres.js, pure, test/adaptres.test.js):
+  the loop's real frame time moves the pixel ratio between 0.6 and a cap
+  of 2.0 (High), 1.6 (Normal) or 1.2 (Low) physical pixels per CSS pixel.
+  Steps down 0.1 (0.2 when far over) at once, probes up 0.05 after calm;
+  a failed probe doubles the wait (up to 60 s). Nothing shown in the HUD.
+  Before, Normal on the S24 Ultra drew at the full 3.5 device ratio.
+- MSAA only when the device ratio is 1.5 or less (decided at start).
+- No compile hitches: every material is compiled (compileAsync) behind
+  the title screen; the sun keeps castShadow on through sunrise and sunset
+  (switching it recompiled every lit material) and just skips the shadow
+  map; car models not built yet are lofted one per idle slot.
+- Look: colour grade in the tone curve (ACES, a little saturation, cool
+  shadows, warm highlights, exposure 1.1), facade AO-lite (darker at the
+  ground, lift toward the top), damp night streets with lamp reflection
+  streaks (one draw call), a sun band along the horizon at dusk.
+- Screens: docs/preview/graphics-before-*.png and graphics-after-*.png.
+  Perf numbers: scripts/perf.mjs (now also night view, shader programs,
+  worst per-system call).
+
+## 2026-11-20: car radio
+- RADIO in the "more" fan (car and boat) and "Car radio" in Settings: Off,
+  Lagoon Drive (chill synth), Pulse Harbour (dance pop 118 to 124 BPM),
+  Lamplight Keys (slow jazz-like) and Gullspeak (talk). Saved as
+  `settings.station` (allow-list, old saves load as off).
+- Gullspeak is a generated talk texture (vowel blips, jingles, ads) with
+  on-screen captions of 40 original DJ lines. It is not real speech.
+- Crossfade 0.6 s on per-station buses; the background score returns on
+  foot. Music ducks under sirens as well as explosions.
+- Files: src/core/radio.js, src/audio/radio.js, radiosounds.js,
+  radioplayer.js, src/systems/radio.js; test/radio.test.js; details in
+  docs/AUDIO.md. Screenshot: docs/preview/radio-talk-caption.png.
+
 ## Known issues
 - A fighter that leaves the depot at part thrust can get stuck on the
   shore (full thrust is fine).

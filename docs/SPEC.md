@@ -73,6 +73,18 @@ existing game: own name, city, characters, art and missions.
 - There is no hidden menu trick any more (the submarine is removed).
 
 
+## Car radio
+In a car or boat the player can switch between four invented stations or
+turn the radio off (the default): a RADIO button in the "more" fan and a
+"Car radio" row in Settings. The choice is saved in `settings.station`
+(only a known id is kept). Stations are fully generated: a chill synth
+station, a dance-pop station (118 to 124 BPM), a slow jazz-like station and a
+talk station. The talk station has no speech: it plays a jingle, short
+vowel-blip texture and songs, and shows the DJ's words (40 funny lines about
+the island, plus ads every third song) as captions in a small strip under the
+minimap while it plays. Changing station crossfades over 0.6 s; music steps
+back under explosions and sirens.
+
 ## Weather and driving
 Rain lowers grip (down to 72 percent in a downpour), adds slight
 understeer, lengthens stops and trims top speed above rain 0.6. Strong wind

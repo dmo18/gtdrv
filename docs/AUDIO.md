@@ -177,6 +177,51 @@ distance low-pass, and occlusion-lite: one collision ray every quarter
 second from the player to each of the four engine slots and to the
 siren; a wall in between closes their low-pass.
 
+## Radio (src/audio/radioplayer.js, radio.js, radiosounds.js, core/radio.js)
+
+In a car or boat the RADIO button in the "more" fan (or Settings, "Car
+radio") steps through Off, **Lagoon Drive**, **Pulse Harbour**, **Lamplight
+Keys** and **Gullspeak** (station names are invented). On foot, or in a
+plane, tank or helicopter, the station stops and the background score
+returns. Everything is generated from the seeded rng; no audio files.
+
+- **Lagoon Drive**: the existing composer (music.js) with its own seed and
+  a slower 82 to 93 BPM.
+- **Pulse Harbour**: dance pop at 118 to 124 BPM. Four-on-the-floor kick,
+  claps, offbeat hats, a rolling offbeat sub bass, syncopated chord stabs
+  and a sixteenth-note lead; intro, full, breakdown with a clap build.
+- **Lamplight Keys**: slow jazz-like, 72 to 81 BPM, swung eighths. Chord
+  voicings are generated (third, fifth, seventh and ninth of ii V I style
+  progressions, kept inside an octave), an electric-piano comp, a short
+  melody from chord tones, a walking bass with a half-step approach, and
+  brushed-style noise drums (brush swish, ride tick, feathered kick).
+- **Gullspeak** (talk). Honest version: **there is no speech.** No speech
+  service and no speech files exist. The station plays a jingle, then a
+  stylised talk texture (one short vowel blip per syllable of the caption,
+  made from a glottal pulse train through formant filters, with a pitch
+  contour that falls at the end of a sentence and rises on a question) while
+  the **words are shown as captions** in a small strip below the minimap
+  (src/systems/radio.js). Each line is one of 40 original DJ lines about the
+  island, three songs between lines, "Now playing: <invented title>"
+  captions, and an ad jingle plus one of 8 invented ads after every third
+  song. The strip is shown only while the station plays and is cleared when
+  the station changes.
+- **Switching** crossfades over 0.6 s: every tune-in gets its own gain bus
+  under the music bus; the old bus ramps to 0 (and the background score
+  ramps back in if the station is off), then the old bus is disconnected.
+  Only the station on air is scheduled, so the cost is one bar of notes
+  (about 25 sources) every 1.5 to 3 s. Music volume and the Music switch
+  apply to the radio too. A station on air steps back with the music under
+  explosions (the existing duck) and, new, under a siren within 150 m.
+- Memory: 12 new buffers, 0.35 MB. The memory limit in the tests moved from
+  12 to 12.5 MB for them (the bank is 12.2 MB).
+- Measured (headless Chromium, busy machine): scheduling a bar averages
+  about 0.7 ms and at most 3 ms, at most 25 notes per bar, no clipping and no
+  click when switching (largest sample jump the same as steady playback),
+  stations within 2x of each other in mean RMS.
+- Not done: the talk station is not speech and sounds like a muffled
+  chatter of beeps. Nobody has listened to any of this on a phone.
+
 ## Checks (scripts/audio-test.mjs, test/audio.test.js)
 
 The browser harness keeps all its earlier checks and adds: no buffer
@@ -195,7 +240,7 @@ louder 2nd firing harmonic than the fundamental; it still requires the
 3x rpm step to give a 3x pitch step within 25 %. Two limits changed on
 purpose: the voice cap from 8 to 10 (explosions hold a voice for their
 4 s tail) and the listed combat buffer memory from 2 to 2.5 MB (the list
-now holds 9 more buffers); the total memory limit stays 12 MB.
+now holds 9 more buffers); the total memory limit stays 12 MB (12.5 MB since the radio samples).
 
 ## Performance
 

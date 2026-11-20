@@ -323,8 +323,10 @@ export function createGraphics(game) {
   // ---- shader warm-up ----
   // Compile every material in the scene (hidden ones too: night lamps,
   // rain, effect pools) behind the title screen, instead of the first
-  // time each appears.
+  // time each appears. Queued just after start-up so the page shows its
+  // title first; the first frame of play runs it if it has not happened.
   let warmed = false;
+  if (typeof setTimeout === 'function') setTimeout(() => { if (!warmed) warmUp(); }, 0);
   function warmUp() {
     warmed = true;
     const t = performance.now();

@@ -36,6 +36,7 @@ const ACT_STYLE = {
   boat: { color: '#45c7dc', name: 'Boat race' },
   sky: { color: '#ffcf5a', name: 'Sky course' },
   delivery: { color: '#8bd66f', name: 'Delivery' },
+  stunt: { color: '#b48cff', name: 'Stunt jump' },
 };
 const LABEL_ZOOM = 2; // full-map zoom at which marker labels appear
 
@@ -404,6 +405,15 @@ function drawIcon(g, type, color, s) {
     g.moveTo(-s * 0.85, 0); g.lineTo(s * 0.85, 0);
     g.strokeStyle = '#1a120d'; g.lineWidth = Math.max(1.6, s * 0.2);
     g.stroke();
+  } else if (type === 'stunt') { // ramp wedge with a jump arc
+    g.moveTo(-s, s * 0.8); g.lineTo(s * 0.35, s * 0.8); g.lineTo(s * 0.35, s * 0.05); g.closePath();
+    g.stroke(); g.fill();
+    g.beginPath();
+    g.moveTo(s * 0.1, -s * 0.15); g.quadraticCurveTo(s * 0.55, -s * 1.05, s * 0.95, -s * 0.2);
+    g.lineWidth = Math.max(3, s * 0.34);
+    g.strokeStyle = '#1a120d'; g.stroke();
+    g.lineWidth = Math.max(1.6, s * 0.18);
+    g.strokeStyle = color; g.stroke();
   } else if (type === 'race') { // chequered flag tile
     g.rect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7);
     g.stroke(); g.fill();

@@ -42,6 +42,7 @@ export function createAirState() {
     pitch: 0, roll: 0, wp: 0, wr: 0,
     turnP: 0, turnR: 0, // signed rotation summed over the flight
     spot: null, crashed: false,
+    heading: 0, dir: 0, // set by the owner at launch (craft heading, ramp direction)
   };
 }
 

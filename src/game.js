@@ -31,6 +31,7 @@ import { createCombat, layDown } from './systems/combat.js';
 import { createCrew } from './systems/crew.js';
 import { createMissions } from './systems/missions.js';
 import { createScore } from './systems/score.js';
+import { createStunts } from './systems/stunts.js';
 import { createCombatFx } from './render/combatfx.js';
 import { createCombatHud } from './ui/combathud.js';
 import { createCinematic } from './systems/cinematic.js';
@@ -337,6 +338,7 @@ export function createGame({ canvas, uiRoot }) {
   game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));
   game.score = game.addSystem(createScore(game));
+  game.stunts = game.addSystem(createStunts(game)); // ramps, jumps and stunt medals (after score)
   game.secrets = game.addSystem(createSecrets(game));
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;

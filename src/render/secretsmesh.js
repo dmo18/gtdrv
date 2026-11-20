@@ -36,9 +36,10 @@ function addPart(group, b, material) {
 function buildContainer(spot, seaY, M) {
   const g = place(new THREE.Group(), spot.x, 0, spot.z, spot.heading);
   const c = new THREE.Group();
-  // Out in the shallows, nose down and listing: only the top half shows.
-  c.position.set(9, seaY + 0.55, 1.5);
-  c.rotation.set(0.2, 0.15, 0.1);
+  // Out in the shallows (the sand shelves away past the spot),
+  // lying along the shore, nose down and listing: only the top half shows.
+  c.position.set(23, seaY + 0.5, 1.5);
+  c.rotation.set(0.2, 1.25, 0.1);
   const b = new THREE.Group();
   const k = new MeshBuilder();
   k.box(-6, -1.3, 6, 1.3, -1.3, 1.3, 0xa8472e, 0xb04e34, 0.9, 1.05);
@@ -56,7 +57,7 @@ function buildContainer(spot, seaY, M) {
   g.add(c);
   // A bright buoy on a rope so it can be spotted from a distance.
   const f = new MeshBuilder();
-  f.blob(4.5, seaY + 0.1, -4, 0.45, 0.45, 0.45, 0xf0ba26, 8, 5, 0.7, 1.1);
+  f.blob(22, seaY + 0.1, -5.5, 0.45, 0.45, 0.45, 0xf0ba26, 8, 5, 0.7, 1.1);
   addPart(g, f, M.std);
   // Wet sand where the rope is tied.
   const s = new MeshBuilder();

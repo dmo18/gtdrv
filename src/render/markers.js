@@ -13,6 +13,7 @@ export const MARKER_COLORS = {
   after: 0xf6efe6,
   finish: 0xfff3c4,
   passed: 0xffffff,
+  stunt: 0xb48cff, // violet: stunt ramps (systems/stunts.js)
 };
 const MAX_STARTS = 20;
 const SLOTS = 3;
@@ -91,6 +92,12 @@ function makeIcon(type, mat) {
     add(g.box, 0.8, 0.12, 3.4, 0.2, 0.05, 0);
     add(g.box, 0.4, 0.12, 1.4, -1.2, 0.05, 0);
     add(g.box, 0.4, 0.8, 0.1, -1.25, 0.4, 0);
+  } else if (type === 'stunt') {
+    // A ramp wedge with an arrow arcing off its lip.
+    add(g.box, 2.4, 0.18, 1.2, -0.2, -0.55, 0).rotation.z = 0.42;
+    add(g.box, 0.18, 0.95, 1.2, 0.85, -0.6, 0);
+    add(g.box, 1.2, 0.16, 0.2, 0.3, 0.75, 0).rotation.z = -0.25;
+    add(g.cone, 0.32, 0.6, 0.32, 1.05, 0.55, 0).rotation.z = -Math.PI / 2 - 0.6;
   } else {
     // A parcel with a strap.
     add(g.box, 1.8, 1.4, 1.8, 0, 0, 0);
@@ -107,8 +114,12 @@ export function createMarkers(scene, opts = {}) {
   scene.add(root);
 
   // --- Start markers -------------------------------------------------------
+  // opts.maxStarts / opts.slots: a smaller set (stunt ramps use a few
+  // starts and no checkpoint slots).
+  const nStarts = Number.isInteger(opts.maxStarts) ? Math.max(0, Math.min(MAX_STARTS, opts.maxStarts)) : MAX_STARTS;
+  const nSlots = Number.isInteger(opts.slots) ? Math.max(0, Math.min(SLOTS, opts.slots)) : SLOTS;
   const starts = [];
-  for (let i = 0; i < MAX_STARTS; i++) {
+  for (let i = 0; i < nStarts; i++) {
     const grp = new THREE.Group();
     grp.visible = false;
     const tubeMat = glow(0xffffff, 0.55);
@@ -161,7 +172,7 @@ export function createMarkers(scene, opts = {}) {
 
   // --- Checkpoint slots ------------------------------------------------------
   const slots = [];
-  for (let k = 0; k < SLOTS; k++) {
+  for (let k = 0; k < nSlots; k++) {
     const grp = new THREE.Group();
     grp.visible = false;
     const tubeMat = glow(0xffffff, 0.5);
