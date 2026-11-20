@@ -5,6 +5,8 @@ import { createBoat } from '../entities/boat.js';
 import { createAircraft } from '../entities/aircraft.js';
 
 const RESPAWN_DIST = 260;
+// These only appear at their berths once the player has bought them.
+export const PREMIUM = ['jet', 'stunt', 'heavyheli', 'yacht'];
 
 export function createFleet(game) {
   const spots = [];
@@ -13,6 +15,7 @@ export function createFleet(game) {
   let timer = 0;
 
   function fill(s) {
+    if (PREMIUM.includes(s.spec) && !game.progress.owned.includes(s.spec)) return;
     const c = s.make(s.spec, s.x, s.z, s.heading, game.rng);
     if (!game.kinds[c.kind]) return;
     c.home = s;
@@ -20,6 +23,10 @@ export function createFleet(game) {
     game.addVehicle(c);
   }
   for (const s of spots) fill(s);
+  // A newly bought craft shows up at its berth straight away.
+  game.events.on('purchase', () => {
+    for (const s of spots) if (!s.craft) fill(s);
+  });
 
   return {
     name: 'fleet',

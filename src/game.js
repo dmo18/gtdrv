@@ -86,6 +86,18 @@ export function createGame({ canvas, uiRoot }) {
     vehicles: [],
     systems: [],
     time: 0, // simulated seconds since start
+    clock: 9, // time of day in hours, 0..24 (the day/night system advances it)
+    cityMesh,
+    waypoint: null,
+    // Everything that is saved between sessions lives here.
+    progress: {
+      money: 250,
+      owned: [], // spec ids of bought craft
+      medals: {}, // activity id -> 'bronze' | 'silver' | 'gold'
+      bestTimes: {}, // activity id -> seconds
+      stats: { distance: 0, flights: 0, races: 0 },
+      settings: { master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true },
+    },
     paused: false,
     quality: 1,
     player: {
@@ -94,7 +106,7 @@ export function createGame({ canvas, uiRoot }) {
       walker: null,
       y: 0,
       x: city.spawn.x, z: city.spawn.z, heading: city.spawn.heading,
-      health: 100, armor: 0, money: 250, wanted: 0,
+      health: 100, armor: 0, wanted: 0,
     },
     hudState: {
       mode: 'car', speedKmh: 0, health: 100, armor: 0, money: 0, wanted: 0,
@@ -357,7 +369,8 @@ export function createGame({ canvas, uiRoot }) {
     h.speedKmh = p.vehicle ? Math.abs(p.vehicle.speed) * 3.6 : 0;
     h.health = p.health;
     h.armor = p.armor;
-    h.money = p.money;
+    h.money = game.progress.money;
+    h.time = game.clock;
     h.wanted = p.wanted;
     h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
     const dKey = city.shoreDist(p.x, p.z) < 34 && !city.onRoad(p.x, p.z) ? 'shore' : city.districtOf(p.x, p.z);
