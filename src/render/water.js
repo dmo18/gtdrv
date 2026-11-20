@@ -233,7 +233,7 @@ export function createWakeTrail(scene, max = 160) {
         colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0;
       } else {
         const k = 1 - t;
-        const c = 0.2 * str[i] * k * k;
+        const c = 0.15 * str[i] * k * k;
         colors[i * 3] = c * 0.92;
         colors[i * 3 + 1] = c;
         colors[i * 3 + 2] = c;
