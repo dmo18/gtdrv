@@ -173,11 +173,11 @@ const HB_K = 0.8; // locked rear tyres slide at this share of grip
 //   and the lock tapers with speed; only a light yaw damper.
 const HANDLING = {
   arcade: {
-    latBase: 2.2, latK: 0.4, fall: 0.06, latTarget: 0.95, mechV: 45, slipLock: 0, rearLat: 1.12, cutMin: 0.6,
+    latBase: 2.4, latK: 0.3, fall: 0.06, latTarget: 1, mechV: 80, lockK: 1.12, rearLat: 1.12, cutMin: 0.3, scrub: 0.35, betaK: 150, comb: 0.5, combR: 0.85,
     steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 10, yawLimK: 1,
   },
   sim: {
-    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, slipLock: 0, rearLat: 1, cutMin: 0.25,
+    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, lockK: 1, rearLat: 1, cutMin: 0.25, scrub: 1, betaK: 30, comb: 0.85, combR: 0.85,
     steerRate: 7, steerRateV: 15, yawK: 1.5, yawFirm: 4, yawLimK: 1,
   },
 };
@@ -260,8 +260,8 @@ function derive(s) {
 export function steerLock(spec, u) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
-  const want = d.L * H.latTarget * lateralGrip(spec) * G / Math.max(au * au, 1) + (d.apF - d.apR) * 0.6 + H.slipLock;
-  return Math.min(spec.steerMax / (1 + au / H.mechV), want);
+  const want = d.L * H.latTarget * lateralGrip(spec) * G / Math.max(au * au, 1) + (d.apF - d.apR) * 0.6;
+  return Math.min(H.lockK * spec.steerMax / (1 + au / H.mechV), want);
 }
 
 const MAX_SUBSTEP_MOVE = 0.3; // metres per collision sub-step
@@ -402,7 +402,7 @@ export function stepVehicle(v, controls, dt, world) {
       yawRef = clamp(yawRef, -yLim, yLim);
       const over = Math.abs(beta) - d.betaAllow;
       if (over > 0) {
-        assistMz += d.iz * 30 * (beta > 0 ? over : -over);
+        assistMz += d.iz * H.betaK * (beta > 0 ? over : -over);
         driveScale = clamp(1 - over * 5, H.cutMin, 1);
       }
       const eY = r - yawRef;
@@ -441,10 +441,11 @@ export function stepVehicle(v, controls, dt, world) {
     const vperp = -vf * sd + vlf * cd;
     const alphaF = Math.atan(vperp / Math.max(Math.abs(vpar), V0));
     const uF = fxF / capF;
-    const latF = capLF * Math.sqrt(Math.max(0.05, 1 - 0.85 * uF * uF));
+    const latF = capLF * Math.sqrt(Math.max(0.05, 1 - H.comb * uF * uF));
     const xF = alphaF / d.apF;
     const fyF = -latF * tyre(xF);
-    const ffx = fxF * cd - fyF * sd;
+    // Arcade tyres scrub less speed off through the steered wheel angle.
+    const ffx = fxF * cd - fyF * sd * H.scrub;
     const ffy = fxF * sd + fyF * cd;
     slideF = Math.max(slideF, Math.abs(xF));
 
@@ -465,7 +466,7 @@ export function stepVehicle(v, controls, dt, world) {
     } else {
       const alphaR = Math.atan(vlr / Math.max(avf, V0));
       const uR = fxR / capR;
-      const latR = capLR * Math.sqrt(Math.max(0.05, 1 - 0.85 * uR * uR));
+      const latR = capLR * Math.sqrt(Math.max(0.05, 1 - H.combR * uR * uR));
       const xR = alphaR / d.apR;
       fry = -latR * tyre(xR);
       frx = fxR;
