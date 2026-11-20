@@ -173,7 +173,7 @@ const HB_K = 0.8; // locked rear tyres slide at this share of grip
 //   and the lock tapers with speed; only a light yaw damper.
 const HANDLING = {
   arcade: {
-    latBase: 1.6, latK: 0.4, fall: 0.06, latTarget: 0.95, mechV: 45, slipLock: 0, rearLat: 1.12, cutMin: 0.6,
+    latBase: 2.2, latK: 0.4, fall: 0.06, latTarget: 0.95, mechV: 45, slipLock: 0, rearLat: 1.12, cutMin: 0.6,
     steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 10, yawLimK: 1,
   },
   sim: {
