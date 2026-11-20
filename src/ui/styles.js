@@ -255,7 +255,7 @@ const CSS = `
 .rw-ww.rw-ww-open { visibility: visible; opacity: 1; transition-delay: 0s; }
 .rw-ww-disc {
   position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(circle, rgba(10, 14, 20, 0.9) 0 24px, rgba(10, 14, 20, 0.78) 25px);
+  background: radial-gradient(circle, rgba(10, 14, 20, 0.96) 0 24px, rgba(16, 22, 30, 0.93) 25px);
   border: 2px solid var(--rw-panel-edge); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 }
 .rw-ww-cancel .rw-ww-disc { border-color: rgba(226, 70, 48, 0.8); opacity: 0.7; }

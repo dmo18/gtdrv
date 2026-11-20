@@ -46,7 +46,9 @@ shapes, 58 coastline lines, 607 parks, 82 labels. Checked by `test/mapdata.test.
 
 ## Integration plan
 
-Status: plan only, no game code changed. Written from a read of
+Status: milestone 1 (core crop) is in the game behind `?map=miami`; see
+"Milestone 1: done" at the end. The rest of this section is the plan as
+written before it, from a read of
 `src/world/citygen.js` and every consumer of its return value
 (src/systems, src/render, src/ui, src/world, src/entities, src/game.js,
 test/). The data format is described above; this section is about
@@ -364,3 +366,100 @@ stays the default until milestone 3.
    the widened east edge (if the data helper adds it) with South Beach
    sand, save `map` id. Tests: oneway respected over a traffic run, boat
    river run, save migration.
+
+### Milestone 1: done (2026-11-20)
+
+Playable at `?map=miami` (the procedural island stays the default):
+drive, walk, boat, fly, traffic, police, parked cars and peds on real
+streets. Activities, secrets and stunt ramps are empty lists on Miami.
+
+What is where:
+
+- `src/world/miami.js`: `createMiamiCity(data, opts)` returns the
+  `generateCity` shape plus `map: 'miami'`, `ux/uz` on edges, `bend` on
+  degree-2 nodes, `edgesNear`, `buildingsNear`, `blockAt`, `inBuilding`,
+  `landGrid` (the drawn land raster), `landRuns`, `landTarget` (nearest
+  dry land, used by `findRescueSpot`), `graphStats`, `buildMs`.
+  `opts`: `crop`, `spots`, `seed`.
+- `src/world/miami-spots.js`: crop, spawn, causeway street, piers,
+  seaplane, helipad, district table, hand links (none needed so far).
+- `src/world/maps.js`: `mapFromSearch(search)`, the map choice (tested).
+- `src/main.js`: reads `?map=miami` and loads `world/miami.js` and the
+  data with a dynamic `import()`; `scripts/build.mjs` turns on esbuild code
+  splitting, so the 2.2 MB data chunk is only loaded on the Miami map
+  (the default `game.js` did not grow) and the chunks are in `sw.js`.
+- `src/game.js`: `createGame({ city })`, `game.courses` from the city,
+  stunt spots from `city.rampSpots`, `findRescueSpot` aims at
+  `city.landTarget`, no session restore on a map other than the island.
+- `src/world/collision.js`: `fillCollision(city, collision)` (citymesh and
+  the tests use the same building boxes).
+- `src/render/citymesh.js`: on a city with `landGrid`, land by marching
+  squares over the raster (chamfered shore, a seawall face), roads as
+  quads along each edge with a disc at every node, deck sides on bridges
+  and the causeway; tile counts from the map size; sea plane from it too.
+- `src/ui/minimap.js`: land from `landRuns`, junction squares from
+  `hx/hz`, round line caps (real map only).
+- `src/world/secrets.js`, `src/world/stunts.js`: a city's own
+  `secretSpots` / `rampSpots` are used when present (Miami: empty).
+- `src/systems/traffic.js`: no giving way and no oncoming-left wait at a
+  `bend` node (two lines; procedural nodes have no `bend`).
+- `src/core/garage.js`: `MAP_LIMIT` 6000.
+
+Numbers (this machine): about 1750 nodes, 2300 edges, 285 blocks, 6400
+building boxes, 7100 kerb spots; 96 % of the junctions in the main
+network; build about 0.9 s CPU in node (wall time doubles when other
+jobs share the machine).
+
+Tests: `test/miami.test.js` (build time, shape, graph and airfield link,
+shoreDist probes and smoothness, every lane 2 m inside land, spawn and
+kerb spots, hand spots, buildings off the roads and collision, a 600
+step traffic + parked + peds run, helper cost, map choice, determinism);
+`test/garage.test.js` (6 km limit, strict sanitiser). Smoke:
+`scripts/smoke-extra.mjs` opens `?map=miami`, drives 300 steps, checks
+for page errors and outside requests. Screenshots:
+`scripts/miami-shots.mjs` writes `docs/preview/miami-*.png`.
+
+Deviations from the plan:
+
+1. Crop x -2600..2450 (plan: ..1200), z -2600..1800. Star, Palm and
+   Hibiscus Islands are only joined to the rest east of x 1200, and
+   without them the main network held 92 % of the junctions. Land past
+   the crop is cut 150 m outside it (a straight seawall); roads stop at
+   the crop edge (dead ends there are well inside land).
+2. The causeway leaves Northeast 26th Street, not 24th: from 24th the
+   islet sits within 100 m of a small real island south of it. Islet x
+   10..790, z -2621..-2321 (still citygen's anchor - 205 .. + 95).
+3. Land raster 5 m (plan 4 m), for build time. `shoreDist` is one signed
+   field in which every road strip (half width + 3 m), bridge and the
+   causeway are stamped as land, so there is no analytic max and no
+   seam anywhere a car can drive. `mainShore` is the drawn land only and
+   is not a distance out at sea (-1 there). Boats cannot pass under
+   bridges yet (milestone 4).
+4. The Miami River is only a centre line in the data: it is carved as
+   water 38 m wide. Ponds narrower than 12 m are ignored.
+5. Roads: freeway pieces at grade and bridges over land are dropped
+   unless an end is within 40 m of water (that keeps the causeway
+   approaches and drops the I-95, I-395 and Dolphin ramps); ways named
+   "Tunnel" are dropped. One-way streets are two-way and 11 m wide;
+   avenues are two-way trunk, primary and secondary roads or 4+ lanes.
+   Junctions: shared vertices, a vertex within 2.2 m of another road
+   (bridges only at their ends), street crossings with no shared vertex;
+   merge radius 12 m; chains simplified at 2.5 m.
+6. Blocks come from a flood fill of road-free land on the raster (not
+   planar faces): regions at least 85 % of their bounding box, 20 to
+   320 m, trimmed clear of the kerb. Buildings in a block are clipped to
+   keep the 4 m pavement ring; others are trimmed 1.5 m clear of the
+   kerb. Every footprint (not only rotated ones) is covered by up to 6
+   boxes, largest rectangle first, on a 2 m grid.
+7. Piers: Miami Beach Marina and Sunset Harbour are outside the crop, so
+   the three main piers are Bayfront Marina, Watson Island Marina and
+   Brickell Key Landing (then the Airfield Dock). Seaplanes: the islet
+   dock and Watson Island. Watson Island Helipad at (640, -640).
+8. The origin (0, 0) is on the west tip of Dodge Island in this data,
+   not in the bay.
+9. Not done yet: `coast` samples (`landTarget` serves `findRescueSpot`),
+   `placeOf` and real names on the HUD, cranes, the Cinder tank, name
+   signs, stop signs, crossing paint and road decals on Miami, a saved
+   map id (a Miami session is not restored, but saving still writes the
+   shared session record), perf budget on the phone profile.
+

@@ -234,6 +234,8 @@ function findGarage(city, rng, taken) {
 // garage }. Each spot has id, x, z, heading and `minY` (null, or the
 // height you must be at to count: the rooftop).
 export function findSecrets(city, seed = SECRETS_SEED) {
+  // A map with its own hand-placed list (Miami: empty until milestone 2).
+  if (Array.isArray(city.secretSpots)) return { spots: city.secretSpots.slice(), garage: city.secretGarage || null };
   const rng = createRng(seed);
   const spots = {};
   const taken = [];

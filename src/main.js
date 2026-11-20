@@ -1,5 +1,6 @@
 import { createGame } from './game.js';
 import { registerServiceWorker } from './pwa.js';
+import { mapFromSearch } from './world/maps.js';
 
 const boot = document.getElementById('boot');
 const msg = document.getElementById('bootmsg');
@@ -14,10 +15,20 @@ function start(game) {
   if (!new URLSearchParams(location.search).has('autostart')) game.menu.maybeAskSteering();
 }
 
-try {
+// ?map=miami: the real-map city, loaded as its own chunk (the map data
+// is bundled, never fetched from elsewhere). Default: the procedural island.
+async function loadCity() {
+  if (mapFromSearch(location.search) !== 'miami') return null;
+  const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);
+  return createMiamiCity(data);
+}
+
+async function startUp() {
+  const city = await loadCity();
   const game = createGame({
     canvas: document.getElementById('game'),
     uiRoot: document.getElementById('ui'),
+    city,
   });
   window.__rw = game;
   game.draw(1, 0);
@@ -35,10 +46,11 @@ try {
     start(game);
   });
   if (new URLSearchParams(location.search).has('autostart')) start(game);
-} catch (err) {
+}
+startUp().catch((err) => {
   console.error(err);
   msg.textContent = 'Sorry, the game could not start on this device.';
-}
+});
 
 // Offline support. A new version is applied right away only while the
 // title screen is showing; otherwise it waits until the next launch.

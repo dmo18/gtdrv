@@ -62,9 +62,11 @@ import { createSecrets } from './systems/secrets.js';
 
 const SKY = 0x9fc8e8;
 
-export function createGame({ canvas, uiRoot }) {
+// city: a ready-made city object (the Miami map, see world/maps.js);
+// left out, the procedural island is generated as before.
+export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   const rng = createRng(77123);
-  const city = generateCity();
+  const city = givenCity || generateCity();
   const collision = createCollisionWorld();
   const events = createEvents();
   const input = createInput();
@@ -129,6 +131,9 @@ export function createGame({ canvas, uiRoot }) {
     clock: 9, // time of day in hours, 0..24 (the day/night system advances it)
     cityMesh,
     waypoint: null,
+    // A map with its own activity list (Miami: none yet); null builds the
+    // procedural courses (systems/activities.js).
+    courses: Array.isArray(city.courses) ? city.courses : null,
     // Everything that is saved between sessions lives here.
     // Score, medals, best times and settings (no money: everything is
     // available from the start). The economy system loads a saved copy
@@ -206,11 +211,18 @@ export function createGame({ canvas, uiRoot }) {
 
   // Nearest safe standing spot on land: walk a line from the given
   // point toward the closer of the main island and the airfield.
+  const landAim = { x: 0, z: 0 };
   function findRescueSpot(x, z, out) {
     const islet = city.airfield.islet;
     const ix = (islet.x0 + islet.x1) / 2, iz = (islet.z0 + islet.z1) / 2;
     const toIslet = Math.hypot(x - ix, z - iz) < Math.hypot(x, z) - 500;
-    const tx = toIslet ? ix : 0, tz = toIslet ? iz : 0;
+    let tx = toIslet ? ix : 0, tz = toIslet ? iz : 0;
+    // A real map has no land at the origin: aim for the nearest dry land.
+    if (city.landTarget) {
+      city.landTarget(x, z, landAim);
+      tx = landAim.x;
+      tz = landAim.z;
+    }
     const d = Math.hypot(tx - x, tz - z) || 1;
     const ux = (tx - x) / d, uz = (tz - z) / d;
     out.x = tx;
@@ -338,7 +350,7 @@ export function createGame({ canvas, uiRoot }) {
   game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));
   game.score = game.addSystem(createScore(game));
-  game.stunts = game.addSystem(createStunts(game)); // ramps, jumps and stunt medals (after score)
+  game.stunts = game.addSystem(createStunts(game, Array.isArray(city.rampSpots) ? { spots: city.rampSpots } : {})); // ramps, jumps and stunt medals (after score)
   game.secrets = game.addSystem(createSecrets(game));
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
@@ -648,8 +660,9 @@ export function createGame({ canvas, uiRoot }) {
     }
   });
 
-  // Pick up where the player left off (a no-op on a new game).
-  game.restoreSession();
+  // Pick up where the player left off (a no-op on a new game). Saved
+  // places are from the island map, so another map starts fresh.
+  if (!city.map) game.restoreSession();
 
   game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1 });
   game.resize = resize;

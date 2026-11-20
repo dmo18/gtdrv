@@ -11,7 +11,7 @@ import { MIAMI_CROP, LAND_MARGIN, MIAMI_SPOTS } from './miami-spots.js';
 
 export { MIAMI_CROP, MIAMI_SPOTS };
 
-const CELL = 4; // land raster cell (m)
+const CELL = 5; // land raster cell (m)
 const CLAMP = 250; // shoreDist is clamped to +-CLAMP m
 const SEA_PAD = 260; // raster reaches this far past the land cut (all sea)
 const GRID = 64; // spatial index cell (m)
@@ -63,25 +63,24 @@ const segDist2 = (px, pz, ax, az, bx, bz) => {
 };
 
 // Distance from segment ab to the axis-aligned rect (0 when they touch).
+const pointRect2 = (px, pz, x0, z0, x1, z1) => {
+  const qx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+  const qz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
+  return qx * qx + qz * qz;
+};
 function segRectDist(ax, az, bx, bz, x0, z0, x1, z1) {
-  const inside = (x, z) => x >= x0 && x <= x1 && z >= z0 && z <= z1;
-  if (inside(ax, az) || inside(bx, bz)) return 0;
-  // Liang-Barsky clip: does the segment cross the rect?
-  let t0 = 0, t1 = 1;
+  // Liang-Barsky clip: does the segment touch the rect?
+  let t0 = 0, t1 = 1, hit = true;
   const dx = bx - ax, dz = bz - az;
-  const clip = (p, q) => {
-    if (p === 0) return q >= 0;
+  for (let k = 0; k < 4 && hit; k++) {
+    const p = k === 0 ? -dx : k === 1 ? dx : k === 2 ? -dz : dz;
+    const q = k === 0 ? ax - x0 : k === 1 ? x1 - ax : k === 2 ? az - z0 : z1 - az;
+    if (p === 0) { if (q < 0) hit = false; continue; }
     const r = q / p;
-    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
-    return true;
-  };
-  if (clip(-dx, ax - x0) && clip(dx, x1 - ax) && clip(-dz, az - z0) && clip(dz, z1 - az) && t0 <= t1) return 0;
-  const cd = (px, pz) => {
-    const qx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
-    const qz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
-    return qx * qx + qz * qz;
-  };
-  let d = Math.min(cd(ax, az), cd(bx, bz));
+    if (p < 0) { if (r > t1) hit = false; else if (r > t0) t0 = r; } else if (r < t0) hit = false; else if (r < t1) t1 = r;
+  }
+  if (hit && t0 <= t1) return 0;
+  let d = Math.min(pointRect2(ax, az, x0, z0, x1, z1), pointRect2(bx, bz, x0, z0, x1, z1));
   d = Math.min(d, segDist2(x0, z0, ax, az, bx, bz), segDist2(x1, z0, ax, az, bx, bz), segDist2(x0, z1, ax, az, bx, bz), segDist2(x1, z1, ax, az, bx, bz));
   return Math.sqrt(d);
 }
@@ -196,7 +195,7 @@ function edt2d(f, w, h) {
 // Signed distance (decimetres, Int16) from a land mask: + on land.
 function signedField(R) {
   const N = R.w * R.h, m = R.data;
-  const toWater = new Float64Array(N), toLand = new Float64Array(N);
+  const toWater = new Float32Array(N), toLand = new Float32Array(N);
   const INF = 1e20;
   for (let k = 0; k < N; k++) {
     toWater[k] = m[k] ? INF : 0;
@@ -229,6 +228,106 @@ function makeSampler(R, f) {
   };
 }
 
+// Labels the 4-connected regions of cells where wall is 0. Returns the count.
+function labelRegions(wall, W, H, label, queue) {
+  const NC = W * H;
+  label.fill(-1);
+  let n = 0;
+  for (let s = 0; s < NC; s++) {
+    if (wall[s] || label[s] >= 0) continue;
+    let qh = 0, qt = 0;
+    queue[qt++] = s;
+    label[s] = n;
+    while (qh < qt) {
+      const c = queue[qh++];
+      const i = c % W;
+      if (i > 0 && !wall[c - 1] && label[c - 1] < 0) { label[c - 1] = n; queue[qt++] = c - 1; }
+      if (i < W - 1 && !wall[c + 1] && label[c + 1] < 0) { label[c + 1] = n; queue[qt++] = c + 1; }
+      if (c >= W && !wall[c - W] && label[c - W] < 0) { label[c - W] = n; queue[qt++] = c - W; }
+      if (c < NC - W && !wall[c + W] && label[c + W] < 0) { label[c + W] = n; queue[qt++] = c + W; }
+    }
+    n++;
+  }
+  return n;
+}
+
+// Coastline wall cells (1) take the majority of their settled neighbours.
+function settleWalls(wall, land, W, H) {
+  const NC = W * H;
+  for (let pass = 0; pass < 3; pass++) {
+    for (let c = 0; c < NC; c++) {
+      if (!wall[c]) continue;
+      let l = 0, n = 0;
+      const i = c % W;
+      if (i > 0 && wall[c - 1] !== 1) { n++; l += land[c - 1]; }
+      if (i < W - 1 && wall[c + 1] !== 1) { n++; l += land[c + 1]; }
+      if (c >= W && wall[c - W] !== 1) { n++; l += land[c - W]; }
+      if (c < NC - W && wall[c + W] !== 1) { n++; l += land[c + W]; }
+      if (n) {
+        land[c] = l * 2 >= n ? 1 : 0;
+        wall[c] = 2;
+      }
+    }
+  }
+}
+
+// Greedy cover of the 1-cells of a cw x ch mask by up to 6 rectangles
+// (largest first, via the histogram method), until 85 % is covered.
+// Writes [i0, j0, i1, j1] per rectangle into out; returns the count.
+function largestRects(cells, cw, ch, filled, hist, stack, out) {
+  const total = filled;
+  let n = 0;
+  while (n < 6 && filled > total * 0.15) {
+    let best = 0, bi0 = 0, bj0 = 0, bi1 = 0, bj1 = 0;
+    for (let i = 0; i < cw; i++) hist[i] = 0;
+    for (let j = 0; j < ch; j++) {
+      const row = j * cw;
+      for (let i = 0; i < cw; i++) hist[i] = cells[row + i] === 1 ? hist[i] + 1 : 0;
+      let sp = 0;
+      for (let i = 0; i <= cw; i++) {
+        const hh = i < cw ? hist[i] : 0;
+        while (sp > 0 && hist[stack[sp - 1]] >= hh) {
+          const height = hist[stack[--sp]];
+          const left = sp > 0 ? stack[sp - 1] + 1 : 0;
+          const a = height * (i - left);
+          if (a > best) { best = a; bi0 = left; bi1 = i - 1; bj1 = j; bj0 = j - height + 1; }
+        }
+        stack[sp++] = i;
+      }
+    }
+    if (best < 4) break;
+    for (let j = bj0; j <= bj1; j++) for (let i = bi0; i <= bi1; i++) cells[j * cw + i] = 2;
+    filled -= best;
+    out[4 * n] = bi0; out[4 * n + 1] = bj0; out[4 * n + 2] = bi1; out[4 * n + 3] = bj1;
+    n++;
+  }
+  return n;
+}
+
+// Flood fills one road-free land region from cell s (inside the crop
+// window ci0..ci1, cj0..cj1). out: [cells, i0, i1, j0, j1, park cells,
+// 1 if it stays clear of the window edge].
+function floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, out) {
+  let qh = 0, qt = 0, i0 = s % W, i1 = i0, j0 = (s - i0) / W, j1 = j0, parks = 0, ok = 1;
+  queue[qt++] = s;
+  lab[s] = s;
+  while (qh < qt) {
+    const c = queue[qh++];
+    const ci = c % W, cj = (c - ci) / W;
+    if (ci <= ci0 || ci >= ci1 || cj <= cj0 || cj >= cj1) ok = 0;
+    if (ci < i0) i0 = ci;
+    if (ci > i1) i1 = ci;
+    if (cj < j0) j0 = cj;
+    if (cj > j1) j1 = cj;
+    if (park[c]) parks++;
+    if (ci > ci0 && lab[c - 1] < 0 && land[c - 1] === 1 && road[c - 1] === 0) { lab[c - 1] = s; queue[qt++] = c - 1; }
+    if (ci < ci1 && lab[c + 1] < 0 && land[c + 1] === 1 && road[c + 1] === 0) { lab[c + 1] = s; queue[qt++] = c + 1; }
+    if (cj > cj0 && lab[c - W] < 0 && land[c - W] === 1 && road[c - W] === 0) { lab[c - W] = s; queue[qt++] = c - W; }
+    if (cj < cj1 && lab[c + W] < 0 && land[c + W] === 1 && road[c + W] === 0) { lab[c + W] = s; queue[qt++] = c + W; }
+  }
+  out[0] = qt; out[1] = i0; out[2] = i1; out[3] = j0; out[4] = j1; out[5] = parks; out[6] = ok;
+}
+
 // ---------------------------------------------------------------------
 // The city
 // ---------------------------------------------------------------------
@@ -251,6 +350,8 @@ export function createMiamiCity(data, opts = {}) {
   const cut = { x0: crop.x0 - LAND_MARGIN, z0: crop.z0 - LAND_MARGIN, x1: crop.x1 + LAND_MARGIN, z1: crop.z1 + LAND_MARGIN };
   const land = makeRaster(cut.x0 - SEA_PAD, cut.z0 - SEA_PAD, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
   const W = land.w, H = land.h, NC = W * H;
+  const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
+  let coastLand = null;
   {
     // Coastline cells form walls; regions between them are flood filled
     // and each region votes land or water from the side of the coast
@@ -266,24 +367,8 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
     lap('land.coast');
-    const label = new Int32Array(NC).fill(-1);
-    const queue = new Int32Array(NC);
-    let nLab = 0;
-    for (let s = 0; s < NC; s++) {
-      if (wall.data[s] || label[s] >= 0) continue;
-      let qh = 0, qt = 0;
-      queue[qt++] = s;
-      label[s] = nLab;
-      while (qh < qt) {
-        const c = queue[qh++];
-        const i = c % W;
-        if (i > 0 && !wall.data[c - 1] && label[c - 1] < 0) { label[c - 1] = nLab; queue[qt++] = c - 1; }
-        if (i < W - 1 && !wall.data[c + 1] && label[c + 1] < 0) { label[c + 1] = nLab; queue[qt++] = c + 1; }
-        if (c >= W && !wall.data[c - W] && label[c - W] < 0) { label[c - W] = nLab; queue[qt++] = c - W; }
-        if (c < NC - W && !wall.data[c + W] && label[c + W] < 0) { label[c + W] = nLab; queue[qt++] = c + W; }
-      }
-      nLab++;
-    }
+    const label = labelBuf;
+    const nLab = labelRegions(wall.data, W, H, label, queueBuf);
     lap('land.fill');
     const votes = new Float64Array(nLab);
     for (const pts of coast) {
@@ -303,31 +388,20 @@ export function createMiamiCity(data, opts = {}) {
     for (let c = 0; c < NC; c++) if (label[c] >= 0) land.data[c] = votes[label[c]] > 0 ? 1 : 0;
     lap('land.votes');
     // Wall cells: majority of their labelled neighbours.
-    for (let pass = 0; pass < 3; pass++) {
-      for (let c = 0; c < NC; c++) {
-        if (!wall.data[c]) continue;
-        let l = 0, n = 0;
-        const i = c % W;
-        if (i > 0 && wall.data[c - 1] !== 1) { n++; l += land.data[c - 1]; }
-        if (i < W - 1 && wall.data[c + 1] !== 1) { n++; l += land.data[c + 1]; }
-        if (c >= W && wall.data[c - W] !== 1) { n++; l += land.data[c - W]; }
-        if (c < NC - W && wall.data[c + W] !== 1) { n++; l += land.data[c + W]; }
-        if (n) {
-          land.data[c] = l * 2 >= n ? 1 : 0;
-          wall.data[c] = 2;
-        }
-      }
-    }
+    settleWalls(wall.data, land.data, W, H);
     lap('land.walls');
-    // Lakes, ponds and the river (water lines are carved with a width).
+    // The river (water lines are carved with a width), then lakes and
+    // ponds; `coastLand` (before the ponds) tells bridges over water.
+    const polys = [];
     for (const w of data.water) {
       const pts = decodePolyline(w.p);
-      if (w.line) {
-        const r = RIVERS[w.name];
-        if (!r) continue;
-        for (let k = 0; k + 3 < pts.length; k += 2) stampCapsule(land, pts[k], pts[k + 1], pts[k + 2], pts[k + 3], r, 0);
-        continue;
-      }
+      if (!w.line) { polys.push(pts); continue; }
+      const r = RIVERS[w.name];
+      if (!r) continue;
+      for (let k = 0; k + 3 < pts.length; k += 2) stampCapsule(land, pts[k], pts[k + 1], pts[k + 2], pts[k + 3], r, 0);
+    }
+    coastLand = land.data.slice();
+    for (const pts of polys) {
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (let k = 0; k < pts.length; k += 2) {
         x0 = Math.min(x0, pts[k]); x1 = Math.max(x1, pts[k]);
@@ -360,7 +434,20 @@ export function createMiamiCity(data, opts = {}) {
   for (const r of data.roads) {
     if (!DRIVE.has(r.class)) continue;
     if (r.name && /tunnel/i.test(r.name)) continue;
+    const fx = r.p[0] / 10, fz = r.p[1] / 10;
+    if (fx < crop.x0 - 3000 || fx > crop.x1 + 3000 || fz < crop.z0 - 3000 || fz > crop.z1 + 3000) continue;
     const pts = decodePolyline(r.p);
+    const nearWater = (x, z) => {
+      for (let k = 0; k < 8; k++) {
+        const c = cellOf(land, x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
+        if (c < 0 || !coastLand[c]) return true;
+      }
+      return false;
+    };
+    const m = pts.length;
+    // Freeway pieces at grade between the dropped flyovers are islands of
+    // ramps; only the ones that run out to a water crossing are kept.
+    if (!r.bridge && r.class.startsWith('motorway') && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
     if (r.bridge) {
       // A long bridge over land is a flyover: the flat world would make
       // it cross the streets below at grade, so it is left out.
@@ -373,7 +460,8 @@ export function createMiamiCity(data, opts = {}) {
           if (baseAt(pts[k] + ((pts[k + 2] - pts[k]) * t) / sl, pts[k + 1] + ((pts[k + 3] - pts[k + 1]) * t) / sl)) on++;
         }
       }
-      if (n && on / n > 0.6 && L > 50) continue;
+      // Bridges that land near the water are approaches to a crossing: kept.
+      if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
     }
     const oneway = !!r.oneway;
     const avenue = !oneway && (BIG.has(r.class) || (r.lanes || 0) >= 4);
@@ -384,9 +472,27 @@ export function createMiamiCity(data, opts = {}) {
       if (run.length >= 4) ways.push({ ...info, pts: run });
       run = [];
     };
+    // Where a segment leaves the crop, it is cut at the edge.
+    const edgePoint = (ax, az, bx, bz) => {
+      let t = 1;
+      const dx = bx - ax, dz = bz - az;
+      if (bx < crop.x0) t = Math.min(t, (crop.x0 - ax) / dx);
+      if (bx > crop.x1) t = Math.min(t, (crop.x1 - ax) / dx);
+      if (bz < crop.z0) t = Math.min(t, (crop.z0 - az) / dz);
+      if (bz > crop.z1) t = Math.min(t, (crop.z1 - az) / dz);
+      run.push(Math.round((ax + dx * t) * 10) / 10, Math.round((az + dz * t) * 10) / 10);
+    };
     for (let k = 0; k < pts.length; k += 2) {
-      if (inCrop(pts[k], pts[k + 1])) run.push(pts[k], pts[k + 1]);
-      else flush();
+      const x = pts[k], z = pts[k + 1];
+      const inside = inCrop(x, z);
+      const prevIn = k > 0 && inCrop(pts[k - 2], pts[k - 1]);
+      if (inside) {
+        if (k > 0 && !prevIn) edgePoint(x, z, pts[k - 2], pts[k - 1]);
+        run.push(x, z);
+      } else if (prevIn) {
+        edgePoint(pts[k - 2], pts[k - 1], x, z);
+        flush();
+      }
     }
     flush();
   }
@@ -702,6 +808,7 @@ export function createMiamiCity(data, opts = {}) {
   const extraLand = [islet, causewayRect];
 
   // Keep the largest connected road network only.
+  const graphStats = {};
   {
     const comp = new Int32Array(nodes.length).fill(-1);
     let best = -1, bestN = 0, c = 0;
@@ -721,6 +828,22 @@ export function createMiamiCity(data, opts = {}) {
       }
       if (cnt > bestN) { bestN = cnt; best = c; }
       c++;
+    }
+    // Junctions (degree 1 or 3+) per component, for the connectivity check.
+    const jc = new Int32Array(c);
+    for (const n of nodes) if (n.edges.length !== 2) jc[comp[n.id]]++;
+    let jAll = 0;
+    for (let k = 0; k < c; k++) jAll += jc[k];
+    graphStats.components = c;
+    graphStats.junctions = jAll;
+    graphStats.mainJunctions = jc[best];
+    graphStats.nodesBefore = nodes.length;
+    graphStats.nodesKept = bestN;
+    graphStats.lost = [];
+    for (let k = 0; k < c; k++) {
+      if (k === best || jc[k] < 3) continue;
+      const n = nodes.find((q) => comp[q.id] === k);
+      graphStats.lost.push({ junctions: jc[k], x: Math.round(n.x), z: Math.round(n.z) });
     }
     const remap = new Int32Array(nodes.length).fill(-1);
     const keptNodes = [];
@@ -825,6 +948,40 @@ export function createMiamiCity(data, opts = {}) {
     return best;
   };
 
+  // Shrinks rect r (x0, z0, x1, z1) away from road strips until it is
+  // `margin` m clear of every kerb. False when it gets below minSize.
+  const TR = { x0: 0, z0: 0, x1: 0, z1: 0 };
+  function trimRect(r, margin, minSize) {
+    for (let k = 0; k < 12; k++) {
+      let hit = null;
+      edgesInRect(r.x0 - 12, r.z0 - 12, r.x1 + 12, r.z1 + 12, (e) => {
+        const a = nodes[e.a], b = nodes[e.b];
+        if (segRectDist(a.x, a.z, b.x, b.z, r.x0, r.z0, r.x1, r.z1) - e.width / 2 < margin - 0.01) { hit = e; return false; }
+        return true;
+      });
+      if (!hit) return true;
+      const a = nodes[hit.a], b = nodes[hit.b];
+      const half = hit.width / 2 + margin;
+      const ccx = (r.x0 + r.x1) / 2, ccz = (r.z0 + r.z1) / 2;
+      if (Math.abs(hit.uz) >= Math.abs(hit.ux)) {
+        // Mostly north-south: the strip's x range over the rect's z span.
+        const za = Math.max(r.z0 - half, Math.min(a.z, b.z)), zb = Math.min(r.z1 + half, Math.max(a.z, b.z));
+        const xa = a.x + ((za - a.z) / (b.z - a.z || 1)) * (b.x - a.x), xb = a.x + ((zb - a.z) / (b.z - a.z || 1)) * (b.x - a.x);
+        const w = half / Math.abs(hit.uz);
+        const lo = Math.min(xa, xb) - w, hi = Math.max(xa, xb) + w;
+        if ((lo + hi) / 2 > ccx) r.x1 = Math.min(r.x1, lo); else r.x0 = Math.max(r.x0, hi);
+      } else {
+        const xa = Math.max(r.x0 - half, Math.min(a.x, b.x)), xb = Math.min(r.x1 + half, Math.max(a.x, b.x));
+        const za = a.z + ((xa - a.x) / (b.x - a.x || 1)) * (b.z - a.z), zb = a.z + ((xb - a.x) / (b.x - a.x || 1)) * (b.z - a.z);
+        const w = half / Math.abs(hit.ux);
+        const lo = Math.min(za, zb) - w, hi = Math.max(za, zb) + w;
+        if ((lo + hi) / 2 > ccz) r.z1 = Math.min(r.z1, lo); else r.z0 = Math.max(r.z0, hi);
+      }
+      if (r.x1 - r.x0 < minSize || r.z1 - r.z0 < minSize) return false;
+    }
+    return roadClearance(r.x0, r.z0, r.x1, r.z1) >= margin - 0.05;
+  }
+
   // Everything drivable is land for shoreDist (bridges, causeway, roads
   // along a seawall), so a car never meets a seam on a road.
   for (const r of extraLand) stampRect(land, r.x0, r.z0, r.x1, r.z1, 1);
@@ -868,8 +1025,9 @@ export function createMiamiCity(data, opts = {}) {
       const pts = decodePolyline(p.p);
       if (pts.length >= 6 && inCrop(pts[0], pts[1])) fillPolygon(parkMask, pts, 1);
     }
-    const lab = new Int32Array(NC).fill(-1);
-    const queue = new Int32Array(NC);
+    const lab = labelBuf.fill(-1);
+    const queue = queueBuf;
+    const FB = new Int32Array(7);
     const ci0 = Math.max(0, Math.floor((crop.x0 - land.x0) / CELL)), ci1 = Math.min(W - 1, Math.floor((crop.x1 - land.x0) / CELL));
     const cj0 = Math.max(0, Math.floor((crop.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((crop.z1 - land.z0) / CELL));
     const free = (c) => baseLand[c] === 1 && road.data[c] === 0;
@@ -877,34 +1035,22 @@ export function createMiamiCity(data, opts = {}) {
       for (let i = ci0; i <= ci1; i++) {
         const s = j * W + i;
         if (lab[s] >= 0 || !free(s)) continue;
-        let qh = 0, qt = 0, bi0 = i, bi1 = i, bj0 = j, bj1 = j, parks = 0, ok = true;
-        queue[qt++] = s;
-        lab[s] = s;
-        while (qh < qt) {
-          const c = queue[qh++];
-          const ci = c % W, cj = (c - ci) / W;
-          if (ci <= ci0 || ci >= ci1 || cj <= cj0 || cj >= cj1) ok = false; // touches the crop edge
-          if (ci < bi0) bi0 = ci;
-          if (ci > bi1) bi1 = ci;
-          if (cj < bj0) bj0 = cj;
-          if (cj > bj1) bj1 = cj;
-          if (parkMask.data[c]) parks++;
-          if (ci > ci0 && lab[c - 1] < 0 && free(c - 1)) { lab[c - 1] = s; queue[qt++] = c - 1; }
-          if (ci < ci1 && lab[c + 1] < 0 && free(c + 1)) { lab[c + 1] = s; queue[qt++] = c + 1; }
-          if (cj > cj0 && lab[c - W] < 0 && free(c - W)) { lab[c - W] = s; queue[qt++] = c - W; }
-          if (cj < cj1 && lab[c + W] < 0 && free(c + W)) { lab[c + W] = s; queue[qt++] = c + W; }
-        }
+        floodBlock(s, W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, queue, FB);
+        const qt = FB[0], bi0 = FB[1], bi1 = FB[2], bj0 = FB[3], bj1 = FB[4], parks = FB[5], ok = FB[6] === 1;
         const bw = (bi1 - bi0 + 1) * CELL, bh = (bj1 - bj0 + 1) * CELL;
         if (!ok || qt * CELL * CELL < 0.85 * bw * bh || Math.min(bw, bh) < 24 || Math.max(bw, bh) > 320) continue;
         // Start from the cell centres (clear of the road), then grow.
         let x0 = land.x0 + (bi0 + 0.5) * CELL, z0 = land.z0 + (bj0 + 0.5) * CELL, x1 = land.x0 + (bi1 + 0.5) * CELL, z1 = land.z0 + (bj1 + 0.5) * CELL;
-        // Grow each side up to the kerb, then make sure it is clear.
+        // Clear of every kerb first, then grow each side up to the kerb.
+        TR.x0 = x0; TR.z0 = z0; TR.x1 = x1; TR.z1 = z1;
+        const area0 = (x1 - x0) * (z1 - z0);
+        if (!trimRect(TR, 0, 20) || (TR.x1 - TR.x0) * (TR.z1 - TR.z0) < area0 * 0.7) continue;
+        x0 = TR.x0; z0 = TR.z0; x1 = TR.x1; z1 = TR.z1;
         const step = 0.25;
-        for (let k = 0; k < 20 && roadClearance(x0 - step, z0, x1, z1) > 0; k++) x0 -= step;
-        for (let k = 0; k < 20 && roadClearance(x0, z0, x1 + step, z1) > 0; k++) x1 += step;
-        for (let k = 0; k < 20 && roadClearance(x0, z0 - step, x1, z1) > 0; k++) z0 -= step;
-        for (let k = 0; k < 20 && roadClearance(x0, z0, x1, z1 + step) > 0; k++) z1 += step;
-        if (roadClearance(x0, z0, x1, z1) < 0) continue;
+        for (let k = 0; k < 16 && roadClearance(x0 - step, z0, x1, z1) > 0; k++) x0 -= step;
+        for (let k = 0; k < 16 && roadClearance(x0, z0, x1 + step, z1) > 0; k++) x1 += step;
+        for (let k = 0; k < 16 && roadClearance(x0, z0 - step, x1, z1) > 0; k++) z0 -= step;
+        for (let k = 0; k < 16 && roadClearance(x0, z0, x1, z1 + step) > 0; k++) z1 += step;
         if (mainShore(x0, z0) < 1 || mainShore(x1, z0) < 1 || mainShore(x0, z1) < 1 || mainShore(x1, z1) < 1) continue;
         const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
         let district = districtOf(cx, cz);
@@ -940,8 +1086,9 @@ export function createMiamiCity(data, opts = {}) {
     const cellsBuf = new Uint8Array(200 * 200);
     const hist = new Int32Array(201);
     const stack = new Int32Array(202);
+    const rects = new Int32Array(24);
     for (const b of data.buildings) {
-      if (SKIP_BUILDING.has(b.kind)) continue;
+      if (SKIP_BUILDING.has(b.kind) || !inCrop(b.p[0] / 10, b.p[1] / 10)) continue;
       const pts = decodePolyline(b.p);
       const n = pts.length / 2;
       if (n < 3) continue;
@@ -962,31 +1109,12 @@ export function createMiamiCity(data, opts = {}) {
       let filled = 0;
       for (let k = 0; k < cw * ch; k++) filled += cellsBuf[k];
       if (!filled) continue;
-      const total = filled;
       const kindTag = b.kind || '';
       const h = Math.max(3, b.h || 8);
-      // Greedy: the largest all-inside rectangle, until 85 % is covered.
-      for (let box = 0; box < 6 && filled > total * 0.15; box++) {
-        let best = 0, bi0 = 0, bj0 = 0, bi1 = 0, bj1 = 0;
-        hist.fill(0);
-        for (let j = 0; j < ch; j++) {
-          for (let i = 0; i < cw; i++) hist[i] = cellsBuf[j * cw + i] === 1 ? hist[i] + 1 : 0;
-          // Largest rectangle under the histogram (stack).
-          let sp = 0;
-          for (let i = 0; i <= cw; i++) {
-            const hh = i < cw ? hist[i] : 0;
-            while (sp && hist[stack[sp - 1]] >= hh) {
-              const height = hist[stack[--sp]];
-              const left = sp ? stack[sp - 1] + 1 : 0;
-              const a = height * (i - left);
-              if (a > best) { best = a; bi0 = left; bi1 = i - 1; bj1 = j; bj0 = j - height + 1; }
-            }
-            stack[sp++] = i;
-          }
-        }
-        if (best < 4) break;
-        for (let j = bj0; j <= bj1; j++) for (let i = bi0; i <= bi1; i++) cellsBuf[j * cw + i] = 2;
-        filled -= best;
+      // Greedy: the largest all-inside rectangles, until 85 % is covered.
+      const nb = largestRects(cellsBuf, cw, ch, filled, hist, stack, rects);
+      for (let k = 0; k < nb; k++) {
+        const bi0 = rects[4 * k], bj0 = rects[4 * k + 1], bi1 = rects[4 * k + 2], bj1 = rects[4 * k + 3];
         const bx0 = bi0 === 0 ? x0 : x0 + bi0 * BC, bz0 = bj0 === 0 ? z0 : z0 + bj0 * BC;
         const bx1 = bi1 === cw - 1 ? x1 : x0 + (bi1 + 1) * BC, bz1 = bj1 === ch - 1 ? z1 : z0 + (bj1 + 1) * BC;
         placeBox(bx0, bz0, bx1, bz1, h, kindTag);
@@ -1002,34 +1130,9 @@ export function createMiamiCity(data, opts = {}) {
       x1 = Math.min(x1, blk.x1 - SIDEWALK); z1 = Math.min(z1, blk.z1 - SIDEWALK);
     } else {
       // Trim the side facing a road until it is 1.5 m clear of the kerb.
-      for (let k = 0; k < 8; k++) {
-        let hit = null;
-        edgesInRect(x0 - 12, z0 - 12, x1 + 12, z1 + 12, (e) => {
-          const a = nodes[e.a], b = nodes[e.b];
-          if (segRectDist(a.x, a.z, b.x, b.z, x0, z0, x1, z1) - e.width / 2 < 1.5) { hit = e; return false; }
-          return true;
-        });
-        if (!hit) break;
-        const a = nodes[hit.a], b = nodes[hit.b];
-        const half = hit.width / 2 + 1.5;
-        const ccx = (x0 + x1) / 2, ccz = (z0 + z1) / 2;
-        if (Math.abs(hit.uz) >= Math.abs(hit.ux)) {
-          // Mostly north-south: the strip's x range over the box's z span.
-          const za = Math.max(z0, Math.min(a.z, b.z)), zb = Math.min(z1, Math.max(a.z, b.z));
-          const xa = a.x + ((za - a.z) / (b.z - a.z || 1)) * (b.x - a.x), xb = a.x + ((zb - a.z) / (b.z - a.z || 1)) * (b.x - a.x);
-          const w = half / Math.abs(hit.uz);
-          const lo = Math.min(xa, xb) - w, hi = Math.max(xa, xb) + w;
-          if ((lo + hi) / 2 > ccx) x1 = Math.min(x1, lo); else x0 = Math.max(x0, hi);
-        } else {
-          const xa = Math.max(x0, Math.min(a.x, b.x)), xb = Math.min(x1, Math.max(a.x, b.x));
-          const za = a.z + ((xa - a.x) / (b.x - a.x || 1)) * (b.z - a.z), zb = a.z + ((xb - a.x) / (b.x - a.x || 1)) * (b.z - a.z);
-          const w = half / Math.abs(hit.ux);
-          const lo = Math.min(za, zb) - w, hi = Math.max(za, zb) + w;
-          if ((lo + hi) / 2 > ccz) z1 = Math.min(z1, lo); else z0 = Math.max(z0, hi);
-        }
-        if (x1 - x0 < 3 || z1 - z0 < 3) return;
-      }
-      if (roadClearance(x0, z0, x1, z1) < 1.4) return;
+      TR.x0 = x0; TR.z0 = z0; TR.x1 = x1; TR.z1 = z1;
+      if (!trimRect(TR, 1.5, 3)) return;
+      x0 = TR.x0; z0 = TR.z0; x1 = TR.x1; z1 = TR.z1;
     }
     if (x1 - x0 < 3 || z1 - z0 < 3 || (x1 - x0) * (z1 - z0) < 12) return;
     if (mainShore((x0 + x1) / 2, (z0 + z1) / 2) < 1) return;
@@ -1245,7 +1348,7 @@ export function createMiamiCity(data, opts = {}) {
         props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
       }
     }
-    if (!e.avenue && !e.causeway && !e.bridge && !e.oneway && usable > 14) {
+    if (!e.avenue && !e.causeway && !e.bridge && usable > 14) {
       for (const side of [-1, 1]) {
         for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
           if (!rng.chance(0.22)) continue;
@@ -1431,12 +1534,14 @@ export function createMiamiCity(data, opts = {}) {
     shoreDist, mainShore, isLand, isGround, districtOf, onRoad,
     nodeAt: () => null,
     blockAt, edgesNear, buildingsNear, landRuns, landTarget, inBuilding,
+    // Drawn land (no road strips): 1 = land, sampled at cell centres.
+    landGrid: { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: visual },
     crop, cut, bounds: { x0: land.x0, z0: land.z0, x1: land.x0 + W * CELL, z1: land.z0 + H * CELL },
     attribution: data.attribution,
     size: span,
     mapHalf: span + 100,
     buildMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart),
-    timings,
+    timings, graphStats,
   };
 }
 

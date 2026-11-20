@@ -227,3 +227,26 @@ test('a wrecked saved craft is never restored: saved sessions carry no wreck', (
   assert.equal(s.craft.health, 0.05);
   assert.equal('wrecked' in s.craft, false);
 });
+
+test('map limit is 6 km: Miami positions survive a save, the bound stays strict', () => {
+  assert.equal(MAP_LIMIT, 6000);
+  // A foot session and a parked car far out on the Miami map round trip exactly.
+  const p = defaultProgress();
+  p.session = buildSession({ mode: 'foot', x: 4000, z: 1000, heading: 0.5 }, null, [rec('sedan', -4400, 3800)]);
+  const s = memory();
+  assert.equal(saveProgress(s, p), true);
+  const back = loadProgress(s);
+  assert.equal(back.session.x, 4000);
+  assert.equal(back.session.z, 1000);
+  assert.equal(back.session.garage[0].x, -4400);
+  assert.equal(back.session.garage[0].z, 3800);
+  // Still clamped beyond 6 km, and non-numbers are still refused.
+  const far = sanitizeSession({ mode: 'foot', x: 7000.5, z: -9e9 });
+  assert.equal(far.x, MAP_LIMIT);
+  assert.equal(far.z, -MAP_LIMIT);
+  assert.equal(sanitizeGarage([rec('sedan', 6500, -6500)])[0].x, MAP_LIMIT);
+  for (const bad of [NaN, Infinity, -Infinity, '4000', null, [4000], { v: 1 }]) {
+    assert.equal(sanitizeSession({ mode: 'foot', x: bad, z: 1 }).mode, 'start', String(bad));
+    assert.deepEqual(sanitizeGarage([rec('sedan', bad, 1)]), [], String(bad));
+  }
+});

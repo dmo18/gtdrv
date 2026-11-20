@@ -879,11 +879,11 @@ function makeShopfront(rng, N) {
     g.fillRect(x, y, w, h);
     rm.set(0.1, 0.5);
     rm.g.fillRect(x * kx, y * ky, w * kx, h * ky);
-    const warm = rng.chance(0.75);
+    const warm = rng.chance(0.9);
     if (lit) {
       const eg = ge.createLinearGradient(0, y, 0, y + h);
-      eg.addColorStop(0, warm ? 'rgb(255,214,150)' : 'rgb(214,232,255)');
-      eg.addColorStop(1, warm ? 'rgb(150,112,66)' : 'rgb(110,130,160)');
+      eg.addColorStop(0, warm ? 'rgb(255,200,128)' : 'rgb(176,206,246)');
+      eg.addColorStop(1, warm ? 'rgb(150,96,50)' : 'rgb(80,104,140)');
       ge.fillStyle = eg;
       ge.fillRect(x, y, w, h);
     }

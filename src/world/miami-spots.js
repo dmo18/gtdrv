@@ -6,10 +6,11 @@
 // Coordinates: x east, z south, metres from lat 25.78, lon -80.18.
 
 // Milestone 1 core crop: Downtown, Brickell, Overtown, Edgewater,
-// Wynwood south, Watson Island and the west end of PortMiami. Land past
+// Wynwood south, Watson, Star, Palm and Hibiscus Islands and the west
+// half of PortMiami. Land past
 // the crop is cut off LAND_MARGIN metres outside it (a straight seawall);
 // roads end at the crop edge itself.
-export const MIAMI_CROP = { x0: -2600, z0: -2600, x1: 1400, z1: 1800 };
+export const MIAMI_CROP = { x0: -2600, z0: -2600, x1: 2450, z1: 1800 };
 export const LAND_MARGIN = 150;
 
 export const MIAMI_SPOTS = {
@@ -17,10 +18,12 @@ export const MIAMI_SPOTS = {
   spawn: { street: 'Southeast 1st Street', x: -1100, z: 780, heading: 0 },
 
   // Gullwing Airfield on an invented islet in open water in north
-  // Biscayne Bay. The causeway leaves the east end of Northeast 24th
-  // Street; the islet's z range follows from that node (as in citygen:
-  // anchor z - 205 .. anchor z + 95), x from these values.
-  airfield: { street: 'Northeast 24th Street', x: -585, z: -2257, isletX0: 10, isletX1: 790 },
+  // Biscayne Bay. The causeway leaves the east end of Northeast 26th
+  // Street (24th, as first planned, puts the islet within 100 m of a
+  // small real island south of it); the islet's z range follows from
+  // that node (as in citygen: anchor z - 205 .. anchor z + 95), x from
+  // these values.
+  airfield: { street: 'Northeast 26th Street', x: -551, z: -2416, isletX0: 10, isletX1: 790 },
 
   // Piers, contract order: three main piers, the airfield dock is added
   // last by the adapter. Each starts on land at (x, z) and is marched in

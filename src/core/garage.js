@@ -8,7 +8,9 @@ import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
 import { TANK_SPECS } from '../entities/tank.js';
 
 export const GARAGE_MAX = 8;
-export const MAP_LIMIT = 3000; // metres from the origin, either axis
+// Metres from the origin, either axis: the Miami map reaches about 4.5 km
+// from it (docs/MAP.md), so 6 km with room to spare. Still a hard bound.
+export const MAP_LIMIT = 6000;
 export const MAX_ALT = 1500;
 export const MODES = ['start', 'foot', 'car', 'boat', 'plane', 'heli', 'tank'];
 export const SAFE_ALT = 120; // altitude an airborne craft comes back at

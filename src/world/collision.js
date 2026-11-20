@@ -185,3 +185,10 @@ export function createCollisionWorld() {
 
   return { addBox, addCircle, resolveCircle, raycast, lineClear, heightAt, boxes, circles };
 }
+
+// The static boxes every city adds: one per building, as citymesh used
+// to add them while drawing. Pure, so node tests use the same boxes.
+export function fillCollision(city, collision) {
+  for (const b of city.buildings) collision.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
+  return collision;
+}

@@ -79,18 +79,25 @@ export function createMapRenderer(city) {
     const extra = city.extraLand || [];
     const rect = (r, grow) => g.rect(r.x0 - grow, r.z0 - grow, r.x1 - r.x0 + grow * 2, r.z1 - r.z0 + grow * 2);
 
-    // Sand rim, then land.
-    g.fillStyle = COL.sand;
-    g.strokeStyle = COL.sand;
-    g.lineWidth = 16;
-    outline();
-    g.fill();
-    g.stroke();
-    for (const r of extra) { g.beginPath(); rect(r, 8); g.fill(); }
-    g.fillStyle = COL.land;
-    outline();
-    g.fill();
-    for (const r of extra) { g.beginPath(); rect(r, 0); g.fill(); }
+    if (city.landRuns) {
+      // A real map: land as runs from its land raster (islet included).
+      const runs = city.landRuns(6);
+      g.fillStyle = COL.land;
+      for (let k = 0; k < runs.length; k += 4) g.fillRect(runs[k], runs[k + 1], runs[k + 2] - runs[k], runs[k + 3] - runs[k + 1] + 0.5);
+    } else {
+      // Sand rim, then land.
+      g.fillStyle = COL.sand;
+      g.strokeStyle = COL.sand;
+      g.lineWidth = 16;
+      outline();
+      g.fill();
+      g.stroke();
+      for (const r of extra) { g.beginPath(); rect(r, 8); g.fill(); }
+      g.fillStyle = COL.land;
+      outline();
+      g.fill();
+      for (const r of extra) { g.beginPath(); rect(r, 0); g.fill(); }
+    }
 
     // Blocks.
     for (const b of city.blocks) {
@@ -99,7 +106,7 @@ export function createMapRenderer(city) {
     }
 
     // Roads: avenues on top of streets, with intersection squares.
-    g.lineCap = 'butt';
+    g.lineCap = city.map ? 'round' : 'butt';
     for (const pass of [false, true]) {
       g.strokeStyle = pass ? COL.avenue : COL.road;
       for (const e of city.edges) {
@@ -113,9 +120,11 @@ export function createMapRenderer(city) {
       }
     }
     for (const n of city.nodes) {
-      const w = Math.max(city.wx[n.i], city.wz[n.j]);
+      // Junction squares: grid widths on the island, box sizes elsewhere.
+      const wX = city.map ? n.hx * 2 : city.wx[n.i], wZ = city.map ? n.hz * 2 : city.wz[n.j];
+      const w = Math.max(wX, wZ);
       g.fillStyle = w > 12 ? COL.avenue : COL.road;
-      g.fillRect(n.x - city.wx[n.i] / 2, n.z - city.wz[n.j] / 2, city.wx[n.i], city.wz[n.j]);
+      g.fillRect(n.x - wX / 2, n.z - wZ / 2, wX, wZ);
     }
     // Avenue centre lines.
     g.strokeStyle = COL.avenueLine;

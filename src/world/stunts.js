@@ -86,6 +86,7 @@ function clearOfBuildings(city, x, z, r) {
 export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
   const out = [];
   if (!city || !city.nodes || !city.edges) return out;
+  if (Array.isArray(city.rampSpots)) return city.rampSpots.slice(); // hand-placed (Miami)
   const rng = createRng((seed ^ 0x57a7) >>> 0);
   const cands = [];
   for (const e of city.edges) {

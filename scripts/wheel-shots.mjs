@@ -113,8 +113,6 @@ check(t1.includes('Barnyard Thumper'), `toast shows the name (${t1.join('|')})`)
 await page.screenshot({ path: `docs/preview/weapon-wheel-toast${tag}.png` });
 
 // 3. dead zone keeps, outer ring cancels
-await openFan();
-sw = center(await rect('.rw-a-swap'));
 for (const [label, off] of [['dead zone', 0], ['outer ring', 160]]) {
   await page.evaluate(() => window.__rw.player.walker.arms.weapon = 'smg');
   await openFan();

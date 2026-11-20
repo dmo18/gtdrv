@@ -13,8 +13,8 @@ import { createRng, clamp, TAU } from '../core/rng.js';
 // (close to horizon so far terrain melts into the sky). sunColor and
 // sunIntensity describe the directional light (the moon at night).
 const KEYS = [
-  { h: 0, sky: 0x0d1a38, horizon: 0x2a3e66, fog: 0x26385c, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 1 },
-  { h: 4.6, sky: 0x0e1c3c, horizon: 0x2c4068, fog: 0x283a5e, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 0.85 },
+  { h: 0, sky: 0x050c24, horizon: 0x1a2a50, fog: 0x15213e, sunColor: 0x9cb2ea, sunIntensity: 0.6, hemiSky: 0x5a74b8, hemiGround: 0x22222c, hemiIntensity: 1.1, night: 1, windowGlow: 1 },
+  { h: 4.6, sky: 0x061028, horizon: 0x1c2e54, fog: 0x172442, sunColor: 0x9cb2ea, sunIntensity: 0.6, hemiSky: 0x5a74b8, hemiGround: 0x22222c, hemiIntensity: 1.1, night: 1, windowGlow: 0.85 },
   { h: 5.8, sky: 0x2a3e72, horizon: 0xb48a8a, fog: 0x76708a, sunColor: 0xffb48a, sunIntensity: 0.45, hemiSky: 0x8896c4, hemiGround: 0x4a4246, hemiIntensity: 1.3, night: 0.65, windowGlow: 0.75 },
   { h: 6.8, sky: 0x6a96c8, horizon: 0xf0b88e, fog: 0xc4b8b6, sunColor: 0xffc694, sunIntensity: 1.05, hemiSky: 0xc4d2ee, hemiGround: 0x7a6c5e, hemiIntensity: 1.55, night: 0.12, windowGlow: 0.25 },
   { h: 8.5, sky: 0x7cb0e0, horizon: 0xc6dcee, fog: 0xb6cfe6, sunColor: 0xfff0d8, sunIntensity: 1.5, hemiSky: 0xe0eeff, hemiGround: 0x8a8272, hemiIntensity: 1.8, night: 0, windowGlow: 0 },
@@ -22,7 +22,7 @@ const KEYS = [
   { h: 16.5, sky: 0x70a8de, horizon: 0xc8d8e8, fog: 0xb4cce2, sunColor: 0xffecd0, sunIntensity: 1.65, hemiSky: 0xe4eefc, hemiGround: 0x8a8070, hemiIntensity: 1.8, night: 0, windowGlow: 0 },
   { h: 18.5, sky: 0x5c88c8, horizon: 0xf8b070, fog: 0xc8b2aa, sunColor: 0xffb466, sunIntensity: 1.6, hemiSky: 0xeed4b8, hemiGround: 0x7a6450, hemiIntensity: 1.55, night: 0, windowGlow: 0.3 },
   { h: 19.6, sky: 0x323e7c, horizon: 0xe0806c, fog: 0x7c6a84, sunColor: 0xff8a5a, sunIntensity: 0.55, hemiSky: 0x9490c0, hemiGround: 0x4c4044, hemiIntensity: 1.3, night: 0.5, windowGlow: 0.85 },
-  { h: 20.8, sky: 0x111e42, horizon: 0x30446e, fog: 0x2a3d62, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 1 },
+  { h: 20.8, sky: 0x08122e, horizon: 0x1e3058, fog: 0x182644, sunColor: 0x9cb2ea, sunIntensity: 0.6, hemiSky: 0x5a74b8, hemiGround: 0x22222c, hemiIntensity: 1.1, night: 1, windowGlow: 1 },
 ];
 KEYS.push({ ...KEYS[0], h: 24 });
 const COLOR_KEYS = ['sky', 'horizon', 'fog', 'sunColor', 'hemiSky', 'hemiGround'];
@@ -136,6 +136,7 @@ uniform float uSun;
 uniform float uMoon;
 uniform float uGlow;
 uniform float uAway;
+uniform vec3 uCity;
 varying vec3 vDir;
 void main() {
   vec3 d = normalize(vDir);
@@ -152,6 +153,8 @@ void main() {
   // A low sun also lights a band along the whole horizon on its side.
   col += uSunCol * uGlow * uAway * pow(face, 3.0) * exp(-max(y, 0.0) * 9.0) * 0.3 * smoothstep(-0.05, 0.02, y);
   col = mix(col, vec3(1.0, 0.98, 0.9) * 1.4, uSun * smoothstep(0.99955, 0.9997, s));
+  // The city's own light scattered low in the night haze.
+  col += uCity * (exp(-max(y, 0.0) * 9.0) + 0.25 * exp(-max(y, 0.0) * 2.5)) * smoothstep(-0.06, 0.01, y);
   float m = dot(d, uMoonDir);
   col += vec3(0.75, 0.8, 0.9) * uMoon * (smoothstep(0.99965, 0.9998, m) + pow(max(m, 0.0), 300.0) * 0.12);
   gl_FragColor = vec4(col, 1.0);
@@ -220,10 +223,31 @@ varying vec3 vC;
 varying vec2 vUv;
 varying float vD;
 void main() {
-  float r = clamp(1.0 - dot(vUv, vUv), 0.0, 1.0);
-  float a = r * r * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  float d2 = dot(vUv, vUv);
+  float r = clamp(1.0 - d2, 0.0, 1.0);
+  // Broad soft pool with a brighter core right under the lamp.
+  float a = (r * r + 1.6 * exp(-d2 * 9.0) * r) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
   gl_FragColor = vec4(uColor * vC * a, 1.0);
-  #include <colorspace_fragment>
+}`;
+// Headlight throw on the road: a cone that widens away from the car
+// (quad local -x end), brightest just ahead of the lamps, two soft lobes.
+const HEAD_FS = `
+uniform vec3 uColor;
+uniform float uIntensity;
+uniform float uFadeNear;
+uniform float uFadeFar;
+varying vec3 vC;
+varying vec2 vUv;
+varying float vD;
+void main() {
+  float t = vUv.x * 0.5 + 0.5;
+  float w = 0.2 + 0.8 * t;
+  float q = abs(vUv.y) / w;
+  float across = 1.0 - smoothstep(0.55, 1.0, q);
+  float lobes = 0.75 + 0.25 * cos(clamp(q, 0.0, 1.0) * 6.2832);
+  float along = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.35);
+  float a = across * along * mix(1.0, lobes, 1.0 - t) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  gl_FragColor = vec4(uColor * vC * a, 1.0);
 }`;
 
 // Wet-street reflections of the lamps: one long soft streak per lamp on
@@ -322,7 +346,10 @@ function quadGeometry() {
   return g;
 }
 
-function poolMaterial(color) {
+// Lights the ground under it: the picture below times (1 + light), so a
+// warm pool takes the colour of the asphalt or paving it falls on, and
+// dark ground stays dark instead of turning a flat milky grey.
+function poolMaterial(color, fs = POOL_FS) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color().setHex(color, THREE.SRGBColorSpace) },
@@ -331,11 +358,13 @@ function poolMaterial(color) {
       uFadeFar: { value: 420 },
     },
     vertexShader: POOL_VS,
-    fragmentShader: POOL_FS,
+    fragmentShader: fs,
     vertexColors: true,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.DstColorFactor,
+    blendDst: THREE.OneFactor,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
@@ -420,6 +449,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
         uMoon: { value: 0 },
         uGlow: { value: 1 },
         uAway: { value: 0 },
+        uCity: { value: new THREE.Color(0, 0, 0) },
       },
       vertexShader: DOME_VS,
       fragmentShader: DOME_FS,
@@ -481,6 +511,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // (one per facade style); we only turn them up at dusk.
     const ud = (game.cityMesh && game.cityMesh.userData) || {};
     const mats = ud.materials || {};
+    vis.ud = ud;
     vis.glowMats = ud.glowMats || [];
     vis.wet = ud.wet || null;
     vis.mats = mats;
@@ -491,7 +522,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // car headlamp bulbs: one additive points cloud.
     const lamps = ud.lamps || [];
     const extra = ud.glows || [];
-    const NL = lamps.length + extra.length, NB = MAX_CARS * 2 + 2;
+    const NL = lamps.length + extra.length, NB = (MAX_CARS + 1) * 4;
     const lp = new Float32Array((NL + NB) * 3), lc = new Float32Array((NL + NB) * 3), ls = new Float32Array(NL + NB);
     const pool = [], poolCol = [], poolUv = [], poolIdx = [];
     for (let i = 0; i < extra.length; i++) {
@@ -514,8 +545,10 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       poolCol.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
       poolIdx.push(n, n + 2, n + 1, n, n + 3, n + 2);
     }
+    // Car lamps in fours: two headlamps, then two red tail lamps.
     for (let i = NL; i < NL + NB; i++) {
-      lc[i * 3] = 1; lc[i * 3 + 1] = 0.96; lc[i * 3 + 2] = 0.88;
+      const tail = (i - NL) % 4 > 1;
+      lc[i * 3] = 1; lc[i * 3 + 1] = tail ? 0.08 : 0.96; lc[i * 3 + 2] = tail ? 0.04 : 0.88;
       ls[i] = 0;
     }
     const lg = new THREE.BufferGeometry();
@@ -599,9 +632,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
 
     // Headlight pools: instanced quads in front of lit vehicles.
     const hq = quadGeometry();
-    // Brighter toward the car end (local -x of the quad).
-    hq.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1, 0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 1, 1, 1], 3));
-    const headMat = poolMaterial(0xfff1d6);
+    hq.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
+    const headMat = poolMaterial(0xfff0d8, HEAD_FS);
     headMat.uniforms.uFadeNear.value = 80;
     headMat.uniforms.uFadeFar.value = 200;
     const NH = MAX_CARS + 1;
@@ -617,6 +649,22 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     scene.add(heads);
     vis.heads = heads;
     vis.headU = headMat.uniforms;
+    // Red glow on the road behind the same cars (brighter when braking).
+    const tailMat = poolMaterial(0xff2a14);
+    tailMat.uniforms.uFadeNear.value = 50;
+    tailMat.uniforms.uFadeFar.value = 140;
+    const tails = new THREE.InstancedMesh(hq, tailMat, NH);
+    tails.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    tails.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(NH * 3), 3);
+    tails.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    tails.frustumCulled = false;
+    tails.visible = false;
+    tails.count = 0;
+    tails.renderOrder = 1;
+    tails.name = 'tail-pools';
+    scene.add(tails);
+    vis.tails = tails;
+    vis.tailU = tailMat.uniforms;
 
     // Rain: pooled streaks wrapped in a box around the camera on the GPU.
     const NR = 1200;
@@ -708,6 +756,14 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     U.uGlow.value = (0.35 + 0.65 * clearSky) * smoothstep(-0.15, 0.05, S.sunY);
     U.uAway.value = 0.75 * (1 - smoothstep(0.08, 0.45, S.sunY)) * (1 - S.night) * (1 - 0.7 * grey);
     U.uMoon.value = clearSky * S.night * smoothstep(-0.02, 0.05, S.moonY);
+    // City glow on the night horizon (stronger under cloud, which bounces
+    // it back), and the same glow in the haze so the far city sinks into
+    // a lit night sky rather than into grey.
+    const cityK = smoothstep(0.3, 1, S.night) * (1 + 0.6 * ov - 0.5 * fg) * dark;
+    U.uCity.value.setRGB(0.05, 0.03, 0.026).multiplyScalar(cityK);
+    fogC.r += U.uCity.value.r * 0.7;
+    fogC.g += U.uCity.value.g * 0.7;
+    fogC.b += U.uCity.value.b * 0.7;
 
     if (scene.fog) {
       scene.fog.color.copy(fogC);
@@ -740,9 +796,14 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     V.night = night;
     V.lit = clamp(Math.max(smoothstep(0.15, 0.6, night), rn * 0.6, fg * 0.5), 0, 1);
     const glow = S.windowGlow * (LS ? LS.glow : 0.95);
-    for (let i = 0; i < V.glowMats.length; i++) V.glowMats[i].emissiveIntensity = glow;
+    // Signs glow harder than rooms; shop windows a little softer.
+    const signK = 1 + 0.9 * night, shopK = 1 - 0.3 * night;
+    for (let i = 0; i < V.glowMats.length; i++) {
+      const m = V.glowMats[i];
+      m.emissiveIntensity = glow * (m === V.mats.detailMat ? signK : m === V.mats.shopfront ? shopK : 1);
+    }
     // Rain: everything darkens a little, roads and pavements go glossy.
-    for (let i = 0; i < V.dimMats.length; i++) V.dimMats[i].color.copy(V.dimBase[i]).multiplyScalar(1 - 0.16 * rn);
+    for (let i = 0; i < V.dimMats.length; i++) V.dimMats[i].color.copy(V.dimBase[i]).multiplyScalar((1 - 0.16 * rn) * (1 - 0.2 * night));
     // Night dew: streets keep a damp sheen after dark, so lamps and the
     // glowing sky show in them (rain makes them fully wet).
     if (V.wet) V.wet.value = Math.max(rn, 0.5 * smoothstep(0.3, 0.9, night));
@@ -786,15 +847,16 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     V.lampU.uIntensity.value = V.lit;
     V.lampPts.visible = V.lit > 0.01;
     if (V.pools) {
-      V.poolU.uIntensity.value = V.lit * (0.25 + 0.55 * night);
-      V.pools.visible = V.poolU.uIntensity.value > 0.01;
+      V.poolU.uIntensity.value = V.lit * (0.9 + 1.5 * night);
+      V.pools.visible = V.poolU.uIntensity.value > 0.01 && !V.ud.lampLightBaked;
     }
     if (V.streaks) {
       const wet = V.wet ? V.wet.value : rn;
       V.streakU.uIntensity.value = V.lit * wet * (0.5 + 0.5 * night) * 0.9;
       V.streaks.visible = V.streakU.uIntensity.value > 0.01;
     }
-    V.headU.uIntensity.value = V.lit * (0.35 + 0.35 * night);
+    V.headU.uIntensity.value = V.lit * (3 + 4 * night);
+    V.tailU.uIntensity.value = V.lit * (0.8 + 0.8 * night);
     // Additive glows fade out with the fog instead of shining through it.
     const fn = scene.fog ? scene.fog.near : 220, ff = scene.fog ? scene.fog.far : 1050;
     V.lampU.uFadeNear.value = Math.min(300, fn);
@@ -829,6 +891,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const H = V.heads;
     if (!(V.lit > 0.01) || !cam) {
       H.visible = false;
+      V.tails.visible = false;
+      CL.n = 0;
       if (V.NB && V.bulbSize.array[V.NL] !== 0) clearBulbs();
       return;
     }
@@ -856,6 +920,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       nearD[j] = d;
     }
     let k = 0;
+    CL.n = 0;
     const bp = V.bulbPos.array, bs = V.bulbSize.array;
     let b = V.NL;
     if (pv) {
@@ -879,6 +944,11 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     H.visible = k > 0;
     H.instanceMatrix.needsUpdate = true;
     H.instanceColor.needsUpdate = true;
+    const T = V.tails;
+    T.count = k;
+    T.visible = k > 0;
+    T.instanceMatrix.needsUpdate = true;
+    T.instanceColor.needsUpdate = true;
     markBulbs();
   }
   function clearBulbs() {
@@ -910,21 +980,42 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     interp(v, alpha);
     const L = (v.spec && v.spec.length) || 4.5;
     const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
-    const reach = air ? 14 + y * 0.6 : 8;
-    const len = air ? 20 : 13;
+    const len = air ? 26 : 24;
     const gy = v.kind === 'boat' ? (v.mesh ? v.mesh.position.y : -0.6) + 0.25 : 0.06;
-    V.p.x += ch * (L / 2 + reach - len / 2 + 3);
-    V.p.z += sh * (L / 2 + reach - len / 2 + 3);
+    const ax = V.p.x, az = V.p.z;
+    // Cars on a city whose ground shaders light themselves (graphics):
+    // hand the lamps over instead of drawing pools.
+    let skip = false;
+    if (v.kind === 'car' && V.ud.lampLightBaked && CL.n < CL.max) {
+      const o = CL.n * 8, d = CL.data;
+      d[o] = ax; d[o + 1] = az; d[o + 2] = ch; d[o + 3] = sh;
+      d[o + 4] = f; d[o + 5] = f * ((v.brake || 0) > 0.1 ? 2.6 : 0.9); d[o + 6] = L / 2;
+      CL.n++;
+      skip = true;
+    }
+    // The cone starts at the nose (from the air: below and ahead).
+    const start = air ? L / 2 + y * 0.6 : L / 2 - 0.6;
+    V.p.x = ax + ch * (start + len / 2);
+    V.p.z = az + sh * (start + len / 2);
     V.p.y = air ? 0.06 : gy;
     V.q.setFromAxisAngle(V.up, -v.heading);
-    V.s.set(len, 1, air ? 12 : 5.5);
+    V.s.set(skip ? 0.001 : len, 1, skip ? 0.001 : air ? 14 : 10);
     V.m4.compose(V.p, V.q, V.s);
     V.heads.setMatrixAt(k, V.m4);
     V.heads.instanceColor.setXYZ(k, f, f, f);
+    // Tail glow: cars only (none on the water or in the air).
+    const tf = v.kind === 'car' && !skip ? f * ((v.brake || 0) > 0.1 ? 1.9 : 0.7) : 0;
+    V.p.x = ax - ch * (L / 2 + 1.2);
+    V.p.z = az - sh * (L / 2 + 1.2);
+    V.p.y = gy;
+    V.s.set(tf > 0 ? 3.4 : 0.001, 1, tf > 0 ? 3.6 : 0.001);
+    V.m4.compose(V.p, V.q, V.s);
+    V.tails.setMatrixAt(k, V.m4);
+    V.tails.instanceColor.setXYZ(k, tf, tf, tf);
     return true;
   }
   function placeBulbs(v, b, alpha) {
-    if (v.kind !== 'car' || b + 2 > V.NL + V.NB) return b;
+    if (v.kind !== 'car' || b + 4 > V.NL + V.NB) return b;
     interp(v, alpha);
     const L = (v.spec && v.spec.length) || 4.5, Wd = (v.spec && v.spec.width) || 1.8;
     const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
@@ -936,6 +1027,16 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       bp[b * 3 + 1] = 0.68;
       bp[b * 3 + 2] = fz + ch * o;
       bs[b] = 0.9;
+      b++;
+    }
+    const rx = V.p.x - ch * (L / 2 + 0.05), rz = V.p.z - sh * (L / 2 + 0.05);
+    const tk = (v.brake || 0) > 0.1 ? 0.75 : 0.45;
+    for (let s = -1; s <= 1; s += 2) {
+      const o = Wd * 0.38 * s;
+      bp[b * 3] = rx - sh * o;
+      bp[b * 3 + 1] = 0.8;
+      bp[b * 3 + 2] = rz + ch * o;
+      bs[b] = tk;
       b++;
     }
     return b;
@@ -956,8 +1057,13 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     R.geometry.setDrawRange(0, (q != null && q < 1 ? V.NR / 2 : V.NR) * 2);
   }
 
+  // Lamps of the nearest cars for shaders that light the ground with them
+  // (graphics.js): per car x, z, cos and sin of heading, headlight, tail
+  // glow, half length, spare.
+  const CL = { n: 0, max: 6, data: new Float32Array(6 * 8) };
   const sys = {
     name: 'daynight',
+    carLamps: CL,
     fixedUpdate(dt) {
       if (!(dt > 0)) return;
       // The player set the time in Settings: the clock stays put.

@@ -289,3 +289,17 @@ None critical or high.
   `setWeaponPicker`), `combat.pickWeapon`, `combathud.js`, styles,
   `test/wheel.test.js`. Docs in docs/UI.md.
 - Screenshots: docs/preview/weapon-wheel-*.png (`node scripts/wheel-shots.mjs`).
+
+## 2026-11-20: Miami map, milestone 1 (core crop)
+- `?map=miami` plays a core crop of real Miami (OpenStreetMap, ODbL):
+  Downtown, Brickell, Overtown, Edgewater, Wynwood south, Watson, Star,
+  Palm and Hibiscus Islands, west PortMiami, plus the invented Gullwing
+  Airfield islet on a causeway from NE 26th Street. Real streets,
+  buildings with heights, water, coastline, parks; traffic, police, peds,
+  parked cars, boats and aircraft work. The procedural island stays the
+  default. Races, secrets and stunt ramps are off on Miami (milestone 2).
+- New: `src/world/miami.js`, `src/world/miami-spots.js`,
+  `src/world/maps.js`, `test/miami.test.js`, `scripts/miami-shots.mjs`.
+  The map data loads as a separate chunk (esbuild code splitting), so the
+  default `game.js` did not grow. Saved positions are clamped at 6 km
+  (was 3 km). Details and deviations: docs/MAP.md, "Milestone 1: done".

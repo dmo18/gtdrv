@@ -1070,4 +1070,56 @@ export default async function extra(page, check) {
   check(hard.dead === 'down' && hard.revived.life === 'ok' && hard.revived.hp > 99, `in hard mode the player can die and comes back with full health (${hard.dead}, ${JSON.stringify(hard.revived)})`);
   check(hard.hurt < 100 && hard.healed > 99 && hard.text === 'HP 100', `RESPAWN on foot restores health (${hard.hurt} -> ${hard.healed}, ${hard.text})`);
   check(hard.meterHidden, 'the health meter hides again with hard mode off');
+
+  // ---- The Miami map (docs/MAP.md milestone 1): ?map=miami loads in its
+  // own page, drives for 300 steps with zero page errors. ----
+  {
+    const url = new URL(page.url());
+    url.search = '?autostart&map=miami';
+    const mp = await page.context().browser().newPage({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+    const errs = [];
+    mp.on('pageerror', (e) => errs.push(String(e)));
+    mp.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+    const outside = [];
+    mp.on('request', (r) => { if (!r.url().startsWith(url.origin + '/') && !r.url().startsWith('data:') && !r.url().startsWith('blob:')) outside.push(r.url()); });
+    let ok = true;
+    try {
+      await mp.goto(url.href);
+      await mp.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 90000 });
+    } catch (e) {
+      ok = false;
+      errs.push(String(e));
+    }
+    let m = null;
+    if (ok) {
+      await mp.keyboard.down('ArrowUp');
+      await mp.waitForTimeout(200);
+      m = await mp.evaluate(() => {
+        const g = window.__rw;
+        g.loop.stop();
+        const c = g.city;
+        const x0 = g.player.x, z0 = g.player.z;
+        let finite = true;
+        for (let i = 0; i < 300; i++) {
+          g.step(1 / 60);
+          for (const v of g.vehicles) if (!Number.isFinite(v.x + v.z + v.heading)) finite = false;
+        }
+        g.draw(1, 1 / 60);
+        return {
+          map: c.map, buildMs: c.buildMs, meshMs: Math.round(g.cityMesh.userData.buildMs), finite,
+          moved: Math.hypot(g.player.x - x0, g.player.z - z0), cars: g.vehicles.length,
+          traffic: g.traffic.count, peds: g.peds.count, onLand: c.shoreDist(g.player.x, g.player.z) > 0,
+          calls: g.renderer.info.render.calls, tris: g.renderer.info.render.triangles,
+        };
+      });
+      await mp.keyboard.up('ArrowUp');
+      await mp.screenshot({ path: 'shots/miami.png' });
+    }
+    await mp.close();
+    check(ok && m && m.map === 'miami', `?map=miami starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
+    check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);
+    check(outside.length === 0, `Miami: no outside network requests (${outside.length})`);
+    check(errs.length === 0, `Miami: no page errors (${errs.length})`);
+    for (const e of errs.slice(0, 10)) console.log('   ', e);
+  }
 }

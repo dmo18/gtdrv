@@ -44,7 +44,14 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
     if (where === 'harbour') {
       // Out on the docks marina pier, looking back at the city over the water.
       const m = c.pois.find((p) => p.type === 'marina' && /Saltyard/.test(p.label)) || c.pois.find((p) => p.type === 'marina');
-      if (m) { x = m.x; z = m.z + 26; heading = -Math.PI / 2; } else { x = 58; z = 596; heading = 1.35; }
+      let best = null, bd = 1e9;
+      for (const p of c.piers || []) {
+        const d = m ? Math.hypot((p.x0 + p.x1) / 2 - m.x, (p.z0 + p.z1) / 2 - m.z) : 0;
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (best && best.z1 - best.z0 > best.x1 - best.x0) { x = (best.x0 + best.x1) / 2; z = best.z0 + 0.62 * (best.z1 - best.z0); heading = -Math.PI / 2; }
+      else if (best) { x = best.x0 + 0.38 * (best.x1 - best.x0); z = (best.z0 + best.z1) / 2; heading = 0; }
+      else { x = 58; z = 596; heading = 1.35; }
     }
     if (g.graphics && 'adaptive' in g.graphics) { g.graphics.adaptive = false; g.resize(); }
     g.loop.start();
@@ -69,7 +76,7 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
     }
     return { calls: g.graphics.calls, triangles: g.graphics.triangles };
   }, [where, hour, cam]);
-  await page.screenshot({ path: `docs/preview/${prefix}-${name}.png` });
+  await page.screenshot({ path: `docs/preview/${prefix}-${name}.png`, timeout: 180000 });
   console.log(name, JSON.stringify(info));
 }
 await browser.close();

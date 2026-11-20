@@ -12,7 +12,7 @@ import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
 import { vehicleStats } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { makeWindowAtlas } from './textures.js';
-import { patchWindows } from './nightlights.js';
+import { patchWindows, bakeLampLight, patchLampLight, CARS } from './nightlights.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -110,7 +110,9 @@ export function createGraphics(game) {
   renderer.toneMapping = THREE.CustomToneMapping;
   renderer.toneMappingExposure = 1.0;
   // A stronger sun against weaker fill light, so shade reads as shade.
-  game.lightScale = { sun: 2.9, moon: 1.5, hemi: 0.26, hemiNight: 0.6, glow: 1.0 };
+  // At night the fill drops further, so lamps, windows and headlights
+  // carry the picture and shade is a deep blue, not a flat grey.
+  game.lightScale = { sun: 2.9, moon: 1.3, hemi: 0.26, hemiNight: 0.36, glow: 1.0 };
 
   // ---- shadows ----
   renderer.shadowMap.enabled = true;
@@ -204,9 +206,9 @@ export function createGraphics(game) {
     skyU.uZenith.value.copy(sky.zenith);
     skyU.uHorizon.value.copy(sky.horizon);
     // City glow low in the night sky: what wet streets and glass pick up.
-    skyU.uHorizon.value.r += 0.16 * sky.lit;
-    skyU.uHorizon.value.g += 0.11 * sky.lit;
-    skyU.uHorizon.value.b += 0.06 * sky.lit;
+    skyU.uHorizon.value.r += 0.09 * sky.lit;
+    skyU.uHorizon.value.g += 0.06 * sky.lit;
+    skyU.uHorizon.value.b += 0.045 * sky.lit;
     // The ground as the sky sees it: lit streets by day, lamp glow by night.
     skyU.uGround.value.copy(sky.horizon).multiplyScalar(0.3).addScalar(0.012 * sky.lit);
     skyU.uSunDir.value.copy(sky.sunDir);
@@ -282,6 +284,15 @@ export function createGraphics(game) {
 
   // ---- lit windows: per-window rooms from one shared atlas ----
   const win = ud.materials ? patchWindows(ud.materials, makeWindowAtlas(game.city ? game.city.seed + 31 : 31)) : null;
+
+  // ---- street lamp pools, baked into one light map ----
+  const baked = ud.materials && ud.lamps ? bakeLampLight(ud.lamps, ud.glows || []) : null;
+  let lampU = null;
+  if (baked) {
+    const M = ud.materials;
+    lampU = patchLampLight([M.asphaltMat, M.pavementMat, M.grassMat, M.landMat, M.sandMat, M.paintMat, M.decalMat, M.plainMat, M.woodMat, M.shopfront], baked);
+    ud.lampLightBaked = true; // the day/night system drops its pool decals
+  }
 
   // ---- traffic-light lamps ----
   const sig = ud.signals && ud.signals.mesh ? ud.signals : null;
@@ -395,6 +406,18 @@ export function createGraphics(game) {
         scene.environmentIntensity = 0.42 + 0.48 * sky.night;
       }
       updateShadow(sky);
+      if (lampU) {
+        lampU.uLampK.value = sky ? 4.6 * sky.lit * (0.4 + 0.6 * sky.night) : 0;
+        const cl = game.daynight && game.daynight.carLamps;
+        const n = cl ? Math.min(cl.n, CARS) : 0;
+        const k = sky ? sky.lit : 0;
+        for (let i = 0; i < n; i++) {
+          const d = cl.data, o = i * 8;
+          lampU.uCarA.value[i].set(d[o], d[o + 1], d[o + 2], d[o + 3]);
+          lampU.uCarB.value[i].set(d[o + 4] * k, d[o + 5] * k, d[o + 6], 0);
+        }
+        lampU.uCarN.value = n;
+      }
       if (win) {
         win.uniforms.uWinNight.value = sky ? sky.night : 0;
         win.uniforms.uWinTime.value = (game.time || 0) % 1000;

@@ -27,7 +27,9 @@ async function walk(dir, base = dir) {
 // keep offline and a version that changes whenever any of them changes.
 async function writeServiceWorker(dist) {
   const files = (await walk(join(root, 'public'))).filter((f) => f !== 'sw.js');
-  const all = ['index.html', 'game.js', ...files];
+  // Lazily loaded chunks (the Miami map) are kept offline too.
+  const chunks = (await readdir(dist)).filter((f) => /^chunk-[\w-]+\.js$/.test(f)).sort();
+  const all = ['index.html', 'game.js', ...chunks, ...files];
   const hash = createHash('sha256');
   for (const f of all) hash.update(f).update(await read(join(dist, f)));
   const list = ['./', ...all];
@@ -41,14 +43,19 @@ async function writeServiceWorker(dist) {
 export async function buildGame({ minify = true, prod = minify, outDir = defaultDist } = {}) {
   const dist = outDir;
   await mkdir(dist, { recursive: true });
+  // Old lazy chunks would otherwise pile up (and be listed for offline use).
+  for (const f of await readdir(dist)) if (/^chunk-[\w-]+\.js$/.test(f)) await rm(join(dist, f));
   await build({
-    entryPoints: [join(root, 'src/main.js')],
+    entryPoints: { game: join(root, 'src/main.js') },
     bundle: true,
     format: 'esm',
     target: 'es2020',
     minify,
     sourcemap: false,
-    outfile: join(dist, 'game.js'),
+    // Code splitting: the Miami map and its data load only for ?map=miami.
+    splitting: true,
+    outdir: dist,
+    chunkNames: 'chunk-[hash]',
     define: { __PROD__: String(prod), __VERSION__: JSON.stringify(pkgVersion) },
     logLevel: 'warning',
   });

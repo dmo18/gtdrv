@@ -449,7 +449,8 @@ function scan(dr, v, ctx) {
     if (approaching) {
       const tx = o.x - T.x, tz = o.z - T.z;
       const inBox = Math.abs(tx) < T.hx + 0.5 && Math.abs(tz) < T.hz + 0.5;
-      if (!T.signal) {
+      // Bend nodes (degree two, real maps) are not junctions: no giving way.
+      if (!T.signal && !T.bend) {
         if (inBox) boxBusy = true;
         else if (o.kind === 'car' && Math.abs(o.speed) > 1) {
           // Someone else about to enter first? First come, first served.
@@ -464,7 +465,7 @@ function scan(dr, v, ctx) {
           }
         }
       }
-      if (dr.t1 === LEFT && o.kind === 'car' && !(o.ai && o.ai.t1 === LEFT && o.ai.f1 === dr.f1)) {
+      if (dr.t1 === LEFT && !T.bend && o.kind === 'car' && !(o.ai && o.ai.t1 === LEFT && o.ai.f1 === dr.f1)) {
         const fo = Math.cos(o.heading) * h0x + Math.sin(o.heading) * h0z;
         const along = tx * h0x + tz * h0z;
         const side = tx * -h0z + tz * h0x; // right of my travel direction
