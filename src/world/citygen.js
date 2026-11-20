@@ -289,7 +289,9 @@ export function generateCity(seed = 20261) {
   const IL = 780, IW = 300;
   const islet = { x0: shoreX + 170, z0: anchor.z - 205, x1: shoreX + 170 + IL, z1: anchor.z - 205 + IW };
   const roadHalf = wz[anchor.j] / 2;
-  extraLand.push(islet, { x0: anchor.x, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 1, z1: anchor.z + roadHalf + 4 });
+  // The causeway overlaps both shores so there is no thin seam where
+  // it meets them.
+  extraLand.push(islet, { x0: anchor.x - 30, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 30, z1: anchor.z + roadHalf + 4 });
   const gate = {
     id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z,
     hx: roadHalf, hz: roadHalf, edges: [], signal: false,

@@ -104,3 +104,16 @@ test('collision: height filter and roof height', () => {
   assert.equal(w.heightAt(5, 5), 20);
   assert.equal(w.heightAt(50, 5), 0);
 });
+
+test('causeway is solid ground all the way to the airfield', () => {
+  const gate = city.airfield.gate;
+  const e = city.edges.find((x) => x.causeway);
+  const a = city.nodes[e.a === gate.id ? e.b : e.a];
+  for (let x = a.x; x <= gate.x; x += 2) {
+    assert.ok(city.shoreDist(x, a.z) > 5, `thin land at x=${x.toFixed(0)}: ${city.shoreDist(x, a.z).toFixed(1)}`);
+  }
+  for (const s of city.boatSpots) assert.ok(city.shoreDist(s.x, s.z) < -1, 'boat berth is in the water');
+  for (const s of city.aircraftSpots) {
+    if (s.spec !== 'seaplane') assert.ok(city.shoreDist(s.x, s.z) > 3, `${s.spec} spot on land`);
+  }
+});
