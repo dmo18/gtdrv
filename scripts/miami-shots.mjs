@@ -43,8 +43,8 @@ console.log('spawn', spawn);
 await page.screenshot({ path: `${out}/miami-street.png` });
 // From the bay east of Bayfront Park, looking west at downtown.
 await look('miami-bay', [-150, 40, 450], [-1100, 60, 650]);
-// High over Watson Island looking south-west across downtown and Brickell.
-await look('miami-aerial', [600, 420, -900], [-900, 0, 700]);
+// High over the Port Boulevard bridge, looking south-west at downtown and Brickell.
+await look('miami-aerial', [-200, 260, 0], [-1150, 0, 900]);
 // The airfield islet from the causeway end.
 await look('miami-airfield', [-500, 60, -2150], [400, 0, -2300]);
 console.log('page errors', errors.length);
