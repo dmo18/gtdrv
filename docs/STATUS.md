@@ -303,3 +303,31 @@ None critical or high.
   The map data loads as a separate chunk (esbuild code splitting), so the
   default `game.js` did not grow. Saved positions are clamped at 6 km
   (was 3 km). Details and deviations: docs/MAP.md, "Milestone 1: done".
+
+## 2026-11-20: night lighting rework
+- Lit windows (`src/render/nightlights.js`, `textures.js`): the facade
+  shaders decide per window, from a seeded hash of building, floor and
+  window, whether the room is lit and which of eight rooms shows (warm
+  room, warm or cool blinds, cool office, curtains, ceiling lamp, dim
+  hall, flickering TV blue), drawn from one shared 256x128 atlas. Offices
+  light whole floors, homes window by window. Unlit glass goes dark at
+  night. The four 512 px lit-window pictures became 128 px glass masks.
+  `buildings.js` adds whole-number UV offsets (no change by day) that
+  carry the building and wall number.
+- Street lamps: every lamp and floodlight baked once into a 1024 px top
+  down light map; ground, kerb, pavement, pier and shopfront shaders add
+  it as light on their own colour (warm pools that take the asphalt or
+  paving colour, walls catch it near the ground). The old additive pool
+  decal is off when the map is in use.
+- Car lamps: the player's and the 5 nearest cars light the ground in the
+  same shaders: a widening headlight cone and a red tail glow (brighter
+  when braking). Red tail glow sprites added. Boats and aircraft keep the
+  pool decals. Signs glow brighter at night, shop windows warmer, softer.
+- Sky: deeper blue night keys, a warm city glow low on the horizon, fog
+  that matches it; less flat night fill (hemi 0.6 -> 0.36, moon 1.5 ->
+  1.3), night pavement a little darker. Day unchanged (same screenshots).
+- Draw calls (perf.mjs, street view): day 253 -> 253, night 264 -> 264;
+  triangles night 451k -> 449k. Programs 84 -> 89, no new program at
+  night after warm-up.
+- Screenshots: docs/preview/night-before-*.png and night-after-*.png
+  (`node scripts/night-shots.mjs <prefix> [views]`).
