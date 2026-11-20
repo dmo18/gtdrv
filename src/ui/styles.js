@@ -209,7 +209,6 @@ const CSS = `
 .rw-slot-alock { --x: 204px; --y: 30px; }
 .rw-slot-det { --x: 284px; --y: 96px; }
 .rw-arc.rw-mode-plane .rw-slot-det, .rw-arc.rw-mode-heli .rw-slot-det { --x: 272px; --y: 30px; }
-.rw-arc.rw-mode-foot .rw-slot-det { --y: 24px; } /* the fan's second column (RESPAWN) owns y 94 */
 .rw-slot-cannon { --x: 26px; --y: 24px; width: 100px; height: 100px; }
 .rw-slot-cannon svg { width: 36px; height: 36px; }
 .rw-slot-coax { --x: 142px; --y: 30px; }
@@ -226,8 +225,8 @@ const CSS = `
 }
 .rw-slot.rw-ringon .rw-face::after { opacity: 1; }
 .rw-pip { position: absolute; right: 12%; top: 10%; font: 800 10px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; pointer-events: none; }
-.rw-arc.rw-mode-plane .rw-more, .rw-arc.rw-mode-heli .rw-more { --x: 352px; --y: 96px; }
-.rw-arc.rw-mode-plane .rw-sec, .rw-arc.rw-mode-heli .rw-sec {
+.rw-arc.rw-mode-plane .rw-more, .rw-arc.rw-mode-heli .rw-more, .rw-arc.rw-mode-foot .rw-more { --x: 352px; --y: 96px; }
+.rw-arc.rw-mode-plane .rw-sec, .rw-arc.rw-mode-heli .rw-sec, .rw-arc.rw-mode-foot .rw-sec {
   --x: calc(352px + var(--c, 0) * 64px); --y: calc(96px + (var(--r, 0) + 1) * 64px);
 }
 

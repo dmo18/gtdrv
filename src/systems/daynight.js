@@ -149,6 +149,8 @@ void main() {
   col = mix(mix(uFog, hor, 0.35), col, smoothstep(-0.02, 0.1, y));
   // Warm glow around the sun, wider near the horizon.
   col += uSunCol * uGlow * (pow(s, 8.0) * 0.35 + pow(s, 64.0) * 0.5) * smoothstep(-0.1, 0.05, y);
+  // A low sun also lights a band along the whole horizon on its side.
+  col += uSunCol * uGlow * uAway * pow(face, 3.0) * exp(-max(y, 0.0) * 9.0) * 0.3 * smoothstep(-0.05, 0.02, y);
   col = mix(col, vec3(1.0, 0.98, 0.9) * 1.4, uSun * smoothstep(0.99955, 0.9997, s));
   float m = dot(d, uMoonDir);
   col += vec3(0.75, 0.8, 0.9) * uMoon * (smoothstep(0.99965, 0.9998, m) + pow(max(m, 0.0), 300.0) * 0.12);

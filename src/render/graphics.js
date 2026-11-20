@@ -90,7 +90,7 @@ function patchShaderChunks() {
 	float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
 	c = max( mix( vec3( l ), c, 1.15 ), 0.0 );
 	vec3 tint = mix( vec3( 0.95, 0.985, 1.07 ), vec3( 1.0 ), smoothstep( 0.0, 0.05, l ) );
-	c *= mix( tint, vec3( 1.06, 1.01, 0.92 ), smoothstep( 0.1, 0.6, l ) );
+	c *= mix( tint, vec3( 1.07, 1.01, 0.9 ), smoothstep( 0.04, 0.55, l ) );
 	return clamp( c, 0.0, 1.0 );
 }`);
 }
@@ -356,8 +356,8 @@ export function createGraphics(game) {
         skyVersion = sky.version;
         updateEnv(sky, false);
         // Brighter eyes at night, as a camera would open up.
-        renderer.toneMappingExposure = 1.0 + 0.15 * sky.night;
-        scene.environmentIntensity = 0.5 + 0.4 * sky.night;
+        renderer.toneMappingExposure = 1.1 + 0.05 * sky.night;
+        scene.environmentIntensity = 0.42 + 0.48 * sky.night;
       }
       updateShadow(sky);
       const w = game.weather;
