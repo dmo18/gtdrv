@@ -49,7 +49,7 @@ const STYLES = {
     bottom: [[-0.5, 0.2], [-0.46, 0.11], [0.44, 0.11], [0.5, 0.13]],
     gh: { xC: -0.34, xR0: -0.115, xR1: -0.01, xA: 0.175, roof: 1, base: 0.85, tumble: 0.2, crown: 0.025, side: [-0.25, 0.135], b: null, rear: true },
     seams: [0.15, -0.19], hood: 0.165, boot: -0.37,
-    head: { bands: [3, 4], z: [0.45, 0.94], ind: 0.86 }, tail: { bands: [3], z: [0.3, 0.97], rev: 0.4 },
+    head: { bands: [3], z: [0.45, 0.94], ind: 0.86 }, tail: { bands: [3], z: [0.3, 0.97], rev: 0.4 },
     grille: { bands: [1, 2], z: 0.55 }, intake: 0.85, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
   },
   muscle: {
@@ -58,8 +58,8 @@ const STYLES = {
     bottom: [[-0.5, 0.21], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.18]],
     gh: { xC: -0.335, xR0: -0.19, xR1: -0.04, xA: 0.105, roof: 1, base: 0.88, tumble: 0.18, crown: 0.025, side: [-0.26, 0.075], b: null, rear: true },
     seams: [0.085, -0.225], hood: 0.09, boot: -0.37,
-    head: { bands: [2, 3], z: [0.55, 0.92], ind: 2 }, tail: { bands: [3], z: [0.2, 0.96], rev: 0.32 },
-    grille: { bands: [2, 3], z: 0.55 }, intake: 0.6, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
+    head: { bands: [3], z: [0.5, 0.9], ind: 2 }, tail: { bands: [3], z: [0.2, 0.96], rev: 0.32 },
+    grille: { bands: [2], z: 0.42 }, intake: 0.6, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
   },
   pickup: {
     pF: 6.5, pR: 10, flare: 0.035, drop: 0.07,
@@ -218,17 +218,17 @@ function bandOf(r, J) {
 
 function lowerStations(sh, near) {
   const xs = [];
-  const tips = near ? [0, 0.2, 0.38, 0.52, 0.64, 0.75, 0.85, 0.92, 0.97] : [0, 0.6, 0.93];
+  const tips = near ? [0, 0.25, 0.45, 0.6, 0.74, 0.86, 0.94, 0.98] : [0, 0.6, 0.93];
   for (const f of tips) {
     xs.push(sh.tipX(f, true), sh.tipX(f, false));
   }
-  const fill = near ? 0.32 : 1.1;
+  const fill = near ? 0.42 : 1.1;
   const n = Math.max(2, Math.ceil((sh.x1 - sh.x0) / fill));
   for (let i = 1; i < n; i++) xs.push(sh.x0 + ((sh.x1 - sh.x0) * i) / n);
   if (near) {
     for (const wx of sh.wheels) {
       xs.push(wx + sh.R + 0.004, wx + sh.R - 0.002, wx - sh.R + 0.002, wx - sh.R - 0.004);
-      for (let k = 1; k < 8; k++) xs.push(wx + sh.R * Math.cos((k / 8) * Math.PI));
+      for (let k = 1; k < 7; k++) xs.push(wx + sh.R * Math.cos((k / 7) * Math.PI));
     }
     const S = sh.S;
     for (const s of S.seams || []) xs.push(s * sh.L, s * sh.L + 0.012);
@@ -288,7 +288,7 @@ function ghHalf(sh, gs, x, near) {
 function ghStations(sh, gs, near) {
   const g = gs.g, L = sh.L;
   const xs = [gs.xC, gs.xR0, gs.xR1, gs.xA];
-  const n = near ? 14 : 3;
+  const n = near ? 10 : 3;
   for (let i = 1; i < n; i++) xs.push(gs.xC + ((gs.xA - gs.xC) * i) / n);
   if (near) {
     for (const v of g.side) xs.push(v * L);
@@ -334,7 +334,7 @@ function archLiners(acc, sh) {
   const col = lin(ARCH);
   for (const wx of sh.wheels) {
     for (const s of [1, -1]) {
-      const zo = (sh.planW(wx) - 0.005) * s, zi = (sh.hw - 0.42) * s;
+      const zi = (sh.hw - 0.42) * s;
       const yb = Math.min(sh.wr * 0.5, sh.bottom(wx + R + 0.02));
       // Profile around the arch, rear foot -> over the top -> front foot.
       const prof = [[wx - R, yb]];
@@ -350,8 +350,9 @@ function archLiners(acc, sh) {
         let nx = -(by - ay), ny = bx - ax_; // left normal of the path (points to arch centre)
         const l = Math.hypot(nx, ny) || 1;
         nx /= l; ny /= l;
-        const a = acc.vert(ax_, ay, zo, nx, ny, 0, col, CLS.TRIM);
-        const b = acc.vert(bx, by, zo, nx, ny, 0, col, CLS.TRIM);
+        const za = s * (sh.planW(ax_) * 0.965), zb = s * (sh.planW(bx) * 0.965);
+        const a = acc.vert(ax_, ay, za, nx, ny, 0, col, CLS.TRIM);
+        const b = acc.vert(bx, by, zb, nx, ny, 0, col, CLS.TRIM);
         const c = acc.vert(bx, by, zi, nx, ny, 0, col, CLS.TRIM);
         const d = acc.vert(ax_, ay, zi, nx, ny, 0, col, CLS.TRIM);
         if (s > 0) { acc.tri(a, c, b); acc.tri(a, d, c); } else { acc.tri(a, b, c); acc.tri(a, c, d); }
@@ -572,8 +573,6 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
       box(acc, TRIM, CLS.TRIM, 0.08, 0.17, 0.03, x + 0.04, y - 0.085, s * sh.hw * 0.62);
       box(acc, TRIM, CLS.TRIM, 0.32, 0.12, 0.012, x, y + 0.02, s * sh.W * 0.46);
     }
-    // Front splitter.
-    box(acc, TRIM, CLS.TRIM, 0.16, 0.02, sh.W * 0.86, sh.x1 - 0.1, sh.bottom(sh.x1 - 0.1) - 0.01, 0);
   }
   if (S.ducktail) {
     const x = sh.x0 + 0.1;

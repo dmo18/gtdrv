@@ -1,3 +1,5 @@
+# Commits whose message contains [wip] are checked but not published,
+# so half-finished work never reaches the live site.
 # Checks the game and, on the repository's default branch, publishes it as a public
 # website with GitHub Pages.
 name: Check and publish
@@ -25,11 +27,11 @@ jobs:
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
-        if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push'
+        if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push' && !contains(github.event.head_commit.message, '[wip]')
         with:
           path: dist
   publish:
-    if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push'
+    if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push' && !contains(github.event.head_commit.message, '[wip]')
     needs: check
     runs-on: ubuntu-latest
     permissions:

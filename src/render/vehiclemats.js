@@ -356,7 +356,7 @@ function setStrip(tex, cells) {
 
 // ColorManagement converts hex to linear; the strip is stored linear and
 // read without conversion, so colours here are as authored.
-const HEAD_DAY = [0xc9d2da, 0xc9d2da, 0xf4f1e6, 0xc07a1c];
+const HEAD_DAY = [0x9eabb6, 0x9eabb6, 0xf4f1e6, 0xb0701a];
 const HEAD_NIGHT = [0xffffff, 0xffffff, 0xfff8e0, 0xc07a1c];
 const LAMP = {};
 function lampMat(name, cells) {

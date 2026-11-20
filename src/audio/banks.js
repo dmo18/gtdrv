@@ -817,7 +817,9 @@ export function createBank(ctx, { first = null } = {}) {
         const j0 = nowMs();
         const r = jobs[next++]();
         const jt = nowMs() - j0;
-        if (jt > 4) (stats.slow || (stats.slow = [])).push(`${next - 1}:${jt.toFixed(0)}:${Object.keys(buffers).length}`);
+        const cat = next <= 64 ? 'eng' : next <= 85 ? 'loops' : next === 86 ? 'kick' : next <= 108 ? 'shots' : 'fin';
+        stats.cat = stats.cat || {};
+        stats.cat[cat] = Math.round(((stats.cat[cat] || 0) + jt) * 10) / 10;
         if (r && typeof r.then === 'function') {
           waiting = r.then(() => {
             waiting = null;
