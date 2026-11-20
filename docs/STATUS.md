@@ -23,6 +23,11 @@ the final review and fix stage; nothing is in progress that blocks play.
   button, idle-shrinking controls, small minimap, full map with waypoint.
 - Camera views per craft: chase, far chase, bumper or cockpit.
 - Saves score, medals, best times and settings in the browser.
+- Hard mode (Settings, "Hard: you can die", off by default): the player can
+  be killed and respawns after the fade; a health meter under the minimap
+  shows walker hp, or the craft's health while aboard. A RESPAWN button in
+  the "more" fan (any mode, hard mode on or off) sets the player on foot at
+  a safe spot, full health, heat cleared; the craft stays where it was.
 
 ## Decisions and direction changes, in order
 1. Name: Rustwater, an original island harbour city. 3D, flat ground,

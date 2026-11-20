@@ -1020,4 +1020,51 @@ export default async function extra(page, check) {
   });
   check(foot.mode === 'foot', 'leaving the car saves "on foot"');
   check(foot.after === null && foot.mode2 === 'car' && foot.spec === 'sedan' && foot.score === 4321, `New game resets the car and place but keeps scores (${JSON.stringify(foot)})`);
+
+  // Hard mode (settings.mortal): the player can die, a health meter shows,
+  // and RESPAWN works from a craft and on foot.
+  const hard = await page.evaluate(() => {
+    const g = window.__rw;
+    g.progress.settings.mortal = true;
+    g.economy.applySettings();
+    const out = {};
+    const w = g.player.walker;
+    // In the car: shots hurt the car, and the player is not dead.
+    out.inCar = g.player.mode === 'car';
+    const meterEl = document.querySelector('.rw-hpmeter');
+    g.draw(1, 1 / 60);
+    out.meterShown = !!meterEl && meterEl.offsetParent !== null;
+    // RESPAWN from the car: out of it, on foot, full health.
+    const car = g.player.vehicle;
+    const cx = car.x, cz = car.z;
+    g.input.press('respawn');
+    g.step(1 / 60);
+    g.input.release('respawn');
+    out.afterRespawn = { mode: g.player.mode, vehicle: !!g.player.vehicle, hp: w.hp, carMoved: Math.hypot(car.x - cx, car.z - cz) < 1.5, driver: car.driver };
+    // Kill the walker: down, fade, back up elsewhere with full health.
+    g.combat.damage(w, 500, null, 'bullet');
+    out.dead = w.life;
+    for (let i = 0; i < 60 * 12 && !(w.life === 'ok' && w.hp > 0); i++) g.step(1 / 60);
+    out.revived = { life: w.life, hp: w.hp, mode: g.player.mode };
+    // Hurt, then RESPAWN on foot restores health.
+    g.combat.damage(w, 40, null, 'fire');
+    out.hurt = w.hp;
+    g.input.press('respawn');
+    g.step(1 / 60);
+    g.input.release('respawn');
+    out.healed = w.hp;
+    g.draw(1, 1 / 60);
+    out.text = document.querySelector('.rw-hptext').textContent;
+    // Back to the default.
+    g.progress.settings.mortal = false;
+    g.economy.applySettings();
+    g.draw(1, 1 / 60);
+    out.meterHidden = meterEl.offsetParent === null;
+    return out;
+  });
+  check(hard.inCar && hard.meterShown, 'hard mode shows the health meter');
+  check(hard.afterRespawn.mode === 'foot' && !hard.afterRespawn.vehicle && hard.afterRespawn.hp > 99 && hard.afterRespawn.carMoved && hard.afterRespawn.driver === null, `RESPAWN in a car leaves it where it is and stands the player up (${JSON.stringify(hard.afterRespawn)})`);
+  check(hard.dead === 'down' && hard.revived.life === 'ok' && hard.revived.hp > 99, `in hard mode the player can die and comes back with full health (${hard.dead}, ${JSON.stringify(hard.revived)})`);
+  check(hard.hurt < 100 && hard.healed > 99 && hard.text === 'HP 100', `RESPAWN on foot restores health (${hard.hurt} -> ${hard.healed}, ${hard.text})`);
+  check(hard.meterHidden, 'the health meter hides again with hard mode off');
 }

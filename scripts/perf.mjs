@@ -28,7 +28,26 @@ await page.addInitScript(() => {
 });
 await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 30000 });
-const startGaps = await page.evaluate(() => window.__rwGaps.length);
+// Worst single-call JS cost of each system and of the final draw (which
+// includes any shader compiles) while the game runs for a few seconds.
+const startGaps = await page.evaluate(() => {
+  const g = window.__rw;
+  const worst = (window.__rwWorst = {});
+  const wrap = (obj, key, label) => {
+    const f = obj[key];
+    if (typeof f !== 'function') return;
+    obj[key] = function (...a) {
+      const t = performance.now();
+      const r = f.apply(this, a);
+      const d = performance.now() - t;
+      if (!(worst[label] >= d)) worst[label] = d;
+      return r;
+    };
+  };
+  for (const s of g.systems) for (const k of ['update', 'render', 'always']) wrap(s, k, s.name + '.' + k);
+  if (g.renderFrame) wrap(g, 'renderFrame', 'renderFrame');
+  return window.__rwGaps.length;
+});
 await page.waitForTimeout(6000);
 const out = await page.evaluate((startGaps) => {
   const g = window.__rw;
@@ -65,8 +84,9 @@ const out = await page.evaluate((startGaps) => {
   const night = view(23);
   const kinds = {};
   for (const x of g.vehicles) kinds[x.kind] = (kinds[x.kind] || 0) + 1;
+  const worstJs = Object.entries(window.__rwWorst).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + ' ' + v.toFixed(1));
   return {
-    day, night, stepMs: +stepMs.toFixed(3),
+    day, night, worstJs, stepMs: +stepMs.toFixed(3),
     pixelRatio: g.renderer.getPixelRatio(),
     programs: info.programs ? info.programs.length : 0, programsAtStart,
     firstFrames: { count: gaps.length, worstMs: sorted.slice(0, 5).map((x) => +x.toFixed(0)), over50ms: gaps.filter((x) => x > 50).length },
