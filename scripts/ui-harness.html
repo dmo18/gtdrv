@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Rustwater UI harness</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2a33; }
+  /* stand-in for the 3D view so the translucent controls read properly */
+  #stage { position: fixed; inset: 0; background: linear-gradient(#6d8fb3 0%, #c9b79c 55%, #55524d 55%, #3a3835 100%); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script type="module" src="./harness.js"></script>
+</body>
+</html>

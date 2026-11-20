@@ -1,0 +1,10 @@
+{
+  "name": "Rustwater",
+  "short_name": "Rustwater",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#14110f",
+  "theme_color": "#e2733a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
