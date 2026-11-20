@@ -383,6 +383,20 @@ export function createGame({ canvas, uiRoot }) {
       v.meshDirty = false;
     }
     wakeTick++;
+    // Far-away cars are drawn as a body only (no wheels or lamps): a
+    // big saving in draw calls that nobody can see. Checked in slices.
+    for (let i = wakeTick % 8; i < vs.length; i += 8) {
+      const v = vs[i];
+      if (v.kind !== 'car' || !v.mesh) continue;
+      const dx = v.x - camera.position.x, dz = v.z - camera.position.z;
+      const far = dx * dx + dz * dz > 75 * 75;
+      if (v.lodFar === far) continue;
+      v.lodFar = far;
+      const ud = v.mesh.userData;
+      for (let k = 0; k < ud.wheels.length; k++) ud.wheels[k].visible = !far;
+      if (ud.head) ud.head.visible = !far;
+      if (ud.tail) ud.tail.visible = !far;
+    }
     water.update(game.time, camera.position);
     wake.update(dt, game.time);
     if (p.vehicle) {
