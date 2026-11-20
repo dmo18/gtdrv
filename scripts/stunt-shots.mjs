@@ -121,9 +121,9 @@ const jump = await page.evaluate(() => {
   // The player jumps first (the toast comes on landing); a second car
   // follows a little behind and is in the air when the toast shows.
   window.__shot.place(v, ...at(45), spot.heading, 27);
-  const c2 = g.debug.spawnCar('sports', ...at(72), spot.heading);
+  const c2 = g.debug.spawnCar('sedan', ...at(80), spot.heading);
   c2.controls = { steer: 0, throttle: 1, brake: 0, handbrake: false };
-  window.__shot.place(c2, ...at(72), spot.heading, 28);
+  window.__shot.place(c2, ...at(80), spot.heading, 27);
   let flew = false, n = 0;
   while (n < 600) {
     g.input.throttle = 1;
@@ -133,7 +133,7 @@ const jump = await page.evaluate(() => {
     else if (flew) break;
   }
   g.input.throttle = 0;
-  while (!(c2.air && c2.air.on && c2.air.t > 0.35) && n < 900) {
+  while (!(c2.air && c2.air.on && c2.air.t > 0.2) && n < 900) {
     g.step(1 / 60);
     n++;
   }
@@ -144,7 +144,7 @@ const jump = await page.evaluate(() => {
 });
 console.log('jump', JSON.stringify(jump));
 await page.evaluate((j) => {
-  window.__shot.draw([j.sx - 4, 3.2, j.z + 19, (j.sx + j.x) / 2 + 2, j.y * 0.45, j.z]);
+  window.__shot.draw([j.sx + 1, 2.6, j.z + 12.5, j.x + 1, j.y * 0.55, j.z]);
 }, jump);
 await page.waitForTimeout(150);
 await page.screenshot({ path: 'docs/preview/stunt-jump.png' });

@@ -249,3 +249,31 @@ None critical or high.
   check, so it is unchanged. Wet-road lamp reflections already existed in
   daynight.js; rain spray in effects.js is a bit stronger and adds droplets
   in heavy rain. Aircraft are not pushed by wind yet.
+
+## 2026-11-20: ragdoll tumbles and stunt jumps
+- Ragdolls (`src/core/ragdoll.js`, pure, `test/ragdoll.test.js`): a person
+  killed by a blast or hit by a car tumbles: one rigid body under gravity
+  with a ground clamp, a bounce, and ten loose limb springs that lag the
+  spin; it topples flat and settles about 0.8 s after touching down, then
+  the pose is baked onto the actor and the slot freed. At most 12 tumble
+  at once (the rest use the old fall pose). Own seeded stream, so fights
+  stay deterministic. A car at speed throws the person up over the bonnet
+  (up speed 1.2 + 0.32 per m/s of car speed, cap 8). Drawn by the existing
+  person mesh through `src/render/ragdoll.js`, hooked in `layDown`.
+- Stunt jumps (`src/world/stunts.js`, `src/core/stunt.js`,
+  `src/systems/stunts.js`, `test/stunts.test.js`): four tabletop ramps on
+  quiet streets (Fernside, Pale Shore, Cinder Row) and two at the airfield
+  dock (Dock Kicker on the quay, Dock Splash in the water for boats),
+  placed from the seeded city. Violet ramp icon on the map and minimap and
+  a violet start pillar beside each ramp. Brake in the air for a backflip,
+  steer for a barrel roll. Points from air time, distance, height, flips
+  and rolls; medals at 450 / 900 / 1500 points, saved per ramp in
+  `progress.medals` and best points in `score.courses`. Wrecked, crashed
+  into a wall, sideways or roof landings score nothing. Ramp jumps no
+  longer also count as generic airtime.
+- Screenshots: docs/preview/ragdoll-bonnet.png, docs/preview/stunt-jump.png
+  (`node scripts/stunt-shots.mjs`).
+- Not done: bikes do not exist in the game, so only cars and boats jump;
+  traffic cars also fly off the street ramps (no score for them); ramps
+  have no collision from the side, a car driving into one side-on passes
+  through it.

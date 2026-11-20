@@ -100,12 +100,31 @@ when killed. Actor cap is 40 (36 + the 4 bodies).
   a wreck can flip over (half or full turn, `tRollEnd`) and stays flipped
   until removed. `craft.y` carries the height, so hit tests follow;
 - people the blast kills get `ky` (3.5 to 12 m/s up), `spinV` and tumble
-  (`spin`, read by `layDown`), then lie where they land;
+  as a ragdoll (see "Ragdolls" below), then lie where they land;
 - props: combatfx throws up to 5 small chunks from `city.furniture`
   (bins, benches, hydrants) within 1.2 r (the static street meshes stay).
 Blast size by craft (`craftBlast`): car 8 (heavy car 9), tank 12 x1.5,
 fighter 11 x1.3, other plane 10 x1.3, heli 10 x1.2. `explosion` carries
 `radius`, `size`, `scale` and `puff` for audio and effects.
+
+## Ragdolls
+`src/core/ragdoll.js` (pure; drawing in `src/render/ragdoll.js`, called by
+`layDown`). Knocked down by `blast` or `ram` (never the player, never
+bullets or melee): the actor gets a slot from a pool of `RAGDOLL_MAX` = 12;
+when all are busy the old fall pose is used. One rigid body (centre at the
+hips, 0.9 m) with velocity, yaw, pitch (+PI/2 on the back) and roll,
+gravity and a ground clamp at the body's lowest point, one small bounce,
+ground friction and a spring that topples it flat; ten limb angles on
+under-damped springs lag the spin and get kicked on impact. It settles
+`RAG_T` = 0.8 s after first touching down (at most 2 x RAG_T, 3 s overall);
+then `ragDone`, `ragYaw`, `ragPitch` keep the lying pose and the slot is
+freed. While live it writes `x`, `z` (body centre), `y` (lowest point),
+`ky` and `spin`; walls push it back and it stops at the shoreline. Start
+spin comes from the push in the body's frame; a blast adds `ky` and spins
+it the same way. A car hit (`ram`, RAM_MIN 4 m/s): thrown up
+`RAM_THROW_UP + RAM_THROW_PER x speed` (1.2 + 0.32 per m/s, cap 8) with
+`RAM_CARRY` = 0.6 of the car's velocity, turning head first over the
+bonnet. Own seeded stream (`seed ^ 0x2a6d`). `resetActor` clears it.
 
 ## Burning and explosions
 Craft below 25% health burn (`burning` on): lose 3% of max per s and
@@ -219,7 +238,7 @@ and sparks.
 
 ## Caps (phone)
 Actors 40 (peds 22, crew 8, officers 4, bodies 4, player); projectiles 24;
-live explosions 4; burning craft 4; scorch decals 24 (one instanced
+live explosions 4; burning craft 4; tumbling ragdolls 12; scorch decals 24 (one instanced
 mesh); tracers 32 and sparks in the existing effect pools. combatfx
 adds at most 4 draw calls. No per-shot allocation. Target step time
 under 2 ms in a 20-actor fight on the phone.

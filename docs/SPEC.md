@@ -90,3 +90,24 @@ Rain lowers grip (down to 72 percent in a downpour), adds slight
 understeer, lengthens stops and trims top speed above rain 0.6. Strong wind
 (above 5 m/s) gently pushes light cars and boats, at most 0.9 m/s squared.
 Thick fog cuts the distance police can spot you to 45 percent.
+
+## Stunt jumps
+Six ramps: four on quiet streets (picked from the seeded city, at least
+240 m apart, never downtown or on avenues) and two at the airfield dock (a
+quay ramp for cars and a floating ramp for boats). Each is a tabletop
+(slope up, flat top, slope down) so it works both ways, and shows as a
+violet ramp icon on the map. A car or boat that crests the slope faster
+than about 23 km/h flies. In the air, brake pulls the nose up into a
+backflip and steering rolls; hands off, the nose follows the flight path
+and the wings level, so a plain jump lands on its wheels. On landing a
+toast shows the ramp name, the medal, the air time and any flips and the
+points, which go straight into the score:
+
+    points = 400 per second of air + 10 per metre + 40 per metre of height
+             + 700 per flip + 500 per roll   (no score under 0.35 s)
+    bronze 450, silver 900, gold 1500
+
+A fast run is silver; add a flip or a roll for gold. Medals are kept per
+ramp and only ever go up. A wrecked car, a crash into a wall in the air,
+or landing more than 50 degrees off upright (sideways or on the roof)
+scores nothing; a bad landing also damages the car. No money.

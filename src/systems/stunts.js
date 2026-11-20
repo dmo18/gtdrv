@@ -238,8 +238,9 @@ export function createStunts(game, opts = {}) {
       for (let i = 0; i < vs.length; i++) {
         const v = vs[i];
         const m = v && v.mesh;
-        if (!m || !(v.airPitch || v.airRoll)) continue;
-        tiltMesh(m, v.heading, v.airPitch || 0, v.airRoll || 0);
+        if (!m) continue;
+        if (v.airPitch || v.airRoll) tiltMesh(m, v.heading, v.airPitch || 0, v.airRoll || 0);
+        else if (m.rotation.order === 'YZX') m.rotation.order = 'XYZ'; // back to the mesh's own order
       }
     },
     dispose() {
