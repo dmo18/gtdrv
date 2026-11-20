@@ -219,7 +219,7 @@ try {
   let pr = await progress();
   check('score persists', pr.score.total === 2000 && pr.score.sessionBest === 4200 && pr.score.courses.race_harbour === 3500, JSON.stringify(pr.score));
   check('live score restored', (await ev(() => window.rw.score.total)) === 2000);
-  check('save is version 2 without money', (await stored()).version === 2 && (await stored()).money === undefined && (await stored()).owned === undefined);
+  check('save is version 3 without money', (await stored()).version === 3 && (await stored()).money === undefined && (await stored()).owned === undefined);
 
   // Settings persist.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
@@ -308,14 +308,14 @@ try {
   check('reset re-applies arcade handling', (await ev(() => window.rw.getHandlingMode())) === 'arcade');
   check('reset re-applies steering', JSON.stringify(await lastSteer()) === '["wheel",1]');
   const sv = await stored();
-  check('reset saved', sv && sv.version === 2 && sv.score.total === 0);
+  check('reset saved', sv && sv.version === 3 && sv.score.total === 0);
   check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.score === window.refO));
 
   // An old version 1 save migrates in the browser: nothing lost.
   await page.evaluate(() => { window.name = 'v1'; });
   await load();
   pr = await progress();
-  check('v1 migrates: total money x 10', pr.score.total === 43210 && pr.version === 2, JSON.stringify(pr.score));
+  check('v1 migrates: total money x 10', pr.score.total === 43210 && pr.version === 3, JSON.stringify(pr.score));
   check('v1 migrates: nothing lost', pr.medals.race_harbour === 'gold' && pr.medals.seen_docks === 'bronze' && pr.medals.hint_car === 'bronze'
     && pr.bestTimes.race_harbour === 70.5 && pr.stats.races === 4 && pr.settings.quality === 0.75 && pr.settings.handling === 'sim' && pr.settings.steering === 'slider', JSON.stringify(pr));
 

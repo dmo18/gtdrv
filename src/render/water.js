@@ -177,8 +177,8 @@ function foamGeometry() {
     for (let i = 0; i < seg; i++) idx.push(base, base + 1 + ((i + 1) % seg), base + 1 + i);
   };
   blob(0, 0.5, 0.5, 1);
-  blob(1, 0.35, 0.14, 0.8);
-  blob(-1, 0.35, 0.14, 0.8);
+  blob(1, 0.5, 0.12, 0.7);
+  blob(-1, 0.5, 0.12, 0.7);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
@@ -233,13 +233,13 @@ export function createWakeTrail(scene, max = 160) {
         colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0;
       } else {
         const k = 1 - t;
-        const c = 0.45 * str[i] * k * k;
+        const c = 0.2 * str[i] * k * k;
         colors[i * 3] = c * 0.92;
         colors[i * 3 + 1] = c;
         colors[i * 3 + 2] = c;
         // Long along the track; the crests run out sideways as it ages
         // (about the Kelvin angle behind a boat moving at full wake).
-        sc.set(3 + 2 * t, 1, (1.2 + 14 * t * life[i] * 0.35) * (0.4 + 0.6 * str[i]));
+        sc.set(5.5 + 3 * t, 1, (1.2 + 14 * t * life[i] * 0.35) * (0.4 + 0.6 * str[i]));
       }
       q.setFromAxisAngle(up, -ph[i]);
       p.set(px[i], waveHeight(px[i], pz[i], time) + 0.08, pz[i]);

@@ -397,7 +397,7 @@ function sprayGeometry(sp) {
         const p = rows[i][j];
         pos.push(p[0], p[1], p[2]);
         const t = i / (n - 1);
-        const c = (j === 0 ? c0 : c1) * Math.sin(Math.PI * Math.min(1, t * 1.2)) * (1 - t * 0.6);
+        const c = (j === 0 ? c0 : c1) * 0.32 * Math.sin(Math.PI * Math.min(1, t * 1.15)) * (1 - t * 0.6);
         col.push(c * 0.95, c, c);
       }
     }
@@ -413,7 +413,7 @@ function sprayGeometry(sp) {
       const z = (hw * 0.75 + t * hw * 1.5) * s;
       rows.push([[x, 0.02, z * 0.95], [x - 0.3, 0.12 + Math.sin(t * Math.PI) * hw * 0.55, z * 1.12]]);
     }
-    quadStrip(rows, 0.55, 0.15);
+    quadStrip(rows, 0.5, 0);
     // Flat foam fan alongside the hull.
     const fan = [];
     for (let i = 0; i <= 6; i++) {
@@ -421,16 +421,18 @@ function sprayGeometry(sp) {
       const x = sp.bowX - t * sp.L * 0.9;
       fan.push([[x, 0.04, hw * 0.9 * s], [x - 0.4, 0.04, (hw * 1.0 + t * hw * 1.4) * s]]);
     }
-    quadStrip(fan, 0.45, 0.05);
+    quadStrip(fan, 0.5, 0);
   }
   // Stern wash and (planing boats) a rooster tail plume.
-  const wash = [];
-  for (let i = 0; i <= 8; i++) {
-    const t = i / 8;
-    const x = sp.sternX - t * sp.L * 1.2;
-    wash.push([[x, 0.05, -hw * (0.5 + t * 0.6)], [x, 0.05, hw * (0.5 + t * 0.6)]]);
+  for (const s of [1, -1]) {
+    const wash = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const x = sp.sternX - t * sp.L * 1.2;
+      wash.push([[x, 0.05, 0], [x, 0.05, hw * (0.6 + t * 0.7) * s]]);
+    }
+    quadStrip(wash, 0.7, 0);
   }
-  quadStrip(wash, 0.6, 0.6);
   if (sp.rooster > 0) {
     const rt = [];
     for (let i = 0; i <= 8; i++) {
@@ -439,7 +441,7 @@ function sprayGeometry(sp) {
       const h = Math.sin(t * Math.PI) * sp.rooster * 0.9;
       rt.push([[x, 0.05 + h * 0.2, -0.12 - t * 0.4], [x, 0.05 + h, 0.12 + t * 0.4]]);
     }
-    quadStrip(rt, 0.5, 0.25);
+    quadStrip(rt, 0.6, 0.1);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

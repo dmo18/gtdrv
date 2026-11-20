@@ -339,8 +339,8 @@ spotlight cone under the nose. No real-world shapes, markings or names.
 - Specs `fighter` (Gannetfang: `noStall`, `cruise`, `autoLevel`, `afterburner`
   flags; `craft.afterburner` 0..1) and `patrolheli` (Lampwatch: `craft.siren`,
   `spotOn` wanted, `spot` 0..1 drawn, `spotAim` + `spotX/Y/Z` aim point);
-  Oxbarrow gains mounts ['drop']. Meshes add the afterburner glow, a belly
-  rack (hidden when bombs run out), a flashing light bar and a fake beam cone.
+  Oxbarrow gains mounts ['drop']. Meshes add the afterburner glow, stores on
+  pylons (each hidden as its magazine empties), a flashing light bar and a fake beam cone.
 - Spots: one fighter on the west apron, one police heli beside the airfield
   pads (citygen, appended, no rng); task 32 adds the depot and roof ones.
 - Pilot: `src/systems/helipilot.js` (system `game.helipilot`). Task 34 calls
@@ -362,8 +362,8 @@ spotlight cone under the nose. No real-world shapes, markings or names.
   `createTank`, `stepTank`, `collideTank`, `barrelRay`, `turretWorldYaw`),
   `src/systems/armor.js` (system `game.armor`: fills `CRAFT_HOOKS.tank` when
   created; crush, ram and prop crunch; crew bail; `tankAimAt`, `shellDrop`,
-  `createGunner` / `tankGunnerStep`), `src/render/tankmesh.js` (4 calls near:
-  hull, tracks, turret, gun; about 1,300 triangles), `src/ui/tankhud.js`,
+  `createGunner` / `tankGunnerStep`), `src/render/tankmesh.js` (3 calls near:
+  hull with tracks, turret, gun; about 10,600 triangles, far LOD), `src/ui/tankhud.js`,
   `src/audio/tanksounds.js` + `src/audio/tankrig.js`.
 - Aim: the camera owns `chase.tankAim` {yaw, pitch, holdDrag}; game.js passes
   it as the camera target heading in tank mode. The turret aims at the point

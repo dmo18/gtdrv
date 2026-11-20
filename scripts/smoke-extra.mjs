@@ -239,10 +239,13 @@ export default async function extra(page, check) {
     let out = false, maxFade = 0, freed = false, gotUp = false;
     for (let i = 0; i < 60 * 6 && !freed; i++) {
       g.step(1 / 60);
-      if (p.life === 'ok' || p.life === 'getup') gotUp = true;
+      // A ped that faded out and then shows up alive again was recycled (its slot
+      // was freed and refilled out of view at once: actor cap 40); getting up
+      // before the fade is what must never happen.
+      if ((p.life === 'ok' || p.life === 'getup') && maxFade < 1) gotUp = true;
       if (p.life === 'out') out = true;
       if (p.fade > maxFade) maxFade = p.fade;
-      if (!p.active || !g.actors.includes(p)) freed = true;
+      if (!p.active || !g.actors.includes(p) || (maxFade >= 1 && p.life === 'ok' && p.fade === 0)) freed = true;
     }
     return { out, maxFade: +maxFade.toFixed(2), freed, gotUp };
   });
@@ -898,6 +901,7 @@ export default async function extra(page, check) {
     const nearBefore = p.near === car;
     g.input.press('enter');
     g.step(1 / 60);
+    g.input.release('enter');
     const started = g.carjack.busy;
     let events = 0, downEv = 0;
     const offs = [g.events.on('carjack', (e) => { if (e.car === car && e.victim && e.thief === p) events++; }), g.events.on('down', () => downEv++)];
@@ -971,6 +975,8 @@ export default async function extra(page, check) {
     w.z = w.pz = car.z - 1.2;
     for (let i = 0; i < 5; i++) g.step(1 / 60);
     g.input.press('enter');
+    g.step(1 / 60);
+    g.input.release('enter');
     for (let i = 0; i < 200; i++) g.step(1 / 60);
     const ok = p.vehicle === car;
     if (!ok) return { ok, mode: p.mode, near: !!p.near, busy: g.carjack.busy };

@@ -76,5 +76,17 @@ Mesh functions (three.js), per kind:
 the craft's ground-contact centre, nose along local +x, up +y.
 `update<Kind>Mesh(mesh, craft, alpha, time)` places it, interpolating
 previous to current state. A heading h maps to `rotation.y = -h`.
-Use MeshLambertMaterial, vertex colours, merged geometry, shared
-module-level material caches (see src/render/vehiclemesh.js).
+Cars: see src/render/vehiclemesh.js. Boats, aircraft and tanks are
+built with src/render/hullkit.js (smooth lofts, lathes, airfoil panels,
+swept tubes, flat plates; pure shape maths in craftmath.js): one merged,
+vertex-coloured geometry per part with a surface class (aCls) and a rig
+attribute, drawn with one PBR "skin" per craft (vehiclemats class patch
+plus a shared triplanar panel / rivet / grime / camo texture). The skin's
+vertex shader moves rigged parts from per-craft uniforms (ailerons,
+elevators, rudders, flaps, retracting gear, rotor and prop blades, road
+wheels, scrolling track links) and hides fired stores, so a near craft is
+2..4 draw calls: body, see-through canopy glass, blur disc / spray, plus
+the afterburner, light bar and beam where they apply. A THREE.LOD swaps
+in a coarse body far away. Wear follows health, wrecks are sooted, hits
+flash (`craft.hitT`). `aircraftStats`, `boatStats`, `tankStats` report
+triangles; `scripts/craft-shots.mjs` renders close-ups to docs/preview.

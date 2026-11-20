@@ -566,7 +566,7 @@ const PRESETS = {
   jet: { rough: 0.55, metal: 0.22, cc: 0, detail: [1, 0.3, 0.42, 70], bump: 0.004, camo: [0.09, 0.48, 0.62], camoA: [0.8, 0.82, 0.85], camoB: [1.1, 1.1, 1.1] },
   boat: { rough: 0.22, metal: 0.04, cc: 0.9, detail: [0.12, 0.12, 0.35, 35], bump: 0.002 },
   rib: { rough: 0.7, metal: 0, cc: 0.15, detail: [0.1, 0.25, 0.35, 30], bump: 0.002 },
-  tank: { rough: 0.78, metal: 0.15, cc: 0, detail: [0.7, 0.75, 0.35, 70], bump: 0.006, camo: [0.06, 0.45, 0.66], camoA: [0.62, 0.66, 0.55], camoB: [1.18, 1.1, 0.95] },
+  tank: { rough: 0.78, metal: 0.15, cc: 0, detail: [0.7, 0.75, 0.35, 70], bump: 0.006, camo: [0.07, 0.42, 0.62], camoA: [0.5, 0.56, 0.4], camoB: [0.36, 0.3, 0.25] },
 };
 
 // A skin for one craft: its own uniforms (rig, damage), shared program.

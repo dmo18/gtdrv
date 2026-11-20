@@ -233,12 +233,14 @@ const SHOTS = {
   'tank-fire': () => {
     const v = S.pick('rustback');
     const g = window.__rw;
+    const f = S.pick('fighter');
+    S.place(v, f.x + Math.cos(f.heading) * 40, 0, f.z + Math.sin(f.heading) * 40, f.heading + 1.2);
     v.turretYaw = v.pturretYaw = 0.4;
     v.gunPitch = v.pgunPitch = 0.06;
     const a = v.heading + 0.4;
     g.combat.fireMount(v, 0, Math.cos(a), 0.06, Math.sin(a), null, null);
-    for (let i = 0; i < 3; i++) g.step(1 / 60);
-    S.cam(v, 2, 3.0, -11, 4, 2.0, 2);
+    g.step(1 / 60);
+    S.cam(v, 1, 3.2, -12, 5, 1.8, 1);
     return S.render(48);
   },
 };
