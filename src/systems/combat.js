@@ -46,6 +46,19 @@ export const RAM_MIN = 4; // m/s closing speed that knocks a person down
 export const RAM_DMG = 4; // damage per m/s of closing speed
 export const BLAST_DMG = 120, BLAST_CRAFT_MULT = 1.5;
 export const CRAFT_BLAST_R = 8, CRAFT_PUSH = 12;
+// Bigger craft blow up bigger: blast radius and damage scale by kind.
+export function craftBlast(c, out) {
+  const m = (c && c.spec && c.spec.mass) || 0;
+  if (c && c.kind === 'tank') { out.r = 12; out.scale = 1.5; }
+  else if (c && c.kind === 'plane') { out.r = (c.spec && c.spec.id === 'fighter') ? 11 : 10; out.scale = 1.3; }
+  else if (c && c.kind === 'heli') { out.r = 10; out.scale = 1.2; }
+  else if (c && c.kind === 'car' && m >= 2500) { out.r = 9; out.scale = 1.1; }
+  else { out.r = CRAFT_BLAST_R; out.scale = 1; }
+  return out;
+}
+const CB = { r: CRAFT_BLAST_R, scale: 1 };
+// Blast throw: cars are launched (and flipped), people ragdoll.
+export const TOSS_G = 9.81;
 export const BURN_BELOW = 0.25, BURN_RATE = 0.03, BURN_T = 6;
 export const MAX_DEPTH = 2;
 export const RATE_WINDOW = 0.5, RATE_MAX = 3, QUEUE_DELAY = 0.3, CHAIN_DELAY = 0.25;
@@ -99,7 +112,7 @@ const EV = {
   hit: { target: null, source: null, amount: 0, kind: 'bullet', x: 0, y: 0, z: 0 },
   down: { target: null, source: null, kind: 'bullet' },
   out: { target: null, source: null },
-  explosion: { x: 0, y: 0, z: 0, radius: 0, source: null, depth: 0, size: 'small', puff: false, craft: null },
+  explosion: { x: 0, y: 0, z: 0, radius: 0, source: null, depth: 0, size: 'small', puff: false, craft: null, scale: 1 },
   launch: { shooter: null, craft: null, weapon: null, x: 0, y: 0, z: 0 },
   bombFall: { index: 0, x: 0, y: 0, z: 0, vy: 0 },
   lock: { craft: null, target: null, state: 'seek' },
@@ -149,6 +162,9 @@ export function resetActor(a) {
   a.bonks = 0;
   a.bumpBy = null;
   a.bumpV = 0;
+  a.ky = 0;
+  a.spin = 0;
+  a.spinV = 0;
   return a;
 }
 
@@ -501,6 +517,7 @@ export function layDown(mesh, a) {
   if (!mesh || !a) return;
   const k = downAmount(a);
   mesh.rotation.z = k * Math.PI * 0.5;
+  mesh.rotation.x = a.spin || 0; // tumbling through the air after a blast
   mesh.position.y += k * 0.15 - (a.fade || 0) * 0.5;
   mesh.visible = !(a.fade >= 1);
 }
@@ -510,6 +527,7 @@ export function layDown(mesh, a) {
 // ---------------------------------------------------------------------
 export function createCombat(game, { seed = 23023 } = {}) {
   const rng = createRng(seed);
+  const tossRng = createRng(seed ^ 0x7055); // separate stream: blast throws never shift the fight's dice
   if (!game.actors) game.actors = [];
   if (!game.aim) game.aim = { dx: 1, dy: 0, dz: 0, manual: false };
   const TR = createTraceResult();
@@ -625,7 +643,8 @@ export function createCombat(game, { seed = 23023 } = {}) {
     c.exploded = true;
     const h = (c.spec && c.spec.height) || 1.5;
     // A blast the full queue drops still leaves a wreck that must go away.
-    if (!requestExplosion(c.x, craftBase(game, c) + h * 0.5, c.z, CRAFT_BLAST_R, c.lastHitBy, depth, c, depth > 0 ? CHAIN_DELAY : 0) && c.wreckT === undefined) c.wreckT = 0;
+    craftBlast(c, CB);
+    if (!requestExplosion(c.x, craftBase(game, c) + h * 0.5, c.z, CB.r, c.lastHitBy, depth, c, depth > 0 ? CHAIN_DELAY : 0, CB.scale) && c.wreckT === undefined) c.wreckT = 0;
   }
 
   function ejectPlayer(c) {
@@ -657,6 +676,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     e.source = source;
     e.depth = 0;
     e.size = 'small';
+    e.scale = 1;
     e.puff = true;
     e.craft = null;
     emit(game, 'explosion');
@@ -673,6 +693,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     e.source = source;
     e.depth = depth;
     e.size = explosionSize(r);
+    e.scale = scale;
     e.puff = false;
     e.craft = craft || null;
     emit(game, 'explosion');
@@ -703,6 +724,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const push = 3 + 9 * k;
       if (hd > 1e-3) setPush((ex / hd) * push, (ez / hd) * push);
       damage(game, a, BLAST_DMG * k * scale, source, 'blast');
+      if (a.hp <= 0 && a.team !== 'player') launchActor(a, k);
     }
     const pv = game.player && game.player.vehicle;
     const own = !!pv && isPlayerSource(game, source);
@@ -727,8 +749,76 @@ export function createCombat(game, { seed = 23023 } = {}) {
       }
       if (hd > 1e-3 && !c.wrecked) setPush((ex / hd) * CRAFT_PUSH * k, (ez / hd) * CRAFT_PUSH * k);
       damage(game, c, amount, source, 'blast');
+      if (c !== pv) tossCraft(c, hd > 1e-3 ? ex / hd : 0, hd > 1e-3 ? ez / hd : 0, k, false);
     }
+    // The blown-up craft pops up out of its own fireball.
+    if (craft && craft !== (game.player && game.player.vehicle)) tossCraft(craft, 0, 0, 1, true);
     curDepth = prev;
+  }
+
+  // A person killed by a blast flies and tumbles.
+  function launchActor(a, k) {
+    a.ky = 3.5 + 7 * k + tossRng.next() * 2;
+    a.spinV = (tossRng.next() < 0.5 ? -1 : 1) * (4 + 6 * k);
+    a.spin = 0;
+    if (!(a.y > 0)) a.y = 0;
+  }
+
+  // Launch a car (or lighter craft) from a blast at (nx, nz) unit direction,
+  // k = 1 - d/r. Live cars hop and rock; wrecks may flip right over.
+  function tossCraft(c, nx, nz, k, own) {
+    if (!c || c.removed || c.kind === 'plane' || c.kind === 'heli' || c.kind === 'boat') return;
+    if (c.tossing && !own) return;
+    const m = (c.spec && c.spec.mass) || 1500;
+    const heavy = c.kind === 'tank' || m > 6000;
+    const f = heavy ? 0.12 : Math.max(0.45, Math.min(1.3, 1500 / m));
+    const kk = own ? 0.9 : k;
+    c.tvy = (2.5 + 5.5 * kk) * f;
+    if (c.tvy < 1.2) return;
+    c.tT = Math.max(0.3, (2 * c.tvy) / TOSS_G);
+    c.tt = 0;
+    c.tossing = true;
+    c.asleep = false;
+    c.meshDirty = true;
+    const side = tossRng.next() < 0.5 ? -1 : 1;
+    const flip = c.wrecked && !heavy && kk > 0.45;
+    // Roll about the car's own axis: a full or half turn for wrecks, a rock for live cars.
+    c.tRollEnd = flip ? side * Math.PI * (tossRng.next() < 0.5 ? 1 : 2) : 0;
+    c.tRollAmp = flip ? 0 : side * (0.25 + 0.5 * kk) * (heavy ? 0.1 : 1);
+    c.tPitchAmp = (tossRng.next() < 0.5 ? -1 : 1) * (0.1 + 0.3 * kk) * (heavy ? 0.1 : 1);
+    c.tRoll = 0;
+    c.tPitch = 0;
+  }
+
+  function stepToss(dt) {
+    const vs = game.vehicles;
+    if (!vs) return;
+    for (let i = 0; i < vs.length; i++) {
+      const c = vs[i];
+      if (!c || !c.tossing) continue;
+      if (c.removed) {
+        c.tossing = false;
+        continue;
+      }
+      c.tt += dt;
+      c.tvy -= TOSS_G * dt;
+      c.y = (c.y || 0) + c.tvy * dt;
+      const u = Math.min(1, c.tt / c.tT);
+      const sm = u * u * (3 - 2 * u);
+      c.tRoll = c.tRollEnd * sm + c.tRollAmp * Math.sin(Math.PI * u);
+      c.tPitch = c.tPitchAmp * Math.sin(Math.PI * u);
+      c.asleep = false;
+      c.meshDirty = true;
+      if (c.y <= 0 && c.tvy < 0) {
+        c.y = 0;
+        c.tvy = 0;
+        c.tossing = false;
+        c.tPitch = 0;
+        c.tRoll = c.tRollEnd; // a flipped wreck stays flipped
+        c.vx *= 0.6;
+        c.vz *= 0.6;
+      }
+    }
   }
 
   function stepQueue(dt) {
@@ -1661,6 +1751,20 @@ export function createCombat(game, { seed = 23023 } = {}) {
         } else a.kx = a.kz = 0;
       }
     }
+    if (a.ky) {
+      // Launched by a blast: a short flight, tumbling, then it lies where it lands.
+      a.ky -= TOSS_G * dt;
+      a.y += a.ky * dt;
+      a.spin += a.spinV * dt;
+      if (a.y <= 0 && a.ky < 0) {
+        a.y = 0;
+        a.ky = 0;
+        a.spin = 0;
+        a.spinV = 0;
+        a.kx *= 0.5;
+        a.kz *= 0.5;
+      }
+    }
     a.lifeT += dt;
     const player = a.team === 'player';
     if (a.life === 'down') {
@@ -2042,6 +2146,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       stepProjectiles(dt);
       stepStickies(dt);
       stepQueue(dt);
+      stepToss(dt);
       stepBurning(dt);
       stepWrecks(dt);
       const actors = game.actors;

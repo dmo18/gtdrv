@@ -9,23 +9,37 @@
 // carries them (see dsp.js).
 import {
   R, TAU, white, lp1, svf, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter,
-  warm, harmonize, addNWave, smoothRandom,
+  warm, harmonize, addNWave, smoothRandom, envelope,
 } from './dsp.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
 
+// A filtered noise burst, filtered only over the span where it rings
+// (cheap even in long buffers).
 function band(out, rng, at, decay, amp, type, f, q = 0.7, attack = 0.0005) {
-  const t = z(out.length);
-  addBurst(t, at, decay, amp, rng, { attack });
-  filter(t, out, biquad(type, f, q), { add: true, loop: false });
+  const L = Math.min(out.length - at, Math.ceil((decay * 7 + 0.02) * R.sr));
+  if (L <= 0) return;
+  const t = z(L);
+  addBurst(t, 0, decay, amp, rng, { attack });
+  filter(t, t, biquad(type, f, q), { loop: false });
+  for (let i = 0; i < L; i++) out[at + i] += t[i];
 }
+// A sine whose pitch falls from f0 to f1 (time constant tc), decaying
+// with tau; recurrences instead of exp() per sample.
 function thump(out, f0, f1, tc, amp, tau, at = 0) {
   let ph = 0;
-  for (let i = at; i < out.length; i++) {
-    const t = (i - at) / R.sr;
-    ph += (TAU * (f1 + (f0 - f1) * Math.exp(-t / tc))) / R.sr;
-    out[i] += Math.sin(ph) * amp * Math.min(1, t / 0.0012) * Math.exp(-t / tau);
+  const end = Math.min(out.length, at + Math.ceil(tau * 9 * R.sr));
+  const dc = Math.exp(-1 / (tc * R.sr));
+  const de = Math.exp(-1 / (tau * R.sr));
+  const att = 0.0012 * R.sr;
+  let gc = 1, ge = amp;
+  for (let i = at; i < end; i++) {
+    const j = i - at;
+    ph += (TAU * (f1 + (f0 - f1) * gc)) / R.sr;
+    out[i] += Math.sin(ph) * ge * (j < att ? j / att : 1);
+    gc *= dc;
+    ge *= de;
   }
 }
 // A gun report. o: crackMs, crack, body f/decay, low f0/f1, tail decay.
@@ -96,11 +110,7 @@ export const COMBAT_SHOTS = {
     const out = z(n);
     thump(out, 85 + rng.next() * 10, 28, 0.14, 1, 0.45);
     // the fireball roar: noise whose low-pass closes as it dies
-    const b = white(n, rng);
-    for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      b[i] *= Math.min(1, t / 0.006) * Math.exp(-t / 0.32);
-    }
+    const b = envelope(white(n, rng), 0.006, 0.32);
     const lo = svf(b, z(n), (u) => 180 + 3200 * Math.exp(-u * 7), 0.8, 'lp');
     for (let i = 0; i < n; i++) out[i] += lo[i] * 1.8;
     harmonize(out, 110, 0.9, { hi: 1000 });
@@ -109,12 +119,9 @@ export const COMBAT_SHOTS = {
   },
   blastTail(rng) {
     const n = len(4.5);
-    const out = white(n, rng);
+    const out = envelope(white(n, rng), 0.12, 1.25);
     const m = smoothRandom(n, 14, rng);
-    for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      out[i] *= Math.min(1, t / 0.12) * Math.exp(-t / 1.25) * (0.7 + 0.3 * m[i]);
-    }
+    for (let i = 0; i < n; i++) out[i] *= 0.7 + 0.3 * m[i];
     const mid = out.slice();
     lp1(out, 160, { loop: false, passes: 3 });
     lp1(mid, 700, { loop: false, passes: 2 });
@@ -170,7 +177,7 @@ export const COMBAT_SHOTS = {
     thump(out, 95 + rng.next() * 40, 38, 0.05, 1, 0.08);
     band(out, rng, 0, 0.025, 0.7, 'bp', 320, 0.9, 0.001); // panel knock
     band(out, rng, 0, 0.004, 0.25, 'hp', 2000);
-    harmonize(out, 120, 0.8, { hi: 900 });
+    harmonize(out, 120, 1.1, { hi: 900 });
     warm(out, 1.8, 0.3);
     return fadeEdges(normalize(removeDC(out), 0.9));
   },
@@ -195,11 +202,7 @@ export const COMBAT_SHOTS = {
     const out = z(n);
     band(out, rng, 0, 0.01, 0.8, 'hp', 1000); // ignition
     thump(out, 110, 50, 0.04, 0.7, 0.12);
-    const w = white(n, rng);
-    for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      w[i] *= Math.min(1, t / 0.03) * Math.exp(-t / 0.7);
-    }
+    const w = envelope(white(n, rng), 0.03, 0.7);
     const roar = svf(w, z(n), (u) => 500 + 2500 * Math.pow(u, 0.5), 0.9, 'bp');
     const hiss = z(n);
     filter(w, hiss, biquad('hp', 3500, 0.7), { loop: false });

@@ -6,15 +6,21 @@ import * as THREE from 'three';
 import { VEHICLE_SPECS, createVehicle } from '../src/entities/vehicle.js';
 import { BOAT_SPECS, createBoat, stepBoat } from '../src/entities/boat.js';
 import { AIRCRAFT_SPECS, createAircraft } from '../src/entities/aircraft.js';
-import { createVehicleMesh, updateVehicleMesh, setVehicleLod, noteVehicleHit, vehicleStats } from '../src/render/vehiclemesh.js';
+import { createVehicleMesh, updateVehicleMesh, setVehicleLod, setVehicleLights, noteVehicleHit, vehicleStats } from '../src/render/vehiclemesh.js';
 import { createBoatMesh, updateBoatMesh } from '../src/render/boatmesh.js';
 import { createAircraftMesh, updateAircraftMesh } from '../src/render/aircraftmesh.js';
 import { createEffects } from '../src/render/effects.js';
 import { createEvents } from '../src/core/events.js';
 import { createWater } from '../src/render/water.js';
+import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from '../src/render/personmesh.js';
 
-const W = 1280, H = 720;
+const qs = new URLSearchParams(location.search);
+const W = +qs.get('w') || 1280, H = +qs.get('h') || 720;
 const canvas = document.getElementById('c');
+canvas.width = W;
+canvas.height = H;
+canvas.style.width = W + 'px';
+canvas.style.height = H + 'px';
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
 renderer.setSize(W, H, false);
@@ -493,7 +499,69 @@ function ptest() {
   return fx.counts();
 }
 
+// One car big in the frame: front three-quarter (or rear), low camera.
+function close(id, rearView = false, night = false) {
+  clear();
+  ground.visible = true;
+  sea.visible = false;
+  const v = createVehicle(id, 0, 0, 0);
+  const spec = v.spec;
+  const mesh = createVehicleMesh(spec, spec.colors[1 % spec.colors.length]);
+  v.steerAngle = rearView ? 0 : 0.28;
+  v.brake = rearView ? 1 : 0;
+  updateVehicleMesh(mesh, v, 1, 0);
+  if (id === 'police') setVehicleLights(mesh, { siren: true, brake: rearView === true, time: 0 });
+  holder.add(mesh);
+  full();
+  camera.fov = 36;
+  camera.updateProjectionMatrix();
+  const d = spec.length * 0.95 + 1.6;
+  const az = rearView === 'nose' ? 0.05 : rearView ? Math.PI + 0.62 : 0.55;
+  camera.position.set(Math.cos(az) * d, spec.height * 0.62 + 0.3, Math.sin(az) * d);
+  camera.lookAt(rearView ? -0.3 : 0.4, spec.height * 0.42, 0);
+  void night;
+  renderer.render(scene, camera);
+  return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+}
+
+// People line-up: every palette, an officer, a crew member; walking,
+// running and lying poses.
+function people(closeUp = false) {
+  clear();
+  ground.visible = true;
+  sea.visible = false;
+  const looks = [...PERSON_PALETTES, { shirt: 0x26406b, trousers: 0x1a2233, skin: 0xb98060, hair: 0x22180f }, { shirt: 0x6e1f4f, trousers: 0x1c1a2c, skin: 0xc68e62, hair: 0xd4a93a }];
+  const list = closeUp ? [looks[10], looks[1], looks[2], looks[11]] : looks;
+  let tris = 0;
+  list.forEach((look, k) => {
+    const m = createPersonMesh(look);
+    const n = list.length;
+    const w = { x: 0, z: (k - (n - 1) / 2) * (closeUp ? 0.75 : 0.8), px: 0, pz: 0, heading: 0, pheading: 0, moving: k % 3 !== 0, speed: k % 3 === 2 ? 6 : 1.6, stride: k * 0.9 + 0.5, y: 0 };
+    w.px = w.x; w.pz = w.z;
+    w.heading = w.pheading = closeUp ? 0.35 : 0.15;
+    if (!closeUp && k === n - 1) { w.life = 'out'; w.lifeT = 2; m.rotation.order = 'YXZ'; }
+    for (let i = 0; i < 30; i++) updatePersonMesh(m, w, 1);
+    if (w.life) { m.rotation.z = Math.PI / 2; m.position.y += 0.15; }
+    holder.add(m);
+    tris += m.userData.person.skin.geometry.index.count / 3;
+  });
+  full();
+  camera.fov = closeUp ? 30 : 38;
+  camera.updateProjectionMatrix();
+  if (closeUp) {
+    camera.position.set(3.6, 1.45, 0.4);
+    camera.lookAt(0, 1.0, 0);
+  } else {
+    camera.position.set(8.5, 2.2, 0);
+    camera.lookAt(0, 0.85, 0);
+  }
+  renderer.render(scene, camera);
+  return { calls: renderer.info.render.calls, trisPerPerson: Math.round(tris / list.length) };
+}
+
 const SHOTS = {
+  people: () => people(false),
+  'people-close': () => people(true),
   ptest,
   'cars-front': () => carLine('front'),
   'cars-rear': () => carLine('rear'),
@@ -507,8 +575,11 @@ const SHOTS = {
 for (const id of CAR_IDS) {
   SHOTS['car-' + id] = () => detail(id);
   SHOTS['far-' + id] = () => detail(id, true);
+  SHOTS['close-' + id] = () => close(id);
+  SHOTS['rear-' + id] = () => close(id, true);
+  SHOTS['nose-' + id] = () => close(id, 'nose');
 }
-window.shotNames = Object.keys(SHOTS).filter((n) => !n.startsWith('car-') && !n.startsWith('far-'));
+window.shotNames = Object.keys(SHOTS).filter((n) => !/^(car|far|close|rear|nose)-/.test(n));
 window.shot = (name) => {
   const r = SHOTS[name]();
   return r || null;

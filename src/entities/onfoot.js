@@ -157,12 +157,13 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
 }
 
 // Nearest craft the walker can reach and climb into, or null.
-export function findEnterable(w, crafts, maxDist = 3.2) {
+export function findEnterable(w, crafts, maxDist = 3.2, accept = null) {
   let best = null, bestD = maxDist;
   if (!crafts) return null;
   for (let i = 0; i < crafts.length; i++) {
     const c = crafts[i];
     if (!c || c.wrecked || !(Math.abs(c.speed) < 4) || !(c.y < 1.5)) continue;
+    if (accept && !accept(c)) continue;
     const d = Math.hypot(c.x - w.x, c.z - w.z) - c.radius * 0.7;
     if (d < bestD) {
       bestD = d;

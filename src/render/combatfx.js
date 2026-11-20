@@ -13,7 +13,7 @@
 // `scene` is missing (node tests).
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
-import { makeAtlas, createPool, emitP, stepPool, writePool, nightAt } from './effects.js';
+import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt } from './effects.js';
 
 const MAX_ALPHA = 420;
 const MAX_ADD = 300;
@@ -241,6 +241,9 @@ export function createCombatFx(game) {
   const _p = new THREE.Vector3();
   const _s = new THREE.Vector3();
   const seenT = new Float32Array(SCORCH).fill(-1e9);
+  const sBirth = new Float32Array(SCORCH).fill(-1);
+  const sSize = new Float32Array(SCORCH), sOp = new Float32Array(SCORCH), sYaw = new Float32Array(SCORCH);
+  const SCORCH_LIFE = 100, SCORCH_FADE = 25;
   let holeHead = 0;
   let decalCount = 0;
   function putDecal(slot, x, y, z, yaw, pitch, size, op) {
@@ -274,7 +277,23 @@ export function createCombatFx(game) {
       if (t === seenT[i]) continue;
       seenT[i] = t;
       if (t < -1e8) continue;
-      putDecal(i, d.x[i], 0.03, d.z[i], rnd() * 6.28, -Math.PI / 2, Math.max(1.2, d.r[i] * 2.3), 0.5 + rnd());
+      sBirth[i] = time;
+      sSize[i] = Math.max(2, d.r[i] * 2.5);
+      sOp[i] = 0.7 + rnd() * 0.5;
+      sYaw[i] = rnd() * 6.28;
+      putDecal(i, d.x[i], 0.03, d.z[i], sYaw[i], -Math.PI / 2, sSize[i], sOp[i]);
+    }
+    // Scorch stays about 100 s, then fades over 25 s (checked twice a second).
+    if (tick % 30 !== 0) return;
+    for (let i = 0; i < SCORCH; i++) {
+      if (sBirth[i] < 0) continue;
+      const age = time - sBirth[i];
+      if (age < SCORCH_LIFE) continue;
+      const k = 1 - (age - SCORCH_LIFE) / SCORCH_FADE;
+      if (k <= 0) {
+        sBirth[i] = -1;
+        putDecal(i, 0, 0.03, 0, 0, -Math.PI / 2, 0.0001, 0);
+      } else putDecal(i, d.x[i], 0.03, d.z[i], sYaw[i], -Math.PI / 2, sSize[i], sOp[i] * k);
     }
   }
 
@@ -613,73 +632,176 @@ export function createCombatFx(game) {
   }
 
   // ---- explosions ----
+  // A cinematic blast from the two shared particle pools (no new draw
+  // calls): a one-step flash, a layered fireball (hot core, orange body
+  // and red-to-black billows that cool into smoke), a fast ground
+  // shockwave and dust skirt, sparks and slow embers with gravity, a
+  // rising smoke column that lingers 6 to 10 s and thins, scorch on the
+  // ground, and camera shake scaled by distance (off with Reduce motion).
+  const MAX_COLUMNS = 6;
+  const cols = [];
+  for (let i = 0; i < MAX_COLUMNS; i++) cols.push({ on: false, x: 0, y: 0, z: 0, t: 0, dur: 0, k: 1, acc: 0, n: 0 });
+  let colHead = 0;
+  let reduced = null;
+  function reduceMotion() {
+    if (reduced === null) {
+      reduced = false;
+      try {
+        const st = game.progress && game.progress.settings;
+        if (st && st.reduceMotion) reduced = true;
+        else if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) reduced = true;
+      } catch {
+        reduced = false;
+      }
+    }
+    return !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion) || reduced;
+  }
+  // Shake kick for a blast of radius r at distance d metres from the camera.
+  function shakeFor(r, d) {
+    const reach = 45 + r * 5;
+    const f = 1 - d / reach;
+    return f > 0 ? f * f * (12 + r * 2.6) : 0;
+  }
+  // Small props near a blast (bins, benches, boxes) throw a few chunks.
+  const PROP_HEX = { bin: 0x2f4a3a, bench: 0x8a6a48, hydrant: 0xb23a2c, mailbox: 0x2d4f8a, planter: 0x6a5a48, barrier: 0xd7a02b, meter: 0x555a60, bikes: 0x444444 };
+  function scatterProps(x, z, r) {
+    const list = game.city && game.city.furniture;
+    if (!list || !debrisMesh) return;
+    let n = 0;
+    const lim = r * 1.2;
+    for (let i = 0; i < list.length && n < 5; i++) {
+      const f = list[i];
+      const dx = f.x - x, dz = f.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > lim * lim) continue;
+      const d = Math.sqrt(d2) || 1;
+      const k = 1 - d / lim;
+      const hex = PROP_HEX[f.type] || 0x666666;
+      chunk(f.x, 0.4, f.z, (dx / d) * (5 + 9 * k), 4 + 7 * k, (dz / d) * (5 + 9 * k), 0.28, 0.3, 0.28, hex);
+      n++;
+    }
+  }
   function onExplosion(e) {
     const x = e.x, y = Math.max(0, e.y), z = e.z;
-    if (e.craft) wreckDebris(e.craft, x, y, z);
-    const k = clamp(e.radius / 8, 0.55, 1.7);
+    const R = Math.max(3, e.radius || 6);
     const d2 = dist2(x, z);
-    // Camera shake through the existing impact kick.
     const dd = Math.sqrt(d2);
-    const sh = (1 - dd / 48) * 28 * k;
-    if (sh > 1.5 && game.chase && game.chase.kick) game.chase.kick(sh);
-    if (d2 > 220 * 220) return;
+    if (!e.puff && game.chase && game.chase.kick && !reduceMotion()) {
+      const sh = shakeFor(R, dd);
+      if (sh > 1) game.chase.kick(sh);
+    }
+    if (e.craft) wreckDebris(e.craft, x, y, z);
+    if (e.puff) {
+      for (let i = 0; i < 4; i++) dust(x + rs(), y + 0.3, z + rs(), rs() * 2, 1 + rnd() * 2, rs() * 2, 0.8, 0.6, 2, 0.5, 0.45);
+      return;
+    }
+    if (!e.puff) scatterProps(x, z, R);
+    if (d2 > 240 * 240) return;
     const qq = q();
-    const gy = y < 0.5 ? 0.4 : y;
-    // Flash and fireball.
-    add(x, gy + 0.8, z, 0, 0, 0, 0.22, 8 * k, 16 * k, 2.2, 1, 0.92, 0.7, GLOW);
-    add(x, gy + 0.8, z, 0, 0, 0, 0.4, 16 * k, 26 * k, 0.3, 1, 0.55, 0.2, GLOW);
-    const nf = Math.max(5, Math.round(14 * qq));
-    for (let i = 0; i < nf; i++) {
-      const a = rnd() * 6.28, up = rnd();
-      const sp = (2 + rnd() * 4) * k;
-      add(x + rs() * k, gy + 0.4 + up * 1.4 * k, z + rs() * k, Math.cos(a) * sp, 1 + up * 3, Math.sin(a) * sp, 0.5 + rnd() * 0.6, 3.2 * k, 7 * k, 0.9, 1, 0.5 + rnd() * 0.25, 0.12, PUFF, -0.5, 1.8);
+    const air = y > 3;
+    const gy = air ? y : (y < 0.5 ? 0.4 : y);
+    const calm = reduceMotion() ? 0.5 : 1; // softer flash with Reduce motion
+    // 1. Flash: one very bright step, a warmer second sprite, a glow on the ground.
+    add(x, gy + 0.6, z, 0, 0, 0, 0.1, R * 2.6, R * 3.4, 3 * calm, 1, 0.96, 0.8, GLOW);
+    add(x, gy + 0.8, z, 0, 0, 0, 0.3, R * 1.5, R * 2.4, 1.5 * calm, 1, 0.62, 0.24, GLOW);
+    if (!air) add(x, 0.12, z, 0, 0, 0, 0.7, R * 3.4, R * 4.2, 0.9 * calm, 1, 0.5, 0.16, GLOW + 4);
+    // 2. Fireball: hot core (additive), orange body (additive), red billows
+    // that cool to black (alpha). 3 to 5 layered puffs each.
+    const core = Math.max(2, Math.round(3 * qq));
+    for (let i = 0; i < core; i++) {
+      add(x + rs() * 0.15 * R, gy + 0.5 + rnd() * 0.15 * R, z + rs() * 0.15 * R, rs() * 0.8, 1.5 + rnd() * 2, rs() * 0.8, 0.3 + rnd() * 0.2, R * 0.55, R * 1.35, 1.4, 1, 0.9, 0.55, PUFF, -0.5, 1.5);
     }
-    const nc = Math.max(3, Math.round(7 * qq));
-    for (let i = 0; i < nc; i++) {
-      const a = rnd() * 6.28;
-      add(x + rs() * 0.8 * k, gy + 0.8 + rnd() * 1.4, z + rs() * 0.8 * k, Math.cos(a) * 1.5, 2 + rnd() * 3, Math.sin(a) * 1.5, 0.3 + rnd() * 0.3, 1.4 * k, 3 * k, 1, 1, 0.9, 0.55, PUFF, -0.4, 1.5);
+    const body = Math.max(3, Math.round(5 * qq));
+    for (let i = 0; i < body; i++) {
+      const a = (i / body) * 6.28 + rnd(), rr = rnd() * 0.35 * R;
+      const j = add(x + Math.cos(a) * rr, gy + 0.4 + rnd() * 0.25 * R, z + Math.sin(a) * rr, Math.cos(a) * R * 0.5, 3 + rnd() * R * 0.5, Math.sin(a) * R * 0.5, 0.55 + rnd() * 0.35, R * 0.45, R * 1.25, 1, 1, 0.5 + rnd() * 0.15, 0.1, PUFF, -0.4, 1.8);
+      tintP(G, j, 0.7, 0.18, 0.04);
     }
-    // Smoke column: faster puffs climb higher.
-    const ns = Math.max(5, Math.round(14 * qq));
-    for (let i = 0; i < ns; i++) {
-      const g = 0.1 + rnd() * 0.12;
-      const f = i / ns;
-      const j = alpha(x + rs() * 1.2 * k, gy + 0.5 + f, z + rs() * 1.2 * k, rs() * 1.2, (2.5 + f * 6) * (0.8 + k * 0.3), rs() * 1.2, 2.4 + rnd() * 1.8, 1.8 * k, (3.8 + f * 2.2) * k, 0.62, g, g, g * 1.05, PUFF, -0.1, 0.5, 0.05);
-      if (j >= 0) S.rotV[j] = rs() * 0.4;
+    const bill = Math.max(3, Math.round(5 * qq));
+    for (let i = 0; i < bill; i++) {
+      const a = (i / bill) * 6.28 + rnd() * 1.2, rr = rnd() * 0.4 * R;
+      const j = alpha(x + Math.cos(a) * rr, gy + 0.6 + rnd() * 0.3 * R, z + Math.sin(a) * rr, Math.cos(a) * R * 0.3, 3 + rnd() * R * 0.45, Math.sin(a) * R * 0.3, 1.1 + rnd() * 0.5, R * 0.5, R * 1.6, 0.9, 0.95, 0.38, 0.1, PUFF, -0.3, 1.5, 0.05);
+      tintP(S, j, 0.1, 0.09, 0.085);
+      if (j >= 0) S.rotV[j] = rs() * 0.5;
     }
-    // Shock ring on the ground, and dust racing outward.
-    alpha(x, 0.25, z, 0, 0, 0, 0.55, 1.5, e.radius * 3, 1, 1, 0.95, 0.85, RING + 4, 0, 0, 0.02);
-    add(x, 0.3, z, 0, 0, 0, 0.35, 1, e.radius * 2.4, 0.8, 1, 0.8, 0.5, RING + 4);
-    const nd = Math.max(4, Math.round(10 * qq));
-    for (let i = 0; i < nd; i++) {
-      const a = (i / nd) * 6.28 + rnd() * 0.4;
-      const sp = (8 + rnd() * 5) * k;
-      dust(x + Math.cos(a), 0.4, z + Math.sin(a), Math.cos(a) * sp, 0.3 + rnd() * 0.5, Math.sin(a) * sp, 1.0 + rnd() * 0.6, 1.2 * k, 3.4 * k, 0.5, 0.58);
+    // 3. Shockwave: a fast bright ring and a dusty one, plus a skirt of dust.
+    if (!air) {
+      add(x, 0.3, z, 0, 0, 0, 0.32, R * 0.6, R * 5.2, 1, 1, 0.88, 0.6, RING + 4);
+      alpha(x, 0.22, z, 0, 0, 0, 0.7, R * 0.8, R * 4.2, 0.7, 0.8, 0.74, 0.66, RING + 4, 0, 0, 0.02);
+      const nd = Math.max(5, Math.round(12 * qq));
+      for (let i = 0; i < nd; i++) {
+        const a = (i / nd) * 6.28 + rnd() * 0.4;
+        const sp = (R * 1.3) * (0.7 + rnd() * 0.5);
+        dust(x + Math.cos(a), 0.4, z + Math.sin(a), Math.cos(a) * sp, 0.3 + rnd() * 0.6, Math.sin(a) * sp, 1.1 + rnd() * 0.7, R * 0.15, R * 0.4, 0.5, 0.58);
+      }
+    } else {
+      // In the air the ring stands up: a flat disc seen from the side.
+      add(x, y, z, 0, 0, 0, 0.3, R * 0.6, R * 4, 0.9, 1, 0.88, 0.6, RING);
     }
-    // Sparks and debris.
-    const nsp = Math.max(5, Math.round(18 * qq));
+    // 4. Sparks (fast, gravity) and embers (slow, glowing, drifting).
+    const nsp = Math.max(6, Math.round(22 * qq * Math.min(1.6, R / 8)));
     for (let i = 0; i < nsp; i++) {
-      const a = rnd() * 6.28, sp = (4 + rnd() * 10) * k;
-      add(x, gy + 0.5, z, Math.cos(a) * sp, (6 + rnd() * 10) * k, Math.sin(a) * sp, 0.7 + rnd() * 0.8, 0.22, 0.06, 2.4, 1, 0.65 + rnd() * 0.25, 0.25, STREAK + 8, 9.8, 0.2);
+      const a = rnd() * 6.28, sp = (5 + rnd() * 12) * (R / 8 + 0.4);
+      add(x, gy + 0.5, z, Math.cos(a) * sp, (6 + rnd() * 12) * (R / 8 + 0.3), Math.sin(a) * sp, 0.7 + rnd() * 0.9, 0.24, 0.06, 2.4, 1, 0.62 + rnd() * 0.25, 0.22, STREAK + 8, 9.8, 0.2);
     }
-    // Big and huge blasts (bombs, missiles, shells): a second, faster
-    // shockwave, a dust skirt and more debris.
+    const nem = Math.max(4, Math.round(12 * qq));
+    for (let i = 0; i < nem; i++) {
+      const a = rnd() * 6.28, sp = (1 + rnd() * 5) * (R / 8);
+      const j = add(x + rs() * 0.4 * R, gy + rnd() * 0.3 * R, z + rs() * 0.4 * R, Math.cos(a) * sp, 3 + rnd() * 7 * (R / 8), Math.sin(a) * sp, 1.4 + rnd() * 1.4, 0.2, 0.07, 1.9, 1, 0.5 + rnd() * 0.2, 0.12, GLOW, 2.2, 0.7);
+      if (j >= 0) G.floor[j] = 0.05;
+    }
+    // 5. Smoke: a dark billow now, then a column that keeps feeding for 2.5 s;
+    // each puff lives 6 to 10 s, grows, thins and leans downwind.
+    const ns = Math.max(4, Math.round(8 * qq));
+    for (let i = 0; i < ns; i++) {
+      const g = 0.1 + rnd() * 0.1;
+      const f = i / ns;
+      const j = alpha(x + rs() * 0.3 * R, gy + 0.5 + f * 0.4 * R, z + rs() * 0.3 * R, rs() * 1.5, (3 + f * 6) * (R / 8 + 0.3), rs() * 1.5, 5 + rnd() * 3, R * 0.25, R * (0.6 + f * 0.4), 0.62, g, g, g * 1.05, PUFF, -0.1, 0.45, 0.05);
+      if (j >= 0) S.rotV[j] = rs() * 0.3;
+    }
+    const c = cols[colHead];
+    colHead = (colHead + 1) % MAX_COLUMNS;
+    c.on = true;
+    c.x = x;
+    c.y = gy;
+    c.z = z;
+    c.t = 0;
+    c.dur = 2.4 + R * 0.08;
+    c.k = R / 8;
+    c.acc = 0;
+    // 6. Big and huge blasts (bombs, missiles, shells, tanks, jets): a second
+    // shockwave and thrown black billows.
     if (e.size === 'big' || e.size === 'huge') {
-      const hk = e.size === 'huge' ? 1.4 : 1;
-      add(x, 0.35, z, 0, 0, 0, 0.5 * hk, 2, e.radius * 4 * hk, 0.9, 1, 0.85, 0.6, RING + 4);
-      alpha(x, 0.3, z, 0, 0, 0, 1.1 * hk, 3, e.radius * 4.5 * hk, 0.55, 0.62, 0.58, 0.52, RING + 4, 0, 0, 0.03);
-      const nh = Math.max(4, Math.round(12 * qq * hk));
+      const hk = e.size === 'huge' ? 1.35 : 1;
+      if (!air) alpha(x, 0.3, z, 0, 0, 0, 1.2 * hk, R * 0.5, R * 5.5 * hk, 0.45, 0.62, 0.58, 0.52, RING + 4, 0, 0, 0.03);
+      const nh = Math.max(4, Math.round(10 * qq * hk));
       for (let i = 0; i < nh; i++) {
-        const a = rnd() * 6.28, sp = (6 + rnd() * 10) * k;
-        const j = alpha(x, gy + 0.6, z, Math.cos(a) * sp, (8 + rnd() * 12) * k, Math.sin(a) * sp, 1.6 + rnd() * 0.8, 0.5, 0.4, 1, 0.14, 0.12, 0.1, PUFF, 9.8, 0.1, 0);
+        const a = rnd() * 6.28, sp = (6 + rnd() * 10) * (R / 8);
+        const j = alpha(x, gy + 0.6, z, Math.cos(a) * sp, (9 + rnd() * 12) * (R / 8), Math.sin(a) * sp, 1.6 + rnd() * 0.8, 0.5, 0.4, 1, 0.14, 0.12, 0.1, PUFF, 9.8, 0.1, 0);
         if (j >= 0) S.floor[j] = 0.1;
       }
     }
-    const nb = Math.max(2, Math.round(8 * qq));
-    for (let i = 0; i < nb; i++) {
-      const a = rnd() * 6.28, sp = (3 + rnd() * 6) * k;
-      const j = alpha(x, gy + 0.5, z, Math.cos(a) * sp, (5 + rnd() * 8) * k, Math.sin(a) * sp, 1.4 + rnd() * 0.6, 0.35, 0.3, 1, 0.12, 0.1, 0.09, PUFF, 9.8, 0.15, 0);
-      if (j >= 0) S.floor[j] = 0.1;
+  }
+  // Feed the lingering smoke columns.
+  function stepColumns(dt, qq) {
+    for (let i = 0; i < MAX_COLUMNS; i++) {
+      const c = cols[i];
+      if (!c.on) continue;
+      c.t += dt;
+      if (c.t > c.dur) {
+        c.on = false;
+        continue;
+      }
+      if (!S) continue;
+      c.acc += dt * (9 * qq + 1);
+      while (c.acc >= 1) {
+        c.acc -= 1;
+        const f = c.t / c.dur; // thins toward the end of the feed
+        const g = 0.14 + rnd() * 0.14;
+        const k = c.k;
+        const j = alpha(c.x + rs() * 0.5 * k, c.y + 0.4, c.z + rs() * 0.5 * k, rs() * 0.5 + 0.3, (5 - f * 2) * (k * 0.5 + 0.6), rs() * 0.5, 6 + rnd() * 4, 1.6 * k + 0.8, (5 + 3 * k) * (1 - f * 0.3), 0.7 * (1 - f * 0.5), g, g, g * 1.05, PUFF, -0.05, 0.4, 0.08);
+        if (j >= 0) S.rotV[j] = rs() * 0.25;
+      }
     }
   }
 
@@ -758,11 +880,18 @@ export function createCombatFx(game) {
         }
       } else if (p.type === 'missile') {
         // Missile: hot nozzle and a long smoke trail (smoke pool).
-        add(p.x, p.y, p.z, 0, 0, 0, 0.06, 1.1, 0.6, 1.6, 1, 0.8, 0.45, GLOW);
-        // Two puffs per step (one half a step back) so the trail is unbroken.
-        const g = 0.82 + rnd() * 0.1;
-        alpha(p.x - p.vx * 0.004, p.y - p.vy * 0.004, p.z - p.vz * 0.004, rs() * 0.4, 0.3, rs() * 0.4, 1.5, 0.9, 2.4, 0.5, g, g, g, PUFF, -0.1, 0.8, 0);
-        if (qq > 0.5) alpha(p.x - p.vx * 0.0125, p.y - p.vy * 0.0125, p.z - p.vz * 0.0125, rs() * 0.4, 0.3, rs() * 0.4, 1.5, 0.9, 2.4, 0.5, g, g, g, PUFF, -0.1, 0.8, 0);
+        add(p.x, p.y, p.z, 0, 0, 0, 0.07, 2.2, 1.2, 2, 1, 0.8, 0.45, GLOW);
+        add(p.x - p.vx * 0.006, p.y - p.vy * 0.006, p.z - p.vz * 0.006, 0, 0, 0, 0.12, 1.1, 0.4, 1.2, 1, 0.55, 0.2, PUFF);
+        // Two puffs per step (one half a step back) so the trail is unbroken;
+        // white at the nozzle, grey as it ages, lingering about 2.4 s.
+        const g = 0.88 + rnd() * 0.1;
+        let j = alpha(p.x - p.vx * 0.004, p.y - p.vy * 0.004, p.z - p.vz * 0.004, rs() * 0.5, 0.3, rs() * 0.5, 2.4, 0.8, 3.2, 0.6, g, g, g, PUFF, -0.1, 0.8, 0);
+        tintP(S, j, 0.5, 0.5, 0.52);
+        if (qq > 0.5) {
+          j = alpha(p.x - p.vx * 0.0125, p.y - p.vy * 0.0125, p.z - p.vz * 0.0125, rs() * 0.5, 0.3, rs() * 0.5, 2.4, 0.8, 3.2, 0.6, g, g, g, PUFF, -0.1, 0.8, 0);
+          tintP(S, j, 0.5, 0.5, 0.52);
+        }
+        if ((tick & 3) === 0) add(p.x, p.y, p.z, rs() * 3 - p.vx * 0.05, rs() * 3, rs() * 3 - p.vz * 0.05, 0.4, 0.16, 0.05, 2, 1, 0.7, 0.3, STREAK + 8, 4, 0.3);
       } else if (p.type === 'shell' && (tick & 1) === 0) {
         add(p.x, p.y, p.z, 0, 0, 0, 0.05, 0.5, 0.3, 1.3, 1, 0.85, 0.5, GLOW);
       } else if (p.type === 'bomb') {
@@ -859,6 +988,25 @@ export function createCombatFx(game) {
     on('splash', onSplash);
   }
 
+  // Thrown cars: tumble and lift the mesh (the sim keeps `tRoll`, `tPitch`
+  // on the craft; vehiclemesh only knows the small suspension lean).
+  function tossVisuals() {
+    const vs = game.vehicles;
+    if (!vs) return;
+    for (let i = 0; i < vs.length; i++) {
+      const v = vs[i];
+      const m = v.mesh;
+      if (!m || !(v.tRoll || v.tPitch || v.tossing)) continue;
+      const sp = v.spec || {};
+      const roll = v.tRoll || 0, pitch = v.tPitch || 0;
+      m.rotation.order = 'YXZ';
+      m.rotation.x = roll;
+      m.rotation.z = pitch;
+      const h = sp.height || 1.5, w = sp.width || 1.8;
+      m.position.y = (v.y || 0) + (1 - Math.cos(roll)) * 0.5 * h + Math.abs(Math.sin(roll)) * 0.5 * w + Math.abs(Math.sin(pitch)) * 0.5 * (sp.length || 4) * 0.4;
+    }
+  }
+
   const sys = {
     name: 'combatfx',
     game,
@@ -875,6 +1023,7 @@ export function createCombatFx(game) {
         G.cap = Math.floor(MAX_ADD * qq);
       }
       stepBurn(dt, qq);
+      stepColumns(dt, qq);
       stepProjectiles(qq);
       stepArms();
       syncScorch();
@@ -887,6 +1036,7 @@ export function createCombatFx(game) {
     },
     render() {
       if (!S) return;
+      tossVisuals();
       const h = Number.isFinite(game.clock) ? game.clock : 12;
       const night = nightAt(h);
       S.mesh.material.uniforms.uLight.value = 0.3 + 0.7 * (1 - night * 0.85);

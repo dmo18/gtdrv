@@ -14,7 +14,7 @@ import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS, warm, harm
 export const RPM_POINTS = [0, 0.3, 0.5, 0.72, 0.95];
 // Loop length: long enough that the cycle-to-cycle variation does not
 // repeat audibly (short loops "motorboat" at 3 to 4 Hz).
-export const LOOP_S = 0.72;
+export const LOOP_S = 0.64;
 
 // Exhaust "bank" pattern for a cross-plane V8: the two banks fire at
 // uneven intervals, and the nearer exhaust dominates. This gives the

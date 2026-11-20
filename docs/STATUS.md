@@ -80,13 +80,64 @@ the final review and fix stage; nothing is in progress that blocks play.
   radius), crew.test.js (low-hp flee, 6 v 1 shot count), tank.test.js
   (ram kills), police-combat.test.js (heat points), combatfx.test.js.
 
+## 2026-11-20: killable cops, cinematic blasts, missiles that hit
+- Why cops could not be killed: nearly all police were inside patrol cars,
+  and officers in cars were not actors at all (only officers who stepped out
+  on foot were). Now every police car (patrol, chase, roadblock) and police
+  heli carries `occ` seats; a bullet into the cabin hurts the driver first,
+  blasts hurt everyone, a wreck kills everyone. Dead officers fall out as
+  body actors (blood, score, heat as for any person). A car with no one left
+  stops (`role: 'dead'`) and the chase calls a new one. See COMBAT.md.
+- Blasts: layered fireball with colour over life, shock ring, sparks and
+  embers, a 6 to 10 s smoke column, fading scorch, distance-scaled shake
+  (off with Reduce motion), cars thrown and flipped, people tumbling, bins
+  and benches scatter chunks, tanks and jets explode bigger.
+- Missiles: an unlocked missile now homes on what the nose points at (18
+  deg), proximity fuse 3.5 m, parked police craft are not lock targets,
+  longer smoke trail. `scripts/combat-e2e.mjs` checks cops, missiles (parked
+  car, moving car, tank, police heli) and a bomb on a car with people.
+- Tests added: police-kill, blast, combatfx (shake, Reduce motion); seeker
+  test changed on purpose (parked police craft is tier 4).
+- Not done: police tank (heat 5) is not spawned by police.js, so there is no
+  tank crew to kill; static street furniture meshes stay put (only chunks fly).
+
+## Carjacking and persistent session
+- Carjacking (core/carjack.js rules and timeline, systems/carjack.js): ENTER
+  on a craft with someone at the controls (speed under 3 m/s, on the
+  ground) runs: player runs to the door (3 s at most), door opens, the
+  driver is dragged out and thrown (0.5 s), the player is in at 0.7 s. The
+  driver is a real combat actor (game.actors): lies down 1.6 s, gets up,
+  runs from the thief for up to 14 s, then fades; can be shot or run over.
+  Events: 'carjack' { car, victim, thief }, 'down' (source null, kind
+  'carjack'), 'carDoor'. Heat: civilian 0.3 to 0.6 only if a cop or civilian
+  saw it, police car 1.5, crew car 0.3 if a cop saw it. Crew cars: the crew
+  system already pulls its members out and has them fight once the player
+  is in; the jack only adds the door and delay. Empty parked cars keep the
+  instant entry. Debug hook: game.debug.spawnOccupied(spec, x, z, heading, team).
+- Saved session (core/garage.js, systems/session.js, save version 3, v1 and
+  v2 saves still load): last position and heading, mode, the craft (spec
+  id, paint colour, health fraction, altitude and speed for aircraft) and a
+  garage of the 8 most recently used cars (spec, colour, health, pose).
+  Autosave: enter, exit, every 10 s of simulated time, visibilitychange
+  hidden, pagehide, beforeunload. createGame calls game.restoreSession()
+  so Play continues; "New game" in Settings calls game.newSession() (scores
+  and settings stay). Bad spots fall back to the nearest road node, pier,
+  airfield stand or rescue spot. Wrecked craft are never saved. Garage cars
+  are parked where they were left (systems/parked.js).
+- Tests: test/carjack.test.js, test/garage.test.js, test/save.test.js
+  (version number 3). E2E in scripts/smoke-extra.mjs; screenshots by
+  scripts/carjack-shots.mjs into docs/preview/.
+
 ## Known issues
 - A fighter that leaves the depot at part thrust can get stuck on the
   shore (full thrust is fine).
 - Draw calls reach about 417 in a street view and 544 in a heavy fight,
   against a budget of about 420.
 - No test on the real phone (Galaxy S24 Ultra) since the overhaul.
-- Sound has been measured, never heard by a person.
+- Sound has been measured, never heard by a person. Audio pass after the
+  owner called it garbage on a phone: phone-speaker harmonics, gun cracks,
+  layered explosions, longer engine loops with rasp, turbo and limiter,
+  generated music; numbers and honest gaps in docs/AUDIO.md.
 - Fixed in the final review: player stuck after a craft was wrecked on a
   roof or at sea; flaky end-to-end, UI and audio test scripts.
 

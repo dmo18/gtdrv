@@ -17,7 +17,9 @@ import { createRng } from '../core/rng.js';
 import { createBank } from '../audio/banks.js';
 import { WEAPONS } from '../core/weapons.js';
 import { ENGINES, engineFor, isJet, pitchFor, pointsFor } from '../audio/engines.js';
-import { createVoices } from '../audio/voices.js';
+import { createVoices, MAX_VOICES, MAX_RAW, MAX_SPOTS } from '../audio/voices.js';
+import { createComposer } from '../audio/music.js';
+import { dopplerFactor, distanceLowpass, travelDelay } from '../audio/spatial.js';
 import { createTankRig } from '../audio/tankrig.js'; // tank (task 32)
 
 const HEARING = 70; // metres for crash sounds
@@ -25,12 +27,13 @@ const OTHER_RANGE = 70; // metres for other craft engines
 const OTHERS = 4;
 const UPDATE_EVERY = 1 / 30; // seconds between parameter pushes
 const PLACE_EVERY = 0.5; // seconds between place/enclosure probes
-const SOUND_SPEED = 343;
 const SLICE_MS = 5; // generation budget per slice
 
 // Default bus levels (the master is set separately). Engines sit under
 // the world so the city still reads.
-const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4 };
+const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.2 };
+const MUSIC_LEVEL = { bass: 0.55, pad: 0.16, pluck: 0.2, kick: 0.6, snare: 0.32, hat: 0.18 };
+const GESTURES = ['touchend', 'pointerup', 'click', 'keydown'];
 
 const URBAN = { downtown: 1, midtown: 0.85, industrial: 0.8, docks: 0.6, residential: 0.45, park: 0.35, beach: 0.3, airfield: 0.25, shore: 0.3 };
 const CRICKET = { residential: 1, park: 1, beach: 0.6, airfield: 0.7, shore: 0.5, midtown: 0.25 };
@@ -71,7 +74,13 @@ export function createAudio(game) {
   let muted = false;
   let hidden = typeof document !== 'undefined' && document.hidden === true;
   let wantRunning = true;
-  const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1 };
+  const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, musicOn: true };
+  let musicBus = null; // music -> its own duck -> master
+  let musicDuck = null;
+  let boomDuck = null; // world ambience ducking under explosions
+  let bassIn = null;
+  let resumeAt = 0;
+  const perf = { renderMs: 0, renderN: 0, renderMax: 0, over4: 0 };
   let disposed = false;
   const unsubs = [];
   const gen = { startMs: 0, wallMs: 0, fullMs: 0, cpuMs: 0, lazyMs: 0, maxSliceMs: 0, slices: 0 };
@@ -79,6 +88,7 @@ export function createAudio(game) {
   let acc = 0;
   let placeAcc = PLACE_EVERY;
   let lastUpdate = 0;
+  const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   // ---- small node helpers ----
   function gainNode(v, dest) {
@@ -157,6 +167,13 @@ export function createAudio(game) {
     sp.pan = d > 0.5 ? clamp((dx * rx + dz * rz) / d, -1, 1) * 0.8 : 0;
     return sp;
   }
+  // Is a wall between the player and the source last given to spatial()?
+  function occluded(d) {
+    const col = game.collision;
+    if (!col || !col.raycast || d < 6) return false;
+    const p = game.player;
+    return fin(col.raycast(fin(p.x), fin(p.z), sp.nx, sp.nz, d), d) < d - 3;
+  }
   function playerVel(out) {
     const v = game.player.mode !== 'foot' ? game.player.vehicle : null;
     out.vx = v ? fin(v.vx) : 0;
@@ -166,8 +183,7 @@ export function createAudio(game) {
   const pvel = { vx: 0, vz: 0 };
   // Doppler factor for a source moving at (vx, vz), with sp filled in.
   function doppler(vx, vz) {
-    const rel = (fin(vx) - pvel.vx) * sp.nx + (fin(vz) - pvel.vz) * sp.nz; // + = receding
-    return clamp(SOUND_SPEED / (SOUND_SPEED + clamp(rel, -80, 80)), 0.8, 1.25);
+    return dopplerFactor((fin(vx) - pvel.vx) * sp.nx + (fin(vz) - pvel.vz) * sp.nz); // + = receding
   }
 
   // ---- engine rigs ----
@@ -290,6 +306,17 @@ export function createAudio(game) {
     if (!Number.isFinite(st.rpm)) st.rpm = idle;
     st.rpm += (clamp(target, 0, 1.08) - st.rpm) * Math.min(1, rate * dt);
     let lt = th > 0.04 ? 0.35 + 0.65 * th : 0;
+    // rev limiter: the ignition cuts in and out about 14 times a second
+    if (c.kind === 'car' && st.rpm > 0.97 && th > 0.5) {
+      st.limT += dt;
+      if ((st.limT * 14) % 1 < 0.45) {
+        lt = 0;
+        st.rpm -= 0.035;
+      }
+      st.limiting = true;
+    } else {
+      st.limiting = false;
+    }
     if (st.shiftT > 0) {
       st.shiftT -= dt;
       lt = 0;
@@ -300,12 +327,13 @@ export function createAudio(game) {
     st.t += dt;
     return st.rpm;
   }
-  const newSim = () => ({ rpm: NaN, gear: 0, shiftT: 0, load: 0, liftT: -9, t: 0 });
+  const newSim = () => ({ rpm: NaN, gear: 0, shiftT: 0, load: 0, liftT: -9, t: 0, limT: 0, limiting: false });
 
   // ---- the player's craft ----
   const pv = {
     key: '', craft: null, rig: null, ch: null, sim: newSim(), startT: 0, started: true,
     spool: 0, prevY: 0, prevVy: 0, slapT: 0, popT: 0, offRoad: false, pending: false,
+    boost: 0, bovT: 0, lastGear: 0, prevLoad: 0,
   };
   let enterT = -9;
   let enterCrank = false;
@@ -340,6 +368,12 @@ export function createAudio(game) {
     if (ch) {
       const r = engineRig(ch, bus.engine, true);
       r.kind = 'engine';
+      const e = ENGINES[ch];
+      if (e.turbo && kind === 'car') {
+        r.turboG = gainNode(0, bus.engine);
+        r.turboS = loopSrc('turbo', r.turboG, 0.6);
+        if (r.turboS) r.off.push({ g: r.turboG, s: r.turboS, extra: true });
+      }
       return r;
     }
     if (kind === 'plane') {
@@ -419,8 +453,23 @@ export function createAudio(game) {
         level = 0.75 * (0.5 + 0.5 * Math.min(1, pv.sim.rpm)) * (0.72 + 0.28 * pv.sim.load);
       }
       setEngine(r, pv.sim.rpm, pv.sim.load, level, pitchFor(c), now);
-      // overrun burble on lift-off for the V8 and sports engines
       const e = ENGINES[r.ch];
+      // turbo: boost builds with load and revs; the valve dumps it on lift
+      if (r.turboG) {
+        const want = pv.sim.load > 0.5 ? clamp((pv.sim.rpm - 0.25) / 0.6, 0, 1) : 0;
+        pv.boost += (want - pv.boost) * Math.min(1, dt * (want > pv.boost ? 1.6 : 6));
+        set(r.turboG.gain, level > 0 ? 0.13 * e.turbo * pv.boost * pv.boost : 0, now, 0.05);
+        if (r.turboS) set(r.turboS.playbackRate, 0.55 + 0.75 * pv.boost, now, 0.08);
+        if (pv.prevLoad > 0.6 && pv.sim.load < 0.35 && pv.boost > 0.4 && now > pv.bovT) {
+          voices.raw('blowoff', bus.engine, 0.3 * e.turbo * pv.boost, 0.9 + 0.2 * rng.next());
+          pv.bovT = now + 0.6;
+        }
+      }
+      pv.prevLoad = pv.sim.load;
+      // a clunk through the body on each upshift
+      if (pv.sim.gear > pv.lastGear && pv.lastGear > 0 && level > 0) voices.raw('shift', bus.engine, 0.16, 0.9 + 0.2 * rng.next());
+      pv.lastGear = pv.sim.gear;
+      // overrun burble on lift-off for the V8 and sports engines
       if (e.burble >= 0.3 && pv.sim.load < 0.12 && pv.sim.rpm > 0.42 && pv.sim.t - pv.sim.liftT < 1.6 && now > pv.popT) {
         pop(0.25 + 0.35 * rng.next());
         pv.popT = now + 0.05 + rng.next() * 0.22;
@@ -500,6 +549,25 @@ export function createAudio(game) {
     if (fx.scrape.s) set(fx.scrape.s.playbackRate, 0.85 + 0.3 * sf, now);
   }
 
+  // ---- footsteps ----
+  let stepAcc = 0.5;
+  function updateSteps(dt) {
+    const p = game.player;
+    if (p.mode !== 'foot') return;
+    const w = p.walker || p;
+    const spd = fin(w.speed);
+    if (spd < 0.3) {
+      stepAcc = 0.5;
+      return;
+    }
+    stepAcc += spd * dt;
+    const stride = spd > 4 ? 1.3 : 0.75;
+    if (stepAcc < stride) return;
+    stepAcc -= stride;
+    const soft = place.park || place.district === 'beach';
+    voices.raw(`step${soft ? 'Soft' : 'Hard'}${Math.floor(rng.next() * 3)}`, bus.effects, spd > 4 ? 0.3 : 0.2, 0.92 + 0.16 * rng.next());
+  }
+
   function pop(g) {
     const r = pv.rig;
     if (!r || !r.out) return;
@@ -544,7 +612,7 @@ export function createAudio(game) {
       const pan = panNode(bus.engine);
       const g = gainNode(0, pan || bus.engine);
       const lp = biq('lowpass', 1500, 0.6, g);
-      slots.push({ v: null, rig: null, rigKey: '', lp, g, pan, sim: newSim(), passT: 0, lastD: 999 });
+      slots.push({ v: null, rig: null, rigKey: '', lp, g, pan, sim: newSim(), passT: 0, lastD: 999, occT: 0, occ: 0, occS: 0 });
     }
   }
   function slotRig(v) {
@@ -614,8 +682,15 @@ export function createAudio(game) {
       const v = s.v;
       spatial(v.x, v.z, OTHER_RANGE);
       const dop = doppler(v.vx, v.vz);
+      s.dop = dop;
       const close = 1 - sp.d / OTHER_RANGE;
-      set(s.lp.frequency, 500 + 4200 * close * close, now, 0.1);
+      // occlusion-lite: one ray every quarter second to the source
+      if (now > s.occT) {
+        s.occT = now + 0.25;
+        s.occ = occluded(sp.d) ? 1 : 0;
+      }
+      s.occS += (s.occ - s.occS) * 0.3;
+      set(s.lp.frequency, (500 + 4200 * close * close) * (1 - 0.55 * s.occS), now, 0.1);
       if (s.pan) set(s.pan.pan, sp.pan, now, 0.08);
       const spd = Math.abs(fin(v.speed));
       if (s.rig.kind === 'engine') {
@@ -678,13 +753,15 @@ export function createAudio(game) {
         best = v;
       }
     }
-    let g = 0.55;
+    let g = 0.35;
     let dop = 1;
     if (best) {
       spatial(best.x, best.z, 320);
       dop = doppler(best.vx, best.vz);
-      g = 0.6 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
-      set(siren.lp.frequency, 1500 + 6000 * Math.max(0, 1 - sp.d / 200), now, 0.1);
+      // the siren buffer is dense (RMS about -5 dBFS): keep it under the mix
+      g = 0.4 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
+      const occ = occluded(sp.d) ? 0.45 : 1;
+      set(siren.lp.frequency, (1500 + 6000 * Math.max(0, 1 - sp.d / 200)) * occ, now, 0.1);
       if (siren.pan) set(siren.pan.pan, sp.pan, now, 0.1);
     } else if (siren.pan) {
       set(siren.pan.pan, 0, now, 0.1);
@@ -714,6 +791,7 @@ export function createAudio(game) {
       lap: bed('lap', duck, { stereo: true }),
       wind: bed('wind', duck, { filterType: 'bandpass', f: 500, q: 0.5, stereo: true }),
       rain: bed('rain', duck, { filterType: 'lowpass', f: 8000, q: 0.5, stereo: true }),
+      birds: bed('birds', duck, { stereo: true }),
     };
   }
   function probePlace() {
@@ -775,6 +853,7 @@ export function createAudio(game) {
 
     set(amb.city.g.gain, 0.3 * land * place.urban * (1 - 0.6 * night) * (1 - 0.8 * alt), now, 0.8);
     set(amb.city.f.frequency, 500 + 1400 * (1 - night), now, 1);
+    set(amb.birds.g.gain, 0.1 * (1 - night) * land * (1 - 0.6 * place.urban) * (1 - alt) * (1 - 0.9 * rain), now, 1.2);
     set(amb.crickets.g.gain, 0.16 * night * land * place.cricket * (1 - alt) * (1 - 0.8 * rain), now, 1.2);
     set(amb.surf.g.gain, 0.34 * nearShore * (place.district === 'beach' ? 1.3 : 1) * (1 - 0.8 * alt), now, 1);
     const harbour = place.district === 'docks' ? 0.22 : sd < -20 ? 0.14 * (1 - alt) : 0;
@@ -901,14 +980,17 @@ export function createAudio(game) {
   // Everything is positioned: distance falloff, stereo pan, and a delay
   // for sound travel. Quiet detail sounds give way when voices run low.
   const GUNS = {
-    pistol: { buf: 'gunPistol', n: 2, g: 0.8, range: 160, gap: 0.03, last: -9 },
-    smg: { buf: 'gunSmg', n: 2, g: 0.62, range: 160, gap: 0.05, last: -9 },
-    scatter: { buf: 'gunScatter', n: 1, g: 1, range: 220, gap: 0.2, last: -9 },
+    pistol: { buf: 'gunPistol', n: 3, g: 0.85, range: 200, gap: 0.03, last: -9, casing: true },
+    smg: { buf: 'gunSmg', n: 3, g: 0.68, range: 200, gap: 0.05, last: -9, casing: true },
+    scatter: { buf: 'gunScatter', n: 1, g: 1, range: 260, gap: 0.2, last: -9 },
     lobber: { buf: 'gunLobber', n: 1, g: 0.9, range: 220, gap: 0.2, last: -9 },
-    coax: { buf: 'tankCoax', n: 1, g: 0.7, range: 180, gap: 0.06, last: -9 }, // tank (task 32)
+    coax: { buf: 'gunRifle', n: 2, g: 0.7, range: 240, gap: 0.06, last: -9 }, // tank (task 32)
+    nosegun: { buf: 'gunCannon', n: 2, g: 0.75, range: 280, gap: 0.04, last: -9 },
   };
-  const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9 };
-  const lowPriority = () => voices.count >= 6;
+  const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9, casing: -9 };
+  // Distance dulls a sound: air absorbs the highs.
+  const distLp = distanceLowpass;
+  const lowPriority = () => voices.count >= MAX_VOICES - 2;
   const SOUND_V = 340;
   function combatGate(key, gap) {
     const now = ctx.currentTime;
@@ -949,9 +1031,17 @@ export function createAudio(game) {
     if (now - def.last >= def.gap && (own || !lowPriority())) {
       def.last = now;
       spatial(x, z, def.range);
-      const delay = own ? 0 : Math.min(0.35, sp.d / SOUND_V);
+      const delay = own ? 0 : Math.min(0.6, sp.d / SOUND_V);
       const name = def.n > 1 ? `${def.buf}${Math.floor(rng.next() * def.n)}` : def.buf;
-      voices.play(bus.effects, sp.gain * def.g, sp.pan, (v, t) => v.add(name, t + delay, 1, 0.95 + rng.next() * 0.1));
+      const rate = 0.95 + rng.next() * 0.1;
+      // between buildings: a slap-back echo off the facades
+      const enc = clamp(place.enclosure, 0, 1);
+      const casing = own && def.casing && game.player.mode === 'foot' && combatGate('casing', 0.12);
+      voices.play(bus.effects, sp.gain * def.g, sp.pan, (v, t) => {
+        v.add(name, t + delay, 1, rate);
+        if (enc > 0.2) v.add(name, t + delay + 0.05 + 0.12 * (1 - enc), 0.3 * enc, rate * 0.97);
+        if (casing) v.add(`casing${Math.floor(rng.next() * 2)}`, t + 0.3 + rng.next() * 0.1, 0.22, 0.9 + rng.next() * 0.2);
+      }, own ? 0 : distLp(sp.d, 150));
     }
     if (w === 'lobber') return;
     // A bullet passing close to the player (not their own).
@@ -977,10 +1067,10 @@ export function createAudio(game) {
     if ((e.hitKind === 'wall' || e.hitKind === 'ground') && !lowPriority() && combatGate('impact', 0.045)) {
       spatial(hx, hz, 55);
       const rico = rng.next() < 0.3;
-      voices.play(bus.effects, sp.gain * (rico ? 0.5 : 0.55), sp.pan, (v, t) => {
-        if (rico) v.add(`ricochet${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.3);
-        else v.add(`impact${Math.floor(rng.next() * 2)}`, t, 1, 0.85 + rng.next() * 0.3);
-      });
+      voices.play(bus.effects, sp.gain * (rico ? 0.5 : 0.6), sp.pan, (v, t) => {
+        v.add(`impactConcrete${Math.floor(rng.next() * 3)}`, t, 1, (e.hitKind === 'ground' ? 0.8 : 1) + rng.next() * 0.15);
+        if (rico) v.add(`ricochet${Math.floor(rng.next() * 2)}`, t + 0.01, 0.8, 0.9 + rng.next() * 0.3);
+      }, distLp(sp.d, 80));
     }
   }
   function onHit(e) {
@@ -997,7 +1087,7 @@ export function createAudio(game) {
         v.add(`thwack${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.2);
         if (craft) v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.6, 0.8);
       } else if (craft) {
-        v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.8, 1.1 + rng.next() * 0.3);
+        v.add(`impactMetal${Math.floor(rng.next() * 3)}`, t, 0.9, 0.9 + rng.next() * 0.25);
         if (rng.next() < 0.3) v.add(`ricochet${Math.floor(rng.next() * 2)}`, t + 0.01, 0.5, 1);
       } else {
         v.add(`bodyHit${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.25);
@@ -1010,26 +1100,52 @@ export function createAudio(game) {
     spatial(fin(e.target.x), fin(e.target.z), 60);
     voices.play(bus.effects, sp.gain * 0.6, sp.pan, (v, t) => v.add(`thud${Math.floor(rng.next() * 3)}`, t + 0.05, 1, 1.1));
   }
+  // Explosions are layered: crack (near only), body, rumble tail and
+  // debris rain (near only). Size from `size` and `radius`; sound arrives
+  // late by distance / speed of sound and duller with distance.
   function onExplosion(e) {
     if (!ready || !e) return;
-    spatial(fin(e.x), fin(e.z), 400);
-    const k = clamp(fin(e.radius, 8) / 8, 0.6, 1.5);
+    const rad = clamp(fin(e.radius, 6), 1, 40);
+    const sizeK = e.size === 'huge' ? 1.5 : e.size === 'big' ? 1.2 : e.size === 'small' ? 0.85 : 1;
+    const k = clamp(Math.sqrt(rad / 8) * sizeK, 0.5, 2.2);
+    const range = 350 + 350 * k;
+    spatial(fin(e.x), fin(e.z), range);
     const d = sp.d;
-    const g = Math.pow(Math.max(0, 1 - d / 400), 1.3) * (0.3 + 0.7 * Math.min(1, 30 / Math.max(1, d))) * (0.75 + 0.25 * k);
+    if (d >= range) return;
+    const near = Math.min(1, 25 / Math.max(5, d));
+    const g = Math.pow(1 - d / range, 1.2) * (0.3 + 0.7 * near) * clamp(0.55 + 0.3 * k, 0.5, 1.2);
     if (g < 0.01) return;
-    const delay = Math.min(1.2, d / SOUND_V);
-    const pan = sp.pan * (d < 6 ? d / 6 : 1);
+    const delay = travelDelay(d);
+    const pan = sp.pan * (d < 8 ? d / 8 : 1);
+    const lp = distLp(d, 160);
     if (e.puff) {
-      voices.play(bus.effects, g * 0.4, pan, (v, t) => v.add('thud0', t + delay, 1, 0.8));
+      voices.play(bus.effects, g * 0.4, pan, (v, t) => v.add('thud0', t + delay, 1, 0.8), lp);
       return;
     }
-    const big = e.size === 'big' || e.size === 'huge';
-    const rate = (e.size === 'huge' ? 0.78 : 1.12 - 0.15 * k) + rng.next() * 0.08;
-    voices.play(bus.effects, Math.min(1, g * (e.size === 'huge' ? 1.25 : 1)), pan, (v, t) => {
-      v.add(`blast${Math.floor(rng.next() * 2)}`, t + delay, 1, rate);
-      if (big) v.add(`blast${Math.floor(rng.next() * 2)}`, t + delay + 0.04, 0.6, rate * 0.6);
-      if (d > 120 || e.size === 'huge') v.add('thud0', t + delay, 0.3, 0.5);
-    });
+    const rate = clamp(1.15 - 0.22 * k, 0.65, 1.15) * (0.96 + 0.08 * rng.next());
+    const crackG = clamp(1 - d / 300, 0, 1);
+    const pick = () => Math.floor(rng.next() * 2);
+    voices.play(bus.effects, Math.min(1.3, g), pan, (v, t) => {
+      const t0 = t + delay;
+      if (crackG > 0.02) v.add(`blastCrack${pick()}`, t0, 0.9 * crackG, rate * 1.1);
+      v.add(`blastBody${pick()}`, t0 + 0.003, 1, rate);
+      v.add('blastTail', t0 + 0.03, 0.5 + 0.2 * k + 0.4 * (1 - near), rate * 0.95);
+      if (k > 1.3) v.add(`blastBody${pick()}`, t0 + 0.06, 0.5, rate * 0.7);
+      if (d < 90) v.add(`debris${pick()}`, t0 + 0.2 + 0.1 * rng.next(), 0.55 * (1 - d / 90), 0.9 + 0.2 * rng.next());
+    }, lp);
+    // music and the ambience step back for a moment
+    const now = ctx.currentTime;
+    const dk = clamp(g * 0.9, 0, 0.75);
+    if (musicDuck) {
+      musicDuck.gain.cancelScheduledValues(now);
+      musicDuck.gain.setTargetAtTime(1 - dk, now + delay, 0.03);
+      musicDuck.gain.setTargetAtTime(1, now + delay + 0.8, 1.2);
+    }
+    if (boomDuck) {
+      boomDuck.gain.cancelScheduledValues(now);
+      boomDuck.gain.setTargetAtTime(1 - dk * 0.6, now + delay, 0.03);
+      boomDuck.gain.setTargetAtTime(1, now + delay + 0.6, 1);
+    }
   }
   // ---- arms (docs/ARMS.md section 7) ----
   function onLaunch(e) {
@@ -1040,15 +1156,15 @@ export function createAudio(game) {
     const w = e.weapon;
     voices.play(bus.effects, sp.gain, sp.pan, (v, t) => {
       if (w === 'missile') {
-        v.add('gunLobber', t, 0.9, 0.8 + rng.next() * 0.06);
-        v.add(`whoosh${Math.floor(rng.next() * 2)}`, t + 0.05, 0.8, 0.7);
+        v.add('rocketLaunch', t, 1, 0.92 + rng.next() * 0.1);
       } else if (w === 'bomb') {
         v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.8, 0.55);
       } else if (w === 'cannon') {
         v.add('tankBoom', t, 1, 0.95 + rng.next() * 0.08); // tank (task 32)
+        v.add('blastTail', t + 0.04, 0.45, 1.15);
       } else {
-        v.add(`blast${Math.floor(rng.next() * 2)}`, t, 0.7, 1.5);
-        v.add('gunScatter', t, 0.7, 0.6);
+        v.add('rocketLaunch', t, 0.8, 1.1);
+        v.add('gunScatter', t, 0.6, 0.6);
       }
     });
   }
@@ -1082,7 +1198,7 @@ export function createAudio(game) {
     voices.play(bus.effects, 0.5, 0, (v, t) => v.add('emptyClick', t, 1, 0.7));
   }
   function onBounce(e) {
-    if (!ready || !e || voices.count >= 7) return;
+    if (!ready || !e || voices.count >= MAX_VOICES - 1) return;
     spatial(fin(e.x), fin(e.z), 40);
     if (sp.gain < 0.02) return;
     voices.play(bus.effects, sp.gain * Math.min(0.6, fin(e.v) / 15), sp.pan, (v, t) => v.add(`tink${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.2));
@@ -1130,18 +1246,95 @@ export function createAudio(game) {
     };
   }
 
+  // ---- music (src/audio/music.js) ----
+  const mus = { comp: null, bar: 0, nextT: 0, panL: null, panR: null, flip: false };
+  function updateMusic(now) {
+    if (!musicBus || !buf('m:kick')) return;
+    if (!vol.musicOn || vol.music <= 0 || muted) {
+      mus.nextT = 0;
+      return;
+    }
+    if (!mus.comp) {
+      mus.comp = createComposer(createRng(0x5eed + (hashId(game.seed) % 997)));
+      mus.panL = panNode(musicBus, -0.35) || musicBus;
+      mus.panR = panNode(musicBus, 0.35) || musicBus;
+    }
+    const barS = 240 / mus.comp.tempo;
+    if (mus.nextT < now + 0.05) mus.nextT = now + 0.15;
+    // schedule about half a second ahead: one bar per call at most
+    if (mus.nextT < now + 0.5) {
+      scheduleBar(mus.comp.bar(mus.bar++), mus.nextT, barS);
+      mus.nextT += barS;
+    }
+  }
+  function scheduleBar(notes, t0, barS) {
+    for (let i = 0; i < notes.length; i++) {
+      const nt = notes[i];
+      const b = buf(`m:${nt.inst}`);
+      if (!b) continue;
+      let semi = nt.semi;
+      if (nt.inst === 'pad' || nt.inst === 'bass') semi = ((((semi + 5) % 12) + 12) % 12) - 5;
+      const src = ctx.createBufferSource();
+      src.buffer = b;
+      if (nt.inst === 'pad' || nt.inst === 'bass' || nt.inst === 'pluck') src.playbackRate.value = Math.pow(2, semi / 12);
+      const g = ctx.createGain();
+      g.gain.value = nt.vel * (MUSIC_LEVEL[nt.inst] || 0.3);
+      src.connect(g);
+      let dest = musicBus;
+      if (nt.inst === 'pluck' || nt.inst === 'hat') {
+        mus.flip = !mus.flip;
+        dest = mus.flip ? mus.panL : mus.panR;
+      }
+      g.connect(dest);
+      src.onended = () => g.disconnect();
+      src.start(t0 + (nt.beat * barS) / 4);
+    }
+  }
+
   // ---- context life cycle ----
+  function safetyCurve() {
+    const n = 4096;
+    const c = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      const a = Math.abs(x);
+      const y = a <= 0.8 ? a : 0.8 + 0.19 * Math.tanh((a - 0.8) / 0.19);
+      c[i] = x < 0 ? -y : y;
+    }
+    return c;
+  }
+  function bassCurve() {
+    const n = 2048;
+    const c = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      c[i] = Math.tanh(3 * x) * 0.5 + Math.abs(Math.tanh(2.4 * x)) * 0.6;
+    }
+    return c;
+  }
+  function onGesture() {
+    if (!ctx || disposed || ctx.state === 'running' || game.paused || hidden) return;
+    const p = ctx.resume();
+    if (p && p.catch) p.catch(() => {});
+  }
   function applyBus() {
     if (!ctx) return;
     const now = ctx.currentTime;
     master.gain.setTargetAtTime(muted ? 0 : vol.master, now, 0.03);
-    for (const k of Object.keys(BUS)) bus[k].gain.setTargetAtTime(BUS[k] * vol[k], now, 0.05);
+    for (const k of Object.keys(BUS)) {
+      const v = k === 'music' ? (vol.musicOn ? vol.music : 0) : vol[k] * vol.sfx;
+      bus[k].gain.setTargetAtTime(BUS[k] * v, now, 0.05);
+    }
   }
 
   function syncRunState() {
     if (!ctx) return;
     const want = !(game.paused || hidden);
     if (want === wantRunning && (!want || ctx.state === 'running')) return;
+    // a context the system suspended or interrupted: retry now and then
+    const t = nowMs();
+    if (want === wantRunning && t < resumeAt) return;
+    resumeAt = t + 500;
     wantRunning = want;
     const p = want ? ctx.resume() : ctx.suspend();
     if (p && p.catch) p.catch(() => {});
@@ -1164,8 +1357,6 @@ export function createAudio(game) {
       setTimeout(fn, 0);
     }
   }
-  const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
   let pumping = false;
   let extrasBuilt = false;
   function ensurePump() {
@@ -1243,46 +1434,69 @@ export function createAudio(game) {
       return;
     }
     try {
-      ctx = new Ctor();
+      // 'interactive' asks for the smallest output buffer the device
+      // allows; the context runs at the device's own rate (often 48 kHz
+      // on Android), which every buffer here is resampled to as it plays.
+      try {
+        ctx = new Ctor({ latencyHint: 'interactive' });
+      } catch {
+        ctx = new Ctor();
+      }
       master = gainNode(0, null);
-      // gentle glue compression, then a fast limiter and a soft clip
+      // Master chain: slow, gentle glue compression (no audible pumping),
+      // a fast peak limiter, then a safety curve that is exactly linear
+      // below 0.8 and only rounds off what the limiter lets through.
       comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -20;
-      comp.knee.value = 10;
-      comp.ratio.value = 3;
-      comp.attack.value = 0.01;
-      comp.release.value = 0.25;
+      comp.threshold.value = -16;
+      comp.knee.value = 12;
+      comp.ratio.value = 2.5;
+      comp.attack.value = 0.006;
+      comp.release.value = 0.4;
       limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -4;
+      limiter.threshold.value = -3;
       limiter.knee.value = 0;
       limiter.ratio.value = 20;
-      limiter.attack.value = 0.002;
-      limiter.release.value = 0.12;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.15;
       shaper = ctx.createWaveShaper();
-      const curve = new Float32Array(1024);
-      for (let i = 0; i < curve.length; i++) curve[i] = (Math.tanh(((i / (curve.length - 1)) * 2 - 1) * 1.2) / Math.tanh(1.2)) * 0.98;
-      shaper.curve = curve;
-      // the compressors add make-up gain; trim it back so the mix sits
-      // around -20 dBFS instead of shouting
-      const trim = gainNode(0.42, limiter);
+      shaper.curve = safetyCurve();
+      // the compressors add automatic make-up gain; trim it back
+      const trim = gainNode(0.75, limiter);
       master.connect(comp);
       comp.connect(trim);
       limiter.connect(shaper);
       shaper.connect(ctx.destination);
+      // Phone-speaker bass: the lows (which a phone cannot move) are
+      // turned into their 2nd and 3rd harmonics and mixed in, so booms and
+      // engines keep their weight. Three filters and a curve, run once.
+      bassIn = biq('lowpass', 140, 0.7, null);
+      const bassSh = ctx.createWaveShaper();
+      bassSh.curve = bassCurve();
+      const bassHp = biq('highpass', 170, 0.7, null);
+      const bassLp = biq('lowpass', 750, 0.7, null);
+      const bassG = gainNode(0.32, comp);
+      master.connect(bassIn);
+      bassIn.connect(bassSh);
+      bassSh.connect(bassHp);
+      bassHp.connect(bassLp);
+      bassLp.connect(bassG);
       // reverb shared by all buses through per-bus sends
       ret = gainNode(0.55, master);
       if (ctx.createConvolver) {
         convolver = ctx.createConvolver();
         convolver.connect(ret);
       }
+      musicDuck = gainNode(1, master);
       for (const k of Object.keys(BUS)) {
-        bus[k] = gainNode(BUS[k], master);
+        bus[k] = gainNode(BUS[k], k === 'music' ? musicDuck : master);
         if (k !== 'ui') {
-          send[k] = gainNode(0.1, convolver || null);
+          send[k] = gainNode(k === 'music' ? 0.12 : 0.1, convolver || null);
           bus[k].connect(send[k]);
         }
       }
-      duck = gainNode(1, bus.world);
+      musicBus = bus.music;
+      boomDuck = gainNode(1, bus.world);
+      duck = gainNode(1, boomDuck);
       voices = createVoices(ctx, () => bank && bank.buffers, rng, duck);
     } catch {
       ctx = null;
@@ -1291,6 +1505,12 @@ export function createAudio(game) {
     applyBus();
     wantRunning = true;
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
+    // Android Chrome only lets a context start inside a real activation
+    // (touchend, pointerup, click, key), not on touchstart: keep trying on
+    // each of those until it runs, and again after it is interrupted.
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      for (const g of GESTURES) window.addEventListener(g, onGesture, { passive: true, capture: true });
+    }
     const p = ctx.resume();
     if (p && p.catch) p.catch(() => {});
     syncRunState();
@@ -1358,6 +1578,7 @@ export function createAudio(game) {
       acc += step;
       placeAcc += step;
       if (acc < UPDATE_EVERY) return;
+      const r0 = nowMs();
       const now = ctx.currentTime;
       const udt = clamp(lastUpdate > 0 ? now - lastUpdate : acc, 1 / 120, 0.25);
       lastUpdate = now;
@@ -1371,7 +1592,14 @@ export function createAudio(game) {
       updateOthers(now, udt);
       updateSiren(now, udt);
       updateAmbience(now);
+      updateSteps(udt);
+      updateMusic(now);
       voices.tick(now);
+      const ms = nowMs() - r0;
+      perf.renderMs += ms;
+      perf.renderN++;
+      if (ms > perf.renderMax) perf.renderMax = ms;
+      if (ms > 4) perf.over4++;
     } catch {
       /* never throw from render */
     }
@@ -1379,10 +1607,10 @@ export function createAudio(game) {
 
   function setVolume(v) {
     if (!v) return;
-    for (const k of ['master', 'engine', 'tyres', 'world', 'effects', 'ui']) {
+    for (const k of ['master', 'engine', 'tyres', 'world', 'effects', 'ui', 'music', 'sfx']) {
       if (Number.isFinite(v[k])) vol[k] = clamp(v[k], 0, 1);
     }
-    if (Number.isFinite(v.music)) vol.ui = clamp(v.music, 0, 1);
+    if (typeof v.musicOn === 'boolean') vol.musicOn = v.musicOn;
     try {
       applyBus();
     } catch {
@@ -1404,6 +1632,9 @@ export function createAudio(game) {
     for (let i = 0; i < unsubs.length; i++) unsubs[i]();
     unsubs.length = 0;
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
+    if (typeof window !== 'undefined' && window.removeEventListener) {
+      for (const g of GESTURES) window.removeEventListener(g, onGesture, { capture: true });
+    }
     if (ctx) {
       const c = ctx;
       ctx = null;
@@ -1446,6 +1677,17 @@ export function createAudio(game) {
         siren: siren ? siren.out : null,
         rpm: pv.sim.rpm,
         gear: pv.sim.gear,
+        limiting: pv.sim.limiting,
+        boost: pv.boost,
+        musicBar: mus.bar,
+        others: slots.map((q) => ({ v: q.v, dop: q.dop || 1 })),
+        musicBus,
+        renderMsAvg: perf.renderN ? perf.renderMs / perf.renderN : 0,
+        renderMsMax: perf.renderMax,
+        renderN: perf.renderN,
+        renderOver4: perf.over4,
+        caps: { voices: MAX_VOICES, raw: MAX_RAW, spots: MAX_SPOTS },
+        sampleRate: ctx ? ctx.sampleRate : 0,
       };
     },
   };

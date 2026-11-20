@@ -73,6 +73,15 @@ API (src/systems/combat.js):
 - `playerControls`: in a craft with `spec.mounts`, held `fire` = slot 0,
   `fire2` = slot 1, tapped `drop` = one bomb. Car and boat drive-by as now.
 
+Unlocked missiles: when `fire2` is pressed with no lock, the missile homes
+on the craft or person within 18 deg of the nose (nearest the nose first, in
+line of sight, 10 to 600 m), so a rough aim still hits a parked or moving
+car. A police craft nobody drives (parked at the depot) is a plain craft for
+the seeker, not a police target. A missile fuses within 3.5 m of its target.
+Bombs and missiles are checked end to end by `scripts/combat-e2e.mjs`
+(lock-on missile on a parked car, a moving car, a Rustback and a police heli;
+a bomb on a car with people beside it).
+
 ### Seeker and lock-on in flight (src/core/seeker.js, pure)
 `createSeeker()`, `stepSeeker(s, craft, candidates, dt, wantCycle)`: looks
 in an 18 deg cone around the nose, out to the slot-1 range. Candidate order

@@ -176,12 +176,13 @@ export function createMenu(root, game, economy) {
   let active = 'resume';
   let opened = false;
   let confirmReset = false;
+  let confirmNew = false;
 
   const settings = () => game.progress.settings;
   function applySettings() {
     if (economy && economy.applySettings) { economy.applySettings(); return; }
     const s = settings();
-    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
+    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
@@ -402,6 +403,23 @@ export function createMenu(root, game, economy) {
     vol.appendChild(slider);
     body.appendChild(vol);
 
+    // Music: on/off and its level against the effects (audio.js). Older
+    // saves have neither; music starts on at half level.
+    if (typeof s.music !== 'boolean') s.music = true;
+    body.appendChild(toggleRow('Music', 'music'));
+    const mv = h('div', 'rw-menu-setting');
+    mv.appendChild(h('span', '', 'Music volume'));
+    const ms = document.createElement('input');
+    ms.type = 'range';
+    ms.min = '0'; ms.max = '100'; ms.step = '1';
+    ms.value = String(Math.round((Number.isFinite(s.musicVol) ? s.musicVol : 0.5) * 100));
+    ms.setAttribute('aria-label', 'Music volume');
+    ms.dataset.setting = 'musicVol';
+    ms.addEventListener('input', () => { settings().musicVol = Number(ms.value) / 100; applySettings(); });
+    ms.addEventListener('change', () => commit());
+    mv.appendChild(ms);
+    body.appendChild(mv);
+
     body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
     body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));
     body.appendChild(toggleRow('Police chases', 'police'));
@@ -439,6 +457,28 @@ export function createMenu(root, game, economy) {
     }
     q.appendChild(seg);
     body.appendChild(q);
+
+    // New game: forget the saved car and place only (scores and settings stay).
+    const fresh = h('div', 'rw-menu-setting');
+    if (!confirmNew) {
+      fresh.appendChild(h('span', 'rw-menu-dim', 'Start again in the starter car. Scores and settings stay.'));
+      const b = button('New game (reset car and place)', '', () => { confirmNew = true; render(); }, 'New game');
+      b.dataset.role = 'newgame';
+      fresh.appendChild(b);
+    } else {
+      fresh.setAttribute('role', 'alert');
+      fresh.appendChild(h('span', '', 'Leave this car and place behind? Your scores stay.'));
+      const c = h('div', 'rw-menu-confirm');
+      const yes = button('Yes, new game', 'rw-menu-danger', () => {
+        confirmNew = false;
+        if (game.newSession) game.newSession();
+        close();
+      }, 'Confirm new game');
+      yes.dataset.role = 'newgame-confirm';
+      c.append(yes, button('Keep playing', '', () => { confirmNew = false; render(); }, 'Cancel new game'));
+      fresh.appendChild(c);
+    }
+    body.appendChild(fresh);
 
     const reset = h('div', 'rw-menu-setting');
     reset.style.borderBottom = '0';
@@ -510,7 +550,7 @@ export function createMenu(root, game, economy) {
     if (!RENDERERS[id]) id = 'resume';
     if (id !== active) body.scrollTop = 0;
     active = id;
-    if (id !== 'settings') confirmReset = false;
+    if (id !== 'settings') confirmReset = confirmNew = false;
     render();
   }
 

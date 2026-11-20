@@ -18,5 +18,9 @@ existing game: own name, city, characters, art and missions.
   blood is shown (red bursts and pools on the ground that fade), and
   destroyed vehicles explode, break into flying debris and vanish.
   Never dismemberment or sexual content.
+- Carjacking: ENTER on a craft with someone at the controls (under 3 m/s)
+  drags the driver out and throws them to the ground; the player drives
+  off. Quitting the game saves the place, craft and a garage of up to 8
+  left-behind cars; Play continues from there (Settings has New game).
 - Target: smooth play (aim 60 frames per second, never under 30) on the
   phone; all controls usable with two thumbs.

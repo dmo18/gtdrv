@@ -39,3 +39,24 @@ These helpers are for developers; none of them fails a build.
 5. `node scripts/vehicle-shots.mjs`, `act-shots.mjs`, `combatfx-shots.mjs`
    and the `*-preview.mjs` scripts (aircraft, boat, markers, sky) take
    screenshots of single features.
+
+## Package it (web app and Android)
+The game is an installable web app and can be wrapped as an Android app
+for Google Play. The step by step guide for the owner is `docs/PLAY.md`,
+and the store listing and form answers are in `docs/STORE.md`.
+1. `npm run build` also copies `public/` (manifest, icons, privacy page)
+   into `dist/` and writes `dist/sw.js`, the offline service worker. It
+   registers only in production builds served over https (or localhost),
+   never inside the Android app and never under test automation unless
+   the address has `?pwa`.
+2. `node scripts/offline-test.mjs` loads the build, goes offline, reloads
+   and checks the game still starts.
+3. `node scripts/make-icons.mjs` redraws the icons and feature graphic
+   (`public/icons`, `store/`, and the Android launcher icons).
+   `node scripts/store-shots.mjs` retakes the 8 store screenshots.
+4. `cd android && npm install && npm run apk` builds a debug APK (needs
+   Java 21 and the Android SDK, platform 36). `npm run aab` builds the
+   release bundle, signed when the keystore variables or
+   `android/native/keystore.properties` exist. Never commit a keystore.
+5. The workflow `.github/workflows/android-release.yml` builds the signed
+   bundle by hand from repository secrets (names listed in the file).

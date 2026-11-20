@@ -31,8 +31,11 @@ const VIEWS = [
   ['airfield', 12, 'clear', 0],
   ['spawn', 23, 'clear', 4],
 ];
-let n = 0;
-for (const [where, hour, weather, drive] of VIEWS) {
+// Optional first argument: number of the shot to start from (to resume).
+let n = Number(process.argv[2] || 1) - 1;
+const first = n;
+page.setDefaultTimeout(240000);
+for (const [where, hour, weather, drive] of VIEWS.slice(first)) {
   await page.evaluate(([where, hour, weather]) => {
     const g = window.__rw;
     const c = g.city;

@@ -1,7 +1,7 @@
 // Bundles the game into dist/ (index.html + game.js). With --serve it
 // also starts a small local web server for testing.
 import { build } from 'esbuild';
-import { cp, mkdir, readdir, readFile as read, writeFile } from 'node:fs/promises';
+import { cp, mkdir, rm, readdir, readFile as read, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -9,7 +9,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const dist = join(root, 'dist');
+const defaultDist = join(root, 'dist');
 
 // Every file under dir, as paths relative to dir with forward slashes.
 async function walk(dir, base = dir) {
@@ -24,7 +24,7 @@ async function walk(dir, base = dir) {
 
 // Writes dist/sw.js: the template in public/ with the list of files to
 // keep offline and a version that changes whenever any of them changes.
-async function writeServiceWorker() {
+async function writeServiceWorker(dist) {
   const files = (await walk(join(root, 'public'))).filter((f) => f !== 'sw.js');
   const all = ['index.html', 'game.js', ...files];
   const hash = createHash('sha256');
@@ -35,7 +35,10 @@ async function writeServiceWorker() {
   await writeFile(join(dist, 'sw.js'), out);
 }
 
-export async function buildGame({ minify = true, prod = minify } = {}) {
+// outDir lets the Android wrapper build into a clean folder (build/web)
+// instead of dist/, which test scripts also write screenshots into.
+export async function buildGame({ minify = true, prod = minify, outDir = defaultDist } = {}) {
+  const dist = outDir;
   await mkdir(dist, { recursive: true });
   await build({
     entryPoints: [join(root, 'src/main.js')],
@@ -50,7 +53,7 @@ export async function buildGame({ minify = true, prod = minify } = {}) {
   });
   await cp(join(root, 'src/index.html'), join(dist, 'index.html'));
   await cp(join(root, 'public'), dist, { recursive: true });
-  await writeServiceWorker();
+  await writeServiceWorker(dist);
 }
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css' };
@@ -60,8 +63,8 @@ export function serve(port = 8080) {
     try {
       let p = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
       if (p.endsWith('/') || p === '\\') p = join(p, 'index.html');
-      const file = join(dist, p);
-      if (!file.startsWith(dist)) throw new Error('outside');
+      const file = join(defaultDist, p);
+      if (!file.startsWith(defaultDist)) throw new Error('outside');
       const data = await readFile(file);
       res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
       res.end(data);
@@ -74,11 +77,14 @@ export function serve(port = 8080) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await buildGame({ minify: !process.argv.includes('--serve') });
+  const o = process.argv.indexOf('--out');
+  const outDir = o > 0 ? resolve(process.argv[o + 1]) : defaultDist;
+  if (process.argv.includes('--clean')) await rm(outDir, { recursive: true, force: true });
+  await buildGame({ minify: !process.argv.includes('--serve'), outDir });
   if (process.argv.includes('--serve')) {
     await serve(8080);
     console.log('Rustwater running at http://localhost:8080');
   } else {
-    console.log('Built dist/');
+    console.log(`Built ${outDir}`);
   }
 }

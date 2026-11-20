@@ -829,12 +829,12 @@ const LOW_SHOTS = new Set(['blastTail', 'm:pad', 'm:bass', 'm:kick']);
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
   'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
   'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn',
-  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS), ...Object.keys(COMBAT_SHOTS).filter((k) => k !== 'thud'), ...Object.keys(MUSIC_SHOTS), 'birds']);
+  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS), ...Object.keys(COMBAT_SHOTS).filter((k) => k !== 'thud'), ...Object.keys(MUSIC_SHOTS), 'birds', 'stepHard', 'stepSoft']);
 
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = {
   thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2,
-  thwack: 2, impact: 2, ricochet: 2, whiz: 2, tink: 2,
+  thwack: 2, impact: 2, ricochet: 2, whiz: 2, tink: 2, stepHard: 3, stepSoft: 3,
   ...COMBAT_VARIANTS,
 };
 
@@ -842,7 +842,7 @@ const SHOT_VARIANTS = {
 // a short darkening tail. Built at the context's own rate.
 function impulse(ctx, rng) {
   const sr = ctx.sampleRate;
-  const n = Math.round(0.6 * sr);
+  const n = Math.round(1.1 * sr);
   const buf = ctx.createBuffer(2, n, sr);
   for (let ch = 0; ch < 2; ch++) {
     const d = buf.getChannelData(ch);
@@ -852,9 +852,14 @@ function impulse(ctx, rng) {
       const g = (0.55 - t * 4) * (rng.next() < 0.5 ? -1 : 1);
       d[Math.floor(t * sr)] += g;
     }
+    // building slap-back: a few strong, slightly smeared echoes
+    for (let k = 0; k < 4; k++) {
+      const at = Math.floor((0.06 + k * 0.035 + rng.next() * 0.02 + ch * 0.007) * sr);
+      for (let j = 0; j < 24; j++) d[at + j] += (0.32 - k * 0.05) * (1 - j / 24) * (j % 2 ? -0.6 : 1);
+    }
     let y = 0;
     let e = 1;
-    const de = Math.exp(-1 / (0.16 * sr));
+    const de = Math.exp(-1 / (0.3 * sr));
     const att = 0.02 * sr;
     for (let i = 0; i < n; i++) {
       const a = 0.65 * Math.exp(-i / (0.25 * sr)) + 0.06;
@@ -958,7 +963,11 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
     if (loop) loops.push(name);
   };
   const Off = offlineCtor();
-  const stats = { offline: 0, js: 0, offlineMs: 0, engines: [] };
+  const stats = { offline: 0, js: 0, offlineMs: 0, engines: [], slowJob: '', slowMs: 0, jobMs: [] };
+  const label = (name, fn) => {
+    fn.label = name;
+    return fn;
+  };
   const flags = { essential: false, extras: false };
 
   // A batch: jobs that each make one filter spec, a job that starts the
@@ -969,10 +978,10 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
     const renders = [];
     let t0 = 0;
     for (const mk of makers) {
-      jobs.push(() => {
+      jobs.push(label('make', () => {
         const it = mk();
         if (it) items.push(it);
-      });
+      }));
     }
     jobs.push(() => {
       if (!Off) return;
@@ -1008,7 +1017,7 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
         stats.offlineMs += nowMs() - t0;
       }) : null));
       jobs.push(() => {
-        const fin = items.map((it) => () => {
+        const fin = items.map((it) => label(`finish ${it.name || ''}`, () => {
           let data = it.data;
           if (data) {
             stats.offline++;
@@ -1019,7 +1028,7 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
           }
           it.spec = null;
           it.done(data);
-        });
+        }));
         jobs.splice(next, 0, ...fin);
       });
     };
@@ -1039,6 +1048,7 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
           const sp = engineSpec(ch, pts[i], load, rng, ENGINE_SR);
           R.sr = SR;
           return {
+            name: `eng:${ch}:${i}`,
             spec: sp,
             done(data) {
               set.push({ i, load, data });
@@ -1070,19 +1080,19 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
         put(name, r, true, sr);
         return null;
       }
-      return { spec: r, done: (data) => put(name, data, true, sr) };
+      return { name, spec: r, done: (data) => put(name, data, true, sr) };
     };
   };
   const shotJobs = (name) => {
     const v = SHOT_VARIANTS[name] || 1;
     const sr = LOW_SHOTS.has(name) ? SR / 2 : SR;
     for (let k = 0; k < v; k++) {
-      jobs.push(() => {
+      jobs.push(label(name, () => {
         R.sr = sr;
         const d = SHOTS[name](rng);
         R.sr = SR;
         put(v > 1 ? `${name}${k}` : name, d, false, sr);
-      });
+      }));
     }
   };
   for (const name of Object.keys(LOOPS)) if (!EXTRA.has(name)) initial.push(loopMaker(name));
@@ -1134,7 +1144,15 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
       if (waiting) return waiting;
       const t0 = nowMs();
       while (next < jobs.length) {
-        const r = jobs[next++]();
+        const job = jobs[next++];
+        const j0 = nowMs();
+        const r = job();
+        const jm = nowMs() - j0;
+        if (stats.jobMs.length < 2000) stats.jobMs.push(Math.round(jm * 10) / 10);
+        if (jm > stats.slowMs) {
+          stats.slowMs = jm;
+          stats.slowJob = job.label || 'job';
+        }
         if (r && typeof r.then === 'function') {
           waiting = r.then(() => {
             waiting = null;

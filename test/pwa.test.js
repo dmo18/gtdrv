@@ -85,7 +85,7 @@ test('privacy policy page exists and makes no tracking claims it cannot keep', (
 
 test('no em or en dashes in the packaging files', () => {
   for (const f of ['manifest.webmanifest', 'privacy.html', 'sw.js']) {
-    assert.ok(!/[–—]/.test(readFileSync(join(pub, f), 'utf8')), f);
+    assert.ok(!/[\u2013\u2014]/.test(readFileSync(join(pub, f), 'utf8')), f);
   }
 });
 
@@ -94,6 +94,7 @@ test('service worker registration is guarded', () => {
   assert.equal(shouldRegister(base), true);
   assert.equal(shouldRegister({ ...base, prod: false }), false);
   assert.equal(shouldRegister({ ...base, cap: {} }), false, 'not inside the Android wrapper');
+  assert.equal(shouldRegister({ ...base, nav: { serviceWorker: {}, webdriver: false, userAgent: 'Mozilla/5.0 (Linux; Android 15; SM-S928B Build/AP3A; wv) Chrome/130' } }), false, 'not in an Android WebView');
   assert.equal(shouldRegister({ ...base, nav: { serviceWorker: {}, webdriver: true } }), false, 'not in automated browsers');
   assert.equal(shouldRegister({ ...base, nav: { webdriver: false } }), false, 'no service worker support');
   assert.equal(shouldRegister({ ...base, loc: { ...base.loc, search: '?autostart' } }), false);

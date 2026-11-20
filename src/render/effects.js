@@ -49,11 +49,12 @@ export function makeAtlas() {
   g.beginPath();
   g.rect(0, 0, S, S);
   g.clip();
-  for (let k = 0; k < 9; k++) {
-    const a = (k / 9) * Math.PI * 2;
-    const r = k === 0 ? 0 : S * 0.16;
+  for (let k = 0; k < 14; k++) {
+    // Deterministic lumps (no rng: the atlas is pure drawing).
+    const a = k * 2.399963 + 0.3;
+    const r = k === 0 ? 0 : S * (0.12 + 0.1 * Math.abs(Math.sin(k * 1.7)));
     const x = S / 2 + Math.cos(a) * r, y = S / 2 + Math.sin(a) * r;
-    const rad = k === 0 ? S * 0.42 : S * 0.26;
+    const rad = k === 0 ? S * 0.4 : S * (0.2 + 0.08 * Math.abs(Math.cos(k * 2.3)));
     const gr = g.createRadialGradient(x, y, 0, x, y, rad);
     gr.addColorStop(0, 'rgba(255,255,255,0.55)');
     gr.addColorStop(0.5, 'rgba(255,255,255,0.28)');
@@ -232,6 +233,7 @@ export function createPool(max, additive, atlas, scene) {
     s0: new Float32Array(max), s1: new Float32Array(max), a0: new Float32Array(max),
     rot: new Float32Array(max), rotV: new Float32Array(max),
     r: new Float32Array(max), g: new Float32Array(max), b: new Float32Array(max),
+    er: new Float32Array(max), eg: new Float32Array(max), eb: new Float32Array(max), // colour at the end of life
     cell: new Float32Array(max), grav: new Float32Array(max), drag: new Float32Array(max),
     fadeIn: new Float32Array(max), floor: new Float32Array(max),
     depth: new Float32Array(max), order: new Uint16Array(max), bucketCount: new Uint16Array(65), cap: max,
@@ -249,9 +251,16 @@ export function emitP(P, x, y, z, vx, vy, vz, life, s0, s1, a0, r, g, b, cell, g
   P.s0[i] = s0; P.s1[i] = s1; P.a0[i] = a0;
   P.rot[i] = rnd() * 6.283; P.rotV[i] = rs() * 0.8;
   P.r[i] = r; P.g[i] = g; P.b[i] = b;
+  P.er[i] = r; P.eg[i] = g; P.eb[i] = b;
   P.cell[i] = cell; P.grav[i] = grav; P.drag[i] = drag;
   P.fadeIn[i] = 0.12; P.floor[i] = -1000;
   return i;
+}
+
+// Fade particle i's colour to (r, g, b) over its life (fire to smoke).
+export function tintP(P, i, r, g, b) {
+  if (i < 0) return;
+  P.er[i] = r; P.eg[i] = g; P.eb[i] = b;
 }
 
 export function stepPool(P, dt) {
@@ -267,6 +276,7 @@ export function stepPool(P, dt) {
         P.s0[i] = P.s0[j]; P.s1[i] = P.s1[j]; P.a0[i] = P.a0[j];
         P.rot[i] = P.rot[j]; P.rotV[i] = P.rotV[j];
         P.r[i] = P.r[j]; P.g[i] = P.g[j]; P.b[i] = P.b[j];
+        P.er[i] = P.er[j]; P.eg[i] = P.eg[j]; P.eb[i] = P.eb[j];
         P.cell[i] = P.cell[j]; P.grav[i] = P.grav[j]; P.drag[i] = P.drag[j];
         P.fadeIn[i] = P.fadeIn[j]; P.floor[i] = P.floor[j];
       }
@@ -325,7 +335,7 @@ export function writePool(P, cam, sort, extra) {
     dat[k * 4 + 1] = a;
     dat[k * 4 + 2] = P.rot[i];
     dat[k * 4 + 3] = P.cell[i];
-    col[k * 3] = P.r[i]; col[k * 3 + 1] = P.g[i]; col[k * 3 + 2] = P.b[i];
+    col[k * 3] = P.r[i] + (P.er[i] - P.r[i]) * t; col[k * 3 + 1] = P.g[i] + (P.eg[i] - P.g[i]) * t; col[k * 3 + 2] = P.b[i] + (P.eb[i] - P.b[i]) * t;
     vel[k * 3] = P.vx[i]; vel[k * 3 + 1] = P.vy[i]; vel[k * 3 + 2] = P.vz[i];
   }
   let m = n;

@@ -799,4 +799,215 @@ export default async function extra(page, check) {
   check(wreck.booms >= 1 && wreck.wreckedAt >= 0 && wreck.listedAfterBlast, `a destroyed car explodes and is wrecked (${JSON.stringify(wreck)})`);
   check(wreck.maxDebris >= 6 && wreck.maxDebris <= 48, `the wreck throws 6 to 48 debris chunks (${wreck.maxDebris})`);
   check(wreck.removedAt > 60 && wreck.removedAt < 60 * 6 && !wreck.listed && wreck.meshGone, `the wreck is removed from game.vehicles within 6 s (${wreck.removedAt} steps)`);
+
+  // ---- Cops are killable; missiles and blasts hit what they should (docs/COMBAT.md) ----
+  // Shoot the officers of a patrol car through the car; then a missile from the
+  // fighter on a fixture sedan; a blast throws a nearby fixture sedan.
+  const copKill = await page.evaluate(() => {
+    const g = window.__rw;
+    const run = (n) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
+    const p = g.player;
+    if (p.vehicle) {
+      p.vehicle.driver = null;
+      p.vehicle = null;
+    }
+    g.setPlayerMode('foot');
+    const w = p.walker;
+    w.x = w.px = g.city.spawn.x;
+    w.z = w.pz = g.city.spawn.z + 6;
+    w.heading = w.pheading = 0;
+    w.hp = w.maxHp || 100;
+    w.life = 'ok';
+    w.arms.weapon = 'pistol';
+    run(30);
+    g.police.heat.level = 2;
+    g.police.heat.points = 2.5;
+    let car = null;
+    for (let i = 0; i < 1500 && !car; i++) {
+      run(1);
+      car = g.police.cars.find((c) => c.occ && c.role !== 'dead');
+    }
+    if (!car) return { ok: false, why: 'no patrol car' };
+    const downs = [];
+    const off = g.events.on('down', (d) => { if (d.target.team === 'police' && d.target.hp <= 0) downs.push(d.kind); });
+    for (let i = 0; i < 40 && car.occ.some((h) => h > 0); i++) {
+      car.x = car.px = w.x + 14;
+      car.z = car.pz = w.z;
+      car.vx = car.vz = car.speed = 0;
+      g.combat.fire(w, 14, 1.0 - 1.4, 0);
+      run(14);
+    }
+    run(30);
+    off();
+    return { ok: true, downs, occ: car.occ.slice(), role: car.role, wrecked: !!car.wrecked, level: g.police.heat.level };
+  });
+  check(copKill.ok && copKill.downs.length === 2 && copKill.occ.every((h) => h <= 0) && copKill.role === 'dead' && !copKill.wrecked && copKill.level >= 2,
+    `shooting a patrol car kills both officers through the car (${JSON.stringify(copKill)})`);
+  const blastToss = await page.evaluate(() => {
+    const g = window.__rw;
+    const rw = g.city.airfield.runway;
+    const car = g.debug.spawnCar('sedan', rw.x0 + 300, (rw.z0 + rw.z1) / 2, 0);
+    car.vx = car.vz = car.speed = 0;
+    car.spec = { ...car.spec, health: 1e6 };
+    car.health = 1e6;
+    g.combat.explode(car.x + 4, 0.5, car.z, 8, null);
+    let peak = 0;
+    for (let i = 0; i < 120; i++) {
+      g.step(1 / 60);
+      peak = Math.max(peak, car.y);
+    }
+    g.draw(1, 1 / 60);
+    return { peak: +peak.toFixed(2), y: car.y, size: 'ok' };
+  });
+  check(blastToss.peak > 0.4 && blastToss.y === 0, `a blast throws a nearby car into the air and it lands again (${JSON.stringify(blastToss)})`);
+
+  // --- Carjacking: ENTER on an occupied car (docs/STATUS.md) -------------
+  // A civilian sits in a damaged coloured muscle car. The player on foot
+  // taps ENTER: runs to the door, the driver is dragged out and thrown, the
+  // player takes the seat. Then: the driver lies on the ground, gets up and
+  // runs, and is removed cleanly; the stolen car keeps colour and damage.
+  const jackRun = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = g.player;
+    if (p.vehicle) {
+      p.vehicle.driver = null;
+      p.vehicle = null;
+    }
+    g.setPlayerMode('foot');
+    const sp = g.city.spawn;
+    // First leave an empty van where it can be found again (garage check below).
+    const van = g.debug.spawnCar('van', sp.x - 30, sp.z - 6, 0.3);
+    van.parked = false;
+    const w = p.walker;
+    w.x = w.px = van.x - 4;
+    w.z = w.pz = van.z;
+    for (let i = 0; i < 5; i++) g.step(1 / 60);
+    g.tryEnterVehicle(van);
+    g.step(1 / 60);
+    van.vx = van.vz = van.speed = 0;
+    const left = g.exitVehicle();
+    window.__van = { x: van.x, z: van.z, color: van.color };
+    // The target car and its driver.
+    const car = g.debug.spawnOccupied('muscle', sp.x + 30, sp.z + 4, 0.4, 'civ');
+    car.health = car.spec.health * 0.6;
+    const want = { color: car.color, health: car.health, id: car.id };
+    w.x = w.px = car.x - 4.2;
+    w.z = w.pz = car.z - 1.5;
+    w.heading = w.pheading = 0.3;
+    for (let i = 0; i < 10; i++) g.step(1 / 60);
+    const nearBefore = p.near === car;
+    g.input.press('enter');
+    g.step(1 / 60);
+    const started = g.carjack.busy;
+    let events = 0, downEv = 0;
+    const offs = [g.events.on('carjack', (e) => { if (e.car === car && e.victim && e.thief === p) events++; }), g.events.on('down', () => downEv++)];
+    let steps = 0;
+    while (g.carjack.busy && steps < 600) {
+      g.step(1 / 60);
+      steps++;
+    }
+    offs.forEach((f) => f());
+    const victim = g.carjack.victims[0] || null;
+    const vs = victim ? { life: victim.life, actor: g.actors.includes(victim), d: Math.hypot(victim.x - car.x, victim.z - car.z) } : null;
+    return { left, nearBefore, started, steps, events, downEv, mode: p.mode, inCar: p.vehicle === car, want, color: car.color, health: car.health, driver: car.driver, victim: vs };
+  });
+  check(jackRun.left && jackRun.nearBefore && jackRun.started, `ENTER on an occupied car starts a carjack (${JSON.stringify({ l: jackRun.left, n: jackRun.nearBefore, s: jackRun.started })})`);
+  check(jackRun.steps > 20 && jackRun.steps < 200 && jackRun.mode === 'car' && jackRun.inCar && jackRun.driver === 'player', `the player ends up driving the jacked car (mode ${jackRun.mode}, ${jackRun.steps} steps)`);
+  check(jackRun.events === 1 && jackRun.downEv >= 1, `'carjack' and 'down' events fired (${jackRun.events}, ${jackRun.downEv})`);
+  check(jackRun.victim && jackRun.victim.actor && jackRun.victim.life === 'down' && jackRun.victim.d > 0.5, `the driver is out, a real actor, on the ground (${JSON.stringify(jackRun.victim)})`);
+  check(jackRun.color === jackRun.want.color && jackRun.health === jackRun.want.health, 'the stolen car keeps its colour and damage');
+  const after = await page.evaluate(() => {
+    const g = window.__rw;
+    const v = g.carjack.victims[0];
+    const log = [];
+    let upAt = -1, x0 = v.x, z0 = v.z, maxFlee = 0;
+    for (let i = 0; i < 60 * 25 && !v.removedFlag; i++) {
+      g.step(1 / 60);
+      if (v.life === 'ok' && upAt < 0) upAt = i;
+      maxFlee = Math.max(maxFlee, Math.hypot(v.x - x0, v.z - z0));
+      if (!g.actors.includes(v)) break;
+      if (!Number.isFinite(v.x) || !Number.isFinite(v.z)) log.push('nan');
+      if (!Number.isFinite(g.player.x)) log.push('player nan');
+    }
+    return { upAt, maxFlee, gone: !g.actors.includes(v), left: g.carjack.victims.length, log, mode: g.player.mode };
+  });
+  check(after.upAt > 60 && after.upAt < 60 * 4 && after.maxFlee > 8, `the driver gets up and runs (up at ${after.upAt}, ran ${after.maxFlee.toFixed(1)} m)`);
+  check(after.gone && after.left === 0 && after.log.length === 0, `the driver is removed cleanly (${JSON.stringify(after)})`);
+  // A fast car cannot be entered on foot.
+  const fast = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = g.player;
+    p.vehicle.vx = p.vehicle.vz = p.vehicle.speed = 0;
+    g.exitVehicle();
+    const sp = g.city.spawn;
+    const car = g.debug.spawnOccupied('sedan', sp.x + 60, sp.z + 4, 0, 'civ');
+    car.speed = 6;
+    const w = p.walker;
+    w.x = w.px = car.x - 3;
+    w.z = w.pz = car.z - 1.5;
+    car.asleep = true; // keep it from moving: only the speed field matters here
+    g.step(1 / 60);
+    const hidden = p.near !== car;
+    car.speed = 1;
+    g.step(1 / 60);
+    return { hidden, shown: p.near === car };
+  });
+  check(fast.hidden && fast.shown, `a fast occupied car cannot be entered, a slow one can (${JSON.stringify(fast)})`);
+
+  // --- Persistent car and place -----------------------------------------
+  // Steal a car, save, reload the page with the same storage and expect to
+  // be in the same stolen car; the van left earlier is parked where it was.
+  const saved = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = g.player;
+    const sp = g.city.spawn;
+    const car = g.debug.spawnOccupied('pickup', sp.x + 90, sp.z + 4, 0.2, 'civ');
+    car.health = car.spec.health * 0.7;
+    const w = p.walker;
+    w.x = w.px = car.x - 4.2;
+    w.z = w.pz = car.z - 1.5;
+    for (let i = 0; i < 5; i++) g.step(1 / 60);
+    g.input.press('enter');
+    for (let i = 0; i < 200; i++) g.step(1 / 60);
+    const ok = p.vehicle === car;
+    car.vx = car.vz = car.speed = 0;
+    g.saveSession();
+    const raw = JSON.parse(localStorage.getItem('rustwater.save.v1'));
+    return { ok, spec: car.spec.id, color: car.color, x: car.x, z: car.z, health: car.health / car.spec.health, raw: raw.session, ver: raw.version, van: window.__van, garage: g.garage.length };
+  });
+  check(saved.ok && saved.ver === 3 && saved.raw && saved.raw.mode === 'car' && saved.raw.craft.spec === 'pickup', `the stolen car is saved (${JSON.stringify(saved.raw && saved.raw.craft)})`);
+  check(saved.raw && saved.raw.garage.some((e) => e.spec === 'van'), 'the van left earlier is in the saved garage');
+  await page.reload();
+  await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 30000 });
+  await page.waitForTimeout(500);
+  const back = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = g.player, v = p.vehicle;
+    for (let i = 0; i < 90; i++) g.step(1 / 60);
+    return {
+      mode: p.mode, spec: v && v.spec.id, color: v && v.color, x: v && v.x, z: v && v.z, hp: v && v.health / v.spec.health,
+      wanted: p.wanted, finite: !!v && Number.isFinite(v.x) && Number.isFinite(v.z) && Number.isFinite(v.heading),
+      vans: g.vehicles.filter((c) => c.spec.id === 'van' && c.parked).map((c) => ({ x: c.x, z: c.z, color: c.color })),
+      cars: g.vehicles.filter((c) => c.kind === 'car' && c.driver === 'player').length,
+    };
+  });
+  check(back.mode === 'car' && back.spec === saved.spec && back.color === saved.color, `reload resumes in the same car (${back.mode} ${back.spec} ${back.color}, want ${saved.spec} ${saved.color})`);
+  check(back.finite && Math.hypot(back.x - saved.x, back.z - saved.z) < 6 && Math.abs(back.hp - saved.health) < 0.02 && back.cars === 1, `resumed near the same spot with the same damage (${back.x && back.x.toFixed(1)}, ${back.z && back.z.toFixed(1)} vs ${saved.x.toFixed(1)}, ${saved.z.toFixed(1)}; hp ${back.hp})`);
+  check(back.wanted === 0, 'wanted level is not restored');
+  check(back.vans.some((c) => Math.hypot(c.x - saved.van.x, c.z - saved.van.z) < 2.5 && c.color === saved.van.color), `the previous car is parked where it was left (${JSON.stringify(back.vans)} vs ${JSON.stringify(saved.van)})`);
+  // On foot is remembered too, and "New game" forgets place and car only.
+  const foot = await page.evaluate(() => {
+    const g = window.__rw;
+    g.player.vehicle.vx = g.player.vehicle.vz = g.player.vehicle.speed = 0;
+    g.exitVehicle();
+    g.saveSession();
+    const s = JSON.parse(localStorage.getItem('rustwater.save.v1'));
+    const total = g.progress.score.total;
+    g.progress.score.total = 4321;
+    g.newSession();
+    const s2 = JSON.parse(localStorage.getItem('rustwater.save.v1'));
+    return { mode: s.session.mode, after: s2.session, mode2: g.player.mode, spec: g.player.vehicle && g.player.vehicle.spec.id, score: s2.score.total, total };
+  });
+  check(foot.mode === 'foot', 'leaving the car saves "on foot"');
+  check(foot.after === null && foot.mode2 === 'car' && foot.spec === 'sedan' && foot.score === 4321, `New game resets the car and place but keeps scores (${JSON.stringify(foot)})`);
 }

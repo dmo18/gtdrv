@@ -6,7 +6,7 @@
 //   tankBoom    one-shot: the main gun, a hard crack and a long low boom
 //   tankCoax    one-shot: one round of the coaxial gun (a heavy rattle)
 //   tankCrush   one-shot: a car or bench rolled flat, metal crunch
-import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter, soft, harmonize, addNWave, warm } from './dsp.js';
+import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter, soft, harmonize, addNWave, warm, envelope } from './dsp.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -70,25 +70,21 @@ export const TANK_SHOTS = {
     filter(cr, out, biquad('hp', 700, 0.7), { add: true, loop: false });
     filter(cr, out, biquad('bp', 400, 0.8), { gain: 1.2, add: true, loop: false });
     // Body: low noise closing down, a falling thump, a long rumble.
-    const body = white(n, rng);
-    for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      body[i] *= Math.min(1, t / 0.003) * Math.exp(-t / 0.28);
-    }
+    const body = envelope(white(n, rng), 0.003, 0.28);
     lp1(body, 520, { loop: false, passes: 2 });
     for (let i = 0; i < n; i++) out[i] += body[i] * 4;
     let ph = 0;
+    const dF = Math.exp(-1 / (0.18 * R.sr));
+    const dA = Math.exp(-1 / (0.5 * R.sr));
+    let gF = 1, gA = 1.5;
+    const att = 0.006 * R.sr;
     for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      const f = 22 + 52 * Math.exp(-t / 0.18);
-      ph += TAU * f / R.sr;
-      out[i] += Math.sin(ph) * 1.5 * Math.min(1, t / 0.006) * Math.exp(-t / 0.5);
+      ph += TAU * (22 + 52 * gF) / R.sr;
+      out[i] += Math.sin(ph) * gA * (i < att ? i / att : 1);
+      gF *= dF;
+      gA *= dA;
     }
-    const rum = white(n, rng);
-    for (let i = 0; i < n; i++) {
-      const t = i / R.sr;
-      rum[i] *= Math.min(1, t / 0.08) * Math.exp(-t / 1.0);
-    }
+    const rum = envelope(white(n, rng), 0.08, 1.0);
     lp1(rum, 110, { loop: false, passes: 2 });
     for (let i = 0; i < n; i++) out[i] += rum[i] * 6;
     // The breech: a metallic clunk as it recoils.

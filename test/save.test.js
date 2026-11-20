@@ -23,12 +23,12 @@ test('round trip keeps valid progress', () => {
   const s = memory();
   assert.equal(saveProgress(s, p), true);
   assert.deepEqual(loadProgress(s), p);
-  assert.equal(JSON.parse(s.getItem(SAVE_KEY)).version, 2);
+  assert.equal(JSON.parse(s.getItem(SAVE_KEY)).version, 3);
 });
 
-test('defaults: version 2, no money, no owned', () => {
+test('defaults: version 3, no money, no owned', () => {
   const p = defaultProgress();
-  assert.equal(p.version, 2);
+  assert.equal(p.version, 3);
   assert.equal(p.money, undefined);
   assert.equal(p.owned, undefined);
   assert.equal(p.score.total, 0);
@@ -43,7 +43,7 @@ test('version 1 save migrates: money x 10 is the total, medals, times, stats, se
     settings: { master: 0.3, invertPitch: true, leftHanded: true, quality: 0.75, police: false, steering: 'slider', steerSensitivity: 1.25, handling: 'sim', hud: 'full' },
   };
   const p = loadProgress(memory(JSON.stringify(v1)));
-  assert.equal(p.version, 2);
+  assert.equal(p.version, 3);
   assert.equal(p.score.total, 12340);
   assert.equal(p.money, undefined);
   assert.equal(p.owned, undefined);
@@ -51,7 +51,7 @@ test('version 1 save migrates: money x 10 is the total, medals, times, stats, se
   assert.deepEqual(p.bestTimes, v1.bestTimes);
   assert.deepEqual(p.stats, v1.stats);
   assert.deepEqual(p.settings, v1.settings);
-  // Migrated once: saving writes version 2 and loading it again changes nothing.
+  // Migrated once: saving writes version 3 and loading it again changes nothing.
   const s = memory(JSON.stringify(v1));
   saveProgress(s, loadProgress(s));
   assert.equal(JSON.parse(s.getItem(SAVE_KEY)).money, undefined);
@@ -106,7 +106,7 @@ test('garbage inputs give valid defaults', () => {
   for (const x of inputs) {
     const p = sanitizeProgress(x);
     assert.ok(Number.isInteger(p.score.total) && p.score.total >= 0 && p.score.total <= 1e9);
-    assert.equal(p.version, 2);
+    assert.equal(p.version, 3);
     assert.equal(p.money, undefined);
     assert.ok(Object.keys(p.medals).length <= 200);
     assert.ok(Object.keys(p.score.courses).length <= 200);

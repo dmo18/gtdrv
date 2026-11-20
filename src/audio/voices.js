@@ -4,9 +4,9 @@
 // share the same idea without counting as voices: `raw` for engine pops
 // and `spot` for distant ambient calls (gulls, clanks, far horns).
 
-const MAX_VOICES = 8;
-const MAX_RAW = 6;
-const MAX_SPOTS = 4;
+export const MAX_VOICES = 10; // explosions hold a voice for their 4 s tail
+export const MAX_RAW = 6;
+export const MAX_SPOTS = 4;
 
 export function createVoices(ctx, getBuffers, rng, spotBus) {
   const slots = [];
@@ -16,12 +16,18 @@ export function createVoices(ctx, getBuffers, rng, spotBus) {
 
   for (let i = 0; i < MAX_VOICES; i++) {
     const g = ctx.createGain();
+    // a per-voice low-pass: distance and occlusion dull a sound
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 20000;
+    lp.Q.value = 0.5;
+    g.connect(lp);
     let p = null;
     if (ctx.createStereoPanner) {
       p = ctx.createStereoPanner();
-      g.connect(p);
+      lp.connect(p);
     }
-    slots.push({ g, p, busy: false, endT: 0, nodes: [], bus: null });
+    slots.push({ g, lp, p, busy: false, endT: 0, nodes: [], bus: null });
   }
 
   function free(slot) {
@@ -40,7 +46,8 @@ export function createVoices(ctx, getBuffers, rng, spotBus) {
 
   // build(v, t) calls v.add(name, when, gain, rate, bands?) per layer;
   // bands = [[freq, q, gain], ...] routes that layer through band-passes.
-  function play(bus, gain, pan, build) {
+  // lp: optional low-pass cut-off in Hz for the whole voice (0 = open).
+  function play(bus, gain, pan, build, lp = 0) {
     if (count >= MAX_VOICES || !(gain > 0.001)) return false;
     const buffers = getBuffers();
     if (!buffers) return false;
@@ -49,7 +56,8 @@ export function createVoices(ctx, getBuffers, rng, spotBus) {
     const t = ctx.currentTime;
     slot.g.gain.cancelScheduledValues(t);
     slot.g.gain.setValueAtTime(gain, t);
-    const out = slot.p || slot.g;
+    slot.lp.frequency.setValueAtTime(lp > 0 ? Math.min(20000, lp) : 20000, t);
+    const out = slot.p || slot.lp;
     if (slot.bus !== bus) {
       try {
         out.disconnect();

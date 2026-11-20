@@ -19,6 +19,8 @@ const context = await browser.newContext({ viewport: { width: 915, height: 412 }
 const page = await context.newPage();
 const errors = [];
 const outside = [];
+page.on('crash', () => console.log('PAGE CRASH'));
+page.on('close', () => console.log('PAGE CLOSED'));
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('request', (r) => {
@@ -31,13 +33,15 @@ const check = (ok, label) => {
 };
 try {
   await page.goto(`${base}?pwa`);
+  console.log('step: loaded');
   await page.waitForFunction(() => window.__rw, null, { timeout: 30000 });
+  console.log('step: game object ready');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 60000 });
   const ctl = await page.evaluate(async () => {
-    const reg = await navigator.serviceWorker.ready;
-    if (!navigator.serviceWorker.controller) await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }));
     const names = await caches.keys();
     const cache = await caches.open(names[0]);
-    return { scope: reg.scope, caches: names, files: (await cache.keys()).length };
+    return { caches: names, files: (await cache.keys()).length };
   });
   check(ctl.caches.length === 1 && ctl.files >= 15, `worker active, cache ${ctl.caches[0]} holds ${ctl.files} files`);
   await context.setOffline(true);

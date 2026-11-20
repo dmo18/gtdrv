@@ -32,7 +32,8 @@ await build({
     contents: `
       import { createAudio } from './src/systems/audio.js';
       import { createEvents } from './src/core/events.js';
-      window.h = { createAudio, createEvents };
+      import * as an from './src/audio/analyze.js';
+      window.h = { createAudio, createEvents, an };
     `,
   },
   bundle: true, platform: 'browser', format: 'esm', outfile: path.join(out, 'harness.js'),
@@ -54,8 +55,10 @@ let results;
 try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('crash', () => console.log('FAIL page crashed'));
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
+    if (process.env.AUDIO_TEST_LOG) console.log('page:', m.text());
   });
   await page.goto(url);
   await page.waitForFunction(() => window.h);
@@ -109,7 +112,7 @@ try {
     const dbg = audio.debug;
     check('bank ready', dbg.ready);
     check('generation time < 1500 ms', dbg.genWallMs > 0 && dbg.genWallMs < 1500,
-      `wall ${dbg.genWallMs.toFixed(0)} ms, main-thread cpu ${dbg.genCpuMs.toFixed(0)} ms in ${dbg.slices} slices, longest slice ${dbg.maxSliceMs.toFixed(1)} ms, offline ${JSON.stringify(dbg.bankStats)}`);
+      `wall ${dbg.genWallMs.toFixed(0)} ms, main-thread cpu ${dbg.genCpuMs.toFixed(0)} ms in ${dbg.slices} slices, longest slice ${dbg.maxSliceMs.toFixed(1)} ms, offline ${dbg.bankStats.offline} specs in ${dbg.bankStats.offlineMs.toFixed(0)} ms, js ${dbg.bankStats.js}`);
     const mb = dbg.bytes / 1048576;
     check('buffer memory < 12 MB', mb > 0.5 && mb < 12, `${mb.toFixed(2)} MB in ${Object.keys(dbg.buffers).length} buffers`);
 
@@ -275,8 +278,10 @@ try {
     fan.smoothingTimeConstant = 0.6;
     dbg.buses.engine.connect(fan);
     const spec = new Float32Array(fan.frequencyBinCount);
-    // Average the power spectrum over several analyser frames, then take
-    // the lowest clear peak within 10 dB of the loudest.
+    // Average the power spectrum over several analyser frames, then find
+    // the fundamental by a harmonic product (sum of dB at f, 2f, 3f, 4f):
+    // it follows the firing note even when the 2nd harmonic is louder
+    // than the fundamental, as in real engines and as the ear hears it.
     async function peakAt(rpm) {
       await run(10, () => {});
       car.rpm = rpm;
@@ -285,23 +290,28 @@ try {
       car.throttle = 0.6;
       await run(70, () => {});
       const hz = ctx.sampleRate / fan.fftSize;
-      const i0 = Math.floor(20 / hz);
-      const i1 = Math.ceil(700 / hz);
-      const avg = new Float32Array(i1 + 2);
+      const i0 = Math.floor(25 / hz);
+      const i1 = Math.ceil(400 / hz);
+      const top = Math.ceil(1700 / hz);
+      const avg = new Float32Array(top + 3);
       const frames = 8;
       for (let f = 0; f < frames; f++) {
         await run(6, () => {});
         fan.getFloatFrequencyData(spec);
-        for (let i = i0; i < i1 + 2; i++) avg[i] += 10 ** (spec[i] / 10) / frames;
+        for (let i = i0; i < top + 3; i++) avg[i] += 10 ** (spec[i] / 10) / frames;
       }
-      for (let i = i0; i < i1 + 2; i++) avg[i] = 10 * Math.log10(avg[i] + 1e-12);
-      let best = -Infinity;
-      for (let i = i0; i < i1; i++) best = Math.max(best, avg[i]);
-      for (let i = i0 + 2; i < i1 - 2; i++) {
-        const v = avg[i];
-        if (v > best - 10 && v >= avg[i - 1] && v >= avg[i + 1] && v >= avg[i - 2] && v >= avg[i + 2]) return i * hz;
+      for (let i = i0; i < top + 3; i++) avg[i] = 10 * Math.log10(avg[i] + 1e-12);
+      const near = (i) => Math.max(avg[i - 1], avg[i], avg[i + 1]);
+      let best = -Infinity, bestI = 0;
+      for (let i = i0; i <= i1; i++) {
+        let sc = 0;
+        for (let h = 1; h <= 4; h++) sc += near(i * h);
+        if (sc > best) {
+          best = sc;
+          bestI = i;
+        }
       }
-      return 0;
+      return bestI * hz;
     }
     const fLow = await peakAt(0.2);
     const fHigh = await peakAt(0.6);
@@ -367,7 +377,11 @@ try {
 
     // Voice cap.
     for (let i = 0; i < 30; i++) events.emit(i % 2 ? 'ui' : 'checkpoint');
-    check('voice cap', audio.activeVoices <= 8, `voices ${audio.activeVoices}`);
+    // Voice caps are fixed numbers (src/audio/voices.js): 10 pooled
+    // voices, 6 raw engine pops, 4 ambient spots.
+    const caps = audio.debug.caps;
+    check('voice caps fixed', caps.voices <= 10 && caps.raw <= 6 && caps.spots <= 4, JSON.stringify(caps));
+    check('voice cap', audio.activeVoices <= caps.voices, `voices ${audio.activeVoices}`);
     await run(60, () => {});
 
     // Mute.
@@ -402,12 +416,13 @@ try {
     check('voices drain to 0', drained, `voices ${audio.activeVoices}`);
     check('peak <= 1', peak <= 1.0, `peak ${peak.toFixed(4)}`);
     check('peak sane', peak > 0.01, `peak ${peak.toFixed(4)}`);
-    check('max voices <= 8', maxVoices <= 8, `max ${maxVoices}`);
+    check('max voices <= cap', maxVoices <= caps.voices, `max ${maxVoices}`);
 
     // ---- Combat sounds: generated, bounded, positioned, drained ----
     {
-      const names = ['gunPistol0', 'gunPistol1', 'gunSmg0', 'gunScatter', 'gunLobber', 'blast0', 'blast1', 'thwack0', 'bodyHit0',
-        'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick',
+      const names = ['gunPistol0', 'gunPistol1', 'gunSmg0', 'gunScatter', 'gunLobber', 'gunRifle0', 'gunCannon0',
+        'blastCrack0', 'blastBody0', 'blastTail', 'debris0', 'thwack0', 'bodyHit0', 'impactMetal0', 'impactConcrete0', 'casing0',
+        'rocketLaunch', 'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick',
         'pin', 'tink0', 'tink1', 'whistle', 'beep', 'lockSeek', 'lockOn', 'abroar', 'spotClick', 'shockThump'];
       const t1 = performance.now();
       while (names.some((n) => !audio.debug.buffers[n]) && performance.now() - t1 < 8000) {
@@ -435,7 +450,7 @@ try {
         if (bad || pk < 0.3 || Math.sqrt(sum2 / d.length) < 0.01) weak.push(`${n} pk ${pk.toFixed(2)}`);
       }
       check('combat buffers have signal and no clipping', weak.length === 0, weak.join('; '));
-      check('combat buffer memory < 2 MB', cbytes < 2 * 1048576, `${(cbytes / 1048576).toFixed(2)} MB listed`);
+      check('combat buffer memory < 2.5 MB', cbytes < 2.5 * 1048576, `${(cbytes / 1048576).toFixed(2)} MB listed`);
 
       game.vehicles.length = 0; // quiet street: no other engines
       const walker = { x: 0, z: 0, hp: 100, team: 'player' };
@@ -559,7 +574,7 @@ try {
         sample();
         await sleep(5);
       }
-      check('combat storm within voice cap', maxVoices <= 8, `max ${maxVoices}`);
+      check('combat storm within voice cap', maxVoices <= caps.voices, `max ${maxVoices}`);
       check('combat storm does not clip', peak <= 1.0, `peak ${peak.toFixed(3)}`);
       let drained2 = false;
       for (let i = 0; i < 60 && !drained2; i++) {
@@ -577,6 +592,138 @@ try {
     checkLoops('all engines');
     const mb2 = fin.bytes / 1048576;
     check('total buffer memory < 12 MB', mb2 < 12, `${mb2.toFixed(2)} MB in ${Object.keys(fin.buffers).length} buffers; whole bank after ${fin.fullMs.toFixed(0)} ms; background generation (extras + later engines) ${fin.lazyMs.toFixed(0)} ms main-thread`);
+
+    // ---- Sound quality: measured properties of every buffer ----
+    // (measurements only; nobody listened). See docs/AUDIO.md.
+    {
+      const an = window.h.an;
+      const B = fin.buffers;
+      const loops = new Set(fin.loops);
+      const M = {};
+      for (const n of Object.keys(B)) {
+        if (n === 'ir') continue;
+        M[n] = an.measure(B[n].getChannelData(0), B[n].sampleRate, loops.has(n));
+      }
+      const all = Object.keys(M);
+      const clipped = all.filter((n) => M[n].clipped > 0 || !(M[n].peak < 0.999));
+      check('no buffer clips', clipped.length === 0, clipped.join(' '));
+      // loops may be quieter (an idle overrun layer is meant to be soft)
+      const silly = all.filter((n) => !(M[n].lufs > (loops.has(n) ? -40 : -36) && M[n].lufs < -4));
+      const lo = Math.min(...all.map((n) => M[n].lufs)), hi = Math.max(...all.map((n) => M[n].lufs));
+      check('loudness range of every buffer (shots -36..-4, loops -40..-4)', silly.length === 0, `${silly.join(' ')} range ${lo.toFixed(1)}..${hi.toFixed(1)}`);
+      // Spectral centroid per category (Hz).
+      const RANGES = [
+        [/^gunPistol\d$|^gunSmg\d$/, 600, 3000], [/^gunScatter$|^gunRifle\d$|^gunCannon\d$/, 250, 2500],
+        [/^blastCrack\d$/, 1000, 4500], [/^blastBody\d$/, 200, 1500], [/^blastTail$/, 50, 400], [/^debris\d$/, 2000, 8000],
+        [/^eng:.*:on$/, 100, 2500], [/^squeal$/, 1000, 2500], [/^birds$/, 2000, 6000], [/^crickets$/, 3000, 6000],
+        [/^siren(Wail|Yelp)$/, 900, 2000], [/^rotor$/, 70, 600], [/^whiz\d$/, 2000, 6000], [/^turbo$/, 2000, 5000],
+        [/^impactMetal\d$/, 1200, 5000], [/^impactConcrete\d$/, 800, 4000], [/^tankBoom$/, 50, 600], [/^m:hat$/, 5000, 11000],
+      ];
+      const off = [];
+      let counted = 0;
+      for (const n of all) {
+        for (const [re, a, b] of RANGES) {
+          if (!re.test(n)) continue;
+          counted++;
+          if (!(M[n].centroid >= a && M[n].centroid <= b)) off.push(`${n} ${M[n].centroid.toFixed(0)}`);
+        }
+      }
+      check('spectral centroid ranges per category', off.length === 0 && counted > 60, `${counted} checked; ${off.join(', ')}`);
+      // A phone speaker barely reproduces below ~100 Hz: heavy sounds must
+      // keep at least 10 % of their power above it (harmonics).
+      const heavy = all.filter((n) => /^(blastBody|blastTail|tankBoom|thud|rotor|tankTracks|m:kick|bodyHit|eng:.*:on)/.test(n));
+      const thin = heavy.filter((n) => 1 - M[n].bands[0] < 0.1);
+      check('heavy sounds carry on a phone (>=10% power above 100 Hz)', thin.length === 0 && heavy.length > 40,
+        `${heavy.length} checked; ${thin.map((n) => `${n} ${((1 - M[n].bands[0]) * 100).toFixed(0)}%`).join(', ')}`);
+      // Guns have a sharp transient: crest factor at least 14 dB.
+      const dull = all.filter((n) => /^gun(Pistol|Smg|Rifle|Scatter)/.test(n) && M[n].crestDb < 14);
+      check('gunshots have a sharp crack (crest >= 14 dB)', dull.length === 0, dull.join(' '));
+      // Explosion layers: the tail outlasts the body, the body the crack.
+      const dc = M.blastCrack0.decay, db = M.blastBody0.decay, dt = M.blastTail.decay;
+      check('explosion layers: crack < body < tail', dc < db && db < dt && dt > 3, `crack ${dc.toFixed(2)} s, body ${db.toFixed(2)} s, tail ${dt.toFixed(2)} s`);
+      // Engine sets: on-load louder than off-load at each rpm point.
+      const quiet = [];
+      for (const n of all) {
+        const m = /^eng:(\w+):(\d):on$/.exec(n);
+        if (m && !(M[n].lufs > M[`eng:${m[1]}:${m[2]}:off`].lufs + 3)) quiet.push(n);
+      }
+      check('engine on-load louder than overrun (>= 3 dB)', quiet.length === 0, quiet.join(' '));
+      check('reverb impulse at the context rate', B.ir.sampleRate === ctx.sampleRate, `${B.ir.sampleRate} vs ${ctx.sampleRate}`);
+    }
+
+    // ---- Doppler direction: approaching is higher, receding lower ----
+    {
+      const pl = game.player;
+      pl.mode = 'car';
+      pl.vehicle = car;
+      car.speed = 0; car.vx = 0; car.vz = 0;
+      const ap = mk('car', 'sedan', 40, { x: 40, z: 0, speed: 25, vx: -25, vz: 0, throttle: 0.5 });
+      const rc = mk('car', 'compact', 40, { x: -40, z: 0, speed: 25, vx: -25, vz: 0, throttle: 0.5 });
+      game.vehicles = [car, ap, rc];
+      for (let i = 0; i < 30; i++) {
+        audio.render(1, 1 / 60);
+        await sleep(8);
+      }
+      const o = audio.debug.others;
+      const fa = (o.find((q) => q.v === ap) || {}).dop;
+      const fr = (o.find((q) => q.v === rc) || {}).dop;
+      check('doppler: approaching higher, receding lower', fa > 1.03 && fr < 0.97, `approaching ${fa && fa.toFixed(3)}, receding ${fr && fr.toFixed(3)}`);
+      game.vehicles = [car];
+    }
+
+    // ---- Music: on by default, off when switched off ----
+    {
+      const a = ctx.createAnalyser();
+      a.fftSize = 2048;
+      fin.musicBus.connect(a);
+      const tb = new Float32Array(2048);
+      let mOn = 0, mOff = 0;
+      audio.setVolume({ musicOn: true, music: 0.6 });
+      await run(150, () => {
+        a.getFloatTimeDomainData(tb);
+        mOn = Math.max(mOn, window.h.an.rmsOf(tb));
+      });
+      audio.setVolume({ musicOn: false });
+      await run(40, () => {});
+      await run(40, () => {
+        a.getFloatTimeDomainData(tb);
+        mOff = Math.max(mOff, window.h.an.rmsOf(tb));
+      });
+      check('music plays and switches off', mOn > 0.003 && mOff < 0.0005 && audio.debug.musicBar > 0,
+        `on ${mOn.toFixed(4)} off ${mOff.toExponential(1)}, bars ${audio.debug.musicBar}`);
+      fin.musicBus.disconnect(a);
+      audio.setVolume({ musicOn: true });
+    }
+
+    // ---- A huge explosion right next to the player does not clip ----
+    {
+      peak = 0;
+      events.emit('explosion', { x: 1, y: 0, z: 0, radius: 16, size: 'huge', source: null, depth: 0 });
+      await run(120, () => {});
+      check('point-blank huge explosion: loud, no clipping', peak > 0.3 && peak < 1.0, `peak ${peak.toFixed(3)}`);
+    }
+
+    // ---- Gesture resume (Android: touchend / pointerup) ----
+    {
+      await ctx.suspend();
+      window.dispatchEvent(new Event('pointerup'));
+      await sleep(150);
+      check('pointerup resumes a suspended context', ctx.state === 'running', ctx.state);
+    }
+
+    // ---- Main-thread cost ----
+    {
+      const d = audio.debug;
+      check('render cost small (avg < 0.6 ms, < 2 % of updates over 4 ms)', d.renderMsAvg < 0.6 && d.renderOver4 < 0.02 * d.renderN,
+        `avg ${d.renderMsAvg.toFixed(3)} ms per update (30 Hz), ${d.renderOver4} of ${d.renderN} over 4 ms, max ${d.renderMsMax.toFixed(2)} ms; context ${d.sampleRate} Hz`);
+      // One job cannot be split, so a busy machine shows up as a long
+      // slice; the 95th percentile of job times is the stable figure.
+      const jm = d.bankStats.jobMs.slice().sort((a, b) => a - b);
+      const p95 = jm[Math.floor(jm.length * 0.95)] || 0;
+      const med = jm[Math.floor(jm.length * 0.5)] || 0;
+      check('generation jobs short (95th percentile < 20 ms)', p95 < 20 && jm.length > 100,
+        `${jm.length} jobs (headless desktop; the machine may be busy), median ${med} ms, p95 ${p95} ms, longest slice ${d.maxSliceMs.toFixed(1)} ms (${d.bankStats.slowJob} ${d.bankStats.slowMs.toFixed(1)} ms)`);
+    }
 
     audio.dispose();
     check('dispose', true);

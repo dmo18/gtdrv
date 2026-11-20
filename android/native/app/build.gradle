@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Version and signing come from files and environment variables, never from
+// secrets in the repository. See docs/PLAY.md.
+def versionProps = new Properties()
+file('../version.properties').withInputStream { versionProps.load(it) }
+
+// Signing: environment variables first (used by CI), then the gitignored
+// file android/native/keystore.properties. With neither, release builds are
+// left unsigned and Play Console or you can sign them later.
+def signingProps = new Properties()
+def signingFile = file('../keystore.properties')
+if (signingFile.exists()) signingFile.withInputStream { signingProps.load(it) }
+def sign = { String envName, String propName ->
+    System.getenv(envName) ?: signingProps.getProperty(propName)
+}
+def storePath = sign('RUSTWATER_KEYSTORE_FILE', 'storeFile')
+
 android {
     namespace = "io.github.dmo18.rustwater"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "io.github.dmo18.rustwater"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode Integer.parseInt(System.getenv('RUSTWATER_VERSION_CODE') ?: versionProps.getProperty('VERSION_CODE'))
+        versionName System.getenv('RUSTWATER_VERSION_NAME') ?: versionProps.getProperty('VERSION_NAME')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +32,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword sign('RUSTWATER_KEYSTORE_PASSWORD', 'storePassword')
+                keyAlias sign('RUSTWATER_KEY_ALIAS', 'keyAlias')
+                keyPassword sign('RUSTWATER_KEY_PASSWORD', 'keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (storePath) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -43,12 +70,3 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
-
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
-}

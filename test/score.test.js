@@ -238,7 +238,7 @@ test('high scores persist: economy saves, a new session loads them', () => {
   g.events.emit('missionDone', { id: 'm1', score: 4000, time: 200, newBest: true });
   g.events.emit('missionDone', { id: 'm1', score: 3000, time: 150, newBest: false });
   const saved = JSON.parse(storage.getItem(SAVE_KEY));
-  assert.equal(saved.version, 2);
+  assert.equal(saved.version, 3);
   assert.equal(saved.score.total, 1000);
   assert.equal(saved.score.sessionBest, 1000);
   assert.equal(saved.score.missions.m1.best, 4000);

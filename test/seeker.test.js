@@ -66,8 +66,9 @@ test('seeker: cone edge, range, line of sight, wrecked targets', () => {
 test('seeker: tiers (attackers, crew, police incl. police helis, crewed), civilians only within 4 deg', () => {
   assert.equal(seekTier({ hostile: true, spec: {}, health: 1 }), 0);
   assert.equal(seekTier({ crew: true, spec: {}, health: 1 }), 1);
-  assert.equal(seekTier({ spec: { police: true }, health: 1 }), 2);
-  assert.equal(seekTier({ police: true, spec: {}, health: 1 }), 2);
+  assert.equal(seekTier({ spec: { police: true }, health: 1, driver: 'ai' }), 2);
+  assert.equal(seekTier({ police: true, spec: {}, health: 1, driver: {} }), 2);
+  assert.equal(seekTier({ spec: { police: true }, health: 1 }), 4, 'a parked police craft nobody drives is a plain craft');
   assert.equal(seekTier({ spec: {}, health: 1 }), 4);
   assert.equal(seekTier({ hp: 30, team: 'crew' }), 1);
   const c = jet();

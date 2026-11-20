@@ -5,6 +5,8 @@
 
 export function shouldRegister(env) {
   const { prod, nav, loc, cap } = env;
+  // Android's embedded browser ("; wv)") is the app wrapper: files are bundled there.
+  if (/; wv\)/.test((nav && nav.userAgent) || '')) return false;
   if (!prod || !nav || !('serviceWorker' in nav)) return false;
   if (cap) return false;
   if (loc.protocol !== 'https:' && loc.hostname !== 'localhost' && loc.hostname !== '127.0.0.1') return false;

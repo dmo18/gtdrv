@@ -1,3 +1,4 @@
+/* global __FILES__ */
 /* Rustwater service worker. Offline cache for the game's own files only.
  * Same-origin requests only; it never contacts any other site.
  * The build fills in VERSION (a hash of the files) and FILES (the list). */

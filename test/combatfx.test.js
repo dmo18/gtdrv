@@ -88,3 +88,30 @@ test('wreck debris: 6 to 10 chunks per vehicle, pooled with a hard cap, gone in 
   events.emit('explosion', { x: 1, y: 0.7, z: 0, radius: 8, source: null, depth: 0, size: 'small', craft: null });
   assert.equal(fx.counts().debris, DEBRIS_MAX, 'blasts without a craft add no chunks');
 });
+
+test('blast shake scales with distance and size, and Reduce motion silences it', () => {
+  const mk = (reduce) => {
+    const events = createEvents();
+    const kicks = [];
+    const game = {
+      events, quality: 1, paused: false, player: { x: 0, z: 0 },
+      progress: { settings: { reduceMotion: reduce } },
+      chase: { kick: (s) => kicks.push(s) },
+      combat: { decals: { x: new Float32Array(24), z: new Float32Array(24), r: new Float32Array(24), t: new Float32Array(24).fill(-1e9) }, projectiles: [] },
+    };
+    createCombatFx(game);
+    return { events, kicks };
+  };
+  const a = mk(false);
+  a.events.emit('explosion', { x: 8, y: 0, z: 0, radius: 8, size: 'big', puff: false, craft: null });
+  a.events.emit('explosion', { x: 40, y: 0, z: 0, radius: 8, size: 'big', puff: false, craft: null });
+  a.events.emit('explosion', { x: 8, y: 0, z: 0, radius: 14, size: 'huge', puff: false, craft: null });
+  a.events.emit('explosion', { x: 400, y: 0, z: 0, radius: 8, size: 'big', puff: false, craft: null });
+  assert.ok(a.kicks.length >= 3);
+  assert.ok(a.kicks[0] > a.kicks[1], 'nearer shakes more');
+  assert.ok(a.kicks[2] > a.kicks[0], 'bigger shakes more');
+  assert.equal(a.kicks.length, 3, 'too far: no shake');
+  const b = mk(true);
+  b.events.emit('explosion', { x: 8, y: 0, z: 0, radius: 14, size: 'huge', puff: false, craft: null });
+  assert.equal(b.kicks.length, 0, 'Reduce motion: no shake');
+});

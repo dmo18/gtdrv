@@ -50,6 +50,9 @@ import { createPersonMesh, updatePersonMesh } from './render/personmesh.js';
 // Police helicopter pilots and the fighter's shock ring (task 33).
 import { createHeliPilots } from './systems/helipilot.js';
 import { createJetFx } from './render/jetfx.js';
+// Carjacking (core/carjack.js) and the saved place, craft and garage.
+import { createCarjack } from './systems/carjack.js';
+import { createSession } from './systems/session.js';
 
 const SKY = 0x9fc8e8;
 
@@ -234,12 +237,28 @@ export function createGame({ canvas, uiRoot }) {
     events.emit('enter', v);
   };
   game.findRescueSpot = findRescueSpot;
+  // ENTER on a craft: empty ones are entered at once, occupied ones are
+  // carjacked (systems/carjack.js runs the sequence and enters at the end).
+  game.tryEnterVehicle = (v) => {
+    if (v.driver && v.driver !== 'player' && game.carjack) return game.carjack.start(v);
+    game.enterVehicle(v);
+    return true;
+  };
   // Test hook: put a fresh car on the map and keep it from being swept away.
   game.debug = {
     spawnCar(specId, x, z, heading = 0) {
       const v = createVehicle(specId, x, z, heading, rng);
       v.home = { craft: v };
       return game.addVehicle(v);
+    },
+    // A parked car with somebody at the wheel (team: 'civ' | 'police' | 'crew').
+    spawnOccupied(specId, x, z, heading = 0, team = 'civ') {
+      const v = game.debug.spawnCar(specId, x, z, heading);
+      v.driver = { dead: false, debug: true };
+      v.ai = v.driver;
+      v.occupantTeam = team;
+      v.controls = { steer: 0, throttle: 0, brake: 1, handbrake: true };
+      return v;
     },
   };
   game.exitVehicle = () => {
@@ -285,6 +304,7 @@ export function createGame({ canvas, uiRoot }) {
     storage = null;
   }
   game.economy = game.addSystem(createEconomy(game, storage));
+  game.session = game.addSystem(createSession(game, storage));
   game.fleet = game.addSystem(createFleet(game));
   game.traffic = game.addSystem(createTraffic(game));
   game.daynight = game.addSystem(createDayNight(game));
@@ -295,12 +315,14 @@ export function createGame({ canvas, uiRoot }) {
   // later combat tasks fill these files without touching this one.
   game.combat = game.addSystem(createCombat(game));
   game.crew = game.addSystem(createCrew(game));
+  game.carjack = game.addSystem(createCarjack(game)); // after traffic, police and crew: it holds the car still
   game.armor = game.addSystem(createArmor(game, uiRoot));
   game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));
   game.score = game.addSystem(createScore(game));
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
+  game.snapCam = () => { snapCam = true; };
   events.on('respawn', () => {
     if (game.police && game.police.heat) resetHeat(game.police.heat, 3);
     game.player.wanted = 0;
@@ -410,14 +432,16 @@ export function createGame({ canvas, uiRoot }) {
       w.px = w.x;
       w.pz = w.z;
       w.pheading = w.heading;
-      stepWalker(w, input, dt, game.world, game.camHeading);
+      const jacking = !!(game.carjack && game.carjack.busy);
+      if (jacking) game.carjack.stepPlayer(dt);
+      else stepWalker(w, input, dt, game.world, game.camHeading);
       p.x = w.x;
       p.z = w.z;
       p.y = 0;
       p.heading = w.heading;
       const up = !w.life || w.life === 'ok';
-      p.near = up ? findEnterable(w, vs) : null;
-      if (input.consume('enter') && p.near) game.enterVehicle(p.near);
+      p.near = up && !jacking && !p.vehicle ? findEnterable(w, vs, 3.2, game.carjack ? game.carjack.canEnter : null) : null;
+      if (input.consume('enter') && p.near) game.tryEnterVehicle(p.near);
     }
     // Every few seconds, clear away craft nobody is using or tracking
     // once they are far behind, so the world never fills up.
@@ -515,7 +539,7 @@ export function createGame({ canvas, uiRoot }) {
       camTarget.height = 1.5;
       if (p.near !== promptFor) {
         promptFor = p.near;
-        hud.setPrompt(p.near ? `Tap ENTER: ${p.near.spec.label}` : null);
+        hud.setPrompt(p.near ? `Tap ENTER: ${p.near.driver && p.near.driver !== 'player' ? 'take ' : ''}${p.near.spec.label}` : null);
       }
     }
     if (snapCam) {
@@ -573,6 +597,9 @@ export function createGame({ canvas, uiRoot }) {
       events.emit('pause', true);
     }
   });
+
+  // Pick up where the player left off (a no-op on a new game).
+  game.restoreSession();
 
   game.loop = createLoop({ fixedUpdate, render });
   game.resize = resize;

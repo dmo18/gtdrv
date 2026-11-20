@@ -1,0 +1,16 @@
+node_modules/
+native/.gradle/
+native/build/
+native/app/build/
+native/capacitor-cordova-android-plugins/build/
+native/local.properties
+native/keystore.properties
+native/app/src/main/assets/public/
+native/app/src/main/assets/capacitor.config.json
+native/app/src/main/assets/capacitor.plugins.json
+*.jks
+*.keystore
+*.p12
+.idea/
+*.iml
+out/

@@ -10,8 +10,15 @@
 // `hint_` and `seen_` flags kept in that map), best times, stats and
 // settings carry over unchanged. The storage key keeps its old name so
 // those saves are found.
+//
+// Version 3 adds `session`: the last place and craft and a small garage of
+// cars left behind (core/garage.js). Version 2 saves load unchanged with
+// no session. Wanted level is never saved.
+import { sanitizeSession } from './garage.js';
+
 export const SAVE_KEY = 'rustwater.save.v1';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
+const SCORE_VERSION = 2; // first version that keeps `score`
 
 const MAX_NUM = 1e9;
 const MAX_MONEY = 99999999; // v1 only: the old cap, used by the migration
@@ -40,6 +47,7 @@ export function defaultProgress() {
     medals: {},
     bestTimes: {},
     stats: { distance: 0, flights: 0, races: 0 },
+    session: null, // last place, craft and garage (null = new game)
     settings: {
       master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true,
       steering: 'wheel', steerSensitivity: 1, handling: 'arcade', hud: 'minimal',
@@ -94,12 +102,13 @@ export function sanitizeProgress(raw) {
   const p = defaultProgress();
   try {
     if (!isObj(raw)) return p;
-    if (own(raw, 'version') && Number.isInteger(raw.version) && raw.version >= SAVE_VERSION) {
+    if (own(raw, 'version') && Number.isInteger(raw.version) && raw.version >= SCORE_VERSION) {
       readScore(raw.score, p.score);
     } else if (own(raw, 'money') && isNum(raw.money)) {
       // Version 1: the old money becomes the starting total score.
       p.score.total = Math.floor(clampNum(raw.money, MAX_MONEY)) * 10;
     }
+    if (own(raw, 'session')) p.session = sanitizeSession(raw.session);
     p.medals = readMap(raw.medals, (v) => (MEDALS.includes(v) ? v : undefined));
     p.bestTimes = readMap(raw.bestTimes, (v) => (
       isNum(v) && v > 0 && v < 86400 ? v : undefined));
@@ -112,7 +121,8 @@ export function sanitizeProgress(raw) {
     if (isObj(raw.settings)) {
       const s = raw.settings, d = p.settings;
       if (own(s, 'master') && isNum(s.master)) d.master = Math.max(0, Math.min(1, s.master));
-      for (const k of ['invertPitch', 'leftHanded', 'police']) {
+      if (own(s, 'musicVol') && isNum(s.musicVol)) d.musicVol = Math.max(0, Math.min(1, s.musicVol));
+      for (const k of ['invertPitch', 'leftHanded', 'police', 'music']) {
         if (own(s, k) && typeof s[k] === 'boolean') d[k] = s[k];
       }
       if (own(s, 'quality') && QUALITIES.includes(s.quality)) d.quality = s.quality;

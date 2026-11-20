@@ -5,7 +5,7 @@
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,12 @@ try {
   ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
 }
 
+// --size=WxH renders at that canvas size (default 1280x720); --out=DIR
+// copies the pictures there as well.
+const opt = (k) => (process.argv.find((a) => a.startsWith('--' + k + '=')) || '').split('=')[1];
+const [CW, CH] = (opt('size') || '1280x720').split('x').map(Number);
+const copyTo = opt('out');
+const names = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const out = join(root, 'dist', 'vehicle-shots');
 await mkdir(out, { recursive: true });
@@ -27,11 +33,11 @@ await build({
   outfile: join(out, 'harness.js'),
   logLevel: 'warning',
 });
-await writeFile(join(out, 'index.html'), '<!doctype html><html><body style="margin:0;background:#000"><canvas id="c" width="1280" height="720" style="width:1280px;height:720px"></canvas><script type="module" src="harness.js"></script></body></html>');
+await writeFile(join(out, 'index.html'), '<!doctype html><html><body style="margin:0;background:#000"><canvas id="c"></canvas><script type="module" src="harness.js"></script></body></html>');
 
 const server = createServer(async (req, res) => {
   try {
-    const name = new URL(req.url, 'http://x').pathname === '/harness.js' ? 'harness.js' : 'index.html';
+    const name = new URL(req.url, 'http://x').pathname.endsWith('/harness.js') ? 'harness.js' : 'index.html';
     const data = await readFile(join(out, name));
     res.writeHead(200, { 'content-type': name.endsWith('.js') ? 'text/javascript' : 'text/html', 'cache-control': 'no-store' });
     res.end(data);
@@ -45,7 +51,7 @@ await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 let failed = false;
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: CW, height: CH }, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => {
     failed = true;
     console.error('page error:', e.message);
@@ -53,16 +59,17 @@ try {
   page.on('console', (m) => {
     if (m.type() === 'error' || m.type() === 'warning') console.error('console:', m.text());
   });
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?w=${CW}&h=${CH}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
   const all = await page.evaluate(() => window.shotNames);
-  const want = process.argv.slice(2).length ? process.argv.slice(2) : all;
+  const want = names.length ? names : all;
   console.log('triangles per car:', JSON.stringify(await page.evaluate(() => window.stats())));
   for (const name of want) {
     const t0 = Date.now();
     const r = await page.evaluate((n) => window.shot(n), name);
     const file = join(out, name + '.png');
     await page.locator('#c').screenshot({ path: file });
+    if (copyTo) await copyFile(file, join(resolve(copyTo), name + '.png'));
     console.log(name, r ? JSON.stringify(r) : '', `${Date.now() - t0} ms ->`, file);
   }
 } finally {

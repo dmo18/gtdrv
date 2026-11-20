@@ -171,6 +171,20 @@ export function normalize(buf, to = 0.9) {
   return buf;
 }
 
+// Multiply in place by an attack ramp (att s) and exponential decay
+// (time constant tau s), by recurrence: no exp() per sample.
+export function envelope(buf, att, tau, sr = R.sr, from = 0) {
+  const a = Math.max(1, att * sr);
+  const d = Math.exp(-1 / (tau * sr));
+  let e = 1;
+  for (let i = from; i < buf.length; i++) {
+    const j = i - from;
+    buf[i] *= (j < a ? j / a : 1) * e;
+    e *= d;
+  }
+  return buf;
+}
+
 // Short fades so one-shots never click.
 export function fadeEdges(buf, inS = 32, outS = 256) {
   const n = buf.length;
@@ -192,15 +206,12 @@ export function warm(buf, drive = 2, asym = 0.25) {
   const p = peak(buf);
   if (p < 1e-9) return buf;
   const k = drive / p;
-  let q = 0;
   for (let i = 0; i < buf.length; i++) {
     const x = buf[i] * k;
-    const y = Math.tanh(x + asym * x * x * (x > 0 ? 0.5 : 0.25));
-    buf[i] = y;
-    const a = y < 0 ? -y : y;
-    if (a > q) q = a;
+    buf[i] = Math.tanh(x + asym * x * x * (x > 0 ? 0.5 : 0.25));
   }
-  return scale(removeDC(buf), p / (q || 1));
+  removeDC(buf);
+  return scale(buf, p / (peak(buf) || 1));
 }
 
 // Phone speakers barely move below ~250 Hz, so energy under `fc` is
@@ -211,7 +222,6 @@ export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false,
   const n = buf.length;
   const low = new Float32Array(n);
   filter(buf, low, biquad('lp', fc, 0.7, sr), { loop, sr });
-  filter(low, low, biquad('lp', fc, 0.7, sr), { loop, sr });
   const p = peak(low);
   if (p < 1e-9) return buf;
   const k = drive / p;
@@ -220,7 +230,6 @@ export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false,
     // rectified plus clipped: strong 2nd and 3rd harmonics
     low[i] = Math.tanh(x) * 0.6 + Math.abs(Math.tanh(x * 0.8)) * 0.8;
   }
-  filter(low, low, biquad('hp', fc * 1.6, 0.7, sr), { loop, sr });
   filter(low, low, biquad('hp', fc * 1.6, 0.7, sr), { loop, sr });
   filter(low, low, biquad('lp', hi, 0.7, sr), { loop, sr });
   const q = peak(low) || 1;

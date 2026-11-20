@@ -72,6 +72,41 @@ x 1.5 for craft; actors inside r go `down` regardless.
 - Player in a craft is not hit directly; the craft takes the damage.
   A craft exploding with the player in it downs the player.
 
+## Occupants (police cars, police heli)
+A craft may carry `occ` (hp per seat, seat 0 = driver) and
+`occDown(craft, seat, source, kind)` (set by its owner; police.js sets
+both on every patrol, chase and roadblock car and on police helis:
+`police.crewUp(craft)`). Rules in `damageCraft`:
+- a `bullet` that hits the car at least 30% up its height (the cabin; the
+  wheels and engine line do not count) hurts the first live seat by the full
+  bullet damage, so a pistol needs 3 hits per officer, a Buzzbox 6;
+- a `blast` hurts every live seat for 60% of the craft damage;
+- a wreck (`health` 0, or the blast that wrecks it) kills every live seat.
+A dead seat calls `occDown`: police.js takes a body actor from a pool of 4
+(`police.bodies`, team `police`, state `dead`), places it beside the car (a
+helicopter: on the ground below), and hits it with a lethal `damage` of the
+same kind, so the normal `hit`, `down`, `takedown`, blood pool, score and
+heat (officer down +1.5) all follow. When no seat is left the car goes
+`role: 'dead'`, stops and is no longer police business (the chase asks for a
+new car, so the force keeps responding). Officers on foot give their seat up
+when killed. Actor cap is 40 (36 + the 4 bodies).
+
+## Blast throw
+`detonate` throws what it hurts (own RNG stream, never the fight's dice):
+- cars (not planes, helis or boats; the player's own craft is never tossed):
+  `tvy = (2.5 + 5.5 k) x f` m/s with `k = 1 - d/r`, `f` from mass (tank and
+  heavy craft 0.12), so a live car hops up to about 3 m and rocks (`tRoll`,
+  `tPitch`) and lands level; the craft that just blew up pops 2 to 3 m and
+  a wreck can flip over (half or full turn, `tRollEnd`) and stays flipped
+  until removed. `craft.y` carries the height, so hit tests follow;
+- people the blast kills get `ky` (3.5 to 12 m/s up), `spinV` and tumble
+  (`spin`, read by `layDown`), then lie where they land;
+- props: combatfx throws up to 5 small chunks from `city.furniture`
+  (bins, benches, hydrants) within 1.2 r (the static street meshes stay).
+Blast size by craft (`craftBlast`): car 8 (heavy car 9), tank 12 x1.5,
+fighter 11 x1.3, other plane 10 x1.3, heli 10 x1.2. `explosion` carries
+`radius`, `size`, `scale` and `puff` for audio and effects.
+
 ## Burning and explosions
 Craft below 25% health burn (`burning` on): lose 3% of max per s and
 explode after 6 s or at 0. Explosion: blast r 8, damage as above,
@@ -167,8 +202,23 @@ node over 60 m from hostiles and police, hp full, heat 0, nothing lost.
 During a mission this opens the retry card (MISSIONS.md).
 Health regenerates at 10/s after 5 s without damage.
 
+## Explosion look (combatfx.js)
+Per blast, from the two shared particle pools (no new draw call): a one
+step white flash plus a warm second sprite and a flat ground glow (fake
+light, no real light); a layered fireball (hot core, orange body that
+cools to red-brown, red billows that fade to black: colour over life via
+`tintP`); a fast bright shock ring and a dust ring with a dust skirt;
+sparks and glowing embers with gravity; a smoke column that keeps feeding
+for 2.4 s plus 0.08 s per metre of radius and lives 6 to 10 s per puff,
+growing and thinning; a scorch decal (about 100 s, then 25 s fade, 24
+slots). Camera shake `(1 - d/(45 + 5 r))^2 x (12 + 2.6 r)` through
+`chase.kick`, off when `settings.reduceMotion` or the OS asks for reduced
+motion (the flash also halves). Particle counts scale with `game.quality`.
+Missiles leave a white-to-grey trail that lingers 2.4 s with a hot nozzle
+and sparks.
+
 ## Caps (phone)
-Actors 36 (peds 22, crew 8, officers 4, player); projectiles 24;
+Actors 40 (peds 22, crew 8, officers 4, bodies 4, player); projectiles 24;
 live explosions 4; burning craft 4; scorch decals 24 (one instanced
 mesh); tracers 32 and sparks in the existing effect pools. combatfx
 adds at most 4 draw calls. No per-shot allocation. Target step time

@@ -34,7 +34,7 @@ export function createEconomy(game, storage) {
 
   function applySettings() {
     const s = progress.settings;
-    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
+    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);

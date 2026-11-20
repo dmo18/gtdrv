@@ -16,7 +16,6 @@ const GRILLE = 0x0e0f10;
 const GLASS = 0x0b1116;
 const LINER = 0x262626;
 const CHROME = 0xd8dade;
-const PLATE = 0xe6e4da;
 const ARCH = 0x0b0b0b;
 
 // ---- styles -------------------------------------------------------------------
@@ -171,7 +170,7 @@ function shape(spec) {
     const e = Math.pow(Math.max(0, 1 - Math.pow(f, p)), 1 / p);
     return front ? mid + hf * e : mid - hr * e;
   };
-  return { S, L, W, H, hw, wr, R, wheels, x0, x1, mid, planW, top, yc, bottom, tipX, bed, inBed: (x) => bed && x > bed[0] && x < bed[1] };
+  return { S, L, W, H, hw, wr, R, wheels, x0, x1, mid, planW, top, yc, bottom, tipX, bed, cache: new Map(), inBed: (x) => bed && x > bed[0] && x < bed[1] };
 }
 
 const Q = 2.6; // superellipse exponent of the body shoulder / top
@@ -195,9 +194,10 @@ function lowerHalf(sh, x, near) {
     const floor = sh.S.floor * sh.H;
     const ww = Math.max(0.01, ws - 0.07);
     if (near) {
-      out.push([ws * 0.975, top], [ww, top], [ww, floor + 0.04], [Math.max(0.005, ws - 0.1), floor], [0, floor]);
+      const fw = Math.max(0.005, ws - 0.1);
+      out.push([ws * 0.975, top], [ww, top], [ww, (top + floor) / 2], [ww, floor + 0.04], [fw, floor], [fw * 0.6, floor], [fw * 0.25, floor], [0, floor]);
     } else {
-      out.push([ws * 0.975, top], [0, top - 0.06]);
+      out.push([ws * 0.975, top], [ws * 0.5, top - 0.05], [0, top - 0.06]);
     }
     return out;
   }
@@ -234,19 +234,20 @@ function bandOf(r, J) {
   return r < J - 1 ? r : 2 * (J - 1) - r - 1;
 }
 
-function lowerStations(sh, near) {
+function lowerStations(sh, near, lite = false) {
   const xs = [];
-  const tips = near ? [0, 0.15, 0.3, 0.45, 0.58, 0.7, 0.8, 0.88, 0.94, 0.975, 0.993] : [0, 0.45, 0.75, 0.93];
+  const tips = lite ? [0, 0.3, 0.58, 0.8, 0.92, 0.98] : near ? [0, 0.15, 0.3, 0.45, 0.58, 0.7, 0.8, 0.88, 0.94, 0.975, 0.993] : [0, 0.45, 0.75, 0.93];
   for (const f of tips) {
     xs.push(sh.tipX(f, true), sh.tipX(f, false));
   }
-  const fill = near ? 0.17 : 0.55;
+  const fill = lite ? 0.5 : near ? 0.2 : 0.55;
   const n = Math.max(2, Math.ceil((sh.x1 - sh.x0) / fill));
   for (let i = 1; i < n; i++) xs.push(sh.x0 + ((sh.x1 - sh.x0) * i) / n);
   if (near) {
     for (const wx of sh.wheels) {
       xs.push(wx + sh.R + 0.004, wx + sh.R - 0.002, wx - sh.R + 0.002, wx - sh.R - 0.004);
-      for (let k = 1; k < 12; k++) xs.push(wx + sh.R * Math.cos((k / 12) * Math.PI));
+      const ka = lite ? 6 : 12;
+      for (let k = 1; k < ka; k++) xs.push(wx + sh.R * Math.cos((k / ka) * Math.PI));
     }
     const S = sh.S;
     for (const s of S.seams || []) xs.push(s * sh.L, s * sh.L + 0.012);
@@ -307,17 +308,17 @@ function ghHalf(sh, gs, x, near) {
   return out;
 }
 
-function ghStations(sh, gs, near) {
+function ghStations(sh, gs, near, lite = false) {
   const g = gs.g, L = sh.L;
   const xs = [gs.xC, gs.xR0, gs.xR1, gs.xA];
-  const n = near ? 18 : 5;
+  const n = lite ? 7 : near ? 18 : 5;
   for (let i = 1; i < n; i++) xs.push(gs.xC + ((gs.xA - gs.xC) * i) / n);
   if (near) {
     for (const v of g.side) xs.push(v * L);
     if (g.b) xs.push(g.b[0] * L, g.b[1] * L);
     if (g.rearSide) xs.push(g.rearSide[0] * L, g.rearSide[1] * L);
     // Extra stations on the windscreen and rear glass curves.
-    for (const f of [0.25, 0.5, 0.75]) {
+    for (const f of lite ? [0.5] : [0.25, 0.5, 0.75]) {
       xs.push(gs.xR1 + (gs.xA - gs.xR1) * f, gs.xC + (gs.xR0 - gs.xC) * f);
     }
   } else {
@@ -403,21 +404,288 @@ function underside(acc, sh, xs) {
   acc.tri(ids[0], ids[3], ids[1]);
 }
 
-function plate(acc, sh, front) {
+// ---- conformal patches -----------------------------------------------------------
+// Lamps, grilles, intakes and plates are thin shells laid on the body by
+// casting plan-view rays from inside the nose or tail, so their outlines
+// are smooth curves instead of steps of the body grid.
+
+// Half width of the lower body at (x, y), or -1 outside its height span.
+// Sections are cached per millimetre while one car is built.
+function halfWidthAt(sh, x, y) {
+  if (x < sh.x0 || x > sh.x1) return -1;
+  const key = Math.round(x * 1000);
+  let h = sh.cache.get(key);
+  if (!h) {
+    h = lowerHalf(sh, key / 1000, true);
+    sh.cache.set(key, h);
+  }
+  if (y < h[0][1] || y > h[h.length - 1][1]) return -1;
+  for (let k = 1; k < h.length; k++) {
+    if (y <= h[k][1]) {
+      const p = h[k - 1], q = h[k];
+      const t = (y - p[1]) / Math.max(1e-6, q[1] - p[1]);
+      return p[0] + (q[0] - p[0]) * t;
+    }
+  }
+  return -1;
+}
+
+// Distance along a level ray from (ox, y, oz) to where it leaves the body.
+function castBody(sh, ox, y, oz, ux, uz) {
+  let lo = 0, hi = 4;
+  for (let k = 0; k < 22; k++) {
+    const t = (lo + hi) / 2;
+    const w = halfWidthAt(sh, ox + ux * t, y);
+    if (w >= 0 && Math.abs(oz + uz * t) <= w) lo = t;
+    else hi = t;
+  }
+  return lo;
+}
+
+// Ray origin and reference heights for the nose (front) or tail.
+function faceFrame(sh, front) {
+  let archF = sh.mid, archR = sh.mid;
+  for (const wx of sh.wheels) {
+    archF = Math.max(archF, wx + sh.R);
+    archR = Math.min(archR, wx - sh.R);
+  }
+  if (front) {
+    const od = Math.max(0.12, Math.min(0.6, sh.x1 - archF - 0.05));
+    return { front, ox: sh.x1 - od, sx: 1, yb: sh.bottom(sh.x1 - 0.06), yt: sh.yc(sh.x1 - 0.22) };
+  }
+  let od = Math.max(0.12, Math.min(0.6, archR - sh.x0 - 0.05));
+  if (sh.bed) od = Math.min(od, Math.max(0.03, sh.bed[0] - sh.x0 - 0.03));
+  return { front, ox: sh.x0 + od, sx: -1, yb: sh.bottom(sh.x0 + 0.06), yt: sh.yc(sh.x0 + 0.22) };
+}
+
+// Grid of a lens-shaped patch: outline index (closed loop) by rings from
+// the outline (`levels[0]`) inward. o.q: lateral span as signed fractions of
+// the half width, o.f: height span as fractions between the frame's bottom
+// and shoulder, o.e: superellipse exponent (2 oval .. 8 nearly square),
+// o.slant: height change across the span, o.taper: taller at the outer end.
+export function patchGrid(sh, fr, o, side, levels, N = 24) {
+  const e = o.e || 3;
+  const qc = (o.q[0] + o.q[1]) / 2, qa = (o.q[1] - o.q[0]) / 2;
+  const fc = (o.f[0] + o.f[1]) / 2, fa = (o.f[1] - o.f[0]) / 2;
+  const P = [];
+  for (let k = 0; k <= N; k++) {
+    const ph = ((k % N) / N) * Math.PI * 2;
+    const ca = spow(Math.cos(ph), 2 / e), sb = spow(Math.sin(ph), 2 / e);
+    const row = [];
+    for (const s of levels) {
+      const a = ca * s, b = sb * s;
+      const q = qc + qa * a;
+      const f = fc + fa * b * (1 + (o.taper || 0) * a) + (o.slant || 0) * a;
+      const y = fr.yb + f * (fr.yt - fr.yb);
+      // Aim at the plan outline, but never behind the origin (that would
+      // run the ray back into the wheel well).
+      const tx = sh.tipX(Math.min(0.995, Math.abs(q)), fr.front);
+      const px = fr.front ? Math.max(tx, fr.ox + 0.14) : Math.min(tx, fr.ox - 0.14);
+      const dx = px - fr.ox, dz = q * sh.hw * side;
+      const l = Math.hypot(dx, dz) || 1;
+      const ux = dx / l, uz = dz / l;
+      const t = castBody(sh, fr.ox, y, 0, ux, uz);
+      const lift = (o.lift || 0.004) + (o.bulge || 0) * Math.max(0, 1 - s * s);
+      row.push([fr.ox + ux * (t + lift), y, uz * (t + lift)]);
+    }
+    P.push(row);
+  }
+  return P;
+}
+
+// Emit a grid with its faces turned toward `out(c)` (a rough outward
+// direction at a face centre).
+function emitOut(acc, P, fn, out, opts = {}) {
+  let best = 0, flip = false;
+  for (let i = 0; i < P.length - 1 && !best; i++) {
+    for (let r = 0; r < P[0].length - 1; r++) {
+      const a = P[i][r], b = P[i + 1][r], c = P[i + 1][r + 1], d = P[i][r + 1];
+      const ux = c[0] - a[0], uy = c[1] - a[1], uz = c[2] - a[2];
+      const vx = d[0] - b[0], vy = d[1] - b[1], vz = d[2] - b[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const o = out(a);
+      const dot = nx * o[0] + ny * o[1] + nz * o[2];
+      if (Math.abs(dot) > 1e-9) {
+        best = dot;
+        flip = dot < 0;
+        break;
+      }
+    }
+  }
+  emitGrid(acc, P, fn, { ...opts, flip });
+}
+
+const FACE_DEF = {
+  head: { q: [0.5, 0.97], f: [0.6, 0.86], e: 3, slant: 0.05, taper: 0.25, bulge: 0.012, lift: 0.006, ind: 0.9 },
+  grille: { q: [-0.44, 0.44], f: [0.27, 0.5], e: 5, lift: 0.004, bezel: CHROME },
+  intake: { q: [-0.62, 0.62], f: [0.07, 0.3], e: 5, lift: 0.003 },
+  tail: { q: [0.52, 0.98], f: [0.62, 0.84], e: 3.4, slant: 0.04, taper: 0.2, bulge: 0.008, lift: 0.006, rev: 0.66, bar: true },
+  plateF: 0.24, plateR: 0.4,
+};
+// Per style overrides of the nose and tail graphics.
+const FACES = {
+  sedan: {},
+  hatch: { head: { q: [0.46, 0.96], f: [0.58, 0.88], e: 3, slant: 0.06, taper: 0.3, bulge: 0.014, lift: 0.006, ind: 0.88 }, tail: { q: [0.6, 0.985], f: [0.5, 0.88], e: 3, taper: 0.1, bulge: 0.008, lift: 0.006, rev: 0.75, bar: false }, grille: { q: [-0.36, 0.36], f: [0.42, 0.6], e: 5, lift: 0.004 } },
+  sports: { head: { q: [0.48, 0.97], f: [0.62, 0.8], e: 2.6, slant: 0.1, taper: 0.4, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: null, intake: { q: [-0.62, 0.62], f: [0.12, 0.38], e: 4, lift: 0.004 }, tail: { q: [0.4, 0.98], f: [0.62, 0.8], e: 4, slant: 0.05, bulge: 0.006, lift: 0.006, rev: 0.5, bar: true }, plateF: 0.2 },
+  muscle: { head: { q: [0.52, 0.94], f: [0.5, 0.82], e: 6, lift: 0.006, bulge: 0.008, ind: 2 }, grille: { q: [-0.5, 0.5], f: [0.4, 0.82], e: 6, lift: 0.004, bezel: CHROME }, intake: { q: [-0.5, 0.5], f: [0.08, 0.26], e: 6, lift: 0.003 }, tail: { q: [0.3, 0.97], f: [0.56, 0.84], e: 6, bulge: 0.006, lift: 0.006, rev: 0.4, bar: true } },
+  pickup: { head: { q: [0.56, 0.96], f: [0.55, 0.88], e: 5, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: { q: [-0.54, 0.54], f: [0.36, 0.86], e: 7, lift: 0.005, bezel: CHROME }, intake: { q: [-0.6, 0.6], f: [0.08, 0.24], e: 6, lift: 0.003 }, tail: { q: [0.76, 0.99], f: [0.55, 0.92], e: 6, bulge: 0.004, lift: 0.006, rev: 0.84, bar: false }, plateR: 0.3 },
+  van: { head: { q: [0.5, 0.96], f: [0.62, 0.92], e: 3, slant: 0.04, taper: 0.2, bulge: 0.012, lift: 0.006, ind: 0.88 }, grille: { q: [-0.42, 0.42], f: [0.42, 0.7], e: 5, lift: 0.004 }, tail: { q: [0.8, 0.995], f: [0.5, 0.97], e: 5, bulge: 0.004, lift: 0.006, rev: 0.88, bar: false }, plateR: 0.3 },
+  truck: { head: { q: [0.6, 0.94], f: [0.1, 0.25], e: 5, bulge: 0.01, lift: 0.008, ind: 0.88 }, grille: { q: [-0.5, 0.5], f: [0.32, 0.7], e: 8, lift: 0.006, bezel: CHROME }, intake: null, tail: null, plateF: 0.06 },
+};
+function faceFor(spec) {
+  const S = styleFor(spec);
+  let key = 'sedan';
+  for (const k in FACES) if (STYLES[k] === S) key = k;
+  return { ...FACE_DEF, ...FACES[key] };
+}
+
+function lens(acc, sh, fr, o, side, cellFn, hex, cls, N = 24) {
+  // Domed lenses get a few rings; flat ones are a fan.
+  const P = patchGrid(sh, fr, o, side, o.bulge ? [1, 0.72, 0.38, 0] : [1, 0], N);
+  const res = { col: lin(hex), cls, u: 0, v: 0 };
+  emitOut(acc, P, (i, r, c) => {
+    if (cellFn) {
+      res.u = (cellFn(c) + 0.5) / 8;
+      res.v = 0.5;
+    }
+    return res;
+  }, (c) => [c[0] - fr.ox, 0, c[2]], { crease: 0.3 });
+}
+// A ring around a patch outline (bezel, housing).
+function bezel(acc, sh, fr, o, side, width, hex, cls) {
+  const P = patchGrid(sh, fr, { ...o, lift: (o.lift || 0.004) * 0.5, bulge: 0 }, side, [1 + width, 1], 24);
+  const res = { col: lin(hex), cls };
+  emitOut(acc, P, () => res, (c) => [c[0] - fr.ox, 0, c[2]], { crease: 0.3 });
+}
+
+// Flat plate with invented text from the lamp atlas (u 0.625..1).
+function plateQuad(acc, sh, fr, f, hw2, hh) {
+  const y = fr.yb + f * (fr.yt - fr.yb);
+  let x = fr.front ? -1e9 : 1e9;
+  for (const z of [-hw2, 0, hw2]) {
+    for (const dy of [-hh, hh]) {
+      const t = castBody(sh, fr.ox, y + dy, z, fr.sx, 0);
+      const px = fr.ox + fr.sx * t;
+      x = fr.front ? Math.max(x, px) : Math.min(x, px);
+    }
+  }
+  x += fr.sx * 0.008;
+  const col = lin(WHITE);
+  const s = fr.sx;
+  const ids = [];
+  for (const [zz, yy, u, v] of [[-hw2, -hh, 0, 0], [hw2, -hh, 1, 0], [hw2, hh, 1, 1], [-hw2, hh, 0, 1]]) {
+    const uu = 1 - u; // reads left to right from outside, front and rear
+    ids.push(acc.vert(x, y + yy, zz * s, s, 0, 0, col, 0, 0.625 + uu * 0.375, 0.25 + v * 0.5));
+  }
+  acc.tri(ids[0], ids[2], ids[1]);
+  acc.tri(ids[0], ids[3], ids[2]);
+  return { x, y };
+}
+
+// Nose and tail: lamps with lens shapes, DRL strips, grille, intakes,
+// light bar and plates.
+function fascia(acc, headAcc, tailAcc, sh, spec) {
+  const F = faceFor(spec);
+  const hw = sh.hw;
+  const ff = faceFrame(sh, true);
   const S = sh.S;
-  const xTip = front ? sh.x1 : sh.x0;
-  const y0 = sh.bottom(xTip), c = sh.yc(xTip);
-  const y = y0 + (c - y0) * (front ? 0.33 : 0.4);
-  const sx = front ? 1 : -1;
-  if (S.range) return;
-  box(acc, PLATE, CLS.PLATE, 0.02, 0.12, 0.5, xTip + sx * 0.012, y, 0);
-  box(acc, TRIM, CLS.TRIM, 0.012, 0.14, 0.53, xTip + sx * 0.003, y, 0);
+  const dark = spec.id === 'sports' || spec.id === 'police';
+  if (F.head) {
+    const h = F.head;
+    const fr = h.f[1] - h.f[0], qr = h.q[1] - h.q[0];
+    const top = h.lift + (h.bulge || 0) + 0.003;
+    for (const side of [1, -1]) {
+      bezel(acc, sh, ff, h, side, 0.1, 0x16181b, CLS.CHROME);
+      // Smoked housing (cell 4: never lit), round projectors (cells 0 / 1)
+      // and an LED strip along the top edge (cell 2).
+      lens(headAcc, sh, ff, h, side, () => 4, WHITE, 0);
+      const cell = side < 0 ? 0 : 1;
+      const rq = 0.045 / sh.hw, rf = 0.045 / Math.max(0.1, ff.yt - ff.yb);
+      for (const t of [0.3, 0.62]) {
+        const qc = h.q[0] + qr * t;
+        const fc = h.f[0] + fr * 0.42 + (h.slant || 0) * (t * 2 - 1) * 0.9;
+        lens(headAcc, sh, ff, { q: [qc - rq, qc + rq], f: [fc - rf, fc + rf], e: 2, bulge: 0.006, lift: top }, side, () => cell, WHITE, 0, 12);
+      }
+      const drl = { q: [h.q[0] + qr * 0.04, h.q[1] - qr * 0.05], f: [h.f[1] - fr * 0.24, h.f[1] - fr * 0.1], e: 6, slant: h.slant, lift: top };
+      lens(headAcc, sh, ff, drl, side, () => 2, WHITE, 0, 16);
+    }
+  }
+  if (F.grille) {
+    const g = F.grille;
+    bezel(acc, sh, ff, g, 1, 0.06, dark ? 0x1a1c1f : g.bezel || 0x1a1c1f, dark ? CLS.TRIM : CLS.CHROME);
+    lens(acc, sh, ff, g, 1, null, GRILLE, CLS.TRIM);
+    // Horizontal slats.
+    const n = 3;
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.8) / (n + 0.6);
+      const fy = g.f[0] + (g.f[1] - g.f[0]) * t;
+      const sl = { q: [g.q[0] * 0.92, g.q[1] * 0.92], f: [fy - 0.012, fy + 0.012], e: 8, lift: (g.lift || 0.004) + 0.006 };
+      lens(acc, sh, ff, sl, 1, null, dark ? 0x2a2c30 : 0x9a9ea4, dark ? CLS.TRIM : CLS.CHROME);
+    }
+  }
+  if (F.intake) {
+    lens(acc, sh, ff, F.intake, 1, null, GRILLE, CLS.TRIM);
+    if (spec.id === 'sports' || spec.id === 'muscle' || spec.id === 'police') {
+      for (const side of [1, -1]) lens(acc, sh, ff, { q: [0.7, 0.93], f: [0.14, 0.32], e: 4, lift: 0.004 }, side, null, GRILLE, CLS.TRIM);
+    }
+  }
+  if (F.plateF != null && !S.range) plateQuad(headAcc, sh, ff, F.plateF, 0.24, 0.058);
+  else if (F.plateF != null) plateQuad(headAcc, sh, ff, F.plateF, 0.26, 0.06);
+  if (F.tail) {
+    const fr = faceFrame(sh, false);
+    const t = F.tail;
+    for (const side of [1, -1]) {
+      bezel(acc, sh, fr, t, side, 0.06, 0x18090a, CLS.CHROME);
+      // Cells: 0 red (left), 3 red (right), 1 reverse, 2 indicator.
+      lens(tailAcc, sh, fr, t, side, (c) => {
+        const az = Math.abs(c[2]);
+        if (az < t.rev * hw + 0.02 * hw && az > t.rev * hw - 0.1 * hw) return 1;
+        if (az > 0.95 * hw) return 2;
+        return c[2] > 0 ? 3 : 0;
+      }, WHITE, 0);
+    }
+    if (t.bar) {
+      const fy = t.f[0] + (t.f[1] - t.f[0]) * 0.55;
+      lens(tailAcc, sh, fr, { q: [-t.q[0] - 0.02, t.q[0] + 0.02], f: [fy - 0.025, fy + 0.025], e: 8, lift: 0.006 }, 1, (c) => (c[2] > 0 ? 3 : 0), WHITE, 0);
+    }
+    plateQuad(tailAcc, sh, fr, F.plateR, 0.24, 0.058);
+    // Dark diffuser under the bumper.
+    lens(acc, sh, fr, { q: [-0.6, 0.6], f: [0.07, 0.2], e: 6, lift: 0.004 }, 1, null, TRIM, CLS.TRIM);
+  }
+}
+
+// Fender lips: a rolled edge around each wheel arch, so the fenders read
+// as pressed panels that hug the tyres.
+function archLips(acc, sh) {
+  const col = lin(WHITE);
+  const res = { col, cls: CLS.PAINT };
+  for (const wx of sh.wheels) {
+    for (const s of [1, -1]) {
+      const P = [];
+      const N = 18;
+      for (let k = 0; k <= N; k++) {
+        const a = (k / N) * Math.PI;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const row = [];
+        for (const [dr, dz] of [[-0.01, -0.03], [0.012, 0.012], [0.03, 0.016], [0.065, 0.001]]) {
+          const r = sh.R + dr;
+          const x = wx + ca * r, y = sh.wr + sa * r;
+          let w = halfWidthAt(sh, x, Math.min(y, sh.yc(x) - 0.01));
+          if (w < 0) w = sh.planW(x) * 0.99;
+          row.push([x, y, s * (w + dz)]);
+        }
+        P.push(row);
+      }
+      emitOut(acc, P, () => res, (c) => [c[0] - wx, c[1] - sh.wr, s * 2], { crease: 0.2 });
+    }
+  }
 }
 
 // ---- main builder ------------------------------------------------------------
 // Returns { body, head, tail, info } geometries for the near model, or
 // { body } for the far one.
-export function buildCar(spec, near = true) {
+// `lite`: the near model with fewer stations (mid distance, same lamps).
+export function buildCar(spec, near = true, lite = false) {
   const sh = shape(spec);
   const S = sh.S;
   const L = sh.L, hw = sh.hw;
@@ -428,7 +696,7 @@ export function buildCar(spec, near = true) {
   const paint = lin(WHITE);
 
   // Lower shell.
-  const xs = lowerStations(sh, near);
+  const xs = lowerStations(sh, near, lite);
   const P = xs.map((x) => mirror(lowerHalf(sh, x, near), x));
   const J = (P[0].length + 1) / 2;
   const nSide = near ? SIDE_NEAR.length - 1 : 1; // bands 0..nSide-1 are the side
@@ -475,7 +743,7 @@ export function buildCar(spec, near = true) {
 
   // Greenhouse.
   const gs = ghShape(sh);
-  const gx = ghStations(sh, gs, near);
+  const gx = ghStations(sh, gs, near, lite);
   const G = gx.map((x) => mirror(ghHalf(sh, gs, x, near), x));
   const GJ = (G[0].length + 1) / 2;
   const g = S.gh;
@@ -502,9 +770,9 @@ export function buildCar(spec, near = true) {
 
   if (near) {
     archLiners(acc, sh);
+    if (!lite) archLips(acc, sh);
     underside(acc, sh, xs);
-    plate(acc, sh, true);
-    plate(acc, sh, false);
+    fascia(acc, headAcc, tailAcc, sh, spec);
     details(acc, headAcc, tailAcc, sh, gs, spec);
   } else {
     farDetails(acc, sh, spec);
@@ -522,6 +790,21 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
   const S = sh.S;
   const L = sh.L;
   const id = spec.id;
+  // Brake calipers at the top of each disc, seen through the spokes. They
+  // live in the body so they do not spin; at the top of the disc they
+  // stay put when the front wheels steer.
+  {
+    const { wr, tw, ax, az } = wheelLayout(spec);
+    const rimR = wr * RIM;
+    const hex = id === 'sports' ? 0xc81e28 : id === 'muscle' ? 0xd88a18 : id === 'police' ? 0x2a2c30 : 0x55585e;
+    for (const wx of [ax, -ax]) {
+      for (const s of [1, -1]) {
+        const a = Math.PI * 0.56;
+        const r = rimR * 0.7;
+        box(acc, hex, CLS.TRIM, rimR * 0.5, rimR * 0.2, tw * 0.22, wx + Math.cos(a) * r, wr + Math.sin(a) * r, s * (az + tw * 0.02), 0, 0, a - Math.PI / 2);
+      }
+    }
+  }
   // Mirrors at the base of the A pillar.
   if (!S.range) {
     const mx = gs.xA - 0.16;
@@ -606,7 +889,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec) {
     const y = gs.roofY + gs.crown;
     box(acc, TRIM, CLS.TRIM, 0.56, 0.04, 0.3, x, y + 0.02, 0);
     // The lit sign itself lives in the head-lamp mesh (cell 2) so it glows.
-    headAcc.geo(new THREE.BoxGeometry(0.5, 0.17, 0.26), WHITE, 0, place(x, y + 0.12, 0), (2 + 0.5) / 4, 0.5);
+    headAcc.geo(new THREE.BoxGeometry(0.5, 0.17, 0.26), WHITE, 0, place(x, y + 0.12, 0), (2 + 0.5) / 8, 0.5);
   }
   if (id === 'truck') truckParts(acc, tailAcc, sh, spec);
 }
@@ -662,19 +945,22 @@ function truckParts(acc, tailAcc, sh, spec) {
   // Rear lamps on the bumper ends (tail mesh: red, reverse, indicator).
   for (const s of [1, -1]) {
     const z = s * (W / 2 - 0.22);
-    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.12, 0.2), WHITE, 0, place(xb0 + 0.04, 0.55, z), (s > 0 ? 3.5 : 0.5) / 4, 0.5);
-    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.1, 0.1), WHITE, 0, place(xb0 + 0.04, 0.55, z - s * 0.17), 1.5 / 4, 0.5);
-    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.1, 0.1), WHITE, 0, place(xb0 + 0.04, 0.55, z + s * 0.16), 2.5 / 4, 0.5);
+    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.12, 0.2), WHITE, 0, place(xb0 + 0.04, 0.55, z), (s > 0 ? 3.5 : 0.5) / 8, 0.5);
+    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.1, 0.1), WHITE, 0, place(xb0 + 0.04, 0.55, z - s * 0.17), 1.5 / 8, 0.5);
+    tailAcc.geo(new THREE.BoxGeometry(0.04, 0.1, 0.1), WHITE, 0, place(xb0 + 0.04, 0.55, z + s * 0.16), 2.5 / 8, 0.5);
     // Clearance lamps on the box top corners.
-    tailAcc.geo(new THREE.BoxGeometry(0.03, 0.06, 0.08), WHITE, 0, place(xb0 - 0.02, H - 0.08, s * (W / 2 - 0.08)), 0.5 / 4, 0.5);
+    tailAcc.geo(new THREE.BoxGeometry(0.03, 0.06, 0.08), WHITE, 0, place(xb0 - 0.02, H - 0.08, s * (W / 2 - 0.08)), 0.5 / 8, 0.5);
   }
 }
 
 function farDetails(acc, sh, spec) {
   const { wr, tw, ax, az } = wheelLayout(spec);
-  // One dark prism per axle spanning the track: reads as two wheels.
+  // Simple tyres with a grey rim face.
   for (const wx of [ax, -ax]) {
-    acc.geo(new THREE.CylinderGeometry(wr, wr, az * 2 + tw, 6, 1, false), 0x121212, CLS.RUBBER, place(wx, wr, 0, Math.PI / 2, 0, 0));
+    for (const s of [1, -1]) {
+      acc.geo(new THREE.CylinderGeometry(wr, wr, tw, 12, 1, false), 0x151516, CLS.RUBBER, place(wx, wr, s * az, Math.PI / 2, 0, 0));
+      acc.geo(new THREE.CircleGeometry(wr * RIM, 8), 0x9a9ea4, CLS.ALLOY, place(wx, wr, s * (az + tw / 2 + 0.003), 0, s > 0 ? 0 : Math.PI, 0));
+    }
   }
   // Tail lamp blocks (glow at night through the shared lamp uniform).
   if (spec.body !== 'truck') {
@@ -687,36 +973,81 @@ function farDetails(acc, sh, spec) {
 }
 
 // ---- wheels -----------------------------------------------------------------------
-// Tyre (tread blocks alternate shade so spin is visible) with an alloy
-// or steel rim. Axle along local z; the outer face looks toward +z.
-export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2) {
+const RIM = 0.7; // rim radius / tyre radius
+
+// Wheel look per spec: spoke count, spoke style and rim colour.
+export function wheelStyle(spec) {
+  const id = spec.id;
+  if (spec.body === 'truck') return { spokes: 10, kind: 'steel', rim: 0xb4b8be };
+  if (id === 'sports') return { spokes: 10, kind: 'thin', rim: 0x34373c };
+  if (id === 'muscle') return { spokes: 5, kind: 'wide', rim: 0xd6d8dc };
+  if (id === 'compact') return { spokes: 8, kind: 'thin', rim: 0xc6cad0 };
+  if (id === 'pickup') return { spokes: 6, kind: 'wide', rim: 0x4a4d52 };
+  if (id === 'van') return { spokes: 7, kind: 'plain', rim: 0xa9adb2 };
+  if (id === 'police') return { spokes: 7, kind: 'plain', rim: 0x8e9298 };
+  if (id === 'taxi') return { spokes: 6, kind: 'plain', rim: 0xb9bdc3 };
+  return { spokes: 5, kind: 'twin', rim: 0xc9cdd2 };
+}
+
+// Tyre half profile [[radius, z], ...] from the inner bead round the
+// tread to the outer bead: bulging sidewalls and rounded shoulders.
+export function tyreProfile(wr, tw) {
+  const h = tw / 2, rb = wr * RIM;
+  return [[rb * 0.99, -h * 0.84], [rb * 1.05, -h * 0.97], [wr * 0.84, -h * 1.0], [wr * 0.95, -h * 0.93], [wr * 0.992, -h * 0.72], [wr, -h * 0.42], [wr * 0.988, -h * 0.12],
+    [wr * 0.988, h * 0.12], [wr, h * 0.42], [wr * 0.992, h * 0.72], [wr * 0.95, h * 0.93], [wr * 0.84, h * 1.0], [rb * 1.05, h * 0.97], [rb * 0.99, h * 0.84]];
+}
+
+// Tyre (tread blocks alternate shade so spin is visible), alloy rim with
+// spokes over a brake disc. Axle along local z; the outer face looks
+// toward +z.
+export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain', lite = false) {
   const acc = new Acc();
-  const rimR = wr * 0.64;
-  const seg = 14;
-  const tread = [lin(0x1d1d1e), lin(0x0f0f10)];
-  const wall = lin(0x1f1f21), wallHi = lin(0x2c2c2e);
+  const rimR = wr * RIM;
+  const h = tw / 2;
+  const seg = lite ? 12 : 20;
+  const tread = [lin(0x1d1d1e), lin(0x0c0c0d)];
+  const wall = lin(0x1c1c1e), wallHi = lin(0x2a2a2c);
   const o = { col: wall, cls: CLS.RUBBER };
-  lathe(acc, [[rimR, -tw / 2], [wr * 0.94, -tw / 2], [wr, -tw * 0.3], [wr, tw * 0.3], [wr * 0.94, tw / 2], [rimR, tw / 2]], seg, (i, r) => {
-    o.cls = CLS.RUBBER;
-    if (r === 0 || r === 4) o.col = r === 4 && i % 4 < 2 ? wallHi : wall;
-    else o.col = tread[(i + (r === 2 ? 1 : 0)) % 2];
+  const prof = lite ? tyreProfile(wr, tw).filter((_, k) => k !== 1 && k !== 12 && k !== 4 && k !== 9) : tyreProfile(wr, tw);
+  const last = prof.length - 2;
+  lathe(acc, prof, seg, (i, r) => {
+    if (lite ? r >= 3 && r <= 5 : r >= 5 && r <= 7) o.col = tread[(i + (r === (lite ? 4 : 6) ? 1 : 0)) % 2];
+    else o.col = r === last - 1 && i % 6 < 3 ? wallHi : wall;
     return o;
-  }, { crease: 0.3 });
-  const rimC = lin(rimHex), dark = lin(0x2a2b2e);
-  // Barrel (faces inward), outer lip, recessed dark dish.
-  lathe(acc, [[rimR, tw * 0.42], [rimR, -tw / 2 + 0.01]], seg, () => ({ col: dark, cls: CLS.ALLOY }));
-  lathe(acc, [[rimR * 1.02, tw / 2 + 0.002], [rimR * 0.9, tw / 2 - 0.01], [rimR * 0.86, tw * 0.3]], seg, () => ({ col: rimC, cls: CLS.ALLOY }), { crease: 0.4 });
-  lathe(acc, [[rimR * 0.9, tw * 0.02], [rimR * 0.3, tw * 0.02]], 10, () => ({ col: lin(0x3c3d40), cls: CLS.ALLOY }));
-  // Spokes and hub.
-  const zs = tw * 0.36;
-  const len = rimR * 0.66;
+  }, { crease: 0.5 });
+  const rimC = lin(rimHex), dark = lin(0x1e1f22), steel = lin(0x7c7f84);
+  const rc = { col: rimC, cls: CLS.ALLOY };
+  // Outer lip and the inside of the barrel, back wall, brake disc.
+  lathe(acc, [[rimR * 1.04, h * 0.86], [rimR * 1.02, h * 0.98], [rimR * 0.95, h * 0.97], [rimR * 0.91, h * 0.74]], seg, () => rc, { crease: 0.4 });
+  lathe(acc, [[rimR * 0.91, h * 0.74], [rimR * 0.91, -h * 0.8], [rimR * 0.2, -h * 0.8]], seg, () => ({ col: dark, cls: CLS.ALLOY }), { crease: 0.4 });
+  lathe(acc, [[rimR * 0.8, -h * 0.5], [rimR * 0.8, -h * 0.32], [rimR * 0.34, -h * 0.32]], seg, () => ({ col: steel, cls: CLS.ALLOY }), { crease: 0.4 });
+  // Spokes: tapered bars dished from the hub out to the lip.
+  const rh = rimR * 0.24;
+  const wide = kind === 'wide' ? 0.3 : kind === 'thin' ? 0.12 : kind === 'steel' ? 0.2 : 0.18;
+  const arms = kind === 'twin' && !lite ? 2 : 1;
   for (let k = 0; k < spokes; k++) {
-    const a = (k / spokes) * Math.PI * 2;
-    const rm = rimR * 0.24 + len / 2;
-    const width = spokes > 6 ? rimR * 0.13 : rimR * 0.22;
-    acc.geo(new THREE.BoxGeometry(len, width, tw * 0.22), rimHex, CLS.ALLOY, place(Math.cos(a) * rm, Math.sin(a) * rm, zs, 0, 0, a));
+    const a0 = (k / spokes) * Math.PI * 2;
+    for (let m = 0; m < arms; m++) {
+      const off = arms === 2 ? (m ? 1 : -1) * 0.13 : 0;
+      const P = [];
+      for (const u of [0, 0.45, 1]) {
+        const r = rh + (rimR * 0.93 - rh) * u;
+        const a = a0 + off * u;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const half = rimR * wide * (1 - 0.35 * u) * (arms === 2 ? 0.55 : 1) * 0.5;
+        const zf = h * (0.94 - 0.16 * u * (kind === 'steel' ? 0.2 : 1));
+        const zb = zf - h * 0.22;
+        const tx = -sa, ty = ca; // tangential
+        const ring = [[half, zf], [-half, zf], [-half, zb], [half, zb], [half, zf]].map(([t, z]) => [ca * r + tx * t, sa * r + ty * t, z]);
+        P.push(ring);
+      }
+      emitOut(acc, P, () => rc, (c) => [c[0] * 0.2, c[1] * 0.2, 1], { crease: 0.6 });
+    }
   }
-  acc.geo(new THREE.CylinderGeometry(rimR * 0.3, rimR * 0.34, tw * 0.2, 8, 1, true), rimHex, CLS.ALLOY, place(0, 0, tw * 0.38, Math.PI / 2, 0, 0));
-  acc.geo(new THREE.CylinderGeometry(rimR * 0.12, rimR * 0.12, 0.012, 8), 0x2a2a2a, CLS.CHROME, place(0, 0, tw * 0.49, Math.PI / 2, 0, 0));
+  if (kind === 'steel') {
+    lathe(acc, [[rimR * 0.92, h * 0.78], [rimR * 0.5, h * 0.7]], seg, () => rc, { crease: 0.4 });
+  }
+  // Hub cap.
+  lathe(acc, [[rh * 1.15, h * 0.88], [rh * 1.0, h * 0.98], [rh * 0.55, h * 1.02], [0.001, h * 1.03]], lite ? 6 : 12, (i, r) => (r === 2 ? { col: lin(0x2a2b2e), cls: CLS.CHROME } : rc), { crease: 0.5 });
   return acc.build();
 }

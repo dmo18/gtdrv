@@ -55,7 +55,8 @@ export function seekTier(t, self) {
   }
   if (t.hostile || t.attacking) return 0;
   if (t.crew) return 1;
-  if (t.police || (t.spec && t.spec.police)) return 2;
+  // A police craft nobody drives (parked at the depot) is just a craft.
+  if (t.police || (t.spec && t.spec.police)) return t.driver ? 2 : 4;
   if (t.driver && t.driver !== 'player' && t.driver !== 'traffic' && !t.traffic && !t.ai) return 3;
   return 4;
 }

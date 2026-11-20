@@ -1,0 +1,85 @@
+# Builds a signed Android App Bundle (.aab) for Google Play. Run it by hand:
+# GitHub, Actions tab, "Android release bundle", Run workflow.
+# Needs four repository secrets (Settings, Secrets and variables, Actions).
+# Names only, never values:
+#   ANDROID_KEYSTORE_BASE64    the upload keystore file, base64 encoded
+#   ANDROID_KEYSTORE_PASSWORD  password of the keystore
+#   ANDROID_KEY_ALIAS          alias of the upload key
+#   ANDROID_KEY_PASSWORD       password of the key
+# Action versions are pinned to exact version tags (full commit SHAs could
+# not be looked up from the machine this file was written on). See docs/PLAY.md.
+name: Android release bundle
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "versionCode (whole number, higher than the last upload to Play)"
+        required: true
+        type: string
+      version_name:
+        description: "versionName shown to players, for example 1.0.0"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4.7.1
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Check the secrets exist
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for v in KS KSP KA KP; do
+            if [ -z "${!v}" ]; then echo "A required secret is missing (see the comment at the top of this file)"; exit 1; fi
+          done
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm ci
+        working-directory: android
+      - name: Install Android platform and build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+      - name: Bundle the web game and sync it into the Android project
+        run: npm run sync
+        working-directory: android
+      - name: Build the signed bundle
+        working-directory: android/native
+        env:
+          RUSTWATER_VERSION_CODE: ${{ inputs.version_code }}
+          RUSTWATER_VERSION_NAME: ${{ inputs.version_name }}
+          RUSTWATER_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RUSTWATER_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RUSTWATER_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          export RUSTWATER_KEYSTORE_FILE="$RUNNER_TEMP/upload.jks"
+          ./gradlew bundleRelease --no-daemon
+          rm -f "$RUNNER_TEMP/upload.jks"
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: rustwater-release-aab
+          path: android/native/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14

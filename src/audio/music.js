@@ -4,7 +4,7 @@
 // on a music bus, so the groove never repeats exactly and costs almost
 // no memory. Everything is composed from the seeded rng: no melodies are
 // copied from anywhere. Pure logic (the composer) runs in node tests.
-import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, biquad, filter, svf, warm } from './dsp.js';
+import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, biquad, filter, svf, warm, harmonize } from './dsp.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -12,13 +12,23 @@ const z = (n) => new Float32Array(n);
 // Reference pitches of the instrument samples (playbackRate = f / ref).
 export const MUSIC_REF = { bass: 55, pluck: 440, pad: 220 };
 
-// Saw by additive harmonics up to `top` Hz (no aliasing).
+// Band-limited saw (harmonics up to `top` Hz) from a one-period table,
+// read with linear interpolation: cheap even for long notes.
+const TBL = 2048;
 function saw(out, f, amp, from = 0, top = 7000, detune = 0) {
   const K = Math.max(1, Math.floor(top / f));
+  const tb = new Float32Array(TBL + 1);
   for (let k = 1; k <= K; k++) {
-    const w = (TAU * f * k * (1 + detune)) / R.sr;
-    const a = amp / k;
-    for (let i = from; i < out.length; i++) out[i] += Math.sin(w * (i - from)) * a;
+    for (let i = 0; i < TBL; i++) tb[i] += Math.sin((TAU * k * i) / TBL) / k;
+  }
+  tb[TBL] = tb[0];
+  const inc = (f * (1 + detune) * TBL) / R.sr;
+  let ph = 0;
+  for (let i = from; i < out.length; i++) {
+    const j = ph | 0;
+    out[i] += (tb[j] + (tb[j + 1] - tb[j]) * (ph - j)) * amp;
+    ph += inc;
+    if (ph >= TBL) ph -= TBL;
   }
 }
 
@@ -70,6 +80,7 @@ export const MUSIC_SHOTS = {
       out[i] = Math.sin(ph) * Math.min(1, t / 0.001) * Math.exp(-t / 0.16);
     }
     warm(out, 2, 0.4); // harmonics so the kick reads on a phone
+    harmonize(out, 110, 1.2, { hi: 700 });
     return fadeEdges(normalize(removeDC(out), 0.9), 2, 600);
   },
   'm:snare'(rng) {

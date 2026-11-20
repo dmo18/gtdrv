@@ -32,7 +32,7 @@
 import { createRng, clamp, angleDiff } from '../core/rng.js';
 import { createAircraft } from '../entities/aircraft.js';
 import { MOUNTS, tryMount, USE_NO } from '../core/weapons.js';
-import { damage, canBeHit, craftBase, EVENT_PAYLOADS, CRAFT_BLAST_R, CRAFT_HOOKS } from './combat.js';
+import { damage, canBeHit, craftBase, EVENT_PAYLOADS, craftBlast, CRAFT_HOOKS } from './combat.js';
 
 export const PILOT = {
   orbitR: 62, orbitMin: 55, orbitMax: 70, orbitV: 17,
@@ -298,7 +298,10 @@ export function stepHeliPilot(game, p, dt) {
     if (!p.exploded && (a.onGround || a.onWater || p.crashT > PILOT.crashMax)) {
       p.exploded = true;
       const sys = game.combat;
-      if (sys && sys.explode) sys.explode(a.x, (a.y || 0) + 1.2, a.z, CRAFT_BLAST_R, a.lastHitBy || null, 0, 1, a);
+      if (sys && sys.explode) {
+        craftBlast(a, HB);
+        sys.explode(a.x, (a.y || 0) + 1.2, a.z, HB.r, a.lastHitBy || null, 0, HB.scale, a);
+      }
       a.scorched = true;
       a.ai = null; // the sweep may clear the wreck now
       a.driver = null;
@@ -452,6 +455,7 @@ export function stepHeliPilot(game, p, dt) {
 }
 
 // Spawn a police helicopter with a pilot. See the API notes at the top.
+const HB = { r: 0, scale: 1 };
 export function spawnPoliceHeli(game, opts = {}) {
   const target = opts.target !== undefined ? opts.target : game.player;
   const tx = target ? target.x : 0, tz = target ? target.z : 0;

@@ -66,6 +66,26 @@ export const CAR_SHOTS = {
     for (let i = 0; i < n; i++) out[i] += hi[i] * 0.3;
     return fadeEdges(normalize(removeDC(out), 0.8), 8, 800);
   },
+  // footsteps: a heel tap and a sole scuff on pavement; a soft rustle on grass
+  stepHard(rng) {
+    const out = z(len(0.16));
+    const b = z(out.length);
+    addBurst(b, 0, 0.003, 1, rng);
+    filter(b, out, biquad('bp', 2200, 1.1), { gain: 0.8, add: true, loop: false });
+    addMode(out, 0, 150 + rng.next() * 40, 0.015, 0.6);
+    const s2 = z(out.length);
+    addBurst(s2, len(0.03), 0.025, 0.35, rng, { attack: 0.006 });
+    filter(s2, out, biquad('hp', 3000, 0.7), { add: true, loop: false });
+    return fadeEdges(normalize(removeDC(out), 0.6), 2, 300);
+  },
+  stepSoft(rng) {
+    const out = z(len(0.22));
+    const b = z(out.length);
+    addBurst(b, 0, 0.05, 1, rng, { attack: 0.01 });
+    filter(b, out, biquad('bp', 1500, 0.6), { gain: 0.8, add: true, loop: false });
+    addMode(out, 0, 110, 0.02, 0.3);
+    return fadeEdges(normalize(removeDC(out), 0.5), 8, 400);
+  },
   shift(rng) {
     const out = z(len(0.18));
     addMode(out, 0, 180, 0.03, 0.8);
