@@ -37,6 +37,21 @@ for the owner's decision. State at the pause:
 - Direction change (user): the game is about fun driving, boating and
   flying. Combat and crime missions dropped; police chases are a light
   optional extra.
+- Direction change 2 (owner, after first phone play test): steering
+  radius too wide (being fixed, with an Arcade and a Realistic handling
+  mode); VIEW button did nothing (fixed: chase, far chase, bumper or
+  cockpit views); wants violence and fun, "more GTA and Gran Turismo
+  combined". Owner's answers: violence is FULL SANDBOX (no blood or
+  gore); build combat and weapons first, then story missions;
+  tuning garage and championships are parked for later.
+- Design principle (owner): "The game shouldn't be about more points.
+  It's about more fun. Everything is available. You just get high scores
+  and have a fun time." So no money, shop or unlocks: every vehicle and
+  weapon is available from the start; progression is high scores only.
+- Models: Fable is no longer used (owner request). Opus takes the hard
+  work, Sonnet the rest.
+- Run cap for this stage: 1.5M delegated tokens (my recommendation; the
+  owner did not name a number). Stop and ask before passing it.
 - Run cap: 27 tasks, 3.5M delegated tokens.
 - No separate main branch exists: the working branch is the
   repository's default branch and publishes to GitHub Pages directly.
