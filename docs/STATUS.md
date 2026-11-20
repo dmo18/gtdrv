@@ -50,8 +50,14 @@ for the owner's decision. State at the pause:
   weapon is available from the start; progression is high scores only.
 - Models: Fable is no longer used (owner request). Opus takes the hard
   work, Sonnet the rest.
-- Run cap for this stage: 1.5M delegated tokens (my recommendation; the
-  owner did not name a number). Stop and ask before passing it.
+- Direction change 3 (owner): wants bombs, grenades, police shootouts and
+  chases, fighter jets, police helicopters you can fly, and tanks you can
+  steal and drive.
+- Run cap for this stage: raised to 2.8M delegated tokens (owner chose
+  "Raise cap to 2.8M, toys first"). Order: finish wave 2 (touch aiming,
+  rival crew and police), publish a playable combat build, then the toys
+  (tasks 31 to 34), then missions engine and final review only if the
+  cap allows. Stop and ask before passing 2.8M.
 - Run cap: 27 tasks, 3.5M delegated tokens.
 - No separate main branch exists: the working branch is the
   repository's default branch and publishes to GitHub Pages directly.
