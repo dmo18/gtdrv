@@ -15,9 +15,11 @@ Commands:
 Conventions:
 - Coordinates: x east, z south, metres, flat ground at y = 0.
   Heading 0 faces +x; heading increases turning toward +z.
-- Game logic (`src/core`, `src/world/citygen.js`, `src/world/collision.js`,
-  `src/entities`, `src/systems`) must not import three.js or touch the
-  DOM, so it runs in node tests. Drawing lives in `src/render`, `src/ui`.
+- Pure game logic (`src/core`, `src/world`, `src/entities`, and the
+  rule/AI cores inside `src/systems`) must run in node tests: no
+  three.js, no DOM at import time. A system file may also create its
+  own meshes or small DOM panels, but must guard them so the logic
+  still works when `document` or `game.scene` is missing.
 - Simulation runs in fixed 1/60 s steps; never use wall-clock time in logic.
 - All randomness goes through `createRng` (seeded).
 - No network requests at runtime. No secrets. Dependencies pinned exactly.

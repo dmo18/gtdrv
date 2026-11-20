@@ -8,7 +8,10 @@
 - Milestone 4: police chases (optional), day/night, weather, hints
 
 ## In progress
-- Final verification and review
+- Milestone 5: quality overhaul after the owner's first play test
+  (steering and driving feel, sound, city graphics, vehicle looks)
+- Fixes from the final review (race start button, map markers, HUD
+  leftovers)
 
 ## Decisions
 - Name: Rustwater (original setting, an island harbour city).
@@ -17,8 +20,10 @@
 - Preview: public GitHub Pages site (user's choice).
 - Direction change (user): the game is about fun driving, boating and
   flying. Combat and crime missions dropped; police chases are a light
-  optional extra. Run cap now 23 tasks.
-- Run cap: 21 tasks, 3.5M delegated tokens.
+  optional extra.
+- Run cap: 27 tasks, 3.5M delegated tokens.
+- No separate main branch exists: the working branch is the
+  repository's default branch and publishes to GitHub Pages directly.
 
 ## Known issues
 - none yet
@@ -29,4 +34,6 @@
 - Milestone 2 review: no critical. Two high (player could get stuck at
   sea; pause with map open) fixed. Two medium (abandoned craft piling
   up) fixed with a periodic sweep.
+- Final review (212 simulated minutes of soak testing, 0 errors):
+  no critical or high findings. Medium usability items being fixed.
 - Low (open): page style policy allows inline styles (needed by the UI code).

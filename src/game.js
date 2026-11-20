@@ -340,6 +340,13 @@ export function createGame({ canvas, uiRoot }) {
       p.z = p.vehicle.z;
       p.y = p.vehicle.y || 0;
       p.heading = p.vehicle.heading;
+      // Count take-offs for the records screen.
+      const flying = (p.vehicle.kind === 'plane' || p.vehicle.kind === 'heli') && p.y > 8;
+      if (flying && !wasFlying) {
+        game.progress.stats.flights++;
+        events.emit('progress');
+      }
+      wasFlying = flying;
       if (input.consume('enter')) game.exitVehicle();
     } else {
       const w = p.walker;
@@ -375,6 +382,7 @@ export function createGame({ canvas, uiRoot }) {
 
   // --- Drawing step. ---
   let sweepTimer = 3;
+  let wasFlying = false;
   let lastDistrict = '';
   let promptFor = null;
   let wakeTick = 0;

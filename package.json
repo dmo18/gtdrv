@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Rustwater: an original open-world driving and crime sandbox for mobile browsers",
+  "description": "Rustwater: an original open-world driving, boating and flying playground for mobile browsers",
   "license": "UNLICENSED",
   "scripts": {
     "build": "node scripts/build.mjs",
