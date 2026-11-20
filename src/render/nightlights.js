@@ -168,14 +168,15 @@ const LAMP_FRAG = `
 			float w = 0.7 + along * 0.36;
 			float c = 1.0 - smoothstep( w * 0.55, w, across );
 			float t = clamp( along / 42.0, 0.0, 1.0 );
-			c *= smoothstep( 0.0, 1.5, along ) * ( 1.0 - t ) * ( 1.0 - t ) * 9.0 / ( 1.0 + along * 0.1 );
+			c *= smoothstep( 0.0, 1.5, along ) * ( 1.0 - t ) * ( 1.0 - t ) * 6.5 / ( 1.0 + along * 0.1 );
 			rwL += vec3( 1.0, 0.94, 0.82 ) * ( c * b.x * exp( - up * 0.35 ) );
 		} else {
 			float r = length( vec2( along + 2.0 * b.z + 0.9, across * 0.8 ) );
 			rwL += vec3( 1.0, 0.06, 0.03 ) * ( b.y * exp( - r * r * 0.4 ) * exp( - up * 1.5 ) );
 		}
 	}
-	reflectedLight.indirectDiffuse += material.diffuseColor * rwL;
+	// Dark asphalt still shows a pool (its sheen scatters some light back).
+	reflectedLight.indirectDiffuse += max( material.diffuseColor, vec3( 0.07, 0.065, 0.06 ) ) * rwL;
 }`;
 
 // Cars whose lamps light the ground (the player's and the nearest).

@@ -40,7 +40,7 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
   const info = await page.evaluate(async ([where, hour, cam]) => {
     const g = window.__rw;
     const c = g.city;
-    let x = c.spawn.x, z = c.spawn.z, heading = c.spawn.heading || 0;
+    let x = c.spawn.x, z = c.spawn.z, heading = c.spawn.heading || 0, pierEnd = 0;
     if (where === 'harbour') {
       // Out on the docks marina pier, looking back at the city over the water.
       const m = c.pois.find((p) => p.type === 'marina' && /Saltyard/.test(p.label)) || c.pois.find((p) => p.type === 'marina');
@@ -49,8 +49,9 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
         const d = m ? Math.hypot((p.x0 + p.x1) / 2 - m.x, (p.z0 + p.z1) / 2 - m.z) : 0;
         if (d < bd) { bd = d; best = p; }
       }
-      if (best && best.z1 - best.z0 > best.x1 - best.x0) { x = (best.x0 + best.x1) / 2; z = best.z0 + 0.62 * (best.z1 - best.z0); heading = -Math.PI / 2; }
-      else if (best) { x = best.x0 + 0.38 * (best.x1 - best.x0); z = (best.z0 + best.z1) / 2; heading = 0; }
+      // The car waits on the quay at the root of the pier, lamps along it;
+      // the camera stands out on the pier looking back at the city.
+      if (best) { x = (best.x0 + best.x1) / 2; z = best.z0 - 4; heading = Math.PI / 2; pierEnd = best.z1 - 6; }
       else { x = 58; z = 596; heading = 1.35; }
     }
     if (g.graphics && 'adaptive' in g.graphics) { g.graphics.adaptive = false; g.resize(); }
@@ -65,7 +66,12 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
     g.loop.stop();
     g.graphics.refreshEnvironment();
     g.draw(1, 0);
-    if (cam === 'front') {
+    if (pierEnd) {
+      g.camera.position.set(x + 1.2, 3.2, pierEnd);
+      g.camera.lookAt(x, 6, z - 120);
+      g.camera.updateMatrixWorld();
+      g.renderFrame(0);
+    } else if (cam === 'front') {
       // Low and ahead of the car, to one side, looking back at it and
       // along the road it lights.
       const ch = Math.cos(heading), sh = Math.sin(heading);

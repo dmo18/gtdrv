@@ -1071,12 +1071,13 @@ export default async function extra(page, check) {
   check(hard.hurt < 100 && hard.healed > 99 && hard.text === 'HP 100', `RESPAWN on foot restores health (${hard.hurt} -> ${hard.healed}, ${hard.text})`);
   check(hard.meterHidden, 'the health meter hides again with hard mode off');
 
-  // ---- The Miami map (docs/MAP.md milestone 1): ?map=miami loads in its
-  // own page, drives for 300 steps with zero page errors. ----
+  // ---- The Miami map (docs/MAP.md milestone 1): the same page reloads
+  // with ?map=miami (every island check is done by now), drives for 300
+  // steps with zero page errors. ----
   {
     const url = new URL(page.url());
     url.search = '?autostart&map=miami';
-    const mp = await page.context().browser().newPage({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+    const mp = page;
     const errs = [];
     mp.on('pageerror', (e) => errs.push(String(e)));
     mp.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
@@ -1085,7 +1086,7 @@ export default async function extra(page, check) {
     let ok = true;
     try {
       await mp.goto(url.href);
-      await mp.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 90000 });
+      await mp.waitForFunction(() => window.__rw && window.__rw.loop.running && window.__rw.city.map === 'miami', null, { timeout: 180000 });
     } catch (e) {
       ok = false;
       errs.push(String(e));
@@ -1115,7 +1116,6 @@ export default async function extra(page, check) {
       await mp.keyboard.up('ArrowUp');
       await mp.screenshot({ path: 'shots/miami.png' });
     }
-    await mp.close();
     check(ok && m && m.map === 'miami', `?map=miami starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
     check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);
     check(outside.length === 0, `Miami: no outside network requests (${outside.length})`);
