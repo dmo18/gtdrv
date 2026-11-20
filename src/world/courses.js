@@ -308,10 +308,10 @@ export function tallestNear(city, x, z, R = RING_CLEAR_RADIUS) {
 }
 
 // Ring centre height that keeps the ring's bottom well above any roof
-// nearby (or a few metres above open ground and sea).
+// nearby (or 12 m above open ground and sea).
 function ringY(city, x, z, r, wantY) {
   const tall = tallestNear(city, x, z);
-  const minBottom = tall > 0 ? tall + RING_CLEAR_HEIGHT : 8;
+  const minBottom = tall > 0 ? tall + RING_CLEAR_HEIGHT : 12;
   return Math.ceil(Math.max(wantY, minBottom + r) + 0.5);
 }
 

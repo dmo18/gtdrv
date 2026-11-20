@@ -73,7 +73,7 @@ export function createActivities(game, uiRoot = null) {
   const radiusOf = (c) => START_RADIUS[c.type] || 9;
   const progress = () => game.progress;
 
-  const markers = game.scene ? createMarkers(game.scene) : null;
+  const markers = game.scene ? createMarkers(game.scene, { seaY: game.seaY ?? 0 }) : null;
   const ui = typeof document !== 'undefined' ? createPanel(uiRoot) : null;
 
   // --- Idle: start zones. ---

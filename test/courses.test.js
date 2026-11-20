@@ -416,7 +416,8 @@ test('activities: abort on leaving the craft, wrecking, straying, running late',
   const d = byId['deliver-courier'];
   put(game, sys, d.start.x, d.start.z, 0, secs(HOLD_TIME + COUNTDOWN) + 4);
   assert.equal(sys.active.id, d.id);
-  put(game, sys, d.start.x, d.start.z, 0, secs(d.timeLimit) + 2);
+  const B = d.checkpoints[0];
+  put(game, sys, B.x, B.z - 300, 0, secs(d.timeLimit) + 2);
   assert.equal(sys.active, null);
   assert.ok(game.toasts.includes('Out of time'));
   assert.equal(game.progress.money, 0);

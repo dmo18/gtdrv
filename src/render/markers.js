@@ -148,8 +148,8 @@ export function createMarkers(scene, opts = {}) {
     s.tube.scale.set(radius, 7, radius);
     s.disc.scale.set(radius, 1, radius);
     s.fill.scale.set(radius, 1, radius);
-    s.icon.position.y = 8.5;
-    s.icon.scale.setScalar(1.25);
+    s.icon.position.y = 9;
+    s.icon.scale.setScalar(2);
     s.grp.visible = true;
   }
   function hideStart(i) {
@@ -298,7 +298,7 @@ export function createMarkers(scene, opts = {}) {
       if (!s.grp.visible) continue;
       const t = time + s.phase;
       s.icon.rotation.y = t * 0.9;
-      s.icon.position.y = 8.5 + Math.sin(t * 1.6) * 0.5;
+      s.icon.position.y = 9 + Math.sin(t * 1.6) * 0.5;
       s.tubeMat.opacity = 0.42 + 0.12 * Math.sin(t * 2.2);
       if (s.type === 'boat') s.grp.position.y = s.baseY + Math.sin(t * 1.3) * 0.12;
     }

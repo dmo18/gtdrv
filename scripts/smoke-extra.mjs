@@ -87,4 +87,49 @@ export default async function extra(page, check) {
   const h = await page.evaluate(() => ({ y: window.__rw.player.y, mode: window.__rw.player.mode }));
   await page.keyboard.up('KeyW');
   check(h.mode === 'heli' && h.y > 3, `helicopter lifts off (height ${h.y.toFixed(0)} m)`);
+
+  // Run a street race end to end by hopping the car between checkpoints.
+  await page.evaluate(() => {
+    const g = window.__rw;
+    const v = g.player.vehicle;
+    v.driver = null;
+    g.player.vehicle = null;
+    g.setPlayerMode('foot');
+    const w = g.player.walker;
+    w.x = w.px = g.city.spawn.x;
+    w.z = w.pz = g.city.spawn.z + 6;
+  });
+  // Back in town, parked cars appear within a moment.
+  await page.waitForFunction(() => window.__rw.vehicles.some((c) => c.kind === 'car' && !c.ai), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    const g = window.__rw;
+    g.enterVehicle(g.vehicles.find((c) => c.kind === 'car' && !c.ai));
+  });
+  const race = await page.evaluate(async () => {
+    const g = window.__rw;
+    const course = g.activities.courses.find((c) => c.type === 'street');
+    const money0 = g.progress.money;
+    const car = g.player.vehicle;
+    const put = (p) => {
+      car.x = car.px = p.x;
+      car.z = car.pz = p.z;
+      car.vx = car.vz = 0;
+      car.speed = 0;
+    };
+    put(course.start);
+    g.activities.start(course.id);
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    await wait(4500);
+    for (let lap = 0; lap < (course.laps || 1); lap++) {
+      for (const cp of course.checkpoints) {
+        put(cp);
+        await wait(250);
+      }
+    }
+    await wait(600);
+    return { id: course.id, name: course.name, medal: g.progress.medals[course.id] || null, gained: g.progress.money - money0, courses: g.activities.courses.length };
+  });
+  await page.screenshot({ path: 'shots/race.png' });
+  check(race.courses >= 10, `activities loaded (${race.courses})`);
+  check(!!race.medal && race.gained > 0, `finishing "${race.name}" awards a medal (${race.medal}) and $${race.gained}`);
 }
