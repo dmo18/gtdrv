@@ -1,10 +1,12 @@
 # Status
 
 ## Done
-- Task 1: foundations (package, lint, tests, docs)
+- Milestone 1: drivable city, touch controls, HUD
+- Milestone 2: walking, boats, planes, helicopters, map, sound
 
 ## In progress
-- Milestone 1: drive around the city
+- Milestone 3: traffic, pedestrians (done), activities, showroom, save
+- Milestone 4 started early: day/night and weather
 
 ## Decisions
 - Name: Rustwater (original setting, an island harbour city).
@@ -22,4 +24,7 @@
 ## Open security findings
 - Milestone 1 review: no critical or high.
 - Low (open): GitHub Actions are pinned to version tags, not commit ids.
+- Milestone 2 review: no critical. Two high (player could get stuck at
+  sea; pause with map open) fixed. Two medium (abandoned craft piling
+  up) fixed with a periodic sweep.
 - Low (open): page style policy allows inline styles (needed by the UI code).

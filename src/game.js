@@ -167,6 +167,29 @@ export function createGame({ canvas, uiRoot }) {
   const exitSpot = { x: 0, z: 0, ok: false };
   const uiModeFor = (kind) => kind;
 
+  // Nearest safe standing spot on land: walk a line from the given
+  // point toward the closer of the main island and the airfield.
+  function findRescueSpot(x, z, out) {
+    const islet = city.airfield.islet;
+    const ix = (islet.x0 + islet.x1) / 2, iz = (islet.z0 + islet.z1) / 2;
+    const toIslet = Math.hypot(x - ix, z - iz) < Math.hypot(x, z) - 500;
+    const tx = toIslet ? ix : 0, tz = toIslet ? iz : 0;
+    const d = Math.hypot(tx - x, tz - z) || 1;
+    const ux = (tx - x) / d, uz = (tz - z) / d;
+    out.x = tx;
+    out.z = tz;
+    out.ok = true;
+    for (let t = 0; t < d; t += 3) {
+      const px = x + ux * t, pz = z + uz * t;
+      if (city.shoreDist(px, pz) > 4 && !collision.resolveCircle(px, pz, 0.6, 0).hit) {
+        out.x = px;
+        out.z = pz;
+        break;
+      }
+    }
+    return out;
+  }
+
   game.setPlayerMode = (mode) => {
     const p = game.player;
     p.mode = mode;
@@ -193,6 +216,11 @@ export function createGame({ canvas, uiRoot }) {
       return false;
     }
     exitPosition(v, game.world, exitSpot);
+    if (!exitSpot.ok && (v.wrecked || v.kind === 'plane' || v.kind === 'heli')) {
+      // Stranded (ditched at sea, wrecked boat): a rescue back to dry land.
+      findRescueSpot(v.x, v.z, exitSpot);
+      hud.toast('Rescued! Back on dry land.', 2.5);
+    }
     if (!exitSpot.ok) {
       hud.toast(v.kind === 'boat' ? 'Pull up to a pier to get out' : 'No room to get out here', 2);
       return false;
@@ -218,7 +246,7 @@ export function createGame({ canvas, uiRoot }) {
   // --- Simulation step. ---
   function fixedUpdate(dt) {
     input.poll();
-    if (input.consume('pause')) {
+    if (input.consume('pause') && !(game.map && game.map.fullMap.isOpen())) {
       game.paused = !game.paused;
       events.emit('pause', game.paused);
     }
@@ -301,6 +329,18 @@ export function createGame({ canvas, uiRoot }) {
       p.near = findEnterable(w, vs);
       if (input.consume('enter') && p.near) game.enterVehicle(p.near);
     }
+    // Every few seconds, clear away craft nobody is using or tracking
+    // once they are far behind, so the world never fills up.
+    sweepTimer -= dt;
+    if (sweepTimer <= 0) {
+      sweepTimer = 3;
+      for (let i = vs.length - 1; i >= 0; i--) {
+        const v = vs[i];
+        if (v.driver || v.parked || v.ai || (v.home && v.home.craft === v)) continue;
+        const dx = v.x - p.x, dz = v.z - p.z;
+        if (dx * dx + dz * dz > 300 * 300) game.removeVehicle(v);
+      }
+    }
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
       if (s.fixedUpdate) s.fixedUpdate(dt);
@@ -309,6 +349,7 @@ export function createGame({ canvas, uiRoot }) {
   }
 
   // --- Drawing step. ---
+  let sweepTimer = 3;
   let lastDistrict = '';
   let promptFor = null;
   let wakeTick = 0;
@@ -339,7 +380,11 @@ export function createGame({ canvas, uiRoot }) {
       camTarget.roll = v.kind === 'car' ? 0 : v.roll;
       camTarget.speed = v.speed;
       camTarget.height = 1.2;
-      hud.setPrompt(null);
+      const want = v.wrecked ? 'wreck' : null;
+      if (promptFor !== want) {
+        promptFor = want;
+        hud.setPrompt(want ? 'Wrecked. Tap EXIT to get out.' : null);
+      }
     } else {
       const w = p.walker;
       updatePersonMesh(personMesh, w, alpha);
@@ -385,6 +430,7 @@ export function createGame({ canvas, uiRoot }) {
 
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
+    if (!(w > 0 && h > 0)) return;
     // Phones report very high pixel densities; cap the drawn height so
     // the frame rate stays smooth.
     const cap = (900 * game.quality) / Math.max(1, h);

@@ -97,10 +97,18 @@ export function attachKeyboard(input, target = window) {
     if (buttons[e.code]) input.release(buttons[e.code]);
     refresh();
   };
+  // Losing focus with a key held would otherwise leave it stuck down.
+  const onBlur = () => {
+    for (const code of down) if (buttons[code]) input.release(buttons[code]);
+    down.clear();
+    refresh();
+  };
+  target.addEventListener('blur', onBlur);
   target.addEventListener('keydown', onDown);
   target.addEventListener('keyup', onUp);
   return () => {
     target.removeEventListener('keydown', onDown);
     target.removeEventListener('keyup', onUp);
+    target.removeEventListener('blur', onBlur);
   };
 }

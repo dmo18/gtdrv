@@ -56,7 +56,8 @@ export function createDriver(city, rng) {
     obsGap: Infinity, obsSpeed: 0, obsAlong: Infinity, obsVeh: null,
     boxBusy: false, oncoming: false, exitBlocked: false,
     // Timers and state.
-    yieldTime: 0, oncomingTime: 0, blockedTime: 0, nextAround: 6, pause: 0,
+    yieldTime: 0, oncomingTime: 0, blockedTime: 0, waitTime: 0, nextAround: 6, pause: 0,
+    nudge: 0, // small sideways shift away from things beside the lane
     mode: 0, // 0 normal, 1 backing up, 2 steering around
     modeTime: 0, aroundVeh: null, offset: 0, override: 0,
     junctions: 0, targetSpeed: 0, inJunction: false,
@@ -386,9 +387,14 @@ function scan(dr, v, ctx) {
   const distLine = dr.stopS - dr.s - halfL;
   const approaching = distLine > -0.5 && distLine < 30;
   const h0x = dr.ux[0], h0z = dr.uz[0];
-  const myTime = Math.max(0, distLine) / Math.max(sp, 1);
+  // Time to reach the junction box, measured like it is for others below.
+  const mtx = v.x - T.x, mtz = v.z - T.z;
+  const myDbo = Math.max(0, Math.abs(mtx) - T.hx, Math.abs(mtz) - T.hz);
+  const myTime = myDbo / Math.max(sp, 1);
+  // Too late to stop comfortably: carry on.
+  const committed = distLine < (sp * sp) / (2 * 6);
   let gap = Infinity, gSpeed = 0, gAlong = Infinity, gVeh = null;
-  let boxBusy = false, oncoming = false;
+  let boxBusy = false, oncoming = false, nudge = 0;
   for (let i = 0; i < list.length; i++) {
     const o = list[i];
     if (o === v || o.removed || (o.y || 0) > 2.5) continue;
@@ -405,11 +411,18 @@ function scan(dr, v, ctx) {
       // While steering around, the car being passed is judged against
       // where this car really is, and may be approached closer.
       const lat = around ? PR.lat - dr.lat : PR.lat - dr.offset;
-      if (Math.abs(lat) < oHalfW + halfW + 0.1 && PR.along > dr.s + 0.5) {
+      const need = oHalfW + halfW + 0.1;
+      // Something just beside the lane (a parked car): edge away from it.
+      if (!around && PR.along > dr.s - halfL && PR.along < dr.s + 25 && Math.abs(o.speed) < 1 &&
+        Math.abs(lat) >= need && Math.abs(lat) < need + 0.6) {
+        const n = (lat > 0 ? -1 : 1) * (need + 0.6 - Math.abs(lat));
+        if (Math.abs(n) > Math.abs(nudge)) nudge = n;
+      }
+      if (Math.abs(lat) < need && PR.along > dr.s + 0.5) {
         let g = PR.along - dr.s - halfL - oHalfL;
         if (around) g += MIN_GAP - 0.8;
         // Deadlock breaker: two cars waiting on each other.
-        if (o.ai && o.ai.obsVeh === v && dr.blockedTime > 1.5 && Math.abs(o.speed) < 0.5 && v.id < o.id) {
+        if (o.ai && o.ai.obsVeh === v && dr.waitTime > 1.5 && o.ai.waitTime > 1.5 && v.id < o.id) {
           dr.override = 2;
         }
         if (dr.override > 0 && o.ai && o.ai.obsVeh === v) g = Infinity;
@@ -433,8 +446,8 @@ function scan(dr, v, ctx) {
           const closing = -(o.vx * tx + o.vz * tz) / td;
           // Only crossing traffic: same or opposite direction is not a conflict.
           const along = Math.abs(Math.cos(o.heading) * h0x + Math.sin(o.heading) * h0z) > 0.7;
-          if (dbo < 14 && closing > 1 && !along) {
-            const oTime = dbo / Math.max(closing, 1);
+          if (!committed && dbo < 30 && closing > 1 && !along) {
+            const oTime = Math.max(0, dbo) / Math.max(closing, 1);
             if (oTime < myTime - 0.3 || (Math.abs(oTime - myTime) <= 0.3 && o.id < v.id)) boxBusy = true;
           }
         }
@@ -454,6 +467,7 @@ function scan(dr, v, ctx) {
   dr.obsVeh = gVeh;
   dr.boxBusy = boxBusy;
   dr.oncoming = oncoming;
+  dr.nudge = nudge;
   // Do not enter the junction when the exit is queued up.
   dr.exitBlocked = gVeh !== null && gAlong > dr.cum[IB] && gSpeed < 1.5 && gAlong < dr.cum[IC] + 2 * halfL + 3;
   // Steering around: done once the obstacle is well behind.
@@ -551,6 +565,8 @@ export function driveStep(dr, v, dt, ctx = {}) {
   // Waiting in a queue behind another working driver does not count.
   const ov = dr.obsVeh;
   const queued = ov && ov.ai && !ov.ai.stuck && !ov.ai.dead && ov.ai.mode === 0;
+  if (obsLimited && vt < 0.5 && Math.abs(sp) < 0.5) dr.waitTime += dt;
+  else dr.waitTime = 0;
   if (obsLimited && vt < 0.5 && Math.abs(sp) < 0.5 && !mustStop && !queued && dr.mode === 0) dr.blockedTime += dt;
   else if (sp > 2 && dr.mode === 0) {
     dr.blockedTime = 0;
@@ -571,7 +587,8 @@ export function driveStep(dr, v, dt, ctx = {}) {
       dr.modeTime = 0;
     } else reverse = true;
   }
-  let offTarget = 0;
+  // Wide vehicles keep a little left of the lane centre.
+  let offTarget = -Math.max(0, v.spec.width / 2 - 0.95) + clamp(dr.nudge, -0.6, 0.6);
   if (dr.mode === 2) {
     offTarget = -3.2;
     vt = Math.min(vt, 3);
