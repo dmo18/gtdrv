@@ -31,6 +31,7 @@ await build({
       import { defaultProgress } from './src/core/save.js';
       import { createEconomy } from './src/systems/economy.js';
       import { createMenu } from './src/ui/menu.js';
+      import { getHandlingMode } from './src/entities/vehicle.js';
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0;background:linear-gradient(#9fc8e8,#6d8f5a)';
       document.body.appendChild(root);
@@ -55,7 +56,7 @@ await build({
       };
       const economy = createEconomy(game, window.localStorage);
       const menu = createMenu(root, game, economy);
-      window.rw = { game, economy, menu, log };
+      window.rw = { game, economy, menu, log, getHandlingMode };
     `,
   },
   bundle: true, platform: 'browser', format: 'esm', outfile: path.join(out, 'harness.js'),
@@ -110,6 +111,7 @@ try {
   await load();
   check('starts closed', !(await isOpen()));
   const lastSteer = () => ev(() => window.rw.log.steer[window.rw.log.steer.length - 1]);
+  check('handling arcade at load', (await ev(() => window.rw.getHandlingMode())) === 'arcade');
   check('steering applied at load', JSON.stringify(await lastSteer()) === '["wheel",1]', JSON.stringify(await lastSteer()));
 
   // First run: ask how to steer, paused, once.
@@ -230,6 +232,18 @@ try {
   await page.locator('.rw-menu-body [data-steering="tilt"]').tap();
   check('settings: tilt kept where it works', (await progress()).settings.steering === 'tilt');
   await page.screenshot({ path: path.join(out, 'settings-steering-915x412.png') });
+  // Handling: two choices, arcade by default, realistic applies at once.
+  check('settings: two handling choices', (await page.locator('.rw-menu-body [data-handling]').count()) === 2);
+  check('settings: arcade marked', (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'true');
+  const hText = await page.locator('.rw-menu-body [data-handling="sim"]').innerText();
+  check('settings: realistic labelled', hText.includes('Realistic') && hText.includes('grip'), hText);
+  await page.locator('.rw-menu-body [data-handling="sim"]').scrollIntoViewIfNeeded();
+  await page.locator('.rw-menu-body [data-handling="sim"]').tap();
+  check('settings: handling applied at once', (await ev(() => window.rw.getHandlingMode())) === 'sim' && (await progress()).settings.handling === 'sim');
+  check('settings: realistic marked', (await page.locator('.rw-menu-body [data-handling="sim"]').getAttribute('aria-checked')) === 'true'
+    && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'false');
+  check('settings: handling saved', (await stored()).settings.handling === 'sim');
+  await page.screenshot({ path: path.join(out, 'settings-handling-915x412.png') });
   await page.locator('[data-setting="invertPitch"]').tap();
   await page.locator('[data-setting="leftHanded"]').tap();
   await page.locator('[data-setting="police"]').tap();
@@ -252,6 +266,7 @@ try {
   st = (await progress()).settings;
   check('settings persist', st.invertPitch && st.leftHanded && !st.police && st.quality === 1.25 && Math.abs(st.master - 0.35) < 1e-9, JSON.stringify(st));
   check('steering settings persist', st.steering === 'tilt' && st.steerSensitivity === 1.3, JSON.stringify(st));
+  check('handling persists and is applied', st.handling === 'sim' && (await ev(() => window.rw.getHandlingMode())) === 'sim', JSON.stringify(st));
   check('steering restored to controls', JSON.stringify(await lastSteer()) === '["tilt",1.3]' && (await ev(() => window.rw.log.lefty)) === true);
   check('quality restored to game', (await ev(() => window.rw.game.quality)) === 1.25);
 
@@ -265,7 +280,8 @@ try {
   await page.locator('[data-role="reset-confirm"]').tap();
   pr = await progress();
   check('reset clears', pr.money === 250 && pr.owned.length === 0 && pr.settings.quality === 1 && pr.settings.police === true
-    && pr.settings.steering === 'wheel' && pr.settings.steerSensitivity === 1, JSON.stringify(pr));
+    && pr.settings.steering === 'wheel' && pr.settings.steerSensitivity === 1 && pr.settings.handling === 'arcade', JSON.stringify(pr));
+  check('reset re-applies arcade handling', (await ev(() => window.rw.getHandlingMode())) === 'arcade');
   check('reset re-applies steering', JSON.stringify(await lastSteer()) === '["wheel",1]');
   const sv = await stored();
   check('reset saved', sv && sv.money === 250 && sv.owned.length === 0);

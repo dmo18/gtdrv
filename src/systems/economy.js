@@ -1,6 +1,7 @@
 // Money, purchases, saving and the small bits of bookkeeping that go
 // with them (distance travelled, first-visit bonuses).
 import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
+import { setHandlingMode } from '../entities/vehicle.js';
 import { DISTRICTS } from '../world/citygen.js';
 
 // Premium craft: they only appear at their berths once bought.
@@ -42,6 +43,7 @@ export function createEconomy(game, storage) {
     const s = progress.settings;
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
     if (game.input) game.input.invertPitch = s.invertPitch;
+    setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
     if (game.touch && game.touch.setSteering) {
       const used = game.touch.setSteering(s.steering, s.steerSensitivity, steerFallback);

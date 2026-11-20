@@ -12,6 +12,7 @@ const KEY_RE = /^[a-z0-9_-]{1,40}$/;
 const MEDALS = ['bronze', 'silver', 'gold'];
 const QUALITIES = [0.75, 1, 1.25];
 const STEERING = ['wheel', 'buttons', 'tilt', 'slider'];
+const HANDLING = ['arcade', 'sim'];
 const BAD_KEYS = ['__proto__', 'constructor', 'prototype'];
 
 export function defaultProgress() {
@@ -23,7 +24,7 @@ export function defaultProgress() {
     stats: { distance: 0, flights: 0, races: 0 },
     settings: {
       master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true,
-      steering: 'wheel', steerSensitivity: 1,
+      steering: 'wheel', steerSensitivity: 1, handling: 'arcade',
     },
   };
 }
@@ -81,6 +82,7 @@ export function sanitizeProgress(raw, validSpecIds = []) {
       }
       if (own(s, 'quality') && QUALITIES.includes(s.quality)) d.quality = s.quality;
       if (own(s, 'steering') && STEERING.includes(s.steering)) d.steering = s.steering;
+      if (own(s, 'handling') && HANDLING.includes(s.handling)) d.handling = s.handling;
       if (own(s, 'steerSensitivity') && typeof s.steerSensitivity === 'number' && Number.isFinite(s.steerSensitivity)) {
         d.steerSensitivity = Math.round(Math.max(0.5, Math.min(1.5, s.steerSensitivity)) * 100) / 100;
       }

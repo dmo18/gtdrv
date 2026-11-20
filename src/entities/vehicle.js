@@ -155,11 +155,53 @@ const RP = 0.75; // rpm fraction where the engine makes its rated power
 const NSUB = 3; // tyre-dynamics sub-steps per simulation step
 const V0 = 4; // m/s: slip angles use at least this speed (low-speed sanity)
 const KIN_V = 4; // below this the car blends into a no-slip kinematic model
-const LAT_TARGET = 0.85; // full steering asks for this share of grip
 const ROLL_RES = 0.013; // rolling resistance coefficient
 const ABS_K = 0.95; // ABS keeps braking at this share of the tyre limit
 const HB_K = 0.8; // locked rear tyres slide at this share of grip
-const FALL = 0.22; // tyre force falls this much past the peak slip
+
+// Two handling modes, module-wide (every car at once):
+// - 'arcade' (default): tight and forgiving. More lateral grip than real
+//   tyres (lateral friction latBase + latK * spec.grip, about 1.7..2.1),
+//   a tyre curve that hardly sags past the peak, more steering lock at
+//   speed (the lock is capped by the lateral acceleration it asks for,
+//   not by a heavy speed taper), quicker steering and a yaw-rate assist
+//   that pulls the car toward the bicycle-model yaw rate of the wheel
+//   angle. Longitudinal grip (traction, braking, ABS), weight transfer,
+//   gears, power oversteer and handbrake slides are the same as 'sim'.
+// - 'sim': realistic grip numbers (lateral friction = spec.grip), the
+//   tyre force sags past the peak, full input asks for about 0.85 of grip
+//   and the lock tapers with speed; only a light yaw damper.
+const HANDLING = {
+  arcade: {
+    latBase: 1.6, latK: 0.4, fall: 0.06, latTarget: 0.95, mechV: 45, slipLock: 0, rearLat: 1.12, cutMin: 0.6,
+    steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 10, yawLimK: 1,
+  },
+  sim: {
+    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, slipLock: 0, rearLat: 1, cutMin: 0.25,
+    steerRate: 7, steerRateV: 15, yawK: 1.5, yawFirm: 4, yawLimK: 1,
+  },
+};
+let handlingMode = 'arcade';
+let H = HANDLING.arcade;
+let FALL = H.fall; // tyre force falls this much past the peak slip
+
+// Pick the handling for every car: 'arcade' (default) or 'sim'. Anything
+// else means 'arcade'.
+export function setHandlingMode(mode) {
+  handlingMode = mode === 'sim' ? 'sim' : 'arcade';
+  H = HANDLING[handlingMode];
+  FALL = H.fall;
+  return handlingMode;
+}
+
+export function getHandlingMode() {
+  return handlingMode;
+}
+
+// Lateral tyre friction of a spec in the current mode.
+export function lateralGrip(spec) {
+  return H.latBase + H.latK * spec.grip;
+}
 
 // Normalised engine torque, peak around 60% of the redline.
 function torque(r) {
@@ -209,16 +251,17 @@ function derive(s) {
   return d;
 }
 
-// Maximum front wheel angle at speed u: near walking pace the full lock,
-// above that whatever asks for about LAT_TARGET of grip in a steady turn,
-// so full input never simply spins the car.
+// Maximum front wheel angle at speed u: near walking pace the mechanical
+// lock (which eases off a little with speed), above that whatever asks for
+// about latTarget of lateral grip in a steady turn, so full input never
+// simply spins the car. 'sim' tapers the mechanical lock as
+// steerMax / (1 + u / 20), the same curve the traffic and police planners
+// use to turn a wanted wheel angle into `steer`.
 export function steerLock(spec, u) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
-  const want = d.L * LAT_TARGET * spec.grip * G / Math.max(au * au, 1) + (d.apF - d.apR) * 0.6;
-  // The mechanical lock eases off a little with speed too (traffic AI plans
-  // its turns with this same curve).
-  return Math.min(spec.steerMax / (1 + au / 20), want);
+  const want = d.L * H.latTarget * lateralGrip(spec) * G / Math.max(au * au, 1) + (d.apF - d.apR) * 0.6 + H.slipLock;
+  return Math.min(spec.steerMax / (1 + au / H.mechV), want);
 }
 
 const MAX_SUBSTEP_MOVE = 0.3; // metres per collision sub-step
@@ -248,14 +291,14 @@ export function stepVehicle(v, controls, dt, world) {
   v.brake = brake;
   v.handbrake = handbrake;
 
-  const m = s.mass, mg = m * G, mu = s.grip;
+  const m = s.mass, mg = m * G, mu = s.grip, muLat = lateralGrip(s);
   let ch = Math.cos(v.heading), sh = Math.sin(v.heading);
   const vf0 = v.vx * ch + v.vz * sh;
   const avf0 = Math.abs(vf0);
 
   // ---- Steering: rate-limited, quicker at low speed, lock shrinks with speed.
   const back = steerIn === 0 || steerIn * v.steer < 0;
-  const rate = (back ? 1.6 : 1) * 7 / (1 + avf0 / 15);
+  const rate = (back ? 1.6 : 1) * H.steerRate / (1 + avf0 / H.steerRateV);
   v.steer = approach(v.steer, steerIn, rate * dt);
   // Two input mappings, same limit: 'proportional' (the player) scales the
   // speed-dependent lock, so the whole input range stays useful at speed;
@@ -346,7 +389,8 @@ export function stepVehicle(v, controls, dt, world) {
     const dFz = m * v.accelX * d.h / L;
     const fzF = clamp(mg * d.cgF - dFz, 0.2 * mg, 0.85 * mg);
     const fzR = mg - fzF;
-    const capF = mu * fzF, capR = mu * fzR;
+    const capF = mu * fzF, capR = mu * fzR; // longitudinal limits
+    const capLF = muLat * fzF, capLR = muLat * H.rearLat * fzR; // lateral limits
 
     // Stability assist (off while the handbrake is held).
     const beta = Math.atan2(vl, Math.max(avf, V0));
@@ -354,16 +398,16 @@ export function stepVehicle(v, controls, dt, world) {
     let driveScale = 1;
     if (!handbrake && avf > 4 && !v.wrecked) {
       let yawRef = vf * Math.tan(delta) / L;
-      const yLim = mu * G / Math.max(avf, 1);
+      const yLim = H.yawLimK * muLat * G / Math.max(avf, 1);
       yawRef = clamp(yawRef, -yLim, yLim);
       const over = Math.abs(beta) - d.betaAllow;
       if (over > 0) {
         assistMz += d.iz * 30 * (beta > 0 ? over : -over);
-        driveScale = clamp(1 - over * 5, 0.25, 1);
+        driveScale = clamp(1 - over * 5, H.cutMin, 1);
       }
       const eY = r - yawRef;
       // Damp yaw toward the steering's intent; firmer when over-rotating.
-      const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? 4 : 1.5;
+      const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK;
       assistMz -= d.iz * firm * eY;
     }
 
@@ -397,7 +441,7 @@ export function stepVehicle(v, controls, dt, world) {
     const vperp = -vf * sd + vlf * cd;
     const alphaF = Math.atan(vperp / Math.max(Math.abs(vpar), V0));
     const uF = fxF / capF;
-    const latF = capF * Math.sqrt(Math.max(0.05, 1 - 0.85 * uF * uF));
+    const latF = capLF * Math.sqrt(Math.max(0.05, 1 - 0.85 * uF * uF));
     const xF = alphaF / d.apF;
     const fyF = -latF * tyre(xF);
     const ffx = fxF * cd - fyF * sd;
@@ -421,7 +465,7 @@ export function stepVehicle(v, controls, dt, world) {
     } else {
       const alphaR = Math.atan(vlr / Math.max(avf, V0));
       const uR = fxR / capR;
-      const latR = capR * Math.sqrt(Math.max(0.05, 1 - 0.85 * uR * uR));
+      const latR = capLR * Math.sqrt(Math.max(0.05, 1 - 0.85 * uR * uR));
       const xR = alphaR / d.apR;
       fry = -latR * tyre(xR);
       frx = fxR;
@@ -454,7 +498,7 @@ export function stepVehicle(v, controls, dt, world) {
       const rk = nf * Math.tan(delta) / L;
       const lk = b * rk;
       v.yawRate = rk + (v.yawRate - rk) * blend;
-      nl = approach(nl, lk + (nl - lk) * blend, mu * G * h * 1.5);
+      nl = approach(nl, lk + (nl - lk) * blend, muLat * G * h * 1.5);
       v.vx = nf * ch - nl * sh;
       v.vz = nf * sh + nl * ch;
     }

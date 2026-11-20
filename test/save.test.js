@@ -17,7 +17,7 @@ test('round trip keeps valid progress', () => {
   p.medals = { race1: 'gold', seen_docks: 'bronze' };
   p.bestTimes = { race1: 61.5 };
   p.stats = { distance: 5000.5, flights: 2, races: 3 };
-  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false, steering: 'tilt', steerSensitivity: 1.25 };
+  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false, steering: 'tilt', steerSensitivity: 1.25, handling: 'sim' };
   const s = memory();
   assert.equal(saveProgress(s, p), true);
   assert.deepEqual(loadProgress(s, IDS), p);
@@ -50,12 +50,12 @@ test('field checks', () => {
     medals: { a: 'platinum', b: 'gold', 'Bad Key': 'gold' },
     bestTimes: { a: -1, b: 90000, c: 12, d: NaN },
     stats: { distance: -1, flights: 4, races: 'x' },
-    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0, steering: 'joystick', steerSensitivity: 9 },
+    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0, steering: 'joystick', steerSensitivity: 9, handling: 'gt' },
   }, IDS);
   assert.deepEqual(p.medals, { b: 'gold' });
   assert.deepEqual(p.bestTimes, { c: 12 });
   assert.deepEqual(p.stats, { distance: 0, flights: 4, races: 0 });
-  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true, steering: 'wheel', steerSensitivity: 1.5 });
+  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true, steering: 'wheel', steerSensitivity: 1.5, handling: 'arcade' });
 });
 
 test('prototype pollution is ignored', () => {
@@ -90,4 +90,12 @@ test('storage problems are tolerated', () => {
   assert.deepEqual(loadProgress(memory('{not json'), IDS), defaultProgress());
   const big = JSON.stringify({ money: 999, pad: 'x'.repeat(100001) });
   assert.deepEqual(loadProgress(memory(big), IDS), defaultProgress());
+});
+
+test('handling setting: arcade by default, sim kept, anything else falls back', () => {
+  assert.equal(defaultProgress().settings.handling, 'arcade');
+  const h = (x) => sanitizeProgress({ settings: { handling: x } }, IDS).settings.handling;
+  assert.equal(h('sim'), 'sim');
+  assert.equal(h('arcade'), 'arcade');
+  for (const bad of ['SIM', 'realistic', '', 1, null, ['sim'], { sim: 1 }]) assert.equal(h(bad), 'arcade');
 });

@@ -2,6 +2,7 @@
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
 import { BOAT_SPECS } from '../entities/boat.js';
+import { setHandlingMode } from '../entities/vehicle.js';
 import { CATALOG } from '../systems/economy.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -122,6 +123,10 @@ const STEER_CHOICES = [
   ['tilt', 'Tilt', 'Tilt your phone like a steering wheel.'],
   ['slider', 'Slider', 'Slide your thumb left and right on a pad.'],
 ];
+const HANDLING_CHOICES = [
+  ['arcade', 'Arcade', 'Tight and forgiving.'],
+  ['sim', 'Realistic', 'Heavier, more grip-limited.'],
+];
 const MEDAL_COLORS = { bronze: '#c9803f', silver: '#c4cbd2', gold: '#f0c24a' };
 const MAX_BY_KIND = {
   plane: { speed: 130, tough: 1000, handle: 6 },
@@ -216,6 +221,7 @@ export function createMenu(root, game, economy) {
     const s = settings();
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master });
     if (game.input) game.input.invertPitch = s.invertPitch;
+    setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
     if (game.touch && game.touch.setSteering) game.touch.setSteering(s.steering, s.steerSensitivity);
     if (game.quality !== s.quality) {
@@ -403,7 +409,29 @@ export function createMenu(root, game, economy) {
     slider.addEventListener('change', () => commit());
     row.append(slider, val);
     body.appendChild(row);
+    renderHandling();
     body.appendChild(h('div', 'rw-menu-group', 'Other'));
+  }
+
+  // Car handling: two big radio buttons (applies to every car at once).
+  function renderHandling() {
+    const current = settings().handling;
+    body.appendChild(h('div', 'rw-menu-group', 'Handling'));
+    const grid = h('div', 'rw-menu-steer');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', 'Car handling');
+    for (const [id, label, desc] of HANDLING_CHOICES) {
+      const b = h('button', 'rw-menu-btn rw-menu-choice');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(current === id));
+      b.setAttribute('aria-label', 'Handling: ' + label + ', ' + desc);
+      b.dataset.handling = id;
+      b.append(h('b', '', label), h('span', '', desc));
+      b.addEventListener('click', () => { settings().handling = id; commit(); render(); });
+      grid.appendChild(b);
+    }
+    body.appendChild(grid);
   }
 
   function renderSettings() {

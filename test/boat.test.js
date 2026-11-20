@@ -249,3 +249,37 @@ test('no NaN in 3000 random steps', () => {
     assert.ok(city.shoreDist(b.x, b.z) < 0);
   }
 });
+
+// Full-lock turning circle at a held speed: half the larger extent of the
+// path over one full turn (the entry included).
+function turnRadius(id, target) {
+  const b = createBoat(id, 0, 0, 0);
+  const c = ctl();
+  for (let i = 0; i < 1500; i++) { c.throttle = b.speed < target ? 1 : 0; stepBoat(b, c, DT, {}); }
+  c.steer = 1;
+  let turned = 0, last = b.heading, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, slide = 0;
+  for (let i = 0; i < 1200 && turned < Math.PI * 2; i++) {
+    c.throttle = b.speed < target ? 1 : 0;
+    stepBoat(b, c, DT, {});
+    let d = b.heading - last;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    turned += d;
+    last = b.heading;
+    slide = Math.max(slide, Math.abs(-b.vx * Math.sin(b.heading) + b.vz * Math.cos(b.heading)));
+    minX = Math.min(minX, b.x); maxX = Math.max(maxX, b.x); minZ = Math.min(minZ, b.z); maxZ = Math.max(maxZ, b.z);
+  }
+  return { radius: Math.max(maxX - minX, maxZ - minZ) / 2, slide, turned };
+}
+
+test('turning circles: speedboat within 22 m and jetski within 12 m at 10 m/s, still sliding', () => {
+  const sb = turnRadius('speedboat', 10), js = turnRadius('jetski', 10);
+  assert.ok(sb.turned >= Math.PI * 2 - 0.05 && js.turned >= Math.PI * 2 - 0.05);
+  assert.ok(sb.radius <= 22 && sb.radius > 12, `speedboat ${sb.radius.toFixed(1)} m`);
+  assert.ok(js.radius <= 12 && js.radius > 4, `jetski ${js.radius.toFixed(1)} m`);
+  // The hull still slides out in the turn (the boat feel).
+  assert.ok(sb.slide > 2.5, `speedboat slide ${sb.slide.toFixed(1)} m/s`);
+  const fast = turnRadius('speedboat', 20);
+  assert.ok(fast.radius > sb.radius && fast.radius < 30, `speedboat at 20 m/s ${fast.radius.toFixed(1)} m`);
+  assert.ok(fast.slide > 6, `speedboat slide at 20 m/s ${fast.slide.toFixed(1)} m/s`);
+});

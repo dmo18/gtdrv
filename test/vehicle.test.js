@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  VEHICLE_SPECS, createVehicle, stepVehicle, collideVehicles, vehicleCorners, damageVehicle,
+  VEHICLE_SPECS, createVehicle, stepVehicle, collideVehicles, vehicleCorners, damageVehicle, setHandlingMode,
 } from '../src/entities/vehicle.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createRng } from '../src/core/rng.js';
@@ -216,6 +216,11 @@ const bodySlip = (v) => {
   return Math.atan2(-v.vx * sh + v.vz * ch, v.vx * ch + v.vz * sh);
 };
 const DEG = Math.PI / 180;
+// Run a test body in one handling mode, then go back to the default.
+const inMode = (mode, fn) => () => {
+  setHandlingMode(mode);
+  try { fn(); } finally { setHandlingMode('arcade'); }
+};
 
 test('0-100 km/h times fall in believable bands per spec', () => {
   const bands = {
@@ -262,7 +267,7 @@ test('braking from 100 km/h stops in a realistic distance, with ABS and no lock'
   }
 });
 
-test('steady cornering at 20 m/s with full steer settles to a constant radius', () => {
+test('steady cornering at 20 m/s with full steer settles to a constant radius (sim)', inMode('sim', () => {
   for (const id of ['sedan', 'sports', 'muscle', 'truck']) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 20;
@@ -290,7 +295,7 @@ test('steady cornering at 20 m/s with full steer settles to a constant radius', 
     assert.ok(radius > 30 && radius < 70, `${id} radius ${radius.toFixed(1)} m`);
     assert.ok(Math.abs(v.roll) > 0.02 && v.roll < 0, `${id} leans out of a right turn (roll ${v.roll.toFixed(3)})`);
   }
-});
+}));
 
 test('releasing the steering at 40 m/s returns straight without weaving', () => {
   for (const id of ['sports', 'police', 'muscle', 'sedan']) {
@@ -317,7 +322,7 @@ test('releasing the steering at 40 m/s returns straight without weaving', () => 
   }
 });
 
-test('rwd car: handbrake starts a slide, the assist recovers it after release', () => {
+test('rwd car: handbrake starts a slide, the assist recovers it after release (sim)', inMode('sim', () => {
   for (const id of ['sports', 'muscle']) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 20;
@@ -339,9 +344,9 @@ test('rwd car: handbrake starts a slide, the assist recovers it after release', 
     assert.ok(v.speed > 10, `${id} still driving at ${v.speed.toFixed(1)}`);
     assert.ok(Math.abs(bodySlip(v)) < 1 * DEG);
   }
-});
+}));
 
-test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches it', () => {
+test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches it (sim)', inMode('sim', () => {
   const powerOn = (id) => {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 12;
@@ -369,7 +374,7 @@ test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches
     return v.yawRate;
   };
   assert.ok(turnIn(0) > turnIn(1) * 1.2);
-});
+}));
 
 test('gearbox: gears and revs stay in range, upshifts under full throttle', () => {
   for (const id of ['sedan', 'sports', 'truck', 'van']) {
