@@ -130,7 +130,7 @@ try {
   poses.forEach((p, i) => {
     if (i < 3) check(p.road > 150, `minimap pose ${i}: road pixels present (${p.road})`);
     check(p.opaque > 15000, `minimap pose ${i}: not blank (${p.opaque} opaque px)`);
-    const d = Math.hypot(p.centre[0] - 0xe2, p.centre[1] - 0x73, p.centre[2] - 0x3a);
+    const d = Math.hypot(p.centre[0] - 0x5f, p.centre[1] - 0xe0, p.centre[2] - 0xff);
     check(d < 12, `minimap pose ${i}: centre pixel is player arrow colour (${p.centre})`);
   });
 
