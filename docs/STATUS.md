@@ -4,9 +4,11 @@
 - Milestone 1: drivable city, touch controls, HUD
 - Milestone 2: walking, boats, planes, helicopters, map, sound
 
+- Milestone 3: traffic, pedestrians, races and deliveries, showroom, save
+- Milestone 4: police chases (optional), day/night, weather, hints
+
 ## In progress
-- Milestone 3: traffic, pedestrians (done), activities, showroom, save
-- Milestone 4 started early: day/night and weather
+- Final verification and review
 
 ## Decisions
 - Name: Rustwater (original setting, an island harbour city).

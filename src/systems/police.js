@@ -266,10 +266,10 @@ function roadAim(cop, v, dt, tx, tz) {
   let F = city.nodes[cop.f], T = city.nodes[cop.t];
   let ux = (T.x - F.x) / E.length, uz = (T.z - F.z) / E.length;
   let d = (v.x - F.x) * ux + (v.z - F.z) * uz;
-  let lat = (v.x - F.x) * -uz + (v.z - F.z) * ux;
+  const lat = (v.x - F.x) * -uz + (v.z - F.z) * ux;
   if (Math.abs(lat) > 14 || d < -15 || d > E.length + 25) {
     attach(cop, v, tx, tz);
-    return roadAim2(cop, v, tx, tz);
+    return roadAim2(cop, v);
   }
   // Onto the next edge once nearer to it than to this one.
   if (d > E.length - 30) {
@@ -289,7 +289,6 @@ function roadAim(cop, v, dt, tx, tz) {
       ux = (T.x - F.x) / E.length;
       uz = (T.z - F.z) / E.length;
       d = (v.x - F.x) * ux + (v.z - F.z) * uz;
-      lat = (v.x - F.x) * -uz + (v.z - F.z) * ux;
     }
   }
   // Re-plan the turns ahead while there is still room to brake.
@@ -301,7 +300,7 @@ function roadAim(cop, v, dt, tx, tz) {
     if (distT > (sp * sp) / (2 * DECEL) + 10) cop.n1 = pickToward(city, cop.e, cop.t, tx, tz);
     cop.n2 = pickToward(city, cop.n1, otherEnd(city.edges[cop.n1], cop.t), tx, tz);
   }
-  return roadAim2(cop, v, tx, tz);
+  return roadAim2(cop, v);
 }
 
 function roadAim2(cop, v) {
@@ -362,6 +361,14 @@ function scanAhead(cop, v, target, vehicles) {
   cop.obsSpeed = gs;
 }
 
+function wideClear(col, x0, z0, x1, z1, w) {
+  const d = Math.hypot(x1 - x0, z1 - z0);
+  if (d < 1e-6) return true;
+  const ox = (-(z1 - z0) / d) * w, oz = ((x1 - x0) / d) * w;
+  return col.lineClear(x0, z0, x1, z1) && col.lineClear(x0 + ox, z0 + oz, x1 + ox, z1 + oz) &&
+    col.lineClear(x0 - ox, z0 - oz, x1 - ox, z1 - oz);
+}
+
 // Fill v.controls for one step of chasing `target` (any craft or the
 // player on foot: { x, z, vx, vz, heading, spec?, y? }).
 // ctx: { collision, vehicles, time }.
@@ -382,7 +389,9 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
 
   if (cop.tick % 4 === 0) {
-    cop.los = dist < SIGHT && (target.y || 0) < 4 && (!col || col.lineClear(v.x, v.z, tx, tz));
+    // A car-wide clear line, not just a sight line, so it never cuts
+    // across a building corner.
+    cop.los = dist < SIGHT && (target.y || 0) < 4 && (!col || wideClear(col, v.x, v.z, tx, tz, 1.2));
   }
   if (cop.tick % 3 === 0 && ctx.vehicles) scanAhead(cop, v, target, ctx.vehicles);
   else if (cop.obsGap < Infinity) cop.obsGap -= (sp - cop.obsSpeed) * dt;
@@ -491,6 +500,7 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   const cosA = lx / (Math.hypot(lx, ly) || 1);
   vt = Math.min(vt, 5 + 31 * Math.max(0, cosA) * Math.max(0, cosA));
 
+  const want = vt;
   // Feelers: ease off and steer away from walls.
   if (col) {
     const asp = Math.abs(sp);
@@ -511,7 +521,7 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
 
   // Stuck against something: back up for a moment and try again.
   if (cop.reverse <= 0) {
-    if (vt > 2.5 && Math.abs(sp) < 1.2) cop.stuckTime += dt;
+    if (want > 2.5 && Math.abs(sp) < 1.2) cop.stuckTime += dt;
     else cop.stuckTime = Math.max(0, cop.stuckTime - 2 * dt);
     if (cop.stuckTime >= 2) {
       cop.stuckTime = 0;
@@ -591,6 +601,7 @@ export function createPolice(game, { max = 3 } = {}) {
     v.role = null;
     v.controls = null;
     if (v.driver !== 'player') v.driver = null;
+    if (v.mesh) setVehicleLights(v.mesh, { brake: false, siren: false, time: game.time });
   }
 
   function despawn(i) {
