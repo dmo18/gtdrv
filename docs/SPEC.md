@@ -13,8 +13,10 @@ existing game: own name, city, characters, art and missions.
   unlocks: everything is available from the start.
 - Art: stylised low-poly shapes built in code (no downloaded art).
 - Sound: generated in code (engine, sirens, impacts). No licensed music.
-- Tone: playful, loud and fun. Action violence is allowed (weapons,
-  explosions, wrecks, pedestrians can be knocked down). Never any blood,
-  gore, dismemberment or sexual content.
+- Tone: loud, violent sandbox fun. Action violence is allowed: weapons
+  and explosions kill people outright (they fall, lie still and fade),
+  blood is shown (red bursts and pools on the ground that fade), and
+  destroyed vehicles explode, break into flying debris and vanish.
+  Never dismemberment or sexual content.
 - Target: smooth play (aim 60 frames per second, never under 30) on the
   phone; all controls usable with two thumbs.

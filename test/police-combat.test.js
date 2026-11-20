@@ -69,10 +69,11 @@ test('hurting people: civilians and officers always count, crew only when police
   step(game, [police], 1);
   assert.equal(police.heat.points, 0, 'crew hurt, unseen');
   const civ = civAt(game, p.x + 300, p.z);
-  damage(game, civ, 10, w, 'bullet');
+  damage(game, civ, 5, w, 'melee'); // the first wrench hit only hurts: hit points only
   step(game, [police], 1);
   assert.ok(Math.abs(police.heat.points - VIOLENCE.civHit) < 1e-6);
-  damage(game, civ, 100, w, 'bullet'); // hit + down
+  const civ2 = civAt(game, p.x + 300, p.z + 5);
+  damage(game, civ2, 10, w, 'bullet'); // a bullet is lethal: hit + down
   step(game, [police], 1);
   assert.equal(police.heat.level, 1);
   assert.ok(Math.abs(police.heat.points - 0.5) < 1e-6, `pending points capped at 1.5 before the step: ${police.heat.points}`);

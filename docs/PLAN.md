@@ -256,7 +256,7 @@ rivals; missions 4 to 8; AI fighters; ejection seat; knocking over
 lamps and trees; pickups and armour.
 
 Change log: owner asked for "more GTA and Gran Turismo combined":
-full sandbox combat (no blood or gore), story missions, and scores in
+full sandbox combat (blood allowed, no dismemberment), story missions, and scores in
 place of money. Earlier "no combat" decision superseded. Then (direction
 change 3, cap 2.8M): bombs, grenades, fighter jets, flyable police
 helicopters, stealable tanks and heat-5 chases added as tasks 31 to 34

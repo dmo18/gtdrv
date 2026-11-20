@@ -1,7 +1,7 @@
 # Arms interface (explosives, craft weapons, tank, fighter, police heli, chases)
 
-Extends docs/COMBAT.md and docs/CRAFT.md; same rules: cartoon only (sparks,
-flash, knock-down, fade; never blood, gore or dismemberment), fixed 1/60 s
+Extends docs/COMBAT.md and docs/CRAFT.md; same rules: violent but not graphic (sparks,
+flash, blood, death, fade; never dismemberment), fixed 1/60 s
 steps, `createRng` only, no allocation per frame, pure logic in node-testable
 files, every toy available from the start. All names are invented.
 
@@ -131,8 +131,8 @@ applies `damage(car, car.spec.health, t, 'ram')` (wrecked) and sets
 `crushed = true` (vehiclemesh squashes the body to 45% height, dark tint).
 Longer cars and tanks are only pushed (ram damage 30 per m/s closing).
 People: peds.js already records bumps for any craft, so a moving tank
-knocks people down through the COMBAT.md ram rule (never crushed, they
-tumble aside and get up). Benches and signs have no collision: the tank
+kills people through the COMBAT.md ram rule (never crushed flat; they
+are thrown aside, die and fade). Benches and signs have no collision: the tank
 rolls through (`crush`, target null). Lamps and trees stay solid (merged
 static meshes; flattening them is out of this wave).
 Touch (twin-stick): left stick drives tank-relative (up = forward demand,

@@ -146,16 +146,15 @@ test('the last one standing flees when outnumbered; low hp may flee too', () => 
   assert.equal(st.fled, 1);
   assert.equal(st.out, 2);
 
-  // Low hp: about a quarter of hurt members run (seeded).
-  let fled = 0;
-  for (let s = 0; s < 40; s++) {
+  // A single hit is lethal now: nobody is left hurt enough to flee.
+  for (let s = 0; s < 10; s++) {
     const g2 = makeFightGame({ city, collision, px: 18, pz: 0, seed: s });
     const c2 = createCrew(g2, { ambient: false, seed: 100 + s });
     const gr = c2.spawnGroup({ x: 0, z: 0, n: 3, hostile: true });
-    damage(g2, gr.members[0], 50, g2.player.walker, 'bullet');
-    if (gr.members[0].state === 'flee') fled++;
+    damage(g2, gr.members[0], 5, g2.player.walker, 'bullet');
+    assert.equal(gr.members[0].hp, 0);
+    assert.equal(gr.members[0].life, 'down');
   }
-  assert.ok(fled >= 4 && fled <= 18, `${fled} of 40 fled`);
 });
 
 // Six crew against the player, 120 simulated seconds on the real city.
@@ -191,7 +190,7 @@ function sixVersusOne(seed) {
 test('six versus one: 120 s resolve with no NaN, slots and LOS budget held', () => {
   const r = sixVersusOne(11);
   assert.equal(r.steps, 7200);
-  assert.ok(r.shots > 20, `${r.shots} crew shots`);
+  assert.ok(r.shots > 8, `${r.shots} crew shots`);
   assert.ok(r.hits > 0 && r.hits < r.shots, `${r.hits} hits of ${r.shots}`);
   assert.ok(r.takedowns + r.playerDowns > 0, `takedowns ${r.takedowns}, player downs ${r.playerDowns}`);
   assert.ok(r.maxSlots <= ATTACK_SLOTS, `${r.maxSlots} slots`);

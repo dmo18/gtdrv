@@ -51,6 +51,7 @@ export const RATE_WINDOW = 0.5, RATE_MAX = 3, QUEUE_DELAY = 0.3, CHAIN_DELAY = 0
 export const LIVE_T = 1.2; // seconds an explosion counts as "live"
 export const RESPAWN_CLEAR = 60;
 export const GRAVITY = 9.81;
+export const WRECK_T = 3; // s from the blast until the wreck hull is removed
 export const CAPS = { actors: 36, projectiles: 24, explosions: 4, burning: 4, decals: 24, queue: 8 };
 // docs/ARMS.md: live projectiles by type, stickies, throwing, mounts.
 export const TYPE_CAPS = { missile: 4, bomb: 6, shell: 4, thrown: 6 };
@@ -96,7 +97,7 @@ const EV = {
   hit: { target: null, source: null, amount: 0, kind: 'bullet', x: 0, y: 0, z: 0 },
   down: { target: null, source: null, kind: 'bullet' },
   out: { target: null, source: null },
-  explosion: { x: 0, y: 0, z: 0, radius: 0, source: null, depth: 0, size: 'small', puff: false },
+  explosion: { x: 0, y: 0, z: 0, radius: 0, source: null, depth: 0, size: 'small', puff: false, craft: null },
   launch: { shooter: null, craft: null, weapon: null, x: 0, y: 0, z: 0 },
   bombFall: { index: 0, x: 0, y: 0, z: 0, vy: 0 },
   lock: { craft: null, target: null, state: 'seek' },
@@ -283,12 +284,16 @@ export function damage(game, target, amount, source = null, kind = 'bullet') {
   target.sinceHit = 0;
   target.kx += px;
   target.kz += pz;
-  emitHit(game, target, source, applied, kind, (target.y || 0) + 1.1);
-  let goDown = target.hp <= 0 || kind === 'blast' || kind === 'ram';
+  let goDown = target.hp <= 0;
   if (kind === 'melee') {
     target.bonks = (target.bonks || 0) + 1;
     if (target.bonks >= WEAPONS.wrench.knockHits) goDown = true;
+  } else if (kind !== 'fire' && (target.team !== 'player' || kind === 'blast' || kind === 'ram')) {
+    goDown = true; // guns, blasts and rams are lethal outright (the player keeps hp rules)
   }
+  // Anyone but the player who falls is dead: no getting back up.
+  if (goDown && target.team !== 'player') target.hp = 0;
+  emitHit(game, target, source, applied, kind, (target.y || 0) + 1.1);
   if (goDown) knockDown(game, target, source, kind);
   return applied;
 }
@@ -553,10 +558,16 @@ export function createCombat(game, { seed = 23023 } = {}) {
   function craftDestroyed(c, depth) {
     stopBurning(c);
     c.scorched = true;
-    if (depth > MAX_DEPTH || c.exploded) return;
+    if (depth > MAX_DEPTH) {
+      // Chain limit: no blast, but the hull still goes away.
+      if (c.wreckT === undefined) c.wreckT = 0;
+      return;
+    }
+    if (c.exploded) return;
     c.exploded = true;
     const h = (c.spec && c.spec.height) || 1.5;
-    requestExplosion(c.x, craftBase(game, c) + h * 0.5, c.z, CRAFT_BLAST_R, c.lastHitBy, depth, c, depth > 0 ? CHAIN_DELAY : 0);
+    // A blast the full queue drops still leaves a wreck that must go away.
+    if (!requestExplosion(c.x, craftBase(game, c) + h * 0.5, c.z, CRAFT_BLAST_R, c.lastHitBy, depth, c, depth > 0 ? CHAIN_DELAY : 0) && c.wreckT === undefined) c.wreckT = 0;
   }
 
   function ejectPlayer(c) {
@@ -589,6 +600,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     e.depth = 0;
     e.size = 'small';
     e.puff = true;
+    e.craft = null;
     emit(game, 'explosion');
   }
 
@@ -604,7 +616,10 @@ export function createCombat(game, { seed = 23023 } = {}) {
     e.depth = depth;
     e.size = explosionSize(r);
     e.puff = false;
+    e.craft = craft || null;
     emit(game, 'explosion');
+    e.craft = null;
+    if (craft) craft.wreckT = 0;
     if (y < 3 && isLand(game, x, z)) addDecal(x, z, r * 0.45);
     const prev = curDepth;
     curDepth = depth;
@@ -626,7 +641,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       if (d >= r) continue;
       const k = 1 - d / r;
       const hd = Math.sqrt(ex * ex + ez * ez);
-      const push = 2 + 6 * k;
+      const push = 3 + 9 * k;
       if (hd > 1e-3) setPush((ex / hd) * push, (ez / hd) * push);
       damage(game, a, BLAST_DMG * k * scale, source, 'blast');
     }
@@ -678,10 +693,12 @@ export function createCombat(game, { seed = 23023 } = {}) {
         q.x = c.x;
         q.z = c.z;
       }
-      detonate(q.x, q.y, q.z, q.r, q.source, q.depth, c, q.scale);
+      // Free the slot first: detonate() can queue chain blasts into it.
+      const qx = q.x, qy = q.y, qz = q.z, qr = q.r, qs = q.source, qd = q.depth, qk = q.scale;
       q.scale = 1;
       q.craft = null;
       q.source = null;
+      detonate(qx, qy, qz, qr, qs, qd, c, qk);
     }
   }
 
@@ -1523,6 +1540,32 @@ export function createCombat(game, { seed = 23023 } = {}) {
     }
   }
 
+  // --- Wrecks: after the blast the hull vanishes (debris is drawn by combatfx) ---
+  function queuedFor(c) {
+    for (let i = 0; i < queue.length; i++) if (queue[i].active && queue[i].craft === c) return true;
+    return false;
+  }
+  function stepWrecks(dt) {
+    const vs = game.vehicles;
+    if (!vs) return;
+    const p = game.player;
+    for (let i = vs.length - 1; i >= 0; i--) {
+      const c = vs[i];
+      if (!c || !c.wrecked || c.removed) continue;
+      if (c.wreckT === undefined) continue; // the blast has not happened yet
+      c.wreckT += dt;
+      if (c.wreckT < WRECK_T || queuedFor(c)) continue;
+      // Never leave the player inside a hull that is about to go.
+      if (p && p.vehicle === c) ejectPlayer(c);
+      if (p && p.vehicle === c) continue;
+      if (game.removeVehicle) game.removeVehicle(c);
+      else {
+        vs.splice(i, 1);
+        c.removed = true;
+      }
+    }
+  }
+
   // --- People ---
   function stepActor(a, dt) {
     if (a.hitT > 0) a.hitT = Math.max(0, a.hitT - dt);
@@ -1892,7 +1935,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     armsOf: ensureArms,
     get throwAiming() { return throwAim; },
     trace: (x, y, z, dx, dy, dz, len, skipActor, skipCraft, out = TR) => trace(game, x, y, z, dx, dy, dz, len, skipActor, skipCraft, out),
-    explode: (x, y, z, r, source = null, depth = 0, scale = 1) => requestExplosion(x, y, z, r, source, depth, null, 0, scale),
+    explode: (x, y, z, r, source = null, depth = 0, scale = 1, craft = null) => requestExplosion(x, y, z, r, source, depth, craft, 0, scale),
     craftDestroyed,
     respawn,
     respawnSpot,
@@ -1908,6 +1951,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       stepStickies(dt);
       stepQueue(dt);
       stepBurning(dt);
+      stepWrecks(dt);
       const actors = game.actors;
       for (let i = 0; i < actors.length; i++) stepActor(actors[i], dt);
       const p = game.player;

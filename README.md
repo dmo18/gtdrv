@@ -2,7 +2,7 @@
 
 An original open-world driving, boating and flying game that runs in a
 phone browser. Cars, boats, planes, helicopters, a tank and a fighter
-jet, with on-foot combat in a cartoon sandbox (no blood or gore). Best
+jet, with on-foot combat in a violent sandbox (blood, no dismemberment). Best
 played on a phone turned sideways.
 
 ## Run it

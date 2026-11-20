@@ -305,7 +305,7 @@ test('crush: a sedan above 2 m/s is flattened and wrecked; a slow push and a tru
   assert.ok(tr.health < 2000, 'rammed');
 });
 
-test('people are knocked down by a moving tank, never crushed (they get up)', () => {
+test('people hit by a moving tank die (not crushed flat, and never get up)', () => {
   const { g, t } = tankGame();
   board(g, t);
   const p = { x: 8, z: 0, y: 0, radius: 0.35, heading: 0, px: 8, pz: 0, vx: 0, vz: 0 };
@@ -318,9 +318,10 @@ test('people are knocked down by a moving tank, never crushed (they get up)', ()
     p.bumpV = 5.5;
   });
   assert.equal(p.life, 'down');
-  assert.ok(p.hp > 0, 'not out');
+  assert.equal(p.hp, 0, 'a ram is lethal');
   sim(g, 60 * 3);
-  assert.ok(canBeHit(p), `back up (${p.life})`);
+  assert.ok(!canBeHit(p), `stays down (${p.life})`);
+  assert.equal(p.life, 'out');
 });
 
 test('benches and signs: the tank rolls through with a crush event (no target)', () => {

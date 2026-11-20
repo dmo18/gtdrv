@@ -178,7 +178,8 @@ export default async function extra(page, check) {
   });
 
   // Combat core: on foot, hold fire at the nearest ped until it goes
-  // down (cartoon knock-down, no gore), then it lies there and fades.
+  // dead (one bullet is lethal, blood on the street), then it lies there
+  // and fades; it never gets up.
   // The 'fire' action is pressed directly: the F key binding is task 26.
   const fight = await page.evaluate(() => {
     const g = window.__rw;
@@ -204,6 +205,7 @@ export default async function extra(page, check) {
     w.z = w.pz = ped.z;
     w.heading = w.pheading = 0;
     const events = { shot: 0, hit: 0, down: 0 };
+    const blood0 = g.combatFx.counts().blood;
     const offs = ['shot', 'hit', 'down'].map((n) => g.events.on(n, () => events[n]++));
     g.input.press('fire');
     let steps = 0;
@@ -223,25 +225,28 @@ export default async function extra(page, check) {
     run(30);
     offs.forEach((f) => f());
     window.__downed = ped;
-    return { ok: ped.life !== 'ok', life: ped.life, hp: ped.hp, steps, events, actors: g.actors.length };
+    return { ok: ped.life !== 'ok', life: ped.life, hp: ped.hp, steps, events, actors: g.actors.length,
+      blood0, blood1: g.combatFx.counts().blood };
   });
   await page.waitForTimeout(400);
   await page.screenshot({ path: 'shots/combat-down.png' });
   check(fight.ok, `holding fire downs a ped (${fight.life}, hp ${fight.hp}, ${fight.steps} steps, ${JSON.stringify(fight.events)})`);
+  check(fight.hp === 0 && fight.blood1 > fight.blood0, `the shot ped is dead and blood decals rise (${fight.blood0} -> ${fight.blood1})`);
   check(fight.actors > 1 && fight.actors <= 36, `combat actors registered (${fight.actors})`);
   const later = await page.evaluate(() => {
     const g = window.__rw;
     const p = window.__downed;
-    let out = false, maxFade = 0, freed = false;
+    let out = false, maxFade = 0, freed = false, gotUp = false;
     for (let i = 0; i < 60 * 6 && !freed; i++) {
       g.step(1 / 60);
+      if (p.life === 'ok' || p.life === 'getup') gotUp = true;
       if (p.life === 'out') out = true;
       if (p.fade > maxFade) maxFade = p.fade;
       if (!p.active || !g.actors.includes(p)) freed = true;
     }
-    return { out, maxFade: +maxFade.toFixed(2), freed };
+    return { out, maxFade: +maxFade.toFixed(2), freed, gotUp };
   });
-  check(later.out && later.maxFade > 0.9 && later.freed, `downed ped lies out, fades and its slot is freed (${JSON.stringify(later)})`);
+  check(later.out && later.maxFade > 0.9 && later.freed && !later.gotUp, `downed ped lies out, fades and its slot is freed (${JSON.stringify(later)})`);
 
   // ---- Explosives and craft weapons (docs/ARMS.md, task 31) ----
   // Fixture: the open, flat airfield runway, so buildings, props and
@@ -767,4 +772,31 @@ export default async function extra(page, check) {
     });
     check(boarded2 && !boom.wrecked && !boom.onFoot, `the player cannot die: a blast over the sea leaves the craft and pilot unharmed (${JSON.stringify(boom)})`);
   }
+
+  // ---- Wrecks break apart and vanish (docs/COMBAT.md) ----
+  // A fixture sedan on the open runway is destroyed: it explodes, throws
+  // debris, and the hull leaves game.vehicles within 6 simulated seconds.
+  const wreck = await page.evaluate(() => {
+    const g = window.__rw;
+    const rw = g.city.airfield.runway;
+    const car = g.debug.spawnCar('sedan', rw.x0 + 330, (rw.z0 + rw.z1) / 2, 0);
+    car.vx = car.vz = 0;
+    car.speed = 0;
+    let booms = 0, maxDebris = 0, removedAt = -1, wreckedAt = -1;
+    const off = g.events.on('explosion', () => booms++);
+    g.combat.damage(car, 1e5, null, 'blast');
+    const listedAfterBlast = g.vehicles.includes(car);
+    for (let i = 0; i < 60 * 6; i++) {
+      g.step(1 / 60);
+      if (car.wrecked && wreckedAt < 0) wreckedAt = i;
+      maxDebris = Math.max(maxDebris, g.combatFx.counts().debris);
+      if (car.removed && removedAt < 0) removedAt = i;
+    }
+    off();
+    return { booms, maxDebris, wreckedAt, removedAt, listedAfterBlast, listed: g.vehicles.includes(car), meshGone: !car.mesh,
+      player: g.player.mode };
+  });
+  check(wreck.booms >= 1 && wreck.wreckedAt >= 0 && wreck.listedAfterBlast, `a destroyed car explodes and is wrecked (${JSON.stringify(wreck)})`);
+  check(wreck.maxDebris >= 6 && wreck.maxDebris <= 48, `the wreck throws 6 to 48 debris chunks (${wreck.maxDebris})`);
+  check(wreck.removedAt > 60 && wreck.removedAt < 60 * 6 && !wreck.listed && wreck.meshGone, `the wreck is removed from game.vehicles within 6 s (${wreck.removedAt} steps)`);
 }

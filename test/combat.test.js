@@ -14,7 +14,7 @@ import {
 } from '../src/core/weapons.js';
 import {
   createCombat, damage, initActor, addActor, trace, createTraceResult, cylinderT,
-  CAPS, HP, DOWN_T, GETUP_T, OUT_LIE_T, FADE_T, PLAYER_DOWN_T, PLAYER_FADE_T,
+  CAPS, HP, DOWN_T, OUT_LIE_T, FADE_T, PLAYER_DOWN_T, PLAYER_FADE_T, WRECK_T,
 } from '../src/systems/combat.js';
 
 const DT = 1 / 60;
@@ -171,7 +171,8 @@ test('pistol shot: shared shot and hit payloads, damage, down and out', () => {
     game.combat.fire(a, 1, 0, 0);
     steps(game, 15);
   }
-  assert.ok(shots.length >= 2);
+  assert.equal(shots.length, 1, 'one pistol bullet is lethal');
+  assert.equal(hits.length, 1);
   assert.equal(shots[0].weapon, 'pistol');
   assert.equal(shots[0].hitKind, 'actor');
   assert.ok(Math.abs(shots[0].y - 1.4) < 1e-9, 'muzzle at actor y + 1.4');
@@ -195,19 +196,21 @@ test('pistol shot: shared shot and hit payloads, damage, down and out', () => {
   assert.equal(ped.fade, 1);
 });
 
-test('state machine: blast knock-down with hp left gets up; melee downs on the 2nd hit', () => {
+test('state machine: any blast or bullet kills outright and nobody gets up; melee kills on the 2nd hit', () => {
   const game = makeGame();
   const a = civ(game, 0, 0);
   a.maxHp = a.hp = 200;
   assert.ok(damage(game, a, 10, null, 'blast') === 10);
   assert.equal(a.life, 'down');
+  assert.equal(a.hp, 0, 'a small blast on a tough person is still lethal');
   assert.ok(a.hitT > 0);
   assert.equal(damage(game, a, 10, null, 'bullet'), 0, 'down people ignore hits');
   steps(game, Math.ceil(DOWN_T * 60) + 1);
-  assert.equal(a.life, 'getup');
-  steps(game, Math.ceil(GETUP_T * 60) + 1);
-  assert.equal(a.life, 'ok');
-  assert.equal(a.hp, 190);
+  assert.equal(a.life, 'out', 'never a get-up');
+  steps(game, Math.ceil((OUT_LIE_T + FADE_T) * 60) + 30);
+  assert.equal(a.life, 'out');
+  assert.equal(a.hp, 0);
+  assert.equal(a.fade, 1);
   const b = civ(game, 3, 0);
   b.maxHp = b.hp = 200;
   const m = shooter(game, 2, 0, 'wrench');
@@ -217,7 +220,10 @@ test('state machine: blast knock-down with hp left gets up; melee downs on the 2
   assert.equal(b.life, 'ok');
   steps(game, 40);
   game.combat.fire(m, 1, 0, 0);
-  assert.equal(b.life, 'down', 'second wrench hit knocks down');
+  assert.equal(b.life, 'down', 'second wrench hit kills');
+  assert.equal(b.hp, 0);
+  steps(game, Math.ceil(DOWN_T * 60) + 1);
+  assert.equal(b.life, 'out');
   // Knock-back decays at 6 m/s^2.
   const c = civ(game, -50, 0);
   c.kx = 3;
@@ -307,12 +313,15 @@ test('blast radius and falloff: actors and craft (x1.5), everyone inside goes do
   car.health = 5000; // stays alive
   game.vehicles.push(car);
   const ex = record(game, 'explosion');
+  const bh = record(game, 'hit');
   game.combat.explode(0, 0.9, 0, 6, null, 0);
   assert.equal(ex.length, 1);
   assert.equal(ex[0].radius, 6);
-  assert.ok(Math.abs(1000 - near.hp - 120) < 1e-6);
-  assert.ok(Math.abs(1000 - mid.hp - 60) < 1e-6);
-  assert.ok(1000 - edge.hp > 0 && 1000 - edge.hp < 3);
+  const amt = (t) => bh.find((h) => h.target === t).amount;
+  assert.ok(Math.abs(amt(near) - 120) < 1e-6);
+  assert.ok(Math.abs(amt(mid) - 60) < 1e-6);
+  assert.ok(amt(edge) > 0 && amt(edge) < 3);
+  for (const a of [near, mid, edge]) assert.equal(a.hp, 0, 'everyone in range dies');
   assert.equal(far.hp, 1000);
   for (const a of [near, mid, edge]) assert.equal(a.life, 'down');
   assert.equal(far.life, 'ok');
@@ -596,4 +605,113 @@ test('no NaN over thousands of random steps', () => {
   for (const v of f.game.vehicles) for (const k of ['health', 'vx', 'vz', 'x', 'z']) assert.ok(!bad(v[k]), `craft ${k}`);
   for (const p of f.game.combat.projectiles) for (const k of ['x', 'y', 'z', 'vx', 'vy', 'vz']) assert.ok(!bad(p[k]), `projectile ${k}`);
   assert.ok(f.game.actors.length <= CAPS.actors);
+});
+
+test('people die outright: one bullet, one blast or one ram, and they never get up', () => {
+  for (const kind of ['bullet', 'blast', 'ram']) {
+    const game = makeGame();
+    const crew = shooter(game, 0, 0, 'pistol', 'crew');
+    crew.maxHp = crew.hp = 60;
+    assert.ok(damage(game, crew, 1, null, kind) > 0);
+    assert.equal(crew.hp, 0, `${kind} kills a full-health person`);
+    assert.equal(crew.life, 'down');
+    steps(game, 60 * 12);
+    assert.equal(crew.life, 'out', `${kind}: lies there, no get-up`);
+    assert.equal(crew.fade, 1, 'then fades');
+    assert.equal(crew.hp, 0);
+  }
+});
+
+test('the player cannot be killed while RULES.invulnerable is on', () => {
+  CLASSIC.invulnerable = true;
+  try {
+    const game = makeGame();
+    const w = game.player.walker;
+    initActor(w, 'player');
+    addActor(game, w);
+    assert.equal(damage(game, w, 500, null, 'blast'), 0);
+    assert.equal(w.life, 'ok');
+    assert.equal(w.hp, 100);
+  } finally {
+    CLASSIC.invulnerable = false;
+  }
+});
+
+test('a destroyed car explodes, then the wreck is removed about 3 s later', () => {
+  const game = makeGame();
+  const car = createVehicle('sedan', 30, 0, 0, null);
+  game.vehicles.push(car);
+  const ex = record(game, 'explosion');
+  damage(game, car, 1e5, null, 'blast');
+  steps(game, 2);
+  assert.ok(car.wrecked);
+  assert.equal(ex.length, 1);
+  assert.equal(ex[0].craft, car, 'the blast names the craft so debris can fly');
+  steps(game, Math.round((WRECK_T - 0.5) * 60));
+  assert.ok(!car.removed && game.vehicles.includes(car), 'still there before the delay');
+  steps(game, 60);
+  assert.ok(car.removed, 'removed');
+  assert.ok(!game.vehicles.includes(car), 'gone from game.vehicles');
+});
+
+test('wrecks go through game.removeVehicle when the game has it', () => {
+  const game = makeGame();
+  const seen = [];
+  game.removeVehicle = (v) => {
+    seen.push(v);
+    game.vehicles.splice(game.vehicles.indexOf(v), 1);
+    v.removed = true;
+  };
+  const car = createVehicle('sedan', 30, 0, 0, null);
+  game.vehicles.push(car);
+  damage(game, car, 1e5, null, 'blast');
+  steps(game, Math.round((WRECK_T + 1) * 60));
+  assert.deepEqual(seen, [car]);
+});
+
+test('the player is ejected from a destroyed car and never left stuck in a removed wreck', () => {
+  const game = makeGame();
+  const car = createVehicle('sedan', 30, 0, 0, null);
+  game.vehicles.push(car);
+  car.driver = 'player';
+  game.player.vehicle = car;
+  game.player.mode = 'car';
+  game.combat.damage(car, 1e5, null, 'blast');
+  steps(game, 2);
+  assert.equal(game.player.vehicle, null, 'ejected at the blast');
+  steps(game, 60 * 5);
+  assert.ok(car.removed);
+  const w = game.player.walker;
+  assert.ok(Number.isFinite(w.x) && Number.isFinite(w.z));
+  assert.equal(car.driver, null);
+  // A wreck the blast never ejected the player from (chain limit): ejected, then removed.
+  const car2 = createVehicle('sedan', 60, 0, 0, null);
+  game.vehicles.push(car2);
+  car2.driver = 'player';
+  car2.wrecked = true;
+  car2.wreckT = 0;
+  game.player.vehicle = car2;
+  steps(game, Math.round((WRECK_T + 0.5) * 60));
+  assert.equal(game.player.vehicle, null);
+  assert.ok(car2.removed);
+});
+
+test('explosions kill and throw people in range, and chain blasts stay capped', () => {
+  const game = makeGame();
+  const a = civ(game, 3, 0);
+  game.combat.explode(0, 0.9, 0, 8, null, 0);
+  assert.equal(a.hp, 0);
+  assert.ok(a.kx > 0, 'thrown away from the blast');
+  const cars = [];
+  for (let i = 0; i < 12; i++) {
+    const c = createVehicle('sedan', 40 + i * 3, 0, 0, null);
+    c.health = 60; // brittle, so the blasts chain
+    game.vehicles.push(c);
+    cars.push(c);
+  }
+  const ex = record(game, 'explosion');
+  damage(game, cars[0], 1e5, null, 'blast');
+  steps(game, 60 * 10);
+  assert.ok(ex.length >= 2 && ex.length <= cars.length + 1, `${ex.length} blasts`);
+  assert.ok(cars.every((c) => c.removed || !c.wrecked), cars.map((c) => [c.wrecked, c.removed, c.wreckT, c.exploded, c.health].join()).join(' | '));
 });

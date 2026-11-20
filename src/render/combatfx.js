@@ -3,11 +3,12 @@
 // explosions (fireball, smoke column, shock ring, debris, camera shake),
 // flames and smoke on burning craft, rocket trails, shell eject and
 // bullet-hole / scorch decals. Listens to the combat events in
-// docs/COMBAT.md. Cartoon handling only: no blood, ever.
+// docs/COMBAT.md. Blood is allowed (red bursts, ground pools that fade);
+// dismemberment never. Vehicle wrecks break into pooled debris chunks.
 //
 // Reuses the particle pools of effects.js (one alpha, one additive
-// instanced billboard system, same atlas and shaders) plus one instanced
-// decal mesh: three extra draw calls in all. Everything is pooled and
+// instanced billboard system, same atlas and shaders) plus two instanced
+// decal meshes and one debris mesh: a few extra draw calls in all. Everything is pooled and
 // counts scale with game.quality. Logic is guarded so it still runs when
 // `scene` is missing (node tests).
 import * as THREE from 'three';
@@ -19,6 +20,15 @@ const MAX_ADD = 300;
 const SCORCH = 24; // matches CAPS.decals in combat.js
 const HOLES = 40;
 const DECALS = SCORCH + HOLES;
+// Blood: two ring buffers (pools under the dead, small spatters from hits).
+export const BLOOD_POOLS = 16;
+export const BLOOD_SPLATS = 24;
+const BLOOD = BLOOD_POOLS + BLOOD_SPLATS;
+const POOL_LIFE = 20, POOL_GROW = 1.6, POOL_FADE = 5;
+const SPLAT_LIFE = 12, SPLAT_FADE = 4;
+// Wreck debris: one pooled instanced mesh.
+export const DEBRIS_MAX = 48;
+const DEBRIS_LIFE = 3.6, DEBRIS_SHRINK = 0.7;
 const NEAR = 170; // metres from the camera where small effects are made
 
 // Atlas cells: 0 puff, 1 ring, 2 streak, 3 glow. +4 flat on the ground, +8 stretched.
@@ -49,6 +59,36 @@ void main() {
 }
 `;
 
+const BLOOD_VERT = /* glsl */`
+attribute float iOp;
+attribute float iSeed;
+varying vec2 vUv;
+varying float vOp;
+varying float vSeed;
+void main() {
+  vUv = uv;
+  vOp = iOp;
+  vSeed = iSeed;
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+}
+`;
+const BLOOD_FRAG = /* glsl */`
+varying vec2 vUv;
+varying float vOp;
+varying float vSeed;
+void main() {
+  vec2 p = vUv - 0.5;
+  float r = length(p) * 2.0;
+  float a = atan(p.y, p.x);
+  float rim = 0.74 + 0.26 * sin(a * 5.0 + vSeed) * sin(a * 3.0 - vSeed * 1.7);
+  float k = smoothstep(rim, rim * 0.4, r);
+  float al = k * min(1.0, vOp) * 0.9;
+  if (al < 0.01) discard;
+  float shade = 0.85 + 0.15 * sin(a * 9.0 + vSeed * 3.0);
+  gl_FragColor = vec4(0.58 * shade, 0.02, 0.03, al);
+}
+`;
+
 function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
 }
@@ -65,6 +105,9 @@ export function createCombatFx(game) {
   let atlas = null;
   let decalMesh = null;
   let decalOp = null;
+  let bloodMesh = null;
+  let bloodOp = null;
+  let debrisMesh = null;
   let offs = [];
   let time = 0;
   let tick = 0;
@@ -97,6 +140,49 @@ export function createCombatFx(game) {
     const zero = new THREE.Matrix4().makeScale(0, 0, 0);
     for (let i = 0; i < DECALS; i++) decalMesh.setMatrixAt(i, zero);
     scene.add(decalMesh);
+
+    const bgeo = new THREE.PlaneGeometry(1, 1);
+    bloodOp = new THREE.InstancedBufferAttribute(new Float32Array(BLOOD), 1);
+    bloodOp.setUsage(THREE.DynamicDrawUsage);
+    const bseed = new THREE.InstancedBufferAttribute(new Float32Array(BLOOD), 1);
+    for (let i = 0; i < BLOOD; i++) bseed.array[i] = rng.next() * 6.28;
+    bgeo.setAttribute('iOp', bloodOp);
+    bgeo.setAttribute('iSeed', bseed);
+    const bmat = new THREE.ShaderMaterial({
+      vertexShader: BLOOD_VERT,
+      fragmentShader: BLOOD_FRAG,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -6,
+    });
+    bloodMesh = new THREE.InstancedMesh(bgeo, bmat, BLOOD);
+    bloodMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    bloodMesh.frustumCulled = false;
+    bloodMesh.renderOrder = 4;
+    bloodMesh.name = 'cfx-blood';
+    bloodMesh.visible = false;
+    const zero2 = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < BLOOD; i++) bloodMesh.setMatrixAt(i, zero2);
+    scene.add(bloodMesh);
+
+    debrisMesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      DEBRIS_MAX,
+    );
+    debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const white = new THREE.Color(0x333333);
+    for (let i = 0; i < DEBRIS_MAX; i++) {
+      debrisMesh.setColorAt(i, white);
+      debrisMesh.setMatrixAt(i, zero2);
+    }
+    debrisMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    debrisMesh.frustumCulled = false;
+    debrisMesh.name = 'cfx-debris';
+    debrisMesh.visible = false;
+    scene.add(debrisMesh);
   }
 
   const q = () => clamp(game.quality == null ? 1 : +game.quality || 1, 0.25, 1);
@@ -192,6 +278,200 @@ export function createCombatFx(game) {
     }
   }
 
+  // ---- blood: pools under the dead and spatters from hits ----
+  // Plain typed-array ring buffers (they work without a scene); the
+  // instanced mesh just mirrors them.
+  const bx = new Float32Array(BLOOD), bz = new Float32Array(BLOOD);
+  const bt = new Float32Array(BLOOD).fill(-1e9); // birth time
+  const bsz = new Float32Array(BLOOD), bya = new Float32Array(BLOOD);
+  let poolHead = 0, splatHead = 0;
+  function putBlood(slot, op, size) {
+    if (!bloodMesh) return;
+    _e.set(-Math.PI / 2, bya[slot], 0, 'YXZ');
+    _q.setFromEuler(_e);
+    _p.set(bx[slot], 0.045 + (slot < BLOOD_POOLS ? 0 : 0.004), bz[slot]);
+    _s.set(size, size, 1);
+    _m.compose(_p, _q, _s);
+    bloodMesh.setMatrixAt(slot, _m);
+    bloodOp.array[slot] = op;
+  }
+  function bloodAdd(pool, x, z, size) {
+    const slot = pool ? poolHead : BLOOD_POOLS + splatHead;
+    if (pool) poolHead = (poolHead + 1) % BLOOD_POOLS;
+    else splatHead = (splatHead + 1) % BLOOD_SPLATS;
+    bx[slot] = x;
+    bz[slot] = z;
+    bt[slot] = time;
+    bsz[slot] = size;
+    bya[slot] = rnd() * 6.28;
+    if (pool) putBlood(slot, 1, size * 0.35);
+    else putBlood(slot, 1, size);
+    if (bloodMesh) {
+      bloodOp.needsUpdate = true;
+      bloodMesh.instanceMatrix.needsUpdate = true;
+      bloodMesh.visible = true;
+    }
+  }
+  function stepBlood() {
+    let dirty = false;
+    for (let i = 0; i < BLOOD; i++) {
+      if (bt[i] < -1e8) continue;
+      const age = time - bt[i];
+      const pool = i < BLOOD_POOLS;
+      const life = pool ? POOL_LIFE : SPLAT_LIFE;
+      if (age >= life) {
+        bt[i] = -1e9;
+        if (bloodMesh) {
+          _m.makeScale(0, 0, 0);
+          bloodMesh.setMatrixAt(i, _m);
+          bloodOp.array[i] = 0;
+          dirty = true;
+        }
+        continue;
+      }
+      if (!bloodMesh || (tick & 1)) continue;
+      const fade = pool ? POOL_FADE : SPLAT_FADE;
+      const op = Math.min(1, (life - age) / fade);
+      const gk = pool ? Math.min(1, age / POOL_GROW) : Math.min(1, age / 0.4);
+      putBlood(i, op, bsz[i] * (pool ? 0.35 + 0.65 * (1 - (1 - gk) * (1 - gk)) : 0.7 + 0.3 * gk));
+      dirty = true;
+    }
+    if (dirty && bloodMesh) {
+      bloodOp.needsUpdate = true;
+      bloodMesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+  function liveCount(arr, lim, below) {
+    let n = 0;
+    for (let i = 0; i < arr.length; i++) if (below ? arr[i] > lim : arr[i] >= lim) n++;
+    return n;
+  }
+  const RED = [0.5, 0.02, 0.03];
+  function droplets(x, y, z, n, speed, up) {
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * 6.28, sp = speed * (0.4 + rnd() * 0.8);
+      const j = alpha(x, y, z, Math.cos(a) * sp, up * (0.4 + rnd()), Math.sin(a) * sp, 0.55 + rnd() * 0.35, 0.09 + rnd() * 0.05, 0.07, 1, RED[0] * (0.7 + rnd() * 0.5), RED[1], RED[2], GLOW, 9.8, 0.4, 0);
+      if (j >= 0) S.floor[j] = 0.03;
+    }
+  }
+  const isPerson = (t) => !!t && !(t.spec && t.hp === undefined);
+  function bloodHit(e) {
+    const t = e.target;
+    if (!isPerson(t)) return;
+    const k = e.kind;
+    if (k === 'blast' || k === 'fire') return;
+    bloodAdd(false, t.x + rs() * 0.6, t.z + rs() * 0.6, 0.55 + rnd() * 0.4);
+    if (!near(e.x, e.z)) return;
+    const n = Math.max(2, Math.round((k === 'melee' || k === 'ram' ? 5 : 4) * q()));
+    droplets(e.x, e.y, e.z, n, 2.2, 3);
+  }
+  function bloodDeath(t, kind) {
+    const big = kind === 'blast';
+    bloodAdd(true, t.x + rs() * 0.3, t.z + rs() * 0.3, big ? 3.2 : 2.3);
+    const extra = big ? 3 : 1;
+    for (let i = 0; i < extra; i++) bloodAdd(false, t.x + rs() * 1.8, t.z + rs() * 1.8, 0.5 + rnd() * 0.6);
+    if (!near(t.x, t.z)) return;
+    const n = Math.max(5, Math.round((big ? 22 : 12) * q()));
+    droplets(t.x, (t.y || 0) + 1.0, t.z, n, big ? 5 : 3.2, big ? 7 : 4);
+  }
+
+  // ---- wreck debris: dark metal, vehicle-coloured panels and tyres ----
+  const dx_ = new Float32Array(DEBRIS_MAX), dy_ = new Float32Array(DEBRIS_MAX), dz_ = new Float32Array(DEBRIS_MAX);
+  const dvx = new Float32Array(DEBRIS_MAX), dvy = new Float32Array(DEBRIS_MAX), dvz = new Float32Array(DEBRIS_MAX);
+  const drx = new Float32Array(DEBRIS_MAX), dry = new Float32Array(DEBRIS_MAX), drz = new Float32Array(DEBRIS_MAX);
+  const dwx = new Float32Array(DEBRIS_MAX), dwy = new Float32Array(DEBRIS_MAX), dwz = new Float32Array(DEBRIS_MAX);
+  const dsx = new Float32Array(DEBRIS_MAX), dsy = new Float32Array(DEBRIS_MAX), dsz = new Float32Array(DEBRIS_MAX);
+  const dage = new Float32Array(DEBRIS_MAX).fill(-1); // < 0 = free
+  const dbounced = new Uint8Array(DEBRIS_MAX);
+  let debrisHead = 0;
+  const _col = THREE.Color ? new THREE.Color() : null;
+  function chunk(x, y, z, vx, vy, vz, sx, sy, sz, hex) {
+    const i = debrisHead;
+    debrisHead = (debrisHead + 1) % DEBRIS_MAX;
+    dx_[i] = x; dy_[i] = y; dz_[i] = z;
+    dvx[i] = vx; dvy[i] = vy; dvz[i] = vz;
+    drx[i] = rnd() * 6.28; dry[i] = rnd() * 6.28; drz[i] = rnd() * 6.28;
+    dwx[i] = rs() * 9; dwy[i] = rs() * 9; dwz[i] = rs() * 9;
+    dsx[i] = sx; dsy[i] = sy; dsz[i] = sz;
+    dage[i] = 0;
+    dbounced[i] = 0;
+    if (debrisMesh) {
+      _col.setHex(hex);
+      debrisMesh.setColorAt(i, _col);
+      debrisMesh.instanceColor.needsUpdate = true;
+      debrisMesh.visible = true;
+    }
+  }
+  // 6 to 10 chunks per wreck (cars add tyres among them).
+  function wreckDebris(c, x, y, z) {
+    const sp = c.spec || {};
+    const len = sp.length || 4, wid = sp.width || 1.8, hgt = sp.height || 1.4;
+    const big = Math.max(len, wid);
+    const n = 6 + Math.floor(rnd() * 5);
+    const hex = typeof c.color === 'number' ? c.color : 0x884433;
+    const tyres = c.kind === 'car' ? 2 + Math.floor(rnd() * 2) : 0;
+    const cy = Math.max(0.4, y);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.28 + rnd() * 0.8;
+      const out = (3 + rnd() * 5) * (0.7 + big * 0.06);
+      const tyre = i < tyres;
+      const col = tyre ? 0x141414 : i % 2 ? hex : 0x2e3034;
+      const k = 0.3 + rnd() * 0.4;
+      const sx = tyre ? 0.7 : Math.max(0.35, len * k * 0.35);
+      const sy = tyre ? 0.7 : Math.max(0.2, hgt * 0.25 * (0.5 + rnd()));
+      const sz = tyre ? 0.28 : Math.max(0.35, wid * k * 0.4);
+      chunk(x + Math.cos(a) * 0.6, cy, z + Math.sin(a) * 0.6, Math.cos(a) * out, 5 + rnd() * 7, Math.sin(a) * out, sx, sy, sz, col);
+    }
+  }
+  function stepDebris(dt) {
+    for (let i = 0; i < DEBRIS_MAX; i++) {
+      if (dage[i] < 0) continue;
+      dage[i] += dt;
+      if (dage[i] >= DEBRIS_LIFE) {
+        dage[i] = -1;
+        if (debrisMesh) {
+          _m.makeScale(0, 0, 0);
+          debrisMesh.setMatrixAt(i, _m);
+        }
+        continue;
+      }
+      dvy[i] -= 9.8 * dt;
+      dx_[i] += dvx[i] * dt;
+      dy_[i] += dvy[i] * dt;
+      dz_[i] += dvz[i] * dt;
+      drx[i] += dwx[i] * dt;
+      dry[i] += dwy[i] * dt;
+      drz[i] += dwz[i] * dt;
+      const floor = Math.max(dsx[i], dsy[i], dsz[i]) * 0.3;
+      if (dy_[i] < floor) {
+        dy_[i] = floor;
+        if (!dbounced[i] && dvy[i] < -1) {
+          dbounced[i] = 1;
+          dvy[i] *= -0.35;
+          dvx[i] *= 0.6;
+          dvz[i] *= 0.6;
+        } else {
+          dvy[i] = 0;
+          dvx[i] *= 0.85;
+          dvz[i] *= 0.85;
+          dwx[i] *= 0.7;
+          dwy[i] *= 0.7;
+          dwz[i] *= 0.7;
+        }
+      }
+      if (!debrisMesh) continue;
+      const left = DEBRIS_LIFE - dage[i];
+      const sc = left < DEBRIS_SHRINK ? left / DEBRIS_SHRINK : 1;
+      _e.set(drx[i], dry[i], drz[i]);
+      _q.setFromEuler(_e);
+      _p.set(dx_[i], dy_[i], dz_[i]);
+      _s.set(dsx[i] * sc, dsy[i] * sc, dsz[i] * sc);
+      _m.compose(_p, _q, _s);
+      debrisMesh.setMatrixAt(i, _m);
+    }
+    if (debrisMesh) debrisMesh.instanceMatrix.needsUpdate = true;
+  }
+
   // ---- weapons ----
   const FLASH = {
     pistol: { s: 0.8, glow: 3.5, sparks: 2, smoke: 0, shell: true },
@@ -285,6 +565,7 @@ export function createCombatFx(game) {
     const t = e.target;
     const k = e.kind;
     if (!t || k === 'blast' || k === 'fire') return;
+    bloodHit(e);
     if (!near(e.x, e.z)) return;
     const qq = q();
     const isCraft = !!(t.spec && t.hp === undefined);
@@ -312,7 +593,9 @@ export function createCombatFx(game) {
 
   function onDown(e) {
     const t = e.target;
-    if (!t || (t.spec && t.hp === undefined) || !near(t.x, t.z)) return;
+    if (!t || (t.spec && t.hp === undefined)) return;
+    if (t.hp <= 0 || t.hp === undefined) bloodDeath(t, e.kind);
+    if (!near(t.x, t.z)) return;
     const n = Math.max(2, Math.round(5 * q()));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * 6.28 + rnd();
@@ -332,6 +615,7 @@ export function createCombatFx(game) {
   // ---- explosions ----
   function onExplosion(e) {
     const x = e.x, y = Math.max(0, e.y), z = e.z;
+    if (e.craft) wreckDebris(e.craft, x, y, z);
     const k = clamp(e.radius / 8, 0.55, 1.7);
     const d2 = dist2(x, z);
     // Camera shake through the existing impact kick.
@@ -579,7 +863,7 @@ export function createCombatFx(game) {
     name: 'combatfx',
     game,
     counts() {
-      return { alpha: S ? S.n : 0, additive: G ? G.n : 0, decals: decalCount };
+      return { alpha: S ? S.n : 0, additive: G ? G.n : 0, decals: decalCount, blood: liveCount(bt, -1e8, true), debris: liveCount(dage, 0, false) };
     },
     fixedUpdate(dt) {
       if (!(dt > 0) || game.paused) return;
@@ -594,6 +878,8 @@ export function createCombatFx(game) {
       stepProjectiles(qq);
       stepArms();
       syncScorch();
+      stepBlood();
+      stepDebris(dt);
       if (S) {
         stepPool(S, dt);
         stepPool(G, dt);
@@ -611,7 +897,7 @@ export function createCombatFx(game) {
     dispose() {
       for (const off of offs) off();
       offs = [];
-      for (const m of [S && S.mesh, G && G.mesh, decalMesh]) {
+      for (const m of [S && S.mesh, G && G.mesh, decalMesh, bloodMesh, debrisMesh]) {
         if (!m) continue;
         scene.remove(m);
         m.geometry.dispose();

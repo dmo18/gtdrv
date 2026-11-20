@@ -298,7 +298,7 @@ export function stepHeliPilot(game, p, dt) {
     if (!p.exploded && (a.onGround || a.onWater || p.crashT > PILOT.crashMax)) {
       p.exploded = true;
       const sys = game.combat;
-      if (sys && sys.explode) sys.explode(a.x, (a.y || 0) + 1.2, a.z, CRAFT_BLAST_R, a.lastHitBy || null, 0);
+      if (sys && sys.explode) sys.explode(a.x, (a.y || 0) + 1.2, a.z, CRAFT_BLAST_R, a.lastHitBy || null, 0, 1, a);
       a.scorched = true;
       a.ai = null; // the sweep may clear the wreck now
       a.driver = null;

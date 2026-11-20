@@ -359,6 +359,7 @@ export function createArmor(game, uiRoot = null) {
             if (!v.wrecked) damage(game, v, (v.spec && v.spec.health) || 1000, t, 'ram');
             v.wrecked = true;
             v.health = 0;
+            if (v.wreckT === undefined) v.wreckT = 0; // flattened hulls vanish too
             emitCrush(t, v, v.x, v.z);
           }
         }

@@ -1,8 +1,9 @@
 # Combat interface (actors, weapons, damage)
 
-Cartoon handling, always: hits show sparks, a flash and a knock-down;
-a person who is out lies still, then fades. Never blood, gore,
-dismemberment or sexual content. Logic lives in src/systems/combat.js
+Violent but not graphic: hits show sparks, a flash and a small red blood
+burst; a person who is killed falls, bleeds a pool onto the ground, lies
+still and fades. Blood is allowed; dismemberment and sexual content never.
+Destroyed vehicles explode, break into debris chunks and vanish. Logic lives in src/systems/combat.js
 and src/core/weapons.js (pure, node-testable); drawing in
 src/render/combatfx.js; buttons in src/ui/touch.js. Fixed 1/60 s steps,
 `createRng` only, no allocation per frame (pools, shared payloads).
@@ -18,11 +19,15 @@ to the existing walker (onfoot.js `createWalker`) and ped (`createPed`):
   `kx, kz` knock-back velocity (decays at 6 m/s^2), `lastHitBy`.
 - `height` 1.8 (hits test y in 0..height). Existing `x, z, y, heading,
   radius, px, pz` are reused as is. Peds keep `state` for walking AI.
-States: hit while ok: `hp -= amount`, `hitT`. hp <= 0, a blast, or a
-car at closing speed > 4 m/s: `down` (kx, kz from the push). In
-`down`: hp > 0 goes to `getup` after 1.6 s, then `ok` after 0.6 s;
-hp <= 0 goes to `out`, lies 3 s, `fade` rises over 1 s. Down and out
-actors ignore further hits and do not move by themselves.
+States: hit while ok: `hp -= amount`, `hitT`. For everyone except the
+player a bullet, a blast or a car at closing speed > 4 m/s is lethal in
+one hit (hp set to 0, `down`, kx, kz from the push); a wrench kills on
+its 2nd hit. Dead means dead: `down` goes to `out` after 1.6 s, the body
+lies 3 s, then `fade` rises over 1 s. There is no get-up for anyone but
+the player. Down and out actors ignore further hits and do not move by
+themselves. The player cannot die (`RULES.invulnerable`) and has
+unlimited ammo; with the rule off the player keeps hp, `getup` and
+respawn.
 
 ## Damage entry point
 `damage(game, target, amount, source, kind)`; target is an actor or a
@@ -73,7 +78,26 @@ explode after 6 s or at 0. Explosion: blast r 8, damage as above,
 pushes craft (impulse 12 m/s at centre), sets `wrecked`, dark tint.
 Chain: a blast can ignite or explode other craft, depth capped at 2
 and at most 3 explosions per 0.5 s (extra ones are queued 0.3 s).
-Wrecks are cleared by the existing fleet/traffic cleanup.
+Wrecks: `explosion` carries the destroyed `craft` (else null). 3 s
+(`WRECK_T`) after the blast the hull is removed through
+`game.removeVehicle` (so `game.vehicles`, minimap, traffic and parked
+spawners stay consistent). If the player is still aboard they are
+ejected first, so a removed wreck never leaves them stuck. A wreck that
+cannot explode (chain depth cap, tank crush) is removed on the same
+timer. Buildings are not destructible. Blasts also throw people in
+range outward and kill them.
+
+## Blood and debris (combatfx.js)
+- `hit` on a person: 2 to 5 red droplets and one small ground spatter.
+- `down` with hp 0: a bigger burst (largest for blasts), a pool decal
+  under the body that grows over 1.6 s and fades by 20 s, plus spatters.
+- Decals: one instanced mesh, ring buffers of 16 pools and 24 spatters
+  (oldest slot is reused). Droplets use the shared particle pools,
+  capped by `quality`.
+- Wreck debris: one pooled instanced mesh, 48 chunks at most (ring).
+  Each wreck throws 6 to 10 boxes (dark metal, vehicle colour, 2 to 3
+  tyres for cars) that fly out, tumble, bounce once, shrink and vanish
+  within 3.6 s. A flat scorch decal remains.
 
 ## Touch controls (on foot)
 Left stick walks (unchanged). Right-side drag turns the camera; the

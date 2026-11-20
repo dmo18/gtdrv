@@ -12,7 +12,7 @@ the final review and fix stage; nothing is in progress that blocks play.
   fighter jet with nose gun, missiles and bombs.
 - On-foot combat: six weapons plus grenades (Fizzpop Can) and sticky
   bombs, touch aiming, hold-to-aim throws, bombs dropped from planes,
-  missiles from armed craft. Cartoon only: sparks, knock-down, fade.
+  missiles from armed craft. People die in one hit and bleed; wrecks break apart and vanish.
 - Rival crew and police shootouts; police heat 1 to 4 with officers on
   foot, pursuit cars, roadblocks and a police helicopter.
 - Score and high scores only. No money, shop or unlocks: every vehicle
@@ -37,6 +37,8 @@ the final review and fix stage; nothing is in progress that blocks play.
    GTA and Gran Turismo combined". Answers: full sandbox violence without
    blood or gore; combat and weapons first, then story missions; tuning
    garage and championships parked. This replaced direction change 1.
+   (Later reversed by the owner, see the entry for 2026-11-20: blood is
+   now allowed.)
 5. Design principle (owner): "It's about more fun, not more points." No
    money, shop or unlocks; high scores only.
 6. Models: Fable is no longer used (owner request). Opus takes the hard
@@ -62,6 +64,21 @@ the final review and fix stage; nothing is in progress that blocks play.
 - Tuning garage and car upgrades.
 - Championships with AI rivals.
 - Parked ideas: AI fighters, ejection seat, knockable lamps and trees.
+
+## 2026-11-20: blood, lethal combat, breaking wrecks
+- Owner change: blood is allowed (dismemberment and sexual content still
+  out). Any bullet, blast or ram kills a non-player person outright; they
+  fall, lie a few seconds, fade, never get up. Wrench kills on the 2nd
+  hit. The player still cannot die and has unlimited ammo.
+- combatfx: red hit burst, bigger death burst, ground pool that grows and
+  fades in about 20 s (ring buffers: 16 pools, 24 spatters), blast
+  deaths bleed more. Wrecks throw 6 to 10 pooled debris chunks (48 max),
+  then the hull is removed 3 s after the blast (player ejected first).
+- Also fixed: a chain blast queued while another was detonating lost its
+  craft (wreck was never marked), now handled.
+- Tests changed on purpose: combat.test.js (pistol, state machine, blast
+  radius), crew.test.js (low-hp flee, 6 v 1 shot count), tank.test.js
+  (ram kills), police-combat.test.js (heat points), combatfx.test.js.
 
 ## Known issues
 - A fighter that leaves the depot at part thrust can get stuck on the
