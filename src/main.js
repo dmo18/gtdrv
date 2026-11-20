@@ -20,6 +20,7 @@ try {
   msg.textContent = 'An island of rust, salt and bad ideas.';
   play.disabled = false;
   play.addEventListener('click', async () => {
+    game.audio.unlock();
     // Best effort: go full screen and lock sideways. Not every browser allows it.
     try {
       await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });

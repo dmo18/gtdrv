@@ -152,7 +152,6 @@ export function createAudio(game) {
     const sqg = gainNode(0, engineBus);
     sqf.connect(sqg);
     r.extra = sqg;
-    const steady = base > 0;
     r.update = (c, now) => {
       const ratio = clamp(Math.abs(fin(c.speed)) / (spec.maxSpeed || 40), 0, 1.2);
       const th = clamp(fin(c.throttle), 0, 1);
@@ -166,7 +165,7 @@ export function createAudio(game) {
       o2.frequency.setTargetAtTime(f * 1.004, now, 0.045);
       sub.frequency.setTargetAtTime(f * 0.5, now, 0.045);
       lp.frequency.setTargetAtTime(260 + rpm * 1300 + th * 900, now, 0.06);
-      r.out.gain.setTargetAtTime(steady ? 0.1 + 0.06 * rpm + 0.14 * th : 0, now, 0.08);
+      r.out.gain.setTargetAtTime(0.1 + 0.06 * rpm + 0.14 * th, now, 0.08);
       const slip = fin(c.slip);
       sqg.gain.setTargetAtTime(clamp((slip - 0.2) * 0.5, 0, 0.14), now, 0.05);
     };
@@ -326,11 +325,8 @@ export function createAudio(game) {
       const h = hashId(craft.spec && craft.spec.id);
       const f1 = (craft.kind === 'boat' ? 150 : 330) + (h % 6) * 22;
       const ratio = [1.25, 1.2, 1.335, 1.5, 1.26, 1.18][(h >> 3) % 6];
-      const g = gainNode(0, fxBus);
-      const lp = filter('lowpass', 2200, 0.5, g, null);
-      lp.connect(fxBus);
-      g.disconnect();
-      g.connect(lp);
+      const lp = filter('lowpass', 2200, 0.5, null, fxBus);
+      const g = gainNode(0, lp);
       const a = osc('square', f1, g);
       const b = osc('square', f1 * ratio, g);
       g.gain.setTargetAtTime(0.1, now, 0.01);
@@ -457,13 +453,8 @@ export function createAudio(game) {
     oneShot(0.7, musicBus, 0.3, 0, (g, t) => {
       const list = [];
       for (let i = 0; i < notes.length; i++) {
-        const o = tone('triangle', notes[i], notes[i], 0.22, 0.7, g, t + i * 0.075, 0.01);
-        o.stop(t + i * 0.075 + 0.25);
-        list.push(o);
+        list.push(tone('triangle', notes[i], notes[i], 0.22, 0.7, g, t + i * 0.075, 0.01));
       }
-      // The voice ends with its last note.
-      const last = list.pop();
-      list.unshift(last);
       return list;
     });
   }

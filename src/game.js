@@ -15,6 +15,10 @@ import { createTouchControls } from './ui/touch.js';
 import { createHud } from './ui/hud.js';
 import { injectStyles } from './ui/styles.js';
 import { createParkedCars } from './systems/parked.js';
+import { createMapUi } from './systems/mapui.js';
+import { createAudio } from './systems/audio.js';
+import { createWalker, stepWalker, findEnterable, exitPosition } from './entities/onfoot.js';
+import { createPersonMesh, updatePersonMesh } from './render/personmesh.js';
 
 const SKY = 0x9fc8e8;
 
@@ -37,18 +41,28 @@ export function createGame({ canvas, uiRoot }) {
   scene.add(hemi, sun);
   scene.add(buildCityMesh(city, collision));
 
+  const waterCollision = createCollisionWorld();
+  for (const r of city.piers) waterCollision.addBox(r.x0, r.z0, r.x1, r.z1, 2, 'pier');
+
   const game = {
-    city, collision, events, input, rng, renderer, scene, camera,
+    city, collision, waterCollision, events, input, rng, renderer, scene, camera,
     lights: { hemi, sun },
-    world: { collision, city },
+    world: { collision, waterCollision, city, time: 0, crafts: null },
+    // How each kind of craft is simulated and drawn. Boats and aircraft
+    // register themselves here.
+    kinds: {
+      car: { step: stepVehicle, createMesh: createVehicleMesh, updateMesh: updateVehicleMesh },
+    },
     vehicles: [],
     systems: [],
     time: 0, // simulated seconds since start
     paused: false,
     quality: 1,
     player: {
-      mode: 'car', // 'car' or 'foot'
+      mode: 'car', // 'foot', or the kind of craft being driven
       vehicle: null,
+      walker: null,
+      y: 0,
       x: city.spawn.x, z: city.spawn.z, heading: city.spawn.heading,
       health: 100, armor: 0, money: 250, wanted: 0,
     },
@@ -61,11 +75,12 @@ export function createGame({ canvas, uiRoot }) {
       return sys;
     },
     addVehicle(v) {
-      v.mesh = createVehicleMesh(v.spec, v.color);
+      const kind = game.kinds[v.kind];
+      v.mesh = kind.createMesh(v.spec, v.color);
       v.meshDirty = true;
       scene.add(v.mesh);
       game.vehicles.push(v);
-      updateVehicleMesh(v.mesh, v, 1);
+      kind.updateMesh(v.mesh, v, 1, game.time);
       return v;
     },
     removeVehicle(v) {
@@ -86,7 +101,8 @@ export function createGame({ canvas, uiRoot }) {
 
   const chase = createChaseCamera(camera);
   game.chase = chase;
-  const camTarget = { x: car.x, z: car.z, heading: car.heading, speed: 0, height: 1.2 };
+  const camTarget = { x: car.x, z: car.z, y: 0, heading: car.heading, pitch: 0, roll: 0, speed: 0, height: 1.2 };
+  game.camHeading = car.heading;
   game.camTarget = camTarget;
   chase.snap(camTarget);
 
@@ -98,7 +114,62 @@ export function createGame({ canvas, uiRoot }) {
   attachKeyboard(input);
   touch.setMode('car');
 
+  game.world.crafts = game.vehicles;
+
+  // --- The player on foot. ---
+  const p0 = game.player;
+  p0.walker = createWalker(p0.x, p0.z, p0.heading);
+  const personMesh = createPersonMesh({ shirt: 0xe2733a, trousers: 0x2b3440, skin: 0xc68e62, hair: 0x2a1c14 });
+  personMesh.visible = false;
+  scene.add(personMesh);
+  const exitSpot = { x: 0, z: 0, ok: false };
+  const uiModeFor = (kind) => (kind === 'foot' ? 'foot' : kind === 'plane' || kind === 'heli' ? kind : 'car');
+
+  game.setPlayerMode = (mode) => {
+    const p = game.player;
+    p.mode = mode;
+    touch.setMode(uiModeFor(mode));
+    chase.setMode(mode);
+    personMesh.visible = mode === 'foot';
+    events.emit('mode', mode);
+  };
+  game.enterVehicle = (v) => {
+    const p = game.player;
+    v.driver = 'player';
+    v.asleep = false;
+    v.parked = false;
+    p.vehicle = v;
+    game.setPlayerMode(v.kind);
+    events.emit('enter', v);
+  };
+  game.exitVehicle = () => {
+    const p = game.player;
+    const v = p.vehicle;
+    if (!v) return false;
+    if (Math.abs(v.speed) > 3 || v.y > 0.6) {
+      hud.toast(v.y > 0.6 ? 'Land first' : 'Slow down to get out', 1.5);
+      return false;
+    }
+    exitPosition(v, game.world, exitSpot);
+    if (!exitSpot.ok) {
+      hud.toast(v.kind === 'boat' ? 'Pull up to a pier to get out' : 'No room to get out here', 2);
+      return false;
+    }
+    v.driver = null;
+    const w = p.walker;
+    w.x = w.px = exitSpot.x;
+    w.z = w.pz = exitSpot.z;
+    w.heading = w.pheading = v.heading;
+    w.vx = w.vz = 0;
+    p.vehicle = null;
+    game.setPlayerMode('foot');
+    events.emit('exit', v);
+    return true;
+  };
+
   game.addSystem(createParkedCars(game));
+  game.map = game.addSystem(createMapUi(game, uiRoot));
+  game.audio = game.addSystem(createAudio(game));
 
   // --- Simulation step. ---
   function fixedUpdate(dt) {
@@ -107,11 +178,16 @@ export function createGame({ canvas, uiRoot }) {
       game.paused = !game.paused;
       events.emit('pause', game.paused);
     }
+    for (let i = 0; i < game.systems.length; i++) {
+      const s = game.systems[i];
+      if (s.always) s.always(dt);
+    }
     if (game.paused) {
       input.endStep();
       return;
     }
     game.time += dt;
+    game.world.time = game.time;
     const p = game.player;
     const vs = game.vehicles;
 
@@ -121,8 +197,8 @@ export function createGame({ canvas, uiRoot }) {
       v.px = v.x;
       v.pz = v.z;
       v.pheading = v.heading;
-      const controls = v === p.vehicle && p.mode === 'car' ? input : v.controls || null;
-      stepVehicle(v, controls, dt, game.world);
+      const controls = v === p.vehicle ? input : v.controls || null;
+      game.kinds[v.kind].step(v, controls, dt, game.world);
       if (v.impact > 0) events.emit('vehicleImpact', v, v.impact);
       // A parked car that has settled goes back to sleep.
       if (!v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
@@ -135,6 +211,7 @@ export function createGame({ canvas, uiRoot }) {
       for (let j = i + 1; j < vs.length; j++) {
         const b = vs[j];
         if (a.asleep && b.asleep) continue;
+        if (a.kind !== 'car' || b.kind !== 'car') continue;
         if (collideVehicles(a, b)) {
           a.asleep = false;
           b.asleep = false;
@@ -143,10 +220,24 @@ export function createGame({ canvas, uiRoot }) {
       }
     }
 
-    if (p.mode === 'car' && p.vehicle) {
+    if (p.vehicle) {
       p.x = p.vehicle.x;
       p.z = p.vehicle.z;
+      p.y = p.vehicle.y || 0;
       p.heading = p.vehicle.heading;
+      if (input.consume('enter')) game.exitVehicle();
+    } else {
+      const w = p.walker;
+      w.px = w.x;
+      w.pz = w.z;
+      w.pheading = w.heading;
+      stepWalker(w, input, dt, game.world, game.camHeading);
+      p.x = w.x;
+      p.z = w.z;
+      p.y = 0;
+      p.heading = w.heading;
+      p.near = findEnterable(w, vs);
+      if (input.consume('enter') && p.near) game.enterVehicle(p.near);
     }
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
@@ -157,25 +248,46 @@ export function createGame({ canvas, uiRoot }) {
 
   // --- Drawing step. ---
   let lastDistrict = '';
+  let promptFor = null;
   function render(alpha, dt) {
     const p = game.player;
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {
       const v = vs[i];
       if (v.asleep && !v.meshDirty) continue;
-      updateVehicleMesh(v.mesh, v, v.asleep ? 1 : alpha);
+      game.kinds[v.kind].updateMesh(v.mesh, v, v.asleep ? 1 : alpha, game.time);
       v.meshDirty = false;
     }
-    if (p.mode === 'car' && p.vehicle) {
+    if (p.vehicle) {
       const v = p.vehicle;
-      setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });
+      if (v.kind === 'car') setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });
       camTarget.x = v.px + (v.x - v.px) * alpha;
       camTarget.z = v.pz + (v.z - v.pz) * alpha;
+      camTarget.y = v.py + (v.y - v.py) * alpha;
       camTarget.heading = v.heading;
+      camTarget.pitch = v.kind === 'car' ? 0 : v.pitch;
+      camTarget.roll = v.kind === 'car' ? 0 : v.roll;
       camTarget.speed = v.speed;
       camTarget.height = 1.2;
+      hud.setPrompt(null);
+    } else {
+      const w = p.walker;
+      updatePersonMesh(personMesh, w, alpha);
+      camTarget.x = w.px + (w.x - w.px) * alpha;
+      camTarget.z = w.pz + (w.z - w.pz) * alpha;
+      camTarget.y = 0;
+      camTarget.heading = w.heading;
+      camTarget.pitch = 0;
+      camTarget.roll = 0;
+      camTarget.speed = w.speed;
+      camTarget.height = 1.5;
+      if (p.near !== promptFor) {
+        promptFor = p.near;
+        hud.setPrompt(p.near ? `Tap ENTER: ${p.near.spec.label}` : null);
+      }
     }
     chase.update(camTarget, dt, input, collision);
+    game.camHeading = Math.atan2(camTarget.z - camera.position.z, camTarget.x - camera.position.x);
 
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
@@ -183,13 +295,13 @@ export function createGame({ canvas, uiRoot }) {
     }
 
     const h = game.hudState;
-    h.mode = p.mode;
-    h.speedKmh = p.mode === 'car' && p.vehicle ? Math.abs(p.vehicle.speed) * 3.6 : 0;
+    h.mode = p.mode === 'foot' ? 'foot' : 'car';
+    h.speedKmh = p.vehicle ? Math.abs(p.vehicle.speed) * 3.6 : 0;
     h.health = p.health;
     h.armor = p.armor;
     h.money = p.money;
     h.wanted = p.wanted;
-    h.vehicleHealth = p.mode === 'car' && p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
+    h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
     const dKey = city.shoreDist(p.x, p.z) < 34 && !city.onRoad(p.x, p.z) ? 'shore' : city.districtOf(p.x, p.z);
     h.district = dKey === 'shore' ? 'The Strand' : DISTRICTS[dKey].name;
     if (h.district !== lastDistrict) {

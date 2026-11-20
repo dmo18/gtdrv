@@ -3,7 +3,8 @@
 //
 // Axes:    steer (-1 left .. 1 right), throttle (0..1), brake (0..1),
 //          handbrake (bool), moveX (-1 left .. 1 right),
-//          moveY (-1 back .. 1 forward), sprint (bool)
+//          moveY (-1 back .. 1 forward), sprint (bool),
+//          pitch (-1..1, flying: stick pushed up the screen = +1)
 // Look:    lookX / lookY accumulate camera drag in pixels; the camera
 //          reads them and sets them back to 0.
 // Buttons: 'enter' (get in/out), 'attack', 'horn', 'camera', 'map',
@@ -15,7 +16,7 @@ export function createInput() {
   const pressedSet = new Set();
   const input = {
     steer: 0, throttle: 0, brake: 0, handbrake: false,
-    moveX: 0, moveY: 0, sprint: false,
+    moveX: 0, moveY: 0, sprint: false, pitch: 0,
     lookX: 0, lookY: 0,
     // A source is a plain object with any of the axis fields above.
     addSource(src) {
@@ -37,7 +38,7 @@ export function createInput() {
     },
     // Call once per simulation step before reading axes.
     poll() {
-      let steer = 0, throttle = 0, brake = 0, moveX = 0, moveY = 0;
+      let steer = 0, throttle = 0, brake = 0, moveX = 0, moveY = 0, pitch = 0;
       let handbrake = false, sprint = false;
       for (const s of sources) {
         if (Math.abs(s.steer || 0) > Math.abs(steer)) steer = s.steer;
@@ -45,6 +46,7 @@ export function createInput() {
         if ((s.brake || 0) > brake) brake = s.brake;
         if (Math.abs(s.moveX || 0) > Math.abs(moveX)) moveX = s.moveX;
         if (Math.abs(s.moveY || 0) > Math.abs(moveY)) moveY = s.moveY;
+        if (Math.abs(s.pitch || 0) > Math.abs(pitch)) pitch = s.pitch;
         handbrake = handbrake || !!s.handbrake;
         sprint = sprint || !!s.sprint;
       }
@@ -53,6 +55,7 @@ export function createInput() {
       input.brake = brake;
       input.moveX = moveX;
       input.moveY = moveY;
+      input.pitch = pitch;
       input.handbrake = handbrake;
       input.sprint = sprint;
     },
@@ -66,7 +69,7 @@ export function createInput() {
 
 // Keyboard controls, mainly for testing on a computer.
 export function attachKeyboard(input, target = window) {
-  const src = input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false, moveX: 0, moveY: 0, sprint: false });
+  const src = input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false, moveX: 0, moveY: 0, sprint: false, pitch: 0 });
   const down = new Set();
   const buttons = { KeyF: 'enter', Enter: 'enter', KeyE: 'attack', KeyH: 'horn', KeyC: 'camera', KeyM: 'map', Escape: 'pause', KeyQ: 'weapon', KeyJ: 'jump' };
   const refresh = () => {
@@ -79,6 +82,7 @@ export function attachKeyboard(input, target = window) {
     src.brake = d ? 1 : 0;
     src.moveX = src.steer;
     src.moveY = (u ? 1 : 0) - (d ? 1 : 0);
+    src.pitch = (down.has('KeyI') ? 1 : 0) - (down.has('KeyK') ? 1 : 0);
     src.handbrake = down.has('Space');
     src.sprint = down.has('ShiftLeft') || down.has('ShiftRight');
   };

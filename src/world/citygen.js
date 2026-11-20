@@ -439,6 +439,7 @@ export function generateCity(seed = 20261) {
     airfield: { islet, runway, apron, gate },
     radiusAt, shoreDist, mainShore, isLand, isGround, districtOf, nodeAt, onRoad,
     size: BASE_R * 1.25,
+    mapHalf: Math.max(BASE_R * 1.6, islet.x1 + 120),
   };
 }
 

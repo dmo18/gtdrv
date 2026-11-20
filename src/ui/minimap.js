@@ -3,10 +3,9 @@
 //
 // Coordinates: x east, z south, metres. Heading 0 faces +x and grows toward +z.
 
-const MAP_PX = 1024;
+const MAP_PX = 2048;
 const COL = {
   sea: '#17323f',
-  seaDeep: '#12282f',
   sand: '#d9c391',
   land: '#6f7b5c',
   block: '#7d8869',
@@ -38,7 +37,7 @@ export function createMapRenderer(city) {
   const canvas = document.createElement('canvas');
   canvas.width = MAP_PX;
   canvas.height = MAP_PX;
-  const half = city.size * 1.6;
+  const half = city.mapHalf || city.size * 1.6;
   const scale = MAP_PX / (half * 2); // map pixels per metre
 
   function worldToMap(x, z, out) {
@@ -53,13 +52,6 @@ export function createMapRenderer(city) {
     g.clearRect(0, 0, MAP_PX, MAP_PX);
     g.fillStyle = COL.sea;
     g.fillRect(0, 0, MAP_PX, MAP_PX);
-    // Soft deeper water away from the coast.
-    const grad = g.createRadialGradient(MAP_PX / 2, MAP_PX / 2, MAP_PX * 0.2, MAP_PX / 2, MAP_PX / 2, MAP_PX * 0.72);
-    grad.addColorStop(0, 'rgba(18, 40, 47, 0)');
-    grad.addColorStop(1, COL.seaDeep);
-    g.fillStyle = grad;
-    g.fillRect(0, 0, MAP_PX, MAP_PX);
-
     g.setTransform(scale, 0, 0, scale, half * scale, half * scale);
     g.lineJoin = 'round';
 
@@ -307,8 +299,8 @@ const MAP_CSS = `
 }
 .rw-map-title small { display: block; font-weight: 500; letter-spacing: 0.02em; text-transform: none; opacity: 0.7; margin-top: 2px; }
 .rw-map-legend {
-  position: absolute; left: calc(var(--rw-map-sl) + 10px); bottom: calc(var(--rw-map-sb) + 10px);
-  display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: 60%; padding: 6px 10px;
+  position: absolute; right: calc(var(--rw-map-sr) + 10px); bottom: calc(var(--rw-map-sb) + 10px);
+  display: grid; grid-template-columns: auto auto; gap: 3px 14px; padding: 6px 10px; opacity: 0.92;
   background: ${COL.panel}; border: 1px solid rgba(246,239,230,0.22); border-radius: 12px;
   font-size: 12px; pointer-events: none;
 }
@@ -474,7 +466,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
     ch = el.clientHeight || window.innerHeight;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
-    fitPpm = Math.min(cw, ch) / (city.size * 1.3 * 2);
+    fitPpm = Math.min(cw, ch) / ((city.mapHalf || city.size) * 0.95 * 2);
     view.ppm = fitPpm * view.zoom;
   }
 
@@ -491,7 +483,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   const tmpW = { x: 0, z: 0 }, tmpS = { x: 0, y: 0 };
 
   function clampView() {
-    const lim = city.size * 1.5;
+    const lim = (city.mapHalf || city.size * 1.6) * 0.95;
     view.cx = Math.max(-lim, Math.min(lim, view.cx));
     view.cz = Math.max(-lim, Math.min(lim, view.cz));
   }

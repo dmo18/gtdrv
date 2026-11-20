@@ -159,8 +159,8 @@ try {
   check(await page.evaluate(() => window.t.full.isOpen()), 'full map opens');
   await page.waitForTimeout(100);
   const v = await page.evaluate(() => window.t.full.getView());
-  const size = await page.evaluate(() => window.t.city.size);
-  const fit = Math.min(v.width, v.height) / (size * 1.3 * 2);
+  const size = await page.evaluate(() => window.t.city.mapHalf || window.t.city.size);
+  const fit = Math.min(v.width, v.height) / (size * 0.95 * 2);
   check(Math.abs(v.ppm - fit) < 1e-9, 'full map opens at fit zoom');
 
   async function tapAt(sx, sy) {
