@@ -198,6 +198,16 @@ export function createMenu(root, game, economy) {
 
   const settings = () => game.progress.settings;
   function applySettings() {
+    // Time of day: a fixed time locks the clock; live resumes the cycle.
+    const st = settings();
+    if (game.daynight && game.daynight.setHour) {
+      if (st.liveTime === false && Number.isFinite(st.timeOfDay)) {
+        game.timeLocked = true;
+        game.daynight.setHour(st.timeOfDay);
+      } else {
+        game.timeLocked = false;
+      }
+    }
     if (economy && economy.applySettings) { economy.applySettings(); return; }
     const s = settings();
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
@@ -437,6 +447,30 @@ export function createMenu(root, game, economy) {
     ms.addEventListener('change', () => commit());
     mv.appendChild(ms);
     body.appendChild(mv);
+
+    // Time of day: live cycle, or a fixed time the player picks.
+    if (typeof s.liveTime !== 'boolean') s.liveTime = true;
+    body.appendChild(toggleRow('Live day and night', 'liveTime'));
+    const tv = h('div', 'rw-menu-setting');
+    const tlabel = h('span', '', 'Time of day');
+    const tshow = h('span', 'rw-menu-value', '');
+    const hourText = (x) => { const hh = Math.floor(x), mm = Math.round((x - hh) * 60); return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); };
+    const ts = document.createElement('input');
+    ts.type = 'range';
+    ts.min = '0'; ts.max = '23.5'; ts.step = '0.5';
+    ts.value = String(Number.isFinite(s.timeOfDay) ? s.timeOfDay : (game.clock || 9));
+    ts.setAttribute('aria-label', 'Time of day');
+    ts.dataset.setting = 'timeOfDay';
+    tshow.textContent = hourText(Number(ts.value));
+    ts.addEventListener('input', () => {
+      settings().timeOfDay = Number(ts.value);
+      settings().liveTime = false;
+      tshow.textContent = hourText(Number(ts.value));
+      applySettings();
+    });
+    ts.addEventListener('change', () => commit());
+    tv.append(tlabel, ts, tshow);
+    body.appendChild(tv);
 
     body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
     body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));

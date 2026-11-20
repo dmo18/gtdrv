@@ -122,6 +122,8 @@ export function sanitizeProgress(raw) {
       const s = raw.settings, d = p.settings;
       if (own(s, 'master') && isNum(s.master)) d.master = Math.max(0, Math.min(1, s.master));
       if (own(s, 'musicVol') && isNum(s.musicVol)) d.musicVol = Math.max(0, Math.min(1, s.musicVol));
+      if (own(s, 'liveTime') && typeof s.liveTime === 'boolean') d.liveTime = s.liveTime;
+      if (own(s, 'timeOfDay') && isNum(s.timeOfDay)) d.timeOfDay = Math.max(0, Math.min(23.5, s.timeOfDay));
       for (const k of ['invertPitch', 'leftHanded', 'police', 'music', 'mortal']) {
         if (own(s, k) && typeof s[k] === 'boolean') d[k] = s[k];
       }

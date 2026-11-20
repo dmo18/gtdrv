@@ -224,6 +224,42 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// Wet-street reflections of the lamps: one long soft streak per lamp on
+// the ground, running from below the lamp toward the camera (where a
+// mirror image would be smeared by a damp, rough road). Turned to face
+// the camera in the vertex shader, so the geometry never changes.
+const STREAK_VS = `
+attribute vec4 aLamp;
+varying vec2 vUv;
+varying float vD;
+void main() {
+  vec2 c = aLamp.xz;
+  vec2 to = cameraPosition.xz - c;
+  float dist = max(length(to), 0.001);
+  vec2 f = to / dist;
+  vec2 s = vec2(-f.y, f.x);
+  float len = min(aLamp.w * 2.4, dist * 0.7);
+  vec2 p = c + s * position.x * 0.9 + f * (position.z * len + aLamp.w * 0.15);
+  vec4 mv = viewMatrix * vec4(p.x, 0.2, p.y, 1.0);
+  vUv = vec2(position.x, position.z);
+  vD = -mv.z;
+  gl_Position = projectionMatrix * mv;
+}`;
+const STREAK_FS = `
+uniform vec3 uColor;
+uniform float uIntensity;
+uniform float uFadeNear;
+uniform float uFadeFar;
+varying vec2 vUv;
+varying float vD;
+void main() {
+  float across = exp(-vUv.x * vUv.x * 5.0);
+  float along = smoothstep(0.0, 0.18, vUv.y) * (1.0 - smoothstep(0.35, 1.0, vUv.y));
+  float a = across * along * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  gl_FragColor = vec4(uColor * a, 1.0);
+  #include <colorspace_fragment>
+}`;
+
 const RAIN_VS = `
 attribute float aEnd;
 uniform float uTime;
@@ -309,6 +345,12 @@ const MAX_CARS = 10;
 export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
   const rng = createRng(seed);
   if (!Number.isFinite(game.clock)) game.clock = 9;
+  // A time the player chose in Settings survives a restart.
+  const savedTime = game.progress && game.progress.settings;
+  if (savedTime && savedTime.liveTime === false && Number.isFinite(savedTime.timeOfDay)) {
+    game.clock = savedTime.timeOfDay;
+    game.timeLocked = true;
+  }
 
   // Day speed: nights pass about twice as fast (rate = base * (1 + night)),
   // and a whole day takes `dayMinutes` real minutes.
@@ -515,6 +557,42 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       scene.add(pools);
       vis.pools = pools;
       vis.poolU = poolMat.uniforms;
+
+      // Reflection streaks (see STREAK_VS): x across -1..1, z along 0..1.
+      const NLm = lamps.length;
+      const sp = new Float32Array(NLm * 12), sl = new Float32Array(NLm * 16), si = [];
+      for (let i = 0; i < NLm; i++) {
+        const x = pool[i * 12], z = pool[i * 12 + 2];
+        const cx = x + 7.5, cz = z + 7.5, h = lamps[i].h || 7;
+        sp.set([-1, 0, 0, 1, 0, 0, 1, 0, 1, -1, 0, 1], i * 12);
+        for (let k = 0; k < 4; k++) sl.set([cx, 0, cz, h], i * 16 + k * 4);
+        const n = i * 4;
+        si.push(n, n + 2, n + 1, n, n + 3, n + 2);
+      }
+      const sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+      sg.setAttribute('aLamp', new THREE.BufferAttribute(sl, 4));
+      sg.setIndex(si);
+      const streakMat = new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: new THREE.Color().setHex(0xffc27a, THREE.SRGBColorSpace) },
+          uIntensity: { value: 0 }, uFadeNear: { value: 60 }, uFadeFar: { value: 220 },
+        },
+        vertexShader: STREAK_VS,
+        fragmentShader: STREAK_FS,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      const streaks = new THREE.Mesh(sg, streakMat);
+      streaks.name = 'lamp-reflections';
+      streaks.frustumCulled = false;
+      streaks.visible = false;
+      streaks.renderOrder = 2;
+      scene.add(streaks);
+      vis.streaks = streaks;
+      vis.streakU = streakMat.uniforms;
     }
 
     // Headlight pools: instanced quads in front of lit vehicles.
@@ -663,7 +741,9 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     for (let i = 0; i < V.glowMats.length; i++) V.glowMats[i].emissiveIntensity = glow;
     // Rain: everything darkens a little, roads and pavements go glossy.
     for (let i = 0; i < V.dimMats.length; i++) V.dimMats[i].color.copy(V.dimBase[i]).multiplyScalar(1 - 0.16 * rn);
-    if (V.wet) V.wet.value = rn;
+    // Night dew: streets keep a damp sheen after dark, so lamps and the
+    // glowing sky show in them (rain makes them fully wet).
+    if (V.wet) V.wet.value = Math.max(rn, 0.5 * smoothstep(0.3, 0.9, night));
     if (V.mats.pavementMat) V.mats.pavementMat.roughness = 0.88 - 0.42 * rn;
     if (V.mats.asphaltMat) V.mats.asphaltMat.roughness = 0.93;
 
@@ -706,6 +786,11 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     if (V.pools) {
       V.poolU.uIntensity.value = V.lit * (0.25 + 0.55 * night);
       V.pools.visible = V.poolU.uIntensity.value > 0.01;
+    }
+    if (V.streaks) {
+      const wet = V.wet ? V.wet.value : rn;
+      V.streakU.uIntensity.value = V.lit * wet * (0.5 + 0.5 * night) * 0.9;
+      V.streaks.visible = V.streakU.uIntensity.value > 0.01;
     }
     V.headU.uIntensity.value = V.lit * (0.35 + 0.35 * night);
     // Additive glows fade out with the fog instead of shining through it.
@@ -873,6 +958,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     name: 'daynight',
     fixedUpdate(dt) {
       if (!(dt > 0)) return;
+      // The player set the time in Settings: the clock stays put.
+      if (game.timeLocked) return;
       const h0 = Number.isFinite(game.clock) ? game.clock : 9;
       const dh = dt * baseRate * (1 + nightAt(h0));
       game.clock = (h0 + dh) % 24;

@@ -88,8 +88,9 @@ function patchShaderChunks() {
   SC.tonemapping_pars_fragment = SC.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `vec3 CustomToneMapping( vec3 color ) {
 	vec3 c = ACESFilmicToneMapping( color );
 	float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
-	c = max( mix( vec3( l ), c, 1.12 ), 0.0 );
-	c *= mix( vec3( 0.93, 0.98, 1.08 ), vec3( 1.05, 1.0, 0.93 ), smoothstep( 0.015, 0.45, l ) );
+	c = max( mix( vec3( l ), c, 1.15 ), 0.0 );
+	vec3 tint = mix( vec3( 0.95, 0.985, 1.07 ), vec3( 1.0 ), smoothstep( 0.0, 0.05, l ) );
+	c *= mix( tint, vec3( 1.06, 1.01, 0.92 ), smoothstep( 0.1, 0.6, l ) );
 	return clamp( c, 0.0, 1.0 );
 }`);
 }
