@@ -744,6 +744,7 @@ try {
         if (!lefty || m === 'foot' || m === 'car') await shot(`full-${fileTag}.png`);
       }
       await page.evaluate(() => { rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); rw.touch.setMode('car'); rw.touch.setSteering('buttons'); });
+      await page.waitForTimeout(260); // let the folded fan finish its 0.16 s fold
       await checkLayout(`car buttons-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
       await page.evaluate(() => rw.touch.setSteering('slider'));
       await checkLayout(`car slider-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);

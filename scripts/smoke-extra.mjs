@@ -213,6 +213,26 @@ export default async function extra(page, check) {
   check(later.out && later.maxFade > 0.9 && later.freed, `downed ped lies out, fades and its slot is freed (${JSON.stringify(later)})`);
 
   // ---- Explosives and craft weapons (docs/ARMS.md, task 31) ----
+  // From here on the test steps the simulation by hand, so the page's
+  // real-time loop must not also step the world between our calls (it
+  // made the can, bomb and missile checks depend on machine speed).
+  await page.evaluate(() => window.__rw.loop.stop());
+  const frame = () => page.evaluate(() => window.__rw.draw(1, 1 / 60));
+  // Reset the fixture: the player is healthy and unwanted, whatever the
+  // earlier fight left behind. (Do not move the player here: parked cars only
+  // exist near the player and the next checks need one.)
+  await page.evaluate(() => {
+    const g = window.__rw;
+    const w = g.player.walker;
+    w.hp = w.maxHp || 100;
+    w.life = 'ok';
+    w.lifeT = 0;
+    w.fade = 0;
+    w.vx = w.vz = 0;
+    g.player.health = 100;
+    g.player.wanted = 0;
+    for (const k of Object.keys(w.arms.cool || {})) w.arms.cool[k] = 0;
+  });
   // Hold FIRE with a Fizzpop Can: the arc preview shows, nothing is thrown
   // until release.
   const pre = await page.evaluate(() => {
@@ -225,7 +245,7 @@ export default async function extra(page, check) {
     const live = g.combat.projectiles.filter((p) => p.active).length;
     return { on: g.combat.preview.on, n: g.combat.preview.n, live };
   });
-  await page.waitForTimeout(500);
+  await frame();
   await page.screenshot({ path: 'shots/arms-throw-preview.png' });
   const rel = await page.evaluate(() => {
     const g = window.__rw;
@@ -244,6 +264,17 @@ export default async function extra(page, check) {
     cars.sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z));
     const car = cars[0];
     if (!car) return { ok: false, why: 'no car' };
+    // Fixed fixture spot: the open, flat airfield runway, so buildings,
+    // props and traffic cannot get in the way of the arc.
+    const rw = g.city.airfield.runway;
+    const rz = (rw.z0 + rw.z1) / 2;
+    car.x = car.px = rw.x0 + 200;
+    car.z = car.pz = rz;
+    car.vx = car.vz = 0;
+    car.speed = 0;
+    car.asleep = false;
+    w.x = w.px = car.x - 9;
+    w.z = w.pz = rz;
     // Stand 9 m away; aim pitch picks the reach (6..25 m over -0.2..0.6 rad).
     const ang = Math.atan2(w.z - car.z, w.x - car.x);
     w.x = w.px = car.x + Math.cos(ang) * 9;
@@ -274,6 +305,13 @@ export default async function extra(page, check) {
     plane.spec = { ...plane.spec, mounts: ['nosegun', 'missile', 'bomb'] };
     plane.arms = undefined;
     const car = window.__nadeCar;
+    // Same open runway fixture as the can test: no building or water in the
+    // predicted drop path.
+    const rwy = g.city.airfield.runway;
+    car.x = car.px = rwy.x0 + 420;
+    car.z = car.pz = (rwy.z0 + rwy.z1) / 2;
+    car.vx = car.vz = 0;
+    car.speed = 0;
     car.health = car.spec.health;
     car.wrecked = false;
     const w = g.player.walker;
@@ -326,7 +364,7 @@ export default async function extra(page, check) {
     offs.forEach((f) => f());
     return { launches, pd, h0, booms };
   });
-  await page.waitForTimeout(700);
+  await frame();
   await page.screenshot({ path: 'shots/arms-bomb-drop.png' });
   const bomb2 = await page.evaluate(() => {
     const g = window.__rw;
@@ -337,7 +375,7 @@ export default async function extra(page, check) {
     off();
     return { booms, health: car.health, max: car.spec.health };
   });
-  await page.waitForTimeout(150);
+  await frame();
   await page.screenshot({ path: 'shots/arms-bomb-blast.png' });
   const hitNear = bomb2.booms.length && bomb.pd && Math.hypot(bomb2.booms[0].x - bomb.pd.x, bomb2.booms[0].z - bomb.pd.z) < 3;
   check(bomb.launches && bomb.launches.includes('bomb') && hitNear && bomb2.booms[0].size === 'huge' && bomb2.health < bomb2.max,
@@ -352,7 +390,7 @@ export default async function extra(page, check) {
     for (let i = 0; i < 12; i++) g.step(1 / 60);
     return ok;
   });
-  await page.waitForTimeout(300);
+  await frame();
   await page.screenshot({ path: 'shots/arms-missile.png' });
   check(msl, 'a missile launches from the fixture plane');
 }
