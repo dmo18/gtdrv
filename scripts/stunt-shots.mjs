@@ -138,13 +138,13 @@ const jump = await page.evaluate(() => {
     n++;
   }
   return {
-    id: spot.id, medal: g.progress.medals[spot.id], x: c2.x, y: c2.y, z: c2.z, pitch: c2.airPitch,
+    id: spot.id, medal: g.progress.medals[spot.id], sx: spot.x, x: c2.x, y: c2.y, z: c2.z, pitch: c2.airPitch,
     toast: [...document.querySelectorAll('.rw-toast')].map((e) => e.textContent),
   };
 });
 console.log('jump', JSON.stringify(jump));
 await page.evaluate((j) => {
-  window.__shot.draw([j.x - 9, 2.8, j.z + 12, j.x + 1, j.y - 1.2, j.z]);
+  window.__shot.draw([j.sx - 4, 3.2, j.z + 19, (j.sx + j.x) / 2 + 2, j.y * 0.45, j.z]);
 }, jump);
 await page.waitForTimeout(150);
 await page.screenshot({ path: 'docs/preview/stunt-jump.png' });
