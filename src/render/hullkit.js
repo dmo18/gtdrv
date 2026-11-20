@@ -533,14 +533,12 @@ const DETAIL_BODY = /* glsl */`
   float dLine = dT.r * dPaint * uDetail.x * dFade;
   float dRiv = dT.g * dPaint * uDetail.x * dFade;
   float dGr = (dT.b - 0.5) * 2.0 * uDetail.y;
-#ifdef RW_CAMO
-  if (dC < 1.5) {
+  if (dC < 1.5 && uCamo.x > 0.0) {
     float cm = texture2D(uDetailMap, (vObj.xz + vObj.y * vec2(0.55, -0.35)) * uCamo.x + 0.37).a;
     float m1 = smoothstep(uCamo.y - 0.015, uCamo.y + 0.015, cm);
     float m2 = smoothstep(uCamo.z - 0.015, uCamo.z + 0.015, cm);
     diffuseColor.rgb *= mix(mix(vec3(1.0), uCamoA, m1), uCamoB, m2);
   }
-#endif
   diffuseColor.rgb *= (1.0 - dLine * 0.55) * (1.0 - dRiv * 0.25) * (1.0 + dGr * (0.35 + 0.65 * dPaint));
   roughnessFactor = clamp(roughnessFactor + dLine * 0.25 + dGr * 0.5 * dPaint, 0.03, 1.0);
   float dH = dRiv * 0.6 - dLine;
@@ -575,9 +573,11 @@ const PRESETS = {
 export function createSkin(preset = 'air') {
   const P = PRESETS[preset] || PRESETS.air;
   const base = craftMaterial('gloss');
-  const physical = !!base.isMeshPhysicalMaterial && P.cc > 0;
+  // Every preset shares one program (same type, clearcoat on, camo by
+  // uniform), so a new craft never waits for a shader compile.
+  const physical = !!base.isMeshPhysicalMaterial;
   const opts = { color: 0xffffff, vertexColors: true, roughness: P.rough, metalness: P.metal };
-  const m = physical ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: P.cc, clearcoatRoughness: 0.12 })
+  const m = physical ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: Math.max(0.02, P.cc), clearcoatRoughness: 0.12 })
     : new THREE.MeshStandardMaterial(opts);
   const u = {
     uR0: { value: new THREE.Vector4() },
@@ -594,7 +594,6 @@ export function createSkin(preset = 'air') {
     uCamoA: { value: new THREE.Vector3(...(P.camoA || [1, 1, 1])) },
     uCamoB: { value: new THREE.Vector3(...(P.camoB || [1, 1, 1])) },
   };
-  const camo = !!P.camo;
   m.onBeforeCompile = (sh, r) => {
     base.onBeforeCompile(sh, r);
     Object.assign(sh.uniforms, u);
@@ -602,11 +601,11 @@ export function createSkin(preset = 'air') {
       .replace('#include <common>', '#include <common>\n' + RIG_VERT_HEAD)
       .replace('#include <beginnormal_vertex>', RIG_NORMAL)
       .replace('#include <begin_vertex>', RIG_POS);
-    sh.fragmentShader = (camo ? '#define RW_CAMO\n' : '') + sh.fragmentShader
+    sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\n' + DETAIL_HEAD)
       .replace('#include <normal_fragment_maps>', DETAIL_BODY);
   };
-  const key = 'rwskin' + (physical ? 'P' : 'S') + (camo ? 'C' : '');
+  const key = 'rwskin' + (physical ? 'P' : 'S');
   m.customProgramCacheKey = () => key;
   m.userData.rig = { r0: u.uR0.value, r1: u.uR1.value, r2: u.uR2.value, dmg: u.uDmg.value };
   m.userData.preset = preset;
