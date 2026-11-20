@@ -197,15 +197,14 @@ function groundCheckpoints(city, nodeIds, startHeading) {
   });
 }
 
-// Road length of one lap (start -> checkpoints, or the closed loop).
-function roadLength(city, startNode, nodeIds, closed) {
+// Shortest road length from a node through each checkpoint node in turn.
+function roadLength(city, startNode, nodeIds) {
   let d = 0;
   let prev = startNode;
   for (const id of nodeIds) {
     d += roadDistance(city, prev, id);
     prev = id;
   }
-  if (closed) d += roadDistance(city, prev, nodeIds[0]) - roadDistance(city, startNode, nodeIds[0]);
   return d;
 }
 
@@ -439,7 +438,7 @@ export function buildCourses(city) {
     const c = streetCircuit(city, waypoints.map((n) => n.id), { avoid: avoidGate, ...opts });
     const cps = groundCheckpoints(city, c.nodeIds, c.start.heading);
     const startNode = cps[cps.length - 1].node;
-    const lap = roadLength(city, startNode, c.nodeIds, true);
+    const lap = roadLength(city, startNode, c.nodeIds);
     list.push(finish({ id, name, type: 'street', kinds: ['car'], start: c.start, checkpoints: cps, laps, blurb }, lap * laps));
   };
 
@@ -474,10 +473,7 @@ export function buildCourses(city) {
     for (const [from, to] of legs) {
       const p = roadPath(city, from, to, cost, avoidGate);
       for (let i = 1; i < p.length; i++) used.add(edgeKey(p[i - 1], p[i]));
-      for (let i = 0; i < p.length - 1; i++) {
-        walk.push(p[i]);
-        if (p[i + 1] === undefined) break;
-      }
+      for (let i = 0; i < p.length - 1; i++) walk.push(p[i]);
       if (to === anchor.id) walk.push(anchor.id, gate.id);
     }
     // `walk` now runs ... anchor, gate, (anchor again starts the next leg).
@@ -486,7 +482,7 @@ export function buildCourses(city) {
     ids.push(walk[0]);
     const start = startOnEdge(N[walk[0]], N[walk[1]], 26);
     const cps = groundCheckpoints(city, ids, start.heading);
-    const lap = roadLength(city, walk[0], ids, true);
+    const lap = roadLength(city, walk[0], ids);
     list.push(finish({
       id: 'street-causeway', name: 'Causeway Dash', type: 'street', kinds: ['car'], start, checkpoints: cps, laps: 1,
       blurb: 'From Cinder Row across the causeway to the airfield gate and back.',
@@ -648,16 +644,18 @@ export function buildCourses(city) {
     const ids = stops.map((n) => n.id);
     const cps = groundCheckpoints(city, ids, start.heading);
     delivery('deliver-fare', 'Fare and Square', ['car'], 'A chatty passenger with three stops to make.',
-      start, cps, roadLength(city, from.id, ids, false));
+      start, cps, roadLength(city, from.id, ids));
   }
   {
     // Boat parcel: Northpoint Jetty round to Pale Shore Pier.
     const thA = angleOf(northPier), thB = angleOf(westPier);
-    let span = wrapAngle(thB - thA);
-    const start = seaStart(thA - 0.08, 50, thA - 0.2);
+    const span = wrapAngle(thB - thA);
+    const sg = span < 0 ? -1 : 1;
+    const th0 = thA + sg * 0.08, th1 = thA + span - sg * 0.08; // clear of both piers
+    const start = seaStart(th0, 50, th0 + sg * 0.12);
     const pts = [];
-    const steps = Math.max(3, Math.ceil(Math.abs(span) / 0.22));
-    for (let k = 1; k <= steps; k++) pts.push(pushOut(city, coastPoint(city, thA - 0.08 + ((span + 0.16) * k) / steps, k === steps ? 55 : 90)));
+    const steps = Math.max(3, Math.ceil(Math.abs(th1 - th0) / 0.22));
+    for (let k = 1; k <= steps; k++) pts.push(pushOut(city, coastPoint(city, th0 + ((th1 - th0) * k) / steps, k === steps ? 55 : 90)));
     const route = refineSea(city, [start, ...pts], false).slice(1);
     const cps = buoyCheckpoints(route, (k) => (k === route.length - 1 ? 14 : 18), false, start);
     delivery('deliver-tide', 'Tideline Parcel', ['boat'], 'Rush a crate from Northpoint Jetty round to Pale Shore Pier.',

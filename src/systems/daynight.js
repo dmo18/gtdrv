@@ -16,12 +16,12 @@ const KEYS = [
   { h: 0, sky: 0x0d1a38, horizon: 0x2a3e66, fog: 0x26385c, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 1 },
   { h: 4.6, sky: 0x0e1c3c, horizon: 0x2c4068, fog: 0x283a5e, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 0.85 },
   { h: 5.8, sky: 0x2a3e72, horizon: 0xb48a8a, fog: 0x76708a, sunColor: 0xffb48a, sunIntensity: 0.45, hemiSky: 0x8896c4, hemiGround: 0x4a4246, hemiIntensity: 1.3, night: 0.65, windowGlow: 0.75 },
-  { h: 6.8, sky: 0x6a96c8, horizon: 0xf0b88e, fog: 0xd2b6a4, sunColor: 0xffc694, sunIntensity: 1.05, hemiSky: 0xc4d2ee, hemiGround: 0x7a6c5e, hemiIntensity: 1.55, night: 0.12, windowGlow: 0.25 },
+  { h: 6.8, sky: 0x6a96c8, horizon: 0xf0b88e, fog: 0xc4b8b6, sunColor: 0xffc694, sunIntensity: 1.05, hemiSky: 0xc4d2ee, hemiGround: 0x7a6c5e, hemiIntensity: 1.55, night: 0.12, windowGlow: 0.25 },
   { h: 8.5, sky: 0x7cb0e0, horizon: 0xc6dcee, fog: 0xb6cfe6, sunColor: 0xfff0d8, sunIntensity: 1.5, hemiSky: 0xe0eeff, hemiGround: 0x8a8272, hemiIntensity: 1.8, night: 0, windowGlow: 0 },
   { h: 12.5, sky: 0x64a2dc, horizon: 0xbcd8f0, fog: 0xaacbe8, sunColor: 0xfff4e2, sunIntensity: 1.75, hemiSky: 0xe4f1ff, hemiGround: 0x8a8272, hemiIntensity: 1.9, night: 0, windowGlow: 0 },
   { h: 16.5, sky: 0x70a8de, horizon: 0xc8d8e8, fog: 0xb4cce2, sunColor: 0xffecd0, sunIntensity: 1.65, hemiSky: 0xe4eefc, hemiGround: 0x8a8070, hemiIntensity: 1.8, night: 0, windowGlow: 0 },
-  { h: 18.5, sky: 0x6a8cc4, horizon: 0xf6b87c, fog: 0xe2ba96, sunColor: 0xffb466, sunIntensity: 1.6, hemiSky: 0xeed4b8, hemiGround: 0x7a6450, hemiIntensity: 1.55, night: 0, windowGlow: 0.3 },
-  { h: 19.6, sky: 0x323e7c, horizon: 0xe0806c, fog: 0x9a7684, sunColor: 0xff8a5a, sunIntensity: 0.55, hemiSky: 0x9490c0, hemiGround: 0x4c4044, hemiIntensity: 1.3, night: 0.5, windowGlow: 0.85 },
+  { h: 18.5, sky: 0x5c88c8, horizon: 0xf8b070, fog: 0xc8b2aa, sunColor: 0xffb466, sunIntensity: 1.6, hemiSky: 0xeed4b8, hemiGround: 0x7a6450, hemiIntensity: 1.55, night: 0, windowGlow: 0.3 },
+  { h: 19.6, sky: 0x323e7c, horizon: 0xe0806c, fog: 0x7c6a84, sunColor: 0xff8a5a, sunIntensity: 0.55, hemiSky: 0x9490c0, hemiGround: 0x4c4044, hemiIntensity: 1.3, night: 0.5, windowGlow: 0.85 },
   { h: 20.8, sky: 0x111e42, horizon: 0x30446e, fog: 0x2a3d62, sunColor: 0xa8bce8, sunIntensity: 0.6, hemiSky: 0x6680c0, hemiGround: 0x34343e, hemiIntensity: 1.25, night: 1, windowGlow: 1 },
 ];
 KEYS.push({ ...KEYS[0], h: 24 });
@@ -135,14 +135,18 @@ uniform vec3 uMoonDir;
 uniform float uSun;
 uniform float uMoon;
 uniform float uGlow;
+uniform float uAway;
 varying vec3 vDir;
 void main() {
   vec3 d = normalize(vDir);
   float y = d.y;
   float up = clamp(y, 0.0, 1.0);
-  vec3 col = mix(uHorizon, uZenith, pow(up, 0.55));
-  col = mix(uFog, col, smoothstep(-0.02, 0.1, y));
   float s = max(dot(d, uSunDir), 0.0);
+  // Low sun: the warm horizon only on the sun's side, cooler opposite.
+  float face = dot(normalize(d.xz + vec2(1e-4)), normalize(uSunDir.xz + vec2(1e-4))) * 0.5 + 0.5;
+  vec3 hor = mix(mix(uHorizon, uZenith * 1.3 + uFog * 0.25, uAway), uHorizon, face * face);
+  vec3 col = mix(hor, uZenith, pow(up, 0.55));
+  col = mix(mix(uFog, hor, 0.35), col, smoothstep(-0.02, 0.1, y));
   // Warm glow around the sun, wider near the horizon.
   col += uSunCol * uGlow * (pow(s, 8.0) * 0.35 + pow(s, 64.0) * 0.5) * smoothstep(-0.1, 0.05, y);
   col = mix(col, vec3(1.0, 0.98, 0.9) * 1.4, uSun * smoothstep(0.99955, 0.9997, s));
@@ -399,6 +403,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
         uSun: { value: 1 },
         uMoon: { value: 0 },
         uGlow: { value: 1 },
+        uAway: { value: 0 },
       },
       vertexShader: DOME_VS,
       fragmentShader: DOME_FS,
@@ -647,6 +652,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const clearSky = 1 - clamp(ov * 0.9 + fg * 0.9, 0, 1);
     U.uSun.value = clearSky * smoothstep(-0.04, 0.02, S.sunY);
     U.uGlow.value = (0.35 + 0.65 * clearSky) * smoothstep(-0.15, 0.05, S.sunY);
+    U.uAway.value = 0.75 * (1 - smoothstep(0.08, 0.45, S.sunY)) * (1 - S.night) * (1 - 0.7 * grey);
     U.uMoon.value = clearSky * S.night * smoothstep(-0.02, 0.05, S.moonY);
 
     if (scene.fog) {
@@ -673,7 +679,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const night = S.night;
     V.night = night;
     V.lit = clamp(Math.max(smoothstep(0.15, 0.6, night), rn * 0.6, fg * 0.5), 0, 1);
-    if (V.windowMat) V.windowMat.emissiveIntensity = S.windowGlow * 0.95 + ov * 0.12 * (1 - S.windowGlow);
+    if (V.windowMat) V.windowMat.emissiveIntensity = S.windowGlow * 0.95;
     if (V.plainMat && V.plainBase) V.plainMat.color.copy(V.plainBase).multiplyScalar(1 - 0.14 * rn);
 
     const starA = night * clearSky;
@@ -684,7 +690,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // not black blobs, greyer and denser when overcast.
     const cm = V.clouds.material;
     cm.opacity = (0.82 + 0.14 * ov) * (1 - 0.85 * fg);
-    setLin(cm.emissive, S.sky).multiplyScalar(0.25 + 0.25 * night);
+    setLin(cm.emissive, S.sky).multiplyScalar(0.2 + 0.25 * night);
+    cm.emissive.add(setLin(V.c1, S.horizon).multiplyScalar(0.18 * (1 - night)));
     cm.color.setScalar(1 - 0.35 * ov - 0.15 * rn);
     V.clouds.visible = cm.opacity > 0.02;
 
@@ -694,7 +701,15 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       V.poolU.uIntensity.value = V.lit * (0.25 + 0.55 * night);
       V.pools.visible = V.poolU.uIntensity.value > 0.01;
     }
-    V.headU.uIntensity.value = V.lit * (0.5 + 0.5 * night);
+    V.headU.uIntensity.value = V.lit * (0.35 + 0.35 * night);
+    // Additive glows fade out with the fog instead of shining through it.
+    const fn = scene.fog ? scene.fog.near : 220, ff = scene.fog ? scene.fog.far : 1050;
+    V.lampU.uFadeNear.value = Math.min(300, fn);
+    V.lampU.uFadeFar.value = Math.min(900, ff * 0.85);
+    if (V.poolU) {
+      V.poolU.uFadeNear.value = Math.min(160, fn);
+      V.poolU.uFadeFar.value = Math.min(420, ff * 0.7);
+    }
   }
 
   function updateClouds(cam) {
@@ -805,8 +820,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const reach = air ? 14 + y * 0.6 : 8;
     const len = air ? 20 : 13;
     const gy = v.kind === 'boat' ? (v.mesh ? v.mesh.position.y : -0.6) + 0.25 : 0.06;
-    V.p.x += ch * (L / 2 + reach - len / 2 + 1);
-    V.p.z += sh * (L / 2 + reach - len / 2 + 1);
+    V.p.x += ch * (L / 2 + reach - len / 2 + 3);
+    V.p.z += sh * (L / 2 + reach - len / 2 + 3);
     V.p.y = air ? 0.06 : gy;
     V.q.setFromAxisAngle(V.up, -v.heading);
     V.s.set(len, 1, air ? 12 : 6.5);
