@@ -275,6 +275,8 @@ try {
     fan.smoothingTimeConstant = 0.6;
     dbg.buses.engine.connect(fan);
     const spec = new Float32Array(fan.frequencyBinCount);
+    // Average the power spectrum over several analyser frames, then take
+    // the lowest clear peak within 10 dB of the loudest.
     async function peakAt(rpm) {
       await run(10, () => {});
       car.rpm = rpm;
@@ -282,22 +284,31 @@ try {
       car.speed = 15;
       car.throttle = 0.6;
       await run(70, () => {});
-      fan.getFloatFrequencyData(spec);
       const hz = ctx.sampleRate / fan.fftSize;
-      // fundamental: the lowest spectral peak within 10 dB of the loudest
       const i0 = Math.floor(20 / hz);
       const i1 = Math.ceil(700 / hz);
+      const avg = new Float32Array(i1 + 2);
+      const frames = 8;
+      for (let f = 0; f < frames; f++) {
+        await run(6, () => {});
+        fan.getFloatFrequencyData(spec);
+        for (let i = i0; i < i1 + 2; i++) avg[i] += 10 ** (spec[i] / 10) / frames;
+      }
+      for (let i = i0; i < i1 + 2; i++) avg[i] = 10 * Math.log10(avg[i] + 1e-12);
       let best = -Infinity;
-      for (let i = i0; i < i1; i++) best = Math.max(best, spec[i]);
+      for (let i = i0; i < i1; i++) best = Math.max(best, avg[i]);
       for (let i = i0 + 2; i < i1 - 2; i++) {
-        const v = spec[i];
-        if (v > best - 10 && v >= spec[i - 1] && v >= spec[i + 1] && v >= spec[i - 2] && v >= spec[i + 2]) return i * hz;
+        const v = avg[i];
+        if (v > best - 10 && v >= avg[i - 1] && v >= avg[i + 1] && v >= avg[i - 2] && v >= avg[i + 2]) return i * hz;
       }
       return 0;
     }
     const fLow = await peakAt(0.2);
     const fHigh = await peakAt(0.6);
-    check('engine pitch rises with rpm', fHigh > fLow * 1.4, `${fLow.toFixed(0)} Hz at 0.2 -> ${fHigh.toFixed(0)} Hz at 0.6`);
+    // The fundamental rises with rpm: the frequency ratio follows the rpm
+    // ratio (3x) to within 25 percent, not an absolute peak position.
+    const ratio = fHigh / (fLow || 1);
+    check('engine pitch rises with rpm', fLow > 0 && ratio > 3 * 0.75 && ratio < 3 * 1.25, `${fLow.toFixed(0)} Hz at 0.2 -> ${fHigh.toFixed(0)} Hz at 0.6 (ratio ${ratio.toFixed(2)}, rpm ratio 3)`);
     delete car.rpm;
     delete car.gear;
     other.speed = otherSpeed;
@@ -489,9 +500,13 @@ try {
       split.connect(aR, 1);
       const bl = new Float32Array(2048);
       const br = new Float32Array(2048);
-      async function measure(fn) {
+      // rms: energy over the whole window (steadier than a peak pick).
+      async function measure(fn, rms = false) {
         let l = 0;
         let r = 0;
+        let sl = 0;
+        let sr = 0;
+        let n = 0;
         for (let i = 0; i < 60 && audio.activeVoices > 0; i++) {
           await sleep(100);
           audio.render(1, 1 / 60);
@@ -506,20 +521,32 @@ try {
           for (let k = 0; k < 2048; k++) {
             l = Math.max(l, Math.abs(bl[k]));
             r = Math.max(r, Math.abs(br[k]));
+            sl += bl[k] * bl[k];
+            sr += br[k] * br[k];
           }
+          n += 2048;
         }
-        return [l, r];
+        return rms ? [Math.sqrt(sl / n), Math.sqrt(sr / n)] : [l, r];
       }
       const exp = (x) => () => events.emit('explosion', { x, y: 0, z: 0, radius: 8, source: null, depth: 0 });
       const nearB = await measure(exp(15));
       const farB = await measure(exp(250));
       check('explosion audible', Math.max(...nearB) > 0.02, `peak ${Math.max(...nearB).toFixed(3)}`);
       check('explosion falls off with distance', Math.max(...farB) < Math.max(...nearB) * 0.6, `near ${Math.max(...nearB).toFixed(3)} far ${Math.max(...farB).toFixed(3)}`);
-      const quiet = await measure(() => {});
-      const rightB = await measure(() => events.emit('shot', payload('scatter', 25, 0)));
-      const leftB = await measure(() => events.emit('shot', payload('scatter', -25, 0)));
-      check('shot pans to its side', rightB[1] > rightB[0] && leftB[0] > leftB[1] && (rightB[1] - rightB[0]) - (leftB[1] - leftB[0]) > 0.12,
-        `quiet ${quiet.map((v) => v.toFixed(3))}; right src L ${rightB[0].toFixed(3)} R ${rightB[1].toFixed(3)}; left src L ${leftB[0].toFixed(3)} R ${leftB[1].toFixed(3)}`);
+      // The pan check hears only the effects bus: the engine, tyre and
+      // ambience buses are cut from the master for this measurement (the
+      // engine never goes silent and its level drifts, which swamped the
+      // small left-right difference). Compared as RMS over a long window.
+      const cut = ['engine', 'tyres', 'world'].filter((k) => dbg.buses[k]);
+      for (const k of cut) dbg.buses[k].disconnect(dbg.master);
+      const quiet = await measure(() => {}, true);
+      const rightB = await measure(() => events.emit('shot', payload('scatter', 25, 0)), true);
+      const leftB = await measure(() => events.emit('shot', payload('scatter', -25, 0)), true);
+      for (const k of cut) dbg.buses[k].connect(dbg.master);
+      // Balance index -1 (all left) .. +1 (all right), independent of loudness.
+      const bal = (v) => (v[1] - v[0]) / (v[1] + v[0] + 1e-9);
+      check('shot pans to its side', rightB[1] > rightB[0] && leftB[0] > leftB[1] && bal(rightB) - bal(leftB) > 0.12,
+        `quiet rms ${quiet.map((v) => v.toFixed(4))}; right src L ${rightB[0].toFixed(4)} R ${rightB[1].toFixed(4)} (bal ${bal(rightB).toFixed(2)}); left src L ${leftB[0].toFixed(4)} R ${leftB[1].toFixed(4)} (bal ${bal(leftB).toFixed(2)})`);
 
       // A storm of events stays within the voice cap and the limiter.
       peak = 0;

@@ -191,6 +191,14 @@ try {
     const r = document.querySelector(`[aria-label="${l}"]`).getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
   }, label);
+  // Wait until every finite CSS transition and animation has finished (the
+  // secondary buttons hide with a 0.16 s transition plus a delayed
+  // visibility), whatever the machine speed. Endless pulses are skipped.
+  const settleCss = () => page.evaluate(async () => {
+    const running = () => document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity && a.playState === 'running');
+    for (let i = 0; i < 5 && running().length; i++) await Promise.allSettled(running().map((a) => a.finished));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
   const shot = (name) => page.screenshot({ path: path.join(out, name) });
   // The "more" button toggles on a real tap; wait out the 160 ms ease.
   const tapMore = async () => {
@@ -695,6 +703,7 @@ try {
     return { out, W: innerWidth, H: innerHeight };
   });
   const checkLayout = async (label) => {
+    await settleCss();
     const { out, W, H } = await layoutOf();
     const bad = [];
     for (const b of out) {
@@ -744,6 +753,7 @@ try {
         await page.evaluate(() => { rw.touch.setHudMode('full'); rw.hud.setHudMode('full'); });
         await hudFor(m);
         await page.waitForTimeout(320);
+        await settleCss();
         await checkLayout(`full ${tag}`);
         check(`full ${tag}: nothing folded, more button gone`, await page.evaluate(() => !document.querySelector('.rw-more').offsetParent
           && [...document.querySelectorAll('.rw-sec')].every((e) => getComputedStyle(e).visibility === 'visible' && getComputedStyle(e).opacity === '1')));
@@ -751,6 +761,7 @@ try {
       }
       await page.evaluate(() => { rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); rw.touch.setMode('car'); rw.touch.setSteering('buttons'); });
       await page.waitForTimeout(260); // let the folded fan finish its 0.16 s fold
+      await settleCss();
       await checkLayout(`car buttons-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
       await page.evaluate(() => rw.touch.setSteering('slider'));
       await checkLayout(`car slider-style ${vw}x${vh}${lefty ? ' lefty' : ''}`);
@@ -766,6 +777,7 @@ try {
   check('HUD is Minimal by default', (await page.evaluate(() => [rw.touch.getHudMode(), rw.hud.getHudMode()])).join() === 'minimal,minimal');
   await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'pistol', name: 'Pocket Rattler', mag: 9, max: 12, reload: 0, locked: false, drive: true }));
   await page.waitForTimeout(350);
+  await settleCss();
   check('fan folded at rest: every secondary control hidden',
     await page.evaluate(() => [...document.querySelectorAll('.rw-sec')].every((e) => getComputedStyle(e).visibility === 'hidden'))
     && !(await fanIsOpen()));
@@ -836,9 +848,17 @@ try {
   }
   const gc = await center('Gas');
   await down(32, gc.x, gc.y);
-  await page.waitForTimeout(140);
+  // Machine-speed independent: wait for the transition to finish, then check
+  // the end state and that the transition itself lasts at most 140 ms.
+  await settleCss();
   const fg = await face('Gas');
-  check('Gas grows to full size and opacity within 140 ms of a touch', fg.ratio > 0.99 && fg.op > 0.99, JSON.stringify(fg));
+  const fdur = await page.evaluate(() => {
+    const cs = getComputedStyle(document.querySelector('[aria-label="Gas"] .rw-face'));
+    const secs = (t) => t.split(',').map((x) => parseFloat(x) * (x.trim().endsWith('ms') ? 0.001 : 1));
+    const d = secs(cs.transitionDuration), dl = secs(cs.transitionDelay);
+    return Math.max(...d.map((v, i) => v + (dl[i % dl.length] || 0)));
+  });
+  check('Gas grows to full size and opacity within 140 ms of a touch', fg.ratio > 0.99 && fg.op > 0.99 && fdur <= 0.14, JSON.stringify({ ...fg, fdur }));
   await up(32);
   await page.waitForTimeout(160);
   const fg2 = await face('Gas');
@@ -1203,8 +1223,11 @@ try {
       rw.touch.update(1 / 60);
       rw.chud.render(1, 1 / 60);
     }, [key, mode, charges]);
-    const visibleActions = () => page.evaluate(() => [...document.querySelectorAll('.rw-touch .rw-act')]
+    const visibleActions = async () => {
+      await settleCss();
+      return page.evaluate(() => [...document.querySelectorAll('.rw-touch .rw-act')]
       .filter((e) => e.offsetParent && getComputedStyle(e).visibility !== 'hidden').map((e) => e.dataset.action).sort().join());
+    };
     // [craft, mode, charges, max buttons, wanted actions]. Minimal: 6 at most, except the
     // armed-aircraft arc (ARMS.md: GUN MSL BOMB LOCK, up to 9) and DETONATE (+1).
     const cases = [

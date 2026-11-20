@@ -551,9 +551,9 @@ export function createGame({ canvas, uiRoot }) {
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     if (!(w > 0 && h > 0)) return;
-    // Phones report very high pixel densities; cap the drawn height so
+    // Phones report very high pixel densities; cap the drawn height (sharp, SVGA-plus) so
     // the frame rate stays smooth.
-    const cap = (1080 * game.quality) / Math.max(1, h);
+    const cap = (1440 * game.quality) / Math.max(1, h);
     renderer.setPixelRatio(Math.max(0.75, Math.min(window.devicePixelRatio || 1, cap)));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;

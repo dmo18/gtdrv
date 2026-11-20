@@ -1,76 +1,84 @@
 # Status
 
-## Done
-- Milestone 1: drivable city, touch controls, HUD
-- Milestone 2: walking, boats, planes, helicopters, map, sound
+Last updated: 2026-11-20. The game is playable and published. Work is at
+the final review and fix stage; nothing is in progress that blocks play.
 
-- Milestone 3: traffic, pedestrians, races and deliveries, showroom, save
-- Milestone 4: police chases (optional), day/night, weather, hints
+## Features now in the game
+- Driving: city with traffic and pedestrians, nine road vehicles, tank.
+  Arcade handling (tight steering, the default) and Realistic handling.
+- Boats (speedboat, jet ski, fishing boat), planes (prop, seaplane, jet,
+  fighter), helicopters (including a flyable police helicopter).
+- Tank (the Rustback, stealable at Ironbank Depot) and the Gannetfang
+  fighter jet with nose gun, missiles and bombs.
+- On-foot combat: six weapons plus grenades (Fizzpop Can) and sticky
+  bombs, touch aiming, hold-to-aim throws, bombs dropped from planes,
+  missiles from armed craft. Cartoon only: sparks, knock-down, fade.
+- Rival crew and police shootouts; police heat 1 to 4 with officers on
+  foot, pursuit cars, roadblocks and a police helicopter.
+- Score and high scores only. No money, shop or unlocks: every vehicle
+  and weapon is available from the start.
+- Races, sky ring courses and timed deliveries with medals.
+- Day and night, weather, quality scaling, generated sound.
+- Calmer UI: a Minimal HUD (default) or Full HUD, one expanding "more"
+  button, idle-shrinking controls, small minimap, full map with waypoint.
+- Camera views per craft: chase, far chase, bumper or cockpit.
+- Saves score, medals, best times and settings in the browser.
 
-## In progress
-- Milestone 5: quality overhaul after the owner's first play test
-  (steering and driving feel, sound, city graphics, vehicle looks)
-- Fixes from the final review (race start button, map markers, HUD
-  leftovers)
+## Decisions and direction changes, in order
+1. Name: Rustwater, an original island harbour city. 3D, flat ground,
+   physics in 2D (x, z). three.js 0.187.0, esbuild 0.28.2, eslint 10.15.0.
+2. Preview on a public GitHub Pages site (user's choice). No separate main
+   branch: the working branch is the default branch and publishes directly.
+3. Direction change 1 (user): fun driving, boating and flying; combat
+   and crime missions dropped; police chases a light optional extra.
+4. Direction change 2 (owner, after the first phone play test): steering
+   radius too wide (fixed: Arcade and Realistic handling), VIEW button did
+   nothing (fixed: camera views per craft), wants violence and fun, "more
+   GTA and Gran Turismo combined". Answers: full sandbox violence without
+   blood or gore; combat and weapons first, then story missions; tuning
+   garage and championships parked. This replaced direction change 1.
+5. Design principle (owner): "It's about more fun, not more points." No
+   money, shop or unlocks; high scores only.
+6. Models: Fable is no longer used (owner request). Opus takes the hard
+   work, Sonnet the rest.
+7. Direction change 3 (owner): bombs, grenades, police shootouts and
+   chases, fighter jets, flyable police helicopters, stealable tanks.
+8. Calmer UI pass: one expanding more button, Minimal HUD setting.
 
-## Paused: run cap reached
-Measured helper usage is 3.51M against the 3.5M cap, so work stopped
-for the owner's decision. State at the pause:
-- Milestone 5 tasks 19 (steering, driving physics), 20 (sound) and 22
-  (vehicle looks, effects) are complete and wired in.
-- Task 21 (city graphics) was stopped before its helper finished. What
-  it built is wired in and verified by screenshot and checks: tone
-  mapping, sun shadows, environment reflections, textured roads and
-  pavements, facade styles, shopfronts, props. Not confirmed: its full
-  screenshot pass (dusk, rain, docks, beach, airfield, aerial), bloom,
-  quality scaling, and its performance report.
-- Known weak spots: boats and aircraft are still blocky; the VIEW
-  button does nothing yet; one sound check is timing-sensitive
-  (failed 1 run in 4); sound was never heard by a person.
-- Not yet tested on the real phone since the overhaul.
+## Run cap history
+- Original cap: 27 tasks and 3.5M delegated tokens. Reached at 3.51M
+  after the quality overhaul; work paused for the owner's decision.
+- The owner raised the cap for the combat stage: new stage cap 2.8M
+  ("toys first"). Actual spend for the stage was about 3.2M, over the
+  stage cap.
+- The owner then approved a review only (no new features). This review
+  and its fixes are the last work in this run.
 
-## Decisions
-- Name: Rustwater (original setting, an island harbour city).
-- 3D, flat ground, physics in 2D (x,z) for speed and testability.
-- three.js 0.187.0 (MIT), esbuild 0.28.2 (MIT), eslint 10.15.0 (MIT).
-- Preview: public GitHub Pages site (user's choice).
-- Direction change (user): the game is about fun driving, boating and
-  flying. Combat and crime missions dropped; police chases are a light
-  optional extra.
-- Direction change 2 (owner, after first phone play test): steering
-  radius too wide (being fixed, with an Arcade and a Realistic handling
-  mode); VIEW button did nothing (fixed: chase, far chase, bumper or
-  cockpit views); wants violence and fun, "more GTA and Gran Turismo
-  combined". Owner's answers: violence is FULL SANDBOX (no blood or
-  gore); build combat and weapons first, then story missions;
-  tuning garage and championships are parked for later.
-- Design principle (owner): "The game shouldn't be about more points.
-  It's about more fun. Everything is available. You just get high scores
-  and have a fun time." So no money, shop or unlocks: every vehicle and
-  weapon is available from the start; progression is high scores only.
-- Models: Fable is no longer used (owner request). Opus takes the hard
-  work, Sonnet the rest.
-- Direction change 3 (owner): wants bombs, grenades, police shootouts and
-  chases, fighter jets, police helicopters you can fly, and tanks you can
-  steal and drive.
-- Run cap for this stage: raised to 2.8M delegated tokens (owner chose
-  "Raise cap to 2.8M, toys first"). Order: finish wave 2 (touch aiming,
-  rival crew and police), publish a playable combat build, then the toys
-  (tasks 31 to 34), then missions engine and final review only if the
-  cap allows. Stop and ask before passing 2.8M.
-- Run cap: 27 tasks, 3.5M delegated tokens.
-- No separate main branch exists: the working branch is the
-  repository's default branch and publishes to GitHub Pages directly.
+## NOT built
+- Escalating chases: police helicopters in chases, roadblocks at heat 5,
+  tanks sent after the player (heat stops at 4; the police helicopter is
+  there, but not the heat-5 escalation).
+- Story missions engine and the missions (design in docs/MISSIONS.md).
+- Tuning garage and car upgrades.
+- Championships with AI rivals.
+- Parked ideas: AI fighters, ejection seat, knockable lamps and trees.
 
 ## Known issues
-- none yet
+- A fighter that leaves the depot at part thrust can get stuck on the
+  shore (full thrust is fine).
+- Draw calls reach about 417 in a street view and 544 in a heavy fight,
+  against a budget of about 420.
+- No test on the real phone (Galaxy S24 Ultra) since the overhaul.
+- Sound has been measured, never heard by a person.
+- Fixed in the final review: player stuck after a craft was wrecked on a
+  roof or at sea; flaky end-to-end, UI and audio test scripts.
 
 ## Open security findings
-- Milestone 1 review: no critical or high.
-- Low (open): GitHub Actions are pinned to version tags, not commit ids.
-- Milestone 2 review: no critical. Two high (player could get stuck at
-  sea; pause with map open) fixed. Two medium (abandoned craft piling
-  up) fixed with a periodic sweep.
-- Final review (212 simulated minutes of soak testing, 0 errors):
-  no critical or high findings. Medium usability items being fixed.
-- Low (open): page style policy allows inline styles (needed by the UI code).
+None critical or high.
+- Low (open): GitHub Actions in the publish workflow are pinned to
+  version tags, not commit ids.
+- Low (open): the page style policy allows inline styles (needed by the
+  UI code).
+- Earlier reviews: milestone 1 and 2 findings (player stuck at sea, pause
+  with the map open, abandoned craft piling up) are fixed; the 212-minute
+  soak test had 0 errors.

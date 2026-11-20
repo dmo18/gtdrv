@@ -665,7 +665,8 @@ export function createTouchControls(root, input, opts = {}) {
 
   // ----- secondary: folded into the fan -----
   const armed = () => shown.show !== false;
-  addAction({ id: 'handbrake', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
+  // Handbrake is a primary button: always on screen in a car.
+  addAction({ id: 'handbrake', group: 'primary', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
     press() { src.handbrake = true; }, release() { src.handbrake = false; } });
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });

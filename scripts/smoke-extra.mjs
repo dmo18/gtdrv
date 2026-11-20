@@ -146,6 +146,37 @@ export default async function extra(page, check) {
   check(race.courses >= 10, `activities loaded (${race.courses})`);
   check(!!race.medal && race.gained > 0, `finishing "${race.name}" awards a medal (${race.medal}) and ${race.gained} points`);
 
+  // From here on the test steps the simulation by hand: stop the page's
+  // real-time loop so world state does not depend on machine speed.
+  await page.evaluate(() => window.__rw.loop.stop());
+  const frame = () => page.evaluate(() => window.__rw.draw(1, 1 / 60));
+  // A healthy, unwanted player with no cooldowns, whatever came before.
+  const resetPlayer = () => page.evaluate(() => {
+    const g = window.__rw;
+    const w = g.player.walker;
+    w.hp = w.maxHp || 100;
+    w.life = 'ok';
+    w.lifeT = 0;
+    w.fade = 0;
+    w.vx = w.vz = 0;
+    g.player.health = 100;
+    g.player.wanted = 0;
+    const h = g.police && g.police.heat;
+    if (h) {
+      h.level = 0;
+      h.points = 0;
+      h.calm = 0;
+      h.grace = 0;
+      h.unseen = 0;
+      h.cooldown = 0;
+      h.speedTime = 0;
+      h.bustTime = 0;
+    }
+    const a = w.arms;
+    if (a && a.cool && typeof a.cool === 'object') for (const k of Object.keys(a.cool)) a.cool[k] = 0;
+    else if (a) a.cool = 0;
+  });
+
   // Combat core: on foot, hold fire at the nearest ped until it goes
   // down (cartoon knock-down, no gore), then it lies there and fades.
   // The 'fire' action is pressed directly: the F key binding is task 26.
@@ -213,25 +244,27 @@ export default async function extra(page, check) {
   check(later.out && later.maxFade > 0.9 && later.freed, `downed ped lies out, fades and its slot is freed (${JSON.stringify(later)})`);
 
   // ---- Explosives and craft weapons (docs/ARMS.md, task 31) ----
-  // From here on the test steps the simulation by hand, so the page's
-  // real-time loop must not also step the world between our calls (it
-  // made the can, bomb and missile checks depend on machine speed).
-  await page.evaluate(() => window.__rw.loop.stop());
-  const frame = () => page.evaluate(() => window.__rw.draw(1, 1 / 60));
-  // Reset the fixture: the player is healthy and unwanted, whatever the
-  // earlier fight left behind. (Do not move the player here: parked cars only
-  // exist near the player and the next checks need one.)
+  // Fixture: the open, flat airfield runway, so buildings, props and
+  // traffic cannot get in the way of the arcs. The player stands there
+  // facing +x (the runway's long axis), healthy and unwanted.
+  await resetPlayer();
   await page.evaluate(() => {
     const g = window.__rw;
+    if (g.player.vehicle) {
+      const v = g.player.vehicle;
+      v.vx = v.vz = 0;
+      v.speed = 0;
+      v.driver = null;
+      g.player.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    const rw = g.city.airfield.runway;
     const w = g.player.walker;
-    w.hp = w.maxHp || 100;
-    w.life = 'ok';
-    w.lifeT = 0;
-    w.fade = 0;
-    w.vx = w.vz = 0;
-    g.player.health = 100;
-    g.player.wanted = 0;
-    for (const k of Object.keys(w.arms.cool || {})) w.arms.cool[k] = 0;
+    w.x = w.px = rw.x0 + 191;
+    w.z = w.pz = (rw.z0 + rw.z1) / 2;
+    w.heading = w.pheading = 0;
+    g.player.x = w.x;
+    g.player.z = w.z;
   });
   // Hold FIRE with a Fizzpop Can: the arc preview shows, nothing is thrown
   // until release.
@@ -255,26 +288,20 @@ export default async function extra(page, check) {
   });
   check(pre.on && pre.n > 3 && pre.live === 0 && rel === 1, `hold FIRE previews the arc, release throws (${JSON.stringify(pre)}, thrown ${rel})`);
   // Throw a can at a parked car: the car takes blast damage.
+  await sim(3.4); // the first can has burst and settled
+  await resetPlayer();
   const nade = await page.evaluate(() => {
     const g = window.__rw;
     const run = (n) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
-    run(200);
     const w = g.player.walker;
-    const cars = g.vehicles.filter((v) => v.kind === 'car' && !v.driver && !v.wrecked && v !== g.player.vehicle);
-    cars.sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z));
-    const car = cars[0];
-    if (!car) return { ok: false, why: 'no car' };
-    // Fixed fixture spot: the open, flat airfield runway, so buildings,
-    // props and traffic cannot get in the way of the arc.
     const rw = g.city.airfield.runway;
     const rz = (rw.z0 + rw.z1) / 2;
-    car.x = car.px = rw.x0 + 200;
-    car.z = car.pz = rz;
+    // A fixture sedan on the runway in front of the player.
+    const car = g.debug.spawnCar('sedan', rw.x0 + 200, rz, 0);
+    if (!car) return { ok: false, why: 'no car' };
     car.vx = car.vz = 0;
     car.speed = 0;
     car.asleep = false;
-    w.x = w.px = car.x - 9;
-    w.z = w.pz = rz;
     // Stand 9 m away; aim pitch picks the reach (6..25 m over -0.2..0.6 rad).
     const ang = Math.atan2(w.z - car.z, w.x - car.x);
     w.x = w.px = car.x + Math.cos(ang) * 9;
@@ -300,16 +327,23 @@ export default async function extra(page, check) {
   const bomb = await page.evaluate(() => {
     const g = window.__rw;
     const run = (n) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
-    const plane = g.vehicles.find((v) => v.kind === 'plane' && !v.wrecked);
+    // The parked prop plane, repaired (an earlier check flew it).
+    const plane = g.vehicles.find((v) => v.kind === 'plane' && v.spec.id === 'prop');
+    if (plane) {
+      plane.wrecked = false;
+      plane.exploded = false;
+      plane.burning = false;
+      plane.health = plane.spec.health;
+    }
     if (!plane) return { ok: false, why: 'no plane' };
     plane.spec = { ...plane.spec, mounts: ['nosegun', 'missile', 'bomb'] };
     plane.arms = undefined;
-    const car = window.__nadeCar;
     // Same open runway fixture as the can test: no building or water in the
-    // predicted drop path.
+    // predicted drop path. A fresh sedan stands in for the target and is
+    // moved onto the predicted impact spot.
     const rwy = g.city.airfield.runway;
-    car.x = car.px = rwy.x0 + 420;
-    car.z = car.pz = (rwy.z0 + rwy.z1) / 2;
+    const car = g.debug.spawnCar('sedan', rwy.x0 + 420, (rwy.z0 + rwy.z1) / 2, 0);
+    window.__nadeCar = car;
     car.vx = car.vz = 0;
     car.speed = 0;
     car.health = car.spec.health;
@@ -345,16 +379,10 @@ export default async function extra(page, check) {
       const d = g.combat.predictDrop(plane, { ok: false, hx: 0, hy: 0, hz: 0, t: 0, kind: 'none' });
       if (d.ok && d.hx >= car.x - 1) {
         pd = { x: d.hx, z: d.hz };
-        // Park a live car right on the predicted spot (parked cars far from
-        // the player may have been recycled meanwhile).
-        const live = g.vehicles.filter((v) => v.kind === 'car' && !v.driver && !v.wrecked);
-        live.sort((a, b) => Math.hypot(a.x - d.hx, a.z - d.hz) - Math.hypot(b.x - d.hx, b.z - d.hz));
-        if (live[0]) {
-          window.__nadeCar = live[0];
-          live[0].x = live[0].px = d.hx + 1;
-          live[0].z = live[0].pz = d.hz;
-          live[0].health = live[0].spec.health;
-        }
+        // Park the fixture sedan right on the predicted spot.
+        car.x = car.px = d.hx + 1;
+        car.z = car.pz = d.hz;
+        car.health = car.spec.health;
         g.input.press('drop');
         run(1);
         g.input.release('drop');
@@ -405,11 +433,14 @@ export default async function extra(page, check) {
   // Enter the parked tank, drive it, aim and fire the cannon at a car,
   // then roll over a second car. Cars are copies of a nearby car's state
   // (the depot has no parking), placed in the open yard.
+  await resetPlayer();
   const tk = await page.evaluate(() => {
     const g = window.__rw;
     const t = g.vehicles.find((v) => v.kind === 'tank' && v.home && v.home.place === 'depot' && !v.wrecked);
-    const src = g.vehicles.find((v) => v.kind === 'car' && !v.wrecked && v.spec.length < 6);
-    if (!t || !src) return { ok: false, t: !!t, src: !!src };
+    if (!t) return { ok: false, t: false };
+    // A compact car next to the depot's tank is the template for the targets.
+    const src = g.debug.spawnCar('compact', t.x + 10, t.z + 14, 0);
+    if (!src) return { ok: false, t: true, src: false };
     window.__src32 = g.input.addSource({ steer: 0, throttle: 0, brake: 0 });
     window.__carSrc = src;
     if (g.player.vehicle) {
@@ -563,6 +594,7 @@ export default async function extra(page, check) {
     g.enterVehicle(c);
     return { id: c.id, x: c.x, z: c.z, mode: g.player.mode };
   }, spec);
+  await resetPlayer();
   const jetIn = await boardCraft('fighter');
   check(jetIn && jetIn.mode === 'plane', `boards the parked Gannetfang (${JSON.stringify(jetIn)})`);
   await page.evaluate(() => { for (let i = 0; i < 30; i++) window.__rw.step(1 / 60); });
@@ -651,4 +683,88 @@ export default async function extra(page, check) {
     window.__aiHeli.craft.removed || g.removeVehicle(window.__aiHeli.craft);
     g.clock = 12;
   });
+
+  // ---- Stuck-player regressions: a wrecked craft must never leave the
+  // player stranded on a roof or on the water. Stepped by hand. ----
+  await resetPlayer();
+  const spawnAndBoard = (specId, where) => page.evaluate(([id, at]) => {
+    const g = window.__rw;
+    if (g.player.vehicle) {
+      g.player.vehicle.driver = null;
+      g.player.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    // An existing craft of that type, repaired and moved to the spot
+    // (spawnCar makes cars only).
+    const c = g.vehicles.find((v) => v.spec.id === id && v.home && !v.driver);
+    if (!c) return false;
+    c.wrecked = false;
+    c.exploded = false;
+    c.burning = false;
+    c.health = c.spec.health;
+    c.x = c.px = at.x;
+    c.z = c.pz = at.z;
+    c.y = c.py = at.y || 0;
+    c.vx = c.vz = c.vy = 0;
+    c.speed = 0;
+    c.onGround = !at.y;
+    c.placed = true;
+    g.enterVehicle(c);
+    window.__stuckCraft = c;
+    return true;
+  }, [specId, where]);
+  const exitState = () => page.evaluate(() => {
+    const g = window.__rw;
+    const ok = g.exitVehicle();
+    for (let i = 0; i < 30; i++) g.step(1 / 60);
+    const w = g.player.walker;
+    const inside = g.collision.boxes.some((b) => w.x >= b.x0 && w.x <= b.x1 && w.z >= b.z0 && w.z <= b.z1);
+    return { ok, mode: g.player.mode, onFoot: !g.player.vehicle, x: +w.x.toFixed(1), z: +w.z.toFixed(1), inside, shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
+  });
+  const roof = await page.evaluate(() => {
+    const boxes = window.__rw.collision.boxes.filter((b) => b.h >= 30);
+    boxes.sort((a, b) => b.h - a.h);
+    const b = boxes[0];
+    return b ? { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2, y: b.h } : null;
+  });
+  check(!!roof, `a building 30 m or taller exists (${JSON.stringify(roof)})`);
+  if (roof) {
+    for (const [id, label] of [['heli', 'helicopter'], ['prop', 'plane']]) {
+      const boarded = await spawnAndBoard(id, roof);
+      await page.evaluate(() => { window.__stuckCraft.wrecked = true; });
+      const ex = await exitState();
+      check(boarded && ex.ok && ex.mode === 'foot' && ex.onFoot && !ex.inside,
+        `a wrecked ${label} on a ${roof.y} m roof lets the player out onto open ground (${JSON.stringify(ex)})`);
+    }
+  }
+  const sea = await page.evaluate(() => {
+    const g = window.__rw;
+    let best = null;
+    for (let x = -3000; x <= 3000; x += 250) {
+      for (let z = -3000; z <= 3000; z += 250) {
+        const d = g.city.shoreDist(x, z);
+        if (d < -150 && (!best || d < best.d)) best = { x, z, d };
+      }
+    }
+    return best;
+  });
+  check(!!sea, `open sea found (${JSON.stringify(sea)})`);
+  if (sea) {
+    const boarded = await spawnAndBoard('speedboat', { x: sea.x, z: sea.z });
+    await page.evaluate(() => { window.__stuckCraft.wrecked = true; });
+    const ex = await exitState();
+    check(boarded && ex.ok && ex.onFoot && ex.shore > 0, `a wrecked boat far out at sea lets the player out on land (${JSON.stringify(ex)})`);
+    // A craft that explodes over the sea with the player aboard.
+    const boarded2 = await spawnAndBoard('heli', { x: sea.x, z: sea.z, y: 25 });
+    const boom = await page.evaluate(() => {
+      const g = window.__rw;
+      const c = window.__stuckCraft;
+      c.health = 1;
+      g.combat.explode(c.x, c.y, c.z, 20);
+      for (let i = 0; i < 90; i++) g.step(1 / 60);
+      const w = g.player.walker;
+      return { wrecked: !!c.wrecked, onFoot: !g.player.vehicle && g.player.mode === 'foot', shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
+    });
+    check(boarded2 && boom.wrecked && boom.onFoot && boom.shore > 0, `a craft exploding over the sea leaves the player on land (${JSON.stringify(boom)})`);
+  }
 }
