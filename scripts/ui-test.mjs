@@ -189,7 +189,7 @@ try {
   // ---- foot mode ----
   await page.evaluate(() => rw.touch.setMode('foot'));
   check('foot stick zone present', await page.evaluate(() => !!document.querySelector('.rw-stick').offsetParent));
-  check('car pedals hidden', !(await page.locator('.rw-gas').isVisible()));
+  check('car pedals hidden', !(await page.locator('[aria-label="Gas"]').isVisible()));
   await down(6, 120, 320);
   await drag(6, 120, 320, 122, 240);
   const st = await read('[rw.input.moveX, rw.input.moveY, rw.input.sprint]');
