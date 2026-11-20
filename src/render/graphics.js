@@ -11,6 +11,8 @@ import { signalState } from '../world/citygen.js';
 import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
 import { vehicleStats } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
+import { makeWindowAtlas } from './textures.js';
+import { patchWindows } from './nightlights.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -278,6 +280,9 @@ export function createGraphics(game) {
     if (bloom.on) sizeBloom();
   });
 
+  // ---- lit windows: per-window rooms from one shared atlas ----
+  const win = ud.materials ? patchWindows(ud.materials, makeWindowAtlas(game.city ? game.city.seed + 31 : 31)) : null;
+
   // ---- traffic-light lamps ----
   const sig = ud.signals && ud.signals.mesh ? ud.signals : null;
   const sigState = sig ? new Uint8Array(sig.bulbs.length).fill(2) : null;
@@ -390,6 +395,10 @@ export function createGraphics(game) {
         scene.environmentIntensity = 0.42 + 0.48 * sky.night;
       }
       updateShadow(sky);
+      if (win) {
+        win.uniforms.uWinNight.value = sky ? sky.night : 0;
+        win.uniforms.uWinTime.value = (game.time || 0) % 1000;
+      }
       const w = game.weather;
       if (ud.windsock && w) {
         ud.windsock.rotation.y = -w.windDir + Math.sin(game.time * 2.3) * 0.12;

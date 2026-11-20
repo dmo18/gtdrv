@@ -34,6 +34,8 @@ await page.evaluate((m) => {
   const p = g.player;
   if (p.vehicle) { p.vehicle.driver = null; p.vehicle = null; g.setPlayerMode('foot'); }
   g.touch.setHudMode(m);
+  g.loop.stop(); // the software renderer would starve the pointer events
+  for (let i = 0; i < 30; i++) g.step(1 / 60);
 }, hud);
 await page.waitForTimeout(800);
 const cdp = await ctx.newCDPSession(page);
@@ -45,7 +47,8 @@ const wheelOpen = () => page.evaluate(() => document.querySelector('.rw-ww').cla
 const hidden = () => page.evaluate(() => document.querySelector('.rw-ww').getAttribute('aria-hidden'));
 
 async function openFan() {
-  if (hud === 'minimal') {
+  const open = await page.evaluate(() => window.__rw.touch.isFanOpen());
+  if (hud === 'minimal' && !open) {
     const m = await rect('.rw-more');
     await touch('touchStart', m.x + m.w / 2, m.y + m.h / 2);
     await touch('touchEnd');
@@ -61,6 +64,7 @@ let sw = center(await rect('.rw-a-swap'));
 await touch('touchStart', sw.x, sw.y);
 await page.waitForTimeout(80);
 await touch('touchEnd');
+await page.evaluate(() => { for (let i = 0; i < 3; i++) window.__rw.step(1 / 60); });
 await page.waitForTimeout(300);
 const w1 = await weapon();
 check(w1 !== w0, `tap cycles weapon (${w0} -> ${w1})`);

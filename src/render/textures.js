@@ -462,21 +462,20 @@ function makeDecals(rng) {
 }
 
 // --------------------------------------------------------------- facades ----
-// Lit-window picture: nx*ny windows, each drawn by rectFn(ix, iy) which
-// returns [x, y, w, h] in cell units (0..1), or null for no window.
-function litWindows(rng, size, nx, ny, rectFn, frac, rowRuns = false) {
-  const c = canvas(size);
-  const g = c.getContext('2d');
-  g.fillStyle = '#000';
-  g.fillRect(0, 0, size, size);
-  const cw = size / nx, ch = size / ny;
+// Window mask: white where the glass is, black on the wall, for one
+// facade tile of 4 bays by 4 floors (same layout as the facade picture).
+// Which windows are lit, and what the room behind looks like, is decided
+// per window in the facade shader (see nightlights.js), so the mask is
+// small and the same for every building of a style. `bars` adds the
+// mullion (and transom) lines that split each pane.
+// The old lit-window picture drew from the shared random stream; the
+// same draws are still taken here so every texture painted after this
+// one (and so the daytime look) stays exactly as it was.
+function windowMask(rng, nx, ny, rectFn, frac, rowRuns, bars) {
   for (let iy = 0; iy < ny; iy++) {
-    // Offices light whole runs of a floor; homes are window by window.
     const rowOn = rowRuns ? rng.chance(0.55) : true;
     let run = 0;
     for (let ix = 0; ix < nx; ix++) {
-      const r = rectFn(ix % 4, iy % 4);
-      if (!r) continue;
       let on;
       if (rowRuns) {
         if (run > 0) { on = true; run--; } else {
@@ -485,21 +484,96 @@ function litWindows(rng, size, nx, ny, rectFn, frac, rowRuns = false) {
         }
       } else on = rng.chance(frac);
       if (!on) continue;
-      const k = rng.range(0.5, 1);
-      const t = rng.next();
-      let R = 255, G = 206, B = 138;
-      if (t < 0.22) { R = 214; G = 232; B = 255; } else if (t < 0.34) { R = 255; G = 238; B = 204; }
-      g.fillStyle = rgb(R * k, G * k, B * k);
-      const x = ix * cw + r[0] * cw, y = iy * ch + r[1] * ch, w = r[2] * cw, h = r[3] * ch;
-      g.fillRect(x, y, w, h);
-      // Blind or furniture silhouette.
-      g.fillStyle = 'rgba(0,0,0,0.4)';
-      if (rng.chance(0.5)) g.fillRect(x, y, w, h * rng.range(0.1, 0.5));
-      else g.fillRect(x + w * rng.range(0, 0.6), y + h * 0.55, w * 0.3, h * 0.45);
+      rng.range(0.5, 1); rng.next();
+      if (rng.chance(0.5)) rng.range(0.1, 0.5);
+      else { rng.range(0, 0.6); }
     }
   }
-  const t = toTexture(c, { aniso: 4 });
-  t.repeat.set(4 / nx, 4 / ny);
+  const size = 128, cw = size / 4;
+  const c = canvas(size);
+  const g = c.getContext('2d');
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, size, size);
+  for (let iy = 0; iy < 4; iy++) {
+    for (let ix = 0; ix < 4; ix++) {
+      const r = rectFn(ix, iy);
+      const x = ix * cw + r[0] * cw, y = iy * cw + r[1] * cw, w = r[2] * cw, h = r[3] * cw;
+      g.fillStyle = '#fff';
+      g.fillRect(x, y, w, h);
+      g.fillStyle = 'rgb(40,40,40)';
+      if (bars & 1) g.fillRect(ix * cw + cw / 2 - 0.75, y, 1.5, h);
+      if (bars & 2) g.fillRect(x, y + h * 0.48, w, 1.2);
+    }
+  }
+  return toTexture(c, { aniso: 4 });
+}
+
+// Rooms seen through lit windows at night: one shared 4 x 2 atlas of
+// small pictures, each covering one window cell (a bay by a floor).
+// 0 warm room, 1 warm with blinds, 2 cool office, 3 dark room lit by a
+// television, 4 curtains half drawn, 5 cool blinds, 6 warm white with a
+// ceiling lamp, 7 dim amber (a hall or a night light).
+export function makeWindowAtlas(seed = 1) {
+  const rng = createRng(seed);
+  const T = 64, c = canvas(T * 4, T * 2);
+  const g = c.getContext('2d');
+  const tile = (i, fn) => {
+    g.save();
+    g.translate((i % 4) * T, Math.floor(i / 4) * T);
+    g.beginPath();
+    g.rect(0, 0, T, T);
+    g.clip();
+    fn(g);
+    g.restore();
+  };
+  const vgrad = (top, bottom) => {
+    const gr = g.createLinearGradient(0, 0, 0, T);
+    gr.addColorStop(0, top);
+    gr.addColorStop(1, bottom);
+    g.fillStyle = gr;
+    g.fillRect(0, 0, T, T);
+  };
+  const glow = (x, y, r, col) => {
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, col);
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, T, T);
+  };
+  const furniture = (col) => {
+    g.fillStyle = col;
+    for (let i = 0; i < 3; i++) {
+      const w = rng.range(8, 22), h = rng.range(6, 20);
+      g.fillRect(rng.range(0, T - w), T * 0.86 - h, w, h + T);
+    }
+  };
+  const slats = (col, from) => {
+    g.fillStyle = col;
+    for (let y = from; y < T; y += 4) g.fillRect(0, y, T, 2);
+  };
+  tile(0, () => { vgrad('rgb(255,196,120)', 'rgb(170,96,44)'); glow(T * 0.7, T * 0.25, 26, 'rgba(255,236,190,0.9)'); furniture('rgba(40,18,8,0.7)'); });
+  tile(1, () => { vgrad('rgb(255,190,110)', 'rgb(190,110,52)'); slats('rgba(60,26,8,0.55)', T * 0.28); });
+  tile(2, () => {
+    vgrad('rgb(214,236,255)', 'rgb(120,150,190)');
+    g.fillStyle = 'rgba(245,252,255,0.95)';
+    g.fillRect(0, T * 0.14, T, 3);
+    g.fillStyle = 'rgba(20,30,46,0.6)';
+    g.fillRect(0, T * 0.66, T, T);
+    for (let x = 4; x < T; x += 16) { g.fillStyle = 'rgba(150,200,255,0.8)'; g.fillRect(x, T * 0.58, 7, 5); }
+  });
+  tile(3, () => { vgrad('rgb(14,22,52)', 'rgb(8,10,26)'); glow(T * 0.4, T * 0.62, 30, 'rgba(110,150,255,1)'); glow(T * 0.4, T * 0.62, 10, 'rgba(200,220,255,0.8)'); furniture('rgba(4,6,16,0.8)'); });
+  tile(4, () => {
+    vgrad('rgb(255,206,140)', 'rgb(200,124,64)');
+    g.fillStyle = 'rgba(150,60,30,0.75)';
+    g.fillRect(0, 0, T * 0.3, T);
+    g.fillRect(T * 0.72, 0, T * 0.28, T);
+    g.fillStyle = 'rgba(255,255,255,0.12)';
+    for (let x = 2; x < T * 0.3; x += 5) g.fillRect(x, 0, 1, T);
+  });
+  tile(5, () => { vgrad('rgb(206,226,255)', 'rgb(130,156,200)'); slats('rgba(30,40,60,0.5)', 0); });
+  tile(6, () => { vgrad('rgb(255,238,214)', 'rgb(196,160,120)'); glow(T * 0.5, T * 0.1, 30, 'rgba(255,250,236,1)'); furniture('rgba(50,34,20,0.6)'); });
+  tile(7, () => { vgrad('rgb(150,86,34)', 'rgb(70,34,12)'); glow(T * 0.3, T * 0.5, 22, 'rgba(255,170,80,0.8)'); });
+  const t = toTexture(c, { repeat: false, aniso: 2 });
   return t;
 }
 
@@ -551,7 +625,7 @@ function makeGlassFacade(rng, N) {
   }
   g.fillRect(S - 2.5, 0, 2.5, S);
   grain(c, N.coarse, 512, 0.1, rng);
-  const emissiveMap = litWindows(rng, 512, 8, 8, () => [0.04, sp / cw + 0.03, 0.92, 1 - sp / cw - 0.05], 0.4, true);
+  const emissiveMap = windowMask(rng, 8, 8, () => [0.02, sp / cw + 0.02, 0.96, 1 - sp / cw - 0.03], 0.4, true, 1);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
   return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex };
 }
@@ -614,7 +688,7 @@ function makeBrickFacade(rng, N) {
   }
   grain(c, N.fine, 512, 0.16, rng, 0.08);
   grain(c, N.coarse, 512, 0.14, rng);
-  const emissiveMap = litWindows(rng, 512, 8, 8, () => [win[0] + 0.03, win[1] + 0.03, win[2] - 0.06, win[3] - 0.06], 0.36);
+  const emissiveMap = windowMask(rng, 8, 8, () => [win[0] + 0.03, win[1] + 0.03, win[2] - 0.06, win[3] - 0.06], 0.36, false, 3);
   return { map: toTexture(c), emissiveMap, normalMap: normalFromHeight(heightOf(c), S, 1.6) };
 }
 
@@ -665,7 +739,7 @@ function makeConcreteFacade(rng, N) {
   }
   g.fillStyle = grey(140, 0.5);
   for (let x = 0; x < n; x++) g.fillRect(x * cw, 0, 2, S);
-  const emissiveMap = litWindows(rng, 512, 8, 8, () => [0.04, band[0] + 0.02, 0.92, band[1] - 0.04], 0.42, true);
+  const emissiveMap = windowMask(rng, 8, 8, () => [0.03, band[0] + 0.01, 0.94, band[1] - 0.02], 0.42, true, 1);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
   return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex };
 }
@@ -706,7 +780,7 @@ function makeStuccoFacade(rng, N) {
     g.fillStyle = grey(40, 0.22);
     g.fillRect(0, y * cw, S, 8);
   }
-  const emissiveMap = litWindows(rng, 512, 8, 8, () => [win[0] + 0.01, win[1] + 0.01, win[2] - 0.02, win[3] - 0.03], 0.38);
+  const emissiveMap = windowMask(rng, 8, 8, () => [win[0] + 0.01, win[1] + 0.01, win[2] - 0.02, win[3] - 0.03], 0.38, false, 1);
   return { map: toTexture(c), emissiveMap };
 }
 

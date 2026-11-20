@@ -55,12 +55,23 @@ function span(b, s, a0, a1, y0, y1, o, color, u0, v0, u1, v1, s0 = 1, s1 = s0) {
 
 // Windowed walls: a whole number of bays and floors on every side so
 // windows are never cut off. The textures hold 4 bays by 4 floors.
+// The texture repeats every whole unit, so whole-number offsets change
+// nothing by day; the night shader reads them back as a building number
+// (v / 64) and a wall number (u / 16), so each building and floor gets
+// its own pattern of lit windows. Taken from the position, not the
+// shared random stream, so the rest of the city is unchanged.
+function facadeKey(x, z, k) {
+  let h = (Math.round(x * 4) * 73856093) ^ (Math.round(z * 4) * 19349663) ^ (k * 83492791);
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+  return ((h ^ (h >>> 15)) >>> 0);
+}
 function facadeWalls(fb, x0, z0, x1, z1, y0, y1, color, bay, floorH, rng, s0 = 1, s1 = 1) {
   const floors = Math.max(1, Math.round((y1 - y0) / floorH));
-  const vo = rng.int(0, 3) / 4;
+  const vo = rng.int(0, 3) / 4 + 64 * (facadeKey(x0, z0, Math.round(y0)) & 15);
+  let k = 0;
   for (const s of sidesOf(x0, z0, x1, z1)) {
     const n = Math.max(1, Math.round(s.L / bay));
-    const uo = rng.int(0, 3) / 4;
+    const uo = rng.int(0, 3) / 4 + 16 * (facadeKey(x1, z1, ++k) & 63);
     span(fb, s, 0, s.L, y0, y1, 0, color, uo, vo, uo + n / 4, vo + floors / 4, s0, s1);
   }
   return floors;
