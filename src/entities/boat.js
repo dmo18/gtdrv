@@ -40,14 +40,14 @@ export const BOAT_SPECS = {
     id: 'speedboat', label: 'Swiftgull', hull: 'runabout',
     length: 6.4, width: 2.3, height: 1.5, draft: 0.45,
     mass: 1400, maxSpeed: 30, reverseSpeed: 5, accel: 8.5, drag: 0.02, coastDrag: 0.8,
-    turnRate: 1.05, yawResp: 3.2, sideGrip: 1.6, hop: 1.0, pitchMax: 0.13, rollMax: 0.2,
+    turnRate: 1.05, yawResp: 3.2, sideGrip: 2.0, hop: 1.0, pitchMax: 0.13, rollMax: 0.2,
     health: 800, colors: [0xf4f4f0, 0xc8302a, 0x1e5fa8, 0xf2c230, 0x222831],
   },
   jetski: {
     id: 'jetski', label: 'Skimlet', hull: 'jetski',
     length: 3.0, width: 1.15, height: 1.15, draft: 0.25,
     mass: 380, maxSpeed: 26, reverseSpeed: 3, accel: 11, drag: 0.02, coastDrag: 1.1,
-    turnRate: 2.3, yawResp: 6, sideGrip: 2.3, hop: 1.4, pitchMax: 0.1, rollMax: 0.4,
+    turnRate: 2.3, yawResp: 6, sideGrip: 2.8, hop: 1.4, pitchMax: 0.1, rollMax: 0.4,
     health: 400, colors: [0xffd21f, 0x18b4c8, 0xe0306a, 0x38c050, 0xf2f2f2],
   },
   fisher: {

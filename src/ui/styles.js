@@ -84,9 +84,22 @@ const CSS = `
 .rw-pedal svg { width: 30px; height: 30px; }
 .rw-pedal.rw-gas { border-color: rgba(226, 115, 58, 0.7); }
 
-/* car-only / foot-only groups */
-.rw-touch.rw-mode-car .rw-foot { display: none; }
-.rw-touch.rw-mode-foot .rw-car { display: none; }
+/* per-mode groups: a gated element shows only in the modes it lists */
+.rw-mode-foot .rw-gated:not(.rw-m-foot),
+.rw-mode-car .rw-gated:not(.rw-m-car),
+.rw-mode-boat .rw-gated:not(.rw-m-boat),
+.rw-mode-plane .rw-gated:not(.rw-m-plane),
+.rw-mode-heli .rw-gated:not(.rw-m-heli) { display: none; }
+
+/* flight stick: cross-hair ring behind the knob */
+.rw-stick.rw-flight { border-style: dashed; }
+.rw-stick.rw-flight::before, .rw-stick.rw-flight::after {
+  content: ""; position: absolute; background: var(--rw-dim); opacity: 0.45; border-radius: 1px;
+}
+.rw-stick.rw-flight::before { left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; }
+.rw-stick.rw-flight::after { top: 50%; left: 10px; right: 10px; height: 2px; margin-top: -1px; }
+
+.rw-pedal.rw-tall { height: 122px; }
 
 /* placement (offsets from the safe area) */
 .rw-gas { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 14px); }
@@ -95,11 +108,13 @@ const CSS = `
 .rw-horn { right: calc(var(--rw-sr) + 84px); bottom: calc(var(--rw-sb) + 138px); }
 .rw-exit { right: calc(var(--rw-sr) + 152px); bottom: calc(var(--rw-sb) + 138px); }
 .rw-cam { right: calc(var(--rw-sr) + 220px); bottom: calc(var(--rw-sb) + 138px); }
+.rw-mode-plane .rw-exit, .rw-mode-heli .rw-exit { right: calc(var(--rw-sr) + 16px); bottom: calc(var(--rw-sb) + 150px); }
+.rw-mode-plane .rw-cam, .rw-mode-heli .rw-cam { right: calc(var(--rw-sr) + 84px); bottom: calc(var(--rw-sb) + 150px); }
 
-.rw-attack { right: calc(var(--rw-sr) + 20px); bottom: calc(var(--rw-sb) + 24px); }
-.rw-jump { right: calc(var(--rw-sr) + 110px); bottom: calc(var(--rw-sb) + 20px); }
-.rw-weapon-btn { right: calc(var(--rw-sr) + 94px); bottom: calc(var(--rw-sb) + 96px); }
-.rw-enter { right: calc(var(--rw-sr) + 24px); bottom: calc(var(--rw-sb) + 114px); }
+.rw-enter { right: calc(var(--rw-sr) + 24px); bottom: calc(var(--rw-sb) + 24px); width: 100px; height: 100px; }
+.rw-enter svg { width: 40px; height: 40px; }
+.rw-enter span { font-size: 13px; }
+.rw-run { right: calc(var(--rw-sr) + 140px); bottom: calc(var(--rw-sb) + 28px); width: 68px; height: 68px; }
 
 .rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
 .rw-map { right: calc(var(--rw-sr) + 70px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }

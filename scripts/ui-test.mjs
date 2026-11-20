@@ -200,9 +200,20 @@ try {
   check('half push -> no sprint', st2[1] > 0.2 && st2[1] < 0.85 && st2[2] === false, JSON.stringify(st2));
   await up(6);
   check('stick released -> 0', (await read('[rw.input.moveX, rw.input.moveY, rw.input.sprint]')).join() === '0,0,false');
-  const atk = await center('Attack');
-  await down(7, atk.x, atk.y);
-  check('attack held', (await read("rw.input.held('attack')")) === true);
+  const gone = await page.evaluate(() => ['Attack', 'Switch weapon', 'Jump'].map((l) => {
+    const e = document.querySelector(`[aria-label="${l}"]`);
+    return !!e && !!e.offsetParent;
+  }));
+  check('foot: no attack/weapon/jump buttons', gone.every((v) => !v), JSON.stringify(gone));
+  const run = await center('Run');
+  const ent = await center('Enter car');
+  check('foot: ENTER large', ent.w >= 90, `${ent.w}`);
+  await down(7, run.x, run.y);
+  check('foot: RUN sets sprint', (await read('rw.input.sprint')) === true);
+  await up(7);
+  check('foot: RUN release clears sprint', (await read('rw.input.sprint')) === false);
+  await down(7, ent.x, ent.y);
+  check('foot: ENTER held', (await read("rw.input.held('enter')")) === true);
   await up(7);
   await page.evaluate(() => {
     rw.hud.update({ mode: 'foot', speedKmh: 0, health: 20, armor: 0, money: 12345, wanted: 5,
@@ -216,6 +227,112 @@ try {
   await page.setViewportSize({ width: 780, height: 360 });
   await page.waitForTimeout(200);
   await shot('foot-780x360.png');
+
+  // ---- plane ----
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.evaluate(() => rw.touch.setMode('plane'));
+  const thr = await center('Thrust');
+  const pbr = await center('Plane brake');
+  const pex = await center('Exit aircraft');
+  check('plane: THRUST/BRAKE labels', (await page.locator('.rw-pedal:visible').allTextContents()).join() === 'BRAKE,THRUST');
+  check('plane: car buttons hidden', !(await page.locator('[aria-label="Handbrake"]').isVisible()) && !(await page.locator('[aria-label="Gas"]').isVisible()));
+  await down(10, thr.x, thr.y);
+  await down(11, 120, 320);
+  await drag(11, 120, 320, 180, 260);
+  const pl = await read('[rw.input.throttle, rw.input.pitch, rw.input.steer]');
+  check('plane: stick up+right with thrust', pl[0] === 1 && pl[1] > 0.5 && pl[2] > 0.5, JSON.stringify(pl));
+  await move(11, 120, 250);
+  const pl2 = await read('[rw.input.pitch, rw.input.steer]');
+  check('plane: stick straight up pitch ~+1', pl2[0] > 0.95 && Math.abs(pl2[1]) < 0.1, JSON.stringify(pl2));
+  await move(11, 175, 320);
+  const pl3 = await read('[rw.input.pitch, rw.input.steer]');
+  check('plane: stick right steer ~+1', pl3[1] > 0.95 && Math.abs(pl3[0]) < 0.1, JSON.stringify(pl3));
+  await move(11, 120, 390);
+  check('plane: stick down pitch ~-1', (await read('rw.input.pitch')) < -0.9);
+  await shot('plane-active-915x412.png');
+  await up(11);
+  check('plane: stick released -> 0', (await read('[rw.input.pitch, rw.input.steer, rw.input.throttle]')).join() === '0,0,1');
+  await up(10);
+  await down(10, pbr.x, pbr.y);
+  check('plane: BRAKE sets brake', (await read('rw.input.brake')) === 1);
+  await up(10);
+  await down(10, pex.x, pex.y);
+  check('plane: EXIT presses enter', (await read("rw.input.held('enter')")) === true);
+  await up(10);
+  await page.evaluate(() => rw.hud.update({ mode: 'plane', speedKmh: 210, health: 80, armor: 0, money: 1, wanted: 0,
+    district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null }));
+  await page.waitForTimeout(3300);
+  await shot('plane-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(200);
+  await shot('plane-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- heli ----
+  await page.evaluate(() => rw.touch.setMode('heli'));
+  check('heli: UP/DOWN labels', (await page.locator('.rw-pedal:visible').allTextContents()).join() === 'DOWN,UP');
+  const up2 = await center('Climb');
+  const dn2 = await center('Descend');
+  await down(12, up2.x, up2.y);
+  check('heli: UP -> throttle', (await read('[rw.input.throttle, rw.input.brake]')).join() === '1,0');
+  await down(13, 120, 320);
+  await drag(13, 120, 320, 120, 250);
+  check('heli: stick pitch with UP held', (await read('[rw.input.pitch, rw.input.throttle]')).join() === '1,1');
+  await shot('heli-active-915x412.png');
+  await up(13);
+  await up(12);
+  await down(12, dn2.x, dn2.y);
+  check('heli: DOWN -> brake', (await read('[rw.input.throttle, rw.input.brake]')).join() === '0,1');
+  await up(12);
+  await page.waitForTimeout(100);
+  await shot('heli-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(200);
+  await shot('heli-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- boat ----
+  await page.evaluate(() => rw.touch.setMode('boat'));
+  check('boat: no handbrake button', !(await page.locator('[aria-label="Handbrake"]').isVisible()));
+  check('boat: gas, exit visible', (await page.locator('[aria-label="Gas"]').isVisible()) && (await page.locator('[aria-label="Exit car"]').isVisible()));
+  await down(14, 120, 330);
+  await drag(14, 120, 330, 200, 330);
+  check('boat: steer right', (await read('rw.input.steer')) > 0.95);
+  await shot('boat-active-915x412.png');
+  await up(14);
+  await page.waitForTimeout(100);
+  await shot('boat-915x412.png');
+  await page.setViewportSize({ width: 780, height: 360 });
+  await page.waitForTimeout(200);
+  await shot('boat-780x360.png');
+  await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- mode switch mid-touch zeroes axes; look + pause + map still work ----
+  await page.evaluate(() => rw.touch.setMode('plane'));
+  const thr2 = await center('Thrust');
+  await down(15, thr2.x, thr2.y);
+  await down(16, 120, 320);
+  await drag(16, 120, 320, 180, 260);
+  await page.evaluate(() => rw.touch.setMode('foot'));
+  const zeros = await read('[rw.input.steer, rw.input.throttle, rw.input.brake, rw.input.pitch, rw.input.moveX, rw.input.moveY, rw.input.sprint, rw.input.handbrake]');
+  check('mode switch mid-touch zeroes axes', zeros.join() === '0,0,0,0,0,0,false,false', zeros.join());
+  await up(16);
+  await up(15);
+  await page.evaluate(() => { rw.input.lookX = 0; rw.input.lookY = 0; });
+  await down(17, 520, 120);
+  await drag(17, 520, 120, 600, 150, 5);
+  await up(17);
+  check('look drag works in foot mode', Math.abs((await read('rw.input.lookX')) - 80) < 3);
+  const pz = await center('Pause');
+  await down(17, pz.x, pz.y);
+  check('pause works', (await read("rw.input.held('pause')")) === true);
+  await up(17);
+  const mp = await center('Map');
+  await down(17, mp.x, mp.y);
+  check('map works', (await read("rw.input.held('map')")) === true);
+  await up(17);
+  await page.evaluate(() => rw.touch.setMode('plane'));
+  await page.evaluate(() => rw.touch.setMode('car'));
 
   // ---- cancel / blur release ----
   await page.setViewportSize({ width: 915, height: 412 });

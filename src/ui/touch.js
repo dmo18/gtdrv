@@ -14,10 +14,9 @@ const ICONS = {
   horn: '<path d="M4 9h4l6-4v14l-6-4H4z"/><path d="M17 9c1.6 1.6 1.6 4.4 0 6"/>',
   exit: '<path d="M10 4H5v16h5"/><path d="M9 12h11M16 8l4 4-4 4"/>',
   camera: '<rect x="3" y="7" width="18" height="12" rx="3"/><circle cx="12" cy="13" r="3.4"/><path d="M9 7l1.5-2h3L15 7"/>',
-  attack: '<circle cx="12" cy="12" r="6"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
   enter: '<path d="M3 16v-4l2-5h12l3 5v4z"/><circle cx="7.5" cy="17" r="1.6"/><circle cx="15.5" cy="17" r="1.6"/>',
-  weapon: '<path d="M3 8h14l3 2v3h-7l-1 5H8l1-5H3z"/>',
-  jump: '<path d="M6 12l6-6 6 6M6 19l6-6 6 6"/>',
+  run: '<circle cx="14" cy="5" r="2"/><path d="M6 21l4-6 3 2 3-6-3-2-3 3-3-1M13 10l4 2 3-1"/>',
+  down: '<path d="M6 9l6 6 6-6"/><path d="M6 4l6 6 6-6"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
   map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
   gas: '<path d="M6 15l6-6 6 6"/><path d="M6 20l6-6 6 6"/>',
@@ -43,9 +42,12 @@ export function createTouchControls(root, input) {
 
   const src = input.addSource({
     steer: 0, throttle: 0, brake: 0, handbrake: false,
-    moveX: 0, moveY: 0, sprint: false,
+    moveX: 0, moveY: 0, sprint: false, pitch: 0,
   });
   const layer = el('div', 'rw-touch rw-mode-car', root);
+  const MODES = ['foot', 'car', 'boat', 'plane', 'heli'];
+  // Gated elements show only in the modes listed by their rw-m-* classes.
+  const gate = (b, ...modes) => { b.classList.add('rw-gated', ...modes.map((m) => 'rw-m-' + m)); return b; };
   const cleanups = []; // functions run on releaseAll()
   const listeners = [];
 
@@ -123,20 +125,21 @@ export function createTouchControls(root, input) {
 
   // ----- floating stick zone (left side), mode decides the style -----
   const zone = el('div', 'rw-zone rw-stickzone', layer);
-  const pad = el('div', 'rw-pad rw-car', layer);
+  const pad = gate(el('div', 'rw-pad', layer), 'car', 'boat');
   const padKnob = el('div', 'rw-knob', pad);
-  const stick = el('div', 'rw-stick rw-foot', layer);
+  const stick = gate(el('div', 'rw-stick', layer), 'foot', 'plane', 'heli');
   const stickKnob = el('div', 'rw-knob', stick);
   const origin = { x: 0, y: 0 };
   let mode = 'car';
+  const padMode = () => mode === 'car' || mode === 'boat';
 
   // Rest positions (bottom-left) so the control is visible before touching.
   function restPosition() {
     const r = root.getBoundingClientRect();
-    const w = mode === 'car' ? 176 : 128;
-    const h = mode === 'car' ? 60 : 128;
+    const w = padMode() ? 176 : 128;
+    const h = padMode() ? 60 : 128;
     const sl = parseFloat(getComputedStyle(layer).getPropertyValue('--rw-sl')) || 0;
-    return { x: r.left + sl + 24 + w / 2, y: r.bottom - 28 - h / 2 - (mode === 'car' ? 6 : 0) };
+    return { x: r.left + sl + 24 + w / 2, y: r.bottom - 28 - h / 2 - (padMode() ? 6 : 0) };
   }
   function placeBase(base, cx, cy) {
     const r = root.getBoundingClientRect();
@@ -146,7 +149,7 @@ export function createTouchControls(root, input) {
   }
   function placeRest() {
     const p = restPosition();
-    placeBase(mode === 'car' ? pad : stick, p.x, p.y);
+    placeBase(padMode() ? pad : stick, p.x, p.y);
   }
 
   track(zone, {
@@ -156,9 +159,9 @@ export function createTouchControls(root, input) {
       // nudged so it stays fully on screen.
       origin.x = e.clientX;
       origin.y = e.clientY;
-      const halfW = mode === 'car' ? 88 : 64;
-      const halfH = mode === 'car' ? 30 : 64;
-      const base = mode === 'car' ? pad : stick;
+      const halfW = padMode() ? 88 : 64;
+      const halfH = padMode() ? 30 : 64;
+      const base = padMode() ? pad : stick;
       placeBase(base,
         clamp(e.clientX, r.left + halfW + 6, r.left + r.width * 0.4 - 6),
         clamp(e.clientY, r.top + halfH + 6, r.bottom - halfH - 6));
@@ -167,7 +170,7 @@ export function createTouchControls(root, input) {
     },
     move(e) { applyStick(e.clientX, e.clientY); },
     up() {
-      src.steer = 0; src.moveX = 0; src.moveY = 0; src.sprint = false;
+      src.steer = 0; src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
       padKnob.style.transform = '';
       stickKnob.style.transform = '';
       pad.classList.remove('rw-active');
@@ -179,7 +182,7 @@ export function createTouchControls(root, input) {
   function applyStick(x, y) {
     const dx = x - origin.x;
     const dy = y - origin.y;
-    if (mode === 'car') {
+    if (padMode()) {
       const v = clamp(dx / STEER_RANGE, -1, 1);
       const a = Math.abs(v);
       src.steer = a < STEER_DEAD ? 0 : Math.sign(v) * (a - STEER_DEAD) / (1 - STEER_DEAD);
@@ -190,34 +193,49 @@ export function createTouchControls(root, input) {
       const nx = dx / STICK_RANGE * k;
       const ny = dy / STICK_RANGE * k;
       const mag = Math.min(raw, 1);
-      if (mag < STICK_DEAD) { src.moveX = 0; src.moveY = 0; } else {
-        src.moveX = nx;
-        src.moveY = -ny; // screen y grows downward; up is forward
+      const live = mag >= STICK_DEAD;
+      if (mode === 'foot') {
+        src.moveX = live ? nx : 0;
+        src.moveY = live ? -ny : 0; // screen y grows downward; up is forward
+        src.sprint = raw > SPRINT_AT;
+        stick.classList.toggle('rw-sprint', src.sprint);
+      } else {
+        src.steer = live ? nx : 0;
+        src.pitch = live ? -ny : 0; // stick up the screen = +1
       }
-      src.sprint = raw > SPRINT_AT;
-      stick.classList.toggle('rw-sprint', src.sprint);
       stickKnob.style.transform = `translate(${(nx * STICK_RANGE).toFixed(1)}px, ${(ny * STICK_RANGE).toFixed(1)}px)`;
     }
   }
 
-  // ----- car buttons -----
-  const car = (b) => { b.classList.add('rw-car'); return b; };
-  car(makeButton('rw-pedal rw-brake', 'Brake / reverse', 'brake', 'BRAKE',
+  // ----- car / boat buttons -----
+  const cb = (b) => gate(b, 'car', 'boat');
+  cb(makeButton('rw-pedal rw-brake', 'Brake / reverse', 'brake', 'BRAKE',
     () => { src.brake = 1; }, () => { src.brake = 0; }, false));
-  car(makeButton('rw-pedal rw-gas', 'Gas', 'gas', 'GAS',
+  cb(makeButton('rw-pedal rw-gas', 'Gas', 'gas', 'GAS',
     () => { src.throttle = 1; }, () => { src.throttle = 0; }, false));
-  car(makeButton('rw-handbrake', 'Handbrake', 'handbrake', 'HAND',
-    () => { src.handbrake = true; }, () => { src.handbrake = false; }));
-  car(nameButton('rw-horn', 'Horn', 'horn', 'HORN', 'horn'));
-  car(nameButton('rw-exit', 'Exit car', 'exit', 'EXIT', 'enter'));
-  car(nameButton('rw-cam', 'Change camera', 'camera', 'VIEW', 'camera'));
+  gate(makeButton('rw-handbrake', 'Handbrake', 'handbrake', 'HAND',
+    () => { src.handbrake = true; }, () => { src.handbrake = false; }), 'car');
+  cb(nameButton('rw-horn', 'Horn', 'horn', 'HORN', 'horn'));
+  cb(nameButton('rw-exit', 'Exit car', 'exit', 'EXIT', 'enter'));
+  cb(nameButton('rw-cam', 'Change camera', 'camera', 'VIEW', 'camera'));
+
+  // ----- plane / heli buttons -----
+  const pedals = (mode2, cls, label, icon, text, axis, value) => gate(makeButton(
+    `rw-pedal ${cls}`, label, icon, text,
+    () => { src[axis] = value; }, () => { src[axis] = 0; }, false), mode2);
+  pedals('plane', 'rw-brake', 'Plane brake', 'brake', 'BRAKE', 'brake', 1);
+  pedals('plane', 'rw-gas', 'Thrust', 'gas', 'THRUST', 'throttle', 1);
+  pedals('heli', 'rw-brake rw-tall', 'Descend', 'down', 'DOWN', 'brake', 1);
+  pedals('heli', 'rw-gas rw-tall', 'Climb', 'gas', 'UP', 'throttle', 1);
+  for (const m of ['plane', 'heli']) {
+    gate(nameButton('rw-exit', 'Exit aircraft', 'exit', 'EXIT', 'enter'), m);
+    gate(nameButton('rw-cam', 'Change camera (air)', 'camera', 'VIEW', 'camera'), m);
+  }
 
   // ----- foot buttons -----
-  const foot = (b) => { b.classList.add('rw-foot'); return b; };
-  foot(nameButton('rw-big rw-attack', 'Attack', 'attack', 'ATTACK', 'attack'));
-  foot(nameButton('rw-jump', 'Jump', 'jump', 'JUMP', 'jump'));
-  foot(nameButton('rw-weapon-btn', 'Switch weapon', 'weapon', 'ARMS', 'weapon'));
-  foot(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter'));
+  gate(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter'), 'foot');
+  gate(makeButton('rw-run', 'Run', 'run', 'RUN',
+    () => { src.sprint = true; }, () => { src.sprint = false; }, false), 'foot');
 
   // ----- both modes -----
   nameButton('rw-pause', 'Pause', 'pause', '', 'pause');
@@ -227,7 +245,9 @@ export function createTouchControls(root, input) {
   function releaseAll() {
     for (const c of cleanups) c();
     src.steer = 0; src.throttle = 0; src.brake = 0; src.handbrake = false;
-    src.moveX = 0; src.moveY = 0; src.sprint = false;
+    src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
+    padKnob.style.transform = '';
+    stickKnob.style.transform = '';
   }
   const stop = (e) => e.preventDefault();
   on(layer, 'contextmenu', stop);
@@ -242,12 +262,12 @@ export function createTouchControls(root, input) {
 
   return {
     setMode(m) {
-      const next = m === 'foot' ? 'foot' : 'car';
+      const next = MODES.includes(m) ? m : 'car';
       if (next === mode) return;
       releaseAll();
       mode = next;
-      layer.classList.toggle('rw-mode-car', mode === 'car');
-      layer.classList.toggle('rw-mode-foot', mode === 'foot');
+      for (const k of MODES) layer.classList.toggle('rw-mode-' + k, k === mode);
+      stick.classList.toggle('rw-flight', mode === 'plane' || mode === 'heli');
       placeRest();
     },
     setVisible(v) {
