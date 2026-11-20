@@ -44,7 +44,7 @@ export function createGame({ canvas, uiRoot }) {
   const input = createInput();
 
   // --- Drawing setup. ---
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color().setHex(SKY, THREE.SRGBColorSpace);
   scene.fog = new THREE.Fog(scene.background.getHex(), 220, 1050);
@@ -92,6 +92,8 @@ export function createGame({ canvas, uiRoot }) {
     },
     vehicles: [],
     systems: [],
+    resizeHooks: [], // functions (width, height, pixelRatio) called on resize
+    renderFrame: null, // optional replacement for the final draw call
     time: 0, // simulated seconds since start
     clock: 9, // time of day in hours, 0..24 (the day/night system advances it)
     cityMesh,
@@ -462,7 +464,9 @@ export function createGame({ canvas, uiRoot }) {
       events.emit('district', h.district);
     }
     hud.update(h);
-    renderer.render(scene, camera);
+    // A graphics module may take over the final draw (post effects).
+    if (game.renderFrame) game.renderFrame(dt);
+    else renderer.render(scene, camera);
   }
 
   function resize() {
@@ -470,11 +474,12 @@ export function createGame({ canvas, uiRoot }) {
     if (!(w > 0 && h > 0)) return;
     // Phones report very high pixel densities; cap the drawn height so
     // the frame rate stays smooth.
-    const cap = (900 * game.quality) / Math.max(1, h);
+    const cap = (1080 * game.quality) / Math.max(1, h);
     renderer.setPixelRatio(Math.max(0.75, Math.min(window.devicePixelRatio || 1, cap)));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    for (let i = 0; i < game.resizeHooks.length; i++) game.resizeHooks[i](w, h, renderer.getPixelRatio());
   }
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
