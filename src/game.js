@@ -36,6 +36,7 @@ import { createTutorial } from './systems/tutorial.js';
 import { createObjective } from './systems/objective.js';
 import { createEffects } from './render/effects.js';
 import { createGraphics } from './render/graphics.js';
+import { wantsAntialias } from './render/adaptres.js';
 import { createMenu } from './ui/menu.js';
 import { stepBoat, collideBoats, createBoat } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
@@ -65,7 +66,9 @@ export function createGame({ canvas, uiRoot }) {
   const input = createInput();
 
   // --- Drawing setup. ---
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // Multisampling only where pixels are big (ratio <= 1.5); on denser
+  // phone screens the adaptive resolution keeps edges clean instead.
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: wantsAntialias(window.devicePixelRatio || 1), powerPreference: 'high-performance' });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color().setHex(SKY, THREE.SRGBColorSpace);
   scene.fog = new THREE.Fog(scene.background.getHex(), 220, 1050);
@@ -306,10 +309,13 @@ export function createGame({ canvas, uiRoot }) {
     const p = game.player;
     const v = p.vehicle;
     if (!v) return false;
-    if (!v.wrecked && (Math.abs(v.speed) > 3 || v.y > 0.6)) {
+    // Cars and boats: jump out at any speed (the car keeps going). Aircraft must land first.
+    const aircraft = v.kind === 'plane' || v.kind === 'heli';
+    if (!v.wrecked && aircraft && (v.y > 0.6 || Math.abs(v.speed) > 3)) {
       hud.toast(v.y > 0.6 ? 'Land first' : 'Slow down to get out', 1.5);
       return false;
     }
+    const rolling = Math.abs(v.speed) > 1;
     exitPosition(v, game.world, exitSpot);
     if (!exitSpot.ok && (v.wrecked || v.kind === 'plane' || v.kind === 'heli')) {
       // Stranded (ditched at sea, wrecked boat): a rescue back to dry land.
@@ -326,6 +332,12 @@ export function createGame({ canvas, uiRoot }) {
     w.z = w.pz = exitSpot.z;
     w.heading = w.pheading = v.heading;
     w.vx = w.vz = 0;
+    if (rolling) {
+      // Hop out in the car's direction of travel, with a bit of its speed.
+      const sp = v.speed, h = v.heading;
+      w.vx = Math.cos(h) * sp * 0.5;
+      w.vz = Math.sin(h) * sp * 0.5;
+    }
     p.vehicle = null;
     game.setPlayerMode('foot');
     events.emit('exit', v);
@@ -502,6 +514,7 @@ export function createGame({ canvas, uiRoot }) {
       p.heading = w.heading;
       const up = !w.life || w.life === 'ok';
       p.near = up && !jacking && !p.vehicle ? findEnterable(w, vs, 3.2, game.carjack ? game.carjack.canEnter : null) : null;
+      if (game.touch && game.touch.setEnterReady) game.touch.setEnterReady(!!p.near);
       if (input.consume('enter') && p.near) game.tryEnterVehicle(p.near);
     }
     // Every few seconds, clear away craft nobody is using or tracking
@@ -640,10 +653,11 @@ export function createGame({ canvas, uiRoot }) {
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     if (!(w > 0 && h > 0)) return;
-    // Phones report very high pixel densities; cap the drawn height (sharp, SVGA-plus) so
-    // the frame rate stays smooth.
-    const cap = (1440 * game.quality) / Math.max(1, h);
-    renderer.setPixelRatio(Math.max(0.75, Math.min(window.devicePixelRatio || 1, cap)));
+    // The graphics module picks the pixel ratio (adaptive, bounded by the
+    // device and the quality setting); otherwise cap the drawn height.
+    const dpr = window.devicePixelRatio || 1;
+    const ratio = game.graphics && game.graphics.resolution ? game.graphics.resolution(dpr) : Math.max(0.75, Math.min(dpr, (1440 * game.quality) / Math.max(1, h)));
+    if (ratio !== renderer.getPixelRatio()) renderer.setPixelRatio(ratio);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();

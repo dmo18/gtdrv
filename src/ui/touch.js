@@ -604,7 +604,8 @@ export function createTouchControls(root, input, opts = {}) {
   gate(pri(nameButton('rw-exit rw-texit', 'Exit tank', 'exit', 'EXIT', 'enter')), 'tank');
 
   // ----- primary: foot -----
-  gate(pri(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter')), 'foot');
+  const enterBtn = gate(pri(nameButton('rw-enter', 'Enter car', 'enter', 'ENTER', 'enter')), 'foot');
+  let enterReady = null;
 
   // ----- combat (docs/COMBAT.md "Touch controls", "Drive-by") -----
   // FIRE: hold for automatic fire. The same finger may slide to aim:
@@ -720,6 +721,14 @@ export function createTouchControls(root, input, opts = {}) {
   refreshActions();
 
   return {
+    // ENTER is dimmed and inert until a craft is in reach (game.js sets it).
+    setEnterReady(on) {
+      const v = !!on;
+      if (v === enterReady) return;
+      enterReady = v;
+      enterBtn.classList.toggle('rw-dim', !v);
+      enterBtn.setAttribute('aria-disabled', v ? 'false' : 'true');
+    },
     setMode(m) {
       const next = MODES.includes(m) ? m : 'car';
       if (next === mode) return;

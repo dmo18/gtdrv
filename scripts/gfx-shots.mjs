@@ -37,7 +37,7 @@ const VIEWS = {
   'rain-night': ['spawn', 22.5, 'rain', 0],
   residential: ['residential', 10.5, 'clear', 0],
   docks: ['docks', 15, 'clear', 0],
-  'harbour-dusk': ['docks', 19.3, 'clear', 0],
+  'harbour-dusk': [[58, 596, 1.35], 19.3, 'clear', 0],
   beach: ['beach', 16.5, 'clear', 0],
   midtown: ['midtown', 11.5, 'clear', 0],
   airfield: ['airfield', 12, 'clear', 0],
@@ -63,7 +63,9 @@ for (const [name, [where, hour, weather, lift]] of Object.entries(VIEWS)) {
     const g = window.__rw;
     const c = g.city;
     let x = c.spawn.x, z = c.spawn.z, heading = 0;
-    if (where === 'airfield') {
+    if (Array.isArray(where)) {
+      [x, z, heading] = where;
+    } else if (where === 'airfield') {
       x = c.airfield.runway.x0 + 120; z = (c.airfield.runway.z0 + c.airfield.runway.z1) / 2 + 30; heading = -0.5;
     } else if (where !== 'spawn') {
       // A street in the asked-for district, nearest its typical centre.
@@ -83,6 +85,7 @@ for (const [name, [where, hour, weather, lift]] of Object.entries(VIEWS)) {
       heading = best.horizontal ? 0 : Math.PI / 2;
       void b;
     }
+    if (g.graphics && 'adaptive' in g.graphics) { g.graphics.adaptive = false; g.resize(); }
     g.loop.start();
     const v = g.player.vehicle;
     v.x = v.px = x; v.z = v.pz = z; v.heading = v.pheading = heading; v.vx = v.vz = 0; v.speed = 0;

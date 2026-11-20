@@ -2,10 +2,13 @@
 // shadow map that follows the camera, sky reflections (environment map
 // rebuilt when the time of day moves on), height-aware haze, optional
 // night bloom, live traffic-light lamps and the quality tiers.
+// It also owns the adaptive render resolution (see adaptres.js) and the
+// shader warm-up on the first draw, so no material compiles mid-play.
 // Call createGraphics(game) once, after the city mesh and the day/night
 // system exist.
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
+import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -80,6 +83,15 @@ function patchShaderChunks() {
     'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n\t\tfogFactor *= mix( exp( - max( vFogH, 0.0 ) * 0.006 ), 1.0, fogFactor * fogFactor );');
   SC.shadowmap_pars_fragment = SC.shadowmap_pars_fragment.replace('return mix( 1.0, shadow, shadowIntensity );',
     'vec2 rwEdge = abs( shadowCoord.xy - 0.5 ) * 2.0;\n\t\t\treturn mix( 1.0, shadow, shadowIntensity * ( 1.0 - smoothstep( 0.75, 0.98, max( rwEdge.x, rwEdge.y ) ) ) );');
+  // Colour grade folded into the tone curve (no extra pass): ACES filmic,
+  // a little more saturation, cool shadows and warm highlights.
+  SC.tonemapping_pars_fragment = SC.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `vec3 CustomToneMapping( vec3 color ) {
+	vec3 c = ACESFilmicToneMapping( color );
+	float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+	c = max( mix( vec3( l ), c, 1.12 ), 0.0 );
+	c *= mix( vec3( 0.93, 0.98, 1.08 ), vec3( 1.05, 1.0, 0.93 ), smoothstep( 0.015, 0.45, l ) );
+	return clamp( c, 0.0, 1.0 );
+}`);
 }
 
 export function createGraphics(game) {
@@ -90,7 +102,7 @@ export function createGraphics(game) {
   const t0 = performance.now();
 
   patchShaderChunks();
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.CustomToneMapping;
   renderer.toneMappingExposure = 1.0;
   // A stronger sun against weaker fill light, so shade reads as shade.
   game.lightScale = { sun: 2.9, moon: 1.5, hemi: 0.26, hemiNight: 0.6, glow: 1.0 };
@@ -108,9 +120,12 @@ export function createGraphics(game) {
 
   function updateShadow(sky) {
     const inten = sky ? sky.shadow : 1;
-    sun.castShadow = inten > 0.03;
-    sun.shadow.intensity = Math.min(1, inten);
-    if (!sun.castShadow) return;
+    // castShadow stays on: switching it would recompile every lit
+    // material (a long hitch at each sunrise and sunset). While the light
+    // swings over, the map is simply not redrawn and fades to nothing.
+    sun.shadow.intensity = inten > 0.03 ? Math.min(1, inten) : 0;
+    renderer.shadowMap.autoUpdate = inten > 0.03;
+    if (inten <= 0.03) return;
     if (sky) dir.copy(sky.lightDir);
     else dir.copy(sun.position).normalize();
     // Cover the ground ahead of the camera; wider from the air.
@@ -295,15 +310,44 @@ export function createGraphics(game) {
     if (bloom.on && !bloom.fb) sizeBloom();
   }
 
+  // ---- adaptive resolution ----
+  // The loop's real frame time moves the pixel ratio between 0.6 and the
+  // device cap (2 physical pixels per CSS pixel at most, lower for the
+  // Normal and Low quality settings).
+  const res = createAdaptiveRes({ max: maxRatioFor(window.devicePixelRatio || 1, game.quality), start: 1.5 });
+  let resApplied = res.scale;
+
+  // ---- shader warm-up ----
+  // Compile every material in the scene (hidden ones too: night lamps,
+  // rain, effect pools) behind the title screen, instead of the first
+  // time each appears.
+  let warmed = false;
+  function warmUp() {
+    warmed = true;
+    const t = performance.now();
+    try {
+      renderer.compile(scene, camera);
+    } catch {
+      /* best effort */
+    }
+    sys.warmMs = performance.now() - t;
+    sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
+  }
+
   let frame = 0, skyVersion = -1;
   const sys = {
     name: 'graphics',
     // Measured at about 300 ms a frame on the software-rendered test
     // machine, far over budget, so bloom stays off unless switched on.
     bloomEnabled: false,
-    render() {
+    render(alpha, dt) {
       const sky = game.daynight && game.daynight.sky;
       if (game.quality !== quality) applyQuality(game.quality);
+      if (!warmed) warmUp();
+      if (sys.adaptive && res.update(dt) !== resApplied && game.resize) {
+        resApplied = res.scale;
+        game.resize();
+      }
       if ((frame & 31) === 0) markCasters();
       if ((frame & 7) === 0) updateSignals();
       frame++;
@@ -329,6 +373,18 @@ export function createGraphics(game) {
       const sky = game.daynight && game.daynight.sky;
       if (sky) updateEnv(sky, true);
     },
+    // Pixel ratio to draw at, for game.resize(): the adaptive scale,
+    // bounded by the device and the quality setting.
+    resolution(dpr) {
+      const max = maxRatioFor(dpr, game.quality);
+      res.setMax(max);
+      resApplied = res.scale;
+      return sys.adaptive ? res.scale : max;
+    },
+    adaptive: true,
+    res,
+    warmMs: 0,
+    warmPrograms: 0,
     setupMs: 0,
     calls: 0, // draw calls and triangles of the last scene draw
     triangles: 0,

@@ -181,6 +181,7 @@ const CSS = `
 .rw-chipbtn .rw-face { background: rgba(120, 30, 22, 0.7); border-color: rgba(255, 150, 120, 0.85); font-size: 9px; }
 .rw-chipbtn svg { width: 22px; height: 22px; }
 .rw-touch:not(.rw-chip-on) .rw-chipbtn, .rw-full .rw-chipbtn { display: none; }
+.rw-enter.rw-dim { opacity: 0.32; filter: grayscale(0.8); pointer-events: none; }
 .rw-more { --x: 216px; --y: 30px; width: 56px; height: 56px; }
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }

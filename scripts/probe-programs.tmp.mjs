@@ -17,7 +17,7 @@ const r = await page.evaluate(async () => {
   const mark = (label) => {
     const add = info.programs.filter((p) => !seen.has(p.id));
     add.forEach((p) => seen.add(p.id));
-    log.push(label + ' +' + add.length + ' ' + add.map((p) => p.name).join(','));
+    log.push(label + ' +' + add.length + ' ' + add.map((p) => p.name + '|' + p.cacheKey.slice(0, 60)).join(' ; '));
   };
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await wait(3000); mark('3s day');

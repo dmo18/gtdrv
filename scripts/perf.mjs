@@ -57,6 +57,10 @@ const out = await page.evaluate((startGaps) => {
   const info = g.renderer.info;
   const gl = g.renderer.getContext(), px = new Uint8Array(4);
   const programsAtStart = info.programs ? info.programs.length : 0;
+  // Measure at a fixed pixel ratio of 1 so runs compare; report what the
+  // adaptive controller had picked on this (software) renderer.
+  const adaptiveScale = g.graphics && g.graphics.res ? g.graphics.res.scale : null;
+  if (g.graphics && 'adaptive' in g.graphics) { g.graphics.adaptive = false; g.resize(); }
   let t0 = performance.now();
   for (let i = 0; i < 300; i++) g.step(1 / 60);
   const stepMs = (performance.now() - t0) / 300;
@@ -87,7 +91,7 @@ const out = await page.evaluate((startGaps) => {
   const worstJs = Object.entries(window.__rwWorst).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + ' ' + v.toFixed(1));
   return {
     day, night, worstJs, stepMs: +stepMs.toFixed(3),
-    pixelRatio: g.renderer.getPixelRatio(),
+    pixelRatio: g.renderer.getPixelRatio(), adaptiveScale, warmMs: g.graphics && g.graphics.warmMs ? +g.graphics.warmMs.toFixed(0) : null,
     programs: info.programs ? info.programs.length : 0, programsAtStart,
     firstFrames: { count: gaps.length, worstMs: sorted.slice(0, 5).map((x) => +x.toFixed(0)), over50ms: gaps.filter((x) => x > 50).length },
     geometries: info.memory.geometries, textures: info.memory.textures, vehicles: kinds,
