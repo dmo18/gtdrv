@@ -186,6 +186,8 @@ export function createMenu(root, game, economy) {
     setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
     if (game.touch && game.touch.setSteering) game.touch.setSteering(s.steering, s.steerSensitivity);
+    if (game.touch && game.touch.setHudMode) game.touch.setHudMode(s.hud);
+    if (game.hud && game.hud.setHudMode) game.hud.setHudMode(s.hud);
     if (game.quality !== s.quality) {
       game.quality = s.quality;
       if (game.resize) game.resize();
@@ -403,6 +405,23 @@ export function createMenu(root, game, economy) {
     body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
     body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));
     body.appendChild(toggleRow('Police chases', 'police'));
+
+    const hudRow = h('div', 'rw-menu-setting');
+    hudRow.appendChild(h('span', '', 'HUD'));
+    const hudSeg = h('div', 'rw-menu-seg');
+    hudSeg.setAttribute('role', 'radiogroup');
+    hudSeg.setAttribute('aria-label', 'HUD: Minimal folds extra buttons away, Full shows everything');
+    for (const [label, val] of [['Minimal', 'minimal'], ['Full', 'full']]) {
+      const b = h('button', '', label);
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(s.hud === val));
+      b.dataset.hud = val;
+      b.addEventListener('click', () => { settings().hud = val; commit(); render(); });
+      hudSeg.appendChild(b);
+    }
+    hudRow.appendChild(hudSeg);
+    body.appendChild(hudRow);
 
     const q = h('div', 'rw-menu-setting');
     q.appendChild(h('span', '', 'Graphics quality'));

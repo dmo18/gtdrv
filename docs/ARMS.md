@@ -273,10 +273,10 @@ throttle 0.9); helis keep the rotor rig, the police heli adds the siren
 loop. All generated in code (audio.js, banks.js).
 Meshes: original low-poly, CRAFT.md origin and axes, shared caches,
 vehiclemats.js materials (clearcoat paint for fighter and heli, matte
-standard for the tank, rubber tracks, emissive lamps). Rustback: low wedge hull with side skirts, a
-rounded turret offset back, a long barrel with a muzzle collar (separate
-nodes for turret yaw and gun pitch), scrolling track texture by
-`trackPhase`. Gannetfang: single-seat, blended delta wing with forward
+standard for the tank, rubber tracks, emissive lamps). Rustback: low
+wedge hull with side skirts, rounded turret set back, long barrel with a
+muzzle collar (separate nodes for turret yaw and gun pitch), tread bands
+whose shared-texture offset follows `trackPhase` (no new texture). Gannetfang: single-seat, blended delta wing with forward
 canards, twin canted fins, a belly bomb rack shown while bombs remain.
 Lampwatch: bubble cockpit, chin pod, skids, light bar on the tail boom,
 spotlight cone under the nose. No real-world shapes, markings or names.

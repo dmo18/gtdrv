@@ -141,7 +141,92 @@ Wave 2 (parallel, disjoint files; after 23)
     Check: unit tests for heat, accuracy formula, cover choice, attack
     slots; smoke shot of a level-3 shootout. 260k.
 
-Wave 3 (after 24, 26, 27)
+Toys (owner, direction change 3): bombs, grenades, fighter jets,
+flyable police helicopters, tanks to steal, bigger police chases.
+Contract: docs/ARMS.md. Shared hub files (weapons.js, combat.js,
+input.js, touch.js, combathud.js, combatfx.js, audio.js, banks.js) are
+edited by task 31 only, so 32 and 33 can run side by side. Every toy
+task also passes the per-task checks above (tests, lint, smoke, shots).
+
+Wave 3 (after 26; 27 may still be running: no shared files)
+31. Explosives, craft weapon core and every armed-craft control.
+    Opus. Waits 26. Edits src/core/weapons.js (sticky, blastScale,
+    MOUNTS, createCraftArms), src/systems/combat.js (throw on release,
+    predictThrow, stickies and detonate, shell/missile/bomb projectiles
+    and type caps, fireMount, predictDrop, spec.armor, own-blast rule,
+    craft playerControls incl. police SIREN), src/core/input.js (fire2,
+    drop, detonate actions and keys), src/ui/touch.js (arc-aim FIRE,
+    DETONATE, armed-aircraft arc, tank twin-stick layout, SIREN),
+    src/ui/combathud.js (seeker box, pipper, tank cross and circle,
+    pips), src/render/combatfx.js (arc, rings, blinkers, trails),
+    src/systems/audio.js and src/audio/banks.js (ARMS.md section 7
+    sounds and the 'tracks' and 'turbine' rigs), src/systems/tutorial.js
+    (two hints), test/combat.test.js. New: src/core/seeker.js,
+    test/arms.test.js, test/seeker.test.js, scripts/arms-test.mjs.
+    Accept: ARMS.md sections 1, 2 and 7, tested with fixture specs (the
+    real tank and fighter come in 32 and 33). Check: unit tests (arc
+    preview lands within 0.5 m of the real throw; sticky sticks, rides a
+    moving craft, fizzles, 5th replaces the oldest; detonate respects
+    the chain cap; per-type caps; missile hits a turning target only
+    when locked; predictDrop within 1 m; armor and own-blast rules;
+    seeker 0.8 s lock, 1.0 s break, cycle); Playwright arms-test throws
+    with preview, places and detonates 2 charges, fires GUN, MSL, BOMB
+    from a fixture armed heli; draw calls at most +3. 220k.
+
+Wave 4 (after 31; 32 and 33 in parallel, disjoint files)
+32. Rustback tank, Ironbank Depot and spawn places. Opus. New:
+    src/entities/tank.js, src/render/tankmesh.js, src/systems/armor.js
+    (player turret aim, crush damage, crew bail, tankGunnerStep AI
+    core), test/tank.test.js, scripts/tank-test.mjs. Edits src/game.js
+    (kinds.tank, tank pairs via collideTank, parked-tank sleep),
+    src/world/citygen.js and test/citygen.test.js (depot, tank spots,
+    Cinder Row tank, fighter and patrolheli spots, roof pad, POI; all
+    appended after rng use), src/systems/fleet.js (tank spots),
+    src/render/chasecam.js and test/chasecam.test.js (tank views),
+    src/render/vehiclemesh.js (crushed body), src/ui/minimap.js and
+    src/systems/mapui.js (tank and police heli blips, depot icon).
+    Accept: ARMS.md section 3; city before the appended items
+    unchanged. Check: unit tests (pivot in place, speeds, no side slip,
+    walls and shore stop it, crushes a sedan above 2 m/s but only pushes
+    a bus, people knocked down not crushed, 200 Buzzbox hits barely
+    scratch it and 3 charges wreck it, turret holds world aim while the
+    hull turns, gunner rules); citygen tests (spots on land, clear of
+    buildings, deterministic); Playwright tank-test enters the Cinder
+    Row tank, drives, crushes a parked car, fires; shots; draw calls at
+    most +4 per tank. 210k. (Until 33 lands the fighter and patrolheli
+    spots fall back to the Pipwick spec.)
+33. Gannetfang fighter, Lampwatch police heli, heli AI pilot. Opus.
+    Edits src/entities/aircraft.js and test/aircraft.test.js (two specs,
+    noStall, cruise floor, auto-level, Oxbarrow bombs),
+    src/render/aircraftmesh.js (two models, light bar, fake beam). New:
+    src/systems/helipilot.js, test/helipilot.test.js,
+    scripts/flight-arms-test.mjs. Accept: ARMS.md section 4. Check: unit
+    tests (fighter airborne within 3.5 s and 400 m; 60 s of random stick
+    never stalls; cruise floor holds; Lampwatch hovers; pilot orbits a
+    moving target over Glasswell for 60 s at 55..70 m without touching a
+    roof; strafe cadence, evade, leave, crash reaches the ground and
+    explodes; gunner formula); Playwright takes off from the depot,
+    locks and missiles a fixture target, drops a bomb, flies the police
+    heli with siren; shots; draw calls. 240k.
+
+Wave 5 (after 27, 32, 33)
+34. Escalating chases, heat 1 to 5. Opus. Waits 27. Edits
+    src/systems/police.js (MAX_HEAT 5, unit table, helis through
+    helipilot, level-5 tank through chaseStep and tankGunnerStep, heli
+    sight and call-in, air and sea rule, swap-craft cooldown, caps, tank
+    crew bail), test/police.test.js, test/police-combat.test.js,
+    src/ui/hud.js (5 heat badges). New: test/chase5.test.js,
+    scripts/chase-test.mjs. Accept: ARMS.md sections 5 and 6. Check:
+    headless runs (units per level match the table; caps hold through a
+    seeded 10-minute rampage; heli follows to sea at level 3; line of
+    sight escape; tank never fires under 15 m or at a player on foot
+    who has not hurt it, shell damage cap; a player who keeps moving is
+    never downed by heavy units alone in 20 s); Playwright scripts a
+    level-5 chase, shot with heli, tank and roadblock; draw calls under
+    420, step time logged. 190k. Cut first: the level-5 tank (level 5
+    then = 2 helis and a double roadblock; saves about 45k).
+
+Wave 6 (after 34; uses the toys as SPAWN kinds 'tank' and 'patrolheli')
 28. Mission engine and missions 1 to 3. Opus. Fills
     src/systems/missions.js; new src/world/missiondata.js,
     test/missions.test.js, scripts/mission-test.mjs; edits
@@ -150,23 +235,29 @@ Wave 3 (after 24, 26, 27)
     briefing cards, map markers. Check: node tests run each objective
     type headless; Playwright plays mission 1 start to end. 240k.
 
-Wave 4
-29. Missions 4 to 8 as data, plus tuning. Sonnet. Edits
-    src/world/missiondata.js only (plus test fixtures). Check: each
-    mission passes a scripted headless run and a start-point shot. 130k.
+Wave 7
 30. Milestone review, phone performance and security pass. Opus, fresh
     reviewer. Read-only plus a findings list for the lead. Check: step
-    time and draw calls in a 20-actor shootout versus the 370 baseline;
-    save fuzz; no network. 100k.
+    time and draw calls in a 20-actor shootout and a level-5 chase
+    versus the 370 baseline (under 420); save fuzz; no network. 100k.
 
-Total about 1.62M; target 1.5M. Cut first, in order: task 29 (ship 3
-missions; saves 130k), level-4 roadblocks in 27 (about 40k), drive-by
-in 26 (about 30k), grenades from the weapons table (about 20k).
+Parked: 29. Missions 4 to 8 as data (Sonnet, 130k) does not fit the
+2.8M cap; the game ships with missions 1 to 3.
+
+Totals: about 1.45M spent when 26 and 27 finish. Remaining: 31 220k,
+32 210k, 33 240k, 34 190k (toys 860k, planned 880k), 28 240k, 30 100k
+= 1.20M. Stage total about 2.65M against the 2.8M cap (150k margin).
+Cut first, in order: level-5 tank in 34 (45k), task 28 down to the
+engine plus mission 1 (80k), stickies riding moving craft in 31 (15k),
+police heli spotlight beam in 33 (10k).
 
 Later (parked): tuning garage and car upgrades; championships with AI
-rivals; police helicopter; weapons on aircraft; pickups and armour;
-more missions.
+rivals; missions 4 to 8; AI fighters; ejection seat; knocking over
+lamps and trees; pickups and armour.
 
 Change log: owner asked for "more GTA and Gran Turismo combined":
 full sandbox combat (no blood or gore), story missions, and scores in
-place of money. Earlier "no combat" decision superseded.
+place of money. Earlier "no combat" decision superseded. Then (direction
+change 3, cap 2.8M): bombs, grenades, fighter jets, flyable police
+helicopters, stealable tanks and heat-5 chases added as tasks 31 to 34
+(docs/ARMS.md) ahead of missions 28 and review 30; task 29 parked.

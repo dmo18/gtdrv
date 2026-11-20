@@ -19,7 +19,7 @@ test('round trip keeps valid progress', () => {
   p.medals = { race1: 'gold', seen_docks: 'bronze', hint_car: 'bronze' };
   p.bestTimes = { race1: 61.5 };
   p.stats = { distance: 5000.5, flights: 2, races: 3 };
-  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false, steering: 'tilt', steerSensitivity: 1.25, handling: 'sim' };
+  p.settings = { master: 0.3, invertPitch: true, leftHanded: true, quality: 1.25, police: false, steering: 'tilt', steerSensitivity: 1.25, handling: 'sim', hud: 'full' };
   const s = memory();
   assert.equal(saveProgress(s, p), true);
   assert.deepEqual(loadProgress(s), p);
@@ -40,7 +40,7 @@ test('version 1 save migrates: money x 10 is the total, medals, times, stats, se
     medals: { race1: 'gold', 'street-glasswell': 'silver', seen_docks: 'bronze', hint_car: 'bronze', hint_steer: 'bronze' },
     bestTimes: { race1: 61.5, 'street-glasswell': 90.2 },
     stats: { distance: 12345.6, flights: 7, races: 9 },
-    settings: { master: 0.3, invertPitch: true, leftHanded: true, quality: 0.75, police: false, steering: 'slider', steerSensitivity: 1.25, handling: 'sim' },
+    settings: { master: 0.3, invertPitch: true, leftHanded: true, quality: 0.75, police: false, steering: 'slider', steerSensitivity: 1.25, handling: 'sim', hud: 'full' },
   };
   const p = loadProgress(memory(JSON.stringify(v1)));
   assert.equal(p.version, 2);
@@ -122,12 +122,12 @@ test('field checks', () => {
     medals: { a: 'platinum', b: 'gold', 'Bad Key': 'gold' },
     bestTimes: { a: -1, b: 90000, c: 12, d: NaN },
     stats: { distance: -1, flights: 4, races: 'x' },
-    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0, steering: 'joystick', steerSensitivity: 9, handling: 'gt' },
+    settings: { master: 9, invertPitch: 'yes', leftHanded: true, quality: 2, police: 0, steering: 'joystick', steerSensitivity: 9, handling: 'gt', hud: 'huge' },
   });
   assert.deepEqual(p.medals, { b: 'gold' });
   assert.deepEqual(p.bestTimes, { c: 12 });
   assert.deepEqual(p.stats, { distance: 0, flights: 4, races: 0 });
-  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true, steering: 'wheel', steerSensitivity: 1.5, handling: 'arcade' });
+  assert.deepEqual(p.settings, { master: 1, invertPitch: false, leftHanded: true, quality: 1, police: true, steering: 'wheel', steerSensitivity: 1.5, handling: 'arcade', hud: 'minimal' });
 });
 
 test('prototype pollution is ignored', () => {
@@ -169,4 +169,12 @@ test('handling setting: arcade by default, sim kept, anything else falls back', 
   assert.equal(h('sim'), 'sim');
   assert.equal(h('arcade'), 'arcade');
   for (const bad of ['SIM', 'realistic', '', 1, null, ['sim'], { sim: 1 }]) assert.equal(h(bad), 'arcade');
+});
+
+test('hud setting: minimal by default, only minimal or full accepted', () => {
+  assert.equal(defaultProgress().settings.hud, 'minimal');
+  const h = (x) => sanitizeProgress({ settings: { hud: x } }).settings.hud;
+  assert.equal(h('full'), 'full');
+  assert.equal(h('minimal'), 'minimal');
+  for (const bad of ['Full', 'busy', 1, null, {}, undefined]) assert.equal(h(bad), 'minimal');
 });

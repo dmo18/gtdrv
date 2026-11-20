@@ -42,6 +42,9 @@ export function createEconomy(game, storage) {
       const used = game.touch.setSteering(s.steering, s.steerSensitivity, steerFallback);
       if (used && used !== s.steering) steerFallback(used);
     }
+    if (game.touch && game.touch.setHudMode) game.touch.setHudMode(s.hud);
+    if (game.hud && game.hud.setHudMode) game.hud.setHudMode(s.hud);
+    if (game.combatHud && game.combatHud.setHudMode) game.combatHud.setHudMode(s.hud);
     if (game.quality !== s.quality) {
       game.quality = s.quality;
       if (game.resize) game.resize();

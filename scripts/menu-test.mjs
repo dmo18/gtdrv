@@ -36,7 +36,7 @@ await build({
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0;background:linear-gradient(#9fc8e8,#6d8f5a)';
       document.body.appendChild(root);
-      const log = { resizes: 0, volume: null, toasts: [], touchVisible: true, steer: [], lefty: null, noTilt: false };
+      const log = { hudModes: [], resizes: 0, volume: null, toasts: [], touchVisible: true, steer: [], lefty: null, noTilt: false };
       const game = {
         events: createEvents(), progress: defaultProgress(), paused: false, quality: 1,
         player: { x: 0, z: 0 }, input: {},
@@ -44,6 +44,7 @@ await build({
         touch: {
           setVisible: (v) => { log.touchVisible = v; },
           setLeftHanded: (v) => { log.lefty = v; },
+          setHudMode: (m) => { log.hudModes.push(m); },
           // Like the real controls: tilt without a sensor falls back to the wheel.
           setSteering: (st, sens, onFallback) => {
             log.steer.push([st, sens]);
@@ -258,6 +259,15 @@ try {
     && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'false');
   check('settings: handling saved', (await stored()).settings.handling === 'sim');
   await page.screenshot({ path: path.join(out, 'settings-handling-915x412.png') });
+  // HUD: Minimal by default, Full applies at once and is saved.
+  check('settings: two HUD choices, minimal marked', (await page.locator('.rw-menu-body [data-hud]').count()) === 2
+    && (await page.locator('.rw-menu-body [data-hud="minimal"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('.rw-menu-body [data-hud="full"]').scrollIntoViewIfNeeded();
+  await page.locator('.rw-menu-body [data-hud="full"]').tap();
+  check('settings: HUD full applied at once and saved', (await ev(() => window.rw.log.hudModes.at(-1))) === 'full'
+    && (await stored()).settings.hud === 'full' && (await page.locator('.rw-menu-body [data-hud="full"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('.rw-menu-body [data-hud="minimal"]').tap();
+  check('settings: HUD back to minimal', (await ev(() => window.rw.log.hudModes.at(-1))) === 'minimal' && (await stored()).settings.hud === 'minimal');
   await page.locator('[data-setting="invertPitch"]').tap();
   await page.locator('[data-setting="leftHanded"]').tap();
   await page.locator('[data-setting="police"]').tap();
