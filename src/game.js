@@ -21,6 +21,7 @@ import { createPeds } from './systems/peds.js';
 import { createFleet } from './systems/fleet.js';
 import { createEconomy } from './systems/economy.js';
 import { createTraffic } from './systems/traffic.js';
+import { createDayNight } from './systems/daynight.js';
 import { createMenu } from './ui/menu.js';
 import { stepBoat, collideBoats } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
@@ -255,6 +256,7 @@ export function createGame({ canvas, uiRoot }) {
   game.economy = game.addSystem(createEconomy(game, storage));
   game.fleet = game.addSystem(createFleet(game));
   game.traffic = game.addSystem(createTraffic(game));
+  game.daynight = game.addSystem(createDayNight(game));
   game.menu = createMenu(uiRoot, game, game.economy);
 
   // --- Simulation step. ---

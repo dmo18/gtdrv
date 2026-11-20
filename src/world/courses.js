@@ -312,7 +312,7 @@ export function tallestNear(city, x, z, R = RING_CLEAR_RADIUS) {
 function ringY(city, x, z, r, wantY) {
   const tall = tallestNear(city, x, z);
   const minBottom = tall > 0 ? tall + RING_CLEAR_HEIGHT : 8;
-  return Math.max(wantY, minBottom + r);
+  return Math.ceil(Math.max(wantY, minBottom + r) + 0.5);
 }
 
 // The avenue edge under (x,z), if there is one.

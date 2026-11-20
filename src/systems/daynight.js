@@ -824,7 +824,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     V.p.z += sh * (L / 2 + reach - len / 2 + 3);
     V.p.y = air ? 0.06 : gy;
     V.q.setFromAxisAngle(V.up, -v.heading);
-    V.s.set(len, 1, air ? 12 : 6.5);
+    V.s.set(len, 1, air ? 12 : 5.5);
     V.m4.compose(V.p, V.q, V.s);
     V.heads.setMatrixAt(k, V.m4);
     V.heads.instanceColor.setXYZ(k, f, f, f);

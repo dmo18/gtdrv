@@ -10,7 +10,7 @@ try {
 } catch {
   ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
 }
-const [name = 'shot', x, z, heading = '0', up = '0'] = process.argv.slice(2);
+const [name = 'shot', x, z, heading = '0', up = '0', hour = ''] = process.argv.slice(2);
 await buildGame({ minify: false });
 const server = await serve(0);
 await mkdir('shots', { recursive: true });
@@ -32,6 +32,7 @@ if (x !== undefined) {
     g.debugCamUp = u;
   }, [Number(x), Number(z), Number(heading), Number(up)]);
 }
+if (hour !== '') await page.evaluate((h) => window.__rw.daynight?.setHour(h), Number(hour));
 await page.waitForTimeout(1500);
 if (Number(up) > 0) {
   await page.evaluate((u) => {
