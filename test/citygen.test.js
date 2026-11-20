@@ -95,3 +95,12 @@ test('collision: raycast and line of sight', () => {
   assert.ok(!w.lineClear(0, 0, 30, 0));
   assert.ok(w.lineClear(0, 0, 9, 0));
 });
+
+test('collision: height filter and roof height', () => {
+  const w = createCollisionWorld();
+  w.addBox(0, 0, 10, 10, 20);
+  assert.ok(w.resolveCircle(5, 5, 1, 5).hit, 'below the roof collides');
+  assert.ok(!w.resolveCircle(5, 5, 1, 25).hit, 'above the roof is clear');
+  assert.equal(w.heightAt(5, 5), 20);
+  assert.equal(w.heightAt(50, 5), 0);
+});

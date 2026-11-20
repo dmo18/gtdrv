@@ -71,8 +71,10 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
   const color = rng ? rng.pick(spec.colors) : spec.colors[0];
   return {
     id: nextId++,
+    kind: 'car',
     spec,
     x, z, heading,
+    y: 0, vy: 0, py: 0,
     vx: 0, vz: 0, yawRate: 0, speed: 0,
     steer: 0, steerAngle: 0,
     throttle: 0, brake: 0, handbrake: false,

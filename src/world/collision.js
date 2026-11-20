@@ -39,7 +39,9 @@ export function createCollisionWorld() {
 
   // Push a circle out of everything it overlaps. Returns a shared
   // result object: new position, last contact normal, deepest overlap.
-  function resolveCircle(x, z, r) {
+  // `y` is the height of the thing being tested: obstacles that are
+  // lower than that are ignored, so aircraft can fly over rooftops.
+  function resolveCircle(x, z, r, y = 0) {
     out.x = x;
     out.z = z;
     out.nx = 0;
@@ -57,6 +59,7 @@ export function createCollisionWorld() {
           const it = list[i];
           if (it.stamp === stamp) continue;
           it.stamp = stamp;
+          if (it.h <= y) continue;
           let nx, nz, depth;
           if (it.kind === 0) {
             const px = out.x < it.x0 ? it.x0 : out.x > it.x1 ? it.x1 : out.x;
@@ -165,5 +168,20 @@ export function createCollisionWorld() {
     return raycast(x0, z0, x1 - x0, z1 - z0, d) >= d - 1e-6;
   }
 
-  return { addBox, addCircle, resolveCircle, raycast, lineClear, boxes, circles };
+  // Height of the tallest obstacle covering a point (0 if none): the
+  // roof an aircraft or a dropped object would land on.
+  function heightAt(x, z) {
+    const list = cells.get(key(cellOf(x), cellOf(z)));
+    let h = 0;
+    if (!list) return h;
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      if (it.kind === 0) {
+        if (x >= it.x0 && x <= it.x1 && z >= it.z0 && z <= it.z1 && it.h > h) h = it.h;
+      } else if ((x - it.x) * (x - it.x) + (z - it.z) * (z - it.z) <= it.r * it.r && it.h > h) h = it.h;
+    }
+    return h;
+  }
+
+  return { addBox, addCircle, resolveCircle, raycast, lineClear, heightAt, boxes, circles };
 }
