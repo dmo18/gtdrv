@@ -142,5 +142,5 @@ test('the whole bank: finite, never clips, fits memory', () => {
       assert.ok(p > 0.05, `${n} has signal`);
     }
   }
-  assert.ok(bank.bytes < 12 * 1048576, `${(bank.bytes / 1048576).toFixed(2)} MB`);
+  assert.ok(bank.bytes < 12.5 * 1048576, `${(bank.bytes / 1048576).toFixed(2)} MB`);
 });

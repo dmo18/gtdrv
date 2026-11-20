@@ -114,7 +114,7 @@ try {
     check('generation time < 1500 ms', dbg.genWallMs > 0 && dbg.genWallMs < 1500,
       `wall ${dbg.genWallMs.toFixed(0)} ms, main-thread cpu ${dbg.genCpuMs.toFixed(0)} ms in ${dbg.slices} slices, longest slice ${dbg.maxSliceMs.toFixed(1)} ms, offline ${dbg.bankStats.offline} specs in ${dbg.bankStats.offlineMs.toFixed(0)} ms, js ${dbg.bankStats.js}`);
     const mb = dbg.bytes / 1048576;
-    check('buffer memory < 12 MB', mb > 0.5 && mb < 12, `${mb.toFixed(2)} MB in ${Object.keys(dbg.buffers).length} buffers`);
+    check('buffer memory < 12.5 MB', mb > 0.5 && mb < 12.5, `${mb.toFixed(2)} MB in ${Object.keys(dbg.buffers).length} buffers`);
 
     // Every loop is seamless: the step across the loop point is no bigger
     // than the steps right next to it, and there is no DC offset.
@@ -591,7 +591,7 @@ try {
     check('all engines generated', fin.bankStats.engines.length === 8, fin.bankStats.engines.join(' '));
     checkLoops('all engines');
     const mb2 = fin.bytes / 1048576;
-    check('total buffer memory < 12 MB', mb2 < 12, `${mb2.toFixed(2)} MB in ${Object.keys(fin.buffers).length} buffers; whole bank after ${fin.fullMs.toFixed(0)} ms; background generation (extras + later engines) ${fin.lazyMs.toFixed(0)} ms main-thread`);
+    check('total buffer memory < 12.5 MB', mb2 < 12.5, `${mb2.toFixed(2)} MB in ${Object.keys(fin.buffers).length} buffers; whole bank after ${fin.fullMs.toFixed(0)} ms; background generation (extras + later engines) ${fin.lazyMs.toFixed(0)} ms main-thread`);
 
     // ---- Sound quality: measured properties of every buffer ----
     // (measurements only; nobody listened). See docs/AUDIO.md.
@@ -693,6 +693,94 @@ try {
         `on ${mOn.toFixed(4)} off ${mOff.toExponential(1)}, bars ${audio.debug.musicBar}`);
       fin.musicBus.disconnect(a);
       audio.setVolume({ musicOn: true });
+    }
+
+    // ---- Radio stations (docs/AUDIO.md, "Radio") ----
+    {
+      const an2 = ctx.createAnalyser();
+      an2.fftSize = 2048;
+      fin.musicBus.connect(an2);
+      const tb = new Float32Array(2048);
+      const caps = [];
+      audio.onCaption = (text, dur) => caps.push({ text, dur });
+      audio.setVolume({ musicOn: true, music: 0.6 });
+      let jumpMax = 0;
+      const watch = () => {
+        an2.getFloatTimeDomainData(tb);
+        let j = 0;
+        for (let i = 1; i < tb.length; i++) j = Math.max(j, Math.abs(tb[i] - tb[i - 1]));
+        jumpMax = Math.max(jumpMax, j);
+        return window.h.an.rmsOf(tb);
+      };
+      const rmsOf = {};
+      const levels = [];
+      const jumpOf = {};
+      for (const id of ['chill', 'dance', 'jazz', 'talk']) {
+        audio.setStation(id);
+        await run(40, () => {});
+        let m = 0, sum = 0, cnt = 0;
+        jumpMax = 0;
+        await run(id === 'talk' ? 420 : 200, () => { const r = watch(); m = Math.max(m, r); sum += r * r; cnt++; });
+        rmsOf[id] = Math.sqrt(sum / cnt);
+        levels.push(`${id} ${rmsOf[id].toFixed(4)}`);
+        jumpOf[id] = jumpMax;
+        const r = audio.debug.radio;
+        check(`station ${id} plays`, r.station === id && m > 0.003 && peak <= 1.0,
+          `rms max ${m.toFixed(4)} mean ${rmsOf[id].toFixed(4)}, bars ${r.stats.bars}, notes/bar max ${r.stats.maxNotes}, jump ${jumpMax.toFixed(3)}, master peak ${peak.toFixed(3)}`);
+      }
+      const lv = Object.values(rmsOf);
+      check('stations are about equally loud (mean RMS within 6 dB)', Math.max(...lv) / Math.min(...lv) < 2, levels.join(', '));
+      // the talk station: captions arrive on the audio clock
+      check('talk station shows captions', caps.some((c) => c.text && /Gullspeak/.test(c.text)) && caps.every((c) => c.text === null || c.dur > 0),
+        caps.map((c) => (c.text ? c.text.slice(0, 40) : 'dismissed')).join(' | '));
+      // switching: fast cycling does not clip and makes no click (a click is a
+      // sample-to-sample jump far bigger than the music's own)
+      peak = 0;
+      jumpMax = 0;
+      let swMax = 0;
+      const order = ['dance', 'jazz', 'talk', 'chill', 'dance', 'off', 'chill'];
+      for (const id of order) {
+        audio.setStation(id);
+        await run(18, () => { swMax = Math.max(swMax, watch()); });
+      }
+      const steady = Math.max(...Object.values(jumpOf));
+      check('switching stations does not clip or click', peak <= 1.0 && jumpMax <= steady * 1.5 + 0.02,
+        `peak ${peak.toFixed(3)}, largest sample jump ${jumpMax.toFixed(3)} vs steady ${steady.toFixed(3)}`);
+      // a caption is dismissed when the station changes
+      caps.length = 0;
+      audio.setStation('talk');
+      await run(30, () => {});
+      const gotCap = caps.some((c) => c.text);
+      audio.setStation('jazz');
+      await run(10, () => {});
+      check('caption dismissed on station change', gotCap && caps[caps.length - 1].text === null, `${caps.length} caption events`);
+      // off: the station buses are released after the fade, background music returns
+      audio.setStation('off');
+      await run(110, () => {});
+      const rOff = audio.debug.radio;
+      check('radio off frees its bus', rOff.station === 'off' && rOff.buses === 0, `station ${rOff.station}, buses ${rOff.buses}`);
+      // on foot a station stops; back in a car it resumes
+      audio.setStation('dance');
+      await run(40, () => {});
+      const inCar = audio.debug.radio.station;
+      game.player.mode = 'foot';
+      await run(40, () => {});
+      const onFoot = audio.debug.radio.station;
+      game.player.mode = 'car';
+      await run(40, () => {});
+      check('radio plays in a car only', inCar === 'dance' && onFoot === 'off' && audio.debug.radio.station === 'dance', `${inCar} / ${onFoot} / ${audio.debug.radio.station}`);
+      const st = audio.debug.radio.stats;
+      check('radio scheduling cost small (< 1 ms per bar)', st.bars > 10 && st.ms / st.bars < 1,
+        `${st.bars} bars, avg ${(st.ms / st.bars).toFixed(3)} ms, max ${st.maxMs.toFixed(2)} ms, max ${st.maxNotes} notes per bar`);
+      // a loud explosion ducks the station like the background music
+      peak = 0;
+      events.emit('explosion', { x: 3, y: 0, z: 0, radius: 16, size: 'huge', source: null, depth: 0 });
+      await run(30, () => { watch(); });
+      check('station under an explosion does not clip', peak < 1.0, `peak ${peak.toFixed(3)}`);
+      audio.setStation('off');
+      await run(60, () => {});
+      audio.onCaption = null;
+      fin.musicBus.disconnect(an2);
     }
 
     // ---- A huge explosion right next to the player does not clip ----

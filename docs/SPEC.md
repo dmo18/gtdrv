@@ -40,3 +40,17 @@ existing game: own name, city, characters, art and missions.
 - Health meter (`.rw-hpmeter` in the HUD top-left block, display only):
   only in hard mode; red to green by `healthFraction`; "HP n" on foot,
   "CRAFT n" aboard.
+
+## Wanted stars, slow motion, blast camera
+- WANTED: the HUD shows 0 to 5 stars only while wanted (heat 1 to 4, fifth
+  star when the helicopter is up). From 3 stars they flash red and blue.
+  A bar under them fills while the player is out of sight (`heat.cooldown`);
+  full means escaped. Heat 4 adds a roadblock and a police helicopter.
+- SLOW MOTION: taking out the last enemy within 45 m, blasting a vehicle or
+  downing a police officer slows play to 35 percent for 0.8 s (real time),
+  at most once per 6 s, with a vignette and a 4 percent zoom. Simulation
+  steps stay 1/60 s: `game.timeScale` scales real time into the
+  accumulator. Off with the Reduce motion setting.
+- BLAST CAMERA: a vehicle exploding within 40 m pulls the chase camera back
+  and aside for about 1.5 s, eased; moving the camera cancels it.
+

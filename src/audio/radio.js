@@ -68,7 +68,7 @@ export function createDanceComposer(rng) {
       for (let k = 0; k < 16; k++) {
         const a = arp[k];
         if (a < 0) continue;
-        const tone = a < 3 ? chord[a] + 12 : chord[a - 3] + 24;
+        const tone = a < 3 ? chord[a] : chord[a - 3] + 12;
         notes.push({ beat: k * 0.25, inst: 'pluck', semi: root + tone, vel: 0.3 + 0.2 * rng.next() });
       }
     }
@@ -108,8 +108,10 @@ export function createJazzComposer(rng) {
     const notes = [];
     // keys: a syncopated comp in the swung eighths
     const voice = jazzVoicing(base, ql);
-    for (const b of pick(rng, COMP)) {
-      if (b > 0 && rng.next() < 0.18) continue;
+    const hits = pick(rng, COMP);
+    for (let h = 0; h < hits.length; h++) {
+      const b = hits[h];
+      if (h > 0 && rng.next() < 0.18) continue;
       for (let k = 0; k < voice.length; k++) notes.push({ beat: b + k * 0.012, inst: 'keys', semi: voice[k], vel: 0.32 + 0.12 * rng.next() });
     }
     // a short melody from chord tones and the ninth, now and then

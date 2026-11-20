@@ -29,6 +29,8 @@ import {
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
 import { targetPoint, angleTo, lineOfSight } from '../core/aim.js';
+import { createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
+import { poseRagdoll } from '../render/ragdoll.js';
 
 // ---------------------------------------------------------------------
 // Tunables (COMBAT.md)
@@ -165,6 +167,10 @@ export function resetActor(a) {
   a.ky = 0;
   a.spin = 0;
   a.spinV = 0;
+  a.rag = null; // live ragdoll slot (core/ragdoll.js), or null
+  a.ragDone = false; // settled ragdoll pose kept in ragYaw / ragPitch
+  a.ragYaw = 0;
+  a.ragPitch = 0;
   return a;
 }
 
@@ -206,10 +212,34 @@ export function setPush(x, z) {
 // Depth of the explosion being applied right now (chain bookkeeping).
 let curDepth = -1;
 
+// Ragdolls: hard hits (blasts, cars) make a person tumble. A car at
+// speed throws them up over the bonnet. Pool of RAGDOLL_MAX bodies.
+export const RAM_THROW_UP = 1.2, RAM_THROW_PER = 0.32, RAM_THROW_MAX = 8; // m/s up: base + per m/s of car speed
+export const RAM_CARRY = 0.6; // share of the car's speed the body keeps
+function startTumble(game, a, source, kind) {
+  const pool = game.ragdolls;
+  if (!pool || a.team === 'player' || (kind !== 'blast' && kind !== 'ram')) return;
+  const rng = pool.rng || null;
+  if (kind === 'ram' && source && Number.isFinite(source.vx)) {
+    const v = Math.sqrt(source.vx * source.vx + source.vz * source.vz);
+    const s = startRagdoll(pool, a, source.vx * RAM_CARRY, Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * v), source.vz * RAM_CARRY, rng);
+    if (!s) return;
+    // Legs swept from under them: the body turns head first over the bonnet.
+    const w = Math.min(6.5, 1.5 + 0.3 * v);
+    s.wp = s.wp > 0 ? -w : w;
+    s.wr *= 0.4;
+    s.lwp = s.wp;
+    s.lwr = s.wr;
+  } else {
+    startRagdoll(pool, a, a.kx || 0, 0, a.kz || 0, rng);
+  }
+}
+
 function knockDown(game, a, source, kind) {
   a.life = 'down';
   a.lifeT = 0;
   if (a.vx !== undefined) a.vx = a.vz = 0;
+  startTumble(game, a, source, kind);
   const d = EV.down;
   d.target = a;
   d.source = source;
@@ -515,6 +545,7 @@ export function downAmount(a) {
 }
 export function layDown(mesh, a) {
   if (!mesh || !a) return;
+  if (poseRagdoll(mesh, a)) return; // tumbling or settled ragdoll
   const k = downAmount(a);
   mesh.rotation.z = k * Math.PI * 0.5;
   mesh.rotation.x = a.spin || 0; // tumbling through the air after a blast
@@ -528,6 +559,9 @@ export function layDown(mesh, a) {
 export function createCombat(game, { seed = 23023 } = {}) {
   const rng = createRng(seed);
   const tossRng = createRng(seed ^ 0x7055); // separate stream: blast throws never shift the fight's dice
+  const ragdolls = createRagdolls(RAGDOLL_MAX);
+  ragdolls.rng = createRng(seed ^ 0x2a6d); // own stream too: tumbles never shift other dice
+  game.ragdolls = ragdolls;
   if (!game.actors) game.actors = [];
   if (!game.aim) game.aim = { dx: 1, dy: 0, dz: 0, manual: false };
   const TR = createTraceResult();
@@ -762,6 +796,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     a.spinV = (tossRng.next() < 0.5 ? -1 : 1) * (4 + 6 * k);
     a.spin = 0;
     if (!(a.y > 0)) a.y = 0;
+    if (a.rag) kickRagdoll(a.rag, a.ky, a.spinV); // the ragdoll flies it
   }
 
   // Launch a car (or lighter craft) from a blast at (nx, nz) unit direction,
@@ -1720,11 +1755,35 @@ export function createCombat(game, { seed = 23023 } = {}) {
   }
 
   // --- People ---
+  // Ragdolls bump into walls and stop at the shoreline.
+  const ragFix = (s) => {
+    if (game.collision) {
+      const r = game.collision.resolveCircle(s.x, s.z, 0.3, 0);
+      if (r.x !== s.x || r.z !== s.z) {
+        s.x = r.x;
+        s.z = r.z;
+        s.vx *= 0.3;
+        s.vz *= 0.3;
+      }
+    }
+    if (!isLand(game, s.x, s.z) && isLand(game, s.px, s.pz)) {
+      s.x = s.px;
+      s.z = s.pz;
+      s.vx = s.vz = 0;
+    }
+  };
   function stepActor(a, dt) {
     if (a.hitT > 0) a.hitT = Math.max(0, a.hitT - dt);
     a.sinceHit = (a.sinceHit || 0) + dt;
+    const ragged = !!a.rag || a.ragDone; // a ragdoll moves this body
+    if (ragged && (a.kx || a.kz)) {
+      const sp = Math.sqrt(a.kx * a.kx + a.kz * a.kz);
+      const k = sp > KNOCK_DECAY * dt ? (sp - KNOCK_DECAY * dt) / sp : 0;
+      a.kx *= k;
+      a.kz *= k;
+    }
     // Knock-back slide.
-    if (a.kx || a.kz) {
+    if (!ragged && (a.kx || a.kz)) {
       const sp = Math.sqrt(a.kx * a.kx + a.kz * a.kz);
       const dec = KNOCK_DECAY * dt;
       if (!(sp > dec)) {
@@ -1751,7 +1810,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         } else a.kx = a.kz = 0;
       }
     }
-    if (a.ky) {
+    if (a.ky && !ragged) {
       // Launched by a blast: a short flight, tumbling, then it lies where it lands.
       a.ky -= TOSS_G * dt;
       a.y += a.ky * dt;
@@ -2130,6 +2189,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     preview,
     dropPreview,
     seeker,
+    ragdolls,
     hooks: CRAFT_HOOKS,
     burnAll: false, // true: every craft under 25% burns, not only ones combat hurt
     get burningCount() { return burningCount; },
@@ -2164,6 +2224,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       stepToss(dt);
       stepBurning(dt);
       stepWrecks(dt);
+      stepRagdolls(ragdolls, dt, ragFix);
       const actors = game.actors;
       for (let i = 0; i < actors.length; i++) stepActor(actors[i], dt);
       const p = game.player;

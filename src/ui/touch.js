@@ -54,6 +54,7 @@ const ICONS = {
   down: '<path d="M6 9l6 6 6-6"/><path d="M6 4l6 6 6-6"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
   map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  radio: '<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9l10-5"/><circle cx="8.5" cy="14.5" r="2.2"/><path d="M14 13h4M14 16.5h4"/>',
   gas: '<path d="M6 15l6-6 6 6"/><path d="M6 20l6-6 6 6"/>',
   brake: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   left: '<path d="M15 5l-7 7 7 7"/><path d="M20 5l-7 7 7 7" opacity="0.5"/>',
@@ -671,6 +672,7 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'handbrake', group: 'primary', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
     press() { src.handbrake = true; }, release() { src.handbrake = false; } });
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
+  addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
   addAction({ id: 'swap', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed });
   addAction({ id: 'reload', label: 'Reload', icon: 'reload', text: 'RELOAD', modes: ['foot', 'car', 'boat'], input: 'reload',

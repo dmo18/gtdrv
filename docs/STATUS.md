@@ -133,6 +133,24 @@ the final review and fix stage; nothing is in progress that blocks play.
   (version number 3). E2E in scripts/smoke-extra.mjs; screenshots by
   scripts/carjack-shots.mjs into docs/preview/.
 
+## 2026-11-20: wanted stars, slow motion, blast camera
+- Wanted meter: 0 to 5 stars in the top-right HUD block (under the score,
+  clear of speed, minimap and touch buttons), red and blue flash from 3
+  stars, a green escape bar fills while out of sight. Stars = heat level,
+  fifth star once the police helicopter is up. `wantedStars` in police.js.
+- Heat levels now differ (`LEVEL_RULES` in police.js): more cars, quicker
+  spawn attempts, cars arrive faster and drive up to 16 percent quicker;
+  at heat 4 a roadblock and a police helicopter (existing
+  `spawnPoliceHeli`, called off when heat drops, replaced 30 s after a loss).
+- Slow motion (`src/systems/cinematic.js`): last nearby enemy down, a
+  blasted vehicle or a police takedown gives 0.8 s of real time at 35
+  percent speed via `game.timeScale` (scales real time into the loop's
+  accumulator; every step is still 1/60), a vignette overlay and a 4 percent
+  zoom. At most one per 6 s; off with Reduce motion.
+- Blast camera: a vehicle exploding within 40 m swings the chase camera
+  back and aside for 1.5 s (`chase.fx`), cancelled at once by a camera drag.
+- Tests: `test/cinematic.test.js`. Screenshots: `scripts/wanted-shots.mjs`.
+
 ## Known issues
 - A fighter that leaves the depot at part thrust can get stuck on the
   shore (full thrust is fine).

@@ -99,7 +99,8 @@ test('people killed by a blast fly, tumble and land; the player is never thrown'
   assert.equal(ped.hp, 0);
   assert.ok(ped.ky > 3, `launch ${ped.ky}`);
   let peak = 0, spun = false;
-  for (let i = 0; i < 120; i++) {
+  // A ragdoll (core/ragdoll.js): flight, one small bounce, then it settles.
+  for (let i = 0; i < 180; i++) {
     step(g, [], 1);
     peak = Math.max(peak, ped.y);
     if (Math.abs(ped.spin) > 0.5) spun = true;

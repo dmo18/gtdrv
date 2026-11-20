@@ -19,6 +19,8 @@ import { WEAPONS } from '../core/weapons.js';
 import { ENGINES, engineFor, isJet, pitchFor, pointsFor } from '../audio/engines.js';
 import { createVoices, MAX_VOICES, MAX_RAW, MAX_SPOTS } from '../audio/voices.js';
 import { createComposer } from '../audio/music.js';
+import { createRadioPlayer, scheduleBar } from '../audio/radioplayer.js';
+import { canListen, sanitizeStation } from '../core/radio.js';
 import { dopplerFactor, distanceLowpass, travelDelay } from '../audio/spatial.js';
 import { createTankRig } from '../audio/tankrig.js'; // tank (task 32)
 
@@ -32,7 +34,6 @@ const SLICE_MS = 5; // generation budget per slice
 // Default bus levels (the master is set separately). Engines sit under
 // the world so the city still reads.
 const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.2 };
-const MUSIC_LEVEL = { bass: 0.55, pad: 0.16, pluck: 0.2, kick: 0.6, snare: 0.32, hat: 0.18 };
 const GESTURES = ['touchend', 'pointerup', 'click', 'keydown'];
 
 const URBAN = { downtown: 1, midtown: 0.85, industrial: 0.8, docks: 0.6, residential: 0.45, park: 0.35, beach: 0.3, airfield: 0.25, shore: 0.3 };
@@ -77,6 +78,11 @@ export function createAudio(game) {
   const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, musicOn: true };
   let musicBus = null; // music -> its own duck -> master
   let musicDuck = null;
+  let sirenDuck = null; // music steps back under a close siren (after the explosion duck)
+  let bgBus = null; // the background score; the radio takes over from it
+  let radioPlayer = null;
+  let wantStation = 'off';
+  let sirenDuckV = 1;
   let boomDuck = null; // world ambience ducking under explosions
   let bassIn = null;
   let resumeAt = 0;
@@ -721,6 +727,7 @@ export function createAudio(game) {
   // ---- police siren ----
   let siren = null;
   let sirenOn = false;
+  let sirenNear = false; // a police car with its siren is within earshot
   let policeSiren = false, craftSiren = false; // police chase / a police craft's SIREN
   function buildSiren() {
     const pan = panNode(bus.effects);
@@ -735,6 +742,7 @@ export function createAudio(game) {
   function updateSiren(now, dt) {
     if (!siren) return;
     if (!sirenOn) {
+      sirenNear = false;
       set(siren.out.gain, 0, now, 0.06);
       return;
     }
@@ -755,8 +763,10 @@ export function createAudio(game) {
     }
     let g = 0.35;
     let dop = 1;
+    sirenNear = false;
     if (best) {
       spatial(best.x, best.z, 320);
+      sirenNear = sp.d < 150;
       dop = doppler(best.vx, best.vz);
       // the siren buffer is dense (RMS about -5 dBFS): keep it under the mix
       g = 0.4 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
@@ -1250,45 +1260,44 @@ export function createAudio(game) {
   const mus = { comp: null, bar: 0, nextT: 0, panL: null, panR: null, flip: false };
   function updateMusic(now) {
     if (!musicBus || !buf('m:kick')) return;
-    if (!vol.musicOn || vol.music <= 0 || muted) {
+    const play = vol.musicOn && vol.music > 0 && !muted;
+    updateRadio(now, play);
+    // a station on air replaces the background score (it fades out and back)
+    if (!play || (radioPlayer && radioPlayer.onAir)) {
       mus.nextT = 0;
       return;
     }
     if (!mus.comp) {
       mus.comp = createComposer(createRng(0x5eed + (hashId(game.seed) % 997)));
-      mus.panL = panNode(musicBus, -0.35) || musicBus;
-      mus.panR = panNode(musicBus, 0.35) || musicBus;
+      mus.bus = bgBus || musicBus;
+      mus.panL = panNode(mus.bus, -0.35) || mus.bus;
+      mus.panR = panNode(mus.bus, 0.35) || mus.bus;
     }
     const barS = 240 / mus.comp.tempo;
     if (mus.nextT < now + 0.05) mus.nextT = now + 0.15;
     // schedule about half a second ahead: one bar per call at most
     if (mus.nextT < now + 0.5) {
-      scheduleBar(mus.comp.bar(mus.bar++), mus.nextT, barS);
+      scheduleBar(ctx, buf, mus.comp.bar(mus.bar++), mus.nextT, barS, mus);
       mus.nextT += barS;
     }
   }
-  function scheduleBar(notes, t0, barS) {
-    for (let i = 0; i < notes.length; i++) {
-      const nt = notes[i];
-      const b = buf(`m:${nt.inst}`);
-      if (!b) continue;
-      let semi = nt.semi;
-      if (nt.inst === 'pad' || nt.inst === 'bass') semi = ((((semi + 5) % 12) + 12) % 12) - 5;
-      const src = ctx.createBufferSource();
-      src.buffer = b;
-      if (nt.inst === 'pad' || nt.inst === 'bass' || nt.inst === 'pluck') src.playbackRate.value = Math.pow(2, semi / 12);
-      const g = ctx.createGain();
-      g.gain.value = nt.vel * (MUSIC_LEVEL[nt.inst] || 0.3);
-      src.connect(g);
-      let dest = musicBus;
-      if (nt.inst === 'pluck' || nt.inst === 'hat') {
-        mus.flip = !mus.flip;
-        dest = mus.flip ? mus.panL : mus.panR;
+  // ---- the car radio (audio/radioplayer.js, docs/AUDIO.md) ----
+  function updateRadio(now, play) {
+    if (!radioPlayer) return;
+    const m = game.player ? game.player.mode : 'foot';
+    radioPlayer.tick(now, canListen(m), play);
+    // music steps back under a close siren, on its own gain after the explosion duck
+    if (sirenDuck) {
+      const want = sirenOn && sirenNear ? 0.55 : 1;
+      if (want !== sirenDuckV) {
+        sirenDuckV = want;
+        sirenDuck.gain.setTargetAtTime(want, now, 0.2);
       }
-      g.connect(dest);
-      src.onended = () => g.disconnect();
-      src.start(t0 + (nt.beat * barS) / 4);
     }
+  }
+  function setStation(id) {
+    wantStation = sanitizeStation(id);
+    if (radioPlayer) radioPlayer.setStation(wantStation);
   }
 
   // ---- context life cycle ----
@@ -1486,7 +1495,8 @@ export function createAudio(game) {
         convolver = ctx.createConvolver();
         convolver.connect(ret);
       }
-      musicDuck = gainNode(1, master);
+      sirenDuck = gainNode(1, master);
+      musicDuck = gainNode(1, sirenDuck);
       for (const k of Object.keys(BUS)) {
         bus[k] = gainNode(BUS[k], k === 'music' ? musicDuck : master);
         if (k !== 'ui') {
@@ -1495,6 +1505,12 @@ export function createAudio(game) {
         }
       }
       musicBus = bus.music;
+      bgBus = gainNode(1, musicBus);
+      radioPlayer = createRadioPlayer({
+        ctx, out: musicBus, bg: bgBus, getBuf: buf, seed: 0x7a11 + (hashId(game.seed) % 9973), nowMs,
+        caption: (text, dur) => { if (api.onCaption) api.onCaption(text, dur); },
+      });
+      radioPlayer.setStation(wantStation);
       boomDuck = gainNode(1, bus.world);
       duck = gainNode(1, boomDuck);
       voices = createVoices(ctx, () => bank && bank.buffers, rng, duck);
@@ -1643,10 +1659,15 @@ export function createAudio(game) {
     }
   }
 
-  return {
+  const api = {
     name: 'audio',
     unlock,
     render,
+    setStation,
+    get station() {
+      return wantStation;
+    },
+    onCaption: null, // (text | null, seconds): the talk station's captions
     setVolume,
     setMuted,
     dispose,
@@ -1680,6 +1701,8 @@ export function createAudio(game) {
         limiting: pv.sim.limiting,
         boost: pv.boost,
         musicBar: mus.bar,
+        radio: radioPlayer ? { station: radioPlayer.station, stats: radioPlayer.stats, buses: radioPlayer.buses, bus: radioPlayer.currentBus, ready: radioPlayer.ready } : null,
+        bgBus,
         others: slots.map((q) => ({ v: q.v, dop: q.dop || 1 })),
         musicBus,
         renderMsAvg: perf.renderN ? perf.renderMs / perf.renderN : 0,
@@ -1691,4 +1714,5 @@ export function createAudio(game) {
       };
     },
   };
+  return api;
 }

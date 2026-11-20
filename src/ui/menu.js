@@ -1,6 +1,8 @@
 // The pause menu: Resume, Scores, Records, Settings and How to play.
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { setHandlingMode } from '../entities/vehicle.js';
+import { nextStation, stationInfo } from '../core/radio.js';
+import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
 
 const STYLE_ID = 'rw-menu-style';
 
@@ -49,6 +51,8 @@ const CSS = `
 .rw-menu-group { margin: 10px 0 4px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rw-accent); }
 .rw-menu-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 40px; padding: 4px 0; border-bottom: 1px solid rgba(246,239,230,0.1); }
 .rw-menu-medal { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.rw-menu-secrets .rw-menu-row { min-height: 26px; padding: 2px 0; font-size: 13px; }
+.rw-menu-secrets .rw-menu-row span:last-child { font-size: 12px; text-align: right; }
 .rw-menu-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 6px; }
 .rw-menu-stat { padding: 8px 12px; border-radius: 12px; background: rgba(246,239,230,0.07); }
 .rw-menu-stat b { display: block; font-size: 20px; }
@@ -305,7 +309,21 @@ export function createMenu(root, game, economy) {
     add((p.stats.distance / 1000).toFixed(1) + ' km', 'Distance travelled');
     add(String(Math.floor(p.stats.races)), 'Races');
     add(String(Math.floor(p.stats.flights)), 'Flights');
+    const foundIds = p.secrets && Array.isArray(p.secrets.found) ? p.secrets.found : [];
+    add(foundIds.length + ' / ' + SECRET_DEFS.length, 'Secrets found');
     body.appendChild(stats);
+
+    // Hidden spots: a found one shows its name, the rest stay a question.
+    const list = h('div', 'rw-menu-secrets');
+    for (const d of SECRET_DEFS) {
+      const got = foundIds.includes(d.id);
+      const row = h('div', 'rw-menu-row' + (got ? '' : ' rw-menu-dim'));
+      row.append(h('span', '', got ? d.name : '???'), h('span', 'rw-menu-dim', got ? d.note : 'Not found yet'));
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+    const all = foundIds.length >= SECRET_DEFS.length;
+    body.appendChild(h('p', 'rw-menu-dim', all ? GARAGE_NAME + ' unlocked: look for the lock-up garage on the map.' : 'Find all ' + SECRET_DEFS.length + ' to unlock something special.'));
 
     const seen = Object.keys(p.medals).filter((k) => k.startsWith('seen_')).length;
     body.appendChild(h('p', 'rw-menu-dim', 'Areas explored: ' + seen));
@@ -434,6 +452,22 @@ export function createMenu(root, game, economy) {
     ms.addEventListener('change', () => commit());
     mv.appendChild(ms);
     body.appendChild(mv);
+
+    // Car radio: the station that plays in cars and boats (src/systems/radio.js).
+    // Tap to step through Off, Lagoon Drive, Pulse Harbour, Lamplight Keys, Gullspeak.
+    if (game.radio) {
+      const row = h('div', 'rw-menu-setting');
+      row.appendChild(h('span', '', 'Car radio'));
+      const cur = stationInfo(game.radio.station);
+      const rb = button(cur.name, 'rw-menu-switch', () => {
+        game.radio.setStation(nextStation(game.radio.station, 1), false);
+        commit();
+        render();
+      }, 'Car radio station: ' + cur.name + '. Tap for the next one.');
+      rb.dataset.setting = 'station';
+      row.appendChild(rb);
+      body.appendChild(row);
+    }
 
     // Time of day: live cycle, or a fixed time the player picks.
     if (typeof s.liveTime !== 'boolean') s.liveTime = true;

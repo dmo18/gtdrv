@@ -47,6 +47,7 @@ export function createEconomy(game, storage) {
     }
     if (game.touch && game.touch.setHudMode) game.touch.setHudMode(s.hud);
     if (game.hud && game.hud.setHudMode) game.hud.setHudMode(s.hud);
+    if (game.radio && game.radio.sync) game.radio.sync();
     if (game.combatHud && game.combatHud.setHudMode) game.combatHud.setHudMode(s.hud);
     if (game.quality !== s.quality) {
       game.quality = s.quality;

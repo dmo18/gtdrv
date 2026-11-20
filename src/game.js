@@ -19,6 +19,7 @@ import { injectStyles } from './ui/styles.js';
 import { createParkedCars } from './systems/parked.js';
 import { createMapUi } from './systems/mapui.js';
 import { createAudio } from './systems/audio.js';
+import { createRadio } from './systems/radio.js';
 import { createPeds } from './systems/peds.js';
 import { createFleet } from './systems/fleet.js';
 import { createEconomy } from './systems/economy.js';
@@ -39,7 +40,7 @@ import { createEffects } from './render/effects.js';
 import { createGraphics } from './render/graphics.js';
 import { wantsAntialias } from './render/adaptres.js';
 import { createMenu } from './ui/menu.js';
-import { stepBoat, collideBoats, createBoat } from './entities/boat.js';
+import { stepBoat, collideBoats } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
 import { createWater, createWakeTrail } from './render/water.js';
 import { stepAircraft, collideAircraft } from './entities/aircraft.js';
@@ -56,6 +57,7 @@ import { createJetFx } from './render/jetfx.js';
 // Carjacking (core/carjack.js) and the saved place, craft and garage.
 import { createCarjack } from './systems/carjack.js';
 import { createSession } from './systems/session.js';
+import { createSecrets } from './systems/secrets.js';
 
 const SKY = 0x9fc8e8;
 
@@ -308,6 +310,7 @@ export function createGame({ canvas, uiRoot }) {
   game.addSystem(createParkedCars(game));
   game.map = game.addSystem(createMapUi(game, uiRoot));
   game.audio = game.addSystem(createAudio(game));
+  game.radio = game.addSystem(createRadio(game, uiRoot));
   game.peds = game.addSystem(createPeds(game));
   // Saved progress (score, medals, best times, settings) lives in the
   // browser's own storage on this device. Some private modes forbid it.
@@ -334,6 +337,7 @@ export function createGame({ canvas, uiRoot }) {
   game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));
   game.score = game.addSystem(createScore(game));
+  game.secrets = game.addSystem(createSecrets(game));
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
   game.snapCam = () => { snapCam = true; };
@@ -393,6 +397,7 @@ export function createGame({ canvas, uiRoot }) {
     game.world.time = game.time;
     game.world.weather = game.weather || null;
     if (input.consume('respawn')) game.respawnPlayer();
+    if (input.consume('radio') && game.radio) game.radio.cycle();
     if (input.consume('camera')) {
       hud.toast('Camera: ' + chase.cycleView(), 1.2);
     }
