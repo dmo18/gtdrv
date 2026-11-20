@@ -52,7 +52,9 @@ export async function buildGame({ minify = true, prod = minify, outDir = default
     define: { __PROD__: String(prod), __VERSION__: JSON.stringify(pkgVersion) },
     logLevel: 'warning',
   });
-  await cp(join(root, 'src/index.html'), join(dist, 'index.html'));
+  // The splash screen shows the version from package.json.
+  const html = (await read(join(root, 'src/index.html'), 'utf8')).replaceAll('{{VERSION}}', pkgVersion);
+  await writeFile(join(dist, 'index.html'), html);
   await cp(join(root, 'public'), dist, { recursive: true });
   await writeServiceWorker(dist);
 }
