@@ -291,6 +291,7 @@ export function createCarjack(game) {
     canJack,
     isOccupied,
     get busy() { return !!jack; },
+    cancel() { if (jack) finish(false); },
     get jack() { return jack; },
     // For the ENTER prompt and the foot-search filter.
     canEnter: (v) => !isOccupied(v) || canJack(v),

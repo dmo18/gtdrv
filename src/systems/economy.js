@@ -4,6 +4,7 @@
 // is score (src/systems/score.js).
 import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
 import { setHandlingMode } from '../entities/vehicle.js';
+import { RULES } from '../core/weapons.js';
 import { DISTRICTS } from '../world/citygen.js';
 
 const SAVE_EVERY = 20; // seconds, at most, when something changed
@@ -37,6 +38,8 @@ export function createEconomy(game, storage) {
     if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
+    // Hard mode: the player can be hurt and killed (the death flow is combat.js).
+    RULES.invulnerable = s.mortal !== true;
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
     if (game.touch && game.touch.setSteering) {
       const used = game.touch.setSteering(s.steering, s.steerSensitivity, steerFallback);

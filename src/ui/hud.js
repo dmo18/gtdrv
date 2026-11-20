@@ -1,6 +1,7 @@
 // Heads-up display. update() runs every frame, so it only touches the DOM
 // when a displayed value changed and allocates nothing when nothing did.
 import { injectStyles } from './styles.js';
+import { meterPercent } from '../core/health.js';
 
 function el(tag, cls, parent) {
   const e = document.createElement(tag);
@@ -44,6 +45,14 @@ export function createHud(root) {
   minimapCanvas.setAttribute('aria-expanded', 'false');
   const districtEl = el('div', 'rw-district', tl);
   const clockEl = el('div', 'rw-clock', tl);
+  // Hard mode only: health under the minimap (walker hp, or the craft's health aboard).
+  const meter = el('div', 'rw-hpmeter rw-none', tl);
+  meter.setAttribute('role', 'meter');
+  meter.setAttribute('aria-label', 'Health');
+  meter.setAttribute('aria-valuemin', '0');
+  meter.setAttribute('aria-valuemax', '100');
+  const meterFill = el('div', 'rw-hpfill', meter);
+  const meterText = el('span', 'rw-hptext', meter);
   let mapBig = false;
   let mapTimer = 0;
   function setMapBig(on) {
@@ -109,7 +118,7 @@ export function createHud(root) {
   const last = {
     mode: undefined, speed: undefined,
     score: undefined, pending: undefined, combo: undefined, wanted: undefined, district: undefined, clock: undefined,
-    veh: undefined, prompt: null, health: undefined,
+    veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
   };
 
   function setBar(b, pct) {
@@ -170,6 +179,24 @@ export function createHud(root) {
     if (minutes !== last.clock) {
       last.clock = minutes;
       clockEl.textContent = pad2(Math.floor(minutes / 60)) + ':' + pad2(minutes % 60);
+    }
+    const meterOn = s.mortal === true;
+    if (meterOn !== last.meterOn) {
+      last.meterOn = meterOn;
+      meter.classList.toggle('rw-none', !meterOn);
+    }
+    if (meterOn) {
+      const pct = meterPercent(s.health, s.maxHealth || 100, s.vehicleHealth);
+      const craft = s.vehicleHealth !== null && s.vehicleHealth !== undefined;
+      if (pct !== last.meter || craft !== last.meterCraft) {
+        last.meter = pct;
+        last.meterCraft = craft;
+        meterFill.style.transform = 'scaleX(' + (pct / 100).toFixed(2) + ')';
+        meterFill.style.background = 'hsl(' + Math.round(pct * 1.2) + ', 70%, 48%)';
+        meterText.textContent = (craft ? 'CRAFT ' : 'HP ') + pct;
+        meter.classList.toggle('rw-low', pct <= 25);
+        meter.setAttribute('aria-valuenow', String(pct));
+      }
     }
     const veh = s.vehicleHealth === null ? -1 : Math.round(s.vehicleHealth * 100);
     if (veh !== last.veh) {

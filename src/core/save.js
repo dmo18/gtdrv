@@ -122,7 +122,7 @@ export function sanitizeProgress(raw) {
       const s = raw.settings, d = p.settings;
       if (own(s, 'master') && isNum(s.master)) d.master = Math.max(0, Math.min(1, s.master));
       if (own(s, 'musicVol') && isNum(s.musicVol)) d.musicVol = Math.max(0, Math.min(1, s.musicVol));
-      for (const k of ['invertPitch', 'leftHanded', 'police', 'music']) {
+      for (const k of ['invertPitch', 'leftHanded', 'police', 'music', 'mortal']) {
         if (own(s, k) && typeof s[k] === 'boolean') d[k] = s[k];
       }
       if (own(s, 'quality') && QUALITIES.includes(s.quality)) d.quality = s.quality;

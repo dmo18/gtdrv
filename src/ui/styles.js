@@ -311,6 +311,19 @@ const CSS = `
 @keyframes rw-district { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 .rw-clock { display: none; font-size: 12px; text-align: center; color: var(--rw-dim); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
 .rw-full .rw-clock { display: block; }
+.rw-hpmeter {
+  position: relative; height: 14px; margin-top: 5px; border-radius: 7px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.28);
+}
+.rw-hpmeter.rw-none { display: none; }
+.rw-hpfill { position: absolute; inset: 0; transform-origin: left; background: hsl(120, 70%, 48%); transition: transform 0.15s linear; }
+.rw-hpmeter.rw-low { animation: rw-hplow 0.9s ease-in-out infinite; }
+@keyframes rw-hplow { 50% { border-color: #e2503a; } }
+.rw-hptext {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
 .rw-full .rw-district {
   position: static; opacity: 1; animation: none; margin: 4px 0 0; text-align: left;
   white-space: nowrap; overflow: visible;

@@ -1846,15 +1846,29 @@ export function createCombat(game, { seed = 23023 } = {}) {
   const SPOT = { x: 0, z: 0 };
 
   function respawn() {
+    const w = game.player && game.player.walker;
+    if (!w) return;
+    respawnSpot(w.x, w.z, SPOT);
+    reviveAt(SPOT.x, SPOT.z);
+  }
+
+  // Stand the player up at (x, z) with full health and clear weapon cooldowns.
+  function reviveAt(x, z) {
     const p = game.player;
     const w = p && p.walker;
     if (!w) return;
-    respawnSpot(w.x, w.z, SPOT);
+    SPOT.x = x;
+    SPOT.z = z;
     w.x = w.px = SPOT.x;
     w.z = w.pz = SPOT.z;
     w.vx = w.vz = 0;
     if (w.speed !== undefined) w.speed = 0;
     resetActor(w);
+    if (w.arms) {
+      w.arms.cool = 0;
+      w.arms.reloadT = 0;
+      w.arms.reloading = null;
+    }
     if (w.stamina !== undefined) w.stamina = 1;
     // Placed charges fizzle when the player comes back.
     for (let i = 0; i < stickies.length; i++) if (stickies[i].owner === w) fizzle(stickies[i]);
@@ -2134,6 +2148,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     explode: (x, y, z, r, source = null, depth = 0, scale = 1, craft = null) => requestExplosion(x, y, z, r, source, depth, craft, 0, scale),
     craftDestroyed,
     respawn,
+    reviveAt,
     respawnSpot,
     addActor: (a) => addActor(game, a),
     removeActor: (a) => removeActor(game, a),

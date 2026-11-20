@@ -6,6 +6,7 @@ import { createCollisionWorld } from './world/collision.js';
 import { buildCityMesh } from './render/citymesh.js';
 import { createInput, attachKeyboard } from './core/input.js';
 import { defaultProgress } from './core/save.js';
+import { respawnPlacement } from './core/health.js';
 import { createLoop } from './core/loop.js';
 import { createEvents } from './core/events.js';
 import { createRng } from './core/rng.js';
@@ -368,6 +369,25 @@ export function createGame({ canvas, uiRoot }) {
     game.player.wanted = 0;
     snapCam = true;
   });
+  // RESPAWN button: out of any craft (it stays where it is), onto dry land, full health.
+  const spawnSpot = { x: 0, z: 0, ok: false, craftSide: false };
+  game.respawnPlayer = () => {
+    const p = game.player;
+    const w = p.walker;
+    if (game.carjack && game.carjack.cancel) game.carjack.cancel();
+    const v = p.vehicle;
+    const combat = game.combat;
+    respawnPlacement(!!v, p.x, p.z, p.heading, findRescueSpot, (x, z, out) => combat.respawnSpot(x, z, out), spawnSpot);
+    if (v) {
+      v.driver = null;
+      p.vehicle = null;
+      w.heading = w.pheading = v.heading;
+      game.setPlayerMode('foot');
+      events.emit('exit', v);
+    }
+    combat.reviveAt(spawnSpot.x, spawnSpot.z);
+    hud.toast('Respawned', 1.5);
+  };
   game.addSystem(createTutorial(game));
   game.objective = game.addSystem(createObjective(game, uiRoot));
   game.graphics = game.addSystem(createGraphics(game));
@@ -396,6 +416,7 @@ export function createGame({ canvas, uiRoot }) {
     }
     game.time += dt;
     game.world.time = game.time;
+    if (input.consume('respawn')) game.respawnPlayer();
     if (input.consume('camera')) {
       hud.toast('Camera: ' + chase.cycleView(), 1.2);
     }
@@ -598,6 +619,8 @@ export function createGame({ canvas, uiRoot }) {
     h.mode = p.mode === 'foot' ? 'foot' : 'car';
     h.speedKmh = p.vehicle ? Math.abs(p.vehicle.speed) * 3.6 : 0;
     h.health = p.health;
+    h.maxHealth = p.walker.maxHp || 100;
+    h.mortal = game.progress.settings.mortal === true;
     h.armor = p.armor;
     h.time = game.clock;
     h.wanted = p.wanted;

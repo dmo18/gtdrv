@@ -62,6 +62,7 @@ const ICONS = {
   lock: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   reload: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  respawn: '<circle cx="12" cy="7" r="2.4"/><path d="M8 20v-5a4 4 0 0 1 8 0v5"/><path d="M4 11a8 8 0 0 1 3-6M20 11a8 8 0 0 0-3-6" opacity="0.6"/>',
   more: '<circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>',
   // Armed craft (original line drawings).
   gun: '<path d="M3 10h12l2-2h4v8h-4l-2-2H3z"/><path d="M6 14v3M10 14v3"/>',
@@ -676,6 +677,7 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
     press() { src.sprint = true; }, release() { src.sprint = false; }, buzz: false });
   addAction({ id: 'map', label: 'Map', icon: 'map', text: 'MAP', input: 'map' });
+  addAction({ id: 'respawn', label: 'Respawn', icon: 'respawn', text: 'RESPAWN', modes: ['foot', 'car', 'boat', 'plane', 'heli', 'tank'], input: 'respawn' });
   const swapBtn = actions.find((a) => a.id === 'swap').el;
   cancelTargets.push(swapBtn, more);
 

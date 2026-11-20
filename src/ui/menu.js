@@ -441,6 +441,7 @@ export function createMenu(root, game, economy) {
     body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
     body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));
     body.appendChild(toggleRow('Police chases', 'police'));
+    body.appendChild(toggleRow('Hard: you can die', 'mortal'));
 
     const hudRow = h('div', 'rw-menu-setting');
     hudRow.appendChild(h('span', '', 'HUD'));
