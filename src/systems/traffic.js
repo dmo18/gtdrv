@@ -605,8 +605,8 @@ export function driveStep(dr, v, dt, ctx = {}) {
   }
   // Wide vehicles keep a little left of the lane centre.
   let offTarget = -Math.max(0, v.spec.width / 2 - 0.95) + clamp(dr.nudge, -0.6, 0.6);
+  if (dr.mode === 2 || (dr.mode === 1 && dr.tries > 0)) offTarget = -3.5;
   if (dr.mode === 2) {
-    offTarget = -3.2;
     vt = Math.min(vt, 3);
     if (Math.abs(sp) < 0.3 && vt < 0.5 && dr.modeTime > 1.5 && dr.tries < 3) {
       // Wedged beside it: back up again and have another go.
@@ -644,7 +644,8 @@ export function driveStep(dr, v, dt, ctx = {}) {
     const kappa = (2 * ly) / (lx * lx + ly * ly);
     steer = Math.atan(kappa * spec.wheelBase) / maxAng;
   }
-  c.steer = clamp(reverse ? 0 : steer, -1, 1);
+  // Backing up with the wheels turned right swings the nose out left.
+  c.steer = clamp(reverse ? 0.6 : steer, -1, 1);
 
   // --- Pedals. ---
   c.throttle = 0;

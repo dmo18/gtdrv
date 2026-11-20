@@ -158,9 +158,11 @@ test('stops behind a stationary car in its lane without hitting it', () => {
   assert.equal(maxImpact, 0, 'hit the stopped car');
   assert.ok(Math.abs(v.speed) < 0.3, `still moving at ${v.speed.toFixed(2)}`);
   assert.ok(gap > 0.5 && gap < 8, `gap ${gap.toFixed(2)} m`);
-  // Then, eventually, it steers gently round it.
+  // After waiting a while it backs up a little and steers round it.
   simulate([v, block], 25, { onStep() { maxImpact = Math.max(maxImpact, v.impact, block.impact); } });
   assert.ok(maxImpact < 2, `impact while passing ${maxImpact.toFixed(2)}`);
+  const past = (v.x - block.x) * Math.cos(block.heading) + (v.z - block.z) * Math.sin(block.heading);
+  assert.ok(past > 5, `got ${past.toFixed(1)} m past it`);
 });
 
 function crowd(seed) {
