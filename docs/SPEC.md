@@ -8,10 +8,13 @@ existing game: own name, city, characters, art and missions.
 - Runs as a web page. No install, no account, no network after load.
 - Must-haves: a 3D island city to roam, many cars, boats and aircraft
   to hop between, traffic and pedestrians, races and stunt challenges
-  on road, sea and air, money to unlock vehicles, saving progress.
-  Light optional police chases. No combat.
+  on road, sea and air, weapons and shootouts, a short story with a
+  rival crew, police chases, and high scores. No money, shop or
+  unlocks: everything is available from the start.
 - Art: stylised low-poly shapes built in code (no downloaded art).
 - Sound: generated in code (engine, sirens, impacts). No licensed music.
-- Tone: playful and upbeat. No weapons, gore or sexual content.
+- Tone: playful, loud and fun. Action violence is allowed (weapons,
+  explosions, wrecks, pedestrians can be knocked down). Never any blood,
+  gore, dismemberment or sexual content.
 - Target: smooth play (aim 60 frames per second, never under 30) on the
   phone; all controls usable with two thumbs.
