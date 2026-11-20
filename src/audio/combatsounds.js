@@ -1,0 +1,216 @@
+// Weapons, impacts and explosions, generated in code (banks.js registers
+// these and they replace the older, thinner versions of the same names).
+// Every gun has three parts like a real report: a broadband supersonic
+// crack (an N-wave plus a very short noise burst), a muzzle-blast body
+// (100 Hz to 1 kHz) and a short room tail; the reverb and the city slap
+// echo are added at play time. Explosions are split into layers that the
+// audio system scales by size and distance: crack, body, tail, debris.
+// Low parts are passed through `harmonize` so a phone speaker still
+// carries them (see dsp.js).
+import {
+  R, TAU, white, lp1, svf, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter,
+  warm, harmonize, addNWave, smoothRandom,
+} from './dsp.js';
+
+const len = (s) => Math.round(s * R.sr);
+const z = (n) => new Float32Array(n);
+
+function band(out, rng, at, decay, amp, type, f, q = 0.7, attack = 0.0005) {
+  const t = z(out.length);
+  addBurst(t, at, decay, amp, rng, { attack });
+  filter(t, out, biquad(type, f, q), { add: true, loop: false });
+}
+function thump(out, f0, f1, tc, amp, tau, at = 0) {
+  let ph = 0;
+  for (let i = at; i < out.length; i++) {
+    const t = (i - at) / R.sr;
+    ph += (TAU * (f1 + (f0 - f1) * Math.exp(-t / tc))) / R.sr;
+    out[i] += Math.sin(ph) * amp * Math.min(1, t / 0.0012) * Math.exp(-t / tau);
+  }
+}
+// A gun report. o: crackMs, crack, body f/decay, low f0/f1, tail decay.
+function report(rng, o) {
+  const out = z(len(o.dur));
+  addNWave(out, 0, o.crackMs, o.crack);
+  band(out, rng, 0, Math.max(0.002, o.crackMs * 0.003), o.crack * 1.2, 'hp', 1400);
+  band(out, rng, 0, 0.008, o.crack * 0.9, 'bp', 2400, 0.9);
+  band(out, rng, len(0.0006), o.bodyDecay, o.body * 1.5, 'bp', o.bodyF, 0.8, 0.0008);
+  band(out, rng, len(0.0006), o.bodyDecay * 1.6, o.body * 0.5, 'lp', o.bodyF * 0.6, 0.7, 0.001);
+  thump(out, o.f0, o.f1, 0.012, o.low * 0.4, o.lowTau * 0.8);
+  band(out, rng, len(0.008), o.tail, o.tailAmp, 'lp', o.tailF, 0.7, 0.006);
+  for (const [t, f, d, a] of o.mech || []) addMode(out, len(t), f, d, a, R.sr, rng.next() * TAU);
+  harmonize(out, 130, 0.35, { hi: 1100 });
+  warm(out, o.drive || 1.6, 0.2);
+  return fadeEdges(normalize(removeDC(out), 0.95), 2, 400);
+}
+
+export const COMBAT_SHOTS = {
+  gunPistol(rng) {
+    return report(rng, {
+      dur: 0.55, crackMs: 0.5, crack: 1, bodyF: 750, bodyDecay: 0.018, body: 0.9,
+      f0: 210 + rng.next() * 30, f1: 80, low: 0.55, lowTau: 0.03, tail: 0.11, tailAmp: 0.16, tailF: 1600,
+      mech: [[0.035, 2900, 0.006, 0.05], [0.04, 1750, 0.01, 0.04]],
+    });
+  },
+  gunSmg(rng) {
+    return report(rng, {
+      dur: 0.32, crackMs: 0.35, crack: 1, bodyF: 1050, bodyDecay: 0.011, body: 0.8,
+      f0: 260 + rng.next() * 40, f1: 120, low: 0.4, lowTau: 0.018, tail: 0.06, tailAmp: 0.12, tailF: 2000,
+      mech: [[0.02, 3300, 0.004, 0.04]],
+    });
+  },
+  gunRifle(rng) {
+    return report(rng, {
+      dur: 0.8, crackMs: 0.8, crack: 1.2, bodyF: 600, bodyDecay: 0.03, body: 1,
+      f0: 160 + rng.next() * 20, f1: 55, low: 0.8, lowTau: 0.05, tail: 0.22, tailAmp: 0.2, tailF: 1200, drive: 1.9,
+    });
+  },
+  gunScatter(rng) {
+    return report(rng, {
+      dur: 1.1, crackMs: 1.2, crack: 1, bodyF: 520, bodyDecay: 0.055, body: 1.2,
+      f0: 120, f1: 42, low: 1, lowTau: 0.09, tail: 0.32, tailAmp: 0.28, tailF: 900, drive: 2,
+      // the pump: back and forward
+      mech: [[0.5, 1500, 0.012, 0.05], [0.5, 3100, 0.006, 0.04], [0.66, 1250, 0.014, 0.06], [0.66, 2600, 0.007, 0.05]],
+    });
+  },
+  // A short heavy rattle element for aircraft guns: lower and fatter.
+  gunCannon(rng) {
+    return report(rng, {
+      dur: 0.4, crackMs: 1, crack: 0.9, bodyF: 420, bodyDecay: 0.03, body: 1.2,
+      f0: 130, f1: 60, low: 1, lowTau: 0.04, tail: 0.12, tailAmp: 0.2, tailF: 1000, drive: 2.2,
+    });
+  },
+
+  // ---- explosion layers ----
+  blastCrack(rng) {
+    const out = z(len(0.4));
+    addNWave(out, 0, 3.5, 1);
+    band(out, rng, 0, 0.012, 1, 'hp', 900);
+    band(out, rng, 0, 0.04, 0.7, 'bp', 1600, 0.7);
+    band(out, rng, 0, 0.06, 0.6, 'bp', 500, 0.8);
+    warm(out, 2.2, 0.3);
+    return fadeEdges(normalize(removeDC(out), 0.95), 2, 800);
+  },
+  blastBody(rng) {
+    const n = len(2.2);
+    const out = z(n);
+    thump(out, 85 + rng.next() * 10, 28, 0.14, 1, 0.45);
+    // the fireball roar: noise whose low-pass closes as it dies
+    const b = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      b[i] *= Math.min(1, t / 0.006) * Math.exp(-t / 0.32);
+    }
+    const lo = svf(b, z(n), (u) => 180 + 3200 * Math.exp(-u * 7), 0.8, 'lp');
+    for (let i = 0; i < n; i++) out[i] += lo[i] * 1.8;
+    harmonize(out, 110, 0.9, { hi: 1000 });
+    warm(out, 2.4, 0.35);
+    return fadeEdges(normalize(removeDC(out), 0.95), 4, 3000);
+  },
+  blastTail(rng) {
+    const n = len(4.5);
+    const out = white(n, rng);
+    const m = smoothRandom(n, 14, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      out[i] *= Math.min(1, t / 0.12) * Math.exp(-t / 1.25) * (0.7 + 0.3 * m[i]);
+    }
+    const mid = out.slice();
+    lp1(out, 160, { loop: false, passes: 3 });
+    lp1(mid, 700, { loop: false, passes: 2 });
+    for (let i = 0; i < n; i++) out[i] = out[i] * 7 + mid[i] * 0.6;
+    harmonize(out, 120, 0.8, { hi: 800 });
+    return fadeEdges(normalize(removeDC(out), 0.9), 64, 6000);
+  },
+  debris(rng) {
+    const n = len(2.6);
+    const g = z(n);
+    const out = z(n);
+    for (let k = 0; k < 70; k++) {
+      const t = Math.min(2.4, 0.15 - Math.log(1 - rng.next() * 0.995) * 0.45);
+      const a = rng.next() * (1 - t / 2.6);
+      addBurst(g, len(t), 0.0015 + rng.next() * 0.004, a, rng);
+      if (k % 6 === 0) addMode(out, len(t), 900 + rng.next() * 3000, 0.02 + rng.next() * 0.04, a * 0.15, R.sr, rng.next() * TAU);
+      if (k % 9 === 0) thump(out, 140, 70, 0.02, a * 0.4, 0.03, len(t));
+    }
+    filter(g, out, biquad('hp', 1500, 0.7), { add: true, loop: false });
+    filter(g, out, biquad('bp', 600, 0.9), { gain: 0.6, add: true, loop: false });
+    return fadeEdges(normalize(removeDC(out), 0.85), 16, 3000);
+  },
+
+  // ---- impacts by surface ----
+  impactConcrete(rng) {
+    const out = z(len(0.3));
+    band(out, rng, 0, 0.002, 1, 'hp', 1800);
+    band(out, rng, 0, 0.012, 0.6, 'bp', 2400, 1.2);
+    band(out, rng, len(0.004), 0.06, 0.25, 'bp', 900, 0.7, 0.004); // dust
+    thump(out, 260, 140, 0.01, 0.3, 0.015);
+    return fadeEdges(normalize(removeDC(out), 0.85), 2, 600);
+  },
+  impactMetal(rng) {
+    const out = z(len(0.45));
+    band(out, rng, 0, 0.0015, 1, 'hp', 2500);
+    const base = 1100 + rng.next() * 900;
+    for (const [r, d, a] of [[1, 0.12, 0.4], [2.76, 0.07, 0.3], [5.4, 0.04, 0.2], [1.53, 0.09, 0.2]]) {
+      addMode(out, 0, base * r, d, a, R.sr, rng.next() * TAU);
+    }
+    thump(out, 300, 180, 0.01, 0.25, 0.02);
+    return fadeEdges(normalize(removeDC(out), 0.85), 2, 1200);
+  },
+  bodyHit(rng) {
+    const out = z(len(0.25));
+    band(out, rng, 0, 0.004, 0.7, 'bp', 1300, 0.9); // the slap
+    thump(out, 170, 80, 0.02, 1, 0.04);
+    band(out, rng, 0, 0.02, 0.4, 'lp', 700);
+    harmonize(out, 120, 0.7, { hi: 900 });
+    return fadeEdges(normalize(removeDC(out), 0.85));
+  },
+  thud(rng) {
+    const out = z(len(0.5));
+    thump(out, 95 + rng.next() * 40, 38, 0.05, 1, 0.08);
+    band(out, rng, 0, 0.025, 0.7, 'bp', 320, 0.9, 0.001); // panel knock
+    band(out, rng, 0, 0.004, 0.25, 'hp', 2000);
+    harmonize(out, 120, 0.8, { hi: 900 });
+    warm(out, 1.8, 0.3);
+    return fadeEdges(normalize(removeDC(out), 0.9));
+  },
+  casing(rng) {
+    // a brass case dropping: three or four bright bounces
+    const out = z(len(0.5));
+    let t = 0.01;
+    let a = 0.6;
+    for (let k = 0; k < 4; k++) {
+      const f = 3300 + rng.next() * 1500;
+      addMode(out, len(t), f, 0.025, a, R.sr, rng.next() * TAU);
+      addMode(out, len(t), f * 1.47, 0.015, a * 0.5, R.sr, rng.next() * TAU);
+      t += 0.07 + rng.next() * 0.06 * (1 - k * 0.2);
+      a *= 0.55;
+    }
+    return fadeEdges(normalize(removeDC(out), 0.6), 2, 300);
+  },
+
+  // ---- rockets ----
+  rocketLaunch(rng) {
+    const n = len(1.6);
+    const out = z(n);
+    band(out, rng, 0, 0.01, 0.8, 'hp', 1000); // ignition
+    thump(out, 110, 50, 0.04, 0.7, 0.12);
+    const w = white(n, rng);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      w[i] *= Math.min(1, t / 0.03) * Math.exp(-t / 0.7);
+    }
+    const roar = svf(w, z(n), (u) => 500 + 2500 * Math.pow(u, 0.5), 0.9, 'bp');
+    const hiss = z(n);
+    filter(w, hiss, biquad('hp', 3500, 0.7), { loop: false });
+    for (let i = 0; i < n; i++) out[i] += roar[i] * 1.6 + hiss[i] * 0.5;
+    harmonize(out, 120, 0.5);
+    return fadeEdges(normalize(removeDC(out), 0.9), 8, 2500);
+  },
+};
+
+// Extra variants per name (banks.js merges these).
+export const COMBAT_VARIANTS = {
+  gunPistol: 3, gunSmg: 3, gunRifle: 2, gunCannon: 2, blastCrack: 2, blastBody: 2, debris: 2,
+  impactConcrete: 3, impactMetal: 3, bodyHit: 2, thud: 3, casing: 2,
+};

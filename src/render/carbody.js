@@ -126,7 +126,7 @@ function shape(spec) {
   const mid = (x0 + x1) / 2;
   const hf = x1 - mid, hr = mid - x0;
   const topC = curve(S.top), botC = curve(S.bottom);
-  const R = wr * 1.15; // arch radius
+  const R = wr * 1.06 + 0.03; // arch radius: hugs the tyre
   const wheels = [ax, -ax].filter((wx) => wx - R > x0 + 0.05 && wx + R < x1 - 0.05);
   const bed = S.bed ? [S.bed[0] * L, S.bed[1] * L] : null;
   const planW = (x) => {
@@ -175,7 +175,10 @@ function shape(spec) {
 }
 
 const Q = 2.6; // superellipse exponent of the body shoulder / top
-const SIDE_NEAR = [[0, 0.95], [0.2, 0.975], [0.45, 0.995], [0.72, 1], [1, 0.985]];
+// Side section (fraction of the sill-to-shoulder height, fraction of the
+// plan half width): tucked-under sill, a full lower door, a small step
+// that reads as a character line, then the shoulder.
+const SIDE_NEAR = [[0, 0.92], [0.07, 0.96], [0.18, 0.985], [0.36, 0.997], [0.54, 1], [0.7, 0.998], [0.735, 0.986], [0.86, 0.988], [1, 0.972]];
 const SIDE_FAR = [[0, 0.96], [1, 0.985]];
 
 // Half ring of the lower body at x: [[z, y], ...] bottom to top centre.
@@ -187,7 +190,7 @@ function lowerHalf(sh, x, near) {
   const out = [];
   for (const [f, k] of near ? SIDE_NEAR : SIDE_FAR) out.push([w * k, y0 + (c - y0) * f]);
   const ws = w * 0.985;
-  const K = near ? 5 : 2;
+  const K = near ? 8 : 3;
   if (sh.inBed(x)) {
     const floor = sh.S.floor * sh.H;
     const ww = Math.max(0.01, ws - 0.07);
@@ -233,23 +236,27 @@ function bandOf(r, J) {
 
 function lowerStations(sh, near) {
   const xs = [];
-  const tips = near ? [0, 0.25, 0.45, 0.6, 0.74, 0.86, 0.94, 0.98] : [0, 0.6, 0.93];
+  const tips = near ? [0, 0.15, 0.3, 0.45, 0.58, 0.7, 0.8, 0.88, 0.94, 0.975, 0.993] : [0, 0.45, 0.75, 0.93];
   for (const f of tips) {
     xs.push(sh.tipX(f, true), sh.tipX(f, false));
   }
-  const fill = near ? 0.42 : 1.1;
+  const fill = near ? 0.17 : 0.55;
   const n = Math.max(2, Math.ceil((sh.x1 - sh.x0) / fill));
   for (let i = 1; i < n; i++) xs.push(sh.x0 + ((sh.x1 - sh.x0) * i) / n);
   if (near) {
     for (const wx of sh.wheels) {
       xs.push(wx + sh.R + 0.004, wx + sh.R - 0.002, wx - sh.R + 0.002, wx - sh.R - 0.004);
-      for (let k = 1; k < 7; k++) xs.push(wx + sh.R * Math.cos((k / 7) * Math.PI));
+      for (let k = 1; k < 12; k++) xs.push(wx + sh.R * Math.cos((k / 12) * Math.PI));
     }
     const S = sh.S;
     for (const s of S.seams || []) xs.push(s * sh.L, s * sh.L + 0.012);
     if (S.hood != null) xs.push(S.hood * sh.L, S.hood * sh.L + 0.012);
     if (S.boot != null) xs.push(S.boot * sh.L, S.boot * sh.L - 0.012);
     if (sh.bed) xs.push(sh.bed[0], sh.bed[0] - 0.006, sh.bed[1], sh.bed[1] + 0.006);
+  } else {
+    for (const wx of sh.wheels) {
+      for (let k = 0; k <= 4; k++) xs.push(wx + sh.R * Math.cos((k / 4) * Math.PI));
+    }
   }
   const inside = xs.filter((x) => x >= sh.x0 - 1e-6 && x <= sh.x1 + 1e-6);
   return uniqSorted(inside, 0.0012);
@@ -291,7 +298,7 @@ function ghHalf(sh, gs, x, near) {
     out.push([wb + (wt - wb) * ((h - rail) / Math.max(h, 1e-4)), R - rail]);
   }
   out.push([wt, R - rail * 0.25]);
-  const K = near ? 4 : 1;
+  const K = near ? 6 : 2;
   for (let k = 1; k <= K; k++) {
     const a = (k / K) * Math.PI / 2;
     out.push([wt * 0.97 * spow(Math.cos(a), 0.55), R + crown * spow(Math.sin(a), 0.8)]);
@@ -303,7 +310,7 @@ function ghHalf(sh, gs, x, near) {
 function ghStations(sh, gs, near) {
   const g = gs.g, L = sh.L;
   const xs = [gs.xC, gs.xR0, gs.xR1, gs.xA];
-  const n = near ? 10 : 3;
+  const n = near ? 18 : 5;
   for (let i = 1; i < n; i++) xs.push(gs.xC + ((gs.xA - gs.xC) * i) / n);
   if (near) {
     for (const v of g.side) xs.push(v * L);
@@ -430,8 +437,6 @@ export function buildCar(spec, near = true) {
     return false;
   };
   const hoodSeam = (x) => (S.hood != null && x > S.hood * L && x < S.hood * L + 0.012) || (S.boot != null && x < S.boot * L && x > S.boot * L - 0.012);
-  const isHead = (jj, c, n) => S.head && n[0] > 0.42 && c[0] > sh.mid && S.head.bands.includes(jj) && Math.abs(c[2]) > S.head.z[0] * hw && Math.abs(c[2]) < S.head.z[1] * hw;
-  const isTail = (jj, c, n) => S.tail && n[0] < -0.42 && c[0] < sh.mid && S.tail.bands.includes(jj) && Math.abs(c[2]) > S.tail.z[0] * hw && Math.abs(c[2]) < S.tail.z[1] * hw;
   const bedGap = (x) => sh.bed && ((x > sh.bed[0] - 0.007 && x < sh.bed[0] + 0.001) || (x > sh.bed[1] - 0.001 && x < sh.bed[1] + 0.007));
   const out = { col: paint, cls: CLS.PAINT };
   const pick = (col, cls) => {
@@ -439,14 +444,18 @@ export function buildCar(spec, near = true) {
     out.cls = cls;
     return out;
   };
+  const front = (n, x) => n[0] > 0.55 && x > sh.mid;
+  const rear = (n, x) => n[0] < -0.55 && x < sh.mid;
   emitGrid(acc, P, (i, r, c, n) => {
     const jj = bandOf(r, J);
     const x = c[0], az = Math.abs(c[2]);
     out.col = paint;
     out.cls = CLS.PAINT;
     if (!near) {
-      if (n[0] > 0.5 && jj === 0 && x > sh.mid && az < hw * 0.6) return pick(GRILLE, CLS.TRIM);
       if (jj === 0 && Math.abs(n[1]) < 0.7 && c[1] < sh.bottom(x) + 0.08) return pick(TRIM, CLS.TRIM);
+      if (front(n, x) && jj === 1 && az < hw * 0.55) return pick(GRILLE, CLS.TRIM);
+      if (front(n, x) && jj === 2 && az > hw * 0.45) return pick(0xdfe6ee, CLS.GLOW);
+      if (rear(n, x) && jj === 2 && az > hw * 0.4) return pick(0xc01414, CLS.GLOW);
       return out;
     }
     if (sh.inBed(x) || bedGap(x)) {
@@ -454,42 +463,15 @@ export function buildCar(spec, near = true) {
     }
     if (jj < nSide + 1 && seamAt(x) && c[1] > sh.bottom(x) + 0.02) return pick(SEAM, CLS.TRIM);
     if (jj >= nSide + 1 && hoodSeam(x)) return pick(SEAM, CLS.TRIM);
-    if (isHead(jj, c, n) || isTail(jj, c, n)) return pick(TRIM, CLS.TRIM);
-    if (n[0] > 0.42 && x > sh.mid) {
-      if (jj <= 1 && az < S.intake * hw) return pick(TRIM, CLS.TRIM);
-      if (S.grille.bands.includes(jj) && az < S.grille.z * hw) return pick(GRILLE, CLS.TRIM);
-    }
-    if (n[0] < -0.42 && x < sh.mid && jj === 0) return pick(TRIM, CLS.TRIM);
-    if (S.skirt && jj === 0 && Math.abs(n[2]) > 0.3) return pick(TRIM, CLS.TRIM);
-    if (id === 'police' && jj >= 1 && jj <= 3 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0xf4f4f2, CLS.LIVERY);
-    if (id === 'taxi' && jj === 3 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0x161616, CLS.LIVERY);
+    // Dark lower sill and bumper lip all round.
+    if (jj === 0) return pick(TRIM, CLS.TRIM);
+    if (S.skirt && jj === 1 && Math.abs(n[2]) > 0.3) return pick(TRIM, CLS.TRIM);
+    if (id === 'police' && jj >= 2 && jj <= 5 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0xf4f4f2, CLS.LIVERY);
+    if (id === 'taxi' && jj === 5 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0x161616, CLS.LIVERY);
     return out;
   });
-  if (near) {
-    const lampFace = (isLamp, info) => (i, r, c, n) => {
-      const jj = bandOf(r, J);
-      if (!isLamp(jj, c, n)) return null;
-      const az = Math.abs(c[2]);
-      let cell = c[2] < 0 ? 0 : 1;
-      if (info === S.head) {
-        if (az > S.head.ind * hw) cell = 3;
-      } else {
-        if (az < S.tail.rev * hw) cell = 1;
-        else if (c[2] > 0) cell = 3;
-        else cell = 0;
-        if (az > 0.94 * hw) cell = 2;
-      }
-      out.col = paint;
-      out.cls = 0;
-      out.u = (cell + 0.5) / 4;
-      out.v = 0.5;
-      return out;
-    };
-    if (S.head) emitGrid(headAcc, P, lampFace(isHead, S.head), { offset: 0.006 });
-    if (S.tail) emitGrid(tailAcc, P, lampFace(isTail, S.tail), { offset: 0.006 });
-    out.u = 0;
-    out.v = 0;
-  }
+  out.u = 0;
+  out.v = 0;
 
   // Greenhouse.
   const gs = ghShape(sh);

@@ -27,7 +27,8 @@ import {
   RULES, WEAPONS, MOUNTS, createArms, nextWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
-import { createSeeker, resetSeeker, stepSeeker } from '../core/seeker.js';
+import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
+import { targetPoint, angleTo, lineOfSight } from '../core/aim.js';
 
 // ---------------------------------------------------------------------
 // Tunables (COMBAT.md)
@@ -52,13 +53,14 @@ export const LIVE_T = 1.2; // seconds an explosion counts as "live"
 export const RESPAWN_CLEAR = 60;
 export const GRAVITY = 9.81;
 export const WRECK_T = 3; // s from the blast until the wreck hull is removed
-export const CAPS = { actors: 36, projectiles: 24, explosions: 4, burning: 4, decals: 24, queue: 8 };
+export const CAPS = { actors: 40, projectiles: 24, explosions: 4, burning: 4, decals: 24, queue: 8 };
 // docs/ARMS.md: live projectiles by type, stickies, throwing, mounts.
 export const TYPE_CAPS = { missile: 4, bomb: 6, shell: 4, thrown: 6 };
 export const THROWN_PER_PLAYER = 3;
 export const STICKY_MAX = 4, STICKY_LIFE = 120, STICKY_FAR = 400, STICKY_GAP = 0.08;
 export const STICKY_BEEP_SLOW = 1.1, STICKY_BEEP_FAST = 0.25; // s between beeps, speeding up
-export const MISSILE_PROX = 2.5;
+export const MISSILE_PROX = 3.5;
+export const MISSILE_ASSIST = 18 * Math.PI / 180; // unlocked missile: homes on whatever is this close to the nose
 export const OWN_BLAST = 0.25; // own munition vs own craft
 export const THROW_PITCH_LO = -0.2, THROW_PITCH_HI = 0.6, THROW_EL = 0.6; // rad: low enough to land before the fuse
 export const PREVIEW_PTS = 24, PREVIEW_EVERY = 6, PREVIEW_STEPS = 300;
@@ -226,14 +228,69 @@ function emitHit(game, target, source, amount, kind, y) {
   emit(game, 'hit');
 }
 
+// Height of the bullet hit on the craft being damaged (NaN = unknown, counts
+// as a cabin hit). Set by the hitscan sites right before damage().
+let HIT_Y = NaN;
+export function setHitY(y) {
+  HIT_Y = y;
+}
+
+// Occupants: a craft may carry `occ` (hp per seat, seat 0 = driver) and
+// `occDown(craft, seat, source, kind)`, set by its owner (police). A bullet
+// into the cabin hurts the first live seat, a blast hurts every seat, a
+// wreck kills all. The owner turns a dead seat into a body and events.
+const OCC_BLAST = 0.6;
+export function occupantsAlive(c) {
+  let n = 0;
+  if (c && c.occ) for (let i = 0; i < c.occ.length; i++) if (c.occ[i] > 0) n++;
+  return n;
+}
+function seatDown(game, c, seat, source, kind) {
+  c.occ[seat] = 0;
+  if (c.occDown) c.occDown(c, seat, source, kind);
+}
+export function killOccupants(game, c, source, kind) {
+  if (!c || !c.occ) return 0;
+  let n = 0;
+  for (let i = 0; i < c.occ.length; i++) {
+    if (c.occ[i] > 0) {
+      seatDown(game, c, i, source, kind);
+      n++;
+    }
+  }
+  return n;
+}
+function hurtOccupants(game, c, amount, source, kind, hitY) {
+  if (kind === 'bullet') {
+    const h = (c.spec && c.spec.height) || 1.5;
+    if (Number.isFinite(hitY) && hitY - craftBase(game, c) < h * 0.3) return; // low: engine, wheels
+    for (let i = 0; i < c.occ.length; i++) {
+      if (!(c.occ[i] > 0)) continue;
+      c.occ[i] -= amount;
+      if (c.occ[i] <= 0) seatDown(game, c, i, source, kind);
+      return;
+    }
+  } else if (kind === 'blast') {
+    for (let i = 0; i < c.occ.length; i++) {
+      if (!(c.occ[i] > 0)) continue;
+      c.occ[i] -= amount * OCC_BLAST;
+      if (c.occ[i] <= 0) seatDown(game, c, i, source, kind);
+    }
+  }
+}
+
 function damageCraft(game, c, amount, source, kind, px, pz) {
   if (c.wrecked || c.removed) return 0;
+  const hitY = HIT_Y;
+  HIT_Y = NaN;
   const armor = c.spec && c.spec.armor;
   const applied = amount * (CRAFT_MULT[kind] ?? 1) * (armor && armor[kind] !== undefined ? armor[kind] : 1);
   if (!(applied > 0)) return 0;
   c.health -= applied;
   c.lastHitBy = source;
+  c.lastKind = kind;
   c.combatHit = true;
+  if (c.occ) hurtOccupants(game, c, amount, source, kind, hitY);
   c.hitT = HIT_FLASH;
   // Depth an explosion of this craft would have (blast chains count up).
   c.chainDepth = kind === 'blast' && curDepth >= 0 ? curDepth + 1 : kind === 'fire' ? (c.chainDepth || 0) : 0;
@@ -557,6 +614,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
   // chain depth allows) after a short beat.
   function craftDestroyed(c, depth) {
     stopBurning(c);
+    if (c.occ) killOccupants(game, c, c.lastHitBy, c.lastKind || 'blast');
     c.scorched = true;
     if (depth > MAX_DEPTH) {
       // Chain limit: no blast, but the hull still goes away.
@@ -628,6 +686,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       craft.health = 0;
       craft.scorched = true;
       stopBurning(craft);
+      if (craft.occ) killOccupants(game, craft, source, 'blast');
       if (game.player && game.player.vehicle === craft) ejectPlayer(craft);
     }
     // People: damage with falloff; everyone inside goes down.
@@ -934,6 +993,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         const target = TR.actor || TR.craft;
         if (target) {
           if (w.push && TR.actor) setPush(d.x * w.push, d.z * w.push);
+          if (TR.craft) setHitY(hy);
           damage(game, target, w.dmg, actor, 'bullet');
         }
         emitShot(actor, id, mx, my, mz, d.x, d.y, d.z, hx, hy, hz, kind);
@@ -1039,7 +1099,10 @@ export function createCombat(game, { seed = 23023 } = {}) {
       trace(game, mx, my, mz, d.x, d.y, d.z, m.range, shooter, c, TR);
       const t = TR.actor || TR.craft;
       const kind = TR.kind, hx = TR.x, hy = TR.y, hz = TR.z;
-      if (t) damage(game, t, m.dmg, src, 'bullet');
+      if (t) {
+        if (TR.craft) setHitY(hy);
+        damage(game, t, m.dmg, src, 'bullet');
+      }
       emitShot(src, id, mx, my, mz, d.x, d.y, d.z, hx, hy, hz, kind);
     } else {
       const pr = freeProjectile();
@@ -1776,6 +1839,32 @@ export function createCombat(game, { seed = 23023 } = {}) {
   const MZ2 = { x: 0, y: 0, z: 0 };
   const AIMV = { x: 0, y: 0, z: 0 };
 
+  // Best craft (or person) within MISSILE_ASSIST of the fire direction.
+  const ATP = { x: 0, y: 0, z: 0 };
+  function assistTarget(v, dir) {
+    const ray = noseRay(v, game.seaY || 0);
+    let best = null, bA = MISSILE_ASSIST;
+    const vs = game.vehicles;
+    const sea = game.seaY || 0;
+    for (let pass = 0; pass < 2; pass++) {
+      const list = pass === 0 ? vs : game.actors;
+      if (!list) continue;
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        if (!t || t === v || !targetAlive(t) || (pass === 1 && t.team === 'player')) continue;
+        targetPoint(t, sea, ATP);
+        const dx = ATP.x - ray.x, dy = ATP.y - ray.y, dz = ATP.z - ray.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 100 || d2 > 600 * 600) continue;
+        const a = angleTo(ray.x, ray.y, ray.z, dir.x, dir.y, dir.z, ATP.x, ATP.y, ATP.z);
+        if (a >= bA || !lineOfSight(game.collision, ray.x, ray.y, ray.z, ATP.x, ATP.y, ATP.z)) continue;
+        best = t;
+        bA = a;
+      }
+    }
+    return best;
+  }
+
   function craftControls(w, v, input, dt) {
     const hk = hooksFor(v);
     if (hk.controls) hk.controls(game, v, input, dt);
@@ -1789,7 +1878,10 @@ export function createCombat(game, { seed = 23023 } = {}) {
     if (input.held && input.held('fire2') && mountFor(arms, 1)) {
       const id = mountFor(arms, 1);
       mountAim(v, 1, id, AIMV);
-      const t = MOUNTS[id].type === 'missile' && seeker.state === 'locked' ? seeker.target : null;
+      const isMsl = MOUNTS[id].type === 'missile';
+      let t = isMsl && seeker.state === 'locked' ? seeker.target : null;
+      // No lock yet: the missile still homes on what the nose points at.
+      if (isMsl && !t) t = assistTarget(v, AIMV);
       fireMount(v, 1, AIMV.x, AIMV.y, AIMV.z, w, t);
     }
     if (input.consume && input.consume('drop') && arms.drop) {

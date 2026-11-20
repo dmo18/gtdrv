@@ -1,0 +1,19 @@
+{
+  "name": "rustwater-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor wrapper that packages the built Rustwater game (../dist) as an Android app",
+  "license": "UNLICENSED",
+  "scripts": {
+    "sync": "npx cap sync android",
+    "apk": "npm run sync && cd native && ./gradlew assembleDebug",
+    "aab": "npm run sync && cd native && ./gradlew bundleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/core": "8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

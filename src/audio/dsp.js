@@ -186,6 +186,59 @@ export function soft(buf, drive = 1) {
   return buf;
 }
 
+// Asymmetric saturation relative to the buffer's own peak, keeping that
+// peak: odd and even harmonics (a "throaty" exhaust, a fat boom).
+export function warm(buf, drive = 2, asym = 0.25) {
+  const p = peak(buf);
+  if (p < 1e-9) return buf;
+  const k = drive / p;
+  let q = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const x = buf[i] * k;
+    const y = Math.tanh(x + asym * x * x * (x > 0 ? 0.5 : 0.25));
+    buf[i] = y;
+    const a = y < 0 ? -y : y;
+    if (a > q) q = a;
+  }
+  return scale(removeDC(buf), p / (q || 1));
+}
+
+// Phone speakers barely move below ~250 Hz, so energy under `fc` is
+// mostly lost there. This adds its harmonics (the ear hears the missing
+// fundamental): the low band is clipped hard, the result band-limited
+// to fc*1.6 .. hi and mixed back at `amount` of the low band's peak.
+export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false, sr = R.sr, drive = 4 } = {}) {
+  const n = buf.length;
+  const low = new Float32Array(n);
+  filter(buf, low, biquad('lp', fc, 0.7, sr), { loop, sr });
+  filter(low, low, biquad('lp', fc, 0.7, sr), { loop, sr });
+  const p = peak(low);
+  if (p < 1e-9) return buf;
+  const k = drive / p;
+  for (let i = 0; i < n; i++) {
+    const x = low[i] * k;
+    // rectified plus clipped: strong 2nd and 3rd harmonics
+    low[i] = Math.tanh(x) * 0.6 + Math.abs(Math.tanh(x * 0.8)) * 0.8;
+  }
+  filter(low, low, biquad('hp', fc * 1.6, 0.7, sr), { loop, sr });
+  filter(low, low, biquad('hp', fc * 1.6, 0.7, sr), { loop, sr });
+  filter(low, low, biquad('lp', hi, 0.7, sr), { loop, sr });
+  const q = peak(low) || 1;
+  const g = (amount * p) / q;
+  for (let i = 0; i < n; i++) buf[i] += low[i] * g;
+  return buf;
+}
+
+// An N-wave (supersonic crack of a bullet or a blast front): a fast rise,
+// linear fall through zero, a fast return, `ms` long, at sample `at`.
+export function addNWave(buf, at, ms, amp, sr = R.sr) {
+  const L = Math.max(4, Math.round((ms / 1000) * sr));
+  for (let j = 0; j < L && at + j < buf.length; j++) {
+    const u = j / L;
+    buf[at + j] += amp * (1 - 2 * u) * Math.min(1, j / 2) * Math.min(1, (L - j) / 2);
+  }
+}
+
 // Add a decaying sine "ping" (a struck mode) at sample `at`, by a
 // two-pole recursion (no trig per sample). loop=true wraps around.
 export function addMode(buf, at, f, decay, amp, sr = R.sr, phase = 0, loop = false) {

@@ -1,0 +1,14 @@
+{
+  "appId": "io.github.dmo18.rustwater",
+  "appName": "Rustwater",
+  "webDir": "../dist",
+  "android": {
+    "path": "native",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "loggingBehavior": "none"
+}

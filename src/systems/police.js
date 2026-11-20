@@ -17,7 +17,7 @@ import { setVehicleLights } from '../render/vehiclemesh.js';
 import { clamp, createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
 import { createPersonMesh, updatePersonMesh } from '../render/personmesh.js';
-import { addActor, removeActor, isPlayerSource, isCraft, canBeHit, layDown } from './combat.js';
+import { addActor, removeActor, isPlayerSource, isCraft, canBeHit, layDown, damage, setPush, occupantsAlive, HP } from './combat.js';
 import {
   createFootActor, placeFootActor, stepFoot, faceToward, aiShoot, hitChance,
   takeSlot, releaseSlot, losRay, playerSpeedOf, playerUp,
@@ -581,6 +581,7 @@ const PATROL_DESPAWN = 280, CHASE_DESPAWN = 320;
 const LEAVE_GONE = 130;
 const CLEARANCE = 12;
 const PATROL_DELAY = 10; // seconds after a chase before a patrol returns
+const BODIES_MAX = 4;
 const STEP_OUT = 22, STEP_OUT_BLOCK = 35; // officers get out this close
 const OUT_COOL = 8; // seconds after re-boarding before stepping out again
 const BLOCK_COOL = 20; // seconds between roadblocks
@@ -604,6 +605,13 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   const chaseCtx = { collision: game.collision, vehicles: game.vehicles, time: 0 };
   const footTarget = { x: 0, z: 0, vx: 0, vz: 0, heading: 0, y: 0, spec: null };
   const officers = [];
+  // Bodies of officers killed inside a car: a small pool of lying actors.
+  const bodies = [];
+  for (let i = 0; i < BODIES_MAX; i++) {
+    const b = createFootActor('police', orng, 'pistol');
+    b.car = null;
+    bodies.push(b);
+  }
   for (let i = 0; i < OFFICERS_MAX; i++) {
     const o = createFootActor('police', orng, 'pistol');
     o.car = null;
@@ -667,6 +675,10 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       if (d.target.team === 'civ') violence += VIOLENCE.civDown;
       else if (d.target.team === 'police') violence += VIOLENCE.officerDown;
     });
+    ev.on('down', (d) => {
+      const t = d && d.target;
+      if (t && t.team === 'police' && t.hp <= 0 && t.car && t.state !== 'dead') seatLost(t);
+    });
     ev.on('explosion', (e) => {
       if (!enabledNow || !e || !isPlayerSource(game, e.source)) return;
       if (witnessed(e.x, e.z)) violence += VIOLENCE.explosion;
@@ -690,7 +702,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
 
   function stepOut(v) {
     let n = 0;
-    for (let k = 0; k < 2; k++) {
+    const seats = v.occ ? occupantsAlive(v) - (v.officers || 0) : 2;
+    for (let k = 0; k < 2 && k < seats; k++) {
       const o = freeOfficer();
       if (!o) break;
       exitPosition(v, game.world || { collision: game.collision, city }, EXIT);
@@ -714,6 +727,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       o.arms.mag[wpn] = WEAPONS[wpn].mag;
       o.active = true;
       o.car = v;
+      o.seatNo = k;
       o.state = 'fight';
       o.think = (k * OFFICER_THINK) / 2;
       n++;
@@ -723,6 +737,61 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       stats.stepOuts++;
     }
     return n;
+  }
+
+  // --- Officers inside cars: hurt through the car (combat.js occupants). ---
+  function crewUp(v) {
+    v.occ = [HP.police, HP.police];
+    v.occDown = occDown;
+    v.copsDead = false;
+  }
+  function freeBody() {
+    let old = null;
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i];
+      if (!b.active) return b;
+      if (!old || b.lifeT > old.lifeT) old = b;
+    }
+    releaseBody(old);
+    return old;
+  }
+  function releaseBody(b) {
+    removeActor(game, b);
+    b.active = false;
+    b.car = null;
+    if (b.mesh) b.mesh.visible = false;
+  }
+  // A seat died: the officer falls out beside the car, dead (blood, heat,
+  // score all come from the normal down event).
+  function occDown(v, seat, source, kind) {
+    const b = freeBody();
+    if (v.spec && v.spec.width && (v.y || 0) < 3) exitPosition(v, game.world || { collision: game.collision, city }, EXIT);
+    else EXIT.ok = false;
+    let x = EXIT.ok ? EXIT.x : v.x - Math.sin(v.heading) * 2;
+    let z = EXIT.ok ? EXIT.z : v.z + Math.cos(v.heading) * 2;
+    if (seat % 2 === 1) {
+      x = 2 * v.x - x;
+      z = 2 * v.z - z;
+    }
+    placeFootActor(b, x, z, v.heading + 1.2);
+    b.active = true;
+    b.car = v;
+    b.seatNo = seat;
+    b.state = 'dead';
+    addActor(game, b);
+    const dx = b.x - v.x, dz = b.z - v.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const push = kind === 'blast' ? 7 : 2;
+    setPush((dx / d) * push, (dz / d) * push);
+    damage(game, b, 999, source, kind === 'ram' ? 'bullet' : kind);
+  }
+  // An officer on foot died: that seat of his car is empty for good.
+  function seatLost(o) {
+    const v = o.car;
+    if (!v || !v.occ) return;
+    const k = o.seatNo;
+    if (k >= 0 && v.occ[k] > 0) v.occ[k] = 0;
+    else for (let i = 0; i < v.occ.length; i++) if (v.occ[i] > 0) { v.occ[i] = 0; break; }
   }
 
   function freeOfficerActor(o) {
@@ -835,6 +904,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   }
 
   function clearOfficers() {
+    for (let i = 0; i < bodies.length; i++) if (bodies[i].active) releaseBody(bodies[i]);
     for (let i = 0; i < officers.length; i++) if (officers[i].active) freeOfficerActor(officers[i]);
   }
 
@@ -844,6 +914,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     v.cop = null;
     v.police = false;
     v.siren = false;
+    v.occ = null;
+    v.occDown = null;
     v.role = null;
     v.controls = null;
     if (v.driver !== 'player') v.driver = null;
@@ -945,6 +1017,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     v.asleep = false;
     v.officers = 0;
     v.outCool = 0;
+    crewUp(v);
     let v0;
     if (role === 'chase') {
       toChase(v);
@@ -1032,6 +1105,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       v.asleep = false;
       v.officers = 0;
       v.outCool = 0;
+      crewUp(v);
       v.cop = createCop(city, game.rng);
       v.ai = v.cop;
       v.driver = v.cop;
@@ -1075,6 +1149,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     heat,
     cars,
     officers,
+    bodies,
+    crewUp,
     stats,
     fixedUpdate(dt) {
       const p = game.player;
@@ -1127,13 +1203,20 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       // Officers on foot first (they also tell us whether police see the player).
       officerSees = false;
       for (let i = 0; i < officers.length; i++) if (officers[i].active) stepOfficer(officers[i], dt);
+      for (let i = 0; i < bodies.length; i++) {
+        const b = bodies[i];
+        if (!b.active) continue;
+        b.px = b.x;
+        b.pz = b.z;
+        if (b.fade >= 1) releaseBody(b);
+      }
 
       // Can any police car see the player?
       if (seenTick++ % 4 === 0) {
         let seen = false;
         for (let i = 0; i < cars.length && !seen; i++) {
           const v = cars[i];
-          if (v.role === 'leave') continue;
+          if (v.role === 'leave' || v.role === 'dead') continue;
           const d = Math.hypot(v.x - p.x, v.z - p.z);
           if (d < SIGHT && (!col || col.lineClear(v.x, v.z, p.x, p.z))) seen = true;
         }
@@ -1175,7 +1258,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       let copDist = Infinity;
       for (let i = 0; i < cars.length; i++) {
         const v = cars[i];
-        if (v.role === 'leave') continue;
+        if (v.role === 'leave' || v.role === 'dead') continue;
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         if (d < copDist) copDist = d;
       }
@@ -1238,6 +1321,19 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
           (v.role === 'patrol' && v.ai && (v.ai.stuck || v.ai.dead) && d > 120)) {
           despawn(i);
           if (v.role === 'chase' || v.role === 'out') chasing--;
+          continue;
+        }
+        if (v.role !== 'dead' && v.occ && !v.copsDead && occupantsAlive(v) === 0) {
+          // Everyone aboard is dead: the car rolls to a stop and stays.
+          v.copsDead = true;
+          v.role = 'dead';
+          v.siren = false;
+          v.ai = null;
+          v.cop = null;
+          v.driver = null;
+        }
+        if (v.role === 'dead') {
+          if (v.controls) hold(v.controls);
           continue;
         }
         if (v.role === 'patrol') patrols++;
@@ -1320,8 +1416,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         if (v.mesh) setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: !!v.siren, time: game.time });
       }
       if (!game.scene) return;
-      for (let i = 0; i < officers.length; i++) {
-        const o = officers[i];
+      for (let i = 0; i < officers.length + bodies.length; i++) {
+        const o = i < officers.length ? officers[i] : bodies[i - officers.length];
         if (!o.active) {
           if (o.mesh && o.mesh.visible) o.mesh.visible = false;
           continue;

@@ -6,7 +6,7 @@
 //   tankBoom    one-shot: the main gun, a hard crack and a long low boom
 //   tankCoax    one-shot: one round of the coaxial gun (a heavy rattle)
 //   tankCrush   one-shot: a car or bench rolled flat, metal crunch
-import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter, soft } from './dsp.js';
+import { R, TAU, white, lp1, removeDC, normalize, fadeEdges, addBurst, addMode, biquad, filter, soft, harmonize, addNWave, warm } from './dsp.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -34,7 +34,13 @@ export const TANK_LOOPS = {
       addMode(clank, at, 640 + rng.next() * 500, 0.035, 0.18, R.sr, 0, true);
       addMode(clank, at, 1500 + rng.next() * 700, 0.02, 0.1, R.sr, 0, true);
     }
-    filter(clank, out, biquad('bp', 1100, 0.8), { gain: 0.9, add: true });
+    filter(clank, out, biquad('bp', 1100, 0.8), { gain: 2.4, add: true });
+    filter(clank, out, biquad('hp', 2500, 0.7), { gain: 0.8, add: true });
+    // diesel clatter: injector knock with every firing, high-passed
+    const knock = z(n);
+    for (let k = 0; k < 48; k++) addBurst(knock, Math.floor((k / 48) * n), 0.0012, 0.6 + 0.4 * rng.next(), rng, { loop: true, attack: 0 });
+    filter(knock, out, biquad('bp', 1700, 1.2), { gain: 0.5, add: true });
+    harmonize(out, 120, 0.9, { loop: true, hi: 1000 });
     return normalize(removeDC(soft(out, 1.3)), 0.8);
   },
   tankTurret(rng) {
@@ -57,8 +63,12 @@ export const TANK_SHOTS = {
   tankBoom(rng) {
     const n = len(2.6);
     const out = z(n);
-    // Crack: a short bright noise burst.
-    addBurst(out, 0, 0.012, 1.6, rng);
+    // Crack: the muzzle shock wave and a short bright noise burst.
+    addNWave(out, 0, 4, 2);
+    const cr = z(n);
+    addBurst(cr, 0, 0.02, 2, rng);
+    filter(cr, out, biquad('hp', 700, 0.7), { add: true, loop: false });
+    filter(cr, out, biquad('bp', 400, 0.8), { gain: 1.2, add: true, loop: false });
     // Body: low noise closing down, a falling thump, a long rumble.
     const body = white(n, rng);
     for (let i = 0; i < n; i++) {
@@ -84,7 +94,9 @@ export const TANK_SHOTS = {
     // The breech: a metallic clunk as it recoils.
     addMode(out, len(0.09), 380, 0.06, 0.25);
     addMode(out, len(0.1), 920, 0.03, 0.12);
-    return fadeEdges(normalize(soft(out, 1.4), 0.97), 8, 3000);
+    harmonize(out, 110, 1, { hi: 900 });
+    warm(out, 2.2, 0.3);
+    return fadeEdges(normalize(removeDC(out), 0.97), 8, 3000);
   },
   tankCoax(rng) {
     const n = len(0.16);

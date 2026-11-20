@@ -8,11 +8,14 @@
 import { createRng } from '../core/rng.js';
 import {
   SR, R, TAU, biquad, filter, lp1, svf, white, gauss, smoothRandom, removeDC, normalize, peak,
-  fadeEdges, soft, addMode, addBurst, runSpecJS,
+  fadeEdges, soft, addMode, addBurst, runSpecJS, harmonize,
 } from './dsp.js';
 import { ENGINES, pointsFor, engineSpec, normalizeSet } from './engines.js';
 import { TURBINE_LOOPS, TURBINE_SHOTS } from './turbine.js'; // fighter, police heli (task 33)
 import { TANK_LOOPS, TANK_SHOTS } from './tanksounds.js'; // tank (task 32)
+import { COMBAT_SHOTS, COMBAT_VARIANTS } from './combatsounds.js';
+import { CAR_LOOPS, CAR_SHOTS } from './carsounds.js';
+import { MUSIC_SHOTS } from './music.js';
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -154,6 +157,7 @@ const LOOPS = {
     const n = Math.round((passes / 14) * R.sr);
     const per = n / passes;
     const sr = R.sr;
+    const slap = z(n);
     return spec(n, [{ x: white(n, rng), bands: [['bp', 520, 0.7, 1]] }], (out) => {
       for (let i = 0; i < n; i++) {
         const u = (i % per) / per;
@@ -169,7 +173,12 @@ const LOOPS = {
         }
         addMode(out, at, 46, 0.03, 0.9 * a, sr, 0, true);
         addMode(out, at, 110, 0.012, 0.4 * a, sr, 0, true);
+        // the slap itself: a short broadband crack of air
+        addBurst(slap, at, 0.004, a, rng, { loop: true, attack: 0.0008 });
       }
+      filter(slap, out, biquad('bp', 900, 0.8, sr), { gain: 0.9, add: true });
+      filter(slap, out, biquad('bp', 320, 1.2, sr), { gain: 0.8, add: true });
+      harmonize(out, 120, 0.7, { loop: true, sr, hi: 1000 });
       return normalize(removeDC(out), 0.85);
     });
   },
@@ -307,6 +316,7 @@ const LOOPS = {
   },
   ...TURBINE_LOOPS,
   ...TANK_LOOPS,
+  ...CAR_LOOPS,
 };
 
 // Two detuned pairs of buzzy tones through a honky band-pass.
@@ -802,22 +812,30 @@ const SHOTS = {
   },
   ...TURBINE_SHOTS,
   ...TANK_SHOTS,
+  ...COMBAT_SHOTS,
+  ...CAR_SHOTS,
+  ...MUSIC_SHOTS,
 };
+delete SHOTS.blast; // replaced by the layered blastCrack/Body/Tail + debris
 
 
 // Low-frequency beds rendered at half rate (less memory and work).
-const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tail']);
+const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'tail']);
+
+// Deep one-shots rendered at half rate too.
+const LOW_SHOTS = new Set(['blastTail', 'm:pad', 'm:bass', 'm:kick']);
 
 // Made after the bank is playable: ambience beds and calls, the siren.
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
   'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
   'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn',
-  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS)]);
+  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS), ...Object.keys(COMBAT_SHOTS).filter((k) => k !== 'thud'), ...Object.keys(MUSIC_SHOTS), 'birds']);
 
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = {
   thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2,
-  gunPistol: 2, gunSmg: 2, blast: 2, thwack: 2, bodyHit: 2, impact: 2, ricochet: 2, whiz: 2, tink: 2,
+  thwack: 2, impact: 2, ricochet: 2, whiz: 2, tink: 2,
+  ...COMBAT_VARIANTS,
 };
 
 // Stereo impulse response of a street: a few early wall reflections and
@@ -852,7 +870,7 @@ function impulse(ctx, rng) {
 // ---- offline filtering ----
 const WARM = 0.25; // seconds of filter run-in rendered before each loop
 const MAX_CH = 16;
-const ENGINE_SR = 16000; // engine loops: content stays below 7 kHz
+const ENGINE_SR = 12000; // engine loops: content stays below 5.4 kHz
 
 function offlineCtor() {
   if (typeof window === 'undefined') return null;
@@ -1057,7 +1075,15 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
   };
   const shotJobs = (name) => {
     const v = SHOT_VARIANTS[name] || 1;
-    for (let k = 0; k < v; k++) jobs.push(() => put(v > 1 ? `${name}${k}` : name, SHOTS[name](rng), false));
+    const sr = LOW_SHOTS.has(name) ? SR / 2 : SR;
+    for (let k = 0; k < v; k++) {
+      jobs.push(() => {
+        R.sr = sr;
+        const d = SHOTS[name](rng);
+        R.sr = SR;
+        put(v > 1 ? `${name}${k}` : name, d, false, sr);
+      });
+    }
   };
   for (const name of Object.keys(LOOPS)) if (!EXTRA.has(name)) initial.push(loopMaker(name));
   const complete = batch(initial);

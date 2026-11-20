@@ -480,6 +480,7 @@ export function spawnPoliceHeli(game, opts = {}) {
   const p = createHeliPilot(a, { target, order: opts.order || 'orbit', radius: opts.radius || PILOT.orbitR, seed: opts.seed });
   a.ai = p;
   a.pilot = p;
+  if (game.police && game.police.crewUp) game.police.crewUp(a); // pilot and gunner can be killed
   if (game.addVehicle) game.addVehicle(a);
   else if (game.vehicles) game.vehicles.push(a);
   pilotList(game).push(p);

@@ -1,4 +1,5 @@
 import { createGame } from './game.js';
+import { registerServiceWorker } from './pwa.js';
 
 const boot = document.getElementById('boot');
 const msg = document.getElementById('bootmsg');
@@ -38,3 +39,23 @@ try {
   console.error(err);
   msg.textContent = 'Sorry, the game could not start on this device.';
 }
+
+// Offline support. A new version is applied right away only while the
+// title screen is showing; otherwise it waits until the next launch.
+registerServiceWorker((apply) => {
+  if (boot.style.display !== 'none') apply();
+});
+
+// Called by the Android wrapper when the system Back button is pressed.
+// Returns 'paused' when it paused a running game, or 'leave' when the app
+// should go to the background (title screen, or game already paused).
+window.__rwBack = () => {
+  const game = window.__rw;
+  if (!game || boot.style.display !== 'none') return 'leave';
+  if (!game.paused) {
+    game.paused = true;
+    game.events.emit('pause', true);
+    return 'paused';
+  }
+  return 'leave';
+};

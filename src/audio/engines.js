@@ -7,11 +7,14 @@
 // repeats without a seam. Every character is rendered at a few rpm
 // points, each with an on-load and an off-load layer.
 
-import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS } from './dsp.js';
+import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS, warm, harmonize } from './dsp.js';
 
-// Normalised rpm points (fraction of redline) shared by all characters;
-// the first point is replaced by each character's idle.
-export const RPM_POINTS = [0, 0.2, 0.32, 0.46, 0.64, 0.88];
+// Normalised rpm points (fraction of redline) shared by all characters:
+// idle (replaced by each character's own), low, mid, high, redline.
+export const RPM_POINTS = [0, 0.3, 0.5, 0.72, 0.95];
+// Loop length: long enough that the cycle-to-cycle variation does not
+// repeat audibly (short loops "motorboat" at 3 to 4 Hz).
+export const LOOP_S = 0.72;
 
 // Exhaust "bank" pattern for a cross-plane V8: the two banks fire at
 // uneven intervals, and the nearer exhaust dominates. This gives the
@@ -24,56 +27,56 @@ export const ENGINES = {
     cyl: 4, idle: 850, red: 6800, gears: 5, var: 0.07, jitter: 0.05,
     tauK: 0.03, body: 0.5, formants: [[210, 3, 1], [560, 4, 0.7], [1500, 3.5, 0.35]],
     clatter: 0.12, intake: 0.22, intakeF: 1250, whineMul: 36, whine: 0.018,
-    lpOn: 5200, lpOff: 2600, offPulse: 0.32, burble: 0, wet: 0,
+    lpOn: 6800, lpOff: 3800, offPulse: 0.32, burble: 0, wet: 0, rasp: [2700, 0.55], drive: 2.1,
   },
   // V6 sedan: smoother, rounder
   v6: {
     cyl: 6, idle: 750, red: 6400, gears: 6, var: 0.05, jitter: 0.035,
     tauK: 0.032, body: 0.6, formants: [[150, 2.8, 1], [430, 3.5, 0.6], [1150, 3, 0.28]],
     clatter: 0.08, intake: 0.2, intakeF: 1000, whineMul: 30, whine: 0.014,
-    lpOn: 4600, lpOff: 2300, offPulse: 0.3, burble: 0.1, wet: 0,
+    lpOn: 6200, lpOff: 3400, offPulse: 0.3, burble: 0.1, wet: 0, rasp: [2000, 0.35], drive: 1.6, turbo: 0.25,
   },
   // burbling cross-plane V8 (muscle car, pickup)
   v8: {
     cyl: 8, idle: 680, red: 6000, gears: 5, var: 0.12, jitter: 0.07, bank: V8_BANK,
     tauK: 0.036, body: 0.85, formants: [[98, 2.4, 1.1], [290, 2.8, 0.75], [780, 2.6, 0.32]],
     clatter: 0.1, intake: 0.26, intakeF: 850, whineMul: 26, whine: 0.012,
-    lpOn: 4200, lpOff: 2000, offPulse: 0.38, burble: 0.55, wet: 0,
+    lpOn: 5600, lpOff: 3000, offPulse: 0.38, burble: 0.55, wet: 0, rasp: [1500, 0.9], drive: 2.4,
   },
   // high-revving sports flat six: rasp and a strong upper band
   sports: {
     cyl: 6, idle: 950, red: 8800, gears: 6, var: 0.05, jitter: 0.04,
     tauK: 0.028, body: 0.5, formants: [[240, 3, 0.85], [720, 4.5, 0.85], [1900, 4, 0.45]],
     clatter: 0.1, intake: 0.3, intakeF: 1600, whineMul: 40, whine: 0.022,
-    lpOn: 6800, lpOff: 3000, offPulse: 0.34, burble: 0.4, wet: 0,
+    lpOn: 7200, lpOff: 4200, offPulse: 0.34, burble: 0.4, wet: 0, rasp: [3200, 0.7], drive: 2.6, turbo: 1,
   },
   // diesel (truck, van): low, knocking, a turbo-ish whine
   diesel: {
     cyl: 6, idle: 620, red: 3400, gears: 6, var: 0.06, jitter: 0.04,
     tauK: 0.022, body: 0.75, formants: [[120, 2.2, 1], [390, 2.6, 0.5], [1700, 5, 0.42]],
     clatter: 0.55, intake: 0.18, intakeF: 1400, whineMul: 72, whine: 0.026,
-    lpOn: 4800, lpOff: 2800, offPulse: 0.4, burble: 0, wet: 0,
+    lpOn: 6400, lpOff: 3600, offPulse: 0.4, burble: 0, wet: 0, rasp: [2300, 0.3], drive: 1.8, turbo: 0.8,
   },
   // outboard four (speedboat, jet ski, dinghy): exhaust through the water
   outboard: {
     cyl: 4, idle: 800, red: 6000, gears: 0, var: 0.08, jitter: 0.06,
     tauK: 0.03, body: 0.7, formants: [[170, 2, 1], [470, 2.6, 0.6], [1250, 3, 0.25]],
     clatter: 0.1, intake: 0.24, intakeF: 1300, whineMul: 34, whine: 0.016,
-    lpOn: 3400, lpOff: 1800, offPulse: 0.35, burble: 0.2, wet: 1,
+    lpOn: 5200, lpOff: 2800, offPulse: 0.35, burble: 0.2, wet: 1, rasp: [2200, 0.45], drive: 2.2,
   },
   // inboard diesel (fishing boat, yacht)
   inboard: {
     cyl: 6, idle: 600, red: 2600, gears: 0, var: 0.07, jitter: 0.05,
     tauK: 0.024, body: 0.9, formants: [[95, 2, 1], [300, 2.4, 0.5], [1100, 4, 0.3]],
     clatter: 0.35, intake: 0.14, intakeF: 1000, whineMul: 60, whine: 0.012,
-    lpOn: 2600, lpOff: 1600, offPulse: 0.4, burble: 0.1, wet: 0.7,
+    lpOn: 3800, lpOff: 2400, offPulse: 0.4, burble: 0.1, wet: 0.7, rasp: [1500, 0.22], drive: 1.6,
   },
   // aircraft flat six with a two-blade propeller
   prop: {
     cyl: 6, idle: 700, red: 2750, gears: 0, var: 0.06, jitter: 0.05, blades: 2,
     tauK: 0.03, body: 0.6, formants: [[130, 2.4, 1], [400, 3, 0.55], [950, 3, 0.3]],
     clatter: 0.1, intake: 0.2, intakeF: 900, whineMul: 30, whine: 0.008,
-    lpOn: 4200, lpOff: 2400, offPulse: 0.45, burble: 0.15, wet: 0,
+    lpOn: 5600, lpOff: 3400, offPulse: 0.45, burble: 0.15, wet: 0, rasp: [1800, 0.3], drive: 1.7,
   },
 };
 
@@ -125,7 +128,7 @@ function pulseShape(t, tau) {
 // Describe one loop as a filter spec (see dsp.js runSpecJS): the pulse
 // excitation is built here; the filtering runs in JS or offline.
 // rpmNorm: fraction of redline; load: 1 = on throttle, 0 = overrun.
-export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.26) {
+export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = LOOP_S) {
   const e = ENGINES[ch];
   const rpm = Math.max(200, rpmNorm * e.red);
   const cycleS = 120 / rpm;
@@ -207,8 +210,9 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.26) {
 
   const bright = on ? 1 : 0.45;
   const bands = [
-    // body: the low pulse train itself, carries the firing fundamental
-    ['lp', Math.min(1200, firingHz * 1.7), 0.9, e.body * 2.6],
+    // body: the low pulse train itself with its first few firing
+    // harmonics (the throaty 80 to 400 Hz part)
+    ['lp', Math.min(1400, firingHz * 4.5), 0.8, e.body * 2.2],
   ];
   // exhaust and body resonances, brighter on load
   for (let f = 0; f < e.formants.length; f++) {
@@ -219,8 +223,21 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.26) {
     { x: exc, bands },
     // combustion clatter (diesel knock), high-passed
     { x: comb, bands: [['hp', 1100, 0.7, e.clatter * (on ? 1.6 : 0.5)]] },
-    { x: nz, bands: [['bp', e.intakeF * (0.8 + 0.4 * rpmNorm), 1.1, e.intake * (on ? 1 : 0.3) * (0.4 + 0.8 * rpmNorm)]] },
+    { x: nz, bands: [['bp', e.intakeF * (0.8 + 0.4 * rpmNorm), 1.1, e.intake * (on ? 1.4 : 0.35) * (0.4 + 0.8 * rpmNorm)]] },
   ];
+  // exhaust rasp: noise gated by each exhaust pulse, a hard edge in the
+  // 1.5 to 3.5 kHz region that real recordings have and phones reproduce
+  if (e.rasp) {
+    const gate = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const v = env[i] / ep;
+      gate[i] = v * v;
+    }
+    const rn = white(N, rng);
+    for (let i = 0; i < N; i++) rn[i] *= gate[i];
+    const rg = 3.2 * e.rasp[1] * (on ? 1 : 0.3) * (0.15 + 0.9 * rpmNorm);
+    parts.push({ x: rn, bands: [['bp', e.rasp[0], 0.9, rg], ['bp', e.rasp[0] * 0.55, 1.2, rg * 0.6]] });
+  }
   let bub = null;
   if (e.wet > 0) {
     // boats: exhaust through water, bubbling
@@ -256,13 +273,18 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = 0.26) {
       const bp = peak(bub) || 1;
       for (let i = 0; i < N; i++) out[i] *= 1 - e.wet * 0.35 * (0.5 + 0.5 * bub[i] / bp);
     }
+    removeDC(out);
+    // the exhaust pipe overdriven: harmonics that keep the firing note
+    // audible on a small speaker, then the missing-fundamental helper
+    warm(out, (e.drive || 1.5) * (on ? 1 : 0.6), 0.3);
+    harmonize(out, Math.min(160, Math.max(70, firingHz * 1.2)), on ? 0.45 : 0.3, { loop: true, sr, hi: 1200 });
     return removeDC(out);
   };
   return { sr, n: N, loop: true, parts, post: [['lp', on ? e.lpOn : e.lpOff, 0.6]], finish };
 }
 
 // Render one loop in JS (used when OfflineAudioContext is missing).
-export function renderEngineLoop(ch, rpmNorm, load, rng, sr = R.sr, target = 0.3) {
+export function renderEngineLoop(ch, rpmNorm, load, rng, sr = R.sr, target = LOOP_S) {
   return runSpecJS(engineSpec(ch, rpmNorm, load, rng, sr, target));
 }
 
