@@ -15,6 +15,7 @@ export const DISTRICTS = {
   docks: { name: 'Saltyard', min: 22, max: 48, hMin: 8, hMax: 14, gap: 3 },
   industrial: { name: 'Cinder Row', min: 20, max: 44, hMin: 7, hMax: 18, gap: 3 },
   beach: { name: 'Pale Shore', min: 16, max: 30, hMin: 8, hMax: 30, gap: 2.5 },
+  airfield: { name: 'Gullwing Airfield', min: 0, max: 0, hMin: 0, hMax: 0, gap: 0 },
   park: { name: 'Greenmere', min: 0, max: 0, hMin: 0, hMax: 0, gap: 0 },
 };
 
@@ -37,7 +38,32 @@ export function generateCity(seed = 20261) {
   const radiusAt = (theta) =>
     BASE_R * (1 + 0.1 * Math.sin(2 * theta + p1) + 0.07 * Math.sin(3 * theta + p2) + 0.04 * Math.sin(5 * theta + p3));
   // How far inside the shoreline a point is (negative = in the sea).
-  const shoreDist = (x, z) => radiusAt(Math.atan2(z, x)) - Math.hypot(x, z);
+  // Extra rectangles of land (airfield islet, causeway) are added later.
+  const extraLand = [];
+  const piers = [];
+  const mainShore = (x, z) => radiusAt(Math.atan2(z, x)) - Math.hypot(x, z);
+  const rectDist = (r, x, z) => {
+    const ix = Math.min(x - r.x0, r.x1 - x), iz = Math.min(z - r.z0, r.z1 - z);
+    if (ix >= 0 && iz >= 0) return Math.min(ix, iz);
+    return -Math.hypot(Math.max(0, -ix), Math.max(0, -iz));
+  };
+  const shoreDist = (x, z) => {
+    let d = mainShore(x, z);
+    for (let i = 0; i < extraLand.length; i++) {
+      const e = rectDist(extraLand[i], x, z);
+      if (e > d) d = e;
+    }
+    return d;
+  };
+  // Land, or a pier you can walk along.
+  const isGround = (x, z) => {
+    if (shoreDist(x, z) > 0) return true;
+    for (let i = 0; i < piers.length; i++) {
+      const r = piers[i];
+      if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) return true;
+    }
+    return false;
+  };
   const isLand = (x, z) => shoreDist(x, z) > 0;
 
   // --- Street grid lines with uneven spacing. ---
@@ -61,7 +87,7 @@ export function generateCity(seed = 20261) {
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       if (shoreDist(xs[i], zs[j]) > 55) {
-        grid[j * N + i] = { id: -1, i, j, x: xs[i], z: zs[j], edges: [], signal: false };
+        grid[j * N + i] = { id: -1, i, j, x: xs[i], z: zs[j], hx: wx[i] / 2, hz: wz[j] / 2, edges: [], signal: false };
       }
     }
   }
@@ -128,6 +154,7 @@ export function generateCity(seed = 20261) {
   // --- City blocks. ---
   function districtOf(x, z) {
     const d = Math.hypot(x, z);
+    if (extraLand.length && mainShore(x, z) < -60) return 'airfield';
     if (d < 215) return 'downtown';
     if (x < -330 && shoreDist(x, z) < 260) return 'beach';
     if (z > 250 && x > -120) return 'docks';
@@ -246,12 +273,105 @@ export function generateCity(seed = 20261) {
     }
   }
 
+  // --- Airfield islet, joined to the east shore by a causeway. ---
+  const pois = [];
+  const aircraftSpots = []; // { x, z, heading, spec }
+  const boatSpots = []; // { x, z, heading, spec }
+  const surfaces = []; // extra flat ground to draw: { x0, z0, x1, z1, type }
+  const helipads = [];
+  let anchor = null;
+  for (const n of nodes) {
+    if (nodeAt(n.i + 1, n.j)) continue; // want the east end of a row
+    if (!anchor || Math.abs(n.z) < Math.abs(anchor.z) || (Math.abs(n.z) === Math.abs(anchor.z) && n.x > anchor.x)) anchor = n;
+  }
+  let shoreX = anchor.x;
+  while (mainShore(shoreX, anchor.z) > 0) shoreX += 2;
+  const IL = 780, IW = 300;
+  const islet = { x0: shoreX + 170, z0: anchor.z - 205, x1: shoreX + 170 + IL, z1: anchor.z - 205 + IW };
+  const roadHalf = wz[anchor.j] / 2;
+  extraLand.push(islet, { x0: anchor.x, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 1, z1: anchor.z + roadHalf + 4 });
+  const gate = {
+    id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z,
+    hx: roadHalf, hz: roadHalf, edges: [], signal: false,
+  };
+  nodes.push(gate);
+  addEdge(anchor, gate, true, wz[anchor.j]);
+  edges[edges.length - 1].causeway = true;
+
+  const runway = { x0: islet.x0 + 40, z0: islet.z0 + 40, x1: islet.x1 - 30, z1: islet.z0 + 70, type: 'runway' };
+  const apron = { x0: islet.x0 + 40, z0: runway.z1, x1: islet.x0 + 470, z1: anchor.z + roadHalf + 30, type: 'apron' };
+  surfaces.push(apron, runway);
+  // Hangars and a control tower along the south edge.
+  for (let k = 0; k < 5; k++) {
+    const hx0 = islet.x0 + 110 + k * 70;
+    addBuilding(hx0, islet.z1 - 50, hx0 + 52, islet.z1 - 14, rng.range(11, 14), 'industrial', 'warehouse');
+  }
+  addBuilding(islet.x0 + 480, islet.z1 - 44, islet.x0 + 494, islet.z1 - 30, 34, 'downtown', 'building', 0xcfd6dc);
+  // Aircraft: one lined up on the runway, the rest parked facing it.
+  const rz = (runway.z0 + runway.z1) / 2;
+  aircraftSpots.push({ x: runway.x0 + 30, z: rz, heading: 0, spec: 'prop' });
+  ['stunt', 'jet', 'prop'].forEach((spec, k) => {
+    aircraftSpots.push({ x: islet.x0 + 150 + k * 60, z: runway.z1 + 34, heading: -Math.PI / 2, spec });
+  });
+  ['heli', 'heavyheli'].forEach((spec, k) => {
+    const hp = { x: islet.x0 + 360 + k * 50, z: runway.z1 + 40 };
+    helipads.push(hp);
+    aircraftSpots.push({ ...hp, heading: -Math.PI / 2, spec });
+  });
+  pois.push({ type: 'airfield', x: islet.x0 + 250, z: anchor.z - 60, label: 'Gullwing Airfield' });
+
+  // --- Piers with moored boats around the coast. ---
+  // Each pier sticks straight out to sea along x or z from the shore.
+  function addPier(label, dirX, dirZ, along, boats, shoreFn = mainShore) {
+    // March out from the island along the chosen grid line to the shore.
+    let x = dirX ? 0 : along, z = dirZ ? 0 : along;
+    if (shoreFn !== mainShore) {
+      x = along.x;
+      z = along.z;
+    }
+    while (shoreFn(x, z) > 0) {
+      x += dirX * 2;
+      z += dirZ * 2;
+    }
+    const LEN = 64, HALF = 2.6;
+    const ex = x + dirX * LEN, ez = z + dirZ * LEN;
+    const bx = x - dirX * 8, bz = z - dirZ * 8;
+    const pier = dirX
+      ? { x0: Math.min(bx, ex), x1: Math.max(bx, ex), z0: z - HALF, z1: z + HALF }
+      : { x0: x - HALF, x1: x + HALF, z0: Math.min(bz, ez), z1: Math.max(bz, ez) };
+    piers.push(pier);
+    boats.forEach((spec, k) => {
+      const side = k % 2 ? 1 : -1;
+      const d = 22 + Math.floor(k / 2) * 18;
+      const off = HALF + 3.2;
+      const sx = dirX ? x + dirX * d : x + side * off;
+      const sz = dirX ? z + side * off : z + dirZ * d;
+      boatSpots.push({ x: sx, z: sz, heading: Math.atan2(dirZ, dirX), spec });
+    });
+    pois.push({ type: 'marina', x: x + dirX * 20, z: z + dirZ * 20, label });
+    return pier;
+  }
+  addPier('Saltyard Marina', 0, 1, xs[9], ['speedboat', 'fisher', 'jetski', 'yacht', 'dinghy', 'speedboat']);
+  addPier('Pale Shore Pier', -1, 0, zs[8], ['jetski', 'speedboat', 'jetski', 'dinghy']);
+  addPier('Northpoint Jetty', 0, -1, xs[7], ['fisher', 'dinghy', 'speedboat', 'jetski']);
+  addPier('Airfield Dock', 0, 1, { x: islet.x0 + 600, z: islet.z1 - 2 }, ['speedboat', 'jetski'], (x, z) => rectDist(islet, x, z));
+  // A seaplane floats beside the airfield dock.
+  {
+    const dock = piers[piers.length - 1];
+    aircraftSpots.push({ x: dock.x1 + 14, z: dock.z1 - 12, heading: Math.PI / 2, spec: 'seaplane' });
+  }
+  // A helipad in the docks and a city one on open ground by the centre.
+  {
+    const hp = { x: xs[11] + wx[11] / 2 + 14, z: zs[N - 3] };
+    if (mainShore(hp.x, hp.z) > 20) helipads.push(hp);
+  }
+
   // --- Street furniture and kerbside parking along every road. ---
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b];
     const half = e.width / 2;
-    const startPad = (e.horizontal ? wx[a.i] : wz[a.j]) / 2 + 6;
-    const endPad = (e.horizontal ? wx[b.i] : wz[b.j]) / 2 + 6;
+    const startPad = (e.horizontal ? a.hx : a.hz) + 6;
+    const endPad = (e.horizontal ? b.hx : b.hz) + 6;
     const usable = e.length - startPad - endPad;
     // Street lamps on both kerbs.
     for (let d = startPad; d <= e.length - endPad; d += 28) {
@@ -263,7 +383,7 @@ export function generateCity(seed = 20261) {
       }
     }
     // Parked cars on ordinary streets only.
-    if (!e.avenue && usable > 14) {
+    if (!e.avenue && !e.causeway && usable > 14) {
       for (const side of [-1, 1]) {
         for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
           if (!rng.chance(0.22)) continue;
@@ -315,7 +435,9 @@ export function generateCity(seed = 20261) {
   return {
     seed, N, xs, zs, wx, wz, nodes, edges, blocks, buildings,
     props: cleanProps, parkingSpots, spawn,
-    radiusAt, shoreDist, isLand, districtOf, nodeAt, onRoad,
+    extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
+    airfield: { islet, runway, apron, gate },
+    radiusAt, shoreDist, mainShore, isLand, isGround, districtOf, nodeAt, onRoad,
     size: BASE_R * 1.25,
   };
 }

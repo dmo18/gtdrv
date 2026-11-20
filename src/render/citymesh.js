@@ -124,12 +124,65 @@ export function buildCityMesh(city, collision) {
   group.add(landDisc(-14, -0.12, COL.sand));
   group.add(landDisc(30, -0.06, COL.grass));
 
+  // --- Extra land (airfield islet, causeway), piers and aprons. ---
+  {
+    const eb = new ChunkedBuilder(S * 2.4, 4);
+    for (const r of city.extraLand || []) {
+      eb.at((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2).box(r.x0, r.z0, r.x1, r.z1, -3, -0.06, COL.kerb, COL.grass);
+    }
+    for (const r of city.piers || []) {
+      const b = eb.at((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2);
+      b.box(r.x0, r.z0, r.x1, r.z1, -0.25, 0.1, 0x6b5136, 0x8a6b48);
+      // Posts along both long sides.
+      const alongX = r.x1 - r.x0 > r.z1 - r.z0;
+      const len = alongX ? r.x1 - r.x0 : r.z1 - r.z0;
+      for (let d = 2; d < len; d += 8) {
+        for (const side of [0, 1]) {
+          const px = alongX ? r.x0 + d : side ? r.x1 : r.x0;
+          const pz = alongX ? (side ? r.z1 : r.z0) : r.z0 + d;
+          b.box(px - 0.2, pz - 0.2, px + 0.2, pz + 0.2, -3, 0.7, 0x4f3b28);
+        }
+      }
+    }
+    eb.buildInto(group, groundMat);
+    const sb = new ChunkedBuilder(S * 2.4, 4);
+    const mb = new ChunkedBuilder(S * 2.4, 4);
+    for (const r of city.surfaces || []) {
+      const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+      sb.at(cx, cz).flat(r.x0, r.z0, r.x1, r.z1, 0, r.type === 'runway' ? 0x2f3236 : 0x4a4d52);
+      if (r.type === 'runway') {
+        const m = mb.at(cx, cz);
+        for (let x = r.x0 + 40; x < r.x1 - 50; x += 30) m.flat(x, cz - 0.3, x + 15, cz + 0.3, 0.015, COL.line);
+        for (let k = 0; k < 6; k++) {
+          const z = r.z0 + 3 + k * ((r.z1 - r.z0 - 6) / 5.6);
+          m.flat(r.x0 + 6, z, r.x0 + 26, z + 1.6, 0.015, COL.line);
+          m.flat(r.x1 - 26, z, r.x1 - 6, z + 1.6, 0.015, COL.line);
+        }
+        m.flat(r.x0, r.z0 + 0.4, r.x1, r.z0 + 0.8, 0.015, COL.line);
+        m.flat(r.x0, r.z1 - 0.8, r.x1, r.z1 - 0.4, 0.015, COL.line);
+      }
+    }
+    for (const h of city.helipads || []) {
+      const m = mb.at(h.x, h.z);
+      sb.at(h.x, h.z).flat(h.x - 9, h.z - 9, h.x + 9, h.z + 9, 0.005, 0x3a3d42);
+      m.flat(h.x - 8, h.z - 8, h.x + 8, h.z - 7.4, 0.02, COL.yellow);
+      m.flat(h.x - 8, h.z + 7.4, h.x + 8, h.z + 8, 0.02, COL.yellow);
+      m.flat(h.x - 8, h.z - 8, h.x - 7.4, h.z + 8, 0.02, COL.yellow);
+      m.flat(h.x + 7.4, h.z - 8, h.x + 8, h.z + 8, 0.02, COL.yellow);
+      m.flat(h.x - 3, h.z - 4, h.x - 2, h.z + 4, 0.02, COL.line);
+      m.flat(h.x + 2, h.z - 4, h.x + 3, h.z + 4, 0.02, COL.line);
+      m.flat(h.x - 2, h.z - 0.5, h.x + 2, h.z + 0.5, 0.02, COL.line);
+    }
+    sb.buildInto(group, plainMat);
+    mb.buildInto(group, lineMat, 1);
+  }
+
   // --- Roads and painted lines. ---
   const roads = new ChunkedBuilder(S, TILES);
   const lines = new ChunkedBuilder(S, TILES);
   const LY = 0.015;
   for (const n of city.nodes) {
-    const hx = city.wx[n.i] / 2, hz = city.wz[n.j] / 2;
+    const hx = n.hx, hz = n.hz;
     roads.at(n.x, n.z).flat(n.x - hx, n.z - hz, n.x + hx, n.z + hz, 0, COL.junction);
   }
   for (const e of city.edges) {
@@ -138,7 +191,7 @@ export function buildCityMesh(city, collision) {
     const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
     const rb = roads.at(mx, mz), lb = lines.at(mx, mz);
     if (e.horizontal) {
-      const x0 = a.x + city.wx[a.i] / 2, x1 = b.x - city.wx[b.i] / 2;
+      const x0 = a.x + a.hx, x1 = b.x - b.hx;
       rb.flat(x0, a.z - half, x1, a.z + half, 0, COL.asphalt);
       // Stop lines.
       lb.flat(x0 + 0.6, a.z - half + 0.3, x0 + 1.1, a.z - 0.2, LY, COL.line);
@@ -154,7 +207,7 @@ export function buildCityMesh(city, collision) {
         for (let x = x0 + 4; x < x1 - 6; x += 9) lb.flat(x, a.z - 0.08, x + 3, a.z + 0.08, LY, COL.yellow);
       }
     } else {
-      const z0 = a.z + city.wz[a.j] / 2, z1 = b.z - city.wz[b.j] / 2;
+      const z0 = a.z + a.hz, z1 = b.z - b.hz;
       rb.flat(a.x - half, z0, a.x + half, z1, 0, COL.asphalt);
       lb.flat(a.x + 0.2, z0 + 0.6, a.x + half - 0.3, z0 + 1.1, LY, COL.line);
       lb.flat(a.x - half + 0.3, z1 - 1.1, a.x - 0.2, z1 - 0.6, LY, COL.line);

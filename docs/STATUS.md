@@ -20,4 +20,6 @@
 - none yet
 
 ## Open security findings
-- none
+- Milestone 1 review: no critical or high.
+- Low (open): GitHub Actions are pinned to version tags, not commit ids.
+- Low (open): page style policy allows inline styles (needed by the UI code).
