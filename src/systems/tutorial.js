@@ -7,11 +7,14 @@ const HINTS = {
   plane: ['Hold THRUST and push the stick up to take off.', 'Let go of the stick to level out. Ease off THRUST to come down.'],
   heli: ['Hold UP to lift off. Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],
 };
-const FIRST = ['Open the map (top right) to find races, piers and the airfield.', 'Stop inside a glowing marker to start a race or delivery.'];
+const FIRST = ['Open the map (top right) to find races, piers and the airfield.', 'Stop inside a glowing marker, then tap START to begin a race or delivery.'];
 
 export function createTutorial(game) {
   const queue = [];
   let wait = 2.5;
+  // Remembered in the medals map because the save sanitiser only keeps
+  // known fields. NOTE for the menu: Records must skip `hint_` and `seen_`
+  // keys, they are flags, not medals.
   const seen = (key) => game.progress.medals[`hint_${key}`] === 'bronze';
   const mark = (key) => {
     game.progress.medals[`hint_${key}`] = 'bronze';

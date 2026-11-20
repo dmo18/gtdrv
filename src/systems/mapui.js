@@ -10,9 +10,10 @@ export function createMapUi(game, uiRoot) {
   const minimap = createMinimap(game.hud.minimapCanvas, renderer);
   const blips = [];
   for (let i = 0; i < 48; i++) blips.push({ x: 0, z: 0, type: 'dot', color: '#fff' });
-  const state = { x: 0, z: 0, heading: 0, zoomMetres: 190, blips, blipCount: 0, waypoint: null };
-  // Other systems (races, deliveries) add their own markers here.
+  // Other systems (races, deliveries) add their own markers here:
+  // { x, z, type, color, label? }. The full map draws this same live list.
   const markers = [];
+  const state = { x: 0, z: 0, heading: 0, zoomMetres: 190, blips, blipCount: 0, waypoint: null, markers };
   let zoom = 190;
   let pausedByMap = false;
 

@@ -1,0 +1,249 @@
+// Engine tone generator: a firing-pulse model rendered into seamless
+// loops. Each firing is a short exhaust pressure pulse (a fast blowdown
+// spike followed by a slower rarefaction) that rings a few exhaust/body
+// resonances; combustion roughness, intake noise modulated by the firing
+// rhythm and a gear/valve-train whine are added, then band-limited.
+// A loop holds a whole number of engine cycles (two crank turns), so it
+// repeats without a seam. Every character is rendered at a few rpm
+// points, each with an on-load and an off-load layer.
+
+import { SR, TAU, biquad, filter, lp1, white, gauss, removeDC, peak, scale } from './dsp.js';
+
+// Normalised rpm points (fraction of redline) shared by all characters;
+// the first point is replaced by each character's idle.
+export const RPM_POINTS = [0, 0.36, 0.6, 0.86];
+
+// Exhaust "bank" pattern for a cross-plane V8: the two banks fire at
+// uneven intervals, and the nearer exhaust dominates. This gives the
+// lumpy burble at low revs.
+const V8_BANK = [1, 0.5, 1, 1, 0.5, 1, 0.5, 0.5];
+
+export const ENGINES = {
+  // small inline four: buzzy, light, mid-heavy
+  i4: {
+    cyl: 4, idle: 850, red: 6800, gears: 5, var: 0.07, jitter: 0.05,
+    tauK: 0.03, body: 0.5, formants: [[210, 3, 1], [560, 4, 0.7], [1500, 3.5, 0.35]],
+    clatter: 0.12, intake: 0.22, intakeF: 1250, whineMul: 36, whine: 0.018,
+    lpOn: 5200, lpOff: 2600, offPulse: 0.32, burble: 0, wet: 0,
+  },
+  // V6 sedan: smoother, rounder
+  v6: {
+    cyl: 6, idle: 750, red: 6400, gears: 6, var: 0.05, jitter: 0.035,
+    tauK: 0.032, body: 0.6, formants: [[150, 2.8, 1], [430, 3.5, 0.6], [1150, 3, 0.28]],
+    clatter: 0.08, intake: 0.2, intakeF: 1000, whineMul: 30, whine: 0.014,
+    lpOn: 4600, lpOff: 2300, offPulse: 0.3, burble: 0.1, wet: 0,
+  },
+  // burbling cross-plane V8 (muscle car, pickup)
+  v8: {
+    cyl: 8, idle: 680, red: 6000, gears: 5, var: 0.12, jitter: 0.07, bank: V8_BANK,
+    tauK: 0.036, body: 0.85, formants: [[98, 2.4, 1.1], [290, 2.8, 0.75], [780, 2.6, 0.32]],
+    clatter: 0.1, intake: 0.26, intakeF: 850, whineMul: 26, whine: 0.012,
+    lpOn: 4200, lpOff: 2000, offPulse: 0.38, burble: 0.55, wet: 0,
+  },
+  // high-revving sports flat six: rasp and a strong upper band
+  sports: {
+    cyl: 6, idle: 950, red: 8800, gears: 6, var: 0.05, jitter: 0.04,
+    tauK: 0.028, body: 0.5, formants: [[240, 3, 0.85], [720, 4.5, 0.85], [1900, 4, 0.45]],
+    clatter: 0.1, intake: 0.3, intakeF: 1600, whineMul: 40, whine: 0.022,
+    lpOn: 6800, lpOff: 3000, offPulse: 0.34, burble: 0.4, wet: 0,
+  },
+  // diesel (truck, van): low, knocking, a turbo-ish whine
+  diesel: {
+    cyl: 6, idle: 620, red: 3400, gears: 6, var: 0.06, jitter: 0.04,
+    tauK: 0.022, body: 0.75, formants: [[120, 2.2, 1], [390, 2.6, 0.5], [1700, 5, 0.42]],
+    clatter: 0.55, intake: 0.18, intakeF: 1400, whineMul: 72, whine: 0.026,
+    lpOn: 4800, lpOff: 2800, offPulse: 0.4, burble: 0, wet: 0,
+  },
+  // outboard four (speedboat, jet ski, dinghy): exhaust through the water
+  outboard: {
+    cyl: 4, idle: 800, red: 6000, gears: 0, var: 0.08, jitter: 0.06,
+    tauK: 0.03, body: 0.7, formants: [[170, 2, 1], [470, 2.6, 0.6], [1250, 3, 0.25]],
+    clatter: 0.1, intake: 0.24, intakeF: 1300, whineMul: 34, whine: 0.016,
+    lpOn: 3400, lpOff: 1800, offPulse: 0.35, burble: 0.2, wet: 1,
+  },
+  // inboard diesel (fishing boat, yacht)
+  inboard: {
+    cyl: 6, idle: 600, red: 2600, gears: 0, var: 0.07, jitter: 0.05,
+    tauK: 0.024, body: 0.9, formants: [[95, 2, 1], [300, 2.4, 0.5], [1100, 4, 0.3]],
+    clatter: 0.35, intake: 0.14, intakeF: 1000, whineMul: 60, whine: 0.012,
+    lpOn: 2600, lpOff: 1600, offPulse: 0.4, burble: 0.1, wet: 0.7,
+  },
+  // aircraft flat six with a two-blade propeller
+  prop: {
+    cyl: 6, idle: 700, red: 2750, gears: 0, var: 0.06, jitter: 0.05, blades: 2,
+    tauK: 0.03, body: 0.6, formants: [[130, 2.4, 1], [400, 3, 0.55], [950, 3, 0.3]],
+    clatter: 0.1, intake: 0.2, intakeF: 900, whineMul: 30, whine: 0.008,
+    lpOn: 4200, lpOff: 2400, offPulse: 0.45, burble: 0.15, wet: 0,
+  },
+};
+
+// Which character a craft uses.
+const CAR_ENGINE = {
+  compact: 'i4', sedan: 'v6', taxi: 'v6', police: 'v6', sports: 'sports',
+  muscle: 'v8', pickup: 'v8', van: 'diesel', truck: 'diesel',
+};
+const BOAT_ENGINE = { fisher: 'inboard', yacht: 'inboard' };
+
+export function engineFor(craft) {
+  if (!craft || !craft.spec) return null;
+  const id = String(craft.spec.id || '');
+  if (craft.kind === 'car') return CAR_ENGINE[id] || 'v6';
+  if (craft.kind === 'boat') return BOAT_ENGINE[id] || 'outboard';
+  if (craft.kind === 'plane') return isJet(craft) ? null : 'prop';
+  return null;
+}
+
+export function isJet(craft) {
+  const s = craft && craft.spec;
+  return !!s && (s.jet === true || s.engine === 'jet' || /jet/i.test(String(s.id)));
+}
+
+// Pitch multiplier per spec, so a van does not sound like a truck and
+// two sedans are not identical.
+const SPEC_PITCH = { van: 1.18, truck: 0.92, pickup: 0.94, muscle: 1, jetski: 1.22, dinghy: 1.12, compact: 1.04 };
+export function pitchFor(craft) {
+  const id = craft && craft.spec ? String(craft.spec.id) : '';
+  return SPEC_PITCH[id] || 1;
+}
+
+export function pointsFor(ch) {
+  const e = ENGINES[ch];
+  const pts = RPM_POINTS.slice();
+  pts[0] = e.idle / e.red;
+  return pts;
+}
+
+// Gamma-shaped pulse value at time t (seconds after the pulse start).
+function pulseShape(t, tau) {
+  if (t < 0) return 0;
+  const u = t / tau;
+  const u3 = u / 3;
+  // fast blowdown spike minus a slower rarefaction of similar area
+  return u * Math.exp(1 - u) - 0.31 * u3 * Math.exp(1 - u3);
+}
+
+// Render one loop into a new Float32Array. rpmNorm: fraction of redline;
+// load: 1 = on throttle, 0 = overrun.
+export function renderEngineLoop(ch, rpmNorm, load, rng, sr = SR, target = 0.42) {
+  const e = ENGINES[ch];
+  const rpm = Math.max(200, rpmNorm * e.red);
+  const cycleS = 120 / rpm;
+  const nCyc = Math.max(2, Math.round(target / cycleS));
+  const N = Math.round(nCyc * cycleS * sr);
+  const cs = N / nCyc; // samples per cycle
+  const exc = new Float32Array(N);
+  const comb = new Float32Array(N);
+  const env = new Float32Array(N);
+  const out = new Float32Array(N);
+
+  const on = load > 0.5;
+  const tau = Math.max(0.00022, (e.tauK * 60) / rpm / 3);
+  const pulseLen = Math.ceil(tau * 30 * sr);
+  const cylBias = new Float32Array(e.cyl);
+  for (let k = 0; k < e.cyl; k++) cylBias[k] = rng.next() * 2 - 1;
+  const fireN = e.cyl;
+  const jitterAmp = on ? e.jitter : e.jitter * (1 + 3 * e.burble);
+  const noiseLen = Math.ceil(tau * 8 * sr);
+  for (let c = 0; c < nCyc; c++) {
+    for (let k = 0; k < fireN; k++) {
+      const bank = e.bank ? e.bank[k % e.bank.length] : 1;
+      let amp = bank * (1 + e.var * cylBias[k]) * (1 + jitterAmp * gauss(rng));
+      if (!on) {
+        amp *= e.offPulse;
+        // overrun: some cycles nearly misfire, others pop a little
+        if (e.burble > 0 && rng.next() < 0.25 * e.burble) amp *= 0.2 + 1.8 * rng.next();
+      }
+      const timing = (rng.next() - 0.5) * 0.012;
+      const pos = (c + (k + timing) / fireN) * cs;
+      const start = Math.floor(pos);
+      const frac = pos - start;
+      for (let j = 0; j < pulseLen; j++) {
+        const t = (j - frac) / sr;
+        const v = pulseShape(t, tau) * amp;
+        const i = (start + j) % N;
+        exc[i] += v;
+        env[i] += Math.abs(v);
+      }
+      // combustion roughness: a short noise burst with each firing
+      const ca = amp * (on ? 1 : 0.35);
+      for (let j = 0; j < noiseLen; j++) {
+        const i = (start + j) % N;
+        comb[i] += (rng.next() * 2 - 1) * ca * Math.exp(-j / (noiseLen * 0.25));
+      }
+    }
+  }
+  // Propeller: blade passes add a broad thump at blades * rpm / 60.
+  if (e.blades) {
+    const passes = e.blades * 2; // per two-turn cycle
+    const bt = (60 / rpm / e.blades) * 0.18;
+    const len = Math.ceil(bt * 12 * sr);
+    const amp = 0.9 * (0.45 + 0.55 * rpmNorm);
+    for (let c = 0; c < nCyc; c++) {
+      for (let k = 0; k < passes; k++) {
+        const pos = (c + k / passes) * cs + cs * 0.37;
+        const start = Math.floor(pos);
+        for (let j = 0; j < len; j++) {
+          const t = (j - (pos - start)) / sr;
+          const u = t / bt;
+          const v = u > 0 ? Math.sin(Math.min(u, 2) * Math.PI) * Math.exp(-u * 0.6) * amp : 0;
+          exc[(start + j) % N] += v * (k % 2 ? 0.9 : 1);
+        }
+      }
+    }
+  }
+
+  const firingHz = (e.cyl * rpm) / 120;
+  // body: the low pulse train itself, carries the firing fundamental
+  filter(exc, out, biquad('lp', Math.min(1400, firingHz * 2.6), 0.8, sr), { gain: e.body, sr });
+  // exhaust and body resonances, brighter on load
+  const bright = on ? 1 : 0.45;
+  for (let f = 0; f < e.formants.length; f++) {
+    const [fq, q, g] = e.formants[f];
+    const gg = g * (f === 0 ? 1 : bright) * 2.2;
+    filter(exc, out, biquad('bp', fq, q, sr), { gain: gg, add: true, sr });
+  }
+  // combustion clatter (diesel knock), high-passed
+  filter(comb, out, biquad('hp', 1100, 0.7, sr), { gain: e.clatter * (on ? 1.6 : 0.5), add: true, sr });
+  filter(comb, out, biquad('bp', 450, 1.2, sr), { gain: 0.25, add: true, sr });
+  // intake noise breathing with the firing rhythm
+  lp1(env, Math.min(400, firingHz * 0.9), { sr });
+  const ep = peak(env) || 1;
+  const nz = white(N, rng);
+  for (let i = 0; i < N; i++) nz[i] *= 0.35 + 0.65 * (env[i] / ep);
+  filter(nz, out, biquad('bp', e.intakeF * (0.8 + 0.4 * rpmNorm), 1.1, sr), {
+    gain: e.intake * (on ? 1 : 0.3) * (0.4 + 0.8 * rpmNorm), add: true, sr,
+  });
+  // mechanical whine: an exact harmonic of the cycle rate so it loops
+  const h = Math.max(1, Math.round(e.whineMul * 2));
+  const wAmp = e.whine * (0.5 + rpmNorm) * (on ? 1 : 0.7);
+  const h2 = Math.round(h * 1.5);
+  const g2 = (h2 * rpm) / 120 < sr * 0.3 ? 0.4 : 0;
+  for (let i = 0; i < N; i++) {
+    const ph = (TAU * i) / cs;
+    out[i] += wAmp * (Math.sin(ph * h) + g2 * Math.sin(ph * h2 + 1.3));
+  }
+  // boats: exhaust through water, bubbling and muffled
+  if (e.wet > 0) {
+    const bub = white(N, rng);
+    lp1(bub, 18, { sr });
+    const bp = peak(bub) || 1;
+    for (let i = 0; i < N; i++) out[i] *= 1 - e.wet * 0.35 * (0.5 + 0.5 * bub[i] / bp);
+    const gurgle = white(N, rng);
+    for (let i = 0; i < N; i++) gurgle[i] *= env[i] / ep;
+    filter(gurgle, out, biquad('bp', 320, 1.5, sr), { gain: 0.35 * e.wet, add: true, sr });
+  }
+  // band-limit and clean up
+  filter(out, out, biquad('hp', 28, 0.7, sr), { sr });
+  const lpf = on ? e.lpOn : e.lpOff;
+  filter(out, out, biquad('lp', lpf, 0.6, sr), { sr });
+  lp1(out, Math.min(sr * 0.4, lpf * 1.6), { sr });
+  removeDC(out);
+  return out;
+}
+
+// Scale a set of loops of one character together to a common peak.
+export function normalizeSet(list, to = 0.85) {
+  let p = 0;
+  for (const b of list) p = Math.max(p, peak(b));
+  if (p > 1e-9) for (const b of list) scale(b, to / p);
+}

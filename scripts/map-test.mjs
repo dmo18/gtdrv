@@ -57,7 +57,13 @@ await build({
         { x: 0, z: 0, type: 'car', color: '#6fd0c4' },
         { x: 3000, z: 0, type: 'far', color: '#f2b84b' },
       ];
-      window.t = { city, mapR, mini, full, calls, buildMs, getClosed: () => closed, blips };
+      const markers = [
+        { x: -300, z: -400, type: 'street', color: '#e2733a', label: 'Test Street' },
+        { x: 500, z: 380, type: 'boat', color: '#45c7dc', label: 'Test Boat' },
+        { x: 900, z: -200, type: 'sky', color: '#ffcf5a', label: 'Test Sky' },
+        { x: -200, z: 300, type: 'delivery', color: '#8bd66f', label: 'Test Parcel' },
+      ];
+      window.t = { city, mapR, mini, full, calls, buildMs, getClosed: () => closed, blips, markers };
     `,
   },
   bundle: true, format: 'iife', outfile: path.join(out, 'game.js'), logLevel: 'error',
@@ -157,11 +163,45 @@ try {
     full.open({ x: city.spawn.x, z: city.spawn.z, heading: 0.6, waypoint: null });
   });
   check(await page.evaluate(() => window.t.full.isOpen()), 'full map opens');
+
   await page.waitForTimeout(100);
   const v = await page.evaluate(() => window.t.full.getView());
   const size = await page.evaluate(() => window.t.city.mapHalf || window.t.city.size);
   const fit = Math.min(v.width, v.height) / (size * 0.95 * 2);
   check(Math.abs(v.ppm - fit) < 1e-9, 'full map opens at fit zoom');
+
+  // Activity markers are drawn: their icon colour appears at the marker
+  // position, and the same spot is plain map without markers.
+  async function markerPixels() {
+    return page.evaluate(() => {
+      const { full, markers } = window.t;
+      const v = full.getView();
+      const cv = document.querySelector('.rw-map-canvas');
+      const g = cv.getContext('2d');
+      const k = cv.width / v.width;
+      const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      return markers.map((m) => {
+        const sx = v.width / 2 + (m.x - v.cx) * v.ppm, sy = v.height / 2 + (m.z - v.cz) * v.ppm;
+        const want = hex(m.color);
+        let hits = 0;
+        const d = g.getImageData(Math.round((sx - 14) * k), Math.round((sy - 14) * k), Math.round(28 * k), Math.round(28 * k)).data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (Math.abs(d[i] - want[0]) < 10 && Math.abs(d[i + 1] - want[1]) < 10 && Math.abs(d[i + 2] - want[2]) < 10) hits++;
+        }
+        return { type: m.type, hits };
+      });
+    });
+  }
+  const without = await markerPixels();
+  await page.evaluate(() => {
+    const { city, full, markers } = window.t;
+    full.open({ x: city.spawn.x, z: city.spawn.z, heading: 0.6, waypoint: null, markers }); // reopen with markers
+  });
+  for (const p of await markerPixels()) check(p.hits > 20, `full map draws the ${p.type} marker (${p.hits} px)`);
+  check(without.every((p) => p.hits < 5), 'markers are absent when not passed');
+  const legend = await page.evaluate(() => document.querySelector('.rw-map-legend').textContent);
+  for (const n of ['Street race', 'Boat race', 'Sky course', 'Delivery']) check(legend.includes(n), `legend lists ${n}`);
+  await page.screenshot({ path: path.join(out, 'fullmap-markers.png') });
 
   async function tapAt(sx, sy) {
     await page.touchscreen.tap(sx, sy);

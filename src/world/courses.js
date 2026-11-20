@@ -30,6 +30,10 @@ export const CANYON_RING_R = 14; // street-canyon rings (avenues only) are at le
 export const GATE_SHORE = -25; // every buoy gate this far out to sea (shoreDist below this)
 export const GATE_PIER_CLEAR = 20; // and at least this far from any pier
 
+// Start zones keep this far from aircraft and boat spawn spots (except the
+// runway course, whose plane waits on the line on purpose).
+export const START_SPOT_CLEAR = 16;
+
 const TAU = Math.PI * 2;
 const hyp = Math.hypot;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -597,7 +601,16 @@ export function buildCourses(city) {
   }
   {
     const pad0 = city.helipads[0];
-    const start = { x: r1(pad0.x), z: r1(pad0.z), y: 0, heading: Math.PI };
+    // The helicopter parked on the pad sits in the zone, so start a little
+    // way off the pad, on the first spot clear of every parked craft.
+    const spots = [...city.aircraftSpots, ...city.boatSpots];
+    const clear = (x, z) => spots.every((q) => hyp(q.x - x, q.z - z) >= START_SPOT_CLEAR);
+    let sp = { x: pad0.x, z: pad0.z };
+    for (let k = 0; k < 16 && !clear(sp.x, sp.z); k++) {
+      const ang = (k * TAU) / 16;
+      sp = { x: pad0.x + Math.cos(ang) * START_SPOT_CLEAR, z: pad0.z + Math.sin(ang) * START_SPOT_CLEAR };
+    }
+    const start = { x: r1(sp.x), z: r1(sp.z), y: 0, heading: Math.PI };
     const used = new Set();
     const T = 7;
     const roof1 = roofNear(city, islet.x0 - 380, icz - 140, used);

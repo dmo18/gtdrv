@@ -4,10 +4,10 @@ import { generateCity } from '../src/world/citygen.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createEvents } from '../src/core/events.js';
 import {
-  buildCourses, roadDistance, avenueAt, tallestNear, REF_SPEED, MEDAL_FACTOR, CANYON_RING_R,
+  buildCourses, roadDistance, avenueAt, tallestNear, REF_SPEED, MEDAL_FACTOR, CANYON_RING_R, START_SPOT_CLEAR,
 } from '../src/world/courses.js';
 import {
-  createActivities, medalFor, payoutFor, HOLD_TIME, COUNTDOWN, STRAY_TIME,
+  createActivities, medalFor, payoutFor, COUNTDOWN, STRAY_TIME,
 } from '../src/systems/activities.js';
 
 const DT = 1 / 60;
@@ -213,6 +213,19 @@ test('start zones do not overlap', () => {
   }
 });
 
+test('start zones keep clear of parked aircraft and boats (except the runway course)', () => {
+  const spots = [...city.aircraftSpots, ...city.boatSpots];
+  assert.ok(spots.length > 0);
+  for (const c of courses) {
+    if (c.id === 'sky-gull') continue; // First Feathers starts on the runway on purpose
+    for (const q of spots) {
+      const d = Math.hypot(q.x - c.start.x, q.z - c.start.z);
+      assert.ok(d >= 14, `${c.id} start is ${d.toFixed(1)} m from a ${q.spec} spawn`);
+    }
+  }
+  assert.ok(START_SPOT_CLEAR >= 14);
+});
+
 test('medal and payout rules', () => {
   const c = byId['street-glasswell'];
   assert.equal(medalFor(c, c.medalTimes.gold), 'gold');
@@ -264,11 +277,21 @@ function put(game, sys, x, z, y = 0, steps = 1) {
 }
 const secs = (s) => Math.round(s / DT);
 
+// Stands on the start (stopped), takes the offer like a tap on START, and
+// lets the sim run `after` more steps.
+function begin(game, sys, course, after = 1) {
+  const s = course.start;
+  put(game, sys, s.x, s.z, s.y, 2);
+  assert.equal(sys.offer, course.id, 'offered');
+  assert.equal(sys.acceptOffer(), true);
+  put(game, sys, s.x, s.z, s.y, after);
+}
+
 // Starts `course` and runs it in `time` seconds by teleporting through the
 // checkpoints (waiting just outside the last one).
 function runCourse(game, sys, course, time) {
   const s = course.start;
-  put(game, sys, s.x, s.z, s.y, secs(HOLD_TIME) + 2);
+  begin(game, sys, course);
   assert.equal(sys.active && sys.active.id, course.id, 'started');
   assert.equal(sys.active.phase, 'countdown');
   put(game, sys, s.x, s.z, s.y, secs(COUNTDOWN) + 1);
@@ -290,40 +313,71 @@ function runCourse(game, sys, course, time) {
   }
 }
 
-test('activities: start only in an allowed craft, never on foot', () => {
+test('activities: start only via the offer in an allowed craft, never on foot', () => {
   const game = fakeGame();
   const sys = createActivities(game);
   assert.equal(sys.name, 'activities');
   assert.equal(sys.courses.length, courses.length);
   assert.equal(game.mapMarkers.length, courses.length, 'a map marker per start');
+  for (const c of courses) {
+    const m = game.mapMarkers.find((q) => q.x === c.start.x && q.z === c.start.z);
+    assert.ok(m && m.type === c.type && m.label === c.name, `${c.id} marker has type and label`);
+  }
   const boatRace = byId['boat-saltyard'];
+  const bs = boatRace.start;
   // On foot: nothing, not even a hint.
-  put(game, sys, boatRace.start.x, boatRace.start.z, 0, secs(3));
+  put(game, sys, bs.x, bs.z, 0, secs(3));
   assert.equal(sys.active, null);
+  assert.equal(sys.offer, null);
+  assert.equal(sys.note, null);
   assert.equal(game.toasts.length, 0);
-  // In a car: told what is needed, does not start.
+  assert.equal(sys.acceptOffer(), false);
+  // In a car: a note about what is needed, once per visit; no offer.
   board(game, craftOf('car'));
-  put(game, sys, boatRace.start.x, boatRace.start.z, 0, secs(3));
+  put(game, sys, bs.x, bs.z, 0, 2);
+  assert.equal(sys.note, 'Needs a boat');
+  assert.equal(sys.offer, null);
+  put(game, sys, bs.x, bs.z, 0, secs(5));
+  assert.equal(sys.note, null, 'the note goes away by itself');
+  assert.equal(sys.acceptOffer(), false);
   assert.equal(sys.active, null);
-  assert.ok(game.toasts.includes('Needs a boat'), game.toasts.join('|'));
-  // Moving boat: no start yet.
+  // Moving boat: no offer yet.
   board(game, craftOf('boat'));
   put(game, sys, 0, 0);
   game.player.vehicle.speed = 6;
-  put(game, sys, boatRace.start.x, boatRace.start.z, 0, secs(3));
-  assert.equal(sys.active, null);
-  // Stopped boat: prompt, then starts after the hold time.
+  put(game, sys, bs.x, bs.z, 0, secs(3));
+  assert.equal(sys.offer, null);
+  assert.equal(sys.acceptOffer(), false);
+  // Slow down: offered. It never starts by itself, however long we wait.
   game.player.vehicle.speed = 0.5;
-  put(game, sys, boatRace.start.x, boatRace.start.z, 0, secs(HOLD_TIME) - 5);
-  assert.equal(sys.active, null);
-  assert.ok(game.toasts.includes('Hold still to start: ' + boatRace.name));
-  put(game, sys, boatRace.start.x, boatRace.start.z, 0, 10);
+  put(game, sys, bs.x, bs.z, 0, secs(5));
+  assert.equal(sys.offer, boatRace.id);
+  assert.equal(sys.active, null, 'no auto-start after standing still');
+  // Speeding up to 4 m/s keeps the offer; over 6 m/s withdraws it.
+  game.player.vehicle.speed = 4;
+  put(game, sys, bs.x, bs.z, 0, 2);
+  assert.equal(sys.offer, boatRace.id);
+  game.player.vehicle.speed = 6.5;
+  put(game, sys, bs.x, bs.z, 0, 2);
+  assert.equal(sys.offer, null);
+  game.player.vehicle.speed = 1;
+  put(game, sys, bs.x, bs.z, 0, 2);
+  assert.equal(sys.offer, boatRace.id);
+  // Leaving the zone withdraws it.
+  put(game, sys, bs.x + 100, bs.z, 0, 2);
+  assert.equal(sys.offer, null);
+  put(game, sys, bs.x, bs.z, 0, 2);
+  assert.equal(sys.acceptOffer(), true);
   assert.equal(sys.active.id, boatRace.id);
+  assert.equal(sys.offer, null);
   assert.equal(game.mapMarkers.length, 1, 'only the next checkpoint on the map while racing');
   assert.equal(sys.start('street-rim'), false, 'one at a time');
   assert.equal(sys.abort(), true);
   assert.equal(sys.active, null);
   assert.equal(game.mapMarkers.length, courses.length);
+  // start(id) still works directly, but only in an allowed craft.
+  assert.equal(sys.start('street-rim'), false, 'a boat cannot do a street race');
+  assert.equal(sys.start(boatRace.id), true);
 });
 
 test('activities: medals, pay once, pay only the improvement', () => {
@@ -381,14 +435,14 @@ test('activities: abort on leaving the craft, wrecking, straying, running late',
   const car = craftOf('car');
   board(game, car);
   const c = byId['street-fernside'];
-  const begin = () => {
+  const go = () => {
     put(game, sys, c.start.x + 300, c.start.z, 0, 2);
-    put(game, sys, c.start.x, c.start.z, 0, secs(HOLD_TIME + COUNTDOWN) + 4);
+    begin(game, sys, c, secs(COUNTDOWN) + 4);
     assert.equal(sys.active.phase, 'running');
   };
   const fails = () => game.fired.filter((f) => f[0] === 'fail').length;
 
-  begin();
+  go();
   board(game, null);
   put(game, sys, c.start.x, c.start.z, 0, 1);
   assert.equal(sys.active, null);
@@ -397,14 +451,14 @@ test('activities: abort on leaving the craft, wrecking, straying, running late',
   assert.equal(game.progress.stats.races, 0);
 
   board(game, car);
-  begin();
+  go();
   car.wrecked = true;
   put(game, sys, c.start.x, c.start.z, 0, 1);
   assert.equal(sys.active, null);
   assert.equal(fails(), 2);
   car.wrecked = false;
 
-  begin();
+  go();
   const cp = c.checkpoints[0];
   put(game, sys, cp.x + 450, cp.z, 0, secs(STRAY_TIME) - 10);
   assert.ok(sys.active, 'still racing just before the stray limit');
@@ -414,7 +468,7 @@ test('activities: abort on leaving the craft, wrecking, straying, running late',
 
   // Deliveries have a time limit.
   const d = byId['deliver-courier'];
-  put(game, sys, d.start.x, d.start.z, 0, secs(HOLD_TIME + COUNTDOWN) + 4);
+  begin(game, sys, d, secs(COUNTDOWN) + 4);
   assert.equal(sys.active.id, d.id);
   const B = d.checkpoints[0];
   put(game, sys, B.x, B.z - 300, 0, secs(d.timeLimit) + 2);
@@ -428,7 +482,7 @@ test('activities: sky rings count in 3D', () => {
   const sys = createActivities(game);
   board(game, craftOf('heli'));
   const c = byId['sky-rooftop'];
-  put(game, sys, c.start.x, c.start.z, 0, secs(HOLD_TIME + COUNTDOWN) + 4);
+  begin(game, sys, c, secs(COUNTDOWN) + 4);
   assert.equal(sys.active.id, c.id);
   const cp = c.checkpoints[0];
   put(game, sys, cp.x, cp.z, cp.y + cp.r + 4);

@@ -29,6 +29,14 @@ const POI_STYLE = {
   race: { color: '#f6efe6', name: 'Race' },
   helipad: { color: '#b9a6ee', name: 'Helipad' },
 };
+// Activity markers passed in `state.markers` (races, sky courses, deliveries).
+const ACT_STYLE = {
+  street: { color: '#e2733a', name: 'Street race' },
+  boat: { color: '#45c7dc', name: 'Boat race' },
+  sky: { color: '#ffcf5a', name: 'Sky course' },
+  delivery: { color: '#8bd66f', name: 'Delivery' },
+};
+const LABEL_ZOOM = 2; // full-map zoom at which marker labels appear
 
 // ---------------------------------------------------------------------------
 // Pre-rendered map
@@ -354,6 +362,31 @@ function drawIcon(g, type, color, s) {
     g.arc(0, -s * 0.4, s * 0.4, Math.PI, 0);
     g.strokeStyle = color; g.lineWidth = Math.max(1.6, s * 0.16);
     g.stroke();
+  } else if (type === 'street') { // flag on a pole
+    g.moveTo(-s * 0.55, s * 0.95); g.lineTo(-s * 0.55, -s * 0.95);
+    g.lineTo(s * 0.9, -s * 0.45); g.lineTo(-s * 0.55, s * 0.1);
+    g.stroke(); g.fill();
+  } else if (type === 'boat') { // sail and hull
+    g.moveTo(0, -s); g.lineTo(s * 0.75, s * 0.35); g.lineTo(0, s * 0.35); g.closePath();
+    g.stroke(); g.fill();
+    g.beginPath();
+    g.moveTo(-s * 0.9, s * 0.55); g.lineTo(s * 0.9, s * 0.55); g.lineTo(s * 0.55, s * 0.95); g.lineTo(-s * 0.55, s * 0.95);
+    g.closePath();
+    g.stroke(); g.fill();
+  } else if (type === 'sky') { // hoop
+    g.ellipse(0, 0, s * 0.7, s * 0.95, 0, 0, Math.PI * 2);
+    g.lineWidth = Math.max(3, s * 0.42);
+    g.strokeStyle = '#1a120d'; g.stroke();
+    g.lineWidth = Math.max(1.8, s * 0.24);
+    g.strokeStyle = color; g.stroke();
+  } else if (type === 'delivery') { // parcel with a ribbon
+    g.rect(-s * 0.85, -s * 0.7, s * 1.7, s * 1.4);
+    g.stroke(); g.fill();
+    g.beginPath();
+    g.moveTo(0, -s * 0.7); g.lineTo(0, s * 0.7);
+    g.moveTo(-s * 0.85, 0); g.lineTo(s * 0.85, 0);
+    g.strokeStyle = '#1a120d'; g.lineWidth = Math.max(1.6, s * 0.2);
+    g.stroke();
   } else if (type === 'race') { // chequered flag tile
     g.rect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7);
     g.stroke(); g.fill();
@@ -404,7 +437,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   let fitPpm = 1;
   let cw = 1, ch = 1, dpr = 1;
   let opened = false;
-  let st = { x: 0, z: 0, heading: 0, waypoint: null };
+  let st = { x: 0, z: 0, heading: 0, waypoint: null, markers: null };
   let waypoint = null;
   let dirty = false;
   const pointers = new Map(); // id -> {x, y}
@@ -415,6 +448,8 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
     const types = new Set((city.pois || []).map((p) => p.type));
     const entries = [['player', 'You', COL.accent]];
     for (const t of Object.keys(POI_STYLE)) if (types.has(t)) entries.push([t, POI_STYLE[t].name, POI_STYLE[t].color]);
+    const acts = new Set((st.markers || []).map((m) => m.type));
+    for (const t of Object.keys(ACT_STYLE)) if (acts.has(t)) entries.push([t, ACT_STYLE[t].name, ACT_STYLE[t].color]);
     entries.push(['waypoint', 'Waypoint', '#ffffff']);
     for (const [t, name, color] of entries) {
       const span = document.createElement('span');
@@ -530,6 +565,36 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
         g.fillText(p.label, tmpS.x, tmpS.y + iconS + 3);
       }
     }
+    // Activity markers (live list owned by the game).
+    const marks = st.markers;
+    if (marks) {
+      for (let i = 0; i < marks.length; i++) {
+        const m = marks[i];
+        toScreen(m.x, m.z, tmpS);
+        if (tmpS.x < -40 || tmpS.y < -40 || tmpS.x > cw + 40 || tmpS.y > ch + 40) continue;
+        const style = ACT_STYLE[m.type];
+        g.save();
+        g.translate(tmpS.x, tmpS.y);
+        if (style) drawIcon(g, m.type, m.color || style.color, iconS);
+        else { // checkpoints and anything else: a small dot
+          g.fillStyle = m.color || '#ffffff';
+          g.strokeStyle = '#1a120d';
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(0, 0, 5, 0, Math.PI * 2);
+          g.stroke(); g.fill();
+        }
+        g.restore();
+        if (style && m.label && view.zoom >= LABEL_ZOOM) {
+          g.lineWidth = 3.5;
+          g.strokeStyle = 'rgba(14, 26, 32, 0.9)';
+          g.fillStyle = COL.text;
+          g.lineJoin = 'round';
+          g.strokeText(m.label, tmpS.x, tmpS.y + iconS + 3);
+          g.fillText(m.label, tmpS.x, tmpS.y + iconS + 3);
+        }
+      }
+    }
     if (waypoint) {
       toScreen(waypoint.x, waypoint.z, tmpS);
       drawPin(g, tmpS.x, tmpS.y, 18);
@@ -631,7 +696,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
 
   return {
     open(state) {
-      st = { x: state.x, z: state.z, heading: state.heading };
+      st = { x: state.x, z: state.z, heading: state.heading, markers: state.markers || null };
       waypoint = state.waypoint ? { x: state.waypoint.x, z: state.waypoint.z } : null;
       buildLegend();
       el.classList.add('rw-map-open');

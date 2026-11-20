@@ -6,8 +6,9 @@
 import { buildCourses } from '../world/courses.js';
 import { createMarkers } from '../render/markers.js';
 
-export const STILL_SPEED = 2; // m/s: slower than this counts as stopped
-export const HOLD_TIME = 1.5; // seconds stopped in a start zone to begin
+export const STILL_SPEED = 2; // m/s: slower than this in a start zone offers the race
+export const OFFER_HIDE_SPEED = 6; // m/s: faster than this withdraws the offer
+export const NOTE_TIME = 3; // seconds the "Needs a boat" note stays up
 export const COUNTDOWN = 3;
 export const STRAY_DIST = 400; // metres from the next checkpoint...
 export const STRAY_TIME = 10; // ...for this long abandons the run
@@ -74,10 +75,12 @@ export function createActivities(game, uiRoot = null) {
   const progress = () => game.progress;
 
   const markers = game.scene ? createMarkers(game.scene, { seaY: game.seaY ?? 0 }) : null;
-  const ui = typeof document !== 'undefined' ? createPanel(uiRoot) : null;
+  const ui = typeof document !== 'undefined'
+    ? createPanel(uiRoot, { onStart: () => acceptOffer(), onQuit: () => abort() })
+    : null;
 
   // --- Idle: start zones. ---
-  const startMarks = courses.map((c) => ({ x: c.start.x, z: c.start.z, type: 'race', color: MAP_COLORS[c.type] }));
+  const startMarks = courses.map((c) => ({ x: c.start.x, z: c.start.z, type: c.type, color: MAP_COLORS[c.type], label: c.name }));
   function showIdle() {
     if (game.map) for (const m of startMarks) game.map.addMarker(m);
     if (markers) courses.forEach((c, i) => markers.showStart(i, c, radiusOf(c)));
@@ -89,8 +92,10 @@ export function createActivities(game, uiRoot = null) {
   showIdle();
 
   let zone = -1; // course whose start zone the player is in
-  let hold = 0;
-  let toldNeed = false, toldHold = false;
+  let toldNeed = false;
+  let offered = -1; // course whose START card is showing
+  let note = null; // short non-interactive hint ("Needs a boat")
+  let noteTimer = 0;
   let blocked = -1; // a course just played: ignored until the player leaves its zone
 
   // --- A run in progress. ---
@@ -113,6 +118,8 @@ export function createActivities(game, uiRoot = null) {
     const v = game.player.vehicle;
     if (!course || !v || game.player.mode === 'foot' || !course.kinds.includes(v.kind)) return false;
     hideIdle();
+    offered = -1;
+    note = null;
     run = {
       course, craft: v, phase: 'countdown', count: COUNTDOWN, steps: 0, elapsed: 0,
       index: 0, lap: 1, stray: 0, lx: v.x, ly: v.y || 0, lz: v.z, passed: 0,
@@ -123,7 +130,6 @@ export function createActivities(game, uiRoot = null) {
       game.map.addMarker(cpMark);
     }
     markersDirty = true;
-    toast(course.name + (course.timeLimit ? ': deliver within ' + formatShort(course.timeLimit) : ''), 2.5);
     events.emit('ui');
     return true;
   }
@@ -139,7 +145,6 @@ export function createActivities(game, uiRoot = null) {
     if (game.map) game.map.removeMarker(cpMark);
     run = null;
     zone = -1;
-    hold = 0;
     markersDirty = true;
     showIdle();
     events.emit('ui');
@@ -237,6 +242,12 @@ export function createActivities(game, uiRoot = null) {
     if (run.course.timeLimit && run.elapsed > run.course.timeLimit) fail('Out of time');
   }
 
+  // Start the course being offered (the START button, or a test).
+  function acceptOffer() {
+    if (run || offered < 0) return false;
+    return start(courses[offered].id);
+  }
+
   function stepIdle(dt) {
     const p = game.player;
     const v = p.vehicle;
@@ -247,22 +258,27 @@ export function createActivities(game, uiRoot = null) {
     }
     if (here !== zone) {
       zone = here;
-      hold = 0;
-      toldNeed = toldHold = false;
+      offered = -1;
+      note = null;
+      noteTimer = 0;
+      toldNeed = false;
     }
-    if (here < 0 || here === blocked || !v || p.mode === 'foot') { hold = 0; return; }
+    if (here >= 0 && here !== blocked && v && p.mode !== 'foot' && !toldNeed && !courses[here].kinds.includes(v.kind)) {
+      toldNeed = true; // once per visit
+      note = needsText(courses[here].kinds);
+      noteTimer = NOTE_TIME;
+    }
+    if (noteTimer > 0) {
+      noteTimer -= dt;
+      if (noteTimer <= 0) note = null;
+    }
+    if (here < 0 || here === blocked || !v || p.mode === 'foot') { offered = -1; return; }
     const c = courses[here];
-    if (!c.kinds.includes(v.kind)) {
-      if (!toldNeed) toast(needsText(c.kinds), 2.5);
-      toldNeed = true;
-      return;
-    }
-    if (Math.abs(v.speed || 0) < STILL_SPEED) {
-      if (!toldHold) toast('Hold still to start: ' + c.name, 2);
-      toldHold = true;
-      hold += dt;
-      if (hold >= HOLD_TIME) start(c.id);
-    } else hold = 0;
+    if (!c.kinds.includes(v.kind)) { offered = -1; return; }
+    const speed = Math.abs(v.speed || 0);
+    if (offered === here) {
+      if (speed > OFFER_HIDE_SPEED) offered = -1;
+    } else if (speed < STILL_SPEED) offered = here;
   }
 
   function fixedUpdate(dt) {
@@ -308,7 +324,7 @@ export function createActivities(game, uiRoot = null) {
       }
       markers.update(game.time || 0, game.camera ? game.camera.position : null);
     }
-    if (ui) ui.update(run, result);
+    if (ui) ui.update(run, result, offered >= 0 ? courses[offered] : null, note);
   }
 
   return {
@@ -318,6 +334,11 @@ export function createActivities(game, uiRoot = null) {
     render,
     start,
     abort,
+    acceptOffer,
+    // Id of the course whose START card is showing, or null.
+    get offer() { return offered >= 0 ? courses[offered].id : null; },
+    // Short hint shown instead of the card in the wrong craft, or null.
+    get note() { return note; },
     get active() {
       if (!run) return null;
       return {
@@ -339,19 +360,28 @@ export function createActivities(game, uiRoot = null) {
 // ---------------------------------------------------------------------------
 
 const CSS = `
-.rw-act-panel, .rw-act-count, .rw-act-card {
+.rw-act-top, .rw-act-count, .rw-act-card, .rw-act-offer, .rw-act-note {
   --rw-st: env(safe-area-inset-top, 0px);
+  --rw-act-y: calc(var(--rw-st) + 120px); /* just below the HUD toast stack */
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: #f6efe6; box-sizing: border-box; -webkit-user-select: none; user-select: none;
 }
+.rw-act-top {
+  position: absolute; left: 50%; top: var(--rw-act-y); transform: translateX(-50%);
+  display: flex; align-items: flex-start; gap: 8px; z-index: 22; pointer-events: none;
+}
 .rw-act-panel {
-  position: absolute; left: 50%; top: calc(var(--rw-st) + 54px); transform: translateX(-50%);
-  width: min(200px, 26vw); min-width: 168px; z-index: 9; pointer-events: none;
-  padding: 5px 10px 6px; border-radius: 14px; text-align: center;
+  width: 190px; padding: 5px 10px 6px; border-radius: 14px; text-align: center;
   background: rgba(24, 18, 15, 0.58); border: 1px solid rgba(246, 239, 230, 0.22); border-top: 3px solid #e2733a;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
-.rw-act-panel.rw-act-off, .rw-act-count.rw-act-off, .rw-act-card.rw-act-off { display: none; }
+.rw-act-top.rw-act-off, .rw-act-count.rw-act-off, .rw-act-card.rw-act-off, .rw-act-offer.rw-act-off, .rw-act-note.rw-act-off { display: none; }
+.rw-act-quit {
+  pointer-events: auto; touch-action: manipulation; cursor: pointer;
+  min-width: 44px; min-height: 44px; padding: 0 8px; border-radius: 12px;
+  font: 700 12px/1 system-ui, sans-serif; letter-spacing: 0.04em; color: #f6efe6;
+  background: rgba(24, 18, 15, 0.7); border: 1px solid rgba(246, 239, 230, 0.35);
+}
 .rw-act-name { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(246, 239, 230, 0.7);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rw-act-time { font-size: 24px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; color: #ffe2cc; }
@@ -361,7 +391,7 @@ const CSS = `
 .rw-act-medals i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: 0; }
 .rw-act-g { background: #ffd34d; } .rw-act-s { background: #d4dbe2; } .rw-act-b { background: #c98a52; }
 .rw-act-count {
-  position: absolute; left: 0; right: 0; top: 26%; z-index: 9; pointer-events: none; text-align: center;
+  position: absolute; left: 0; right: 0; top: calc(var(--rw-st) + 214px); z-index: 9; pointer-events: none; text-align: center;
   font-size: 84px; font-weight: 900; line-height: 1; color: #ffe2cc;
   text-shadow: 0 3px 16px rgba(0, 0, 0, 0.8), 0 0 26px rgba(226, 115, 58, 0.75);
 }
@@ -380,16 +410,42 @@ const CSS = `
 .rw-act-medal.rw-act-none { background: rgba(246, 239, 230, 0.25); color: #f6efe6; }
 .rw-act-line { font-size: 13px; color: rgba(246, 239, 230, 0.85); margin-top: 2px; }
 .rw-act-tap { margin-top: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #e2733a; text-transform: uppercase; }
+.rw-act-offer {
+  /* Right of the minimap and clear of the button cluster on the right. */
+  position: absolute; left: calc(env(safe-area-inset-left, 0px) + 172px); top: var(--rw-act-y); z-index: 22; pointer-events: auto;
+  display: flex; align-items: center; gap: 12px; width: min(380px, calc(100vw - 172px - 300px)); padding: 8px 10px 8px 14px; border-radius: 16px;
+  background: rgba(24, 18, 15, 0.88); border: 1px solid rgba(246, 239, 230, 0.25); border-top: 4px solid #e2733a;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+.rw-act-info { flex: 1; min-width: 0; text-align: left; }
+.rw-act-info h2 { margin: 0; font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rw-act-blurb { margin-top: 2px; font-size: 12px; line-height: 1.25; color: rgba(246, 239, 230, 0.85);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rw-act-offer .rw-act-medals { justify-content: flex-start; margin-top: 3px; }
+.rw-act-go {
+  flex: none; min-width: 92px; min-height: 56px; padding: 0 14px; border-radius: 14px; cursor: pointer; touch-action: manipulation;
+  font: 900 20px/1 system-ui, sans-serif; letter-spacing: 0.08em; color: #24170f;
+  background: #ffb066; border: 2px solid #ffe2cc; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.rw-act-go:active { background: #ffd0a0; }
+.rw-act-note {
+  position: absolute; left: 50%; top: var(--rw-act-y); transform: translateX(-50%); z-index: 22; pointer-events: none;
+  padding: 6px 14px; border-radius: 14px; font-size: 13px; font-weight: 700; white-space: nowrap;
+  background: rgba(24, 18, 15, 0.72); border: 1px solid rgba(246, 239, 230, 0.25);
+}
 @media (max-height: 380px) {
-  .rw-act-panel { top: calc(var(--rw-st) + 48px); padding: 3px 8px 4px; }
+  .rw-act-top, .rw-act-offer, .rw-act-note { --rw-act-y: calc(var(--rw-st) + 116px); }
+  .rw-act-panel { padding: 3px 8px 4px; }
   .rw-act-time { font-size: 21px; }
-  .rw-act-count { font-size: 64px; top: 24%; }
+  .rw-act-count { font-size: 64px; top: calc(var(--rw-st) + 202px); }
   .rw-act-card { padding: 10px 14px 9px; }
   .rw-act-big { font-size: 28px; }
+  .rw-act-offer { padding: 6px 8px 6px 12px; }
+  .rw-act-blurb { -webkit-line-clamp: 1; }
 }
 `;
 
-function createPanel(uiRoot) {
+function createPanel(uiRoot, handlers) {
   if (!document.getElementById('rw-act-styles')) {
     const st = document.createElement('style');
     st.id = 'rw-act-styles';
@@ -403,7 +459,13 @@ function createPanel(uiRoot) {
     parent.appendChild(e);
     return e;
   };
-  const panel = el('div', 'rw-act-panel rw-act-off', root);
+  // Buttons must not start a camera drag or steer underneath them.
+  const press = (btn, fn) => {
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+  };
+  const top = el('div', 'rw-act-top rw-act-off', root);
+  const panel = el('div', 'rw-act-panel', top);
   const nameEl = el('div', 'rw-act-name', panel);
   const timeEl = el('div', 'rw-act-time', panel);
   const row = el('div', 'rw-act-row', panel);
@@ -415,6 +477,12 @@ function createPanel(uiRoot) {
     el('i', 'rw-act-' + k, s);
     return s.appendChild(document.createTextNode(''));
   });
+  const quit = el('button', 'rw-act-quit', top);
+  quit.type = 'button';
+  quit.textContent = 'Quit';
+  quit.setAttribute('aria-label', 'Abandon race');
+  press(quit, () => { if (handlers.onQuit) handlers.onQuit(); });
+
   const count = el('div', 'rw-act-count rw-act-off', root);
   const card = el('div', 'rw-act-card rw-act-off', root);
   card.addEventListener('pointerdown', (e) => {
@@ -422,18 +490,58 @@ function createPanel(uiRoot) {
     card.classList.add('rw-act-off');
   });
 
-  const last = { on: false, name: '', time: '', cp: '', lap: '', medals: '', count: '', late: false };
+  // The START card, shown while stopped inside a start zone.
+  const offer = el('div', 'rw-act-offer rw-act-off', root);
+  const info = el('div', 'rw-act-info', offer);
+  const offerName = el('h2', '', info);
+  const offerBlurb = el('div', 'rw-act-blurb', info);
+  const offerMedals = el('div', 'rw-act-medals', info);
+  const offerSpans = ['g', 's', 'b'].map((k) => {
+    const s = el('span', '', offerMedals);
+    el('i', 'rw-act-' + k, s);
+    return s.appendChild(document.createTextNode(''));
+  });
+  const go = el('button', 'rw-act-go', offer);
+  go.type = 'button';
+  go.textContent = 'START';
+  press(go, () => { if (handlers.onStart) handlers.onStart(); });
+  const noteEl = el('div', 'rw-act-note rw-act-off', root);
+
+  const last = { on: false, name: '', time: '', cp: '', lap: '', medals: '', count: '', late: false, offer: '', note: '' };
   const set = (key, node, text) => {
     if (last[key] === text) return;
     last[key] = text;
     node.textContent = text;
   };
 
-  function update(run) {
+  function showOffer(c) {
+    const id = c ? c.id : '';
+    if (id === last.offer) return;
+    last.offer = id;
+    offer.classList.toggle('rw-act-off', !c);
+    if (!c) return;
+    offerName.textContent = c.name;
+    offerBlurb.textContent = c.blurb;
+    offerSpans[0].nodeValue = formatShort(c.medalTimes.gold);
+    offerSpans[1].nodeValue = formatShort(c.medalTimes.silver);
+    offerSpans[2].nodeValue = formatShort(c.medalTimes.bronze);
+    go.setAttribute('aria-label', 'Start ' + c.name);
+  }
+  function showNote(text) {
+    const t = text || '';
+    if (t === last.note) return;
+    last.note = t;
+    noteEl.classList.toggle('rw-act-off', !t);
+    noteEl.textContent = t;
+  }
+
+  function update(run, _result, offerCourse, noteText) {
+    showOffer(run ? null : offerCourse);
+    showNote(run ? null : noteText);
     const on = !!run;
     if (on !== last.on) {
       last.on = on;
-      panel.classList.toggle('rw-act-off', !on);
+      top.classList.toggle('rw-act-off', !on);
       if (!on) {
         count.classList.add('rw-act-off');
         last.count = '';

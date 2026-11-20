@@ -34,17 +34,14 @@ export function createHud(root) {
   // top-centre: toasts
   const toasts = el('div', 'rw-toasts', hud);
 
-  // top-right: money, wanted, bars, weapon
+  // top-right: money and police attention (nobody can be hurt in this game)
   const tr = el('div', 'rw-tr', hud);
   const moneyEl = el('div', 'rw-money', tr);
   const wantedEl = el('div', 'rw-wanted rw-none', tr);
-  wantedEl.setAttribute('aria-label', 'Wanted level');
+  wantedEl.setAttribute('aria-label', 'Police attention');
+  const BADGES = 3;
   const badges = [];
-  for (let i = 0; i < 5; i++) badges.push(el('span', 'rw-badge', wantedEl));
-  const bars = el('div', 'rw-bars', tr);
-  const health = bar('rw-health', bars);
-  const armor = bar('rw-armor', bars);
-  const weaponEl = el('div', 'rw-weapon rw-none', tr);
+  for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', wantedEl));
 
   // bottom-centre: speed (car) and prompt
   const bottom = el('div', 'rw-bottom', hud);
@@ -60,9 +57,9 @@ export function createHud(root) {
 
   // cached last values (undefined forces the first write)
   const last = {
-    mode: undefined, speed: undefined, health: undefined, armor: undefined,
+    mode: undefined, speed: undefined,
     money: undefined, wanted: undefined, district: undefined, clock: undefined,
-    veh: undefined, weapon: undefined, ammo: undefined, prompt: null,
+    veh: undefined, prompt: null,
   };
   const timers = new Set();
 
@@ -81,15 +78,6 @@ export function createHud(root) {
       last.speed = speed;
       speedNum.nodeValue = String(speed);
     }
-    const hp = Math.round(s.health);
-    if (hp !== last.health) { last.health = hp; setBar(health, hp); }
-    const ar = Math.round(s.armor);
-    if (ar !== last.armor) {
-      last.armor = ar;
-      setBar(armor, ar);
-      armor.box.classList.toggle('rw-empty', ar <= 0);
-      armor.box.classList.remove('rw-low');
-    }
     if (s.money !== last.money) {
       last.money = s.money;
       moneyEl.textContent = '$' + s.money.toLocaleString('en-US');
@@ -97,7 +85,7 @@ export function createHud(root) {
     if (s.wanted !== last.wanted) {
       last.wanted = s.wanted;
       wantedEl.classList.toggle('rw-none', s.wanted <= 0);
-      for (let i = 0; i < 5; i++) badges[i].classList.toggle('rw-on', i < s.wanted);
+      for (let i = 0; i < BADGES; i++) badges[i].classList.toggle('rw-on', i < s.wanted);
     }
     if (s.district !== last.district) {
       last.district = s.district;
@@ -119,18 +107,12 @@ export function createHud(root) {
       vehBar.box.classList.toggle('rw-empty', veh < 0);
       if (veh >= 0) setBar(vehBar, veh);
     }
-    if (s.weapon !== last.weapon || s.ammo !== last.ammo) {
-      last.weapon = s.weapon;
-      last.ammo = s.ammo;
-      weaponEl.classList.toggle('rw-none', !s.weapon);
-      if (s.weapon) weaponEl.textContent = s.ammo === null ? s.weapon : s.weapon + '  ' + s.ammo;
-    }
   }
 
   function toast(text, seconds = 3) {
     const t = el('div', 'rw-toast', toasts);
     t.textContent = text;
-    while (toasts.children.length > 3) toasts.firstChild.remove();
+    while (toasts.children.length > 2) toasts.firstChild.remove();
     const fade = setTimeout(() => {
       timers.delete(fade);
       t.classList.add('rw-out');
