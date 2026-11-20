@@ -8,6 +8,7 @@ const HINTS = {
   heli: ['Hold UP to lift off. Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],  // Craft hints by spec id, offered on entering (docs/ARMS.md section 8).
   fighter: ['Gannetfang: full THRUST is afterburner. LOCK on, then MSL.'],
   patrolheli: ['Lampwatch: SIREN and SPOT are under the more button.'],
+  tank: ['Left stick drives; push it sideways to pivot. Drag the right side to aim the turret.', 'Tap CANNON for a shell, hold COAX for the gun. LOCK swings the turret onto a target.'], // task 32
 };
 const FIRST = ['Open the map (top right) to find races, piers and the airfield.', 'Stop inside a glowing marker, then tap START to begin a race or delivery.'];
 

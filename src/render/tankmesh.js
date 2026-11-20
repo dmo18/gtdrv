@@ -194,7 +194,6 @@ function buildTurret(spec, col, police) {
   const cup = new THREE.CylinderGeometry(0.3, 0.36, 0.28, 10, 1);
   cup.translate(-0.35, 1.02, -0.52);
   parts.push(finish(cup, shade(col, 0.8)));
-  box(parts, DARK, 0.42, 0.26, 0.3, 0.55, 1.02, 0.62);
   box(parts, METAL, 0.04, 1.3, 0.04, -1.8, 1.25, 0.72);
   if (police) for (const s of [-1, 1]) box(parts, WHITE, 1.8, 0.14, 0.03, -0.1, 0.42, s * 1.43);
   return parts;

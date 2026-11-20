@@ -347,3 +347,34 @@ spotlight cone under the nose. No real-world shapes, markings or names.
   events `spotlight` (craft, on) and `shockRing` (craft). Over an aircraft arc
   the more fan wraps after 3 items. Sounds: src/audio/turbine.js (`abroar`,
   `spotClick`, `shockThump`); the existing siren loop covers police craft.
+
+## 10. As built by task 32 (tank, depot, spawn places)
+- Files: `src/entities/tank.js` (`TANK_SPECS` rustback and rustbackpolice,
+  `createTank`, `stepTank`, `collideTank`, `barrelRay`, `turretWorldYaw`),
+  `src/systems/armor.js` (system `game.armor`: fills `CRAFT_HOOKS.tank` when
+  created; crush, ram and prop crunch; crew bail; `tankAimAt`, `shellDrop`,
+  `createGunner` / `tankGunnerStep`), `src/render/tankmesh.js` (4 calls near:
+  hull, tracks, turret, gun; about 1,300 triangles), `src/ui/tankhud.js`,
+  `src/audio/tanksounds.js` + `src/audio/tankrig.js`.
+- Aim: the camera owns `chase.tankAim` {yaw, pitch, holdDrag}; game.js passes
+  it as the camera target heading in tank mode. The turret aims at the point
+  the camera's centre ray reaches (with shell drop), or at the LOCK target
+  (the camera follows the lock). Fire bends to any craft or person in a 6 deg
+  cone of the barrel (parked cars too).
+- Crush: `collideTank` records `other.crushedBy` / `other.ramBy, ramV`; the
+  armor system wrecks and flattens (`crushed`, no blast: it pre-sets
+  `exploded`), emits `crush` {tank, target, x, z} (target null for benches,
+  bins and signs under the hull), and applies ram damage 30 per m/s at most
+  every 0.5 s. A tank below 2 m/s, or a car 7 m or longer, is only shoved.
+- Bail: a tank with `crewAI` or a non-player driver on a police spec under 35%
+  sets `bailed`, drops `driver`/`controls` and emits `tankBail` {craft}; task
+  34 spawns the two officers on it. Gunner: call `tankGunnerStep(g, tank,
+  target, { collision, onFoot, hurtBy, seaY }, dt)` each step; on 'aim' call
+  `game.armor.telegraph(tank, target)` (event `aim`), on 'fire' call
+  `fireMount(tank, 0, ...)` with the AI shooter (45 m/s shell).
+- Places: `city.depot` (rect + gate), `city.tankSpots` (2 depot, 1 Cinder Row,
+  `place` field), `city.roofPads`, depot fighter and patrolheli spots and a
+  roof patrolheli spot (`depot` / `roof` flags), POI `depot`. All appended
+  after the seeded city; test/citygen.test.js holds a fingerprint of it.
+- Not built (cut): parked military trucks, the police heli minimap blip
+  (task 33/34), tank meshes flipping cars, flattening lamps and trees.

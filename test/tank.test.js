@@ -387,8 +387,6 @@ test('police tank: under 35% the crew bails and it can be stolen', () => {
 });
 
 test('AI gunner core: telegraph, cadence, minimum range, sight and on-foot rules', () => {
-  const { city, collision } = cityAndCollision();
-  void city;
   const col = createCollisionWorld();
   col.addBox(40, -5, 44, 5, 10);
   const t = createTank('rustback', 0, 0, 0);

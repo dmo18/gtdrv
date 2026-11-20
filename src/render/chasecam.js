@@ -52,7 +52,7 @@ const VIEWS = {
   tank: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 16, height: 6.2, lookHeight: 2, lookAhead: 18, baseFov: 64 },
-    { name: 'Gunner', dist: 1.0, height: 3.25, lookHeight: 3.05, lookAhead: 60, baseFov: 50, follow: 40, turn: 30 },
+    { name: 'Gunner', dist: 0.6, height: 3.4, lookHeight: 3.2, lookAhead: 60, baseFov: 50, follow: 40, turn: 30 },
   ],
 };
 

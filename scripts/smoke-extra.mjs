@@ -362,7 +362,8 @@ export default async function extra(page, check) {
     }
     window.__bombPd = pd;
     offs.forEach((f) => f());
-    return { launches, pd, h0, booms };
+    const c2 = window.__nadeCar;
+    return { launches, pd, h0, booms, dbg: { spec: c2 && c2.spec.id, removed: !!(c2 && c2.removed), inList: g.vehicles.includes(c2), x: c2 && +c2.x.toFixed(1), z: c2 && +c2.z.toFixed(1), parked: !!(c2 && c2.parked), armor: c2 && c2.spec.armor, hp: c2 && c2.health, nCars: g.vehicles.filter((v) => v.kind === 'car').length } };
   });
   await frame();
   await page.screenshot({ path: 'shots/arms-bomb-drop.png' });
@@ -379,7 +380,7 @@ export default async function extra(page, check) {
   await page.screenshot({ path: 'shots/arms-bomb-blast.png' });
   const hitNear = bomb2.booms.length && bomb.pd && Math.hypot(bomb2.booms[0].x - bomb.pd.x, bomb2.booms[0].z - bomb.pd.z) < 3;
   check(bomb.launches && bomb.launches.includes('bomb') && hitNear && bomb2.booms[0].size === 'huge' && bomb2.health < bomb2.max,
-    `a bomb dropped from a plane lands on the predicted spot and damages the car (${JSON.stringify({ l: bomb.launches, pd: bomb.pd, b: bomb2.booms[0], hp: bomb2.health })})`);
+    `a bomb dropped from a plane lands on the predicted spot and damages the car (${JSON.stringify({ l: bomb.launches, pd: bomb.pd, b: bomb2.booms[0], hp: bomb2.health, max: bomb2.max, dbg: bomb.dbg })})`);
   // A missile in flight (for the screenshot), then back on foot.
   const msl = await page.evaluate(() => {
     const g = window.__rw;
@@ -393,6 +394,143 @@ export default async function extra(page, check) {
   await frame();
   await page.screenshot({ path: 'shots/arms-missile.png' });
   check(msl, 'a missile launches from the fixture plane');
+
+  // ---- Task 32: the Rustback at Ironbank Depot, stepped by hand. ----
+  const tankFrame = () => page.evaluate(() => {
+    const g = window.__rw;
+    g.draw(1, 1 / 60);
+    g.chase.snap(g.camTarget);
+    for (let i = 0; i < 3; i++) g.draw(1, 1 / 60);
+  });
+  // Enter the parked tank, drive it, aim and fire the cannon at a car,
+  // then roll over a second car. Cars are copies of a nearby car's state
+  // (the depot has no parking), placed in the open yard.
+  const tk = await page.evaluate(() => {
+    const g = window.__rw;
+    const t = g.vehicles.find((v) => v.kind === 'tank' && v.home && v.home.place === 'depot' && !v.wrecked);
+    const src = g.vehicles.find((v) => v.kind === 'car' && !v.wrecked && v.spec.length < 6);
+    if (!t || !src) return { ok: false, t: !!t, src: !!src };
+    window.__src32 = g.input.addSource({ steer: 0, throttle: 0, brake: 0 });
+    window.__carSrc = src;
+    if (g.player.vehicle) {
+      const v = g.player.vehicle;
+      v.vx = v.vz = 0;
+      v.speed = 0;
+      v.driver = null;
+      g.player.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    const w = g.player.walker;
+    w.x = w.px = t.x - 4;
+    w.z = w.pz = t.z;
+    g.player.x = w.x;
+    g.player.z = w.z;
+    for (let i = 0; i < 10; i++) g.step(1 / 60);
+    g.input.press('enter');
+    g.step(1 / 60);
+    g.input.release('enter');
+    window.__tk = t;
+    return { ok: true, mode: g.player.mode, x: t.x, z: t.z };
+  });
+  check(tk.ok && tk.mode === 'tank', `enters the Rustback at Ironbank Depot (${JSON.stringify(tk)})`);
+  if (tk.ok) {
+    const drive = await page.evaluate(() => {
+      const g = window.__rw;
+      const t = window.__tk;
+      const x0 = t.x, z0 = t.z;
+      for (let i = 0; i < 60 * 3; i++) {
+        window.__src32.throttle = 1;
+        g.step(1 / 60);
+      }
+      const sp = t.speed;
+      window.__src32.throttle = 0;
+      for (let i = 0; i < 60 * 3 && t.speed > 0.2; i++) {
+        window.__src32.brake = 1; // brake to a stop (held longer, it reverses)
+        g.step(1 / 60);
+      }
+      window.__src32.brake = 0;
+      g.step(1 / 60);
+      return { d: +Math.hypot(t.x - x0, t.z - z0).toFixed(1), sp: +sp.toFixed(1), end: +t.speed.toFixed(2) };
+    });
+    check(drive.d > 8 && drive.sp > 6 && Math.abs(drive.end) < 0.3, `the tank drives and stops (${JSON.stringify(drive)})`);
+    // A car 38 m ahead; the camera (and so the turret) aims along the hull.
+    const placeCar = (d) => page.evaluate((dist) => {
+      const g = window.__rw;
+      const t = window.__tk, s = window.__carSrc;
+      const c = { ...s, mesh: null, id: 990000 + Math.round(dist), driver: null, controls: null, ai: null, parked: false, home: undefined, removed: false,
+        wrecked: false, crushed: false, health: s.spec.health, vx: 0, vz: 0, speed: 0, yawRate: 0, asleep: false, burning: false, exploded: false, combatHit: false };
+      c.x = c.px = t.x + Math.cos(t.heading) * dist;
+      c.z = c.pz = t.z + Math.sin(t.heading) * dist;
+      c.heading = c.pheading = t.heading + Math.PI / 2;
+      g.addVehicle(c);
+      return c.id;
+    }, d);
+    await placeCar(38);
+    await page.evaluate(() => {
+      const g = window.__rw;
+      g.chase.tankAim.yaw = window.__tk.heading;
+      g.chase.tankAim.pitch = 0.02;
+      // The turret follows the camera ray (drawn frames), at 1.6 rad/s.
+      for (let i = 0; i < 120; i++) {
+        g.step(1 / 60);
+        g.draw(1, 1 / 60);
+      }
+    });
+    await tankFrame();
+    await page.screenshot({ path: 'shots/tank-aim.png' });
+    const fire = await page.evaluate(() => {
+      const g = window.__rw;
+      const c = g.vehicles.find((v) => v.id === 990038);
+      const ev = [];
+      const offs = [g.events.on('launch', (e) => ev.push(e.weapon)), g.events.on('explosion', (e) => ev.push('boom:' + e.size + '@' + Math.round(e.x - c.x) + ',' + Math.round(e.z - c.z)))];
+      const t = window.__tk;
+      ev.push('aim:' + (t.heading + t.turretYaw - Math.atan2(c.z - t.z, c.x - t.x)).toFixed(3) + '/' + t.gunPitch.toFixed(3) + '/' + Math.round(Math.hypot(c.x - t.x, c.z - t.z)));
+      g.input.press('fire');
+      g.step(1 / 60);
+      g.input.release('fire');
+      for (let i = 0; i < 5; i++) g.step(1 / 60);
+      g.draw(1, 1 / 60);
+      for (let i = 0; i < 40; i++) g.step(1 / 60);
+      offs.forEach((f) => f());
+      return { ev, hp: Math.round(c.health), max: c.spec.health, recoil: window.__tk.recoil };
+    });
+    await tankFrame();
+    await page.screenshot({ path: 'shots/tank-fire.png' });
+    check(fire.ev.includes('cannon') && fire.ev.some((e) => e.startsWith('boom')) && fire.hp < fire.max * 0.7,
+      `the cannon fires a shell that blasts the car (${JSON.stringify(fire)})`);
+    // Roll over a second car 12 m ahead: flattened (no gore, no blast).
+    await placeCar(12);
+    const crush = await page.evaluate(() => {
+      const g = window.__rw;
+      const c = g.vehicles.find((v) => v.id === 990012);
+      const ev = [];
+      const off = g.events.on('crush', (e) => ev.push(e.target === c));
+      for (let i = 0; i < 60 * 3; i++) {
+        window.__src32.throttle = 1;
+        g.step(1 / 60);
+      }
+      window.__src32.throttle = 0;
+      off();
+      return { crushed: !!c.crushed, wrecked: c.wrecked, ev };
+    });
+    await tankFrame();
+    await page.screenshot({ path: 'shots/tank-crush.png' });
+    check(crush.crushed && crush.wrecked && crush.ev.includes(true), `the tank crushes a car in its path (${JSON.stringify(crush)})`);
+    await page.evaluate(() => {
+      const g = window.__rw;
+      const t = window.__tk;
+      for (let i = 0; i < 60 * 3 && t.speed > 0.2; i++) {
+        window.__src32.brake = 1;
+        g.step(1 / 60);
+      }
+      window.__src32.brake = 0;
+      g.input.press('enter');
+      g.step(1 / 60);
+      g.input.release('enter');
+      g.step(1 / 60);
+    });
+    check(await page.evaluate(() => window.__rw.player.mode === 'foot'), 'gets out of the tank');
+  }
 
   // ---- Task 33: the Gannetfang and the Lampwatch, flown through the real
   // controls (input actions), stepped by hand. ----
