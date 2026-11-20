@@ -41,6 +41,7 @@ const CSS = `
 }
 .rw-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px 4px; }
 .rw-menu-title { margin: 0; font-size: 20px; }
+.rw-menu-version { margin-left: 8px; font-size: 11px; opacity: 0.6; align-self: center; }
 .rw-menu-points { font-weight: 700; color: #ffd08a; font-variant-numeric: tabular-nums; }
 .rw-menu-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 8px 16px 16px; }
 .rw-menu-body p { margin: 0 0 8px; }
@@ -153,9 +154,13 @@ export function createMenu(root, game, economy) {
   const main = h('div', 'rw-menu-main');
   const head = h('div', 'rw-menu-head');
   const title = h('h2', 'rw-menu-title');
+  const verEl = h('span', 'rw-menu-version');
+  // __VERSION__ comes from package.json at build time (scripts/build.mjs).
+  /* global __VERSION__ */
+  if (typeof __VERSION__ !== 'undefined') verEl.textContent = 'v' + __VERSION__;
   const pointsEl = h('span', 'rw-menu-points');
   pointsEl.setAttribute('aria-label', 'Score');
-  head.append(title, pointsEl);
+  head.append(title, pointsEl, verEl);
   const body = h('div', 'rw-menu-body');
   body.tabIndex = -1;
   main.append(head, body);

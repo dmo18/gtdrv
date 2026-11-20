@@ -9,6 +9,7 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const pkgVersion = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version;
 const defaultDist = join(root, 'dist');
 
 // Every file under dir, as paths relative to dir with forward slashes.
@@ -48,7 +49,7 @@ export async function buildGame({ minify = true, prod = minify, outDir = default
     minify,
     sourcemap: false,
     outfile: join(dist, 'game.js'),
-    define: { __PROD__: String(prod) },
+    define: { __PROD__: String(prod), __VERSION__: JSON.stringify(pkgVersion) },
     logLevel: 'warning',
   });
   await cp(join(root, 'src/index.html'), join(dist, 'index.html'));
