@@ -144,7 +144,8 @@ const CSS = `
 .rw-mode-car .rw-gated:not(.rw-m-car),
 .rw-mode-boat .rw-gated:not(.rw-m-boat),
 .rw-mode-plane .rw-gated:not(.rw-m-plane),
-.rw-mode-heli .rw-gated:not(.rw-m-heli) { display: none; }
+.rw-mode-heli .rw-gated:not(.rw-m-heli),
+.rw-mode-tank .rw-gated:not(.rw-m-tank) { display: none; }
 
 /* flight stick: cross-hair ring behind the knob */
 .rw-stick.rw-flight { border-style: dashed; }
@@ -157,12 +158,12 @@ const CSS = `
 /* placement slots: --x from the thumb side edge, --y from the bottom.
    Left-handed swaps the side. docs/UI.md draws the whole layout. */
 .rw-gas, .rw-brake, .rw-exit, .rw-enter, .rw-fire, .rw-dbfire, .rw-lock, .rw-chipbtn, .rw-more,
-.rw-sec, .rw-extra {
+.rw-sec, .rw-extra, .rw-slot {
   right: calc(var(--rw-sr) + var(--x)); bottom: calc(var(--rw-sb) + var(--y));
 }
 .rw-lefty .rw-gas, .rw-lefty .rw-brake, .rw-lefty .rw-exit, .rw-lefty .rw-enter, .rw-lefty .rw-fire,
 .rw-lefty .rw-dbfire, .rw-lefty .rw-lock, .rw-lefty .rw-chipbtn, .rw-lefty .rw-more,
-.rw-lefty .rw-sec, .rw-lefty .rw-extra {
+.rw-lefty .rw-sec, .rw-lefty .rw-extra, .rw-lefty .rw-slot {
   right: auto; left: calc(var(--rw-sl) + var(--x));
 }
 .rw-touch { --dir: 1; }
@@ -184,6 +185,45 @@ const CSS = `
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
 .rw-extra { --x: 16px; --y: calc(214px + var(--k, 0) * 72px); width: 64px; height: 64px; }
+.rw-a-detonate .rw-face { border-color: rgba(255, 120, 90, 0.95); animation: rw-pulse 0.9s ease-in-out infinite; }
+@keyframes rw-pulse { 50% { box-shadow: 0 0 14px rgba(255, 90, 60, 0.9); } }
+
+/* armed craft (docs/ARMS.md): an arc for the right thumb, kept in the
+   bottom 220 px so the HUD corners stay clear at 780x360 and within 352 px
+   of the edge so the bottom-centre speed and prompt stay clear: GUN (big,
+   hold), MSL and BOMB in a row above the pedals, LOCK and DETONATE beside
+   the pedals, the more fan moved up and out while the arc is up. Tank:
+   CANNON under the thumb, COAX and LOCK beside it. */
+.rw-slot { width: 64px; height: 64px; }
+.rw-slot span { font-size: 10px; }
+.rw-slot svg { width: 24px; height: 24px; }
+.rw-slot-gun { --x: 92px; --y: 136px; width: 84px; height: 84px; }
+.rw-slot-gun svg { width: 30px; height: 30px; }
+.rw-slot-msl { --x: 188px; --y: 140px; }
+.rw-slot-bomb { --x: 264px; --y: 140px; }
+.rw-slot-alock { --x: 204px; --y: 30px; }
+.rw-slot-det { --x: 284px; --y: 96px; }
+.rw-arc.rw-mode-plane .rw-slot-det, .rw-arc.rw-mode-heli .rw-slot-det { --x: 272px; --y: 30px; }
+.rw-slot-cannon { --x: 26px; --y: 24px; width: 100px; height: 100px; }
+.rw-slot-cannon svg { width: 36px; height: 36px; }
+.rw-slot-coax { --x: 142px; --y: 30px; }
+.rw-slot-tlock { --x: 142px; --y: 106px; }
+.rw-mode-tank .rw-exit { --x: 26px; --y: 140px; width: 72px; height: 72px; }
+.rw-slot-gun .rw-face, .rw-slot-cannon .rw-face { border-color: rgba(226, 115, 58, 0.8); }
+.rw-slot.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
+.rw-slot.rw-on .rw-face { background: rgba(226, 46, 31, 0.85); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 70, 50, 0.8); }
+.rw-slot .rw-face::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: conic-gradient(#ffb48a calc(var(--ring, 0) * 1turn), rgba(0, 0, 0, 0.25) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+}
+.rw-slot.rw-ringon .rw-face::after { opacity: 1; }
+.rw-pip { position: absolute; right: 12%; top: 10%; font: 800 10px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; pointer-events: none; }
+.rw-arc.rw-mode-plane .rw-more, .rw-arc.rw-mode-heli .rw-more { --x: 352px; --y: 96px; }
+.rw-arc.rw-mode-plane .rw-sec, .rw-arc.rw-mode-heli .rw-sec {
+  --x: calc(352px + var(--c, 0) * 64px); --y: calc(96px + (var(--r, 0) + 1) * 64px);
+}
 
 /* the fan: secondary buttons grow upward out of the more button, one
    column of four (--r = place in the column, --c = column) */
@@ -243,6 +283,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .rw-face, .rw-sec, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
+  .rw-a-detonate .rw-face { animation: none; }
 }
 
 /* ---------- HUD ---------- */
@@ -373,6 +414,28 @@ const CSS = `
 .rw-tgt i:nth-child(3) { left: 0; bottom: 0; border-left-width: 3px; border-bottom-width: 3px; }
 .rw-tgt i:nth-child(4) { right: 0; bottom: 0; border-right-width: 3px; border-bottom-width: 3px; }
 .rw-tgt.rw-locked i { border-color: #ff2e1f; width: 36%; height: 36%; }
+/* armed craft: nose pipper, seeker box (shrinks while locking), arrow */
+.rw-pipper { left: 0; top: 0; width: 40px; height: 40px; margin: -20px 0 0 -20px; display: none; will-change: transform; }
+.rw-pipper.rw-on { display: block; }
+.rw-pipper svg { width: 100%; height: 100%; overflow: visible; fill: none; stroke: #bff5c8; stroke-width: 2; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.9)); }
+.rw-pipper .rw-pdot { fill: #bff5c8; }
+.rw-seek { left: 0; top: 0; width: 60px; height: 60px; display: none; will-change: transform; }
+.rw-seek.rw-on { display: block; }
+.rw-seek i { position: absolute; width: 26%; height: 26%; border: 0 solid #ffd27a; filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)); }
+.rw-seek i:nth-child(1) { left: 0; top: 0; border-left-width: 2px; border-top-width: 2px; }
+.rw-seek i:nth-child(2) { right: 0; top: 0; border-right-width: 2px; border-top-width: 2px; }
+.rw-seek i:nth-child(3) { left: 0; bottom: 0; border-left-width: 2px; border-bottom-width: 2px; }
+.rw-seek i:nth-child(4) { right: 0; bottom: 0; border-right-width: 2px; border-bottom-width: 2px; }
+.rw-seek b { position: absolute; left: 50%; top: 100%; transform: translate(-50%, 4px); font-size: 11px; font-weight: 800; color: #ff3b26; display: none; text-shadow: 0 1px 3px #000; }
+.rw-seek.rw-locked i { border-color: #ff2e1f; border-width: 3px; }
+.rw-seek.rw-locked b { display: block; }
+.rw-sarrow { left: 50%; top: 50%; width: 0; height: 0; display: none; }
+.rw-sarrow.rw-on { display: block; }
+.rw-sarrow i {
+  position: absolute; left: min(40vw, 42vh); top: -9px; width: 0; height: 0;
+  border-left: 16px solid #ffd27a; border-top: 9px solid transparent; border-bottom: 9px solid transparent;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8));
+}
 .rw-notarget {
   left: 50%; top: 58%; transform: translateX(-50%); padding: 4px 10px; border-radius: 10px; display: none;
   font-size: 13px; font-weight: 700; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);

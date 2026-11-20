@@ -54,12 +54,13 @@ const record = (game, name) => {
   return list;
 };
 
-test('weapons table: six invented weapons with the contract numbers', () => {
-  assert.deepEqual(WEAPON_IDS, ['wrench', 'pistol', 'smg', 'scatter', 'lobber', 'fizz']);
+test('weapons table: seven invented weapons with the contract numbers', () => {
+  assert.deepEqual(WEAPON_IDS, ['wrench', 'pistol', 'smg', 'scatter', 'lobber', 'fizz', 'sticky']);
   const rows = {
     wrench: ['Pipe Wrench', 'melee', 34, 1.6, 1.8, 0], pistol: ['Pocket Rattler', 'hitscan', 25, 4, 45, 12],
     smg: ['Buzzbox', 'hitscan', 12, 12, 35, 30], scatter: ['Barnyard Thumper', 'hitscan', 9, 1.2, 18, 6],
     lobber: ['Gull Lobber', 'rocket', 100, 0.6, 150, 1], fizz: ['Fizzpop Can', 'thrown', 0, 1, 25, 1],
+    sticky: ['Barnacle Charge', 'sticky', 0, 1.5, 18, 1],
   };
   for (const id of WEAPON_IDS) {
     const w = WEAPONS[id], r = rows[id];
@@ -343,7 +344,8 @@ test('rocket flies straight at 40 m/s, detonates on a wall or at range; fizz arc
   const g3 = makeGame();
   const c = shooter(g3, 0, 0, 'fizz');
   const ex3 = record(g3, 'explosion');
-  g3.combat.fire(c, 1, 0, 0);
+  // Aim pitch 0.6 rad (ARMS.md: top of the pitch span) = full 25 m reach.
+  g3.combat.fire(c, Math.cos(0.6), Math.sin(0.6), 0);
   const can = g3.combat.projectiles.find((p) => p.active);
   let first = null, maxY = 0, t = 0;
   while (can.active && t < 5) {

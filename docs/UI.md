@@ -35,7 +35,20 @@ CSS custom properties `--x` (from the thumb-side edge) and `--y` (from the
 bottom) place each control; left-handed swaps the edge and sets
 `--dir: -1`. Fan items get `--c` and `--r` from `layoutActions()`.
 Extra primary actions stack above the thumb cluster (`--k`); keep to one
-extra primary per mode so it fits at 780x360.
+extra primary per mode so it fits at 780x360. A primary with `slot: 'name'`
+takes the fixed position `.rw-slot-name` from styles.js instead (the
+armed-craft arc, src/ui/armsctl.js; docs/ARMS.md section 8). Arc slots stay
+in the bottom 220 px and within 352 px of the thumb edge, so the HUD
+corners and the bottom-centre speed and prompt stay clear at 780x360.
+
+## Armed craft and explosives
+
+Mode `tank` joins foot car boat plane heli. Minimal shows at most 6
+buttons at once, except the armed-aircraft arc (GUN, MSL, BOMB, LOCK: up
+to 9 with pedals, EXIT, more and pause) and DETONATE (+1, pulsing) while
+the player owns placed charges. SIREN and VIEW stay in the fan. With
+thrown weapons FIRE aims on hold (arc preview) and throws on release;
+lifting the finger over the more button or SWAP cancels.
 
 ## Adding a control
 
@@ -45,7 +58,8 @@ const h = game.touch.registerAction({
   icon: 'fire',                            // built-in name or '<path d=".."/>'
   text: 'NADE',                            // short caption
   group: 'secondary',                      // or 'primary' (default 'secondary')
-  modes: ['foot'],                         // foot car boat plane heli; default all
+  modes: ['foot'],                         // foot car boat plane heli tank; default all
+  slot: 'gun',                             // optional fixed arc slot (primary only)
   press() {}, release() {},                // or input: 'inputButtonName'
   visible: () => true,                     // optional, polled every step
 });

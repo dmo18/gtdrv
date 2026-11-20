@@ -378,6 +378,19 @@ export function createCombatFx(game) {
       const a = rnd() * 6.28, sp = (4 + rnd() * 10) * k;
       add(x, gy + 0.5, z, Math.cos(a) * sp, (6 + rnd() * 10) * k, Math.sin(a) * sp, 0.7 + rnd() * 0.8, 0.22, 0.06, 2.4, 1, 0.65 + rnd() * 0.25, 0.25, STREAK + 8, 9.8, 0.2);
     }
+    // Big and huge blasts (bombs, missiles, shells): a second, faster
+    // shockwave, a dust skirt and more debris.
+    if (e.size === 'big' || e.size === 'huge') {
+      const hk = e.size === 'huge' ? 1.4 : 1;
+      add(x, 0.35, z, 0, 0, 0, 0.5 * hk, 2, e.radius * 4 * hk, 0.9, 1, 0.85, 0.6, RING + 4);
+      alpha(x, 0.3, z, 0, 0, 0, 1.1 * hk, 3, e.radius * 4.5 * hk, 0.55, 0.62, 0.58, 0.52, RING + 4, 0, 0, 0.03);
+      const nh = Math.max(4, Math.round(12 * qq * hk));
+      for (let i = 0; i < nh; i++) {
+        const a = rnd() * 6.28, sp = (6 + rnd() * 10) * k;
+        const j = alpha(x, gy + 0.6, z, Math.cos(a) * sp, (8 + rnd() * 12) * k, Math.sin(a) * sp, 1.6 + rnd() * 0.8, 0.5, 0.4, 1, 0.14, 0.12, 0.1, PUFF, 9.8, 0.1, 0);
+        if (j >= 0) S.floor[j] = 0.1;
+      }
+    }
     const nb = Math.max(2, Math.round(8 * qq));
     for (let i = 0; i < nb; i++) {
       const a = rnd() * 6.28, sp = (3 + rnd() * 6) * k;
@@ -459,16 +472,86 @@ export function createCombatFx(game) {
           const g = 0.75 + rnd() * 0.15;
           alpha(p.x - p.vx * 0.01, p.y, p.z - p.vz * 0.01, rs() * 0.3, 0.2, rs() * 0.3, 0.9, 0.25, 1.2, 0.5, g, g, g, PUFF, -0.1, 1.2, 0);
         }
+      } else if (p.type === 'missile') {
+        // Missile: hot nozzle and a long smoke trail (smoke pool).
+        add(p.x, p.y, p.z, 0, 0, 0, 0.06, 1.1, 0.6, 1.6, 1, 0.8, 0.45, GLOW);
+        // Two puffs per step (one half a step back) so the trail is unbroken.
+        const g = 0.82 + rnd() * 0.1;
+        alpha(p.x - p.vx * 0.004, p.y - p.vy * 0.004, p.z - p.vz * 0.004, rs() * 0.4, 0.3, rs() * 0.4, 1.5, 0.9, 2.4, 0.5, g, g, g, PUFF, -0.1, 0.8, 0);
+        if (qq > 0.5) alpha(p.x - p.vx * 0.0125, p.y - p.vy * 0.0125, p.z - p.vz * 0.0125, rs() * 0.4, 0.3, rs() * 0.4, 1.5, 0.9, 2.4, 0.5, g, g, g, PUFF, -0.1, 0.8, 0);
+      } else if (p.type === 'shell' && (tick & 1) === 0) {
+        add(p.x, p.y, p.z, 0, 0, 0, 0.05, 0.5, 0.3, 1.3, 1, 0.85, 0.5, GLOW);
+      } else if (p.type === 'bomb') {
+        // The bomb itself (a dark body) and a faint wake.
+        alpha(p.x, p.y, p.z, 0, 0, 0, 0.034, 1.1, 1.1, 1, 0.12, 0.12, 0.14, PUFF, 0, 0, 0);
+        if ((tick % 4) === 0) alpha(p.x, p.y + 0.5, p.z, 0, 0, 0, 0.6, 0.3, 0.8, 0.3, 0.7, 0.7, 0.7, PUFF, 0, 1, 0);
+      } else if (p.type === 'sticky' && (tick % 4) === 0) {
+        add(p.x, p.y, p.z, 0, 0, 0, 0.12, 0.25, 0.2, 1.4, 1, 0.25, 0.15, GLOW);
       } else if (p.weapon === 'fizz' && (tick % 3) === 0) {
         add(p.x, p.y + 0.1, p.z, rs() * 2, 1 + rnd() * 2, rs() * 2, 0.25, 0.16, 0.05, 2, 1, 0.9, 0.45, STREAK + 8, 9.8, 0.5);
       }
     }
   }
 
+  // ---- arms (docs/ARMS.md): throw arc, bomb ring, charges, trails ----
+  // All drawn with the two existing particle pools: no new draw calls.
+  function stepArms() {
+    const cb = game.combat;
+    if (!cb || !G) return;
+    const pv = cb.preview;
+    if (pv && pv.on && pv.n > 1) {
+      const pts = pv.pts;
+      // Dashed arc: a dot at each sample and one between.
+      for (let k = 0; k < pv.n; k++) {
+        const x = pts[k * 3], y = pts[k * 3 + 1], z = pts[k * 3 + 2];
+        add(x, y, z, 0, 0, 0, 0.05, 0.42, 0.42, 2.2, 1, 0.9, 0.62, GLOW);
+        if (k + 1 < pv.n) {
+          add(x * 0.67 + pts[k * 3 + 3] * 0.33, y * 0.67 + pts[k * 3 + 4] * 0.33, z * 0.67 + pts[k * 3 + 5] * 0.33, 0, 0, 0, 0.05, 0.3, 0.3, 1.6, 1, 0.9, 0.62, GLOW);
+        }
+      }
+      const r = pv.weapon === 'sticky' ? 6 : 5;
+      add(pv.hx, Math.max(0, pv.hy) + 0.08, pv.hz, 0, 0, 0, 0.05, r * 2, r * 2, 1.3, 1, 0.5, 0.2, RING + 4);
+      add(pv.hx, Math.max(0, pv.hy) + 0.08, pv.hz, 0, 0, 0, 0.05, 1.6, 1.6, 1.6, 1, 0.75, 0.4, RING + 4);
+      add(pv.hx, Math.max(0, pv.hy) + 0.25, pv.hz, 0, 0, 0, 0.05, 1.1, 1.1, 1.6, 1, 0.75, 0.4, GLOW);
+    }
+    const dp = cb.dropPreview;
+    if (dp && dp.on && (tick & 1) === 0) {
+      add(dp.hx, Math.max(0, dp.hy) + 0.15, dp.hz, 0, 0, 0, 0.07, 18, 18, 0.75, 1, 0.45, 0.2, RING + 4);
+      add(dp.hx, Math.max(0, dp.hy) + 0.15, dp.hz, 0, 0, 0, 0.07, 5, 5, 0.6, 1, 0.8, 0.4, RING + 4);
+    }
+    const st = cb.stickies;
+    if (st && (tick & 3) === 0) {
+      for (let i = 0; i < st.length; i++) {
+        const c = st[i];
+        if (c.active && near(c.x, c.z)) add(c.x, c.y + 0.12, c.z, 0, 0, 0, 0.1, 0.22, 0.22, 1.1, 1, 0.2, 0.12, GLOW);
+      }
+    }
+  }
+  function onSticky(e) {
+    if (!e || !e.on || !near(e.x, e.z)) return;
+    if (e.beep) {
+      add(e.x, e.y + 0.15, e.z, 0, 0, 0, 0.18, 0.6, 1.1, 2.2, 1, 0.15, 0.1, GLOW);
+    } else {
+      // Thunk: a little dust where it stuck.
+      for (let i = 0; i < 4; i++) dust(e.x, e.y + 0.1, e.z, rs() * 1.2, 0.6 + rnd(), rs() * 1.2, 0.5, 0.2, 0.6, 0.4, 0.6);
+    }
+  }
+  function onSplash(x, z, strength) {
+    if (!(strength >= 2) || !Number.isFinite(x) || !near(x, z)) return;
+    // A bomb into the sea: a white water column and a ring.
+    const sy = seaY();
+    const n = Math.max(6, Math.round(16 * q()));
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * 6.28, sp = 1 + rnd() * 3;
+      alpha(x + Math.cos(a), sy + 0.3, z + Math.sin(a), Math.cos(a) * sp, 8 + rnd() * 10, Math.sin(a) * sp, 1.4 + rnd() * 0.8, 1.6, 4, 0.8, 0.92, 0.95, 1, PUFF, 9.8, 0.4, 0.02);
+    }
+    alpha(x, sy + 0.1, z, 0, 0, 0, 1.2, 2, 22, 0.7, 0.95, 0.97, 1, RING + 4, 0, 0, 0.02);
+  }
+
   // ---- event handlers ----
   function onShot(e) {
     const w = e.weapon;
-    if (w === 'wrench' || w === 'fizz') return;
+    if (w === 'wrench' || w === 'fizz' || w === 'sticky' || w === 'bomb') return;
     if (!near(e.x, e.z)) return;
     muzzle(w, e.x, e.y, e.z, e.dx, e.dy, e.dz);
     const k = e.hitKind;
@@ -488,6 +571,8 @@ export function createCombatFx(game) {
     on('out', onOut);
     on('explosion', onExplosion);
     on('burning', onBurning);
+    on('sticky', onSticky);
+    on('splash', onSplash);
   }
 
   const sys = {
@@ -507,6 +592,7 @@ export function createCombatFx(game) {
       }
       stepBurn(dt, qq);
       stepProjectiles(qq);
+      stepArms();
       syncScorch();
       if (S) {
         stepPool(S, dt);

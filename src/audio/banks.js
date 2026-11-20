@@ -735,6 +735,67 @@ const SHOTS = {
     noiseBand(out, rng, 0, 0.001, 0.4, 'hp', 3000);
     return fadeEdges(normalize(out, 0.6), 4, 200);
   },
+  // ---- arms (docs/ARMS.md section 7) ----
+  // pin: a ring pulled off a can, a bright metal ping and a scrape
+  pin(rng) {
+    const out = z(len(0.22));
+    noiseBand(out, rng, 0, 0.012, 0.5, 'bp', 3800, 2);
+    addMode(out, len(0.02), 3150, 0.05, 0.5);
+    addMode(out, len(0.02), 5200, 0.025, 0.25);
+    return fadeEdges(normalize(out, 0.6));
+  },
+  // tink: a can bouncing on the street
+  tink(rng) {
+    const out = z(len(0.16));
+    addMode(out, 0, 1450 + rng.next() * 200, 0.03, 0.6);
+    addMode(out, 0, 2900 + rng.next() * 300, 0.012, 0.3);
+    noiseBand(out, rng, 0, 0.003, 0.5, 'hp', 2500);
+    return fadeEdges(normalize(out, 0.6));
+  },
+  // whistle: a falling bomb, the pitch sliding down over 2.4 s
+  whistle(rng) {
+    const n = len(2.6);
+    const out = z(n);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      const f = 1900 - 1150 * (t / 2.6) + Math.sin(t * 31) * 6;
+      ph += (TAU * f) / R.sr;
+      out[i] = Math.sin(ph) * Math.min(1, t / 0.25) * (0.5 + 0.5 * t / 2.6);
+    }
+    const air = white(n, rng);
+    const band = z(n);
+    svf(air, band, (x) => 1700 - 1000 * x, 4, 'bp');
+    for (let i = 0; i < n; i++) out[i] += band[i] * 0.25 * Math.min(1, i / len(0.3));
+    return fadeEdges(normalize(out, 0.55), 64, 400);
+  },
+  // beep: a charge's blink
+  beep() {
+    const out = z(len(0.07));
+    for (let i = 0; i < out.length; i++) {
+      const t = i / R.sr;
+      out[i] = (Math.sin(TAU * 2350 * t) + 0.3 * Math.sin(TAU * 4700 * t)) * Math.min(1, t / 0.002) * Math.exp(-t / 0.04);
+    }
+    return fadeEdges(normalize(out, 0.5), 8, 120);
+  },
+  // lock tones: a short seek tick and a steady "locked" double tone
+  lockSeek() {
+    const out = z(len(0.06));
+    for (let i = 0; i < out.length; i++) {
+      const t = i / R.sr;
+      out[i] = Math.sin(TAU * 1180 * t) * Math.min(1, t / 0.003) * Math.exp(-t / 0.03);
+    }
+    return fadeEdges(normalize(out, 0.45), 8, 120);
+  },
+  lockOn() {
+    const out = z(len(0.42));
+    for (let i = 0; i < out.length; i++) {
+      const t = i / R.sr;
+      const f = t < 0.2 ? 1560 : 1760;
+      out[i] = (Math.sin(TAU * f * t) + 0.25 * Math.sin(TAU * f * 2 * t)) * Math.min(1, t / 0.004) * (t < 0.38 ? 1 : Math.max(0, 1 - (t - 0.38) / 0.04));
+    }
+    return fadeEdges(normalize(out, 0.45), 16, 200);
+  },
 };
 
 
@@ -744,12 +805,12 @@ const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tai
 // Made after the bank is playable: ambience beds and calls, the siren.
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
   'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
-  'reloadA', 'reloadB', 'emptyClick']);
+  'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn']);
 
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = {
   thud: 3, crunch: 2, glass: 2, pop: 3, slap: 3, whoosh: 2, gull: 3, clank: 2,
-  gunPistol: 2, gunSmg: 2, blast: 2, thwack: 2, bodyHit: 2, impact: 2, ricochet: 2, whiz: 2,
+  gunPistol: 2, gunSmg: 2, blast: 2, thwack: 2, bodyHit: 2, impact: 2, ricochet: 2, whiz: 2, tink: 2,
 };
 
 // Stereo impulse response of a street: a few early wall reflections and

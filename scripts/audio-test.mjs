@@ -396,7 +396,8 @@ try {
     // ---- Combat sounds: generated, bounded, positioned, drained ----
     {
       const names = ['gunPistol0', 'gunPistol1', 'gunSmg0', 'gunScatter', 'gunLobber', 'blast0', 'blast1', 'thwack0', 'bodyHit0',
-        'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick'];
+        'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick',
+        'pin', 'tink0', 'tink1', 'whistle', 'beep', 'lockSeek', 'lockOn'];
       const t1 = performance.now();
       while (names.some((n) => !audio.debug.buffers[n]) && performance.now() - t1 < 8000) {
         audio.render(1, 1 / 60);
@@ -448,6 +449,17 @@ try {
         ['empty', 'empty', { actor: walker, weapon: 'pistol' }],
         ['weaponSwitch', 'weaponSwitch', { actor: walker, weapon: 'smg' }],
         ['playerDown', 'playerDown', {}],
+        // docs/ARMS.md section 7
+        ['shot fizz (pin)', 'shot', payload('fizz', 2, 0)],
+        ['launch missile', 'launch', { shooter: walker, craft: null, weapon: 'missile', x: 8, y: 20, z: 0 }],
+        ['launch bomb', 'launch', { shooter: walker, craft: null, weapon: 'bomb', x: 8, y: 20, z: 0 }],
+        ['launch shell', 'launch', { shooter: walker, craft: null, weapon: 'cannon', x: 8, y: 1, z: 0 }],
+        ['bombFall whistle', 'bombFall', { index: 0, x: 10, y: 20, z: 0, vy: 0 }],
+        ['sticky beep', 'sticky', { x: 3, y: 0, z: 1, on: true, beep: true, index: 0 }],
+        ['sticky stuck', 'sticky', { x: 3, y: 0, z: 1, on: true, beep: false, index: 0 }],
+        ['bounce tink', 'bounce', { x: 3, y: 0, z: 1, v: 9, weapon: 'fizz' }],
+        ['detonate click', 'detonate', { count: 2 }],
+        ['huge explosion', 'explosion', { x: 25, y: 1, z: 5, radius: 11, source: null, depth: 0, size: 'huge', puff: false }],
       ];
       // ricochet / impact strike on a wall
       cases.push(['shot wall strike', 'shot', payload('pistol', 10, 6, 'wall')]);

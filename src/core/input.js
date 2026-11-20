@@ -10,10 +10,12 @@
 // Buttons: 'enter' (get in/out), 'attack', 'horn', 'camera', 'map',
 //          'pause', 'weapon', 'jump', and for combat 'fire' (held =
 //          automatic), 'lock' (tap toggles lock-on), 'swap' (next weapon),
-//          'reload'. Use pressed(name) for "was tapped this step" and
-//          held(name) for "is down now".
+//          'reload'; armed craft (docs/ARMS.md) 'fire2' (held, slot 1),
+//          'drop' (tap, one bomb), 'detonate' (tap, blow placed charges),
+//          'cancel' (cancel a throw being aimed). Use pressed(name) for "was
+//          tapped this step" and held(name) for "is down now".
 // Keyboard (desktop testing): F/Enter enter, G fire, T lock, X swap,
-//          R reload.
+//          R reload, Z fire2, B drop, V detonate, H horn (police siren).
 //
 // `steerMode: 'proportional'` tells stepVehicle that steer is a share of
 // the speed-dependent lock (the player); AI controls leave it out.
@@ -81,7 +83,9 @@ export function attachKeyboard(input, target = window) {
   const down = new Set();
   const buttons = { KeyF: 'enter', Enter: 'enter', KeyE: 'attack', KeyH: 'horn', KeyC: 'camera', KeyM: 'map', Escape: 'pause', KeyQ: 'weapon', KeyJ: 'jump',
     // Combat (F stays 'enter'): G fire, T lock-on, X swap, R reload.
-    KeyG: 'fire', KeyT: 'lock', KeyX: 'swap', KeyR: 'reload' };
+    KeyG: 'fire', KeyT: 'lock', KeyX: 'swap', KeyR: 'reload',
+    // docs/ARMS.md: craft slot 1, bomb drop, sticky detonate (H horn = police siren).
+    KeyZ: 'fire2', KeyB: 'drop', KeyV: 'detonate' };
   const refresh = () => {
     const l = down.has('ArrowLeft') || down.has('KeyA');
     const r = down.has('ArrowRight') || down.has('KeyD');

@@ -15,9 +15,18 @@
 // health bar while hurt or fighting, and the downed / respawn fade. The
 // weapon, ammo and reload controls live in touch.js (`setCombat`).
 //
+// Armed craft (docs/ARMS.md): registers every armed-craft button once
+// (src/ui/armsctl.js) and draws the nose pipper, the seeker box (shrinks
+// over the 0.8 s lock, red with LOCK when locked) and an off-screen arrow
+// toward the seeker target. Magazine pips and reload rings sit on the
+// buttons themselves; the bomb impact ring is drawn in the world by
+// combatfx.
+//
 // Logic works without a DOM or a camera (node tests): every DOM part
 // is guarded.
-import { WEAPONS } from '../core/weapons.js';
+import { WEAPONS, mountFor } from '../core/weapons.js';
+import { registerArmsControls } from './armsctl.js';
+import { noseRay } from '../core/seeker.js';
 import {
   pickAssist, pickLock, pickFlick, keepLock, targetPoint, forward, dirTo, convergeDir,
   yawPitchTo, followAngle, alive, isActor,
@@ -378,6 +387,79 @@ export function createCombatHud(game, uiRoot) {
     dmg: [-1, -1, -1], dmgA: [0, 0, 0],
   };
   const combatState = { show: false, weapon: '', name: '', mag: 0, max: 0, reload: 0, locked: false, drive: false };
+  const armsCtl = game.touch ? registerArmsControls(game, game.touch) : null;
+  const cview = { pip: false, px: -1, py: -1, box: false, bx: -1, by: -1, bs: -1, locked: null, arrow: false, aa: 99 };
+  const ray = { x: 0, y: 0, z: 0, fx: 1, fy: 0, fz: 0 };
+
+  // Pipper, seeker box and arrow while aboard an armed craft.
+  function renderCraft(v, cam, W, H) {
+    const cb = game.combat;
+    const arms = cb && cb.armsOf ? cb.armsOf(v) : v.arms;
+    const armed = !!arms && !!cam && !!cam.matrixWorldInverse && (v.kind === 'plane' || v.kind === 'heli');
+    let pip = false, px = -1, py = -1;
+    if (armed && mountFor(arms, 0)) {
+      noseRay(v, ctx.seaY, ray);
+      const d = 120;
+      project(cam, ray.x + ray.fx * d, ray.y + ray.fy * d, ray.z + ray.fz * d, W, H);
+      if (scr.ok && scr.x >= 0 && scr.x <= W && scr.y >= 0 && scr.y <= H) {
+        pip = true;
+        px = Math.round(scr.x);
+        py = Math.round(scr.y);
+      }
+    }
+    if (pip !== cview.pip) {
+      cview.pip = pip;
+      ui.pipper.classList.toggle('rw-on', pip);
+    }
+    if (pip && (px !== cview.px || py !== cview.py)) {
+      cview.px = px;
+      cview.py = py;
+      ui.pipper.style.transform = `translate(${px}px, ${py}px)`;
+    }
+    const sk = cb && cb.seeker;
+    const t = armed && sk ? sk.target : null;
+    let box = false, arrow = false, bx = -1, by = -1, bs = -1, aa = cview.aa;
+    if (t) {
+      targetPoint(t, ctx.seaY, tp);
+      project(cam, tp.x, tp.y, tp.z, W, H);
+      if (scr.ok && scr.x > 0 && scr.x < W && scr.y > 0 && scr.y < H) {
+        box = true;
+        bx = Math.round(scr.x);
+        by = Math.round(scr.y);
+        bs = Math.round(34 + (1 - sk.progress) * 50);
+      } else {
+        // Off screen (or behind): an arrow at the edge toward it.
+        arrow = true;
+        const sx = scr.ok ? scr.x - W / 2 : -(scr.x - W / 2), sy = scr.ok ? scr.y - H / 2 : -(scr.y - H / 2);
+        aa = Math.round(Math.atan2(sy, sx) * 30) / 30;
+      }
+    }
+    if (box !== cview.box) {
+      cview.box = box;
+      ui.seek.classList.toggle('rw-on', box);
+    }
+    if (box && (bx !== cview.bx || by !== cview.by || bs !== cview.bs)) {
+      cview.bx = bx;
+      cview.by = by;
+      cview.bs = bs;
+      ui.seek.style.transform = `translate(${bx}px, ${by}px)`;
+      ui.seek.style.width = ui.seek.style.height = bs + 'px';
+      ui.seek.style.margin = `${-bs / 2}px 0 0 ${-bs / 2}px`;
+    }
+    const locked = !!t && sk.state === 'locked';
+    if (locked !== cview.locked) {
+      cview.locked = locked;
+      ui.seek.classList.toggle('rw-locked', locked);
+    }
+    if (arrow !== cview.arrow) {
+      cview.arrow = arrow;
+      ui.sarrow.classList.toggle('rw-on', arrow);
+    }
+    if (arrow && aa !== cview.aa) {
+      cview.aa = aa;
+      ui.sarrow.style.transform = `rotate(${aa.toFixed(3)}rad)`;
+    }
+  }
 
   function render(alpha, dt) {
     const p = game.player;
@@ -409,10 +491,13 @@ export function createCombatHud(game, uiRoot) {
       combatState.locked = !!st.lock;
       touch.setCombat(combatState);
     }
+    if (armsCtl) armsCtl.update();
     if (!ui || !w) return;
     const cam = game.camera;
     const W = window.innerWidth || 1, H = window.innerHeight || 1;
     if (cam && cam.updateMatrixWorld) cam.updateMatrixWorld();
+    if (p.vehicle && p.vehicle.spec) renderCraft(p.vehicle, cam, W, H);
+    else if (cview.pip || cview.box || cview.arrow) renderCraft(p.vehicle || w, null, W, H);
     const c = chase();
     const k = c && c.aim ? c.aim.k : 0;
     const v = p.vehicle;
@@ -575,9 +660,12 @@ export function createCombatHud(game, uiRoot) {
     const noTarget = mk('rw-notarget', layer);
     noTarget.textContent = 'No target';
     const hp = mk('rw-chp', layer, '<i></i>');
+    const pipper = mk('rw-pipper', layer, '<svg viewBox="-20 -20 40 40" aria-hidden="true"><circle r="9"/><path d="M-16 0h5M11 0h5M0 -16v5"/><circle r="1.5" class="rw-pdot"/></svg>');
+    const seek = mk('rw-seek', layer, '<i></i><i></i><i></i><i></i><b>LOCK</b>');
+    const sarrow = mk('rw-sarrow', layer, '<i></i>');
     return {
       layer, xhair, ring, ringArc: ring.querySelector('.rw-x-ringarc'), tgt, hp, hpFill: hp.firstChild,
-      dmg: dmgEls, fade, fadeText, noTarget,
+      dmg: dmgEls, fade, fadeText, noTarget, pipper, seek, sarrow,
     };
   }
 
@@ -600,9 +688,11 @@ export function createCombatHud(game, uiRoot) {
     get target() { return st.target; },
     get lock() { return st.lock; },
     get aiming() { return st.aiming; },
+    armsCtl,
     dispose() {
       for (const f of offs) f();
       offs.length = 0;
+      if (armsCtl) armsCtl.remove();
       if (ui) ui.layer.remove();
     },
   };

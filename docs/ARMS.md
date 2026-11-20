@@ -280,3 +280,48 @@ whose shared-texture offset follows `trackPhase` (no new texture). Gannetfang: s
 canards, twin canted fins, a belly bomb rack shown while bombs remain.
 Lampwatch: bubble cockpit, chin pod, skids, light bar on the tail boom,
 spotlight cone under the nose. No real-world shapes, markings or names.
+
+## 8. As built by task 31 (plug-in points for tasks 32 and 33)
+- Files: `src/core/weapons.js` (`sticky`, `blastScale`, `rangeMin`, `MOUNTS`,
+  `createCraftArms`, `mountFor`, `tryMount`, `stepCraftArms`, `mountReload`),
+  `src/core/seeker.js`, `src/systems/combat.js`, `src/ui/armsctl.js` (every
+  armed-craft button), `src/ui/touch.js` (`slot` option, mode `tank`),
+  tests `test/arms.test.js`, `test/seeker.test.js`.
+- Slots: slot 0 and 1 are the non-bomb mounts of `spec.mounts` in order;
+  'drop' is the bomb mount ('drop' in a mounts list means 'bomb'). Bomb
+  magazine: plane 6, heli 4, or `spec.bombs`. `game.combat.armsOf(craft)`
+  creates `craft.arms` lazily; combat steps every craft's mount timers.
+- Throw: elevation fixed at 0.6 rad (45 degrees would outlast the 2.2 s
+  fuse at 25 m); the flat reach follows the aim pitch as in section 1.
+  `game.combat.preview` / `dropPreview` hold the live arc and bomb ring.
+  Cancel: lift FIRE over SWAP or the more button (input `cancel`), or tap
+  SWAP while aiming. AI `fire()` with thrown weapons uses the same rule.
+- Craft hooks: `CRAFT_HOOKS` in combat.js, keyed by spec id then kind, are
+  registered empty for `tank`, `fighter`, `patrolheli`. Fill any of
+  `controls(game, craft, input, dt)` (called each step the player is
+  aboard, before firing; the tank turret aim and its LOCK go here),
+  `aim(game, craft, slot, mountId, out)` (write the unit fire direction,
+  return true), `muzzle(game, craft, slot, mountId, out)` (write the world
+  muzzle point, return true), `fired(game, craft, slot, mountId)`.
+  Defaults: aim along the nose (plane pitch; heli 0.12 rad down), bent up
+  to `MOUNTS[id].bend` toward the seeker target; muzzle at the nose tip,
+  bombs under the belly; no bombs while on the ground or water.
+- The seeker runs for the player's armed planes and helis (not tanks).
+  Missiles home only when fired while `seeker.state === 'locked'`.
+- Touch: plane/heli arc slots `gun`, `msl`, `bomb`, `alock`; tank slots
+  `cannon`, `coax`, `tlock` (input `fire`, `fire2`, `lock`); `det`
+  (DETONATE, every mode); SIREN (input `horn`) in the more fan for police
+  craft. Buttons show only for the craft's mounts. Tank mode: the left
+  stick writes throttle (up), brake (down) and steer (sideways); the right
+  half drags the camera. Game.js sets the touch mode from `craft.kind`, so
+  `kind: 'tank'` needs nothing else. Minimal button budget: 6 at once,
+  except the armed-aircraft arc (up to 9: pedals, EXIT, more, pause, GUN,
+  MSL, BOMB, LOCK) and DETONATE (+1) while charges exist.
+- Extra events: `bounce` {x,y,z, v, weapon} (can or charge bouncing);
+  `sticky` also carries `beep` (true for a blink, speeding up from 1.1 s
+  to 0.25 s between beeps over 21 s) and `index`; `explosion.puff` marks a
+  harmless puff; `siren` from police.js stays a boolean, a craft's SIREN
+  sends {craft, on}; `splash` gets a third argument, strength (3 = bomb).
+- Not built here (cut for budget): the 'tracks' and 'turbine' engine rigs
+  and the two tutorial hints (audio.js, banks.js and tutorial.js are hub
+  files: a short follow-up task, not 32 or 33).

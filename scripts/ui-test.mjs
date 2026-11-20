@@ -963,7 +963,7 @@ try {
   await page.evaluate(() => { for (const h of window.__regH) h.remove(); rw.touch.setMode('car'); });
   check('remove() takes the buttons away', (await page.locator('[aria-label="Drop bomb"]').count()) === 0 && (await page.locator('[aria-label="Throw grenade"]').count()) === 0);
   await page.setViewportSize({ width: 780, height: 360 });
-  await page.evaluate(() => { rw.touch.setMode('plane'); rw.touch.registerAction({ id: 'missile', label: 'Fire missile', icon: 'fire', text: 'MSL', group: 'primary', modes: ['plane'] }); });
+  await page.evaluate(() => { rw.touch.setMode('plane'); window.__mslH = rw.touch.registerAction({ id: 'missile', label: 'Fire missile', icon: 'fire', text: 'MSL', group: 'primary', modes: ['plane'] }); });
   await page.waitForTimeout(350);
   await checkLayout('plane 780x360 with a registered primary action');
   await page.evaluate(() => { rw.touch.setLeftHanded(true); });
@@ -1151,6 +1151,199 @@ try {
   await checkLayout('foot aiming 780x360');
   await page.evaluate(() => { rw.input.press('lock'); rw.frame(2); rw.input.release('lock'); rw.frame(100); rw.arena(false); });
   await page.setViewportSize({ width: 915, height: 412 });
+
+  // ======== armed craft and explosives controls (task 31, docs/ARMS.md) ========
+  {
+    await page.setViewportSize({ width: 915, height: 412 });
+    await page.evaluate(() => {
+      if (window.__mslH) window.__mslH.remove();
+      rw.touch.setLeftHanded(false);
+      rw.touch.setHudMode('minimal');
+      rw.hud.setHudMode('minimal');
+      // Fixture craft (the real fighter, police heli and tank come in tasks 32 and 33).
+      const mk = (id, kind, mounts, extra = {}) => ({ id: 900 + mounts.length, kind, x: 0, y: 40, z: 0, heading: 0, pitch: 0,
+        vx: 0, vy: 0, vz: 0, health: 500, spec: { id, kind, length: 12, width: 9, height: 3, health: 500, mounts, ...extra } });
+      window.__CR = {
+        fighter: mk('fx-fighter', 'plane', ['nosegun', 'missile', 'bomb']),
+        police: mk('fx-patrol', 'heli', ['chingun'], { police: true }),
+        heavy: mk('fx-heavy', 'heli', ['drop']),
+        tank: mk('fx-tank', 'tank', ['cannon', 'coax']),
+        prop: mk('fx-prop', 'plane', []),
+      };
+      window.__ST = { n: 0 };
+      rw.game.combat = {
+        seeker: { target: null, state: 'idle', progress: 0 },
+        countStickies: () => window.__ST.n,
+        armsOf: null,
+      };
+      rw.game.combat.armsOf = undefined;
+    });
+    const ids = await page.evaluate(() => [...document.querySelectorAll('.rw-act')].map((e) => e.dataset.action));
+    check('arms actions registered (gun msl bomb alock cannon coax tlock detonate siren)',
+      ['gun', 'msl', 'bomb', 'alock', 'cannon', 'coax', 'tlock', 'detonate', 'siren'].every((k) => ids.includes(k)), ids.join());
+    const setCraft = (key, mode, charges = 0) => page.evaluate(([k, m, n]) => {
+      const p = rw.game.player;
+      p.vehicle = k ? window.__CR[k] : null;
+      window.__ST.n = n;
+      rw.touch.setMode(m);
+      rw.touch.setCombat({ show: true, weapon: n ? 'sticky' : 'fizz', name: 'Fizzpop Can', mag: 1, max: 1, reload: 0, locked: false, drive: false });
+      rw.touch.update(1 / 60);
+      rw.chud.render(1, 1 / 60);
+    }, [key, mode, charges]);
+    const visibleActions = () => page.evaluate(() => [...document.querySelectorAll('.rw-touch .rw-act')]
+      .filter((e) => e.offsetParent && getComputedStyle(e).visibility !== 'hidden').map((e) => e.dataset.action).sort().join());
+    // [craft, mode, charges, max buttons, wanted actions]. Minimal: 6 at most, except the
+    // armed-aircraft arc (ARMS.md: GUN MSL BOMB LOCK, up to 9) and DETONATE (+1).
+    const cases = [
+      ['fighter', 'plane', 0, 9, 'alock,bomb,gun,msl'],
+      ['fighter', 'plane', 2, 10, 'alock,bomb,detonate,gun,msl'],
+      ['police', 'heli', 0, 6, 'gun'],
+      ['heavy', 'heli', 0, 6, 'bomb'],
+      ['tank', 'tank', 0, 6, 'cannon,coax,tlock'],
+      ['tank', 'tank', 1, 7, 'cannon,coax,detonate,tlock'],
+      ['prop', 'plane', 0, 6, ''],
+      [null, 'foot', 0, 6, ''],
+      [null, 'foot', 3, 7, 'detonate'],
+    ];
+    const armsCounts = {};
+    for (const [vw, vh] of [[915, 412], [780, 360]]) {
+      await page.setViewportSize({ width: vw, height: vh });
+      await page.waitForTimeout(80);
+      for (const lefty of [false, true]) {
+        await page.evaluate((l) => rw.touch.setLeftHanded(l), lefty);
+        for (const [key, mode, charges, max, want] of cases) {
+          const tag = `${key || 'walker'}${charges ? '+charges' : ''} ${mode} ${vw}x${vh}${lefty ? ' lefty' : ''}`;
+          await page.evaluate(() => { rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); });
+          await setCraft(key, mode, charges);
+          await hudFor(mode === 'foot' ? 'foot' : 'car');
+          await page.waitForTimeout(200);
+          check(`arms ${tag}: actions ${want || '(none)'}`, (await visibleActions()) === want, await visibleActions());
+          const n = await buttonCount();
+          armsCounts[tag.split(' ')[0]] = Math.max(armsCounts[tag.split(' ')[0]] || 0, n);
+          check(`arms ${tag}: ${n} buttons <= ${max}`, n <= max, String(n));
+          await checkLayout(`arms ${tag}`);
+          if (!lefty && (key === 'fighter' || key === 'tank' || (mode === 'foot' && charges))) await shot(`arms-${key || 'foot'}${charges ? '-charges' : ''}-${vw}x${vh}.png`);
+          if (lefty && key === 'fighter' && charges) await shot(`arms-fighter-lefty-${vw}x${vh}.png`);
+          await tapMore();
+          await checkLayout(`arms ${tag} fan open`);
+          await tapMore();
+          await page.evaluate(() => { rw.touch.setHudMode('full'); rw.hud.setHudMode('full'); });
+          await page.waitForTimeout(260);
+          await checkLayout(`arms full ${tag}`);
+        }
+      }
+    }
+    console.log('arms buttons in Minimal (max):', JSON.stringify(armsCounts));
+    await page.setViewportSize({ width: 915, height: 412 });
+    await page.evaluate(() => { rw.touch.setLeftHanded(false); rw.touch.setHudMode('minimal'); rw.hud.setHudMode('minimal'); });
+    await setCraft('fighter', 'plane', 0);
+    await page.waitForTimeout(200);
+    const at = (a) => page.evaluate((k) => {
+      const r = document.querySelector(`[data-action="${k}"]`).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+    }, a);
+    // Hit areas and fire-type actions primary.
+    const sizes = await page.evaluate(() => ['gun', 'msl', 'bomb', 'alock'].map((k) => {
+      const e = document.querySelector(`[data-action="${k}"]`);
+      return [k, e.offsetWidth, e.classList.contains('rw-pri')];
+    }));
+    check('arc buttons >= 56 px and primary', sizes.every(([, w, p]) => w >= 56 && p), JSON.stringify(sizes));
+    const gun = await at('gun');
+    check('GUN is the big one (>= 80 px)', gun.w >= 80, String(gun.w));
+    // Real multi-touch while flying: stick, GUN held, BOMB tapped, MSL held.
+    await down(41, 140, 300);
+    await drag(41, 140, 300, 190, 260, 5);
+    await down(42, gun.x, gun.y);
+    let st = await read('({ fire: rw.input.held("fire"), steer: rw.input.steer, pitch: rw.input.pitch })');
+    check('flying: stick and GUN at once', st.fire && st.steer > 0.3 && st.pitch > 0.3, JSON.stringify(st));
+    const bomb = await at('bomb');
+    await down(43, bomb.x, bomb.y);
+    check('flying: BOMB tap while holding GUN and the stick', await read('rw.input.pressed("drop") && rw.input.held("fire")'));
+    await up(43);
+    const msl = await at('msl');
+    await down(44, msl.x, msl.y);
+    check('flying: MSL holds fire2', await read('rw.input.held("fire2")'));
+    await up(44);
+    await up(42);
+    await up(41);
+    await page.evaluate(() => rw.frame(1));
+    check('flying: all released', await read('!rw.input.held("fire") && !rw.input.held("fire2") && rw.input.steer === 0'));
+    const lock = await at('alock');
+    await down(45, lock.x, lock.y);
+    await up(45);
+    check('LOCK tap presses lock', await read('rw.input.pressed("lock")'));
+    await page.evaluate(() => rw.frame(1));
+    // Seeker ring and lock state on MSL; pips show the magazine.
+    const ring = await page.evaluate(() => {
+      const sk = rw.game.combat.seeker;
+      sk.target = window.__CR.police;
+      sk.state = 'seek';
+      sk.progress = 0.5;
+      rw.chud.render(1, 1 / 60);
+      const m = document.querySelector('[data-action="msl"]');
+      const a = m.classList.contains('rw-ringon') && !m.classList.contains('rw-on');
+      sk.state = 'locked';
+      sk.progress = 1;
+      rw.chud.render(1, 1 / 60);
+      const b = m.classList.contains('rw-on');
+      const pip = document.querySelector('[data-action="bomb"] .rw-pip').textContent;
+      sk.target = null;
+      sk.state = 'idle';
+      rw.chud.render(1, 1 / 60);
+      return { a, b, pip };
+    });
+    check('MSL ring fills while seeking, solid when locked; BOMB pip shows 6', ring.a && ring.b && ring.pip === '6', JSON.stringify(ring));
+    // Left-handed: the arc moves to the left thumb.
+    await page.evaluate(() => rw.touch.setLeftHanded(true));
+    await page.waitForTimeout(60);
+    const gl = await at('gun');
+    check('left-handed: GUN mirrors to the left side', gl.x < 915 / 2 && Math.abs((915 - gl.x) - gun.x) < 2, `${gl.x} vs ${gun.x}`);
+    await page.evaluate(() => rw.touch.setLeftHanded(false));
+    // Tank: the stick drives (up = throttle, down = brake, sideways = steer).
+    await setCraft('tank', 'tank', 0);
+    await down(46, 140, 300);
+    await drag(46, 140, 300, 140, 240, 5);
+    const tk = await read('({ t: rw.input.throttle, b: rw.input.brake })');
+    await drag(46, 140, 240, 200, 360, 6);
+    const tk2 = await read('({ t: rw.input.throttle, b: rw.input.brake, s: rw.input.steer })');
+    await up(46);
+    check('tank stick: up = throttle, down-right = brake + steer', tk.t > 0.6 && tk.b === 0 && tk2.b > 0.3 && tk2.s > 0.3 && tk2.t === 0,
+      JSON.stringify([tk, tk2]));
+    // On foot: hold FIRE to aim a throw (slide to aim), a second finger walks,
+    // lifting over the more button (where SWAP folds) cancels.
+    await setCraft(null, 'foot', 0);
+    await page.waitForTimeout(100);
+    const fireF = await center('Fire');
+    await down(47, fireF.x, fireF.y);
+    await down(48, 140, 300);
+    await drag(48, 140, 300, 140, 250, 4);
+    await page.evaluate(() => { rw.input.lookX = 0; });
+    await drag(47, fireF.x, fireF.y, fireF.x - 60, fireF.y - 40, 6);
+    st = await read('({ fire: rw.input.held("fire"), look: rw.input.lookX, walk: rw.input.moveY })');
+    check('throwing: FIRE held, slide aims, the other thumb walks', st.fire && st.look < -30 && st.walk > 0.5, JSON.stringify(st));
+    const moreB = await center('More controls');
+    await drag(47, fireF.x - 60, fireF.y - 40, moreB.x, moreB.y, 6);
+    await up(47);
+    await up(48);
+    check('throwing: lift over the more/SWAP button = cancel', await read('rw.input.pressed("cancel") && !rw.input.held("fire")'));
+    await page.evaluate(() => rw.frame(1));
+    await down(49, fireF.x, fireF.y);
+    await up(49);
+    check('throwing: a normal release does not cancel', await read('!rw.input.pressed("cancel")'));
+    // DETONATE: pulsing, primary, >= 56 px.
+    await setCraft(null, 'foot', 2);
+    await page.waitForTimeout(100);
+    const det = await page.evaluate(() => {
+      const e = document.querySelector('[data-action="detonate"]');
+      return { w: e.offsetWidth, pri: e.classList.contains('rw-pri'), anim: getComputedStyle(e.querySelector('.rw-face')).animationName };
+    });
+    check('DETONATE shown with charges: primary, pulsing, >= 56 px', det.w >= 56 && det.pri && det.anim === 'rw-pulse', JSON.stringify(det));
+    const db = await at('detonate');
+    await down(50, db.x, db.y);
+    await up(50);
+    check('DETONATE tap presses detonate', await read('rw.input.pressed("detonate")'));
+    await page.evaluate(() => { rw.frame(1); rw.game.player.vehicle = null; window.__ST.n = 0; rw.game.combat = undefined; rw.touch.setMode('car'); rw.touch.update(1 / 60); });
+  }
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } finally {

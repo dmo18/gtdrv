@@ -4,9 +4,11 @@
 // rhythm (fire, run dry, reload). See docs/COMBAT.md.
 const DEG = Math.PI / 180;
 
-// type: 'melee' | 'hitscan' | 'rocket' | 'thrown'
+// type: 'melee' | 'hitscan' | 'rocket' | 'thrown' | 'sticky'
 // spread: half-angle in radians (melee: half of the hit arc)
 // rate: uses per second; mag 0 = no magazine; reload in seconds
+// blastScale: blast damage multiplier (docs/ARMS.md; missing = 1)
+// rangeMin..range: thrown reach span, picked by the aim pitch
 export const WEAPONS = {
   wrench: {
     id: 'wrench', name: 'Pipe Wrench', type: 'melee', dmg: 34, rate: 1.6,
@@ -34,11 +36,132 @@ export const WEAPONS = {
   fizz: {
     id: 'fizz', name: 'Fizzpop Can', type: 'thrown', dmg: 0, rate: 1,
     spread: 0, range: 25, mag: 1, reload: 0.8, pellets: 1, driveBy: false,
-    fuse: 2.2, blast: 5, bounce: 0.35,
+    fuse: 2.2, blast: 5, bounce: 0.35, blastScale: 1, rangeMin: 6,
+  },
+  sticky: {
+    id: 'sticky', name: 'Barnacle Charge', type: 'sticky', dmg: 0, rate: 1.5,
+    spread: 0, range: 18, mag: 1, reload: 0.6, pellets: 1, driveBy: false,
+    blast: 6, blastScale: 1.4, bounce: 0.35, rangeMin: 6,
   },
 };
 
-export const WEAPON_IDS = ['wrench', 'pistol', 'smg', 'scatter', 'lobber', 'fizz'];
+export const WEAPON_IDS = ['wrench', 'pistol', 'smg', 'scatter', 'lobber', 'fizz', 'sticky'];
+export const isThrown = (w) => !!w && (w.type === 'thrown' || w.type === 'sticky');
+
+// ---------------------------------------------------------------------
+// Craft weapons (mounts). Not in the on-foot cycle. A spec lists them
+// as `spec.mounts` (ids below; 'drop' is accepted for 'bomb'). Slot 0
+// and 1 are the non-bomb mounts in list order; slot 'drop' is the bomb
+// mount. docs/ARMS.md section 2.
+// type: 'shell' (rocket with drop) | 'hitscan' | 'missile' | 'bomb'
+// ---------------------------------------------------------------------
+export const MOUNTS = {
+  cannon: {
+    id: 'cannon', name: 'Thudder', type: 'shell', dmg: 220, rate: 0.4, spread: 0.3 * DEG,
+    range: 300, mag: 1, reload: 2.5, speed: 90, aiSpeed: 45, drop: 0.3, blast: 6, blastScale: 1.3,
+  },
+  coax: {
+    id: 'coax', name: 'Rattlecoax', type: 'hitscan', dmg: 14, rate: 10, spread: 2.5 * DEG,
+    range: 60, mag: 50, reload: 2.0,
+  },
+  nosegun: {
+    id: 'nosegun', name: 'Hailbox', type: 'hitscan', dmg: 18, rate: 15, spread: 1.5 * DEG,
+    range: 220, mag: 120, reload: 2.0, bend: 6 * DEG,
+  },
+  chingun: {
+    id: 'chingun', name: 'Chatter Pod', type: 'hitscan', dmg: 10, rate: 8, spread: 3 * DEG,
+    range: 120, mag: 60, reload: 2.0, bend: 40 * DEG,
+  },
+  missile: {
+    id: 'missile', name: 'Gullseeker', type: 'missile', dmg: 260, rate: 1, spread: 0,
+    range: 600, mag: 2, reload: 3.0, speed: 95, turn: 2.4, life: 6, blast: 7, blastScale: 1.3,
+  },
+  bomb: {
+    id: 'bomb', name: 'Pelican Drop', type: 'bomb', dmg: 0, rate: 3, spread: 0,
+    range: 0, mag: 6, magHeli: 4, reload: 5.0, blast: 11, blastScale: 1.6,
+  },
+};
+export const MOUNT_IDS = Object.keys(MOUNTS);
+const mountId = (id) => (id === 'drop' ? 'bomb' : id);
+
+// Per-craft mount state: { ids, slots: [slot0, slot1], drop, mag, cool,
+// reloadT, reloading } with one entry per mount id. Unlimited reserves,
+// auto-reload when a magazine runs dry. Null when the spec has no mounts.
+export function createCraftArms(spec) {
+  const list = spec && Array.isArray(spec.mounts) ? spec.mounts : null;
+  if (!list || !list.length) return null;
+  const arms = { ids: [], slots: [null, null], drop: null, mag: {}, max: {}, cool: {}, reloadT: {}, reloading: {} };
+  for (let i = 0; i < list.length; i++) {
+    const id = mountId(list[i]);
+    const m = MOUNTS[id];
+    if (!m || arms.ids.indexOf(id) >= 0) continue;
+    arms.ids.push(id);
+    const max = m.type === 'bomb' ? ((spec.bombs | 0) || (spec.kind === 'heli' ? m.magHeli : m.mag)) : m.mag;
+    arms.max[id] = max;
+    arms.mag[id] = max;
+    arms.cool[id] = 0;
+    arms.reloadT[id] = 0;
+    arms.reloading[id] = false;
+    if (m.type === 'bomb') arms.drop = arms.drop || id;
+    else if (!arms.slots[0]) arms.slots[0] = id;
+    else if (!arms.slots[1]) arms.slots[1] = id;
+  }
+  return arms.ids.length ? arms : null;
+}
+
+// Mount id for slot 0, 1 or 'drop' (null when the craft has none).
+export function mountFor(arms, slot) {
+  if (!arms) return null;
+  if (slot === 'drop') return arms.drop;
+  return arms.slots[slot === 1 ? 1 : 0] || null;
+}
+
+export function stepCraftArms(arms, dt) {
+  if (!arms) return;
+  const ids = arms.ids;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    if (arms.cool[id] > 0) arms.cool[id] = Math.max(0, arms.cool[id] - dt);
+    if (arms.reloading[id]) {
+      arms.reloadT[id] -= dt;
+      if (arms.reloadT[id] <= 0) {
+        arms.reloadT[id] = 0;
+        arms.reloading[id] = false;
+        arms.mag[id] = arms.max[id];
+      }
+    } else if (!(arms.mag[id] > 0)) {
+      arms.reloading[id] = true;
+      arms.reloadT[id] = MOUNTS[id].reload;
+    }
+  }
+}
+
+// Ready to fire this mount now (no ammo used)?
+export function mountReady(arms, id) {
+  return !!arms && !!MOUNTS[id] && arms.max[id] !== undefined && !(arms.cool[id] > 0)
+    && !arms.reloading[id] && arms.mag[id] > 0;
+}
+
+// Use one round. Returns USE_NO, USE_OK or USE_LAST (reload started).
+export function tryMount(arms, id) {
+  if (!mountReady(arms, id)) return USE_NO;
+  arms.cool[id] = 1 / MOUNTS[id].rate;
+  arms.mag[id]--;
+  if (arms.mag[id] <= 0) {
+    arms.mag[id] = 0;
+    arms.reloading[id] = true;
+    arms.reloadT[id] = MOUNTS[id].reload;
+    return USE_LAST;
+  }
+  return USE_OK;
+}
+
+// Reload progress 0..1 (0 = not reloading).
+export function mountReload(arms, id) {
+  if (!arms || !arms.reloading[id]) return 0;
+  const r = MOUNTS[id].reload;
+  return r > 0 ? Math.max(0.01, 1 - arms.reloadT[id] / r) : 0;
+}
 
 // Results of tryUse.
 export const USE_NO = 0; // not ready (cooling down or reloading)

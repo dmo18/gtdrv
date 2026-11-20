@@ -622,6 +622,7 @@ export function createAudio(game) {
   // ---- police siren ----
   let siren = null;
   let sirenOn = false;
+  let policeSiren = false, craftSiren = false; // police chase / a police craft's SIREN
   function buildSiren() {
     const pan = panNode(bus.effects);
     const out = gainNode(0, pan || bus.effects);
@@ -644,7 +645,7 @@ export function createAudio(game) {
     let bd = Infinity;
     for (let i = 0; i < vs.length; i++) {
       const v = vs[i];
-      if (!v || !v.police || v.wrecked) continue;
+      if (!v || !(v.police || (v.spec && v.spec.police)) || v.wrecked) continue;
       const dx = fin(v.x) - fin(game.player.x);
       const dz = fin(v.z) - fin(game.player.z);
       const d = dx * dx + dz * dz - (v.siren ? 1e6 : 0);
@@ -906,11 +907,16 @@ export function createAudio(game) {
       }
       return;
     }
-    if (w === 'fizz') {
+    if (w === 'fizz' || w === 'sticky') {
+      // Pin out, then the toss.
       spatial(x, z, 60);
-      voices.play(bus.effects, sp.gain * 0.5, sp.pan, (v, t) => v.add(`pop${Math.floor(rng.next() * 3)}`, t, 1, 0.8 + rng.next() * 0.2));
+      voices.play(bus.effects, sp.gain * 0.5, sp.pan, (v, t) => {
+        v.add('pin', t, 0.8, 0.95 + rng.next() * 0.1);
+        v.add(`whoosh${Math.floor(rng.next() * 2)}`, t + 0.08, 0.5, 1.3);
+      });
       return;
     }
+    if (w === 'bomb' || w === 'missile' || w === 'cannon') return; // sounds come from `launch`
     const def = GUNS[w];
     if (!def) return;
     const own = ownShot(e.shooter);
@@ -988,11 +994,71 @@ export function createAudio(game) {
     if (g < 0.01) return;
     const delay = Math.min(1.2, d / SOUND_V);
     const pan = sp.pan * (d < 6 ? d / 6 : 1);
-    const rate = 1.12 - 0.15 * k + rng.next() * 0.08;
-    voices.play(bus.effects, g, pan, (v, t) => {
+    if (e.puff) {
+      voices.play(bus.effects, g * 0.4, pan, (v, t) => v.add('thud0', t + delay, 1, 0.8));
+      return;
+    }
+    const big = e.size === 'big' || e.size === 'huge';
+    const rate = (e.size === 'huge' ? 0.78 : 1.12 - 0.15 * k) + rng.next() * 0.08;
+    voices.play(bus.effects, Math.min(1, g * (e.size === 'huge' ? 1.25 : 1)), pan, (v, t) => {
       v.add(`blast${Math.floor(rng.next() * 2)}`, t + delay, 1, rate);
-      if (d > 120) v.add('thud0', t + delay, 0.2, 0.6);
+      if (big) v.add(`blast${Math.floor(rng.next() * 2)}`, t + delay + 0.04, 0.6, rate * 0.6);
+      if (d > 120 || e.size === 'huge') v.add('thud0', t + delay, 0.3, 0.5);
     });
+  }
+  // ---- arms (docs/ARMS.md section 7) ----
+  function onLaunch(e) {
+    if (!ready || !e) return;
+    spatial(fin(e.x), fin(e.z), 260);
+    const own = ownShot(e.shooter);
+    if (!own && lowPriority()) return;
+    const w = e.weapon;
+    voices.play(bus.effects, sp.gain, sp.pan, (v, t) => {
+      if (w === 'missile') {
+        v.add('gunLobber', t, 0.9, 0.8 + rng.next() * 0.06);
+        v.add(`whoosh${Math.floor(rng.next() * 2)}`, t + 0.05, 0.8, 0.7);
+      } else if (w === 'bomb') {
+        v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.8, 0.55);
+      } else {
+        v.add(`blast${Math.floor(rng.next() * 2)}`, t, 0.7, 1.5);
+        v.add('gunScatter', t, 0.7, 0.6);
+      }
+    });
+  }
+  function onBombFall(e) {
+    if (!ready || !e) return;
+    spatial(fin(e.x), fin(e.z), 300);
+    // The whistle lasts about the fall; a high drop starts it later.
+    const fall = Math.sqrt(Math.max(0, 2 * fin(e.y) / 9.81));
+    const start = Math.max(0, fall - 2.6);
+    voices.play(bus.effects, sp.gain * 0.7, sp.pan, (v, t) => v.add('whistle', t + start, 1, 1));
+  }
+  function onLock(e) {
+    if (!ready || !e || !game.player || e.craft !== game.player.vehicle) return;
+    if (e.state === 'lost') return;
+    voices.play(bus.ui, 0.45, 0, (v, t) => {
+      if (e.state === 'locked') v.add('lockOn', t, 1, 1);
+      else v.add('lockSeek', t, 1, 1);
+    });
+  }
+  function onSticky(e) {
+    if (!ready || !e || !e.on) return;
+    spatial(fin(e.x), fin(e.z), 40);
+    if (sp.gain < 0.02) return;
+    voices.play(bus.effects, sp.gain * (e.beep ? 0.35 : 0.6), sp.pan, (v, t) => {
+      if (e.beep) v.add('beep', t, 1, 1);
+      else v.add(`thud${Math.floor(rng.next() * 3)}`, t, 0.7, 1.6);
+    });
+  }
+  function onDetonate() {
+    if (!ready) return;
+    voices.play(bus.effects, 0.5, 0, (v, t) => v.add('emptyClick', t, 1, 0.7));
+  }
+  function onBounce(e) {
+    if (!ready || !e || voices.count >= 7) return;
+    spatial(fin(e.x), fin(e.z), 40);
+    if (sp.gain < 0.02) return;
+    voices.play(bus.effects, sp.gain * Math.min(0.6, fin(e.v) / 15), sp.pan, (v, t) => v.add(`tink${Math.floor(rng.next() * 2)}`, t, 1, 0.9 + rng.next() * 0.2));
   }
   function onBurning(e) {
     if (!ready || !e || !e.on || !e.craft) return;
@@ -1234,8 +1300,17 @@ export function createAudio(game) {
         ev.on('weaponSwitch', guard(onSwitch)),
         ev.on('playerDown', guard(onPlayerDown)),
         ev.on('siren', guard((on) => {
-          sirenOn = !!on;
+          // police.js sends a boolean; a police craft's SIREN sends {craft, on}.
+          if (on && typeof on === 'object') craftSiren = !!on.on;
+          else policeSiren = !!on;
+          sirenOn = policeSiren || craftSiren;
         })),
+        ev.on('launch', guard(onLaunch)),
+        ev.on('bombFall', guard(onBombFall)),
+        ev.on('lock', guard(onLock)),
+        ev.on('sticky', guard(onSticky)),
+        ev.on('detonate', guard(onDetonate)),
+        ev.on('bounce', guard(onBounce)),
         ev.on('pause', guard(() => syncRunState())),
       );
     }
