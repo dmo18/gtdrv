@@ -397,7 +397,7 @@ try {
     {
       const names = ['gunPistol0', 'gunPistol1', 'gunSmg0', 'gunScatter', 'gunLobber', 'blast0', 'blast1', 'thwack0', 'bodyHit0',
         'impact0', 'ricochet0', 'whiz0', 'reloadA', 'reloadB', 'emptyClick',
-        'pin', 'tink0', 'tink1', 'whistle', 'beep', 'lockSeek', 'lockOn'];
+        'pin', 'tink0', 'tink1', 'whistle', 'beep', 'lockSeek', 'lockOn', 'abroar', 'spotClick', 'shockThump'];
       const t1 = performance.now();
       while (names.some((n) => !audio.debug.buffers[n]) && performance.now() - t1 < 8000) {
         audio.render(1, 1 / 60);

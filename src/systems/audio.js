@@ -18,6 +18,7 @@ import { createBank } from '../audio/banks.js';
 import { WEAPONS } from '../core/weapons.js';
 import { ENGINES, engineFor, isJet, pitchFor, pointsFor } from '../audio/engines.js';
 import { createVoices } from '../audio/voices.js';
+import { createTankRig } from '../audio/tankrig.js'; // tank (task 32)
 
 const HEARING = 70; // metres for crash sounds
 const OTHER_RANGE = 70; // metres for other craft engines
@@ -324,8 +325,17 @@ export function createAudio(game) {
     };
   }
 
+  // Tank (task 32): the 'tracks' rig and the crush crunch, src/audio/tankrig.js.
+  const tankRig = createTankRig({
+    gainNode, biq, loopSrc, set, bus,
+    playAt(name, x, z, range, g, rate) {
+      spatial(x, z, range);
+      if (sp.gain > 0.01) voices.play(bus.effects, sp.gain * g, sp.pan, (v, t) => v.add(name, t, 1, rate));
+    },
+  });
   function buildPlayerRig(c) {
     const kind = c.kind;
+    if (kind === 'tank') return tankRig.build(c);
     const ch = engineFor(c);
     if (ch) {
       const r = engineRig(ch, bus.engine, true);
@@ -343,7 +353,10 @@ export function createAudio(game) {
       const s1 = loopSrc('turbine', tg, 0.6);
       const s2 = loopSrc('turbine', t2, 0.6);
       const s3 = loopSrc('jetroar', lp, 1);
-      return { kind: 'jet', out, tg, t2, lp, rg, srcs: [s1, s2, s3], s1, s2, s3 };
+      // 'turbine' engines (fighter): an afterburner roar layer (src/audio/turbine.js).
+      const abG = c.spec && c.spec.engine === 'turbine' ? gainNode(0, out) : null;
+      const s4 = abG ? loopSrc('abroar', abG, 1) : null;
+      return { kind: 'jet', out, tg, t2, lp, rg, abG, srcs: s4 ? [s1, s2, s3, s4] : [s1, s2, s3], s1, s2, s3, s4 };
     }
     if (kind === 'heli') {
       const out = gainNode(0, bus.engine);
@@ -421,6 +434,11 @@ export function createAudio(game) {
       set(r.lp.frequency, 450 + 3800 * s, now, 0.1);
       set(r.rg.gain, 0.25 + 0.75 * s, now, 0.1);
       set(r.tg.gain, 0.22 + 0.25 * s, now, 0.1);
+      if (r.abG) {
+        const ab = clamp(fin(c.afterburner), 0, 1);
+        set(r.abG.gain, 0.95 * ab, now, 0.12);
+        if (r.s4) set(r.s4.playbackRate, 0.85 + 0.25 * ab + 0.1 * clamp(speed / maxS, 0, 1.3), now, 0.1);
+      }
       set(r.out.gain, 0.7, now, 0.2);
     } else if (r && r.kind === 'heli') {
       const rs = clamp(fin(c.rotorSpeed), 0, 1.2);
@@ -431,6 +449,8 @@ export function createAudio(game) {
       set(r.tailG.gain, 0.22 * rs, now, 0.1);
       set(r.turG.gain, 0.18 * rs, now, 0.1);
       set(r.out.gain, 0.85, now, 0.2);
+    } else if (r && r.kind === 'tracks') {
+      tankRig.update(r, c, now, dt);
     }
 
     // tyres, wind, water
@@ -534,6 +554,10 @@ export function createAudio(game) {
       const out = gainNode(0, null);
       return { key: 'heli', rig: { kind: 'heli', out, srcs: [loopSrc('rotor', out, 1)] } };
     }
+    if (v.kind === 'tank') {
+      const out = gainNode(0, null);
+      return { key: 'tracks', rig: { kind: 'jet', out, srcs: [loopSrc('tankTracks', out, 1)] } };
+    }
     const out = gainNode(0, null);
     return { key: 'jet', rig: { kind: 'jet', out, srcs: [loopSrc('jetroar', out, 1)] } };
   }
@@ -573,7 +597,7 @@ export function createAudio(game) {
       s.v = v;
       s.sim = newSim();
       s.lastD = 999;
-      const want = engineFor(v) || (v.kind === 'heli' ? 'heli' : 'jet');
+      const want = engineFor(v) || (v.kind === 'heli' ? 'heli' : v.kind === 'tank' ? 'tracks' : 'jet');
       if (want !== s.rigKey) {
         if (s.rig) stopSources(rigSources(s.rig), s.rig.out, now, false);
         const made = slotRig(v);
@@ -881,6 +905,7 @@ export function createAudio(game) {
     smg: { buf: 'gunSmg', n: 2, g: 0.62, range: 160, gap: 0.05, last: -9 },
     scatter: { buf: 'gunScatter', n: 1, g: 1, range: 220, gap: 0.2, last: -9 },
     lobber: { buf: 'gunLobber', n: 1, g: 0.9, range: 220, gap: 0.2, last: -9 },
+    coax: { buf: 'tankCoax', n: 1, g: 0.7, range: 180, gap: 0.06, last: -9 }, // tank (task 32)
   };
   const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9 };
   const lowPriority = () => voices.count >= 6;
@@ -1019,6 +1044,8 @@ export function createAudio(game) {
         v.add(`whoosh${Math.floor(rng.next() * 2)}`, t + 0.05, 0.8, 0.7);
       } else if (w === 'bomb') {
         v.add(`clank${Math.floor(rng.next() * 2)}`, t, 0.8, 0.55);
+      } else if (w === 'cannon') {
+        v.add('tankBoom', t, 1, 0.95 + rng.next() * 0.08); // tank (task 32)
       } else {
         v.add(`blast${Math.floor(rng.next() * 2)}`, t, 0.7, 1.5);
         v.add('gunScatter', t, 0.7, 0.6);
@@ -1311,6 +1338,12 @@ export function createAudio(game) {
         ev.on('sticky', guard(onSticky)),
         ev.on('detonate', guard(onDetonate)),
         ev.on('bounce', guard(onBounce)),
+        ev.on('crush', guard((e) => tankRig.crush(e))), // tank (task 32)
+        // Task 33: police heli spotlight switch, fighter shock ring.
+        ev.on('spotlight', guard(() => uiShot('spotClick', 0.7))),
+        ev.on('shockRing', guard((v) => {
+          if (v === game.player.vehicle) uiShot('shockThump', 0.8);
+        })),
         ev.on('pause', guard(() => syncRunState())),
       );
     }

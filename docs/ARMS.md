@@ -325,3 +325,25 @@ spotlight cone under the nose. No real-world shapes, markings or names.
 - Not built here (cut for budget): the 'tracks' and 'turbine' engine rigs
   and the two tutorial hints (audio.js, banks.js and tutorial.js are hub
   files: a short follow-up task, not 32 or 33).
+
+## 9. As built by task 33 (fighter, police heli, heli pilot)
+- Specs `fighter` (Gannetfang: `noStall`, `cruise`, `autoLevel`, `afterburner`
+  flags; `craft.afterburner` 0..1) and `patrolheli` (Lampwatch: `craft.siren`,
+  `spotOn` wanted, `spot` 0..1 drawn, `spotAim` + `spotX/Y/Z` aim point);
+  Oxbarrow gains mounts ['drop']. Meshes add the afterburner glow, a belly
+  rack (hidden when bombs run out), a flashing light bar and a fake beam cone.
+- Spots: one fighter on the west apron, one police heli beside the airfield
+  pads (citygen, appended, no rng); task 32 adds the depot and roof ones.
+- Pilot: `src/systems/helipilot.js` (system `game.helipilot`). Task 34 calls
+  `spawnPoliceHeli(game, { target, x, z, y | dist, angle, order, seed })` and
+  `setOrder(pilot, 'orbit'|'strafe'|'hover'|'retreat'|'leave'|'land', opts)`;
+  reads `pilot.state`, `pilot.sees` (3D line within 160 m), `pilot.dist`; sets
+  `pilot.weaponsFree`. Real `stepAircraft` physics (no kinematic fallback was
+  needed). Orbit: the nose follows the circle (this heli model cannot crab),
+  the beam stays on the target; the gunner fires only on strafe passes.
+  The pilot pre-sets `craft.exploded` so combat does not blow the heli up in
+  mid-air; it spins down and the pilot calls `combat.explode` on contact.
+- Input `spot` (SPOT in the more fan, police helis) via `CRAFT_HOOKS.patrolheli.controls`;
+  events `spotlight` (craft, on) and `shockRing` (craft). Over an aircraft arc
+  the more fan wraps after 3 items. Sounds: src/audio/turbine.js (`abroar`,
+  `spotClick`, `shockThump`); the existing siren loop covers police craft.

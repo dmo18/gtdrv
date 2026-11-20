@@ -61,6 +61,33 @@ export const AIRCRAFT_SPECS = {
     spoolUp: 0.2, spoolDown: 0.1, rotorRadius: 6.5, blades: 4,
     floats: false, hitRadius: 2.4,
     colors: [0x55624a, 0xd6d6d0, 0xb5651d, 0x2b3a55, 0xa32020],
+    mounts: ['drop'], // 4 bombs (docs/ARMS.md section 4)
+  },
+  // Single-seat fighter (docs/ARMS.md section 4). Arcade assists read by
+  // stepPlane: noStall (never stalls: below 1.1 x stallSpeed the nose eases
+  // down and thrust rises), cruise (airborne throttle floor with THRUST
+  // released), autoLevel (rad/s of extra roll levelling with the stick
+  // centred), afterburner (extra thrust share with THRUST above 0.9).
+  fighter: {
+    id: 'fighter', label: 'Gannetfang', kind: 'plane',
+    length: 13.4, width: 9.6, height: 3.6, mass: 9000, health: 700,
+    maxSpeed: 130, stallSpeed: 30, thrust: 14, groundBrake: 14,
+    maxBank: 85 * DEG, maxClimb: 70 * DEG, rollRate: 4.6, pitchRate: 3.1, turnGain: 3.4,
+    floats: false, hitRadius: 1.9,
+    noStall: true, cruise: 0.45, autoLevel: 1.5, afterburner: 0.6,
+    mounts: ['nosegun', 'missile', 'bomb'], armor: { bullet: 0.3 }, engine: 'turbine',
+    colors: [0x9aa3ab, 0x2f4d6b, 0xc8b88a, 0x2a2d33],
+  },
+  // Police helicopter: siren and light bar (craft.siren), spotlight
+  // (craft.spotOn wanted, craft.spot 0..1 drawn), chin gun.
+  patrolheli: {
+    id: 'patrolheli', label: 'Lampwatch', kind: 'heli',
+    length: 10.2, width: 9.6, height: 3.2, mass: 1400, health: 360,
+    maxSpeed: 46, climbRate: 10, sinkRate: 8, accel: 10, yawRate: 1.6,
+    spoolUp: 0.35, spoolDown: 0.12, rotorRadius: 4.8, blades: 4,
+    floats: false, hitRadius: 1.7,
+    mounts: ['chingun'], police: true,
+    colors: [0x1d2f52],
   },
 };
 
@@ -97,6 +124,11 @@ export function createAircraft(specId, x, z, heading = 0, rng = null) {
     touchdownSpeed: 0,
     crashed: false,
     turningBack: false,
+    afterburner: 0, // 0..1, fighter boost (sound, glow)
+    // Police craft: siren and light bar, spotlight wanted (spotOn) and drawn (spot).
+    siren: false,
+    spotOn: false,
+    spot: 0,
   };
 }
 
@@ -345,6 +377,7 @@ function stepPlane(a, controls, dt, world) {
   a.throttle = throttle;
   a.brake = brake;
   a.engineOn = controls != null;
+  if (s.afterburner && (a.onGround || !controls)) a.afterburner = approach(a.afterburner, controls && throttle > 0.9 ? 1 : 0, 2.5 * dt);
   const parked = controls == null && a.onGround;
   if (parked) a.turningBack = false;
   else steerIn = edgeSteer(a, steerIn);
@@ -373,7 +406,7 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   if (throttle > 0.02) {
     if (vf > -0.5) {
       const r = clamp(vf / s.maxSpeed, 0, 1);
-      vf += s.thrust * throttle * (1 - r * r) * dt;
+      vf += s.thrust * throttle * (1 + (s.afterburner || 0) * a.afterburner) * (1 - r * r) * dt;
     } else {
       vf = approach(vf, 0, s.groundBrake * throttle * dt);
     }
@@ -454,13 +487,22 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
 
   // Bank follows the stick and levels by itself; bank makes the turn.
   a.roll += (a.steer * s.maxBank - a.roll) * Math.min(1, s.rollRate * dt);
+  if (s.autoLevel && Math.abs(a.steer) < 0.05) a.roll = approach(a.roll, 0, s.autoLevel * dt);
+  // Arcade jets: a throttle floor while flying, afterburner at full THRUST.
+  if (s.cruise && a.engineOn && throttle < s.cruise && !(brake > 0.02)) {
+    throttle = s.cruise;
+    a.throttle = throttle;
+  }
+  if (s.afterburner) a.afterburner = approach(a.afterburner, throttle > 0.9 ? 1 : 0, 2.5 * dt);
   const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs), -1.1, 1.1);
   a.heading = angleDiff(a.heading + turn * dt, 0);
 
-  // Stall: soft, the nose drops until speed returns.
-  if (v < vs) a.stalled = true;
+  // Stall: soft, the nose drops until speed returns. noStall craft never
+  // stall: the nose eases down and thrust rises below 1.1 x stall speed.
+  if (s.noStall) a.stalled = false;
+  else if (v < vs) a.stalled = true;
   else if (v > vs * 1.08) a.stalled = false;
-  const slow = clamp((1.35 * vs - v) / (0.35 * vs), 0, 2);
+  const slow = s.noStall ? clamp((1.1 * vs - v) / (0.3 * vs), 0, 1.5) : clamp((1.35 * vs - v) / (0.35 * vs), 0, 2);
 
   const surf = surfaceAt(world, a.x, a.z);
   const h = a.y - surf;
@@ -477,11 +519,12 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
 
   // Speed: thrust, drag, and the trade with climbing or diving.
   const r = v / s.maxSpeed;
-  let acc = s.thrust * throttle - s.thrust * r * r - G * Math.sin(a.pitch);
+  let acc = s.thrust * throttle * (1 + (s.afterburner || 0) * a.afterburner) - s.thrust * r * r - G * Math.sin(a.pitch);
   acc -= Math.abs(Math.sin(a.roll)) * 0.6;
   // The air brake cannot drag the plane into a stall.
   if (brake > 0.02) acc -= 9 * brake * clamp((v - 1.1 * vs) / (0.3 * vs), 0, 1);
-  v = clamp(v + acc * dt, 0, s.maxSpeed * 1.35);
+  if (s.noStall && slow > 0) acc = Math.max(acc, 0) + s.thrust * slow;
+  v = clamp(v + acc * dt, s.noStall ? vs : 0, s.maxSpeed * 1.35);
   a.airspeed = v;
 
   const cp = Math.cos(a.pitch);

@@ -11,6 +11,8 @@ import {
   fadeEdges, soft, addMode, addBurst, runSpecJS,
 } from './dsp.js';
 import { ENGINES, pointsFor, engineSpec, normalizeSet } from './engines.js';
+import { TURBINE_LOOPS, TURBINE_SHOTS } from './turbine.js'; // fighter, police heli (task 33)
+import { TANK_LOOPS, TANK_SHOTS } from './tanksounds.js'; // tank (task 32)
 
 const len = (s) => Math.round(s * R.sr);
 const z = (n) => new Float32Array(n);
@@ -303,6 +305,8 @@ const LOOPS = {
       return v < 0.55 ? 720 + 820 * (v / 0.55) : 1540 - 820 * ((v - 0.55) / 0.45);
     });
   },
+  ...TURBINE_LOOPS,
+  ...TANK_LOOPS,
 };
 
 // Two detuned pairs of buzzy tones through a honky band-pass.
@@ -796,6 +800,8 @@ const SHOTS = {
     }
     return fadeEdges(normalize(out, 0.45), 16, 200);
   },
+  ...TURBINE_SHOTS,
+  ...TANK_SHOTS,
 };
 
 
@@ -805,7 +811,8 @@ const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'rotor', 'tai
 // Made after the bank is playable: ambience beds and calls, the siren.
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',
   'gunPistol', 'gunSmg', 'gunScatter', 'gunLobber', 'blast', 'thwack', 'bodyHit', 'impact', 'ricochet', 'whiz',
-  'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn']);
+  'reloadA', 'reloadB', 'emptyClick', 'pin', 'tink', 'whistle', 'beep', 'lockSeek', 'lockOn',
+  ...Object.keys(TURBINE_SHOTS), ...Object.keys(TANK_SHOTS)]);
 
 // variants: how many copies of each one-shot to make
 const SHOT_VARIANTS = {

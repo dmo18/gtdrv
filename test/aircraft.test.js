@@ -462,3 +462,105 @@ test('no NaN in 4000 random steps for each spec', () => {
     }
   }
 });
+
+// ---- task 33: Gannetfang fighter, Lampwatch police heli -------------------------
+test('fighter and police heli specs follow ARMS.md', () => {
+  const f = AIRCRAFT_SPECS.fighter, h = AIRCRAFT_SPECS.patrolheli;
+  assert.equal(f.label, 'Gannetfang');
+  assert.equal(f.kind, 'plane');
+  assert.deepEqual([f.length, f.width, f.height, f.health, f.maxSpeed, f.stallSpeed, f.thrust], [13.4, 9.6, 3.6, 700, 130, 30, 14]);
+  assert.deepEqual(f.mounts, ['nosegun', 'missile', 'bomb']);
+  assert.equal(f.armor.bullet, 0.3);
+  assert.equal(f.engine, 'turbine');
+  assert.ok(f.noStall && f.cruise === 0.45);
+  assert.equal(h.label, 'Lampwatch');
+  assert.equal(h.kind, 'heli');
+  assert.deepEqual([h.length, h.width, h.height, h.health, h.maxSpeed, h.climbRate, h.accel, h.yawRate, h.blades], [10.2, 9.6, 3.2, 360, 46, 10, 10, 1.6, 4]);
+  assert.deepEqual(h.mounts, ['chingun']);
+  assert.ok(h.police);
+  assert.deepEqual(AIRCRAFT_SPECS.heavyheli.mounts, ['drop']);
+  const c = createAircraft('patrolheli', 0, 0, 0, createRng(1));
+  assert.equal(c.siren, false);
+  assert.equal(c.spot, 0);
+});
+
+test('fighter takes off within 3.5 s and 400 m, reaches speed and climbs', () => {
+  const a = createAircraft('fighter', 0, 0, 0);
+  a.driver = 'player';
+  const w = emptyWorld();
+  let t = null;
+  for (let i = 0; i < 60 * 6 && t === null; i++) {
+    stepAircraft(a, ctl({ throttle: 1, pitch: 0.4 }), DT, w);
+    if (!a.onGround) t = i * DT;
+  }
+  assert.ok(t !== null && t <= 3.5 && a.x < 400, `lift-off at ${t} s, ${a.x} m`);
+  run(a, ctl({ throttle: 1, pitch: 0.5 }), 60 * 8, w);
+  assert.ok(a.y > 150, `climbed to ${a.y}`);
+  run(a, ctl({ throttle: 1 }), 60 * 10, w);
+  assert.ok(a.airspeed > 125, `speed ${a.airspeed}`);
+  assert.ok(a.afterburner > 0.95);
+  assert.ok(!a.wrecked && !a.stalled);
+});
+
+test('fighter afterburner: full THRUST is faster than 0.85; glow state falls off', () => {
+  const top = (th) => {
+    const a = airborne('fighter', 300, 90);
+    run(a, ctl({ throttle: th }), 60 * 30);
+    return a;
+  };
+  const ab = top(1), dry = top(0.85);
+  assert.ok(ab.airspeed > dry.airspeed + 15, `${ab.airspeed} vs ${dry.airspeed}`);
+  assert.ok(ab.afterburner === 1 && dry.afterburner === 0);
+});
+
+test('fighter: cruise floor holds speed with THRUST released, BRAKE slows to 1.1 x stall', () => {
+  const a = airborne('fighter', 300, 100);
+  run(a, ctl(), 60 * 40);
+  assert.ok(a.airspeed > 80 && Math.abs(a.y - 300) < 60, `cruise ${a.airspeed} at ${a.y}`);
+  assert.ok(a.throttle >= 0.45);
+  run(a, ctl({ brake: 1 }), 60 * 30);
+  assert.ok(a.airspeed >= 30 && a.airspeed < 45, `braked to ${a.airspeed}`);
+  assert.ok(!a.stalled);
+});
+
+test('fighter: 60 s of random stick never stalls, rolls and turns, levels itself', () => {
+  const rng = createRng(33);
+  const a = airborne('fighter', 400, 100);
+  const c = ctl({ throttle: 1 });
+  let turned = 0;
+  for (let i = 0; i < 3600; i++) {
+    if (i % 20 === 0) {
+      c.steer = rng.range(-1, 1);
+      c.pitch = rng.range(-1, 1);
+      c.throttle = rng.chance(0.5) ? 1 : 0;
+      if (a.y < 150) c.pitch = 0.8;
+    }
+    const h = a.heading;
+    stepAircraft(a, c, DT, emptyWorld());
+    turned += Math.abs(a.heading - h) < 1 ? Math.abs(a.heading - h) : 0;
+    assert.ok(!a.stalled && a.airspeed >= 30 - 1e-9, `stalled at ${i}: ${a.airspeed}`);
+    assert.ok(Number.isFinite(a.x + a.y + a.z + a.roll + a.pitch));
+  }
+  assert.ok(!a.wrecked);
+  assert.ok(turned > 6, `turned ${turned} rad`);
+  // Full right stick banks hard, then centring levels out.
+  run(a, ctl({ steer: 1, throttle: 1 }), 60);
+  assert.ok(a.roll > 1.2, `bank ${a.roll}`);
+  run(a, ctl({ throttle: 1 }), 90);
+  assert.ok(Math.abs(a.roll) < 0.05, `levelled to ${a.roll}`);
+  // Vertical climb with no throttle: the nose eases down, no stall.
+  run(a, ctl({ pitch: 1, brake: 1 }), 60 * 20);
+  assert.ok(!a.stalled && a.airspeed >= 30);
+});
+
+test('police heli lifts off its pad and hovers', () => {
+  const h = createAircraft('patrolheli', 0, 0, 0);
+  h.driver = 'player';
+  const w = emptyWorld();
+  run(h, ctl({ throttle: 1 }), 60 * 8, w);
+  assert.ok(!h.onGround && h.y > 15, `climbed to ${h.y}`);
+  run(h, ctl(), 120, w);
+  const y0 = h.y, x0 = h.x;
+  run(h, ctl(), 300, w);
+  assert.ok(Math.abs(h.y - y0) < 1 && Math.abs(h.x - x0) < 1);
+});

@@ -3,13 +3,13 @@
 import { createMapRenderer, createMinimap, createFullMap } from '../ui/minimap.js';
 
 const ZOOM = { foot: 110, car: 190, boat: 260, plane: 620, heli: 420 };
-const BLIP_COLORS = { car: '#f4efe6', boat: '#7fd3e6', plane: '#ffd166', heli: '#ffd166' };
+const BLIP_COLORS = { car: '#f4efe6', boat: '#7fd3e6', plane: '#ffd166', heli: '#ffd166', tank: '#c9b98a' };
 
 export function createMapUi(game, uiRoot) {
   const renderer = createMapRenderer(game.city);
   const minimap = createMinimap(game.hud.minimapCanvas, renderer);
   const blips = [];
-  for (let i = 0; i < 48; i++) blips.push({ x: 0, z: 0, type: 'dot', color: '#fff' });
+  for (let i = 0; i < 48; i++) blips.push({ x: 0, z: 0, type: 'dot', color: '#fff', h: 0 });
   // Other systems (races, deliveries) add their own markers here:
   // { x, z, type, color, label? }. The full map draws this same live list.
   const markers = [];
@@ -78,6 +78,7 @@ export function createMapUi(game, uiRoot) {
         b.z = v.z;
         b.type = v.kind;
         b.color = BLIP_COLORS[v.kind] || '#fff';
+        b.h = v.kind === 'tank' ? v.heading + (v.turretYaw || 0) : 0; // tank blip: barrel tick
       }
       for (let i = 0; i < markers.length && n < blips.length; i++) {
         const m = markers[i];

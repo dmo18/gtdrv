@@ -5,7 +5,9 @@ const HINTS = {
   foot: ['Left stick to walk, drag the right side to look around.', 'Hold FIRE to aim and shoot, drag to aim. LOCK sticks to a target, SWAP changes weapon.', 'Boats wait at the piers. Aircraft are at Gullwing Airfield, east over the causeway.'],
   boat: ['Hold GAS. Boats turn best under power.', 'Pull up beside a pier to get out.'],
   plane: ['Hold THRUST and push the stick up to take off.', 'Let go of the stick to level out. Ease off THRUST to come down.'],
-  heli: ['Hold UP to lift off. Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],
+  heli: ['Hold UP to lift off. Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],  // Craft hints by spec id, offered on entering (docs/ARMS.md section 8).
+  fighter: ['Gannetfang: full THRUST is afterburner. LOCK on, then MSL.'],
+  patrolheli: ['Lampwatch: SIREN and SPOT are under the more button.'],
 };
 const FIRST = ['Open the map (top right) to find races, piers and the airfield.', 'Stop inside a glowing marker, then tap START to begin a race or delivery.'];
 
@@ -33,6 +35,9 @@ export function createTutorial(game) {
   }
 
   game.events.on('mode', offer);
+  game.events.on('enter', (v) => {
+    if (v && v.spec && (v.spec.id === 'fighter' || v.spec.id === 'patrolheli')) offer(v.spec.id);
+  });
 
   return {
     name: 'tutorial',

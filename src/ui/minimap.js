@@ -28,6 +28,7 @@ const POI_STYLE = {
   shop: { color: '#e88aa8', name: 'Shop' },
   race: { color: '#f6efe6', name: 'Race' },
   helipad: { color: '#b9a6ee', name: 'Helipad' },
+  depot: { color: '#c9b98a', name: 'Military depot' },
 };
 // Activity markers passed in `state.markers` (races, sky courses, deliveries).
 const ACT_STYLE = {
@@ -215,6 +216,22 @@ export function createMinimap(canvas, mapRenderer) {
       ctx.strokeStyle = 'rgba(0,0,0,0.75)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
+      if (b.type === 'tank') {
+        // Tank: a square with a barrel tick toward the gun's heading.
+        const q = clamped ? 3 : 4, bx = px, by = py;
+        ctx.rect(bx - q, by - q, q * 2, q * 2);
+        ctx.fill();
+        ctx.stroke();
+        project(b.x - s.x + Math.cos(b.h || 0) * 30, b.z - s.z + Math.sin(b.h || 0) * 30);
+        const tx = px - bx, ty = py - by, tl = Math.sqrt(tx * tx + ty * ty) || 1;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + (tx / tl) * (q + 5), by + (ty / tl) * (q + 5));
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = b.color || '#ffffff';
+        ctx.stroke();
+        continue;
+      }
       ctx.arc(px, py, clamped ? 3.2 : 4.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
@@ -395,6 +412,20 @@ function drawIcon(g, type, color, s) {
     for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
       if ((a + b) % 2 === 0) g.fillRect(-s * 0.85 + a * q, -s * 0.85 + b * q, q, q);
     }
+  } else if (type === 'depot') { // shield with a star
+    g.moveTo(-s * 0.85, -s * 0.8); g.lineTo(s * 0.85, -s * 0.8); g.lineTo(s * 0.85, s * 0.05);
+    g.quadraticCurveTo(s * 0.7, s * 0.7, 0, s); g.quadraticCurveTo(-s * 0.7, s * 0.7, -s * 0.85, s * 0.05);
+    g.closePath();
+    g.stroke(); g.fill();
+    g.fillStyle = '#1a120d';
+    g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 ? s * 0.22 : s * 0.5;
+      if (k) g.lineTo(Math.cos(a) * r, Math.sin(a) * r - s * 0.02);
+      else g.moveTo(Math.cos(a) * r, Math.sin(a) * r - s * 0.02);
+    }
+    g.closePath();
+    g.fill();
   } else { // helipad: circle with an H
     g.arc(0, 0, s * 0.95, 0, Math.PI * 2);
     g.stroke(); g.fill();

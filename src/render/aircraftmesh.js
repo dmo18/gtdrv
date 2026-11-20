@@ -406,10 +406,161 @@ function buildHeavyHeli(color, trim, parts) {
   };
 }
 
+// Canted fin: base (xb0..xb1 at y0, z0) leaning out to the top (xt0..xt1
+// at y1, z1).
+function cantFin(parts, hex, xb0, xb1, xt0, xt1, y0, y1, z0, z1, t) {
+  const h = t / 2, hh = t * 0.3;
+  hexa(parts, hex, [
+    [xb0, y0, z0 - h * 0.6], [xb1, y0, z0 - h], [xb1, y0, z0 + h], [xb0, y0, z0 + h * 0.6],
+    [xt0, y1, z1 - hh * 0.6], [xt1, y1, z1 - hh], [xt1, y1, z1 + hh], [xt0, y1, z1 + hh * 0.6],
+  ]);
+}
+
+const ORANGE = 0xe8782a;
+
+// Gannetfang (fighter): single seat, blended delta wing with forward
+// canards, twin canted fins, side intakes, one big nozzle. Original shape.
+function buildFighter(color, trim, parts) {
+  loft(parts, color, [
+    [-6.3, 1.8, 0.5, 0.48], [-5.4, 1.78, 0.68, 0.56], [-3.0, 1.78, 1.0, 0.6],
+    [0.6, 1.82, 0.9, 0.62], [3.0, 1.86, 0.56, 0.52], [5.1, 1.82, 0.3, 0.3], [6.7, 1.78, 0.03, 0.04],
+  ]);
+  // Bubble canopy with a dark frame line.
+  loft(parts, GLASS, [[1.5, 2.3, 0.06, 0.05], [2.3, 2.42, 0.34, 0.3], [3.3, 2.38, 0.3, 0.26], [4.3, 2.22, 0.05, 0.05]]);
+  box(parts, DARK, 0.08, 0.36, 0.6, 2.75, 2.42, 0);
+  // Blended delta wing (tips in the trim colour) and forward canards.
+  wingPair(parts, color, trim,
+    { x0: -5.3, x1: 1.4, y: 1.62, z: 0.75, t: 0.3 },
+    { x0: -5.0, x1: -3.7, y: 1.56, z: 4.8, t: 0.06 }, 0.86);
+  wingPair(parts, color, trim,
+    { x0: 2.2, x1: 3.5, y: 1.9, z: 0.5, t: 0.1 },
+    { x0: 1.9, x1: 2.4, y: 1.95, z: 1.95, t: 0.04 }, 0.7);
+  for (const s of [1, -1]) {
+    // Twin fins canted outward.
+    cantFin(parts, color, -6.1, -3.6, -6.7, -5.5, 2.2, 3.6, 0.62 * s, 1.25 * s, 0.14);
+    cantFin(parts, trim, -6.75, -5.6, -6.85, -6.15, 3.55, 3.62, 1.25 * s, 1.28 * s, 0.1);
+    // Side intakes: a dark mouth inside a body-coloured lip.
+    hexa(parts, color, [
+      [-0.5, 1.25, 0.82 * s], [1.6, 1.3, 0.82 * s], [1.6, 1.3, 1.12 * s], [-0.5, 1.25, 1.12 * s],
+      [-0.5, 1.95, 0.82 * s], [1.3, 1.95, 0.82 * s], [1.3, 1.95, 1.08 * s], [-0.5, 1.95, 1.08 * s],
+    ]);
+    box(parts, DARK, 0.06, 0.52, 0.22, 1.6, 1.6, 0.97 * s);
+    // Main gear.
+    wheel(parts, -1.6, 1.45 * s, 0.36, 0.22);
+    strut(parts, METAL, -1.6, 0.36, 1.32 * s, -1.5, 1.3, 1.0 * s, 0.11);
+  }
+  // Spine stripe and nozzle.
+  box(parts, trim, 5.0, 0.04, 0.32, -1.2, 2.41, 0);
+  cyl(parts, DARK, 0.5, 0.44, 0.7, 'x', -6.6, 1.8, 0, 12);
+  cyl(parts, 0x3a1d10, 0.36, 0.36, 0.05, 'x', -6.96, 1.8, 0, 12);
+  // Nose gear and the nose probe.
+  wheel(parts, 4.3, 0.1, 0.26, 0.12);
+  wheel(parts, 4.3, -0.1, 0.26, 0.12);
+  strut(parts, METAL, 4.3, 0.26, 0, 4.2, 1.4, 0, 0.1);
+  cyl(parts, METAL, 0.03, 0.02, 0.8, 'x', 7.05, 1.78, 0, 6);
+  return { prop: null, nozzle: [-6.95, 1.8, 0.4], rack: true };
+}
+
+// Lampwatch (police helicopter): bubble cockpit, chin gun pod, skids,
+// light bar on the tail boom, spotlight under the nose. Navy with white
+// and an orange band. Original livery, no markings.
+function buildPatrolHeli(color, trim, parts) {
+  loft(parts, color, [[-2.0, 1.55, 0.36, 0.5], [-0.9, 1.45, 0.88, 0.95], [0.6, 1.38, 0.92, 0.98]]);
+  loft(parts, GLASS, [
+    [0.6, 1.38, 0.92, 0.98], [1.7, 1.3, 0.84, 0.88], [2.45, 1.18, 0.56, 0.6], [2.8, 1.1, 0.16, 0.16],
+  ]);
+  // White lower body and an orange band.
+  box(parts, WHITE, 2.6, 0.42, 1.78, -0.25, 0.72, 0);
+  box(parts, ORANGE, 2.62, 0.14, 1.8, -0.25, 1.0, 0);
+  // Engine deck and mast.
+  loft(parts, DARK, [[-1.9, 2.42, 0.24, 0.18], [-1.0, 2.5, 0.5, 0.26], [0.4, 2.5, 0.5, 0.26], [0.9, 2.42, 0.24, 0.12]]);
+  cyl(parts, METAL, 0.09, 0.09, 0.46, 'y', -0.2, 2.9, 0, 8);
+  // Tail boom (white band), fin, stabiliser.
+  loft(parts, color, [[-6.9, 2.0, 0.08, 0.1], [-1.8, 1.78, 0.25, 0.3]]);
+  box(parts, WHITE, 1.4, 0.2, 0.36, -3.4, 1.9, 0);
+  fin(parts, color, -7.1, -6.4, -7.4, -6.95, 1.9, 3.05, 0.1);
+  fin(parts, ORANGE, -6.9, -6.5, -7.1, -6.8, 2.0, 1.35, 0.08);
+  box(parts, color, 0.5, 0.06, 1.8, -5.6, 1.95, 0);
+  cyl(parts, METAL, 0.05, 0.05, 0.3, 'z', -6.9, 2.0, 0.17, 6);
+  // Chin gun pod and the spotlight housing under the nose.
+  cyl(parts, DARK, 0.2, 0.2, 0.7, 'x', 2.2, 0.62, 0.42, 8);
+  cyl(parts, DARK, 0.05, 0.05, 0.6, 'x', 2.8, 0.62, 0.42, 6);
+  cyl(parts, DARK, 0.26, 0.22, 0.34, 'y', 2.35, 0.55, -0.3, 10);
+  cyl(parts, 0xf6efd2, 0.2, 0.2, 0.04, 'y', 2.35, 0.37, -0.3, 10);
+  for (const s of [1, -1]) {
+    box(parts, DARK, 3.8, 0.1, 0.1, 0.25, 0.05, 1.1 * s);
+    strut(parts, DARK, 2.15, 0.05, 1.1 * s, 2.4, 0.3, 1.1 * s, 0.1);
+    strut(parts, DARK, 1.3, 0.09, 1.1 * s, 1.15, 0.7, 0.55 * s, 0.08);
+    strut(parts, DARK, -0.8, 0.09, 1.1 * s, -0.7, 0.72, 0.55 * s, 0.08);
+  }
+  return {
+    prop: null,
+    rotor: { x: -0.2, y: 3.14, r: 4.8, blades: 4, chord: 0.28 },
+    tailRotor: { x: -6.9, y: 2.0, z: 0.36, r: 0.8 },
+    lightbar: [-2.9, 2.16, 0],
+    spot: [2.35, 0.36, -0.3],
+  };
+}
+
 const BUILDERS = {
   prop: buildProp, stunt: buildStunt, seaplane: buildSeaplane, jet: buildJet,
-  heli: buildHeli, heavyheli: buildHeavyHeli,
+  heli: buildHeli, heavyheli: buildHeavyHeli, fighter: buildFighter, patrolheli: buildPatrolHeli,
 };
+
+// ---- extras: afterburner glow, bomb rack, light bar, spotlight beam -------
+// One shared geometry and material each (no textures, no real lights).
+const EXTRA_MAT = {
+  glow: new THREE.MeshBasicMaterial({
+    color: 0xff7a2a, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  }),
+  lamp: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
+  beam: new THREE.MeshBasicMaterial({
+    color: 0xfff1c8, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false,
+    side: THREE.DoubleSide, toneMapped: false,
+  }),
+};
+let extraGeo = null;
+function extraGeometry() {
+  if (extraGeo) return extraGeo;
+  // Afterburner: a cone along -x from the nozzle, unit length (scaled).
+  const glow = new THREE.CylinderGeometry(0.0, 1, 1, 10, 1, true);
+  glow.rotateZ(Math.PI / 2); // +y end (r 0) goes to -x
+  glow.translate(-0.5, 0, 0);
+  // Bomb rack: a pylon with three stores under the belly.
+  const rp = [];
+  box(rp, DARK, 2.6, 0.12, 0.3, -1.2, 1.12, 0);
+  for (const s of [-1, 0, 1]) {
+    cyl(rp, 0x5d6450, 0.16, 0.16, 1.1, 'x', -1.2 + s * 0.05, 0.92, s * 0.42, 8);
+    cyl(rp, 0x5d6450, 0.16, 0.02, 0.35, 'x', -0.5 + s * 0.05, 0.92, s * 0.42, 8);
+  }
+  const rack = mergeGeometries(rp, false);
+  for (const g of rp) g.dispose();
+  // Light bar: red lamp left, blue lamp right, dark base.
+  const lp = [];
+  box(lp, 0x202226, 0.34, 0.08, 1.3, 0, 0, 0);
+  box(lp, 0xff2a2a, 0.3, 0.16, 0.56, 0, 0.11, -0.33);
+  box(lp, 0x2a6bff, 0.3, 0.16, 0.56, 0, 0.11, 0.33);
+  const lightbar = mergeGeometries(lp, false);
+  for (const g of lp) g.dispose();
+  // Beam: unit cone hanging down -y from the lamp, its base cap is the
+  // pool of light on the ground.
+  const beam = new THREE.CylinderGeometry(0.03, 1, 1, 16, 1, false);
+  beam.translate(0, -0.5, 0);
+  extraGeo = { glow, rack, lightbar, beam };
+  return extraGeo;
+}
+const Q1 = new THREE.Quaternion();
+const Q2 = new THREE.Quaternion();
+const V1 = new THREE.Vector3();
+const DOWN = new THREE.Vector3(0, -1, 0);
+const BEAM_TILT = 0.55; // rad forward of straight down when not aimed
+const BEAM_MAX = 170; // metres
+
+// Light bar flash pattern at 6 Hz: red side, off, blue side, off.
+export function lightbarPhase(time) {
+  const k = Math.floor((Number.isFinite(time) ? time : 0) * 6) & 3;
+  return k;
+}
 
 // ---- caches ---------------------------------------------------------------
 const bodyCache = new Map();
@@ -496,10 +647,41 @@ export function createAircraftMesh(spec, color) {
     group.add(tailRotor.pivot);
   }
 
+  let glow = null, rack = null, lightbar = null, beam = null;
+  if (lay.nozzle || lay.rack || lay.lightbar || lay.spot) {
+    const xg = extraGeometry();
+    if (lay.nozzle) {
+      glow = new THREE.Mesh(xg.glow, EXTRA_MAT.glow);
+      glow.position.set(lay.nozzle[0], lay.nozzle[1], 0);
+      glow.scale.set(5, lay.nozzle[2], lay.nozzle[2]);
+      glow.visible = false;
+      glow.renderOrder = 3;
+      glow.userData.r = lay.nozzle[2];
+      group.add(glow);
+    }
+    if (lay.rack) {
+      rack = new THREE.Mesh(xg.rack, MAT.body);
+      group.add(rack);
+    }
+    if (lay.lightbar) {
+      lightbar = new THREE.Mesh(xg.lightbar, EXTRA_MAT.lamp);
+      lightbar.position.set(lay.lightbar[0], lay.lightbar[1], lay.lightbar[2]);
+      group.add(lightbar);
+    }
+    if (lay.spot) {
+      beam = new THREE.Mesh(xg.beam, EXTRA_MAT.beam);
+      beam.position.set(lay.spot[0], lay.spot[1], lay.spot[2]);
+      beam.visible = false;
+      beam.frustumCulled = false;
+      beam.renderOrder = 6;
+      group.add(beam);
+    }
+  }
+
   // Yaw about world up, then pitch about the wing axis, then roll about
   // the nose axis (the usual aircraft order).
   group.rotation.order = 'YZX';
-  group.userData = { spec, body, prop, rotor, tailRotor };
+  group.userData = { spec, body, prop, rotor, tailRotor, glow, rack, lightbar, beam };
   return group;
 }
 
@@ -534,4 +716,64 @@ export function updateAircraftMesh(mesh, a, alpha = 1, _time = 0) {
     ud.tailRotor.disc.visible = rs > 0.5;
     ud.tailRotor.blades.visible = rs <= 0.5;
   }
+  if (ud.glow) {
+    const ab = a.wrecked ? 0 : a.afterburner || 0;
+    ud.glow.visible = ab > 0.04;
+    if (ud.glow.visible) {
+      const r = ud.glow.userData.r;
+      const flick = 0.92 + 0.08 * Math.sin(spin * 7.3);
+      ud.glow.scale.set((1.0 + 2.6 * ab) * flick, r * (0.6 + 0.4 * ab), r * (0.6 + 0.4 * ab));
+    }
+  }
+  if (ud.rack) {
+    const arms = a.arms;
+    ud.rack.visible = !a.wrecked && !(arms && arms.mag && arms.mag.bomb <= 0);
+  }
+  if (ud.lightbar) {
+    const k = lightbarPhase(_time);
+    const on = !!a.siren && !a.wrecked;
+    // Siren on: flash, swapping sides; off: lamps dark (hidden, the base
+    // stays in the body colour).
+    ud.lightbar.visible = on && (k & 1) === 0;
+    ud.lightbar.rotation.y = k === 2 ? Math.PI : 0;
+  }
+  if (ud.beam) aimBeam(mesh, ud.beam, a);
+}
+
+// Point the fake spotlight cone at (spotX, spotY, spotZ) when the craft
+// has an aim point (spotAim), else forward and down. Length reaches the
+// ground below (sea level when unknown), capped.
+function aimBeam(mesh, beam, a) {
+  const on = (a.spot || 0) > 0.05 && !a.wrecked;
+  beam.visible = on;
+  if (!on) return;
+  mesh.updateMatrixWorld();
+  beam.getWorldPosition(V1);
+  let dx, dy, dz;
+  if (a.spotAim && Number.isFinite(a.spotX)) {
+    dx = a.spotX - V1.x;
+    dy = (a.spotY || 0) - V1.y;
+    dz = a.spotZ - V1.z;
+  } else {
+    const h = a.heading || 0;
+    const t = Math.tan(BEAM_TILT);
+    const down = Math.max(1, V1.y);
+    dx = Math.cos(h) * t * down;
+    dy = -down;
+    dz = Math.sin(h) * t * down;
+  }
+  let len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (!(len > 0.5)) {
+    beam.visible = false;
+    return;
+  }
+  // World rotation that takes -y to the beam direction, then into the
+  // craft's local frame.
+  V1.set(dx / len, dy / len, dz / len);
+  Q1.setFromUnitVectors(DOWN, V1);
+  mesh.getWorldQuaternion(Q2).invert();
+  beam.quaternion.copy(Q2.multiply(Q1));
+  len = Math.min(len, BEAM_MAX);
+  const r = (0.6 + len * 0.13) * (0.6 + 0.4 * Math.min(1, a.spot));
+  beam.scale.set(r, len, r);
 }

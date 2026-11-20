@@ -34,7 +34,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshL
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-const ids = ['prop', 'stunt', 'seaplane', 'jet', 'heli', 'heavyheli'];
+const ids = ['prop', 'stunt', 'seaplane', 'jet', 'heli', 'heavyheli', 'fighter', 'patrolheli'];
 const camera = new THREE.PerspectiveCamera(28, 1, 1, 900);
 const views = [];
 ids.forEach((id, i) => {
@@ -52,6 +52,9 @@ ids.forEach((id, i) => {
   flying.engineOn = true;
   flying.rotorSpeed = 1;
   flying.propSpin = 0.5;
+  flying.afterburner = 1;
+  flying.siren = true;
+  flying.spot = 1;
   const m2 = createAircraftMesh(spec, spec.colors[1]);
   updateAircraftMesh(m2, flying, 1, 0);
   scene.add(m2);
@@ -60,8 +63,8 @@ ids.forEach((id, i) => {
 ground.position.set(300, 0, 75);
 ground.scale.set(4, 4, 1);
 
-// One tile per craft: all six in a row, parked above, flying below.
-const tw = Math.floor(W / 6), th = H / 2;
+// One tile per craft: all in a row, parked above, flying below.
+const tw = Math.floor(W / ids.length), th = H / 2;
 camera.aspect = tw / th;
 camera.updateProjectionMatrix();
 renderer.setScissorTest(true);

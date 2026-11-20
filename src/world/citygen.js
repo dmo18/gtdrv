@@ -363,9 +363,13 @@ export function generateCity(seed = 20261) {
     aircraftSpots.push({ x: dock.x1 + 14, z: dock.z1 - 12, heading: Math.PI / 2, spec: 'seaplane' });
   }
   // A helipad in the docks and a city one on open ground by the centre.
+  let dockPad = null;
   {
     const hp = { x: xs[11] + wx[11] / 2 + 14, z: zs[N - 3] };
-    if (mainShore(hp.x, hp.z) > 20) helipads.push(hp);
+    if (mainShore(hp.x, hp.z) > 20) {
+      helipads.push(hp);
+      dockPad = hp;
+    }
   }
 
   // --- Street furniture and kerbside parking along every road. ---
@@ -604,11 +608,97 @@ export function generateCity(seed = 20261) {
     furniture.push({ type: 'umbrella', x, z, rot: dr.range(0, TAU), q: k % 3 === 0 ? 0 : 1, v: dr.next() });
   }
 
+  // --- Military places (docs/ARMS.md section 3). Appended after every
+  // random draw, with explicit colours and styles, so the rest of the
+  // seeded city is exactly as before. ---
+  const tankSpots = []; // { x, z, heading, spec }
+  const roofPads = []; // { x, z, y, building }
+  let depot;
+  {
+    // Ironbank Depot: the east end of the airfield islet. A concrete yard
+    // fenced by low blast walls on the west, south and east, open to the
+    // runway on the north (the flight line), with a 14 m road gate in the
+    // west wall, two hangar sheds, a small office and tank bays.
+    const D = { x0: islet.x0 + 520, z0: runway.z1 + 12, x1: islet.x1 - 40, z1: islet.z1 - 24 };
+    depot = { ...D, gate: { x: D.x0, z: 0 } };
+    const WALL = 0xb7b09c, WALL_H = 2.5, T = 1.2;
+    const gz = Math.round((D.z0 + D.z1) / 2);
+    depot.gate.z = gz;
+    const put = (x0, z0, x1, z1, h, kind, style, color) => {
+      buildings.push({ x0, z0, x1, z1, h, district: 'airfield', kind, color, style, tint: color, vseed: 32032 + buildings.length, block: -1, street: 0, depot: true });
+    };
+    const wall = (x0, z0, x1, z1) => put(x0, z0, x1, z1, WALL_H, 'container', 'container', WALL);
+    // West wall with the gate, south wall, east wall, short north stubs.
+    wall(D.x0, D.z0 + 30, D.x0 + T, gz - 7);
+    wall(D.x0, gz + 7, D.x0 + T, D.z1);
+    wall(D.x0, D.z1 - T, D.x1, D.z1);
+    wall(D.x1 - T, D.z0 + 30, D.x1, D.z1);
+    // Gate posts.
+    put(D.x0 - 0.6, gz - 8, D.x0 + 1.8, gz - 7, 3.4, 'container', 'container', 0x8e8a7c);
+    put(D.x0 - 0.6, gz + 7, D.x0 + 1.8, gz + 8, 3.4, 'container', 'container', 0x8e8a7c);
+    // Hangar sheds (big doors face north into the yard) and the office.
+    put(D.x0 + 40, D.z1 - 46, D.x0 + 88, D.z1 - 14, 11, 'warehouse', 'hangar', 0x7d8273);
+    put(D.x0 + 104, D.z1 - 46, D.x0 + 152, D.z1 - 14, 11, 'warehouse', 'hangar', 0x7d8273);
+    put(D.x0 + 12, gz + 18, D.x0 + 28, gz + 30, 5, 'building', 'office', 0xb8b4a6);
+    // Tank bays: blast walls between the two parking spots.
+    const bayZ = D.z1 - 74;
+    for (const bx of [D.x0 + 48, D.x0 + 66, D.x0 + 84]) wall(bx - 0.6, bayZ - 8, bx + 0.6, bayZ + 6);
+    // Sandbag-like barrier rows near the gate.
+    wall(D.x0 + 8, gz - 22, D.x0 + 20, gz - 21);
+    wall(D.x0 + 8, gz + 40, D.x0 + 20, gz + 41);
+    for (const bx of [D.x0 + 57, D.x0 + 75]) tankSpots.push({ x: bx, z: bayZ, heading: -Math.PI / 2, spec: 'rustback', place: 'depot' });
+    // Two fighters on the flight line facing the runway, a police heli pad.
+    for (const fx of [D.x0 + 120, D.x0 + 160]) aircraftSpots.push({ x: fx, z: D.z0 + 34, heading: -Math.PI / 2, spec: 'fighter', depot: true });
+    const pad = { x: D.x1 - 30, z: gz + 10 };
+    helipads.push(pad);
+    aircraftSpots.push({ ...pad, heading: Math.PI, spec: 'patrolheli', depot: true });
+    surfaces.push({ x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, type: 'apron', depot: true });
+    pois.push({ type: 'depot', x: D.x0 + 110, z: gz, label: 'Ironbank Depot' });
+  }
+  // One Rustback in the easternmost Cinder Row open car park (by
+  // position, not chance); kerb and lot spaces within 6 m are cleared.
+  {
+    let best = null;
+    for (const s of parkingSpots) if (s.lot && districtOf(s.x, s.z) === 'industrial' && (!best || s.x > best.x)) best = s;
+    if (best) {
+      tankSpots.push({ x: best.x, z: best.z, heading: best.heading, spec: 'rustback', place: 'cinder' });
+      for (let i = parkingSpots.length - 1; i >= 0; i--) {
+        const s = parkingSpots[i];
+        if (Math.hypot(s.x - best.x, s.z - best.z) < 6) parkingSpots.splice(i, 1);
+      }
+    }
+  }
+  // Police roof pad: the midtown roof (16 x 16 m or more, 12..30 m high)
+  // nearest the centre; else the docks helipad.
+  {
+    let best = null, bd = Infinity;
+    for (const b of buildings) {
+      if (b.district !== 'midtown' || b.kind !== 'building' || b.x1 - b.x0 < 16 || b.z1 - b.z0 < 16 || b.h < 12 || b.h > 30) continue;
+      const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+      const d = Math.hypot(cx, cz);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    if (best) roofPads.push({ x: (best.x0 + best.x1) / 2, z: (best.z0 + best.z1) / 2, y: best.h, building: buildings.indexOf(best) });
+    else if (dockPad) roofPads.push({ x: dockPad.x, z: dockPad.z, y: 0, building: -1 });
+    for (const r of roofPads) aircraftSpots.push({ x: r.x, z: r.z, heading: 0, spec: 'patrolheli', roof: true });
+  }
+
+  // --- Task 33: a Gannetfang on the west apron and a Lampwatch police heli
+  // beside the airfield pads. Appended, no rng: the rest is unchanged. ---
+  aircraftSpots.push(
+    { x: islet.x0 + 90, z: runway.z1 + 34, heading: -Math.PI / 2, spec: 'fighter' },
+    { x: islet.x0 + 448, z: runway.z1 + 40, heading: -Math.PI / 2, spec: 'patrolheli' },
+  );
+
   return {
     seed, N, xs, zs, wx, wz, nodes, edges, blocks, buildings,
     props: cleanProps, parkingSpots, spawn,
     furniture, signals, landmarks, streetNames,
     extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
+    tankSpots, roofPads, depot,
     airfield: { islet, runway, apron, gate },
     radiusAt, shoreDist, mainShore, isLand, isGround, districtOf, nodeAt, onRoad,
     size: BASE_R * 1.25,

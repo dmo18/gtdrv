@@ -41,7 +41,14 @@ import { createWater, createWakeTrail } from './render/water.js';
 import { stepAircraft, collideAircraft } from './entities/aircraft.js';
 import { createAircraftMesh, updateAircraftMesh } from './render/aircraftmesh.js';
 import { createWalker, stepWalker, findEnterable, exitPosition } from './entities/onfoot.js';
+// Tank (task 32): tracked craft, its mesh and the armour system.
+import { stepTank, collideTank } from './entities/tank.js';
+import { createTankMesh, updateTankMesh } from './render/tankmesh.js';
+import { createArmor } from './systems/armor.js';
 import { createPersonMesh, updatePersonMesh } from './render/personmesh.js';
+// Police helicopter pilots and the fighter's shock ring (task 33).
+import { createHeliPilots } from './systems/helipilot.js';
+import { createJetFx } from './render/jetfx.js';
 
 const SKY = 0x9fc8e8;
 
@@ -98,6 +105,7 @@ export function createGame({ canvas, uiRoot }) {
       boat: { step: stepBoat, createMesh: createBoatMesh, updateMesh: updateBoatMesh },
       plane: { step: stepAircraft, createMesh: createAircraftMesh, updateMesh: updateAircraftMesh },
       heli: { step: stepAircraft, createMesh: createAircraftMesh, updateMesh: updateAircraftMesh },
+      tank: { step: stepTank, createMesh: createTankMesh, updateMesh: updateTankMesh },
     },
     vehicles: [],
     actors: [], // every live person (combat actors, see docs/COMBAT.md)
@@ -277,6 +285,8 @@ export function createGame({ canvas, uiRoot }) {
   // later combat tasks fill these files without touching this one.
   game.combat = game.addSystem(createCombat(game));
   game.crew = game.addSystem(createCrew(game));
+  game.armor = game.addSystem(createArmor(game, uiRoot));
+  game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));
   game.score = game.addSystem(createScore(game));
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
@@ -290,6 +300,7 @@ export function createGame({ canvas, uiRoot }) {
   game.graphics = game.addSystem(createGraphics(game));
   game.effects = game.addSystem(createEffects(game));
   game.combatFx = game.addSystem(createCombatFx(game));
+  game.jetFx = game.addSystem(createJetFx(game));
   game.combatHud = game.addSystem(createCombatHud(game, uiRoot));
   game.menu = createMenu(uiRoot, game, game.economy);
 
@@ -328,7 +339,7 @@ export function createGame({ canvas, uiRoot }) {
       game.kinds[v.kind].step(v, controls, dt, game.world);
       if (v.impact > 0) events.emit('vehicleImpact', v, v.impact);
       // A parked car that has settled goes back to sleep.
-      if (v.kind === 'car' && !v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
+      if ((v.kind === 'car' || v.kind === 'tank') && !v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
         v.asleep = true;
         v.meshDirty = true;
       }
@@ -349,6 +360,11 @@ export function createGame({ canvas, uiRoot }) {
             a.asleep = false;
             events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
           }
+          continue;
+        }
+        // Tanks shove, ram and crush any ground craft (docs/ARMS.md section 3).
+        if (a.kind === 'tank' || b.kind === 'tank') {
+          if ((a.kind === 'tank' ? collideTank(a, b) : collideTank(b, a)) && Math.max(a.impact, b.impact) > 1) events.emit('vehicleCrash', a, b, Math.max(a.impact, b.impact));
           continue;
         }
         if (a.kind !== b.kind) continue;
@@ -458,6 +474,13 @@ export function createGame({ canvas, uiRoot }) {
       camTarget.roll = v.kind === 'car' ? 0 : v.roll;
       camTarget.speed = v.speed;
       camTarget.height = 1.2;
+      if (v.kind === 'tank' && chase.tankAim) {
+        // Behind the turret's wanted aim, not the hull (docs/ARMS.md).
+        camTarget.heading = chase.tankAim.yaw;
+        camTarget.pitch = chase.tankAim.pitch;
+        camTarget.roll = 0;
+        camTarget.height = 0;
+      }
       const want = v.wrecked ? 'wreck' : null;
       if (promptFor !== want) {
         promptFor = want;

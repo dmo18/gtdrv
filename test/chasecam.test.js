@@ -95,3 +95,56 @@ test('aim view: over the right shoulder, FOV 55, eases in 0.2 s, drag turns it, 
   chase.setAim(true);
   assert.equal(chase.aim.on, false, 'no aim view in craft');
 });
+
+test('tank: chase behind the aim, far and gunner views, drag turns the aim (task 32)', () => {
+  const cam = new THREE.PerspectiveCamera(62, 2, 0.5, 1800);
+  const chase = createChaseCamera(cam);
+  chase.setMode('tank');
+  const ta = chase.tankAim;
+  ta.yaw = Math.PI / 2; // aim south while the hull faces east
+  ta.pitch = 0.1;
+  const tk = { x: 0, z: 0, y: 0, heading: ta.yaw, pitch: ta.pitch, roll: 0, speed: 0, height: 0 };
+  chase.snap(tk);
+  const step = (n, input = null) => {
+    for (let i = 0; i < n; i++) {
+      tk.heading = ta.yaw;
+      tk.pitch = ta.pitch;
+      chase.update(tk, 1 / 60, input, null);
+    }
+    return cam.position.clone();
+  };
+  let pos = step(60);
+  assert.equal(chase.getView(), 'Chase');
+  assert.ok(pos.z < -9 && Math.abs(pos.x) < 1, `behind the aim (south), not the hull: ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}`);
+  assert.ok(Math.abs(cam.fov - 62) < 1.5, 'FOV 62');
+  // Drag right turns the aim right (toward -x when facing +z), up raises it.
+  const input = { lookX: 0, lookY: 0 };
+  for (let i = 0; i < 20; i++) {
+    input.lookX = 10;
+    input.lookY = -5;
+    step(1, input);
+  }
+  assert.ok(ta.yaw > Math.PI / 2 + 0.5, `yaw turned (${ta.yaw.toFixed(2)})`);
+  assert.ok(ta.pitch > 0.1 && ta.pitch <= 0.42 + 1e-9, 'pitch rose within limits');
+  // A lock holds the drag.
+  ta.holdDrag = true;
+  const y0 = ta.yaw;
+  input.lookX = 50;
+  step(1, input);
+  assert.equal(ta.yaw, y0);
+  ta.holdDrag = false;
+  assert.equal(chase.cycleView(), 'Far chase');
+  pos = step(90);
+  const d = Math.hypot(pos.x, pos.z);
+  assert.ok(d > 13, `far view further back (${d.toFixed(1)})`);
+  assert.equal(chase.cycleView(), 'Gunner');
+  pos = step(90);
+  assert.ok(Math.hypot(pos.x, pos.z) < 2.5 && pos.y > 2.5, 'gunner sits on the turret');
+  assert.ok(Math.abs(cam.fov - 50) < 1.5, 'gunner FOV 50');
+  // Reversing fast still follows the aim.
+  chase.cycleView();
+  tk.speed = -5;
+  ta.yaw = 0;
+  pos = step(120);
+  assert.ok(pos.x < -8, 'follows the aim while reversing');
+});

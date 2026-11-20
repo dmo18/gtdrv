@@ -393,4 +393,124 @@ export default async function extra(page, check) {
   await frame();
   await page.screenshot({ path: 'shots/arms-missile.png' });
   check(msl, 'a missile launches from the fixture plane');
+
+  // ---- Task 33: the Gannetfang and the Lampwatch, flown through the real
+  // controls (input actions), stepped by hand. ----
+  // A control source like the touch pedals and stick (input.poll reads it).
+  await page.evaluate(() => {
+    window.__src33 = window.__rw.input.addSource({ steer: 0, throttle: 0, brake: 0, pitch: 0 });
+  });
+  // Camera caught up with the craft (hand stepping skips the chase smoothing).
+  const snapFrame = () => page.evaluate(() => {
+    const g = window.__rw;
+    g.draw(1, 1 / 60);
+    g.chase.snap(g.camTarget);
+    for (let i = 0; i < 3; i++) g.draw(1, 1 / 60);
+  });
+  const boardCraft = (spec) => page.evaluate((id) => {
+    const g = window.__rw;
+    const c = g.vehicles.find((v) => v.spec.id === id && !v.wrecked && v.home);
+    if (!c) return null;
+    if (g.player.vehicle) {
+      g.player.vehicle.driver = null;
+      g.player.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    const w = g.player.walker;
+    w.x = w.px = c.x + 3;
+    w.z = w.pz = c.z + 3;
+    g.player.x = w.x;
+    g.player.z = w.z;
+    g.chase.snap(g.camTarget);
+    g.enterVehicle(c);
+    return { id: c.id, x: c.x, z: c.z, mode: g.player.mode };
+  }, spec);
+  const jetIn = await boardCraft('fighter');
+  check(jetIn && jetIn.mode === 'plane', `boards the parked Gannetfang (${JSON.stringify(jetIn)})`);
+  await page.evaluate(() => { for (let i = 0; i < 30; i++) window.__rw.step(1 / 60); });
+  await snapFrame();
+  await page.screenshot({ path: 'shots/fighter-apron.png' });
+  const jet = await page.evaluate(() => {
+    const g = window.__rw;
+    const f = g.player.vehicle;
+    // Taxi out: the parked fighter faces the runway (north), turn west along it.
+    f.heading = f.pheading = 0;
+    f.z = f.pz = (g.city.airfield.runway.z0 + g.city.airfield.runway.z1) / 2;
+    f.x = f.px = g.city.airfield.runway.x0 + 40;
+    let lift = -1;
+    for (let i = 0; i < 60 * 8; i++) {
+      window.__src33.throttle = 1;
+      window.__src33.pitch = i > 60 ? 0.35 : 0;
+      g.step(1 / 60);
+      if (lift < 0 && !f.onGround) lift = i / 60;
+    }
+    window.__src33.pitch = 0;
+    return { lift: +lift.toFixed(2), y: +f.y.toFixed(1), v: +f.airspeed.toFixed(1), ab: +f.afterburner.toFixed(2), wrecked: f.wrecked };
+  });
+  check(jet.lift > 0 && jet.lift < 4 && jet.y > 30 && !jet.wrecked && jet.ab > 0.9, `the fighter takes off on afterburner (${JSON.stringify(jet)})`);
+  await snapFrame();
+  await page.screenshot({ path: 'shots/fighter-flight.png' });
+  const jetMsl = await page.evaluate(() => {
+    const g = window.__rw;
+    const f = g.player.vehicle;
+    const launches = [];
+    const off = g.events.on('launch', (e) => launches.push(e.weapon));
+    g.input.press('fire2');
+    for (let i = 0; i < 6; i++) g.step(1 / 60);
+    g.input.release('fire2');
+    g.input.press('fire');
+    for (let i = 0; i < 20; i++) g.step(1 / 60);
+    g.input.release('fire');
+    window.__src33.throttle = 0;
+    off();
+    return { launches, mag: f.arms && f.arms.mag };
+  });
+  check(jetMsl.launches.includes('missile') && jetMsl.mag && jetMsl.mag.nosegun < 120,
+    `the fighter fires a missile (MSL) and the nose gun (${JSON.stringify(jetMsl)})`);
+  await snapFrame();
+  await page.screenshot({ path: 'shots/fighter-missile.png' });
+
+  const heliIn = await boardCraft('patrolheli');
+  check(heliIn && heliIn.mode === 'heli', `boards the parked Lampwatch (${JSON.stringify(heliIn)})`);
+  const heli = await page.evaluate(() => {
+    const g = window.__rw;
+    const h = g.player.vehicle;
+    const sirens = [];
+    const off = g.events.on('siren', (e) => sirens.push(e && e.on));
+    g.clock = 22.5; // night, so the beam shows
+    g.input.press('horn');
+    g.step(1 / 60);
+    g.input.release('horn');
+    g.input.press('spot');
+    g.step(1 / 60);
+    g.input.release('spot');
+    for (let i = 0; i < 60 * 9; i++) {
+      window.__src33.throttle = 1;
+      g.step(1 / 60);
+    }
+    window.__src33.throttle = 0;
+    for (let i = 0; i < 60; i++) g.step(1 / 60);
+    off();
+    return { y: +h.y.toFixed(1), ground: h.onGround, siren: h.siren, spot: h.spot, sirens };
+  });
+  check(!heli.ground && heli.y > 15 && heli.siren && heli.spot === 1, `the police heli lifts off with siren and spotlight (${JSON.stringify(heli)})`);
+  await snapFrame();
+  await page.screenshot({ path: 'shots/patrolheli-night.png' });
+  // An AI police heli: spawn, orbit the player for a while.
+  const ai = await page.evaluate(() => {
+    const g = window.__rw;
+    const p = g.helipilot.spawn({ dist: 200, angle: 0 });
+    for (let i = 0; i < 60 * 20; i++) g.step(1 / 60);
+    const r = { state: p.state, d: +p.dist.toFixed(1), wrecked: p.craft.wrecked, listed: g.vehicles.includes(p.craft) };
+    window.__aiHeli = p;
+    return r;
+  });
+  check(ai.listed && !ai.wrecked && (ai.state === 'orbit' || ai.state === 'arrive') && ai.d < 120, `an AI police heli arrives and orbits (${JSON.stringify(ai)})`);
+  await snapFrame();
+  await page.screenshot({ path: 'shots/patrolheli-ai.png' });
+  await page.evaluate(() => {
+    const g = window.__rw;
+    window.__aiHeli.craft.removed || g.removeVehicle(window.__aiHeli.craft);
+    g.clock = 12;
+  });
 }

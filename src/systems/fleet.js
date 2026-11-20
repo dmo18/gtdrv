@@ -3,6 +3,7 @@
 // the player is far away, so there is always something to ride.
 import { createBoat } from '../entities/boat.js';
 import { createAircraft } from '../entities/aircraft.js';
+import { createTank } from '../entities/tank.js';
 
 const RESPAWN_DIST = 260;
 // The special craft. Nothing is bought any more: they sit at their
@@ -13,6 +14,8 @@ export function createFleet(game) {
   const spots = [];
   for (const s of game.city.boatSpots) spots.push({ ...s, make: createBoat, craft: null });
   for (const s of game.city.aircraftSpots) spots.push({ ...s, make: createAircraft, craft: null });
+  // Tanks wait at the depot and in Cinder Row (docs/ARMS.md section 3).
+  for (const s of game.city.tankSpots || []) spots.push({ ...s, make: createTank, craft: null });
   let timer = 0;
 
   function fill(s) {

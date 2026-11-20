@@ -37,6 +37,9 @@ await build({
       import { createArms } from './src/core/weapons.js';
       import { createEvents } from './src/core/events.js';
       import * as THREE from 'three';
+      import { AIRCRAFT_SPECS } from './src/entities/aircraft.js';
+      import { TANK_SPECS } from './src/entities/tank.js'; // the real Rustback (task 32)
+      import { createHeliPilots } from './src/systems/helipilot.js';
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0';
       document.body.appendChild(root);
@@ -61,6 +64,9 @@ await build({
       const game = { input, touch, hud, chase, camera, events, collision, actors: [walker], vehicles: [], seaY: 0,
         aim: { dx: 1, dy: 0, dz: 0, manual: false }, player: { walker, vehicle: null, mode: 'foot', x: 0, z: 0 } };
       const chud = createCombatHud(game, root);
+      createHeliPilots(game); // the police heli's SPOT button (task 33)
+      window.__SPECS = AIRCRAFT_SPECS;
+      window.__TANKS = TANK_SPECS;
       const meshes = new Map();
       const personMesh = (color) => {
         const m = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.8, 0.5), new THREE.MeshLambertMaterial({ color }));
@@ -1171,6 +1177,12 @@ try {
         tank: mk('fx-tank', 'tank', ['cannon', 'coax']),
         prop: mk('fx-prop', 'plane', []),
       };
+      // The real Gannetfang and Lampwatch (task 33).
+      const real = (id) => ({ ...mk(id, window.__SPECS[id].kind, []), spec: window.__SPECS[id], siren: false, spotOn: false, spot: 0 });
+      window.__CR.gannet = real('fighter');
+      window.__CR.lamp = real('patrolheli');
+      // The real Rustback (task 32).
+      window.__CR.rtank = { ...mk('rustback', 'tank', []), y: 0, spec: window.__TANKS.rustback, turretYaw: 0, gunPitch: 0 };
       window.__ST = { n: 0 };
       rw.game.combat = {
         seeker: { target: null, state: 'idle', progress: 0 },
@@ -1202,7 +1214,12 @@ try {
       ['heavy', 'heli', 0, 6, 'bomb'],
       ['tank', 'tank', 0, 6, 'cannon,coax,tlock'],
       ['tank', 'tank', 1, 7, 'cannon,coax,detonate,tlock'],
+      ['rtank', 'tank', 0, 6, 'cannon,coax,tlock'],
+      ['rtank', 'tank', 2, 7, 'cannon,coax,detonate,tlock'],
       ['prop', 'plane', 0, 6, ''],
+      ['gannet', 'plane', 0, 9, 'alock,bomb,gun,msl'],
+      ['gannet', 'plane', 2, 10, 'alock,bomb,detonate,gun,msl'],
+      ['lamp', 'heli', 0, 6, 'gun'],
       [null, 'foot', 0, 6, ''],
       [null, 'foot', 3, 7, 'detonate'],
     ];
@@ -1223,7 +1240,7 @@ try {
           armsCounts[tag.split(' ')[0]] = Math.max(armsCounts[tag.split(' ')[0]] || 0, n);
           check(`arms ${tag}: ${n} buttons <= ${max}`, n <= max, String(n));
           await checkLayout(`arms ${tag}`);
-          if (!lefty && (key === 'fighter' || key === 'tank' || (mode === 'foot' && charges))) await shot(`arms-${key || 'foot'}${charges ? '-charges' : ''}-${vw}x${vh}.png`);
+          if ((!lefty || key === 'rtank') && (key === 'fighter' || key === 'tank' || key === 'rtank' || key === 'gannet' || key === 'lamp' || (mode === 'foot' && charges))) await shot(`arms-${key || 'foot'}${charges ? '-charges' : ''}${lefty ? '-lefty' : ''}-${vw}x${vh}.png`);
           if (lefty && key === 'fighter' && charges) await shot(`arms-fighter-lefty-${vw}x${vh}.png`);
           await tapMore();
           await checkLayout(`arms ${tag} fan open`);
@@ -1300,6 +1317,40 @@ try {
     const gl = await at('gun');
     check('left-handed: GUN mirrors to the left side', gl.x < 915 / 2 && Math.abs((915 - gl.x) - gun.x) < 2, `${gl.x} vs ${gun.x}`);
     await page.evaluate(() => rw.touch.setLeftHanded(false));
+    // Lampwatch: SIREN and SPOT in the more fan; real multi-touch: the stick
+    // and UP held, GUN held, then SPOT tapped from the fan.
+    for (const lefty of [false, true]) {
+      await page.evaluate((l) => rw.touch.setLeftHanded(l), lefty);
+      await setCraft('lamp', 'heli', 0);
+      await page.waitForTimeout(150);
+      const lgun = await at('gun');
+      const sx = lefty ? 915 - 140 : 140;
+      await down(51, sx, 300);
+      await drag(51, sx, 300, sx, 250, 4);
+      const upB = await center('Climb');
+      await down(52, upB.x, upB.y);
+      await down(53, lgun.x, lgun.y);
+      const fl = await read('({ fire: rw.input.held("fire"), pitch: rw.input.pitch, th: rw.input.throttle })');
+      check(`police heli${lefty ? ' lefty' : ''}: stick, UP and GUN at once`, fl.fire && fl.pitch > 0.3 && fl.th > 0.5, JSON.stringify(fl));
+      await tapMore();
+      await page.waitForTimeout(220);
+      const fan = await visibleActions();
+      check(`police heli${lefty ? ' lefty' : ''}: fan has SIREN and SPOT`, fan.includes('siren') && fan.includes('spot'), fan);
+      await checkLayout(`police heli fan${lefty ? ' lefty' : ''}`);
+      if (!lefty) await shot('arms-lamp-fan-915x412.png');
+      const sp = await at('spot');
+      await down(54, sp.x, sp.y);
+      await up(54);
+      check(`police heli${lefty ? ' lefty' : ''}: SPOT tap presses spot while flying and firing`,
+        await read('rw.input.pressed("spot") && rw.input.held("fire")'));
+      await up(53);
+      await up(52);
+      await up(51);
+      await page.evaluate(() => rw.frame(1));
+    }
+    await page.evaluate(() => rw.touch.setLeftHanded(false));
+    await setCraft('gannet', 'plane', 0);
+    check('SPOT hidden in the fighter', !(await visibleActions()).includes('spot'));
     // Tank: the stick drives (up = throttle, down = brake, sideways = steer).
     await setCraft('tank', 'tank', 0);
     await down(46, 140, 300);
@@ -1310,6 +1361,45 @@ try {
     await up(46);
     check('tank stick: up = throttle, down-right = brake + steer', tk.t > 0.6 && tk.b === 0 && tk2.b > 0.3 && tk2.s > 0.3 && tk2.t === 0,
       JSON.stringify([tk, tk2]));
+    // The real Rustback (task 32): real multi-touch while driving, aiming
+    // and firing: the stick held forward-left (pivoting), the right half
+    // dragged to turn the turret, COAX held and CANNON tapped at once;
+    // mirrored for left hands. Buttons within the 6-button Minimal limit.
+    for (const [vw, vh] of [[915, 412], [780, 360]]) {
+      await page.setViewportSize({ width: vw, height: vh });
+      for (const lefty of [false, true]) {
+        await page.evaluate((l) => rw.touch.setLeftHanded(l), lefty);
+        await setCraft('rtank', 'tank', 0);
+        await page.waitForTimeout(150);
+        const tag = `rustback ${vw}x${vh}${lefty ? ' lefty' : ''}`;
+        const cn = await at('cannon'), cx = await at('coax'), lk = await at('tlock');
+        check(`${tag}: CANNON big (>= 80 px), COAX and LOCK >= 56 px`, cn.w >= 80 && cx.w >= 56 && lk.w >= 56, JSON.stringify([cn.w, cx.w, lk.w]));
+        check(`${tag}: fire buttons on the ${lefty ? 'left' : 'right'} thumb`, lefty ? cn.x < vw / 2 && cx.x < vw / 2 : cn.x > vw / 2 && cx.x > vw / 2);
+        const n = await buttonCount();
+        check(`${tag}: ${n} buttons <= 6`, n <= 6, String(n));
+        const sx = lefty ? vw - 140 : 140;
+        await down(61, sx, vh - 110);
+        await drag(61, sx, vh - 110, sx - 45, vh - 170, 5);
+        await page.evaluate(() => { rw.input.lookX = 0; rw.input.lookY = 0; });
+        // The look drag starts in the open middle of the aiming side.
+        const lx = lefty ? vw * 0.3 : vw * 0.62, ly = vh * 0.35;
+        await down(62, lx, ly);
+        await drag(62, lx, ly, lx + 70, ly - 25, 6);
+        await down(63, cx.x, cx.y);
+        await down(64, cn.x, cn.y);
+        const st2 = await read('({ t: rw.input.throttle, s: rw.input.steer, look: rw.input.lookX, lookY: rw.input.lookY, fire: rw.input.pressed("fire") || rw.input.held("fire"), coax: rw.input.held("fire2") })');
+        check(`${tag}: drive, aim drag, COAX held and CANNON at once`, st2.t > 0.4 && st2.s < -0.3 && st2.look > 30 && st2.fire && st2.coax, JSON.stringify(st2));
+        await up(64);
+        await up(63);
+        await up(62);
+        await up(61);
+        await page.evaluate(() => rw.frame(1));
+        check(`${tag}: all released`, await read('!rw.input.held("fire") && !rw.input.held("fire2") && rw.input.throttle === 0 && rw.input.steer === 0'));
+        await checkLayout(`${tag} after multi-touch`);
+      }
+    }
+    await page.evaluate(() => rw.touch.setLeftHanded(false));
+    await page.setViewportSize({ width: 915, height: 412 });
     // On foot: hold FIRE to aim a throw (slide to aim), a second finger walks,
     // lifting over the more button (where SWAP folds) cancels.
     await setCraft(null, 'foot', 0);

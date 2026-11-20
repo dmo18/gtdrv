@@ -16,6 +16,9 @@ const MODES = {
   boat: { dist: 10.5, height: 3.6, lookHeight: 1.4, lookAhead: 5, baseFov: 62, follow: 10, turn: 0.8, pitchShare: 0, rollShare: 0 },
   plane: { dist: 16, height: 3.8, lookHeight: 1.8, lookAhead: 12, baseFov: 64, follow: 18, turn: 1, pitchShare: 0.55, rollShare: 0.22 },
   heli: { dist: 15, height: 6.5, lookHeight: 1.8, lookAhead: 3, baseFov: 62, follow: 6, turn: 0.55, pitchShare: 0, rollShare: 0.1 },
+  // Tank: behind the turret's aim (game.js passes tankAim as the target
+  // heading and pitch); the drag turns the aim, not an orbit.
+  tank: { dist: 11, height: 4.5, lookHeight: 2, lookAhead: 14, baseFov: 62, follow: 14, turn: 8, pitchShare: 1, rollShare: 0 },
 };
 
 // Selectable views for the VIEW button. Each view overrides parts of the
@@ -46,6 +49,11 @@ const VIEWS = {
     { name: 'Far chase', dist: 26, height: 10, lookHeight: 2, lookAhead: 6, baseFov: 66 },
     { name: 'Cockpit', dist: -1.8, height: 0.7, lookHeight: 0.3, lookAhead: 50, baseFov: 80, follow: 30, turn: 0.9, rollShare: 0.5 },
   ],
+  tank: [
+    { name: 'Chase' },
+    { name: 'Far chase', dist: 16, height: 6.2, lookHeight: 2, lookAhead: 18, baseFov: 64 },
+    { name: 'Gunner', dist: 1.0, height: 3.25, lookHeight: 3.05, lookAhead: 60, baseFov: 50, follow: 40, turn: 30 },
+  ],
 };
 
 const MIN_CLEAR = 0.6; // camera never gets closer than this to ground/sea
@@ -58,6 +66,7 @@ const FEEL = {
   boat: { turnLook: 0.6, fovKick: 0.2, buzz: 0.6 },
   plane: { turnLook: 0.4, fovKick: 0.12, buzz: 0.4 },
   heli: { turnLook: 0.3, fovKick: 0.1, buzz: 0.2 },
+  tank: { turnLook: 0, fovKick: 0, buzz: 0 },
 };
 const MAX_SHAKE_ROT = 0.022; // radians at full trauma
 const MAX_SHAKE_POS = 0.06; // metres at full trauma
@@ -69,12 +78,14 @@ export const AIM = {
   drag: 0.0042, // radians per pixel of drag
   pitchMin: -0.6, pitchMax: 0.7,
 };
+// Tank aim: drag turns it (radians per pixel as AIM.drag), pitch limits.
+export const TANK_AIM = { pitchMin: -0.3, pitchMax: 0.42 };
 const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
 export function createChaseCamera(camera) {
   let mode = MODES.car;
   let modeKey = 'car';
-  const viewIdx = { car: 0, foot: 0, boat: 0, plane: 0, heli: 0 }; // remembered per kind
+  const viewIdx = { car: 0, foot: 0, boat: 0, plane: 0, heli: 0, tank: 0 }; // remembered per kind
   let viewName = 'Chase';
   // Build the active mode from the base mode plus the chosen view.
   function applyMode() {
@@ -111,6 +122,9 @@ export function createChaseCamera(camera) {
   // The crosshair ray of the last placed frame (camera position and the
   // unit view direction before shake).
   const ray = { x: 0, y: 0, z: 0, dx: 1, dy: 0, dz: 0 };
+  // Tank mode: world yaw / pitch the turret is asked to aim along. The
+  // drag turns it; a lock (systems/armor.js) steers it with holdDrag.
+  const tankAim = { yaw: 0, pitch: 0.1, holdDrag: false, dragScale: 1 };
 
   // Distance at which the view line from the target back to the camera
   // is first blocked, or `dist` if it is clear. Height-aware: roofs below
@@ -175,7 +189,7 @@ export function createChaseCamera(camera) {
     if (!(py >= floor)) py = floor;
 
     const spd = Math.abs(target.speed || 0);
-    const ahead = mode.lookAhead * Math.min(1, 0.3 + spd / 25);
+    const ahead = modeKey === 'tank' ? mode.lookAhead : mode.lookAhead * Math.min(1, 0.3 + spd / 25);
     const ch = Math.cos(target.heading), sh = Math.sin(target.heading);
     let lx = target.x + ch * ahead - sh * turnLook;
     let ly = baseY + mode.lookHeight + sp * ahead;
@@ -312,6 +326,15 @@ export function createChaseCamera(camera) {
         input.lookX = 0;
         input.lookY = 0;
         sinceDrag = 0;
+      } else if (modeKey === 'tank' && input && (input.lookX || input.lookY)) {
+        if (!tankAim.holdDrag) {
+          const g = AIM.drag * tankAim.dragScale;
+          tankAim.yaw = angleDiff(tankAim.yaw + input.lookX * g, 0);
+          tankAim.pitch = clamp(tankAim.pitch - input.lookY * g, TANK_AIM.pitchMin, TANK_AIM.pitchMax);
+        }
+        input.lookX = 0;
+        input.lookY = 0;
+        sinceDrag = 0;
       } else if (input && (input.lookX || input.lookY)) {
         orbitYaw += input.lookX * 0.006;
         orbitPitch = clamp(orbitPitch + input.lookY * 0.01, Math.min(0, -mode.height + 0.6), 6);
@@ -337,7 +360,7 @@ export function createChaseCamera(camera) {
         camHeading = aim.yaw;
         orbitYaw = 0;
         orbitPitch = 0;
-      } else if ((target.speed || 0) > -2) {
+      } else if ((target.speed || 0) > -2 || modeKey === 'tank') {
         camHeading += angleDiff(target.heading, camHeading) * Math.min(1, rate * dt);
       }
       camHeading = angleDiff(camHeading, 0);
@@ -375,6 +398,7 @@ export function createChaseCamera(camera) {
     setAim,
     aim,
     ray,
+    tankAim,
     // Where the view points now, as yaw (heading convention).
     viewYaw: () => Math.atan2(ray.dz, ray.dx),
     // The VIEW button: next camera view for the current kind of craft.

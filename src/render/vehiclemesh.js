@@ -287,6 +287,8 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   const rig = ud.rig;
   rig.rotation.set(roll, 0, pitch, 'XZY');
   rig.position.set(p * Math.sin(pitch), p * (2 - Math.cos(roll) - Math.cos(pitch)), -p * Math.sin(roll));
+  // Rolled over by a tank (docs/ARMS.md): squashed flat; wrecked tint.
+  rig.scale.y = v.crushed ? 0.45 : 1;
 
   // Wheels: spin, steer, and follow part of the body's travel.
   const spin = v.wheelSpin || 0;
