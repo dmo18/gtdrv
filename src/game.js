@@ -26,6 +26,7 @@ import { createActivities } from './systems/activities.js';
 import { createPolice } from './systems/police.js';
 import { createTutorial } from './systems/tutorial.js';
 import { createEffects } from './render/effects.js';
+import { createGraphics } from './render/graphics.js';
 import { createMenu } from './ui/menu.js';
 import { stepBoat, collideBoats } from './entities/boat.js';
 import { createBoatMesh, updateBoatMesh } from './render/boatmesh.js';
@@ -267,6 +268,7 @@ export function createGame({ canvas, uiRoot }) {
   game.activities = game.addSystem(createActivities(game, uiRoot));
   game.police = game.addSystem(createPolice(game));
   game.addSystem(createTutorial(game));
+  game.graphics = game.addSystem(createGraphics(game));
   game.effects = game.addSystem(createEffects(game));
   game.menu = createMenu(uiRoot, game, game.economy);
 

@@ -13,22 +13,21 @@
 - Fixes from the final review (race start button, map markers, HUD
   leftovers)
 
-## Paused: usage limit reached
-The account's 5-hour usage limit stopped three Milestone 5 helpers
-part-way (limit resets 02:50 UTC). Their partial work is committed and
-the game runs with no errors, but these are unfinished:
-- City graphics and lighting: roads, pavements, shopfronts and props
-  are in; shadows, tone mapping, reflections (src/render/graphics.js)
-  are NOT built yet, so building walls look too dark.
-- Vehicle looks and effects: smooth car bodies are in; effects
-  (src/render/effects.js exists, not yet registered in game.js),
-  damage, boat/aircraft materials and camera feel unfinished/unverified.
-- Sound overhaul: new sample-based engine is partly in; one check
-  fails (engine pitch does not rise with revs). scripts/audio-test.mjs.
-To resume: message each of the three stopped helpers to continue from
-where it stopped, then wire createGraphics and createEffects into
-src/game.js, run all checks, look at screenshots, and publish.
-Steering and driving physics (task 19) are complete and wired in.
+## Paused: run cap reached
+Measured helper usage is 3.51M against the 3.5M cap, so work stopped
+for the owner's decision. State at the pause:
+- Milestone 5 tasks 19 (steering, driving physics), 20 (sound) and 22
+  (vehicle looks, effects) are complete and wired in.
+- Task 21 (city graphics) was stopped before its helper finished. What
+  it built is wired in and verified by screenshot and checks: tone
+  mapping, sun shadows, environment reflections, textured roads and
+  pavements, facade styles, shopfronts, props. Not confirmed: its full
+  screenshot pass (dusk, rain, docks, beach, airfield, aerial), bloom,
+  quality scaling, and its performance report.
+- Known weak spots: boats and aircraft are still blocky; the VIEW
+  button does nothing yet; one sound check is timing-sensitive
+  (failed 1 run in 4); sound was never heard by a person.
+- Not yet tested on the real phone since the overhaul.
 
 ## Decisions
 - Name: Rustwater (original setting, an island harbour city).
