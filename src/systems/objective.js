@@ -1,3 +1,4 @@
+import { formatDistance } from '../core/units.js';
 // Objective arrow: while a race or delivery is running (or a map waypoint is
 // set) a big arrow on screen points to where to go, with the distance.
 // Pure helper first, then a small DOM overlay guarded for node tests.
@@ -95,7 +96,7 @@ export function createObjective(game, uiRoot) {
       const d = Math.round(this.distance / 5) * 5;
       if (d !== shownDist) {
         shownDist = d;
-        label.textContent = `${goal.text} ${d} m`;
+        label.textContent = `${goal.text} ${formatDistance(d)}`;
       }
     },
   };

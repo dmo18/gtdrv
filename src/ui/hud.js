@@ -1,3 +1,4 @@
+import { speedMph } from '../core/units.js';
 // Heads-up display. update() runs every frame, so it only touches the DOM
 // when a displayed value changed and allocates nothing when nothing did.
 import { injectStyles } from './styles.js';
@@ -111,7 +112,7 @@ export function createHud(root) {
   const speedEl = el('div', 'rw-speed', speedBox);
   const speedNum = document.createTextNode('0');
   speedEl.appendChild(speedNum);
-  el('small', 'rw-unit', speedEl).textContent = 'km/h';
+  el('small', 'rw-unit', speedEl).textContent = 'mph';
   const vehBar = bar('rw-vehbar', speedBox);
   const promptEl = el('div', 'rw-prompt rw-none', bottom);
 
@@ -135,7 +136,7 @@ export function createHud(root) {
       last.mode = s.mode;
       speedBox.classList.toggle('rw-none', s.mode === 'foot');
     }
-    const speed = Math.round(s.speedKmh);
+    const speed = Math.round(speedMph(s.speedKmh));
     if (speed !== last.speed) {
       last.speed = speed;
       speedNum.nodeValue = String(speed);

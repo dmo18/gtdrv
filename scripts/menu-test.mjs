@@ -203,7 +203,7 @@ try {
   check('no money or buy anywhere', (await page.locator('.rw-menu button', { hasText: /buy|\$/i }).count()) === 0);
   await tab('Records');
   const rec = await page.locator('.rw-menu-body').innerText();
-  check('records distance km', rec.includes('12.3 km'), rec);
+  check('records distance miles', rec.includes('7.7 mi'), rec);
   check('economy has no buy', await ev(() => window.rw.economy.buy === undefined));
 
   // Resume button unpauses.

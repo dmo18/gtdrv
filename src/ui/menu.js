@@ -1,3 +1,4 @@
+import { formatDistance, formatMiles } from '../core/units.js';
 // The pause menu: Resume, Scores, Records, Settings and How to play.
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { setHandlingMode } from '../entities/vehicle.js';
@@ -240,7 +241,7 @@ export function createMenu(root, game, economy) {
     add(num(live ? live.total : sc.total), 'Total score');
     add(num(sc.sessionBest), 'Best session');
     add(sc.best.combo > 0 ? 'x' + sc.best.combo : '-', 'Best combo');
-    add(sc.best.jump > 0 ? Math.round(sc.best.jump) + ' m' : '-', 'Longest jump');
+    add(sc.best.jump > 0 ? formatDistance(sc.best.jump) : '-', 'Longest jump');
     add(sc.best.airtime > 0 ? sc.best.airtime.toFixed(1) + ' s' : '-', 'Longest airtime');
     add(sc.best.drift > 0 ? num(sc.best.drift) : '-', 'Best drift');
     add(sc.best.nearMiss > 0 ? String(Math.round(sc.best.nearMiss)) : '-', 'Near misses in a row');
@@ -306,7 +307,7 @@ export function createMenu(root, game, economy) {
       s.append(h('b', '', v), h('span', 'rw-menu-dim', label));
       stats.appendChild(s);
     };
-    add((p.stats.distance / 1000).toFixed(1) + ' km', 'Distance travelled');
+    add(formatMiles(p.stats.distance), 'Distance travelled');
     add(String(Math.floor(p.stats.races)), 'Races');
     add(String(Math.floor(p.stats.flights)), 'Flights');
     const foundIds = p.secrets && Array.isArray(p.secrets.found) ? p.secrets.found : [];

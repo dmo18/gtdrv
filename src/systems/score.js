@@ -1,3 +1,4 @@
+import { formatDistance } from '../core/units.js';
 // Score and combo. There is no money in this game: `add(points, reason,
 // x, z)` is the only way to score. Rules: docs/MISSIONS.md "Score".
 //
@@ -289,7 +290,7 @@ export function createScore(game) {
           const dist = Math.hypot(v.x - takeX, v.z - takeZ);
           if (dist >= JUMP_MIN) {
             recordBest('jump', dist);
-            add(dist * POINTS.jumpPerMetre, 'Jump ' + Math.round(dist) + ' m', v.x, v.z);
+            add(dist * POINTS.jumpPerMetre, 'Jump ' + formatDistance(dist), v.x, v.z);
           }
         }
       }
