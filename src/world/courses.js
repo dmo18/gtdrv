@@ -419,7 +419,6 @@ export function buildCourses(city) {
   const { islet, runway, gate } = city.airfield;
   const mainNodes = N.filter((n) => n !== gate);
   const avoidGate = new Set([gate.id]);
-  const plain = (e) => e.length;
   const list = [];
 
   // Grid lines of the central avenues.
