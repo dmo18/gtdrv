@@ -266,7 +266,7 @@ export function createFootActor(team, rng, weapon = 'pistol') {
     coverX: 0, coverZ: 0, peekX: 0, peekZ: 0, hasCover: false, coverT: 0, peeking: false,
     coverFromX: 0, coverFromZ: 0, coverAge: 99, coverPhase: rng.next() * TAU,
     stuckT: 0, fleeT: 0, fleeRolled: false, idleT: 0, flee: false,
-    detourT: 0, dtx: 0, dtz: 0, detourSide: 1, peekT: 0, covered: false, coverGood: false,
+    nerve: 1, detourT: 0, dtx: 0, dtz: 0, detourSide: 1, peekT: 0, covered: false, coverGood: false,
     mesh: null, tag: null, shots: 0, hits: 0,
   };
   initActor(a, team);
@@ -517,7 +517,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
   const chaseCtx = { collision: game.collision, vehicles: game.vehicles, time: 0 };
   const footTarget = { x: 0, z: 0, vx: 0, vz: 0, heading: 0, y: 0, spec: null };
   let stepCount = 0;
-  const stats = { shots: 0, hits: 0, thinks: 0, covers: 0 };
+  const stats = { shots: 0, hits: 0, thinks: 0, covers: 0, fleeRolls: 0, fleeHurt: 0 };
 
   // --- Groups ---
   function freeMember() {
@@ -586,6 +586,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       m.state = 'patrol';
       m.think = (members.length * THINK_T) / max; // stagger decisions
       m.coverPhase = rng.next() * TAU;
+      m.nerve = rng.next(); // under FLEE_CHANCE: runs when badly hurt
       if (g.car && k < 2 && g.drive) {
         m.inCar = g.car;
         m.seat = k;
@@ -1339,7 +1340,11 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       }
       if (t.life === 'ok' && t.hp > 0 && t.hp < t.maxHp * FLEE_HP && !t.fleeRolled) {
         t.fleeRolled = true;
-        if (rng.next() < FLEE_CHANCE) startFlee(t, 'hurt');
+        stats.fleeRolls++;
+        if (t.nerve < FLEE_CHANCE) {
+          stats.fleeHurt++;
+          startFlee(t, 'hurt');
+        }
       }
     });
     ev.on('down', (d) => {

@@ -176,7 +176,7 @@ const CSS = `
 .rw-btn.rw-dbfire svg { width: 28px; height: 28px; }
 .rw-btn.rw-dbfire.rw-down { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
 .rw-fire-mag { position: absolute; right: 10%; top: 8%; font: 800 11px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; }
-.rw-dbfire .rw-fire-mag { right: 6%; top: 4%; }
+.rw-dbfire .rw-fire-mag { right: 14%; top: 12%; }
 .rw-lock { right: calc(var(--rw-sr) + 138px); bottom: calc(var(--rw-sb) + 92px); width: 62px; height: 62px; }
 .rw-lock.rw-on { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
 .rw-swap { right: calc(var(--rw-sr) + 98px); bottom: calc(var(--rw-sb) + 162px); width: 62px; height: 62px; }
