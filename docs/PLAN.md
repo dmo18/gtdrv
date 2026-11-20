@@ -59,7 +59,21 @@ tier up, committed.
 18. Final verification and security review (fresh reviewer).
     Model: Fable
 
-Run cap: 23 tasks, 3.5M delegated tokens.
+## Milestone 5: quality overhaul (after first play test)
+The owner played the first build on the phone and found steering,
+sound, graphics and realism poor. Four tasks, all with on-screen or
+measured proof:
+19. Steering and driving feel: steering wheel, buttons, tilt and
+    slider styles with sensitivity; tyre model, gears, weight
+    transfer, body motion. Model: Opus
+20. Sound rebuilt from generated samples: firing-pulse engines,
+    tyres, wind, impacts, reverb, ambience, siren. Model: Opus
+21. City graphics: shadows, tone mapping, reflections, textured
+    roads and facades, street props, traffic lights. Model: Fable
+22. Vehicle looks and effects: smooth car bodies, glossy paint,
+    damage, smoke, skid marks, sparks, spray, camera feel. Model: Opus
+
+Run cap: 27 tasks, 3.5M delegated tokens.
 Security items that apply: no secrets, no personal data, no network
 calls at runtime, pinned and audited dependencies, licence check,
 save data validated on load, review at each milestone.
