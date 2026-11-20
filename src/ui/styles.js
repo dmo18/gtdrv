@@ -113,7 +113,7 @@ const CSS = `
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 .rw-district {
-  margin-top: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  margin: 4px -30px 0; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
   text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }

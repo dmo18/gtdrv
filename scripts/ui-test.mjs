@@ -1,3 +1,4 @@
+/* global rw -- injected by the harness page, used inside page.evaluate callbacks */
 // Real-touch test of the on-screen controls and HUD in headless Chromium.
 // Bundles src/ui with esbuild, serves scripts/ui-harness.html, drives it
 // with CDP touch events. Exits non-zero on any failure.
@@ -84,7 +85,12 @@ try {
   });
   const down = async (id, x, y) => { fingers.set(id, { x, y }); await send('touchStart'); };
   const move = async (id, x, y) => { fingers.set(id, { x, y }); await send('touchMove'); };
-  const up = async (id) => { fingers.delete(id); await send('touchEnd'); };
+  // touchEnd lists only the points being lifted; the others stay down.
+  const up = async (id) => {
+    const p = fingers.get(id);
+    fingers.delete(id);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ x: p.x, y: p.y, id }] });
+  };
   // Drag in small steps so pointermove fires like a real thumb.
   const drag = async (id, x0, y0, x1, y1, steps = 8) => {
     for (let i = 1; i <= steps; i++) await move(id, x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps);
@@ -216,7 +222,7 @@ try {
   await page.evaluate(() => rw.touch.setMode('car'));
   const g2 = await center('Gas');
   await down(8, g2.x, g2.y);
-  await send('touchCancel').catch((e) => console.log('cancel err', e.message));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
   fingers.clear();
   await page.waitForTimeout(50);
   check('touchcancel releases gas', (await read('rw.input.throttle')) === 0);

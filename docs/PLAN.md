@@ -30,30 +30,40 @@ tier up, committed.
 5. Single-file build, phone preview, smoke test with screenshot.
    Depends 4. Model: Sonnet
 
-## Milestone 2: a living city
-6. On-foot player, enter/exit/take vehicles. Model: Opus
-7. Traffic AI following road graph, lights, avoidance. Model: Opus
-8. Pedestrians (walk, flee, react). Model: Sonnet
+## Milestone 2: sea and sky
+6. On-foot walking, get in/out of any car, boat or aircraft. Model: Opus
+7. Boats: speedboat, jet ski, fishing boat; water physics with waves
+   and wake, marinas and piers. Check: unit tests. Model: Opus
+8. Aircraft: small plane, seaplane, helicopter; flight physics with
+   height, airfield islet with runway, camera for flying.
+   Check: unit tests (take-off, stall, landing, hover). Model: Fable
 9. Minimap, full map, waypoint. Model: Sonnet
-10. Generated audio (engine, horn, siren, impacts). Model: Sonnet
-
-## Milestone 3: crime and consequences
-11. Wanted level (1 to 5), police cars and officers, pursuit,
-    arrest/escape. Model: Opus
-12. Health, damage, simple combat, vehicle damage, respawn.
+10. Generated audio (engines, propeller, rotor, water, impacts).
     Model: Sonnet
-13. Mission engine + 6 original story missions. Model: Opus
-14. Money, shops, garage, save/load (validated on load). Model: Sonnet
+
+## Milestone 3: a living island with things to do
+11. Road traffic following the road graph and lights. Model: Opus
+12. Pedestrians, plus drifting boats and a circling plane for life.
+    Model: Sonnet
+13. Activities: street races, boat races, sky ring courses, stunt
+    jumps, timed deliveries, with medals. Model: Opus
+14. Money, vehicle showroom and garage (unlock cars, boats,
+    aircraft), save/load (validated on load). Model: Sonnet
 
 ## Milestone 4: polish
-15. Day/night, weather, phone performance pass (measured frame
+15. Light police chases for reckless driving (can be switched off).
+    Model: Opus
+16. Day/night, weather, phone performance pass (measured frame
     times). Model: Opus
-16. Menus, settings, tutorial, accessibility (contrast, labels,
-    left-handed layout). Model: Sonnet
-17. Final verification and security review (fresh reviewer).
+17. Menus, settings, tutorial, accessibility. Model: Sonnet
+18. Final verification and security review (fresh reviewer).
     Model: Fable
 
-Run cap: 21 tasks, 3.5M delegated tokens.
+Run cap: 23 tasks, 3.5M delegated tokens.
 Security items that apply: no secrets, no personal data, no network
 calls at runtime, pinned and audited dependencies, licence check,
 save data validated on load, review at each milestone.
+
+Change log: user redirected the game toward fun driving, boating and
+flying. On-foot combat and crime story missions were dropped; police
+chases kept only as a light, optional extra.

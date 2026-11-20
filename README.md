@@ -1,6 +1,6 @@
 # Rustwater
 
-An original open-world driving and crime sandbox game that runs in a
+An original open-world driving, boating and flying game that runs in a
 phone browser.
 
 ## Run it

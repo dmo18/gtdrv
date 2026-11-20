@@ -1,6 +1,6 @@
 # Rustwater
 
-An original open-world driving and crime sandbox game for mobile
+An original open-world driving, boating and flying playground for mobile
 browsers (target: Galaxy S24 Ultra, Chrome, landscape, touch). It must
 stay original: no names, characters, maps or art from existing games.
 
