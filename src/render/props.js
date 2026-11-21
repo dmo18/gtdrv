@@ -8,6 +8,7 @@ import { createRng, TAU } from '../core/rng.js';
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
 const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 const BIKE = [0xd8452c, 0x2c7fb8, 0x2f2f33, 0x3f9a5a, 0xe0b030, 0xf2f2f2];
+const FLOWERS = [0xd84a6a, 0xf0c030, 0xe8e0f0, 0xd86a2c, 0x9a5ac8];
 
 function hexShade(hex, f) {
   const r = Math.min(255, ((hex >> 16) & 255) * f) | 0;
@@ -156,8 +157,12 @@ function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
   D.wall(x - dx, z - dz, x + dx, z + dz, y0, y1, color, r.u0, r.v0, r.u1, r.v1, sh);
 }
 
-export function addProps(C) {
+// own(x, z): emit geometry only for items it accepts (a streamed tile of
+// the real map; null: everything). side: also add the collision circles
+// (the real map does that once, for the whole map, with no geometry).
+export function addProps(C, own = null, side = true) {
   const { city, collision } = C;
+  const mine = (x, z) => !own || own(x, z);
   const rng = createRng(city.seed + 4242);
   const T = makeTemplates(rng);
   const R = C.R;
@@ -197,35 +202,35 @@ export function addProps(C) {
   for (const p of city.props) {
     if (p.type === 'lamp') {
       lamps.push(p);
-      C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
+      if (mine(p.x, p.z)) C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
       continue;
     }
     if (blocked(p.x, p.z)) continue;
     if (p.type === 'tree') {
-      collision.addCircle(p.x, p.z, p.r, p.h, 'tree');
-      tree(p.x, p.z, p.h, 0, true);
+      if (side) collision.addCircle(p.x, p.z, p.r, p.h, 'tree');
+      if (mine(p.x, p.z)) tree(p.x, p.z, p.h, 0, true);
     } else if (p.type === 'palm') {
-      collision.addCircle(p.x, p.z, 0.3, p.h, 'tree');
-      palm(p.x, p.z, p.h, 0);
+      if (side) collision.addCircle(p.x, p.z, 0.3, p.h, 'tree');
+      if (mine(p.x, p.z)) palm(p.x, p.z, p.h, 0);
     }
   }
 
   // ---- street furniture ----
   for (const f of city.furniture || []) {
     const { x, z, rot, q, v } = f;
+    if (side && (f.type === 'streettree' || f.type === 'palmtree')) collision.addCircle(x, z, 0.22, f.type === 'palmtree' ? 6 : 5, 'tree');
+    if (!mine(x, z)) continue;
     const P = C.plain.at(x, z, q), D = C.detail.at(x, z, q);
     const y = C.groundY(x, z);
     const ay = y + 0.012;
     switch (f.type) {
       case 'streettree':
         tree(x, z, 5 + v * 3, 0, false);
-        collision.addCircle(x, z, 0.22, 5, 'tree');
         // Tree pit: a square of bare earth in the pavement.
         if (y > 0) C.decal.at(x, z).flatRect(x - 0.7, z - 0.7, x + 0.7, z + 0.7, y + 0.015, 0x6a5a48, C.DR.stain1);
         break;
       case 'palmtree':
         palm(x, z, 6.5 + v * 3, 0);
-        collision.addCircle(x, z, 0.22, 6, 'tree');
         break;
       case 'bench':
         P.add(T.bench, x, y, z, rot);
@@ -305,6 +310,7 @@ export function addProps(C) {
   // ---- traffic lights: poles here, the lamps as one instanced mesh ----
   const bulbs = [];
   for (const s of city.signals || []) {
+    if (!mine(s.x, s.z)) continue;
     const P = C.plain.at(s.x, s.z);
     const y = C.groundY(s.x, s.z);
     P.cyl(s.x, s.z, y, y + 0.8, 0.16, 0.12, 6, 0x2c3034, false, 0.6, 1);
@@ -329,6 +335,18 @@ export function addProps(C) {
   for (const b of city.blocks) {
     if (b.district !== 'park') continue;
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    if (!mine(cx, cz)) {
+      // Not drawn here: the flower beds' random numbers are still used up,
+      // so every park gets the same beds whichever tile draws it.
+      for (let i = 0; i < 6; i++) {
+        const fx = rng.range(b.x0 + 8, b.x1 - 8), fz = rng.range(b.z0 + 8, b.z1 - 8);
+        if (Math.abs(fx - cx) < 6 || Math.abs(fz - cz) < 6) continue;
+        rng.pick(FLOWERS);
+        rng.range(1, 2);
+        rng.range(1, 2);
+      }
+      continue;
+    }
     const P = C.plain.at(cx, cz);
     P.cyl(cx, cz, 0.16, 0.62, 3.3, 3.3, 12, 0xb4b0a6, false, 0.6, 1);
     P.cyl(cx, cz, 0.16, 0.5, 3.0, 3.0, 12, 0x3f8fae, true, 1, 1, 0x4fa6c4);
@@ -345,13 +363,14 @@ export function addProps(C) {
     for (let i = 0; i < 6; i++) {
       const fx = rng.range(b.x0 + 8, b.x1 - 8), fz = rng.range(b.z0 + 8, b.z1 - 8);
       if (Math.abs(fx - cx) < 6 || Math.abs(fz - cz) < 6) continue;
-      const col = rng.pick([0xd84a6a, 0xf0c030, 0xe8e0f0, 0xd86a2c, 0x9a5ac8]);
+      const col = rng.pick(FLOWERS);
       C.plain.at(fx, fz, 1).blob(fx, 0.2, fz, rng.range(1, 2), 0.3, rng.range(1, 2), col, 6, 3, 0.7, 1.1);
     }
   }
 
   // ---- piers: mooring bollards ----
   for (const r of city.piers || []) {
+    if (!mine((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2)) continue;
     const alongX = r.x1 - r.x0 > r.z1 - r.z0;
     const len = alongX ? r.x1 - r.x0 : r.z1 - r.z0;
     for (let d = 6; d < len; d += 8) {
@@ -365,13 +384,14 @@ export function addProps(C) {
 
   // ---- dock cranes ----
   for (const c of L.cranes) {
+    if (side) for (const ox of [-7, 7]) for (const oz of [-6, 6]) collision.addCircle(c.x + ox, c.z + oz, 0.9, 27, 'crane');
+    if (!mine(c.x, c.z)) continue;
     const P = C.plain.at(c.x, c.z);
     const col = c.v < 0.5 ? 0xc8502c : 0xd8a030, dark = hexShade(col, 0.7);
     const H = 27;
     for (const ox of [-7, 7]) {
       for (const oz of [-6, 6]) {
         P.box(c.x + ox - 0.6, c.z + oz - 0.6, c.x + ox + 0.6, c.z + oz + 0.6, -0.3, H, col, col, 0.6, 1);
-        collision.addCircle(c.x + ox, c.z + oz, 0.9, H, 'crane');
         C.ao.at(c.x, c.z).aoDisc(c.x + ox, c.z + oz, 2.2, C.groundY(c.x + ox, c.z + oz) + 0.012, 0.6, 6);
       }
       P.box(c.x + ox - 0.4, c.z - 6, c.x + ox + 0.4, c.z + 6, 11.5, 12.5, dark);
@@ -385,11 +405,16 @@ export function addProps(C) {
     P.box(c.x - 1.4, c.z + 14, c.x + 1.4, c.z + 17.5, H - 3.2, H, 0xe8e4d8, 0x8a8880, 0.8, 1);
     P.box(c.x - 0.12, c.z + 30, c.x + 0.12, c.z + 30.24, H - 12, H, 0x2a2c30);
     P.box(c.x - 1.3, c.z + 28.9, c.x + 1.3, c.z + 31.3, H - 12.6, H - 12, 0x8a2c22);
-    C.glows.push({ x: c.x, y: H + 12.3, z: c.z, r: 1, g: 0.12, b: 0.08, size: 2.6 });
+    if (side) C.glows.push({ x: c.x, y: H + 12.3, z: c.z, r: 1, g: 0.12, b: 0.08, size: 2.6 });
   }
 
   // ---- lighthouse ----
-  if (L.lighthouse) {
+  if (L.lighthouse && side) {
+    const { x, z } = L.lighthouse;
+    C.glows.push({ x, y: 24 + 1.9, z, r: 1, g: 0.92, b: 0.7, size: 7 });
+    collision.addCircle(x, z, 3.7, 24 + 5, 'lighthouse');
+  }
+  if (L.lighthouse && mine(L.lighthouse.x, L.lighthouse.z)) {
     const { x, z } = L.lighthouse;
     const P = C.plain.at(x, z);
     P.cyl(x, z, -0.2, 1.2, 4.6, 4.4, 12, 0x9a968c, true, 0.6, 1);
@@ -403,17 +428,15 @@ export function addProps(C) {
     P.cyl(x, z, H + 0.4, H + 3.2, 1.7, 1.7, 10, 0xa8c4d0);
     P.cyl(x, z, H + 3.2, H + 5.4, 2.0, 0.1, 10, 0xc03a2e);
     C.glow.at(x, z).cyl(x, z, H + 0.9, H + 2.8, 0.7, 0.7, 6, 0xfff0c0);
-    C.glows.push({ x, y: H + 1.9, z, r: 1, g: 0.92, b: 0.7, size: 7 });
-    collision.addCircle(x, z, 3.7, H + 5, 'lighthouse');
     C.ao.at(x, z).aoDisc(x, z, 7.5, C.groundY(x, z) + 0.012, 0.55, 12);
   }
 
   // ---- airfield: runway edge lights and the windsock pole ----
   for (const l of L.runwayLights) {
-    C.glow.at(l.x, l.z).box(l.x - 0.14, l.z - 0.14, l.x + 0.14, l.z + 0.14, 0.02, 0.3, l.color);
-    C.glows.push({ x: l.x, y: 0.4, z: l.z, r: ((l.color >> 16) & 255) / 255, g: ((l.color >> 8) & 255) / 255, b: (l.color & 255) / 255, size: 1.5 });
+    if (mine(l.x, l.z)) C.glow.at(l.x, l.z).box(l.x - 0.14, l.z - 0.14, l.x + 0.14, l.z + 0.14, 0.02, 0.3, l.color);
+    if (side) C.glows.push({ x: l.x, y: 0.4, z: l.z, r: ((l.color >> 16) & 255) / 255, g: ((l.color >> 8) & 255) / 255, b: (l.color & 255) / 255, size: 1.5 });
   }
-  if (L.windsock) {
+  if (L.windsock && mine(L.windsock.x, L.windsock.z)) {
     const { x, z } = L.windsock;
     C.plain.at(x, z).cyl(x, z, -0.1, 6.2, 0.09, 0.06, 5, 0xe8e4dc);
   }

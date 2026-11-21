@@ -125,11 +125,20 @@ function tri(bd, N, a, b, c) {
 // Superellipse coordinate.
 const se = (t, p) => Math.sign(t) * Math.pow(Math.abs(t), 2 / p);
 // Column angles, denser toward the front (a = 0, +x) where the detail is.
-function angles(S, q = 1.25) {
-  const out = [];
+// `cuts` (angles from the front, mirrored to both sides) get a doubled
+// column so a colour edge there (a jacket opening, a vest side) is crisp
+// instead of a sawtooth across the triangles.
+function angles(S, q = 1.25, cuts = null) {
+  let out = [];
   for (let s = 0; s < S; s++) {
     const x = (s / S) * 2 - 1;
     out.push(Math.PI * Math.sign(x) * Math.pow(Math.abs(x), q));
+  }
+  if (cuts) {
+    const e = 0.002;
+    out = out.filter((a) => cuts.every((c) => Math.abs(Math.abs(a) - c) > 0.09));
+    for (const c of cuts) out.push(-c - e, -c + e, c - e, c + e);
+    out.sort((a, b) => a - b);
   }
   return out;
 }
@@ -142,19 +151,19 @@ function loftY(bd, rings, seg, cz, bones, opt = {}) {
   let list = rings;
   if (bd.far) list = rings.filter((r, k) => r.keep || k % 2 === 0 || k === rings.length - 1);
   const S = bd.far ? Math.max(opt.minFar || 5, Math.round(seg * 0.5)) : seg;
-  const A = angles(S, opt.q ?? 1.25);
+  const A = angles(S, opt.q ?? 1.25, bd.far ? null : opt.cuts);
   const rows = [], centres = [];
   for (const R of list) {
     const row = [];
     const [b0, b1, w] = bones(R.y);
     const p = R.p ?? opt.p ?? 2.2;
-    for (let s = 0; s < S; s++) {
+    for (let s = 0; s < A.length; s++) {
       const ca = Math.cos(A[s]), sa = Math.sin(A[s]);
       const u = se(ca, p), v = se(sa, p);
       const x = (R.cx || 0) + (ca > 0 ? R.f : R.b) * u;
       const z = cz + (R.dz || 0) + R.w * v;
       const col = typeof R.col === 'function' ? R.col(ca, sa, R.y) : R.col;
-      let occ = R.occ ?? 1;
+      let occ = (R.occ ?? 1) * (opt.grad ? opt.grad(R.y) : 1);
       if (opt.inner) occ *= 1 - opt.inner * Math.max(0, -sa * Math.sign(cz)); // limb side facing the body
       row.push({ x, y: R.y + (R.dy ? R.dy(ca, sa) : 0), z, col, occ, b0, b1, w });
     }
@@ -301,7 +310,7 @@ export function buildPerson(L, far = false) {
       { y: 0.16, f: 0.062, b: 0.064, w: 0.06, cx: 0, col: crease },
       { y: 0.075, f: 0.066, b: 0.066, w: 0.063, cx: 0.002, col: mul(tr, 0.92), keep: true },
       { y: 0.074, f: 0.035, b: 0.035, w: 0.032, cx: 0.0, col: mul(tr, 0.3) },
-    ], 10, z, joint(leg, knee, HIP_Y + KNEE_DY, 0.06), { inner: 0.12, ao: 0.1 });
+    ], 9, z, joint(leg, knee, HIP_Y + KNEE_DY, 0.06), { inner: 0.12, ao: 0.1, grad: (y) => 0.84 + 0.16 * Math.min(1, y / 0.9) });
 
     // Shoe: lofted along x, flat sole, rounded toe and heel.
     const st = [
@@ -311,11 +320,10 @@ export function buildPerson(L, far = false) {
       [-0.015, 0.05, 0.058, 0.05, 0.048],
       [0.04, 0.04, 0.042, 0.04, 0.051],
       [0.1, 0.032, 0.032, 0.032, 0.049],
-      [0.145, 0.026, 0.024, 0.026, 0.043],
       [0.172, 0.022, 0.012, 0.022, 0.028],
       [0.18, 0.018, 0.002, 0.018, 0.006],
     ];
-    const S = far ? 6 : 10;
+    const S = far ? 6 : 8;
     const list = far ? st.filter((_, k) => k % 2 === 0) : st;
     const rows = [], centres = [];
     const sz = side * (LEG_Z + 0.008);
@@ -344,7 +352,7 @@ export function buildPerson(L, far = false) {
     if (police) {
       if (y < 1.0) return trousers;
       if (y < 1.065) return belt;
-      if (y > 1.07 && y < 1.43 && Math.abs(sa) < 0.84) {
+      if (y > 1.07 && y < 1.43 && (ang < 1.0 || ang > Math.PI - 1.0)) {
         if (y > 1.28 && y < 1.32) return lin(0xb7bdc2);
         return vest;
       }
@@ -354,9 +362,8 @@ export function buildPerson(L, far = false) {
       // Open front: a straight band of the inner shirt, lapels beside it
       // on the chest, wider at the collar.
       if (y < hemY) return trousers;
-      const as = ca > 0 ? Math.abs(sa) : 1;
-      if (as < (y > 1.4 ? 0.62 : 0.3)) return inner;
-      if (as < 0.62 && y > 1.15) return lapel;
+      if (ang < (y > 1.4 ? 0.62 : 0.3)) return inner;
+      if (ang < 0.62 && y > 1.15) return lapel;
       return shirt;
     }
     if (o === 'hoodie') {
@@ -395,7 +402,7 @@ export function buildPerson(L, far = false) {
     T(1.32, 0.12 + chest, 0.105, 0.158 * bw, 0.002),
     T(1.38, 0.114, 0.108, 0.168 * bw, 0),
     T(1.43, 0.1, 0.1, 0.184 * bw, -0.004),
-    T(1.465, 0.076, 0.084, 0.155 * bw, -0.008),
+    T(1.465, 0.076, 0.084, 0.148 * bw, -0.008),
     T(1.495, 0.06, 0.068, 0.11 * bw, -0.01),
     T(1.515, 0.05, 0.054, 0.064, -0.01, { keep: true }),
     T(1.52, 0.02, 0.02, 0.02, -0.01, { keep: true }),
@@ -411,7 +418,8 @@ export function buildPerson(L, far = false) {
       { y: hemY - 0.004, f: at(lo.f, hi.f) - cloth, b: at(lo.b, hi.b) - cloth, w: at(lo.w, hi.w) - cloth, cx: 0, col: trousers, occ: 0.7 },
       { y: yH, f: at(lo.f, hi.f) + 0.004, b: at(lo.b, hi.b) + 0.004, w: at(lo.w, hi.w) + 0.004, cx: 0, col: torsoCol });
   }
-  loftY(bd, rings, 16, 0, tb, { p: 2.4, q: 1.2, minFar: 8, ao: 0.18 });
+  const cuts = jacket ? [0.3, 0.62] : police ? [1.0, Math.PI - 1.0] : null;
+  loftY(bd, rings, cuts ? 14 : 16, 0, tb, { p: 2.4, q: 1.2, minFar: 8, ao: 0.18, cuts, grad: (y) => 0.9 + 0.1 * Math.min(1, Math.max(0, (y - 0.95) / 0.45)) });
 
   // -- neck and collar -------------------------------------------------------------
   const nb = joint(B.head, B.torso, 1.5, 0.03);
@@ -430,9 +438,6 @@ export function buildPerson(L, far = false) {
   if (o === 'hoodie') {
     // Hood resting on the shoulders behind the neck.
     blob(bd, -0.075, 1.505, 0, 0.06, 0.06, 0.13, mul(shirt, 0.92), B.torso, { seg: 10, rows: 5, deform: (pt, nx) => { if (nx > 0.3) pt.x *= 0.4; } });
-    if (!far) {
-      for (const s of [-1, 1]) blob(bd, 0.112, 1.36, s * 0.035, 0.006, 0.06, 0.006, lin(0xe6e2da), B.torso, { seg: 4, rows: 3 });
-    }
   }
   if (police) {
     // Badge, shoulder radio, holster.
@@ -450,7 +455,7 @@ export function buildPerson(L, far = false) {
     if (nx > 0.55 && ny < -0.05 && ny > -0.45 && Math.abs(nz) > 0.3) return mix(skin, lin(0xc86a5a), 0.08);
     return skin;
   };
-  blob(bd, H.x, H.y, 0, H.rx, H.ry, H.rz, faceCol, B.head, { seg: 14, rows: 10, deform: headDeform, ao: 0.12 });
+  blob(bd, H.x, H.y, 0, H.rx, H.ry, H.rz, faceCol, B.head, { seg: 13, rows: 9, deform: headDeform, ao: 0.12 });
   const hs = L.hairStyle;
   if (!far) {
     // Nose, brows, eyes, mouth, ears.
@@ -460,7 +465,7 @@ export function buildPerson(L, far = false) {
       const ez = s * 0.034;
       blob(bd, fx(H.y + 0.012, ez) - 0.004, H.y + 0.012, ez, 0.008, 0.008, 0.014, lin(0x1d1714), B.head, { seg: 6, rows: 3 });
       blob(bd, fx(H.y + 0.036, ez) - 0.002, H.y + 0.036, ez * 1.05, 0.008, 0.007, 0.025, mul(hs === 'bald' ? skin : hair, 0.75), B.head, { seg: 6, rows: 3 });
-      if (hs !== 'long') blob(bd, H.x - 0.012, H.y - 0.002, s * 0.079, 0.018, 0.03, 0.012, mul(skin, 0.95), B.head, { seg: 6, rows: 3 });
+      if (hs !== 'long') blob(bd, H.x - 0.012, H.y - 0.002, s * 0.079, 0.018, 0.03, 0.012, mul(skin, 0.95), B.head, { seg: 5, rows: 3 });
     }
     blob(bd, fx(H.y - 0.058, 0) - 0.006, H.y - 0.058, 0, 0.008, 0.007, 0.022, mix(skin, lin(0x8a3a34), 0.35), B.head, { seg: 6, rows: 3 });
   }
@@ -502,7 +507,8 @@ export function buildPerson(L, far = false) {
     const vestTop = police ? vest : sl;
     const r = (dy, f, b, w, col, cx = 0, extra = {}) => ({ y: sy + dy, f, b, w, cx, col, ...extra });
     const ring = [
-      r(0.038, 0.034, 0.038, 0.04, vestTop, -0.006, { keep: true }),
+      r(0.046, 0.016, 0.018, 0.018, vestTop, -0.006, { keep: true, dz: -0.014 * side }),
+      r(0.032, 0.04, 0.042, 0.042, vestTop, -0.005, { dz: -0.007 * side }),
       r(0.0, 0.056 + d, 0.058 + d, 0.058 + d, sl),
       r(-0.07, 0.054 + d, 0.054 + d, 0.054 + d, sl),
     ];
@@ -531,10 +537,10 @@ export function buildPerson(L, far = false) {
         r(-0.565, 0.028, 0.027, 0.032, skin, 0.008, { keep: true }),
       );
     }
-    loftY(bd, ring, 10, z, joint(arm, elbow, sy + ELBOW_DY, 0.05), { inner: 0.14, ao: 0.12 });
+    loftY(bd, ring, 9, z, joint(arm, elbow, sy + ELBOW_DY, 0.05), { inner: 0.14, ao: 0.12 });
     // Fist: a rounded box with knuckles forward, a thumb over the front.
     const hy = sy - 0.64;
-    blob(bd, 0.012, hy, z, 0.044, 0.05, 0.031, skin, elbow, { seg: 8, rows: 5, p: 2.8 });
+    blob(bd, 0.012, hy, z, 0.044, 0.05, 0.031, skin, elbow, { seg: 8, rows: 4, p: 2.8 });
     if (!far) blob(bd, 0.045, hy + 0.012, z - side * 0.016, 0.014, 0.028, 0.015, mul(skin, 0.97), elbow, { seg: 6, rows: 3 });
   }
 
