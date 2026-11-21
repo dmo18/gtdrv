@@ -15,8 +15,9 @@ function start(game) {
   if (!new URLSearchParams(location.search).has('autostart')) game.menu.maybeAskSteering();
 }
 
-// ?map=miami: the real-map city, loaded as its own chunk (the map data
-// is bundled, never fetched from elsewhere). Default: the procedural island.
+// The real-map city (the default), loaded as its own chunk (the map data
+// is bundled, never fetched from elsewhere). ?map=island: the procedural
+// island (null: createGame generates it).
 async function loadCity() {
   if (mapFromSearch(location.search) !== 'miami') return null;
   const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);

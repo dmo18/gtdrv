@@ -17,6 +17,7 @@ import { createRng } from '../core/rng.js';
 import { createBank } from '../audio/banks.js';
 import { WEAPONS } from '../core/weapons.js';
 import { ENGINES, engineFor, isJet, pitchFor, pointsFor } from '../audio/engines.js';
+import { categoryLevels, BUS_CATEGORY } from '../audio/levels.js';
 import { createVoices, MAX_VOICES, MAX_RAW, MAX_SPOTS } from '../audio/voices.js';
 import { createComposer } from '../audio/music.js';
 import { createRadioPlayer, scheduleBar } from '../audio/radioplayer.js';
@@ -75,7 +76,7 @@ export function createAudio(game) {
   let muted = false;
   let hidden = typeof document !== 'undefined' && document.hidden === true;
   let wantRunning = true;
-  const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, musicOn: true };
+  const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, ambience: 1, musicOn: true, muteAll: false };
   let musicBus = null; // music -> its own duck -> master
   let musicDuck = null;
   let sirenDuck = null; // music steps back under a close siren (after the explosion duck)
@@ -1261,7 +1262,7 @@ export function createAudio(game) {
   const mus = { comp: null, bar: 0, nextT: 0, panL: null, panR: null, flip: false };
   function updateMusic(now) {
     if (!musicBus || !buf('m:kick')) return;
-    const play = vol.musicOn && vol.music > 0 && !muted;
+    const play = vol.musicOn && vol.music > 0 && !muted && !vol.muteAll && vol.master > 0;
     updateRadio(now, play);
     // a station on air replaces the background score (it fades out and back)
     if (!play || (radioPlayer && radioPlayer.onAir)) {
@@ -1330,10 +1331,14 @@ export function createAudio(game) {
   function applyBus() {
     if (!ctx) return;
     const now = ctx.currentTime;
-    master.gain.setTargetAtTime(muted ? 0 : vol.master, now, 0.03);
+    // master * category: the master node scales everything, each bus its category
+    const L = categoryLevels(vol, muted);
+    // faster fall to silence so Mute all is gone well inside 0.1 s
+    master.gain.setTargetAtTime(L.master, now, L.master === 0 ? 0.012 : 0.03);
     for (const k of Object.keys(BUS)) {
-      const v = k === 'music' ? (vol.musicOn ? vol.music : 0) : vol[k] * vol.sfx;
-      bus[k].gain.setTargetAtTime(BUS[k] * v, now, 0.05);
+      const cat = L[BUS_CATEGORY[k]];
+      const v = k === 'music' ? cat : cat * vol[k];
+      bus[k].gain.setTargetAtTime(BUS[k] * v, now, 0.04);
     }
   }
 
@@ -1624,10 +1629,11 @@ export function createAudio(game) {
 
   function setVolume(v) {
     if (!v) return;
-    for (const k of ['master', 'engine', 'tyres', 'world', 'effects', 'ui', 'music', 'sfx']) {
+    for (const k of ['master', 'engine', 'tyres', 'world', 'effects', 'ui', 'music', 'sfx', 'ambience']) {
       if (Number.isFinite(v[k])) vol[k] = clamp(v[k], 0, 1);
     }
     if (typeof v.musicOn === 'boolean') vol.musicOn = v.musicOn;
+    if (typeof v.muteAll === 'boolean') vol.muteAll = v.muteAll;
     try {
       applyBus();
     } catch {

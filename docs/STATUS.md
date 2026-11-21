@@ -349,3 +349,12 @@ None critical or high.
   HUD names and district flags on Miami). Smoke: a land race, a boat
   course, a sky course and a stunt ramp on Miami. Details and
   deviations: docs/MAP.md, "Milestone 2: done".
+
+## Volume controls
+- Settings now has Master, Music, Sound effects and Ambience sliders (each
+  with a percent), Mute all, and the Music on/off switch. Effective level
+  is master times category (src/audio/levels.js); master 0 or Mute all is
+  silent, music included. Routing audited: nothing bypassed the master;
+  the world bus no longer follows the effects slider. Tests:
+  `test/levels.test.js`, `scripts/volume-test.mjs` (real gains),
+  `scripts/menu-test.mjs`. Preview: docs/preview/settings-audio.png.

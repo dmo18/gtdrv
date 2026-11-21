@@ -8,6 +8,7 @@
 // private copy.
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
+import { buildPerson, HIP_Y, SHOULDER_Y, NECK_Y, KNEE_DY, ELBOW_DY, LEG_Z, armZ } from './personbody.js';
 
 // Clothing colour sets for the player and pedestrians. `outfit`: tee,
 // long (long sleeves), jacket (open jacket over a shirt), hoodie, dress
@@ -55,301 +56,21 @@ export function resolveLook(p = {}) {
   return look;
 }
 
-// ---- skeleton -----------------------------------------------------------------
-const HIP_Y = 0.9;
-const SHOULDER_Y = 1.42;
-const NECK_Y = 0.56; // head bone above the torso bone
-const ARM_Z = 0.178;
-// Bone indices.
-const B = { body: 0, torso: 1, head: 2, legL: 3, kneeL: 4, legR: 5, kneeR: 6, armL: 7, elbowL: 8, armR: 9, elbowR: 10 };
-
-// ---- geometry ---------------------------------------------------------------------
-class Build {
-  constructor() {
-    this.p = [];
-    this.n = [];
-    this.c = [];
-    this.si = [];
-    this.sw = [];
-    this.i = [];
-    this.count = 0;
-  }
-  vert(x, y, z, nx, ny, nz, col, b0, b1 = 0, w1 = 0) {
-    this.p.push(x, y, z);
-    const l = Math.hypot(nx, ny, nz) || 1;
-    this.n.push(nx / l, ny / l, nz / l);
-    this.c.push(col[0], col[1], col[2]);
-    this.si.push(b0, b1, 0, 0);
-    this.sw.push(1 - w1, w1, 0, 0);
-    return this.count++;
-  }
-  geometry() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
-    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(this.si, 4));
-    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(this.sw, 4));
-    g.setIndex(this.i);
-    g.computeBoundingSphere();
-    return g;
-  }
-}
-
-const cache = new Map();
-function lin(hex) {
-  let c = cache.get(hex);
-  if (!c) {
-    const t = new THREE.Color().setHex(hex);
-    c = [t.r, t.g, t.b];
-    cache.set(hex, c);
-  }
-  return c;
-}
-
-// Loft a closed tube along y through rings: each ring { y, cx, rx, rz,
-// col(ang) | col, bone: (y) => [b0, b1, w1] }. Ring points are an
-// ellipse (rx along x, rz along z) around (cx, y, cz). Smooth normals.
-function tube(bd, rings, seg, cz, bone, capTop, capBottom) {
-  const ids = [];
-  for (let k = 0; k < rings.length; k++) {
-    const R = rings[k];
-    const prev = rings[Math.max(0, k - 1)], next = rings[Math.min(rings.length - 1, k + 1)];
-    const dy = next.y - prev.y || 1e-4;
-    const row = [];
-    const [b0, b1, w1] = bone(R.y);
-    for (let s = 0; s <= seg; s++) {
-      const a = (s / seg) * Math.PI * 2;
-      const ca = Math.cos(a), sa = Math.sin(a);
-      const x = R.cx + R.rx * ca, z = cz + R.rz * sa;
-      // Normal: ellipse normal tilted by the change in radius along y.
-      const drx = (next.rx - prev.rx) / dy, drz = (next.rz - prev.rz) / dy, dcx = (next.cx - prev.cx) / dy;
-      const nx = ca / R.rx, nz = sa / R.rz;
-      const nl = Math.hypot(nx, nz);
-      const tilt = -(drx * ca * ca + drz * sa * sa + dcx * ca);
-      const col = typeof R.col === 'function' ? R.col(ca, sa) : R.col;
-      row.push(bd.vert(x, R.y, z, nx / nl, tilt, nz / nl, col, b0, b1, w1));
-    }
-    ids.push(row);
-  }
-  for (let k = 0; k < ids.length - 1; k++) {
-    for (let s = 0; s < seg; s++) {
-      const a = ids[k][s], b = ids[k][s + 1], c = ids[k + 1][s + 1], d = ids[k + 1][s];
-      // Rings run top to bottom or bottom to top; keep faces outward.
-      if (rings[k + 1].y > rings[k].y) bd.i.push(a, d, b, b, d, c);
-      else bd.i.push(a, b, d, b, c, d);
-    }
-  }
-  const cap = (row, R, up) => {
-    const [b0, b1, w1] = bone(R.y);
-    const col = typeof R.col === 'function' ? R.col(1, 0) : R.col;
-    const c = bd.vert(R.cx, R.y, cz, 0, up ? 1 : -1, 0, col, b0, b1, w1);
-    for (let s = 0; s < seg; s++) {
-      if (up) bd.i.push(c, row[s + 1], row[s]);
-      else bd.i.push(c, row[s], row[s + 1]);
-    }
-  };
-  const topK = rings[0].y > rings[rings.length - 1].y ? 0 : rings.length - 1;
-  const botK = topK === 0 ? rings.length - 1 : 0;
-  if (capTop) cap(ids[topK], rings[topK], true);
-  if (capBottom) cap(ids[botK], rings[botK], false);
-}
-
-// Ellipsoid blob (head, hands, hair shells) with an optional profile:
-// r(t) scales the radius from the bottom (t 0) to the top (t 1).
-function blob(bd, cx, cy, cz, rx, ry, rz, col, b0, seg = 10, rows = 8, shape = null, colFn = null) {
-  const ids = [];
-  for (let r = 0; r <= rows; r++) {
-    const v = r / rows;
-    const th = -Math.PI / 2 + v * Math.PI;
-    const k = shape ? shape(v) : 1;
-    const row = [];
-    for (let s = 0; s <= seg; s++) {
-      const a = (s / seg) * Math.PI * 2;
-      const nx = Math.cos(th) * Math.cos(a), ny = Math.sin(th), nz = Math.cos(th) * Math.sin(a);
-      const fx = shape && shape.fx ? shape.fx(v, nx) : 1;
-      const x = cx + nx * rx * k * fx, y = cy + ny * ry, z = cz + nz * rz * k;
-      const c = colFn ? colFn(nx, ny, nz) : col;
-      row.push(bd.vert(x, y, z, nx / rx, ny / ry, nz / rz, c, b0));
-    }
-    ids.push(row);
-  }
-  for (let r = 0; r < rows; r++) {
-    for (let s = 0; s < seg; s++) {
-      const a = ids[r][s], b = ids[r][s + 1], c = ids[r + 1][s + 1], d = ids[r + 1][s];
-      bd.i.push(a, d, b, b, d, c);
-    }
-  }
-}
-
-// Weight helper: rigid on b0 above `yj + band`, rigid on b1 below
-// `yj - band`, blended between (limbs hang downward).
-function joint(b0, b1, yj, band) {
-  return (y) => {
-    if (y >= yj + band) return [b0, 0, 0];
-    if (y <= yj - band) return [b1, 0, 0];
-    return [b0, b1, (yj + band - y) / (2 * band)];
-  };
-}
-const rigid = (b) => () => [b, 0, 0];
-
-function buildLook(L) {
-  const bd = new Build();
-  const skin = lin(L.skin), shirt = lin(L.shirt), trousers = lin(L.trousers), shoes = lin(L.shoes), hair = lin(L.hair);
-  const inner = lin(L.inner), hat = lin(L.hat), vest = L.vest != null ? lin(L.vest) : null;
-  const sole = lin(0x2c2a28), belt = lin(0x18171a);
-  const bw = 0.92 + L.build * 0.16; // shoulder / chest width scale
-  const hip = 1.04 - L.build * 0.08; // slimmer builds get relatively wider hips
-  const longSleeve = L.outfit !== 'tee';
-  const open = L.outfit === 'jacket' || L.outfit === 'crew';
-  const torsoCol = (ca, sa) => {
-    if (vest && ca > -0.2) return Math.abs(sa) < 0.86 ? vest : shirt;
-    if (open && ca > 0.7 && Math.abs(sa) < 0.36) return inner;
-    return shirt;
-  };
-
-  // Legs: thigh and shin (knee blend), shoes.
-  for (const side of [-1, 1]) {
-    const leg = side < 0 ? B.legL : B.legR, knee = side < 0 ? B.kneeL : B.kneeR;
-    const z = side * 0.095;
-    const hy = HIP_Y;
-    tube(bd, [
-      { y: hy + 0.06, cx: 0, rx: 0.085, rz: 0.08, col: trousers },
-      { y: hy - 0.06, cx: 0.005, rx: 0.09, rz: 0.085, col: trousers },
-      { y: hy - 0.26, cx: 0.01, rx: 0.074, rz: 0.07, col: trousers },
-      { y: hy - 0.44, cx: 0.012, rx: 0.06, rz: 0.058, col: trousers },
-      { y: hy - 0.52, cx: 0.008, rx: 0.058, rz: 0.056, col: trousers },
-      { y: hy - 0.66, cx: -0.008, rx: 0.06, rz: 0.054, col: trousers },
-      { y: hy - 0.8, cx: 0, rx: 0.047, rz: 0.045, col: trousers },
-      { y: hy - 0.84, cx: 0, rx: 0.045, rz: 0.043, col: trousers },
-    ], 8, z, joint(leg, knee, hy - 0.46, 0.05), false, false);
-    // Shoe: a lofted sole-to-toe shape along x.
-    const sy = 0.0;
-    const rows = [[-0.07, 0.035, 0.04], [-0.03, 0.05, 0.05], [0.04, 0.045, 0.052], [0.11, 0.032, 0.046], [0.15, 0.02, 0.03]];
-    const ids = [];
-    for (const [x, ry, rz] of rows) {
-      const row = [];
-      for (let s = 0; s <= 8; s++) {
-        const a = (s / 8) * Math.PI * 2;
-        const ca = Math.cos(a), sa = Math.sin(a);
-        const y = sy + ry + ry * ca * (ca < 0 ? 0.25 : 1);
-        row.push(bd.vert(x, Math.max(sy, y), z + rz * sa, 0, ca, sa, ca < -0.3 ? sole : shoes, knee));
-      }
-      ids.push(row);
-    }
-    for (let k = 0; k < ids.length - 1; k++) {
-      for (let s = 0; s < 8; s++) {
-        const a = ids[k][s], b = ids[k][s + 1], c = ids[k + 1][s + 1], d = ids[k + 1][s];
-        bd.i.push(a, b, d, b, c, d);
-      }
-    }
-    const cHeel = bd.vert(-0.08, 0.04, z, -1, 0, 0, shoes, knee), cToe = bd.vert(0.155, 0.02, z, 1, 0, 0, shoes, knee);
-    for (let s = 0; s < 8; s++) {
-      bd.i.push(cHeel, ids[0][s + 1], ids[0][s]);
-      bd.i.push(cToe, ids[4][s], ids[4][s + 1]);
-    }
-  }
-
-  // Torso: pelvis to shoulders (torso bone), rounded shoulder top.
-  const ty = HIP_Y;
-  const tr = (y, rx, rz, cx, col) => ({ y: ty + y, cx, rx, rz, col });
-  const low = L.outfit === 'dress' ? inner : trousers;
-  tube(bd, [
-    tr(-0.06, 0.1, 0.17 * hip, 0, trousers),
-    tr(0.02, 0.11, 0.175 * hip, 0, trousers),
-    tr(0.07, 0.105, 0.165 * hip, 0, belt),
-    tr(0.1, 0.1, 0.158, 0.003, L.outfit === 'dress' ? shirt : low === inner ? shirt : torsoCol),
-    tr(0.22, 0.098, 0.15 * bw, 0.006, torsoCol),
-    tr(0.36, 0.112, 0.168 * bw, 0.012, torsoCol),
-    tr(0.46, 0.114, 0.168 * bw, 0.01, torsoCol),
-    tr(0.515, 0.1, 0.16 * bw, 0.0, torsoCol),
-    tr(0.55, 0.082, 0.145 * bw, -0.004, torsoCol),
-    tr(0.575, 0.062, 0.1 * bw, -0.005, torsoCol),
-    tr(0.595, 0.045, 0.06, -0.005, L.outfit === 'hoodie' ? shirt : skin),
-  ], 12, 0, rigid(B.torso), true, true);
-  // Neck.
-  tube(bd, [
-    { y: ty + 0.58, cx: -0.004, rx: 0.042, rz: 0.044, col: skin },
-    { y: ty + 0.68, cx: 0.0, rx: 0.04, rz: 0.042, col: skin },
-  ], 8, 0, rigid(B.head), false, false);
-  if (L.outfit === 'hoodie') {
-    // Hood folded behind the neck.
-    blob(bd, -0.07, ty + 0.58, 0, 0.06, 0.05, 0.12, shirt, B.torso, 8, 5);
-  }
-  if (vest) {
-    // Reflective band and shoulder patches on the police vest.
-    tube(bd, [tr(0.33, 0.118, 0.172 * bw, 0.013, lin(0xb8bcc0)), tr(0.35, 0.119, 0.174 * bw, 0.013, lin(0xb8bcc0))], 12, 0, rigid(B.torso), false, false);
-  }
-
-  // Head: egg shape, narrower jaw, nose, ears.
-  const hy = HIP_Y + NECK_Y;
-  const headShape = (v) => (v < 0.35 ? 0.78 + v * 0.63 : 1 - (v - 0.35) * 0.12);
-  blob(bd, 0.005, hy + 0.14, 0, 0.104, 0.13, 0.09, skin, B.head, 12, 9, headShape);
-  blob(bd, 0.1, hy + 0.12, 0, 0.022, 0.03, 0.017, skin, B.head, 6, 4);
-  for (const s of [-1, 1]) blob(bd, -0.005, hy + 0.135, s * 0.09, 0.018, 0.03, 0.012, skin, B.head, 6, 4);
-  // Eyes: small dark dots.
-  for (const s of [-1, 1]) blob(bd, 0.092, hy + 0.16, s * 0.035, 0.008, 0.009, 0.014, lin(0x1a1410), B.head, 5, 3);
-  // Hair or hat.
-  const hs = L.hairStyle;
-  if (hs !== 'bald') {
-    // Skull cap of hair: upper half of a slightly bigger ellipsoid, a bit
-    // further down at the back.
-    const shell = (v) => (v < 0.42 ? 0.0001 : 1.0);
-    if (hs === 'short' || hs === 'long' || hs === 'bun') {
-      blob(bd, -0.004, hy + 0.155, 0, 0.112, 0.126, 0.098, hair, B.head, 12, 7, shell);
-      blob(bd, -0.045, hy + 0.125, 0, 0.074, 0.085, 0.093, hair, B.head, 8, 5);
-    }
-    if (hs === 'long') blob(bd, -0.06, hy + 0.04, 0, 0.055, 0.14, 0.095, hair, B.head, 10, 6);
-    if (hs === 'bun') blob(bd, -0.09, hy + 0.21, 0, 0.045, 0.045, 0.045, hair, B.head, 8, 5);
-    if (hs === 'cap' || hs === 'beanie') {
-      const capCol = hat;
-      blob(bd, -0.004, hy + 0.16, 0, 0.114, 0.128, 0.1, capCol, B.head, 12, 7, shell);
-      blob(bd, -0.05, hy + 0.115, 0, 0.07, 0.065, 0.092, hair, B.head, 8, 5);
-      if (hs === 'cap') {
-        // Peak.
-        blob(bd, 0.1, hy + 0.205, 0, 0.07, 0.012, 0.085, capCol, B.head, 10, 3);
-        if (L.outfit === 'police') blob(bd, 0.096, hy + 0.235, 0, 0.012, 0.016, 0.022, lin(0xc8b060), B.head, 5, 3);
-      }
-    }
-  }
-
-  // Arms: upper arm (sleeve), forearm (skin or sleeve), hand; elbow blend.
-  for (const side of [-1, 1]) {
-    const arm = side < 0 ? B.armL : B.armR, elbow = side < 0 ? B.elbowL : B.elbowR;
-    const z = side * ARM_Z * bw;
-    const sy = SHOULDER_Y;
-    const sleeve = shirt;
-    const fore = longSleeve ? sleeve : skin;
-    tube(bd, [
-      { y: sy + 0.03, cx: 0, rx: 0.03, rz: 0.026, col: sleeve },
-      { y: sy, cx: 0, rx: 0.048, rz: 0.044, col: sleeve },
-      { y: sy - 0.05, cx: 0, rx: 0.052, rz: 0.048, col: sleeve },
-      { y: sy - 0.14, cx: 0, rx: 0.05, rz: 0.047, col: sleeve },
-      { y: sy - 0.24, cx: 0, rx: 0.044, rz: 0.042, col: sleeve },
-      { y: sy - 0.27, cx: 0, rx: 0.042, rz: 0.04, col: fore },
-      { y: sy - 0.33, cx: 0.004, rx: 0.042, rz: 0.04, col: fore },
-      { y: sy - 0.48, cx: 0.006, rx: 0.036, rz: 0.034, col: fore },
-      { y: sy - 0.57, cx: 0.004, rx: 0.03, rz: 0.03, col: L.outfit === 'jacket' || L.outfit === 'crew' ? sleeve : longSleeve ? sleeve : skin },
-      { y: sy - 0.59, cx: 0.004, rx: 0.026, rz: 0.026, col: skin },
-    ], 8, z, joint(arm, elbow, sy - 0.3, 0.04), true, false);
-    // Hand.
-    blob(bd, 0.01, sy - 0.65, z, 0.034, 0.06, 0.028, skin, elbow, 8, 5);
-  }
-  const g = bd.geometry();
-  g.userData.triangles = bd.i.length / 3;
-  return g;
-}
+// ---- skeleton and geometry ---------------------------------------------------------
+// The body itself is built in render/personbody.js.
+export const PERSON_LOD_M = 40; // past this the coarse body is drawn
 
 const GEO = new Map();
 function lookKey(L) {
   return [L.shirt, L.trousers, L.skin, L.hair, L.outfit, L.hairStyle, L.build, L.inner, L.hat, L.vest, L.shoes].join(':');
 }
-export function personGeometry(look) {
+// Shared body geometry for a look; lod 0 near (about 2k triangles), 1 far.
+export function personGeometry(look, lod = 0) {
   const L = resolveLook(look);
-  const key = lookKey(L);
+  const key = lookKey(L) + ':' + lod;
   let g = GEO.get(key);
   if (!g) {
-    g = buildLook(L);
+    g = buildPerson(L, lod === 1);
     GEO.set(key, g);
   }
   return g;
@@ -364,7 +85,6 @@ function sharedMaterial() {
 const BOUND = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.15);
 
 export function createPersonMesh(palette = {}) {
-  const geo = personGeometry(palette);
   const root = new THREE.Group();
   const mk = (parent, x, y, z) => {
     const b = new THREE.Bone();
@@ -373,27 +93,38 @@ export function createPersonMesh(palette = {}) {
     return b;
   };
   const L = resolveLook(palette);
-  const bw = 0.92 + L.build * 0.16;
+  const az = armZ(L.build);
   const body = mk(null, 0, 0, 0);
   const torso = mk(body, 0, HIP_Y, 0);
   const head = mk(torso, 0, NECK_Y, 0);
-  const legL = mk(body, 0, HIP_Y, -0.095);
-  const kneeL = mk(legL, 0, -0.46, 0);
-  const legR = mk(body, 0, HIP_Y, 0.095);
-  const kneeR = mk(legR, 0, -0.46, 0);
-  const armL = mk(body, 0, SHOULDER_Y, -ARM_Z * bw);
-  const elbowL = mk(armL, 0, -0.3, 0);
-  const armR = mk(body, 0, SHOULDER_Y, ARM_Z * bw);
-  const elbowR = mk(armR, 0, -0.3, 0);
+  const legL = mk(body, 0, HIP_Y, -LEG_Z);
+  const kneeL = mk(legL, 0, KNEE_DY, 0);
+  const legR = mk(body, 0, HIP_Y, LEG_Z);
+  const kneeR = mk(legR, 0, KNEE_DY, 0);
+  const armL = mk(body, 0, SHOULDER_Y, -az);
+  const elbowL = mk(armL, 0, ELBOW_DY, 0);
+  const armR = mk(body, 0, SHOULDER_Y, az);
+  const elbowR = mk(armR, 0, ELBOW_DY, 0);
   const bones = [body, torso, head, legL, kneeL, legR, kneeR, armL, elbowL, armR, elbowR];
   root.add(body);
-  const mesh = new THREE.SkinnedMesh(geo, sharedMaterial());
-  mesh.boundingSphere = BOUND.clone();
-  mesh.castShadow = false;
-  root.add(mesh);
+  // Near and far bodies share one skeleton; the LOD shows exactly one of
+  // them, so a person is a single draw call (plus a held weapon).
+  const skeleton = new THREE.Skeleton(bones);
+  const lod = new THREE.LOD();
+  const mk2 = (lv) => {
+    const m = new THREE.SkinnedMesh(personGeometry(palette, lv), sharedMaterial());
+    m.boundingSphere = BOUND.clone();
+    m.castShadow = false;
+    return m;
+  };
+  const mesh = mk2(0), far = mk2(1);
+  lod.addLevel(mesh, 0, 0.1);
+  lod.addLevel(far, PERSON_LOD_M, 0.1);
+  root.add(lod);
   root.updateMatrixWorld(true);
-  mesh.bind(new THREE.Skeleton(bones));
-  root.userData.person = { body, torso, head, legL, legR, armL, armR, kneeL, kneeR, elbowL, elbowR, skin: mesh, amp: 0, gun: null, gunId: '', raise: 0, flash: 0, fade: 0, op: 1, own: null };
+  mesh.bind(skeleton);
+  far.bind(skeleton);
+  root.userData.person = { body, torso, head, legL, legR, armL, armR, kneeL, kneeR, elbowL, elbowR, skin: mesh, far, lod, amp: 0, gun: null, gunId: '', raise: 0, flash: 0, fade: 0, op: 1, own: null };
   return root;
 }
 
@@ -426,17 +157,14 @@ function gunMat(id) {
   return GUN_MAT[id] || (GUN_MAT[id] = new THREE.MeshStandardMaterial({ color: GUN_DIMS[id][3], roughness: 0.5, metalness: 0.4 }));
 }
 
+// One private copy shared by the near and far bodies.
 function ownMaterials(mesh, P) {
   if (P.own) return P.own;
-  const list = [];
-  mesh.traverse((o) => {
-    if (o.isMesh && o !== P.gun) {
-      o.material = o.material.clone();
-      list.push(o.material);
-    }
-  });
-  P.own = list;
-  return list;
+  const m = P.skin.material.clone();
+  P.skin.material = m;
+  P.far.material = m;
+  P.own = [m];
+  return P.own;
 }
 
 function applyArms(mesh, P, w) {
@@ -530,8 +258,8 @@ export function updatePersonMesh(mesh, w, alpha = 1) {
   P.elbowL.rotation.z = POSE.elbow;
   P.elbowR.rotation.z = POSE.elbow;
   // Arms hang slightly away from the body.
-  P.armL.rotation.x = 0.06;
-  P.armR.rotation.x = -0.06;
+  P.armL.rotation.x = 0.08;
+  P.armR.rotation.x = -0.08;
   P.body.position.y = POSE.bob;
   P.torso.rotation.z = -0.12 * a * a; // lean into a run
   P.head.rotation.z = 0.08 * a * a;

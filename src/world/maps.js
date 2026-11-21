@@ -1,6 +1,6 @@
-// Which map to play. The procedural island is the default; the real
-// Miami map (world/miami.js, in progress, docs/MAP.md) is picked with
-// ?map=miami. Pure: runs in node tests.
+// Which map to play. The real Miami map (world/miami.js, docs/MAP.md) is
+// the default; the procedural island is picked with ?map=island. Pure:
+// runs in node tests.
 import { DISTRICTS } from './citygen.js';
 
 // The island's name for its coast (the economy's 'shore' flag).
@@ -8,14 +8,16 @@ export const SHORE_NAME = 'The Strand';
 
 export const MAP_IDS = ['island', 'miami'];
 
+export const DEFAULT_MAP = 'miami';
+
 export function mapFromSearch(search = '') {
   let v;
   try {
     v = new URLSearchParams(search).get('map');
   } catch {
-    return 'island';
+    return DEFAULT_MAP;
   }
-  return v === 'miami' ? 'miami' : 'island';
+  return v === 'island' || v === 'miami' ? v : DEFAULT_MAP;
 }
 
 // What the HUD shows for a point: `out.key` is the district key the

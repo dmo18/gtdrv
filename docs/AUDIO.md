@@ -68,7 +68,19 @@ master -> phone bass helper: low-pass 140 Hz -> harmonic curve ->
   beds, and music notes (about 30 short sources per 2.5 s bar).
 - Settings: master volume (existing), plus **Music on/off** and **Music
   volume** in the settings tab (saved as `music`, `musicVol`).
-  `setVolume({ master, music, musicOn, sfx })`.
+  `setVolume({ master, music, musicOn, sfx, ambience, muteAll })`.
+- **Volume model** (src/audio/levels.js, pure): effective level = master
+  times category. Master is the master gain node; music, effects
+  (engine, tyres, effects and ui buses) and ambience (the world bus: city,
+  birds, wind, surf, rain, cabin wind) are the category buses under it.
+  Mute all sets the master to 0 (fast 12 ms constant, silent inside 0.1 s)
+  and keeps every slider. Routing audit: every source ends in a bus, every
+  bus in the master (reverb return, siren and music ducks included); the
+  bass-synth tap reads the master, so nothing reaches the output around
+  it. The old build scaled the world bus by the effects level and had no
+  ambience control; music now follows its slider exactly. Check:
+  `node scripts/volume-test.mjs` (real gain values in Chromium) and
+  `test/levels.test.js`.
 
 ## Sound designs (plain language)
 

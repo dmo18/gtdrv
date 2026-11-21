@@ -52,7 +52,7 @@ await build({
             return st;
           },
         },
-        audio: { setVolume: (v) => { log.volume = v.master; } },
+        audio: { setVolume: (v) => { log.volume = v.master; log.vol = v; } },
         resize: () => { log.resizes++; },
         activities: { courses: [{ id: 'race_harbour', name: 'Harbour Dash', type: 'race' }] },
       };
@@ -283,6 +283,25 @@ try {
   check('left-handed applied to controls', (await ev(() => window.rw.log.lefty)) === true);
   check('quality applied to game', (await ev(() => window.rw.game.quality)) === 1.25 && (await ev(() => window.rw.log.resizes)) > 0);
   check('volume applied', Math.abs((await ev(() => window.rw.log.volume)) - 0.35) < 1e-9);
+  // volume controls: master, music, sound effects, ambience, mute all (percent shown)
+  for (const [key, pct] of [['master', '35%'], ['musicVol', null], ['sfxVol', null], ['ambVol', null]]) {
+    check('settings: ' + key + ' slider', (await page.locator(`.rw-menu-body input[data-setting="${key}"]`).count()) === 1);
+    if (pct) check('settings: master percent shown', (await page.locator(`.rw-menu-body input[data-setting="${key}"]`).locator('xpath=preceding-sibling::span[1]').innerText()) === pct);
+  }
+  await ev(() => {
+    const s = document.querySelector('[data-setting="sfxVol"]');
+    s.value = '40';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  check('settings: effects volume applied and saved', Math.abs((await ev(() => window.rw.log.vol.sfx)) - 0.4) < 1e-9 && Math.abs((await progress()).settings.sfxVol - 0.4) < 1e-9);
+  await page.locator('[data-setting="muteAll"]').tap();
+  check('settings: mute all applied, master kept', (await ev(() => window.rw.log.vol.muteAll)) === true && Math.abs((await ev(() => window.rw.log.vol.master)) - 0.35) < 1e-9);
+  await page.locator('[data-setting="muteAll"]').tap();
+  check('settings: unmute', (await ev(() => window.rw.log.vol.muteAll)) === false);
+  await page.locator('[data-setting="muteAll"]').scrollIntoViewIfNeeded();
+  await page.locator('.rw-menu-body').evaluate((b) => { const a = b.querySelector('[data-setting="ambVol"]'); a.scrollIntoView({ block: 'end' }); });
+  await page.screenshot({ path: path.join(repo, 'docs', 'preview', 'settings-audio.png') });
   check('invert applied', (await ev(() => window.rw.game.input.invertPitch)) === true);
   await tab('How to play');
   check('howto matches invert', (await page.locator('.rw-menu-body').innerText()).includes('Pull the stick down to climb'));

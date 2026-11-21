@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createMiamiCity, MIAMI_CROP, MIAMI_SPOTS } from '../src/world/miami.js';
-import { mapFromSearch } from '../src/world/maps.js';
+import { mapFromSearch, DEFAULT_MAP } from '../src/world/maps.js';
 import { lanePoint, laneOffset, lanesPerDirection, DISTRICTS } from '../src/world/citygen.js';
 import { createCollisionWorld, fillCollision } from '../src/world/collision.js';
 import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
@@ -70,8 +70,8 @@ test('same object shape as the procedural city', () => {
     assert.ok(a.edges.includes(e.id) && b.edges.includes(e.id));
   }
   // Every district key the city returns is a known one (HUD names).
-  for (let x = MIAMI_CROP.x0; x <= MIAMI_CROP.x1; x += 97) {
-    for (let z = MIAMI_CROP.z0; z <= MIAMI_CROP.z1; z += 97) assert.ok(DISTRICTS[city.districtOf(x, z)], `${x}, ${z}`);
+  for (let x = city.crop.x0; x <= city.crop.x1; x += 97) {
+    for (let z = city.crop.z0; z <= city.crop.z1; z += 97) assert.ok(DISTRICTS[city.districtOf(x, z)], `${x}, ${z}`);
   }
   // Activities, secrets and ramps come from the city's own hand-placed
   // lists (milestone 2; checked in detail in test/miami-places.test.js).
@@ -144,9 +144,9 @@ test('no seam on any road: every lane, bridge and the causeway is 2 m inside lan
     }
   }
   assert.ok(worst >= 2, `lane at ${worst.toFixed(2)} m from the water: ${where}`);
-  // Dead ends at the crop edge are inside land too, with room to turn.
+  // Dead ends at the edge of the box are inside land too, with room to turn.
   for (const n of city.nodes) {
-    const atEdge = n.x - MIAMI_CROP.x0 < 1 || MIAMI_CROP.x1 - n.x < 1 || n.z - MIAMI_CROP.z0 < 1 || MIAMI_CROP.z1 - n.z < 1;
+    const atEdge = n.x - city.crop.x0 < 1 || city.crop.x1 - n.x < 1 || n.z - city.crop.z0 < 1 || city.crop.z1 - n.z < 1;
     if (atEdge) assert.ok(city.shoreDist(n.x, n.z) > 8, `crop-edge node ${n.id}`);
   }
   assert.ok(laneOffset(city.edges[0]) > 0);
@@ -299,13 +299,17 @@ test('helpers are cheap: 1e5 calls of shoreDist, onRoad and districtOf', () => {
   assert.ok(ms < 400, `${ms.toFixed(0)} ms`);
 });
 
-test('map choice: the island is the default, ?map=miami picks Miami', () => {
-  assert.equal(mapFromSearch(''), 'island');
-  assert.equal(mapFromSearch('?autostart'), 'island');
+test('map choice: Miami is the default, ?map=island still reaches the island', () => {
+  assert.equal(DEFAULT_MAP, 'miami');
+  assert.equal(mapFromSearch(''), 'miami');
+  assert.equal(mapFromSearch('?autostart'), 'miami');
   assert.equal(mapFromSearch('?map=miami'), 'miami');
   assert.equal(mapFromSearch('?autostart&map=miami'), 'miami');
-  assert.equal(mapFromSearch('?map=Miami%00'), 'island');
-  assert.equal(mapFromSearch('?map=elsewhere'), 'island');
+  assert.equal(mapFromSearch('?map=island'), 'island');
+  assert.equal(mapFromSearch('?autostart&map=island'), 'island');
+  assert.equal(mapFromSearch('?map=Miami%00'), 'miami');
+  assert.equal(mapFromSearch('?map=elsewhere'), 'miami');
+  assert.equal(mapFromSearch('%%%'), 'miami');
 });
 
 test('deterministic: the same data builds the same city', () => {

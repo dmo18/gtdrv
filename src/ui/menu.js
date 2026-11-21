@@ -2,6 +2,7 @@ import { formatDistance, formatMiles } from '../core/units.js';
 // The pause menu: Resume, Scores, Records, Settings and How to play.
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { setHandlingMode } from '../entities/vehicle.js';
+import { volumeFromSettings } from '../audio/levels.js';
 import { nextStation, stationInfo } from '../core/radio.js';
 import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
 
@@ -58,6 +59,8 @@ const CSS = `
 .rw-menu-stat { padding: 8px 12px; border-radius: 12px; background: rgba(246,239,230,0.07); }
 .rw-menu-stat b { display: block; font-size: 20px; }
 .rw-menu-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 4px 0; border-bottom: 1px solid rgba(246,239,230,0.1); flex-wrap: wrap; }
+.rw-menu-vol > span:first-child { flex: 0 0 9.5em; }
+.rw-menu-vol .rw-menu-value { flex: 0 0 3em; text-align: right; opacity: 0.85; }
 .rw-menu-setting input[type=range] { flex: 1 1 160px; min-height: 56px; accent-color: var(--rw-accent); }
 .rw-menu-switch { min-width: 92px; }
 .rw-menu-switch[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; }
@@ -202,7 +205,7 @@ export function createMenu(root, game, economy) {
     }
     if (economy && economy.applySettings) { economy.applySettings(); return; }
     const s = settings();
-    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
+    if (game.audio && game.audio.setVolume) game.audio.setVolume(volumeFromSettings(s));
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);
@@ -424,38 +427,37 @@ export function createMenu(root, game, economy) {
   function renderSettings() {
     const s = settings();
     renderSteering();
-    const vol = h('div', 'rw-menu-setting');
-    vol.appendChild(h('span', '', 'Master volume'));
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '0'; slider.max = '100'; slider.step = '1';
-    slider.value = String(Math.round(s.master * 100));
-    slider.setAttribute('aria-label', 'Master volume');
-    slider.dataset.setting = 'master';
-    slider.addEventListener('input', () => {
-      settings().master = Number(slider.value) / 100;
-      applySettings();
-    });
-    slider.addEventListener('change', () => commit());
-    vol.appendChild(slider);
-    body.appendChild(vol);
-
-    // Music: on/off and its level against the effects (audio.js). Older
-    // saves have neither; music starts on at half level.
+    // Volume: master scales everything; music, effects and ambience sit
+    // inside it (src/audio/levels.js). Mute all silences without moving them.
+    function volRow(label, key, dflt) {
+      const row = h('div', 'rw-menu-setting rw-menu-vol');
+      row.appendChild(h('span', '', label));
+      const val = h('span', 'rw-menu-value', '');
+      const sl = document.createElement('input');
+      sl.type = 'range';
+      sl.min = '0'; sl.max = '100'; sl.step = '1';
+      const cur = Number.isFinite(s[key]) ? s[key] : dflt;
+      sl.value = String(Math.round(cur * 100));
+      val.textContent = sl.value + '%';
+      sl.setAttribute('aria-label', label + ' volume');
+      sl.dataset.setting = key;
+      sl.addEventListener('input', () => {
+        settings()[key] = Number(sl.value) / 100;
+        val.textContent = sl.value + '%';
+        applySettings();
+      });
+      sl.addEventListener('change', () => commit());
+      row.append(val, sl);
+      body.appendChild(row);
+    }
+    volRow('Master', 'master', 0.8);
+    if (typeof s.muteAll !== 'boolean') s.muteAll = false;
+    body.appendChild(toggleRow('Mute all', 'muteAll'));
     if (typeof s.music !== 'boolean') s.music = true;
-    body.appendChild(toggleRow('Music', 'music'));
-    const mv = h('div', 'rw-menu-setting');
-    mv.appendChild(h('span', '', 'Music volume'));
-    const ms = document.createElement('input');
-    ms.type = 'range';
-    ms.min = '0'; ms.max = '100'; ms.step = '1';
-    ms.value = String(Math.round((Number.isFinite(s.musicVol) ? s.musicVol : 0.5) * 100));
-    ms.setAttribute('aria-label', 'Music volume');
-    ms.dataset.setting = 'musicVol';
-    ms.addEventListener('input', () => { settings().musicVol = Number(ms.value) / 100; applySettings(); });
-    ms.addEventListener('change', () => commit());
-    mv.appendChild(ms);
-    body.appendChild(mv);
+    body.appendChild(toggleRow('Music on/off', 'music'));
+    volRow('Music', 'musicVol', 0.5);
+    volRow('Sound effects', 'sfxVol', 1);
+    volRow('Ambience', 'ambVol', 1);
 
     // Car radio: the station that plays in cars and boats (src/systems/radio.js).
     // Tap to step through Off, Lagoon Drive, Pulse Harbour, Lamplight Keys, Gullspeak.

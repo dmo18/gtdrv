@@ -559,7 +559,96 @@ function people(closeUp = false) {
   return { calls: renderer.info.render.calls, trisPerPerson: Math.round(tris / list.length) };
 }
 
+// People review shots at phone size: close (about 5 m) and street
+// distance (about 25 m), day and night, an officer, a crowd.
+const NIGHT_LAMPS = [];
+function peopleScene(kind, night) {
+  clear();
+  ground.visible = true;
+  sea.visible = false;
+  const env = scene.environment;
+  if (night) {
+    scene.environment = null;
+    hemi.intensity = 0.35;
+    sun.intensity = 0.12;
+    scene.background = new THREE.Color(0x0d1a38);
+    if (!NIGHT_LAMPS.length) {
+      for (const [x, z] of [[2, -3], [2, 3], [-6, 0]]) {
+        const l = new THREE.PointLight(0xffd29a, 9, 16, 1.6);
+        l.position.set(x, 4.5, z);
+        NIGHT_LAMPS.push(l);
+        scene.add(l);
+      }
+    }
+  }
+  for (const l of NIGHT_LAMPS) l.visible = night;
+  const cop = { shirt: 0x26406b, trousers: 0x1a2233, skin: 0xb98060, hair: 0x22180f };
+  const crew = { shirt: 0x6e1f4f, trousers: 0x1c1a2c, skin: 0xc68e62, hair: 0xd4a93a };
+  const P = PERSON_PALETTES;
+  let list, spread = 0.9;
+  if (kind === 'police') list = [cop, cop, crew];
+  else if (kind === 'crowd') list = [];
+  else if (kind === 'one') list = [P[+(qs.get('p') || 0)], P[+(qs.get('q') || 1)]];
+  else list = [P[0], P[2], P[1], P[3], P[4], P[5]];
+  const put = (look, x, z, h, k, opts = {}) => {
+    const m = createPersonMesh(look);
+    const w = { x, z, px: x, pz: z, heading: h, pheading: h, moving: opts.moving ?? k % 3 !== 0, speed: opts.speed ?? (k % 4 === 3 ? 5.5 : 1.5), stride: k * 1.3 + 0.5, y: 0 };
+    if (opts.weapon) w.arms = { weapon: opts.weapon, cool: 0.3 };
+    for (let i = 0; i < 30; i++) updatePersonMesh(m, w, 1);
+    holder.add(m);
+    return m;
+  };
+  if (kind === 'crowd') {
+    let k = 0;
+    for (let i = 0; i < 7; i++) for (let j = 0; j < 6; j++) {
+      const look = k % 13 === 5 ? cop : k % 11 === 7 ? crew : P[(k * 7) % P.length];
+      put(look, -i * 2.2 + Math.sin(k * 3.1) * 0.6, (j - 2.5) * 1.6 + Math.cos(k * 1.7) * 0.5, (k % 2 ? Math.PI : 0) + Math.sin(k) * 0.4, k);
+      k++;
+    }
+  } else {
+    list.forEach((look, k) => {
+      const n = list.length;
+      const opts = kind === 'police' && k < 2 ? { weapon: 'pistol', moving: k === 1, speed: 1.4 } : {};
+      put(look, 0, (k - (n - 1) / 2) * spread, kind === 'police' ? 0.5 : 0.35 + (k % 2) * 0.25, k, opts);
+    });
+  }
+  full();
+  camera.fov = 40;
+  camera.updateProjectionMatrix();
+  const far = kind === 'street' || kind === 'crowd';
+  if (kind === 'crowd') {
+    camera.position.set(18, 7, 9);
+    camera.lookAt(-6, 0.6, 0);
+  } else if (far) {
+    camera.position.set(24, 4.5, 7);
+    camera.lookAt(0, 0.9, 0);
+  } else if (kind === 'one') {
+    camera.position.set(2.6, 1.3, 0.6);
+    camera.lookAt(0, 1.0, 0);
+  } else if (kind === 'police') {
+    camera.position.set(4.2, 1.6, 1.4);
+    camera.lookAt(0, 1.0, 0);
+  } else {
+    camera.position.set(4.6, 1.65, 1.5);
+    camera.lookAt(0, 0.95, 0);
+  }
+  renderer.render(scene, camera);
+  const r = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+  scene.environment = env;
+  hemi.intensity = 1.9;
+  sun.intensity = 1.7;
+  scene.background = new THREE.Color(SKY);
+  return r;
+}
+
 const SHOTS = {
+  'people-close-day': () => peopleScene('close', false),
+  'people-close-night': () => peopleScene('close', true),
+  'people-street-day': () => peopleScene('street', false),
+  'people-street-night': () => peopleScene('street', true),
+  'people-police': () => peopleScene('police', false),
+  'people-crowd': () => peopleScene('crowd', false),
+  'people-one': () => peopleScene('one', false),
   people: () => people(false),
   'people-close': () => people(true),
   ptest,

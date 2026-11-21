@@ -26,6 +26,13 @@ existing game: own name, city, characters, art and missions.
   phone; all controls usable with two thumbs.
 
 ## Hard mode, respawn and health meter
+- Volume (Settings tab): `master` (0..1), `musicVol`, `sfxVol`,
+  `ambVol` (0..1, each shown as a percent), `muteAll` (boolean) and the
+  existing `music` on/off switch. The last three new keys are optional:
+  absent means sfx 100%, ambience 100%, not muted; the sanitiser clamps
+  numbers to 0..1 and drops non-numbers. Effective level = master times
+  category; Mute all silences everything without moving a slider
+  (docs/AUDIO.md).
 - `settings.mortal` (boolean, absent means false; menu: "Hard: you can die").
   `economy.applySettings` sets `RULES.invulnerable = !mortal`. With it on,
   hits hurt the player on foot; hits while aboard hurt the craft, and a

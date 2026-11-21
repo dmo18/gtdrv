@@ -4,6 +4,7 @@
 // is score (src/systems/score.js).
 import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
 import { setHandlingMode } from '../entities/vehicle.js';
+import { volumeFromSettings } from '../audio/levels.js';
 import { RULES } from '../core/weapons.js';
 import { DISTRICTS } from '../world/citygen.js';
 import { SHORE_NAME } from '../world/maps.js';
@@ -38,7 +39,7 @@ export function createEconomy(game, storage) {
 
   function applySettings() {
     const s = progress.settings;
-    if (game.audio && game.audio.setVolume) game.audio.setVolume({ master: s.master, musicOn: s.music !== false, music: Number.isFinite(s.musicVol) ? s.musicVol : 0.5 });
+    if (game.audio && game.audio.setVolume) game.audio.setVolume(volumeFromSettings(s));
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
     // Hard mode: the player can be hurt and killed (the death flow is combat.js).
