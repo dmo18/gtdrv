@@ -338,7 +338,7 @@ export function buildPerson(L, far = false) {
 
   // -- torso: pelvis, waist, chest, shoulders --------------------------------------
   // Colour by height and angle for each outfit.
-  const open = (y) => (y > 1.36 ? 0.42 : y > 1.12 ? 0.18 + (y - 1.12) : 0.16);
+  const hemY = police || tucked ? 1.0 : jacket ? 0.875 : o === 'hoodie' ? 0.945 : 0.965;
   const torsoCol = (ca, sa, y) => {
     const ang = Math.atan2(Math.abs(sa), ca); // 0 front .. PI back
     if (police) {
@@ -351,14 +351,17 @@ export function buildPerson(L, far = false) {
       return shirt;
     }
     if (jacket) {
-      if (y < 0.86) return trousers;
-      if (ang < open(y)) return y < 1.03 && !tucked ? trousers : y > 1.03 && y < 1.055 ? belt : inner;
-      if (ang < open(y) + 0.2 && y > 1.15) return lapel;
+      // Open front: a straight band of the inner shirt, lapels beside it
+      // on the chest, wider at the collar.
+      if (y < hemY) return trousers;
+      const as = ca > 0 ? Math.abs(sa) : 1;
+      if (as < (y > 1.4 ? 0.62 : 0.3)) return inner;
+      if (as < 0.62 && y > 1.15) return lapel;
       return shirt;
     }
     if (o === 'hoodie') {
-      if (y < 0.93) return trousers;
-      if (y < 0.965) return mul(shirt, 0.82); // ribbed hem
+      if (y < hemY) return trousers;
+      if (y < hemY + 0.035) return mul(shirt, 0.82); // ribbed hem
       if (y < 1.13 && ang < 0.75 && y > 0.98) return mul(shirt, 0.88); // front pocket
       return shirt;
     }
@@ -369,12 +372,11 @@ export function buildPerson(L, far = false) {
       return shirt;
     }
     // tee, untucked
-    if (y < 0.975) return trousers;
-    if (y < 0.99) return mul(shirt, 0.9);
+    if (y < hemY) return trousers;
+    if (y < hemY + 0.015) return mul(shirt, 0.9);
     return shirt;
   };
   const tb = (y) => (y < 1.0 ? [B.body, 0, 0] : y > 1.1 ? [B.torso, 0, 0] : [B.body, B.torso, (y - 1.0) / 0.1]);
-  const hemY = police || tucked ? 1.0 : jacket ? 0.86 : o === 'hoodie' ? 0.93 : 0.975;
   const outer = (y) => (y >= hemY ? cloth : 0) + (police && y > 1.07 && y < 1.43 ? 0.012 : 0) + (police && y > 1.0 && y < 1.065 ? 0.014 : 0);
   const chest = soft ? 0.012 : 0;
   const T = (y, f, b, w, cx = 0, extra = {}) => {
@@ -391,16 +393,16 @@ export function buildPerson(L, far = false) {
     T(1.17, 0.103, 0.095, 0.146 * bw),
     T(1.25, 0.115 + chest, 0.1, 0.153 * bw),
     T(1.32, 0.12 + chest, 0.105, 0.158 * bw, 0.002),
-    T(1.38, 0.114, 0.108, 0.165 * bw, 0),
-    T(1.43, 0.098, 0.102, 0.172 * bw, -0.004),
-    T(1.468, 0.076, 0.088, 0.152 * bw, -0.008),
-    T(1.495, 0.06, 0.068, 0.1 * bw, -0.01),
+    T(1.38, 0.114, 0.108, 0.168 * bw, 0),
+    T(1.43, 0.1, 0.1, 0.184 * bw, -0.004),
+    T(1.465, 0.076, 0.084, 0.155 * bw, -0.008),
+    T(1.495, 0.06, 0.068, 0.11 * bw, -0.01),
     T(1.515, 0.05, 0.054, 0.064, -0.01, { keep: true }),
     T(1.52, 0.02, 0.02, 0.02, -0.01, { keep: true }),
   ];
   // Untucked hems and jackets: a lip where the garment ends.
   if (!tucked && !police) {
-    const k = rings.findIndex((r) => r.y > hemY);
+    const k = rings.findIndex((r) => r.y > hemY + 0.004);
     const yH = hemY + 0.002;
     const lo = rings[k - 1], hi = rings[k];
     const t = (yH - lo.y) / (hi.y - lo.y);
@@ -500,8 +502,7 @@ export function buildPerson(L, far = false) {
     const vestTop = police ? vest : sl;
     const r = (dy, f, b, w, col, cx = 0, extra = {}) => ({ y: sy + dy, f, b, w, cx, col, ...extra });
     const ring = [
-      r(0.07, 0.03, 0.03, 0.03, vestTop, -0.006, { keep: true }),
-      r(0.045, 0.054, 0.058, 0.058, vestTop, -0.004),
+      r(0.038, 0.034, 0.038, 0.04, vestTop, -0.006, { keep: true }),
       r(0.0, 0.056 + d, 0.058 + d, 0.058 + d, sl),
       r(-0.07, 0.054 + d, 0.054 + d, 0.054 + d, sl),
     ];
@@ -520,12 +521,12 @@ export function buildPerson(L, far = false) {
     } else {
       ring.push(
         r(-0.155, 0.058, 0.056, 0.058, sl, 0, { keep: true }),
-        r(-0.158, 0.046, 0.045, 0.046, mul(skin, 0.75)),
-        r(-0.2, 0.046, 0.045, 0.046, skin, 0.002),
-        r(-0.27, 0.042, 0.043, 0.042, skin, 0.002),
-        r(-0.3, 0.041, 0.046, 0.041, skin, -0.002),
-        r(-0.36, 0.045, 0.043, 0.045, skin, 0.004),
-        r(-0.46, 0.038, 0.035, 0.038, skin, 0.006),
+        r(-0.158, 0.049, 0.048, 0.049, mul(skin, 0.75)),
+        r(-0.2, 0.049, 0.048, 0.049, skin, 0.002),
+        r(-0.27, 0.044, 0.045, 0.044, skin, 0.002),
+        r(-0.3, 0.043, 0.047, 0.043, skin, -0.002),
+        r(-0.36, 0.047, 0.045, 0.047, skin, 0.004),
+        r(-0.46, 0.04, 0.037, 0.04, skin, 0.006),
         r(-0.535, 0.03, 0.028, 0.033, skin, 0.006, { keep: true }),
         r(-0.565, 0.028, 0.027, 0.032, skin, 0.008, { keep: true }),
       );

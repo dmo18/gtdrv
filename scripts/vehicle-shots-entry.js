@@ -588,7 +588,7 @@ function peopleScene(kind, night) {
   let list, spread = 0.9;
   if (kind === 'police') list = [cop, cop, crew];
   else if (kind === 'crowd') list = [];
-  else if (kind === 'one') list = [P[+(qs.get('p') || 0)], P[+(qs.get('q') || 1)]];
+  else if (kind === 'one') list = (window.__oneList || '0,1').split(',').map((i) => (i === 'c' ? cop : i === 'k' ? crew : P[+i]));
   else list = [P[0], P[2], P[1], P[3], P[4], P[5]];
   const put = (look, x, z, h, k, opts = {}) => {
     const m = createPersonMesh(look);
@@ -670,6 +670,11 @@ for (const id of CAR_IDS) {
 }
 window.shotNames = Object.keys(SHOTS).filter((n) => !/^(car|far|close|rear|nose)-/.test(n));
 window.shot = (name) => {
+  // people-one:<list> shows a close pair (palette indexes, c officer, k crew).
+  if (name.startsWith('people-one:')) {
+    window.__oneList = name.slice(11);
+    name = 'people-one';
+  }
   const r = SHOTS[name]();
   return r || null;
 };
