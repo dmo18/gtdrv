@@ -334,10 +334,19 @@ function floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, out)
 // ---------------------------------------------------------------------
 // The city
 // ---------------------------------------------------------------------
+// The data box (bounds in metres), rounded in by a metre.
+export function fullBox(data) {
+  const b = data.bounds;
+  return { x0: Math.ceil(b.minX) + 1, z0: Math.ceil(b.minZ) + 1, x1: Math.floor(b.maxX) - 1, z1: Math.floor(b.maxZ) - 1 };
+}
 // opts: { crop, spots, seed }. data: the parsed miami.json.
 export function createMiamiCity(data, opts = {}) {
   const tStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const crop = opts.crop || MIAMI_CROP;
+  // The whole data box by default (milestone 3); `opts.crop` (a test
+  // option, e.g. MIAMI_CROP) limits it to a rect with land cut
+  // LAND_MARGIN m outside it.
+  const crop = opts.crop || fullBox(data);
+  const margin = opts.crop ? LAND_MARGIN : 0;
   const S = opts.spots || MIAMI_SPOTS;
   const seed = opts.seed ?? 25780;
   const rng = createRng(seed);
@@ -350,7 +359,7 @@ export function createMiamiCity(data, opts = {}) {
   };
 
   // ---- 1. Land mask: coastline sides, water polygons, the river. ----
-  const cut = { x0: crop.x0 - LAND_MARGIN, z0: crop.z0 - LAND_MARGIN, x1: crop.x1 + LAND_MARGIN, z1: crop.z1 + LAND_MARGIN };
+  const cut = { x0: crop.x0 - margin, z0: crop.z0 - margin, x1: crop.x1 + margin, z1: crop.z1 + margin };
   const land = makeRaster(cut.x0 - SEA_PAD, cut.z0 - SEA_PAD, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
   const W = land.w, H = land.h, NC = W * H;
   const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
@@ -368,6 +377,15 @@ export function createMiamiCity(data, opts = {}) {
       for (let k = 0; k + 3 < pts.length; k += 2) {
         if (!outside(pts[k], pts[k + 1], pts[k + 2], pts[k + 3])) stampLine(wall, pts[k], pts[k + 1], pts[k + 2], pts[k + 3], 1);
       }
+    }
+    // The whole box: the data ends at the box, so coast lines that stop
+    // just past it would let land and sea regions meet outside it. A wall
+    // along the box closes every region inside.
+    if (!margin) {
+      stampLine(wall, cut.x0, cut.z0, cut.x1, cut.z0, 1);
+      stampLine(wall, cut.x1, cut.z0, cut.x1, cut.z1, 1);
+      stampLine(wall, cut.x1, cut.z1, cut.x0, cut.z1, 1);
+      stampLine(wall, cut.x0, cut.z1, cut.x0, cut.z0, 1);
     }
     lap('land.coast');
     const label = labelBuf;
