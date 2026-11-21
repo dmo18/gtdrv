@@ -351,7 +351,7 @@ export function buildCityMesh(city, collision) {
 
   // --- A real map: land from its raster, roads along any direction. ---
   if (city.landGrid) {
-    buildRealGround(city, B, M, rng);
+    buildRealGround(city, B);
   }
 
   // --- Extra land (airfield islet, causeway), piers, aprons, runway. ---
@@ -571,10 +571,10 @@ export function buildCityMesh(city, collision) {
 // (marching squares, so the shore is chamfered rather than stepped),
 // a seawall along every shore, and roads as quads along each edge.
 // ---------------------------------------------------------------------
-const LAND_Y = -0.06;
-const PAVE = 0xb2aea4, PARK = 0x8cc064;
+export const LAND_Y = -0.06;
+export const PAVE = 0xb2aea4, PARK = 0x8cc064;
 
-function orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, color, sa = 1, sb = sa, sc = sa, sd = sa) {
+export function orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, color, sa = 1, sb = sa, sc = sa, sd = sa) {
   bld.quad(ax, y, az, bx, y, bz, cx, y, cz, dx, y, dz, color, 0, 1, 0, 0, 0, 1, 1, sa, sb, sc, sd);
   if (bld.uv) {
     const k = 1 / bld.uvScale, u = bld.uv, o = u.length - 8;
@@ -584,7 +584,7 @@ function orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, color, sa = 1, sb 
 }
 
 // A filled polygon (x, z pairs), any winding, fan from the first point.
-function flatPoly(bld, pts, y, color) {
+export function flatPoly(bld, pts, y, color) {
   let area = 0;
   const n = pts.length / 2;
   for (let i = 0; i < n; i++) {
@@ -600,25 +600,39 @@ function flatPoly(bld, pts, y, color) {
   }
 }
 
-function buildRealGround(city, B, M, rng) {
+function buildRealGround(city, B) {
+  const G = city.landGrid;
+  realLand(city, B, 0, G.w - 1, 0, G.h - 1);
+  realRoads(city, B, city.nodes, city.edges);
+}
+
+// Land from the raster: dual cells between four raster centres, over
+// the dual-cell range i0..i1 x j0..j1 (end exclusive), every `s`-th
+// raster cell (s > 1: the coarse far copy). Full cells merge into runs
+// (never past the range, so a streamed tile owns exactly its cells).
+// walls: a seawall along every shore.
+export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = true) {
   const G = city.landGrid;
   const { x0, z0, cell, w, h, data } = G;
-  const at = (i, j) => (i >= 0 && j >= 0 && i < w && j < h ? data[j * w + i] : 0);
-  const cx = (i) => x0 + (i + 0.5) * cell, cz = (j) => z0 + (j + 0.5) * cell;
+  const at = (i, j) => {
+    const ri = i * s, rj = j * s;
+    return ri >= 0 && rj >= 0 && ri < w && rj < h ? data[rj * w + ri] : 0;
+  };
+  const cx = (i) => x0 + (i * s + 0.5) * cell, cz = (j) => z0 + (j * s + 0.5) * cell;
   const parkAt = (x, z) => { const d = city.districtOf(x, z); return d === 'park' || d === 'airfield'; };
   const WALL = 0x9a968c;
-  // Land: dual cells between four raster centres. Full cells merge into runs.
-  for (let j = 0; j < h - 1; j++) {
+  const P = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let j = j0; j < j1; j++) {
     const za = cz(j), zb = cz(j + 1);
     let run = -1, runPark = false;
     const flush = (iEnd) => {
       if (run < 0) return;
       const xa = cx(run), xb = cx(iEnd);
       const bld = runPark ? B.land : B.ground;
-      bld.at((xa + xb) / 2, za).flat(xa, za, xb, zb, LAND_Y, runPark ? PARK : PAVE);
+      bld.at((xa + xb) / 2, za).flat(xa, za, xb, zb, y, runPark ? PARK : PAVE);
       run = -1;
     };
-    for (let i = 0; i < w - 1; i++) {
+    for (let i = i0; i < i1; i++) {
       const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1);
       const sum = a + b + c + d;
       const xa = cx(i), xb = cx(i + 1);
@@ -631,7 +645,10 @@ function buildRealGround(city, B, M, rng) {
       flush(i);
       if (sum === 0) continue;
       // Corners clockwise from north-west: a (xa, za), b (xb, za), c (xb, zb), d (xa, zb).
-      const P = [[xa, za, a], [xb, za, b], [xb, zb, c], [xa, zb, d]];
+      P[0][0] = xa; P[0][1] = za; P[0][2] = a;
+      P[1][0] = xb; P[1][1] = za; P[1][2] = b;
+      P[2][0] = xb; P[2][1] = zb; P[2][2] = c;
+      P[3][0] = xa; P[3][1] = zb; P[3][2] = d;
       const bld = parkAt(xa, za) ? B.land : B.ground;
       const col = bld === B.land ? PARK : PAVE;
       const saddle = sum === 2 && a === c;
@@ -653,7 +670,8 @@ function buildRealGround(city, B, M, rng) {
         pieces.push(poly);
       }
       const mid = bld.at((xa + xb) / 2, za);
-      for (const poly of pieces) flatPoly(mid, poly, LAND_Y, col);
+      for (const poly of pieces) flatPoly(mid, poly, y, col);
+      if (!walls) continue;
       // Seawall along the shore line through this cell, facing the water.
       const mids = [];
       for (let k = 0; k < 4; k++) {
@@ -674,16 +692,24 @@ function buildRealGround(city, B, M, rng) {
         const ex = s1[0] - s0[0], ez = s1[1] - s0[1];
         const len = Math.hypot(ex, ez) || 1;
         const landRight = city.mainShore(mx - (ez / len) * 1.2, mz + (ex / len) * 1.2) > 0;
-        if (landRight) wb.wall(s1[0], s1[1], s0[0], s0[1], -3, LAND_Y + 0.01, WALL, 0, -0.6, len / 4.8, 0, 0.45, 1);
-        else wb.wall(s0[0], s0[1], s1[0], s1[1], -3, LAND_Y + 0.01, WALL, 0, -0.6, len / 4.8, 0, 0.45, 1);
+        if (landRight) wb.wall(s1[0], s1[1], s0[0], s0[1], -3, y + 0.01, WALL, 0, -0.6, len / 4.8, 0, 0.45, 1);
+        else wb.wall(s0[0], s0[1], s1[0], s1[1], -3, y + 0.01, WALL, 0, -0.6, len / 4.8, 0, 0.45, 1);
       }
     }
-    flush(w - 1);
+    flush(i1);
   }
+}
 
-  // Roads: discs at nodes cover joins and bends; quads along each edge.
-  const tone = COL.asphalt;
-  for (const n of city.nodes) {
+// A road piece is up to this long (m): pieces are owned by the tile of
+// their middle.
+export const ROAD_PIECE = 90;
+
+// Roads: discs at nodes cover joins and bends; quads along each edge.
+// own(x, z): only nodes, pieces and per-edge paint whose point it
+// accepts (a streamed tile); null for all.
+export function realRoads(city, B, nodes, edges, own = null) {
+  for (const n of nodes) {
+    if (own && !own(n.x, n.z)) continue;
     let r = 2;
     for (const eid of n.edges) r = Math.max(r, city.edges[eid].width / 2);
     const bld = B.asphalt.at(n.x, n.z);
@@ -694,25 +720,28 @@ function buildRealGround(city, B, M, rng) {
     }
     flatPoly(bld, pts, -0.012, COL.junction);
   }
-  for (const e of city.edges) {
+  for (const e of edges) {
     const a = city.nodes[e.a], b = city.nodes[e.b];
     const ux = e.ux ?? (b.x - a.x) / e.length, uz = e.uz ?? (b.z - a.z) / e.length;
     const rx = -uz, rz = ux;
     const half = e.width / 2;
     const prof = e.avenue ? PROFILE_AVENUE : PROFILE_STREET;
     const scale = half / prof[prof.length - 1][0];
-    const t = shade(tone, rng.range(0.9, 1.06));
+    // A tone of its own per edge (from its id, so every tile agrees).
+    const t = shade(COL.asphalt, 0.9 + 0.16 * edgeHash(e.id));
     const s0 = Math.min(a.hx, e.length * 0.3), s1 = e.length - Math.min(b.hx, e.length * 0.3);
-    const segs = Math.max(1, Math.round((s1 - s0) / 90));
+    const segs = Math.max(1, Math.round((s1 - s0) / ROAD_PIECE));
     for (let sg = 0; sg < segs; sg++) {
       const d0 = s0 + ((s1 - s0) * sg) / segs, d1 = s0 + ((s1 - s0) * (sg + 1)) / segs;
       const px0 = a.x + ux * d0, pz0 = a.z + uz * d0, px1 = a.x + ux * d1, pz1 = a.z + uz * d1;
+      if (own && !own((px0 + px1) / 2, (pz0 + pz1) / 2)) continue;
       const bld = B.asphalt.at((px0 + px1) / 2, (pz0 + pz1) / 2);
       for (let k = 0; k < prof.length - 1; k++) {
         const o0 = prof[k][0] * scale, o1 = prof[k + 1][0] * scale, sa = prof[k][1], sb = prof[k + 1][1];
         orientedQuad(bld, px0 + rx * o1, pz0 + rz * o1, px1 + rx * o1, pz1 + rz * o1, px1 + rx * o0, pz1 + rz * o0, px0 + rx * o0, pz0 + rz * o0, 0, t, sb, sb, sa, sa);
       }
     }
+    if (own && !own((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
     // Painted lines.
     const lb = B.paint.at((a.x + b.x) / 2, (a.z + b.z) / 2);
     const line = (d0, d1, o0, o1, col) => {
@@ -739,4 +768,10 @@ function buildRealGround(city, B, M, rng) {
       wb.wall(b.x - rx * half, b.z - rz * half, a.x - rx * half, a.z - rz * half, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
     }
   }
+}
+
+function edgeHash(id) {
+  let h = Math.imul(id + 1, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
 }
