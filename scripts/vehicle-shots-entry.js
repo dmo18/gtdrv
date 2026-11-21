@@ -622,6 +622,9 @@ function peopleScene(kind, night) {
   } else if (far) {
     camera.position.set(24, 4.5, 7);
     camera.lookAt(0, 0.9, 0);
+  } else if (kind === 'one' && window.__bust) {
+    camera.position.set(1.3, 1.45, 0.15);
+    camera.lookAt(0, 1.3, 0);
   } else if (kind === 'one') {
     camera.position.set(2.6, 1.3, 0.6);
     camera.lookAt(0, 1.0, 0);
@@ -671,8 +674,9 @@ for (const id of CAR_IDS) {
 window.shotNames = Object.keys(SHOTS).filter((n) => !/^(car|far|close|rear|nose)-/.test(n));
 window.shot = (name) => {
   // people-one:<list> shows a close pair (palette indexes, c officer, k crew).
-  if (name.startsWith('people-one:')) {
-    window.__oneList = name.slice(11);
+  window.__bust = name.startsWith('people-bust:');
+  if (name.startsWith('people-one:') || window.__bust) {
+    window.__oneList = name.slice(name.indexOf(':') + 1);
     name = 'people-one';
   }
   const r = SHOTS[name]();
