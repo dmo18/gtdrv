@@ -60,6 +60,16 @@ export function createObjective(game, uiRoot) {
       goal.text = m.label || 'Objective';
       return;
     }
+    // The tracked adventure (systems/adventures.js): the arrow points at
+    // the centre of its fuzzy map ring, not the true spot.
+    const adv = game.adventures && game.adventures.objective;
+    if (adv && Number.isFinite(adv.x) && Number.isFinite(adv.z)) {
+      goal.x = adv.x;
+      goal.z = adv.z;
+      goal.on = true;
+      goal.text = adv.label || 'Adventure';
+      return;
+    }
     const w = game.waypoint;
     if (w) {
       goal.x = w.x;

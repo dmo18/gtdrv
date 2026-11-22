@@ -60,7 +60,11 @@ function segDist2(ax, ay, az, bx, by, bz, cx, cy, cz, flat) {
 }
 
 export function createActivities(game, uiRoot = null) {
-  const courses = game.courses || buildCourses(game.city);
+  // Locked routes (docs/REVAMP.md 6.6, world/courses.js buildRoutes) come
+  // after the courses; each is offered only once its adventure is done.
+  const routes = game.city && Array.isArray(game.city.routes) ? game.city.routes : [];
+  const courses = routes.length ? (game.courses || buildCourses(game.city)).concat(routes) : (game.courses || buildCourses(game.city));
+  const isOpen = (c) => !c.locked || !!(game.explore && game.explore.isDone && game.explore.isDone(c.locked));
   const events = game.events;
   const toast = (text, s = 2.5) => { if (game.hud && game.hud.toast) game.hud.toast(text, s); };
   const radiusOf = (c) => START_RADIUS[c.type] || 9;
@@ -74,14 +78,22 @@ export function createActivities(game, uiRoot = null) {
   // --- Idle: start zones. ---
   const startMarks = courses.map((c) => ({ x: c.start.x, z: c.start.z, type: c.type, color: MAP_COLORS[c.type], label: c.name }));
   function showIdle() {
-    if (game.map) for (const m of startMarks) game.map.addMarker(m);
-    if (markers) courses.forEach((c, i) => markers.showStart(i, c, radiusOf(c)));
+    if (game.map) startMarks.forEach((m, i) => { if (isOpen(courses[i])) game.map.addMarker(m); });
+    if (markers) courses.forEach((c, i) => { if (isOpen(c)) markers.showStart(i, c, radiusOf(c)); });
   }
   function hideIdle() {
     if (game.map) for (const m of startMarks) game.map.removeMarker(m);
     if (markers) markers.hideStarts();
   }
   showIdle();
+  // A route opens the moment its adventure is done.
+  if (routes.length && events) {
+    events.on('adventureDone', () => {
+      if (run) return;
+      hideIdle();
+      showIdle();
+    });
+  }
 
   let zone = -1; // course whose start zone the player is in
   let toldNeed = false;
@@ -251,7 +263,7 @@ export function createActivities(game, uiRoot = null) {
     if (blocked >= 0 && !inZone(courses[blocked], p)) blocked = -1;
     let here = -1;
     for (let i = 0; i < courses.length; i++) {
-      if (inZone(courses[i], p)) { here = i; break; }
+      if (inZone(courses[i], p) && isOpen(courses[i])) { here = i; break; }
     }
     if (here !== zone) {
       zone = here;

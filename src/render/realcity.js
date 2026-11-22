@@ -40,8 +40,9 @@ export const LOD = { near: 340, mid: 170, build: 520, drop: 860, hyst: 40 };
 const FAR_LAND_Y = -0.3, FAR_ROAD_Y = -0.1;
 const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // Longest piece of tile work between two yields (ms): a slice ends at
-// the first break point past this, so slices stay well under 5 ms.
-export const SLICE_MS = 2;
+// the first break point past this, so slices stay well under 5 ms, with
+// room left for a minor garbage collection landing in one.
+export const SLICE_MS = 1.5;
 const PROP_PIECE = 16;
 
 // Near-tile mesh arrays come from the builders' pool (views of pooled
@@ -701,12 +702,12 @@ export function buildRealCity(city, collision, opts = {}) {
       lotGround(city, B, li0, li1, j, Math.min(lj1, j + 10));
       if (over()) { yield 'lotGround'; ts = now(); }
     }
-    for (let a = 0; a < t.nodes.length; a += 16) {
-      realRoads(city, B, t.nodes.slice(a, a + 16), [], own);
+    for (let a = 0; a < t.nodes.length; a += 8) {
+      realRoads(city, B, t.nodes.slice(a, a + 8), [], own);
       if (over()) { yield 'roads'; ts = now(); }
     }
-    for (let a = 0; a < t.edges.length; a += 4) {
-      realRoads(city, B, [], t.edges.slice(a, a + 4), own);
+    for (let a = 0; a < t.edges.length; a += 2) {
+      realRoads(city, B, [], t.edges.slice(a, a + 2), own);
       if (over()) { yield 'roads'; ts = now(); }
     }
     for (const b of t.blocks) addBlock(B, b, DR);

@@ -62,6 +62,11 @@ import { createJetFx } from './render/jetfx.js';
 import { createCarjack } from './systems/carjack.js';
 import { createSession } from './systems/session.js';
 import { createSecrets } from './systems/secrets.js';
+// Garages, adventures and exploring on the Miami map (docs/REVAMP.md 6.6).
+import { attachExplore } from './world/adventures.js';
+import { createAdventures } from './systems/adventures.js';
+import { createGarages, favouriteCar } from './systems/garages.js';
+import { registerExploreScreens } from './ui/explore.js';
 
 const SKY = 0x9fc8e8;
 
@@ -86,6 +91,9 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
   sun.position.set(0.55, 1, 0.35);
   scene.add(hemi, sun);
+  // Garages, adventures and locked routes go on a real map before its
+  // tiles are dressed (lot dressing skips the garage rects).
+  attachExplore(city);
   // A real map (city.landGrid) is streamed in tiles round the camera.
   const cityMesh = city.landGrid ? buildRealCity(city, collision) : buildCityMesh(city, collision);
   scene.add(cityMesh);
@@ -362,6 +370,10 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   game.score = game.addSystem(createScore(game));
   game.stunts = game.addSystem(createStunts(game, Array.isArray(city.rampSpots) ? { spots: city.rampSpots } : {})); // ramps, jumps and stunt medals (after score)
   game.secrets = game.addSystem(createSecrets(game));
+  // Exploring (after score and stunts): game.explore, then the garages on it.
+  game.adventures = game.addSystem(createAdventures(game, storage));
+  game.garages = game.addSystem(createGarages(game));
+  game.favouriteCar = () => favouriteCar(game);
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
   game.snapCam = () => { snapCam = true; };
@@ -399,6 +411,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // Slow motion on big kills, pull-back camera on blasts (game.timeScale).
   game.cinematic = game.addSystem(createCinematic(game, uiRoot));
   game.menu = createMenu(uiRoot, game, game.economy);
+  registerExploreScreens(game);
 
   // --- Simulation step. ---
   function fixedUpdate(dt) {
