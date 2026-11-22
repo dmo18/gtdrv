@@ -27,7 +27,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
-await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 180000 });
+await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 420000 });
 await page.evaluate(() => {
   const g = window.__rw;
   g.loop.stop();

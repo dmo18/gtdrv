@@ -359,6 +359,7 @@ void main() {
 
 // The near puffs are only a sparse third layer under the sky-dome clouds.
 const PUFFS = 8;
+const SHOW_PUFFS = false;
 
 // ---- builders ---------------------------------------------------------------
 function makeCloudGeometry(rng) {
@@ -891,11 +892,13 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // not black blobs, greyer and denser when overcast.
     const cm = V.clouds.material;
     cm.opacity = (0.5 + 0.3 * ov) * (1 - 0.85 * fg);
-    U.uCloud.value.set(clamp(0.3 + 0.7 * ov + 0.15 * rn, 0, 1), clamp(0.25 + 0.75 * ov, 0, 1), clamp(fg * 0.8, 0, 0.9), night);
+    U.uCloud.value.set(clamp(0.4 + 0.6 * ov + 0.15 * rn, 0, 1), clamp(0.25 + 0.75 * ov, 0, 1), clamp(fg * 0.8, 0, 0.9), night);
     setLin(cm.emissive, S.sky).multiplyScalar(0.2 + 0.25 * night);
     cm.emissive.add(setLin(V.c1, S.horizon).multiplyScalar(0.18 * (1 - night)));
     cm.color.setScalar(1 - 0.35 * ov - 0.15 * rn);
-    V.clouds.visible = cm.opacity > 0.02;
+    // The sky-dome layers replace the old puffs; the mesh stays (and the
+    // update code) only as an option for a nearer layer.
+    V.clouds.visible = SHOW_PUFFS && cm.opacity > 0.02;
 
     V.lampU.uIntensity.value = V.lit;
     V.lampPts.visible = V.lit > 0.01;
@@ -921,6 +924,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
   }
 
   function updateClouds(cam) {
+    if (!SHOW_PUFFS) return;
     const C = V.clouds, n = C.count;
     const cx = cam ? cam.position.x : 0, cz = cam ? cam.position.z : 0;
     const B = 1150, wx = Math.cos(W.windDir), wz = Math.sin(W.windDir);

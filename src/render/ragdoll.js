@@ -24,7 +24,7 @@ export function poseRagdoll(mesh, a) {
   } else {
     yaw = a.ragYaw || 0;
     pitch = a.ragPitch || 0;
-    roll = 0;
+    roll = a.ragRoll || 0;
     cy = (a.y || 0) + RAG_THICK;
     ang = LIMB_REST;
   }

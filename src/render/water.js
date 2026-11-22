@@ -76,11 +76,11 @@ const SHORE_TONE = `
             float rwIn = step(0.02, rwSu.x) * step(rwSu.x, 0.98) * step(0.02, rwSu.y) * step(rwSu.y, 0.98) * uShoreOn;
             float rwSd = texture2D(uShore, rwSu).r * ${glslFloat(SHORE_RANGE)} - ${glslFloat(SHORE_NEG)};
             float rwShallow = (1.0 - smoothstep(1.0, 26.0, rwSd)) * rwIn;
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.3, 0.32), rwShallow * 0.4);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.3, 0.32), rwShallow * 0.3);
             float rwN = 0.5 + 0.5 * sin(vRwP.x * 0.8 + uTime * 0.5) * sin(vRwP.y * 1.1 - uTime * 0.3);
             float rwLap = 0.5 + 0.5 * sin(rwSd * 1.5 - uTime * 1.4 + rwN * 2.0);
-            float rwFoamL = smoothstep(3.6, 0.0, rwSd) * (0.35 + 0.65 * rwLap) * (0.6 + 0.6 * rwN)
-              + smoothstep(1.0, 0.1, rwSd) * 0.6;
+            float rwFoamL = smoothstep(5.0, 0.0, rwSd) * (0.4 + 0.7 * rwLap) * (0.6 + 0.6 * rwN)
+              + smoothstep(1.4, 0.1, rwSd) * 0.8;
             rwFoamL *= rwIn * step(-0.6, rwSd);
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.97, 0.97), clamp(rwFoamL, 0.0, 0.9));
           }`;

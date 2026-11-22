@@ -41,10 +41,10 @@ const FLOOR = 0x242321;
 // q: deck superellipse exponent (higher is flatter with a tighter edge).
 const STYLES = {
   sedan: {
-    pF: 6, pR: 7, flare: 0.022, q: 3.4, lean: [0.13, 0.07, 0.07, 0.1], hoodCrease: [0.22, 0.44, 0.012],
+    pF: 6, pR: 7, flare: 0.032, q: 3.4, lean: [0.13, 0.07, 0.07, 0.1], hoodCrease: [0.22, 0.44, 0.012],
     top: [[-0.5, 0.56], [-0.492, 0.64], [-0.475, 0.675], [-0.44, 0.682], [-0.36, 0.672], [-0.3, 0.665], [0.2, 0.615], [0.3, 0.59], [0.4, 0.56], [0.46, 0.535], [0.49, 0.5], [0.5, 0.44]],
     belt: [[-0.5, 0.52], [-0.49, 0.6], [-0.465, 0.635], [-0.4, 0.645], [-0.3, 0.64], [0, 0.605], [0.2, 0.575], [0.38, 0.535], [0.46, 0.505], [0.49, 0.47], [0.5, 0.42]],
-    bottom: [[-0.5, 0.25], [-0.465, 0.15], [0.44, 0.14], [0.5, 0.22]],
+    bottom: [[-0.5, 0.24], [-0.465, 0.135], [0.44, 0.125], [0.5, 0.2]],
     gh: { xC: -0.35, xR0: -0.205, xR1: -0.015, xA: 0.205, roof: 1, base: 0.885, tumble: 0.42, crown: 0.035, side: [-0.29, 0.168], b: [-0.088, -0.062], rear: true },
     seams: [0.205, -0.07, -0.215], hood: 0.235, boot: -0.37,
     head: { bands: [3], z: [0.46, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.42, 0.97], rev: 0.56 },
@@ -380,7 +380,7 @@ function ghHalf(sh, gs, x, lod) {
     out.push(at(1));
   }
   out.push([wt * 0.985 + bul * 0.3, R - rail * 0.25]);
-  const K = lod === LOD_NEAR ? 5 : 2;
+  const K = lod === LOD_NEAR ? 4 : 2;
   for (let k = 1; k <= K; k++) {
     const a = (k / K) * Math.PI / 2;
     out.push([wt * 0.97 * spow(Math.cos(a), 0.55), R + crown * spow(Math.sin(a), 0.8)]);
@@ -608,10 +608,10 @@ const FACE_DEF = {
 // Per style overrides of the nose and tail graphics.
 const FACES = {
   sedan: {
-    head: { q: [0.42, 0.975], f: [0.66, 0.9], e: 3.2, slant: 0.1, taper: 0.55, bulge: 0.008, lift: 0.006, ind: 0.9, drl: 'L' },
+    head: { q: [0.38, 0.975], f: [0.62, 0.92], e: 3.2, slant: 0.1, taper: 0.55, bulge: 0.008, lift: 0.006, ind: 0.9, drl: 'L' },
     grille: { q: [-0.48, 0.48], f: [0.34, 0.68], e: 5, lift: 0.004, bezel: CHROME, slats: 3, slatHex: 0x2a2c30 },
     intake: { q: [-0.6, 0.6], f: [0.08, 0.26], e: 7, lift: 0.003 },
-    fog: { q: [0.7, 0.9], f: [0.14, 0.26], e: 4 },
+    fog: { q: [0.75, 0.87], f: [0.13, 0.22], e: 2.6 },
     tail: { q: [0.36, 0.985], f: [0.7, 0.9], e: 4, slant: 0.04, taper: 0.35, bulge: 0.006, lift: 0.006, rev: 0.5, bar: true },
     plateF: 0.24, plateR: 0.45,
   },
@@ -825,7 +825,7 @@ function cabin(acc, sh, gs, spec) {
   const sz = -zw * 0.47;
   // Ring axis along x, tilted so the rim leans back toward the driver.
   M.makeRotationY(Math.PI / 2).premultiply(new THREE.Matrix4().makeRotationZ(-0.45)).setPosition(sx, sy, sz);
-  acc.geo(new THREE.TorusGeometry(0.17, 0.02, 4, 12), 0x121314, CLS.CABIN, M);
+  acc.geo(new THREE.TorusGeometry(0.17, 0.02, 4, 10), 0x121314, CLS.CABIN, M);
   box(acc, 0x121314, CLS.CABIN, 0.24, 0.05, 0.05, sx + 0.1, sy - 0.03, sz, 0, 0, 0.5);
 }
 
@@ -883,11 +883,11 @@ function contactShadow(acc, sh, spec, near) {
       const z = s * az, lx = wr * 0.9, lz = tw * 0.5 + 0.1;
       const m = acc.vert(wx, 0.02, z, 0, 1, 0, col, CLS.SHADOW, 0.7, 0);
       const o = [];
-      for (let k = 0; k < 8; k++) {
-        const a = (k / 8) * Math.PI * 2;
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
         o.push(acc.vert(wx + Math.cos(a) * lx, 0.02, z + Math.sin(a) * lz, 0, 1, 0, col, CLS.SHADOW, 0, 0));
       }
-      for (let k = 0; k < 8; k++) acc.tri(m, o[(k + 1) % 8], o[k]);
+      for (let k = 0; k < 6; k++) acc.tri(m, o[(k + 1) % 6], o[k]);
     }
   }
 }
@@ -1356,7 +1356,7 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain'
   lathe(acc, [[rimR * 1.03, h * 0.84], [rimR * 1.0, h * 0.97], [rimR * 0.92, h * 0.93]], seg, () => rc, { crease: 0.4 });
   lathe(acc, [[rimR * 0.92, h * 0.93], [rimR * 0.9, -h * 0.7], [rimR * 0.3, -h * 0.7]], 10, () => ({ col: dark, cls: CLS.ALLOY }), { crease: 0.4 });
   // Brake disc set well back from the spoke face, with a darker hat.
-  lathe(acc, [[rimR * 0.8, -h * 0.25], [rimR * 0.8, h * 0.02], [rimR * 0.42, h * 0.02], [rimR * 0.3, h * 0.12]], 12, (i, r) => ({ col: r === 2 ? hat : disc, cls: CLS.ALLOY }), { crease: 0.4 });
+  lathe(acc, [[rimR * 0.8, -h * 0.25], [rimR * 0.8, h * 0.02], [rimR * 0.42, h * 0.02], [rimR * 0.3, h * 0.12]], 10, (i, r) => ({ col: r === 2 ? hat : disc, cls: CLS.ALLOY }), { crease: 0.4 });
   // Spokes: tapered bars, concave from the lip down to a recessed hub.
   const rh = rimR * 0.22;
   const wide = kind === 'wide' ? 0.3 : kind === 'thin' ? 0.12 : kind === 'steel' ? 0.2 : 0.17;

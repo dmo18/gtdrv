@@ -4,49 +4,175 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
 import { buildCar, buildWheel, wheelLayout, wheelStyle, tyreProfile } from '../src/render/carbody.js';
-import { createVehicleMesh, vehicleStats, MID_LOD_M } from '../src/render/vehiclemesh.js';
-import { lampAtlasPixels, PLATE_TEXT } from '../src/render/vehiclemats.js';
+import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M } from '../src/render/vehiclemesh.js';
+import { lampAtlasPixels, PLATE_TEXT, CLS } from '../src/render/vehiclemats.js';
 import * as THREE from 'three';
 import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTES, PERSON_LOD_M } from '../src/render/personmesh.js';
 
 const tris = (g) => g.index.count / 3;
 
-test('car bodies: near, mid and far LOD triangle budgets', () => {
+// The ten road vehicles (the reward cars are checked with them).
+const ROAD = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwake', 'pickup', 'van', 'truck'];
+
+test('car LOD triangle budgets: near 6k..9k, mid under 1.5k, far light', () => {
   for (const id of Object.keys(VEHICLE_SPECS)) {
     const s = vehicleStats(VEHICLE_SPECS[id]);
-    assert.ok(s.body >= 5000 && s.body <= 10000, `${id} near body ${s.body}`);
-    assert.ok(s.mid < s.body * 0.65, `${id} mid body ${s.mid} vs ${s.body}`);
+    // Whole near car: body, glass with contact shadow, lamps, four wheels.
+    assert.ok(s.near >= 6000 && s.near <= 9000, `${id} near total ${s.near}`);
+    assert.ok(s.midAll < 1500, `${id} mid total ${s.midAll}`);
     assert.ok(s.far < 1500 && s.far > 300, `${id} far body ${s.far}`);
-    assert.ok(s.wheelMid < s.wheel * 0.6, `${id} wheel LOD ${s.wheelMid} vs ${s.wheel}`);
-    // Whole near car (body, lamps, four wheels) stays in the 6k..16k band.
-    const total = s.body + s.head + s.tail + 4 * s.wheel;
-    assert.ok(total >= 6000 && total <= 16000, `${id} near total ${total}`);
+    assert.ok(s.wheelMid < s.wheel * 0.25, `${id} wheel LOD ${s.wheelMid} vs ${s.wheel}`);
+    assert.ok(s.lampsMid < s.lamps * 0.3, `${id} lamp LOD ${s.lampsMid} vs ${s.lamps}`);
   }
   assert.ok(MID_LOD_M > 10 && MID_LOD_M < 75);
 });
 
-test('near car is 7 draw calls (8 with a light bar), far car is 1', () => {
-  for (const id of ['sedan', 'police', 'truck']) {
+// Draw calls of a car mesh seen from distance d (LOD levels resolved).
+function callsAt(m, d) {
+  const cam = new THREE.PerspectiveCamera(50, 2, 0.3, 1000);
+  cam.position.set(d, 1.5, 0);
+  cam.updateMatrixWorld(true);
+  m.updateMatrixWorld(true);
+  m.traverse((o) => {
+    if (o.isLOD) o.update(cam);
+  });
+  let n = 0;
+  m.traverseVisible((o) => {
+    if (o.isMesh) n++;
+  });
+  return n;
+}
+
+test('a car is 4 draw calls near and mid (5 with a light bar), 1 far', () => {
+  for (const id of ['sedan', 'police', 'truck', 'compact']) {
     const spec = VEHICLE_SPECS[id];
     const m = createVehicleMesh(spec, spec.colors[0]);
     const ud = m.userData;
-    let near = 0;
-    m.traverse((o) => {
-      if (!o.isMesh || o === ud.far) return;
-      // Inside an LOD only one level draws at a time.
-      if (o.parent && o.parent.isLOD && o.parent.levels[0].object !== o) return;
-      near++;
-    });
-    assert.equal(near, id === 'police' ? 8 : 7, id);
+    const want = id === 'police' ? 5 : 4;
+    assert.equal(callsAt(m, 6), want, id + ' near');
+    assert.equal(callsAt(m, 40), want, id + ' mid');
     assert.equal(ud.far.visible, false);
-    // Far LOD hides every near part.
+    // Far LOD (game.js toggles head / tail / wheels) hides every near part.
     ud.head.visible = false;
+    ud.tail.visible = false;
+    for (const w of ud.wheels) w.visible = false;
     assert.equal(ud.bodyLod.visible, false);
+    assert.equal(ud.glass.visible, false);
     assert.equal(ud.far.visible, true);
+    assert.equal(callsAt(m, 90), 1, id + ' far');
     // Only bodies cast sun shadows.
     assert.equal(ud.rwShadow, true);
     assert.equal(ud.body.castShadow, true);
-    assert.ok(!ud.head.castShadow && !ud.wheels[0].levels[0].object.castShadow);
+    assert.ok(!ud.head.castShadow && !ud.wheelLevels[0].castShadow && !ud.glassLevels[0].castShadow);
+  }
+});
+
+test('near model: see-through glass, cabin, contact shadow, lamps that follow a crumple', () => {
+  const classes = (g) => new Set(g.attributes.aCls.array);
+  for (const id of ROAD) {
+    const r = buildCar(VEHICLE_SPECS[id], true);
+    const gc = classes(r.glass), bc = classes(r.body);
+    assert.ok(gc.has(CLS.GLASS) && gc.has(CLS.SHADOW), id + ' glass and shadow');
+    assert.ok(!bc.has(CLS.GLASS), id + ' no opaque glass in the near body');
+    assert.ok(bc.has(CLS.CABIN), id + ' cabin');
+    assert.equal(r.lamps.morphAttributes.position.length, 2, id + ' lamp crumple targets');
+    // Shadow opacity (u) peaks under the sills and fades to 0 outside.
+    const u = r.glass.attributes.uv, k = r.glass.attributes.aCls;
+    let lo = 1, hi = 0;
+    for (let i = 0; i < k.count; i++) {
+      if (k.getX(i) !== CLS.SHADOW) continue;
+      lo = Math.min(lo, u.getX(i));
+      hi = Math.max(hi, u.getX(i));
+    }
+    assert.ok(lo === 0 && hi >= 0.7 && hi <= 0.9, `${id} shadow ${lo}..${hi}`);
+    const mid = buildCar(VEHICLE_SPECS[id], true, true);
+    assert.ok(classes(mid.body).has(CLS.GLASS) && classes(mid.glass).has(CLS.SHADOW), id + ' mid glass opaque, shadow kept');
+  }
+});
+
+test('wheels: one instanced draw, front wheels steer and all spin', () => {
+  const spec = VEHICLE_SPECS.sedan;
+  const m = createVehicleMesh(spec, spec.colors[0]);
+  const ud = m.userData;
+  const v = { x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, y: 0, spec, steerAngle: 0.3, wheelSpin: 1.1, health: spec.health };
+  updateVehicleMesh(m, v, 1, 0);
+  const a = ud.wheelLevels[0].instanceMatrix.array;
+  assert.equal(ud.wheelLevels[0].count, 4);
+  assert.equal(ud.wheelLevels[1].instanceMatrix, ud.wheelLevels[0].instanceMatrix);
+  const mat = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  const axle = (i) => {
+    mat.fromArray(a, i * 16);
+    mat.decompose(pos, q, sc);
+    return { p: pos.clone(), z: new THREE.Vector3(0, 0, 1).applyQuaternion(q) };
+  };
+  const { ax, az, wr } = ud.anchors;
+  const f = axle(0), r = axle(2), fl = axle(1);
+  assert.ok(Math.abs(f.p.x - ax) < 1e-6 && Math.abs(f.p.z - az) < 1e-6 && Math.abs(f.p.y - wr) < 0.04);
+  assert.ok(Math.abs(fl.p.z + az) < 1e-6);
+  // Rear axle points straight out (+z), front axle turned by the steer.
+  assert.ok(Math.abs(r.z.z - 1) < 1e-6);
+  assert.ok(Math.abs(Math.atan2(f.z.x, f.z.z) - -0.3) < 1e-6 || Math.abs(Math.atan2(-f.z.x, f.z.z) - 0.3) < 1e-6);
+  assert.ok(Math.abs(fl.z.z + Math.cos(0.3)) < 1e-6, 'left wheel faces outward');
+});
+
+// Side outline of a car at 50 m on a 915 x 412 screen with a 50 degree
+// field of view (about 8.8 px per metre): the mid model (what draws at
+// that distance) plus its lamps and light bar, rasterised.
+function outline(id) {
+  const spec = VEHICLE_SPECS[id];
+  const pxm = 412 / (2 * 50 * Math.tan((25 * Math.PI) / 180));
+  const r = buildCar(spec, true, true);
+  const geos = [r.body, r.lamps];
+  const Wp = 80, Hp = 36;
+  const grid = new Uint8Array(Wp * Hp);
+  const addGeo = (g, dy = 0, dx = 0) => {
+    const P = g.attributes.position, I = g.index.array;
+    for (let t = 0; t < I.length; t += 3) {
+      const v = [0, 1, 2].map((k) => [(P.getX(I[t + k]) + dx) * pxm + Wp / 2, (P.getY(I[t + k]) + dy) * pxm]);
+      const x0 = Math.max(0, Math.floor(Math.min(v[0][0], v[1][0], v[2][0]))), x1 = Math.min(Wp - 1, Math.ceil(Math.max(v[0][0], v[1][0], v[2][0])));
+      const y0 = Math.max(0, Math.floor(Math.min(v[0][1], v[1][1], v[2][1]))), y1 = Math.min(Hp - 1, Math.ceil(Math.max(v[0][1], v[1][1], v[2][1])));
+      const d = (v[1][1] - v[2][1]) * (v[0][0] - v[2][0]) + (v[2][0] - v[1][0]) * (v[0][1] - v[2][1]);
+      if (Math.abs(d) < 1e-9) continue;
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const px = x + 0.5, py = y + 0.5;
+          const l1 = ((v[1][1] - v[2][1]) * (px - v[2][0]) + (v[2][0] - v[1][0]) * (py - v[2][1])) / d;
+          const l2 = ((v[2][1] - v[0][1]) * (px - v[2][0]) + (v[0][0] - v[2][0]) * (py - v[2][1])) / d;
+          if (l1 >= 0 && l2 >= 0 && l1 + l2 <= 1) grid[y * Wp + x] = 1;
+        }
+      }
+    }
+  };
+  for (const g of geos) if (g) addGeo(g);
+  if (id === 'police') {
+    const m = createVehicleMesh(spec, spec.colors[0]);
+    addGeo(m.userData.bar.geometry, m.userData.bar.position.y, m.userData.bar.position.x);
+  }
+  // Wheels: discs at the axles.
+  const { wr, ax } = wheelLayout(spec);
+  for (const wx of [ax, -ax]) {
+    for (let y = 0; y < Hp; y++) {
+      for (let x = 0; x < Wp; x++) {
+        if (Math.hypot((x + 0.5 - Wp / 2) / pxm - wx, (y + 0.5) / pxm - wr) <= wr) grid[y * Wp + x] = 1;
+      }
+    }
+  }
+  let h = 2166136261;
+  for (let i = 0; i < grid.length; i++) h = Math.imul(h ^ grid[i], 16777619);
+  return { grid, hash: (h >>> 0).toString(16) };
+}
+
+test('silhouettes: the ten road vehicles have distinct outlines at 50 m', () => {
+  const o = ROAD.map((id) => [id, outline(id)]);
+  assert.equal(new Set(o.map(([, s]) => s.hash)).size, ROAD.length, 'hashes differ');
+  // And not by a stray pixel: every pair differs in at least 12 pixels.
+  for (let i = 0; i < o.length; i++) {
+    for (let j = i + 1; j < o.length; j++) {
+      let d = 0;
+      const a = o[i][1].grid, b = o[j][1].grid;
+      for (let k = 0; k < a.length; k++) d += a[k] !== b[k] ? 1 : 0;
+      assert.ok(d >= 12, `${o[i][0]} vs ${o[j][0]}: ${d} px apart`);
+    }
   }
 });
 

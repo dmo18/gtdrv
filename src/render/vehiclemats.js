@@ -492,7 +492,7 @@ function atlasTex(pixels, w) {
   return t;
 }
 const HEAD_BASE = [0xdfe4ea, 0xdfe4ea, 0xeef0f2, 0xd8a050, 0x1c2026];
-const TAIL_BASE = [0x8a161a, 0xd8dadc, 0xc08a3a, 0x8a161a, 0x2a0507];
+const TAIL_BASE = [0x8a161a, 0x8a7e80, 0xc08a3a, 0x8a161a, 0x2a0507];
 const BAR_BASE = [0x8a1a1e, 0x1a2a8a, 0xe8e8e8, 0x1a1b1e, 0x1a1b1e];
 // Front half and rear half side by side (256 x 32).
 export function lampPairPixels() {
@@ -514,7 +514,7 @@ function atlasFor(kind) {
 // read without conversion, so colours here are as authored.
 const HEAD_DAY = [0x24282c, 0x24282c, 0xd8e4f0, 0x5a3408];
 const HEAD_NIGHT = [0xffffff, 0xffffff, 0xffffff, 0x8a4a0a];
-const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x8a0c0e, TAIL_BRAKE = 0xff2a22;
+const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x7a0606, TAIL_BRAKE = 0xe00c08;
 const REV_OFF = 0x000000, REV_ON = 0xffffff, IND_OFF = 0x000000, IND_ON = 0xffa424;
 const LAMP = { pair: [] };
 function lampMat(cells, kind) {
@@ -534,6 +534,9 @@ function pairCells(h, t, night) {
 }
 for (let h = 0; h < 2; h++) for (let t = 0; t < 8; t++) LAMP.pair[h * 8 + t] = lampMat(pairCells(h, t, false), 'pair');
 LAMP.off = lampMat([0, 0, 0, 0, 0, 0, 0, 0], 'pair');
+// Burnt-out lamps: sooty lenses.
+LAMP.off.color.setHex(0x1a1816);
+LAMP.off.roughness = 0.7;
 // Light bar: cells red, blue, white, base.
 LAMP.bar0 = lampMat([0x120203, 0x020412, 0x000000, 0x000000], 'bar');
 LAMP.bar1 = lampMat([0xff2a20, 0x020412, 0xffffff, 0x000000], 'bar');

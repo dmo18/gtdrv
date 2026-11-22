@@ -35,6 +35,11 @@ if (process.argv.includes('--game')) {
   await gameShots();
   process.exit(0);
 }
+// --compare=before.png,after.png,out.png stacks two pictures with labels.
+if (opt('compare')) {
+  await compare(...opt('compare').split(','));
+  process.exit(0);
+}
 await build({
   entryPoints: [join(root, 'scripts', 'vehicle-shots-entry.js')],
   bundle: true,
@@ -115,7 +120,8 @@ async function gameShots() {
         g.daynight.setHour(+hour);
         for (const v of window.__show || []) g.removeVehicle(v);
         window.__show = [];
-        const p = g.player.vehicle || g.player;
+        const p0 = g.player.vehicle || g.player;
+        const p = window.__base || { x: p0.x, z: p0.z, heading: p0.heading };
         const h = p.heading, fx = Math.cos(h), fz = Math.sin(h), rx = -Math.sin(h), rz = Math.cos(h);
         const put = (sid, d, side, hh) => {
           const v = g.debug.spawnCar(sid, p.x + fx * d + rx * side, p.z + fz * d + rz * side, hh);
@@ -128,7 +134,7 @@ async function gameShots() {
           pv.x = pv.px = p.x - fx * 60;
           pv.z = pv.pz = p.z - fz * 60;
         }
-        window.__base = { x: p.x, z: p.z, h };
+        window.__base = { x: p.x, z: p.z, heading: h, h };
         if (id === 'street') {
           const ids = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwake', 'pickup', 'van', 'truck'];
           ids.forEach((sid, k) => put(sid, 14 + k * 3.4, (k % 2 ? 1 : -1) * (1.8 + (k % 3) * 1.6), h + (k % 2 ? 0 : Math.PI)));
@@ -197,5 +203,19 @@ async function gameShots() {
   } finally {
     await browser.close();
     server.close();
+  }
+}
+
+async function compare(a, b, dest) {
+  const url = async (f) => 'data:image/png;base64,' + (await readFile(resolve(f))).toString('base64');
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: CW, height: CH * 2 }, deviceScaleFactor: 1 });
+    const cell = (src, label) => `<div style="position:relative;width:${CW}px;height:${CH}px;overflow:hidden"><img src="${src}" style="width:${CW}px;height:${CH}px;display:block"><span style="position:absolute;left:10px;top:8px;font:bold 18px sans-serif;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px">${label}</span></div>`;
+    await page.setContent(`<body style="margin:0">${cell(await url(a), 'before')}${cell(await url(b), 'after')}</body>`);
+    await page.screenshot({ path: resolve(dest) });
+    console.log('compare ->', resolve(dest));
+  } finally {
+    await browser.close();
   }
 }

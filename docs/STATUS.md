@@ -537,8 +537,24 @@ None critical or high.
 - Tests: test/explore.test.js, test/garages.test.js,
   test/adventures.test.js. Screenshots: docs/preview/m1-garage-*.png.
 - Not yet: the map draws explore markers as plain dots (no "?" glyph or
-  ring circle until mapui offers a layer with those shapes); the garage
-  shows no parked cars inside.
+  ring circle until mapui offers a layer with those shapes).
+
+## 2026-11-22: garage fixes G1 (K7, K8, cars inside the shed)
+- K7 fixed: a favourite taken out of a garage keeps its star in
+  `rustwater.explore.v1` (`garages.road`, `{ spec, color }`, strict
+  sanitiser, same version 1: older and newer data read as no star). After a
+  reload the live car gets its star back; a wrecked favourite loses it; the
+  title Start uses it.
+- K8 fixed: a reward car taken out is marked in `garages.out`. Other
+  garages show it as "Out on the road" and refuse (`reason: 'out'`) until it
+  is stored again, wrecked or lost (no live copy and not in the left-behind
+  cars). A reward car driven without being marked is marked on entering. A
+  reward favourite that is out is not used by Start.
+- Parked cars show inside an open garage: up to four stored cars (two rows,
+  nose to the door) for the one garage whose door is open; rebuilt only when
+  the list changes. Screenshot: docs/preview/g1-garage-open.png.
+- Tests: explore.test.js (road star, out list), garages.test.js (one copy
+  across two garages, wreck, reload, star after a cold start, the shed).
 
 ## Sirens: traffic and pedestrians give way
 

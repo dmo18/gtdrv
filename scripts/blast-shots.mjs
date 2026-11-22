@@ -216,6 +216,8 @@ if (only === 'all' || only.startsWith('w6')) {
       c.vx = c.vz = c.speed = 0;
       window.__car = c;
       window.__shot.cam = [cx - fx * 19 + fz * 2.5, 4.2, cz - fz * 19 - fx * 2.5, cx, 2.2, cz];
+      // Closer for the later shots: the hull and the parts lying round it.
+      window.__closeCam = [cx - fx * 9 + fz * 5, 2.8, cz - fz * 9 - fx * 5, cx + fx * 2, 0.6, cz + fz * 2];
       window.__shot.run(2);
       g.combat.damage(c, 1e5, w, 'blast');
       window.__blastT = 0;
@@ -224,6 +226,7 @@ if (only === 'all' || only.startsWith('w6')) {
       await page.evaluate((t) => {
         const n = Math.max(0, Math.round((t - window.__blastT) * 60));
         window.__blastT = t;
+        if (t >= 5) window.__shot.cam = window.__closeCam;
         window.__shot.run(n);
       }, t);
       await shot(`w6-blast-${tag}-${name}`);

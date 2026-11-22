@@ -32,6 +32,7 @@ const BOUNCE_MIN = 2.5; // m/s downward speed that bounces
 const FRICTION = 5; // 1/s horizontal slowdown while touching the ground
 const TOPPLE_K = 70, TOPPLE_D = 13; // spring that lays the body flat
 const YAW_DAMP = 6;
+const YAW_K = 40, YAW_D = 12; // directed fall: yaw spring toward the lying pose
 const LIMB_K = 70, LIMB_D = 7; // floppy: under-damped on purpose
 const LAG = 0.06; // limb lag per rad/s change of body spin
 const SETTLE_V = 0.4, SETTLE_W = 0.6;
@@ -63,6 +64,7 @@ function makeSlot(i) {
     yaw: 0, pitch: 0, roll: 0,
     wy: 0, wp: 0, wr: 0, lwp: 0, lwr: 0,
     contact: false, bounced: false,
+    dir: false, tY: 0, tP: 0, tR: 0, // directed fall: the lying pose it ends in
     ang: new Float64Array(LIMB_COUNT),
     vel: new Float64Array(LIMB_COUNT),
   };
@@ -129,6 +131,7 @@ export function startRagdoll(pool, a, vx, vy, vz, rng) {
   s.lwr = s.wr;
   s.contact = false;
   s.bounced = false;
+  s.dir = false;
   for (let i = 0; i < LIMB_COUNT; i++) {
     s.ang[i] = i === LIMB.bend ? 0.1 : 0;
     s.vel[i] = (r() - 0.5) * 12;
@@ -151,6 +154,60 @@ export function kickRagdoll(s, vy, spin) {
   s.lwp = s.wp;
 }
 
+// Nearest angle to `cur` that equals `t` modulo a full turn.
+const nearAngle = (t, cur) => t + Math.round((cur - t) / TAU) * TAU;
+
+// Directed fall (REVAMP 6.7 "Body fall direction rule"): the body goes
+// down along the unit ground vector (dx, dz) and ends lying along it, the
+// line from the feet to the head within a few degrees of it. Of the four
+// lying poses whose head points along d (on the back, on the face, on the
+// right or left side) it takes the one needing the least turn from where
+// the body faces, so a hit from the front lays it on its back, from behind
+// on its face and from the side on that side. `spin` (rad/s) tips it over
+// toward that pose.
+export function directRagdoll(s, dx, dz, spin = 3) {
+  if (!s || !s.on) return;
+  const l = Math.sqrt(dx * dx + dz * dz);
+  if (!(l > 1e-6)) return;
+  const al = Math.atan2(dz / l, dx / l);
+  const h = s.yaw;
+  // [yaw, pitch, roll] for: back, face, right side, left side.
+  let best = 0, bestD = Infinity;
+  for (let k = 0; k < 4; k++) {
+    const y = al + POSE_YAW[k];
+    const d = Math.abs(Math.atan2(Math.sin(y - h), Math.cos(y - h)));
+    if (d < bestD) {
+      bestD = d;
+      best = k;
+    }
+  }
+  s.dir = true;
+  s.tY = nearAngle(al + POSE_YAW[best], h);
+  s.tP = POSE_PITCH[best];
+  s.tR = POSE_ROLL[best];
+  const w = Math.min(SPIN_MAX, Math.max(0, spin));
+  if (s.tP !== 0) s.wp = s.tP > 0 ? Math.max(s.wp, w) : Math.min(s.wp, -w);
+  else s.wr = s.tR > 0 ? Math.max(s.wr, w) : Math.min(s.wr, -w);
+  s.wy = 0;
+  s.lwp = s.wp;
+  s.lwr = s.wr;
+}
+const POSE_YAW = [Math.PI, 0, -HALF_PI, HALF_PI];
+const POSE_PITCH = [HALF_PI, -HALF_PI, 0, 0];
+const POSE_ROLL = [0, 0, HALF_PI, -HALF_PI];
+
+// Unit vector from the feet to the head for a body pose (mesh rotation
+// order 'YXZ': R = Ry(-yaw) Rx(roll) Rz(pitch)), written into out {x, y, z}.
+export function headDir(yaw, pitch, roll, out) {
+  const sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
+  const sy = Math.sin(yaw), cy = Math.cos(yaw);
+  const lx = -sp, ly = cp * cr, lz = cp * sr;
+  out.x = lx * cy - lz * sy;
+  out.y = ly;
+  out.z = lx * sy + lz * cy;
+  return out;
+}
+
 function releaseSlot(pool, s) {
   s.on = false;
   s.actor = null;
@@ -162,6 +219,22 @@ function releaseSlot(pool, s) {
 // pitch -PI/2 and the yaw turned half round.
 function settle(pool, s) {
   const a = s.actor;
+  if (s.dir) {
+    if (a && a.rag === s) {
+      a.rag = null;
+      a.ragDone = true;
+      a.ragYaw = ((s.tY % TAU) + TAU) % TAU;
+      a.ragPitch = s.tP;
+      a.ragRoll = s.tR;
+      a.x = s.x;
+      a.z = s.z;
+      a.y = s.ground;
+      a.ky = 0;
+      a.spin = 0;
+    }
+    releaseSlot(pool, s);
+    return;
+  }
   let p = flatPitch(s.pitch), r = flatRoll(s.roll), y = s.yaw;
   if (Math.abs(Math.sin(r * 0.5)) > 0.5) { // roll is an odd multiple of PI
     p = -p;
@@ -175,6 +248,7 @@ function settle(pool, s) {
     a.ragDone = true;
     a.ragYaw = y;
     a.ragPitch = p;
+    a.ragRoll = 0;
     a.x = s.x;
     a.z = s.z;
     a.y = s.ground;
@@ -211,7 +285,9 @@ export function stepRagdolls(pool, dt, fix = null) {
 
 function calm(s) {
   const hv = s.vx * s.vx + s.vz * s.vz + s.vy * s.vy;
-  return hv < SETTLE_V * SETTLE_V && Math.abs(s.wp) < SETTLE_W && Math.abs(s.wr) < SETTLE_W;
+  if (!(hv < SETTLE_V * SETTLE_V && Math.abs(s.wp) < SETTLE_W && Math.abs(s.wr) < SETTLE_W)) return false;
+  if (!s.dir) return true;
+  return Math.abs(nearAngle(s.tP, s.pitch) - s.pitch) < 0.15 && Math.abs(nearAngle(s.tR, s.roll) - s.roll) < 0.15;
 }
 
 function writeActor(s, a) {
@@ -256,11 +332,16 @@ function stepOne(s, dt) {
     const f = Math.exp(-FRICTION * dt);
     s.vx *= f;
     s.vz *= f;
-    // Topple flat: the body falls onto its back or front.
-    s.wp += (TOPPLE_K * (flatPitch(s.pitch) - s.pitch) - TOPPLE_D * s.wp) * dt;
-    s.wr += (TOPPLE_K * (flatRoll(s.roll) - s.roll) - TOPPLE_D * s.wr) * dt;
-    s.wy *= Math.exp(-YAW_DAMP * dt);
+    // Topple flat: the body falls onto its back or front (a directed fall:
+    // into the pose it was given).
+    const tp = s.dir ? nearAngle(s.tP, s.pitch) : flatPitch(s.pitch);
+    const tr = s.dir ? nearAngle(s.tR, s.roll) : flatRoll(s.roll);
+    s.wp += (TOPPLE_K * (tp - s.pitch) - TOPPLE_D * s.wp) * dt;
+    s.wr += (TOPPLE_K * (tr - s.roll) - TOPPLE_D * s.wr) * dt;
+    if (!s.dir) s.wy *= Math.exp(-YAW_DAMP * dt);
   }
+  // A directed body turns to face its fall (a twist of at most 45 degrees).
+  if (s.dir) s.wy += (YAW_K * (nearAngle(s.tY, s.yaw) - s.yaw) - YAW_D * s.wy) * dt;
   // Limbs: springs toward the lying pose that lag behind the body's spin.
   const dwp = s.wp - s.lwp, dwr = s.wr - s.lwr;
   s.lwp = s.wp;

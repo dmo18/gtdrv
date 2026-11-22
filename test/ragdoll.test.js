@@ -7,12 +7,14 @@ RULES.invulnerable = false;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, ragOrigin, ragReach, flatPitch,
+  createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, ragOrigin, ragReach, flatPitch, headDir,
   RAGDOLL_MAX, RAG_T, RAG_MAX_T, RAG_THICK, RAG_CENTRE, LIMB_REST, LIMB_COUNT,
 } from '../src/core/ragdoll.js';
 import { createRng } from '../src/core/rng.js';
 import { poseRagdoll } from '../src/render/ragdoll.js';
-import { initActor, addActor, damage, setPush, RAM_THROW_UP, RAM_THROW_PER } from '../src/systems/combat.js';
+import { initActor, addActor, removeActor, damage, setPush, setFall, FALL_BULLET, FALL_SHOTGUN, RAM_THROW_UP, RAM_THROW_PER } from '../src/systems/combat.js';
+import { createArms } from '../src/core/weapons.js';
+import { createVehicle } from '../src/entities/vehicle.js';
 import { makeFightGame, step, yard } from './fightgame.js';
 
 const DT = 1 / 60;
@@ -170,15 +172,94 @@ test('combat: a car at speed throws a person up over the bonnet in an arc', () =
   assert.ok(!ped.rag && ped.ragDone && ped.y === 0, 'settled on the ground');
 });
 
-test('combat: bullets keep the plain fall; the player never ragdolls', () => {
+// W6 slice 4: bullets used to keep the plain fall pose; now every killing
+// hit throws the body along its fall direction (REVAMP 6.7).
+test('combat: a bullet kill falls away from the shot; the player never ragdolls', () => {
   const g = arena();
   const ped = initActor({ x: 5, z: 5, y: 0, heading: 0, radius: 0.35, px: 5, pz: 5, vx: 0, vz: 0 }, 'civ');
   addActor(g, ped);
   damage(g, ped, 50, null, 'bullet');
   assert.equal(ped.life, 'down');
-  assert.equal(ped.rag, null);
+  assert.ok(ped.rag && ped.rag.dir, 'a directed ragdoll');
   const w = g.player.walker;
   g.combat.explode(w.x + 1, 0.5, w.z, 6);
   assert.ok(!w.rag);
   assert.equal(g.ragdolls.max, RAGDOLL_MAX);
 });
+
+// The fall direction rule, 16 directions for each cause: the body travels
+// along d and ends lying along it (feet to head within 25 degrees of d);
+// hit from the front it lies on its back, from behind on its face.
+const HD = { x: 0, y: 0, z: 0 };
+function fallCase(cause, k, heading = 0.3) {
+  const g = arena();
+  const an = (k / 16) * Math.PI * 2;
+  const dx = Math.cos(an), dz = Math.sin(an);
+  const ped = initActor({ x: 0, z: 0, y: 0, heading, radius: 0.35, px: 0, pz: 0, vx: 0, vz: 0 }, 'civ');
+  addActor(g, ped);
+  if (cause === 'bullet' || cause === 'shotgun') {
+    const r = cause === 'bullet' ? 6 : 2; // point blank for the wide shotgun spread
+    const sh = initActor({ x: -dx * r, z: -dz * r, y: 0, heading: an, radius: 0.35, px: -dx * r, pz: -dz * r, vx: 0, vz: 0 }, 'crew');
+    addActor(g, sh);
+    sh.arms = createArms(cause === 'bullet' ? 'pistol' : 'scatter');
+    g.combat.fire(sh, dx, (1.0 - 1.4) / r, dz);
+    removeActor(g, sh);
+  } else if (cause === 'blast') {
+    g.combat.explode(-dx * 3, 0.6, -dz * 3, 8);
+  } else {
+    const car = g.addVehicle(createVehicle('sedan', -dx * 3, -dz * 3, an));
+    car.vx = dx * 12;
+    car.vz = dz * 12;
+    ped.bumpBy = car;
+    ped.bumpV = 12;
+  }
+  step(g, [], 1);
+  assert.equal(ped.hp, 0, `${cause} ${k}: killed`);
+  for (let i = 0; i < 60 * 4 && !ped.ragDone; i++) step(g, [], 1);
+  assert.ok(ped.ragDone, `${cause} ${k}: settled`);
+  const travel = ped.x * dx + ped.z * dz;
+  headDir(ped.ragYaw, ped.ragPitch, ped.ragRoll, HD);
+  const hl = Math.hypot(HD.x, HD.z);
+  const cos = (HD.x * dx + HD.z * dz) / hl;
+  return { travel, deg: Math.acos(Math.min(1, cos)) * 180 / Math.PI, flat: Math.abs(HD.y) < 0.05, pitch: ped.ragPitch, roll: ped.ragRoll, an };
+}
+for (const cause of ['bullet', 'shotgun', 'blast', 'vehicle']) {
+  test(`fall direction: ${cause}, 16 directions: travels along d and lies along it`, () => {
+    for (let k = 0; k < 16; k++) {
+      const r = fallCase(cause, k);
+      assert.ok(r.travel > 0, `${cause} ${k}: moved ${r.travel.toFixed(2)} m along d`);
+      assert.ok(r.deg <= 25, `${cause} ${k}: lying ${r.deg.toFixed(1)} deg off d`);
+      assert.ok(r.flat, `${cause} ${k}: flat on the ground`);
+    }
+  });
+}
+test('fall direction: shot from the front lands on the back, from behind on the face, from the side on that side', () => {
+  // The victim faces +x (heading 0); d is the way the shot travels.
+  const front = fallCase('bullet', 8, 0); // d = -x: hit in the chest
+  const behind = fallCase('bullet', 0, 0); // d = +x: hit in the back
+  const side = fallCase('bullet', 4, 0); // d = +z
+  assert.ok(front.pitch > 1.5, `on the back (pitch ${front.pitch})`);
+  assert.ok(behind.pitch < -1.5, `on the face (pitch ${behind.pitch})`);
+  assert.ok(Math.abs(side.pitch) < 0.01 && Math.abs(Math.abs(side.roll) - Math.PI / 2) < 0.01, `on the side (roll ${side.roll})`);
+});
+test('fall speed along d: bullet 1.5, shotgun 4, blast 6 + 10 (1 - d/r) with 3 to 6 up, car 0.6 x speed', () => {
+  const g = arena();
+  const mk = (x, z) => {
+    const a = initActor({ x, z, y: 0, heading: 0, radius: 0.35, px: x, pz: z, vx: 0, vz: 0 }, 'civ');
+    addActor(g, a);
+    return a;
+  };
+  const a = mk(0, 0);
+  setFall(1, 0, FALL_BULLET);
+  damage(g, a, 50, null, 'bullet');
+  assert.ok(Math.abs(a.rag.vx - 1.5) < 1e-9 && Math.abs(a.rag.vz) < 1e-9);
+  const b = mk(0, 20);
+  setFall(0, 1, FALL_SHOTGUN);
+  damage(g, b, 50, null, 'bullet');
+  assert.ok(Math.abs(b.rag.vz - 4) < 1e-9);
+  const c = mk(40, 0);
+  g.combat.explode(36, 0.9, 0, 8);
+  assert.ok(Math.abs(c.rag.vx - (6 + 10 * 0.5)) < 1e-6, `blast ${c.rag.vx}`);
+  assert.ok(c.rag.vy >= 3 && c.rag.vy <= 6, `up ${c.rag.vy}`);
+});
+

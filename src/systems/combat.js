@@ -29,7 +29,7 @@ import {
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
 import { targetPoint, angleTo, lineOfSight, AIR_REACH, airborne } from '../core/aim.js';
-import { createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
+import { createRagdolls, startRagdoll, kickRagdoll, directRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
 import { poseRagdoll } from '../render/ragdoll.js';
 
 // ---------------------------------------------------------------------
@@ -188,6 +188,7 @@ export function resetActor(a) {
   a.ragDone = false; // settled ragdoll pose kept in ragYaw / ragPitch
   a.ragYaw = 0;
   a.ragPitch = 0;
+  a.ragRoll = 0;
   return a;
 }
 
@@ -229,27 +230,69 @@ export function setPush(x, z) {
 // Depth of the explosion being applied right now (chain bookkeeping).
 let curDepth = -1;
 
-// Ragdolls: hard hits (blasts, cars) make a person tumble. A car at
-// speed throws them up over the bonnet. Pool of RAGDOLL_MAX bodies.
+// Falls (REVAMP 6.7 "Body fall direction rule"). Every killing hit has
+// one unit ground vector d: a gunshot the way the shot travelled, a blast
+// from its centre to the victim, a vehicle the way it was moving. The body
+// is thrown along d (a ragdoll from a pool of RAGDOLL_MAX) and ends lying
+// along it: on the back when hit from the front, on the face from behind,
+// on that side from the side (core/ragdoll.js directRagdoll). Start speed
+// along d: bullet 1.5 m/s (shotgun 4), vehicle 0.6 x the closing speed up
+// to 14, blast 6 + 10 (1 - distance / radius) with 3 to 6 m/s up.
+export const FALL_BULLET = 1.5, FALL_SHOTGUN = 4, FALL_MELEE = 2;
+export const FALL_RAM_K = 0.6, FALL_RAM_MAX = 14;
+export const FALL_BLAST_V0 = 6, FALL_BLAST_V1 = 10, FALL_BLAST_UP0 = 3, FALL_BLAST_UP1 = 3;
+// A car at speed also throws them up over the bonnet.
 export const RAM_THROW_UP = 1.2, RAM_THROW_PER = 0.32, RAM_THROW_MAX = 8; // m/s up: base + per m/s of car speed
-export const RAM_CARRY = 0.6; // share of the car's speed the body keeps
+export const RAM_CARRY = FALL_RAM_K; // share of the car's speed the body keeps
+// The fall for the next damage() call (cleared by it), like PUSH.
+const FALL = { x: 0, z: 0, v: 0, up: 0, set: false };
+export function setFall(dx, dz, v, up = 0) {
+  const l = Math.sqrt(dx * dx + dz * dz);
+  if (!(l > 1e-6) || !Number.isFinite(l)) return;
+  FALL.x = dx / l;
+  FALL.z = dz / l;
+  FALL.v = v > 0 ? v : 0;
+  FALL.up = up > 0 ? up : 0;
+  FALL.set = true;
+}
+// The fall of the hit being applied now (damage() moves FALL here).
+const HIT_FALL = { x: 0, z: 0, v: 0, up: 0, set: false };
 function startTumble(game, a, source, kind) {
   const pool = game.ragdolls;
-  if (!pool || a.team === 'player' || (kind !== 'blast' && kind !== 'ram')) return;
+  if (!pool || a.team === 'player' || kind === 'fire') return;
   const rng = pool.rng || null;
-  if (kind === 'ram' && source && Number.isFinite(source.vx)) {
-    const v = Math.sqrt(source.vx * source.vx + source.vz * source.vz);
-    const s = startRagdoll(pool, a, source.vx * RAM_CARRY, Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * v), source.vz * RAM_CARRY, rng);
-    if (!s) return;
-    // Legs swept from under them: the body turns head first over the bonnet.
-    const w = Math.min(6.5, 1.5 + 0.3 * v);
-    s.wp = s.wp > 0 ? -w : w;
-    s.wr *= 0.4;
-    s.lwp = s.wp;
-    s.lwr = s.wr;
-  } else {
-    startRagdoll(pool, a, a.kx || 0, 0, a.kz || 0, rng);
+  let dx = HIT_FALL.x, dz = HIT_FALL.z, v = HIT_FALL.v, up = HIT_FALL.up;
+  if (!HIT_FALL.set) {
+    // No direction given: the push, else away from the source, else backwards.
+    dx = a.kx || 0;
+    dz = a.kz || 0;
+    if (!(dx * dx + dz * dz > 1e-6) && source && Number.isFinite(source.x)) {
+      dx = a.x - source.x;
+      dz = a.z - source.z;
+    }
+    if (!(dx * dx + dz * dz > 1e-6)) {
+      dx = -Math.cos(a.heading || 0);
+      dz = -Math.sin(a.heading || 0);
+    }
+    const l = Math.sqrt(dx * dx + dz * dz);
+    dx /= l;
+    dz /= l;
+    v = kind === 'blast' ? FALL_BLAST_V0 : kind === 'melee' ? FALL_MELEE : kind === 'ram' ? 4 : FALL_BULLET;
+    up = kind === 'blast' ? FALL_BLAST_UP0 : 0;
   }
+  if (kind === 'ram' && source && Number.isFinite(source.vx) && !HIT_FALL.set) {
+    const sp = Math.sqrt(source.vx * source.vx + source.vz * source.vz);
+    if (sp > 0.5) {
+      dx = source.vx / sp;
+      dz = source.vz / sp;
+      v = Math.min(FALL_RAM_MAX, FALL_RAM_K * sp);
+      up = Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * sp);
+    }
+  }
+  const s = startRagdoll(pool, a, dx * v, up, dz * v, rng);
+  if (!s) return;
+  // Tip over toward the lying pose; harder hits turn faster.
+  directRagdoll(s, dx, dz, Math.min(6.5, 2.2 + v * 0.35));
 }
 
 function knockDown(game, a, source, kind) {
@@ -385,6 +428,12 @@ function damageCraft(game, c, amount, source, kind, px, pz) {
 export function damage(game, target, amount, source = null, kind = 'bullet') {
   const px = PUSH.x, pz = PUSH.z;
   PUSH.x = PUSH.z = 0;
+  HIT_FALL.set = FALL.set;
+  HIT_FALL.x = FALL.x;
+  HIT_FALL.z = FALL.z;
+  HIT_FALL.v = FALL.v;
+  HIT_FALL.up = FALL.up;
+  FALL.set = false;
   if (!target || !(amount > 0) || !Number.isFinite(amount)) return 0;
   const p = game && game.player;
   // The player cannot die: nothing that hurts them, or the craft they sit in, counts.
@@ -393,6 +442,7 @@ export function damage(game, target, amount, source = null, kind = 'bullet') {
   if (p && target === p.walker && p.vehicle) {
     PUSH.x = px;
     PUSH.z = pz;
+    FALL.set = false;
     return damage(game, p.vehicle, amount, source, kind);
   }
   if (isCraft(target)) return damageCraft(game, target, amount, source, kind, px, pz);
@@ -784,7 +834,16 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const k = 1 - d / r;
       const hd = Math.sqrt(ex * ex + ez * ez);
       const push = 3 + 9 * k;
-      if (hd > 1e-3) setPush((ex / hd) * push, (ez / hd) * push);
+      // Fall away from the centre (a seeded direction when right on top of it).
+      let fx = ex, fz = ez;
+      if (hd < 0.2) {
+        const an = tossRng.next() * Math.PI * 2;
+        fx = Math.cos(an);
+        fz = Math.sin(an);
+      }
+      const fl = Math.sqrt(fx * fx + fz * fz);
+      setPush((fx / fl) * push, (fz / fl) * push);
+      setFall(fx, fz, FALL_BLAST_V0 + FALL_BLAST_V1 * k, FALL_BLAST_UP0 + FALL_BLAST_UP1 * k);
       damage(game, a, BLAST_DMG * k * scale, source, 'blast');
       if (a.hp <= 0 && a.team !== 'player') launchActor(a, k);
     }
@@ -820,11 +879,14 @@ export function createCombat(game, { seed = 23023 } = {}) {
 
   // A person killed by a blast flies and tumbles.
   function launchActor(a, k) {
-    a.ky = 3.5 + 7 * k + tossRng.next() * 2;
     a.spinV = (tossRng.next() < 0.5 ? -1 : 1) * (4 + 6 * k);
     a.spin = 0;
     if (!(a.y > 0)) a.y = 0;
-    if (a.rag) kickRagdoll(a.rag, a.ky, a.spinV); // the ragdoll flies it
+    if (a.rag) {
+      // The ragdoll flies it (thrown up 3 to 6 m/s by setFall); a tumble on top.
+      kickRagdoll(a.rag, 0, a.spinV);
+      a.ky = a.rag.vy;
+    } else a.ky = FALL_BLAST_UP0 + FALL_BLAST_UP1 * k;
   }
 
   // Launch a car (or lighter craft) from a blast at (nx, nz) unit direction,
@@ -1149,6 +1211,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         const target = TR.actor || TR.craft;
         if (target) {
           if (w.push && TR.actor) setPush(d.x * w.push, d.z * w.push);
+          if (TR.actor) setFall(d.x, d.z, w.pellets > 1 ? FALL_SHOTGUN : FALL_BULLET);
           if (TR.craft) setHitY(hy);
           damage(game, target, w.dmg, actor, 'bullet');
         }
@@ -1257,6 +1320,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const kind = TR.kind, hx = TR.x, hy = TR.y, hz = TR.z;
       if (t) {
         if (TR.craft) setHitY(hy);
+        if (TR.actor) setFall(d.x, d.z, FALL_BULLET);
         damage(game, t, m.dmg, src, 'bullet');
       }
       emitShot(src, id, mx, my, mz, d.x, d.y, d.z, hx, hy, hz, kind);
@@ -2283,6 +2347,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       if (!(v > RAM_MIN) || !canBeHit(a)) continue;
       const sp = Math.sqrt(c.vx * c.vx + c.vz * c.vz) || 1;
       setPush((c.vx / sp) * v * 0.5, (c.vz / sp) * v * 0.5);
+      setFall(c.vx, c.vz, Math.min(FALL_RAM_MAX, FALL_RAM_K * v), Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * v));
       damage(game, a, RAM_DMG * v, c, 'ram');
     }
   }

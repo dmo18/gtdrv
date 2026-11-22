@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt } from './effects.js';
+import { PARTS_MAX, PART, createParts, addPart, launchCarParts, stepParts, partScale, liveParts } from './carparts.js';
 import { BLAST, ROLL_V, ROLL_S0, ROLL_S1, blastScale, fireRadius, shakeAt, dustTone } from './blastplan.js';
 
 const MAX_ALPHA = 420;
@@ -29,9 +30,9 @@ const BLOOD = BLOOD_POOLS + BLOOD_SPLATS;
 // A pool lasts as long as its body (combat BODY_LIE_T 30 s + the 1 s fade).
 export const POOL_LIFE = 31, POOL_GROW = 1.6, POOL_FADE = 1.5;
 const SPLAT_LIFE = 12, SPLAT_FADE = 4;
-// Wreck debris: one pooled instanced mesh.
-export const DEBRIS_MAX = 48;
-const DEBRIS_LIFE = 3.6, DEBRIS_SHRINK = 0.7;
+// Wreck parts (carparts.js): a pool of 96, drawn as three instanced meshes
+// (boxes for chunks, bonnets, bumpers and panels; doors; wheels).
+export const DEBRIS_MAX = PARTS_MAX;
 const NEAR = 170; // metres from the camera where small effects are made
 
 // Atlas cells: 0 puff, 1 ring, 2 streak, 3 glow. +4 flat on the ground, +8 stretched.
@@ -96,6 +97,52 @@ function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
 }
 
+// Merge boxes and cylinders into one geometry with a vertex colour per piece.
+function mergeShaded(pieces) {
+  let nv = 0, ni = 0;
+  for (const [g] of pieces) {
+    nv += g.attributes.position.count;
+    ni += g.index.count;
+  }
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+  const idx = new Uint16Array(ni);
+  let v = 0, k = 0;
+  for (const [g, shade] of pieces) {
+    const p = g.attributes.position.array, n = g.attributes.normal.array, ix = g.index.array;
+    pos.set(p, v * 3);
+    nor.set(n, v * 3);
+    for (let i = 0; i < g.attributes.position.count; i++) col[(v + i) * 3] = col[(v + i) * 3 + 1] = col[(v + i) * 3 + 2] = shade;
+    for (let i = 0; i < ix.length; i++) idx[k + i] = ix[i] + v;
+    v += g.attributes.position.count;
+    k += ix.length;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+// A door lying flat (thin on y): the lower panel in the paint, the window
+// frame dark, a handle.
+function doorGeometry() {
+  const lower = new THREE.BoxGeometry(1, 1, 0.58).translate(0, 0, 0.21);
+  const pillarA = new THREE.BoxGeometry(0.1, 0.9, 0.42).translate(-0.45, 0, -0.29);
+  const pillarB = new THREE.BoxGeometry(0.1, 0.9, 0.42).translate(0.45, 0, -0.29);
+  const top = new THREE.BoxGeometry(1, 0.9, 0.08).translate(0, 0, -0.46);
+  const glass = new THREE.BoxGeometry(0.8, 0.4, 0.34).translate(0, 0, -0.29);
+  const handle = new THREE.BoxGeometry(0.16, 1.5, 0.05).translate(0.3, 0, 0.02);
+  return mergeShaded([[lower, 1], [pillarA, 0.9], [pillarB, 0.9], [top, 0.9], [glass, 0.06], [handle, 0.25]]);
+}
+// A wheel (axis on y, so it lies on its side): tyre, rim, hub.
+function wheelGeometry() {
+  const tyre = new THREE.CylinderGeometry(0.5, 0.5, 1, 16);
+  const rim = new THREE.CylinderGeometry(0.33, 0.33, 1.04, 12);
+  const hub = new THREE.CylinderGeometry(0.1, 0.1, 1.08, 8);
+  return mergeShaded([[tyre, 0.08], [rim, 0.72], [hub, 0.35]]);
+}
+
 export function createCombatFx(game) {
   const scene = game && game.scene;
   const camera = game && game.camera;
@@ -111,6 +158,8 @@ export function createCombatFx(game) {
   let bloodMesh = null;
   let bloodOp = null;
   let debrisMesh = null;
+  let doorMesh = null;
+  let wheelMesh = null;
   let offs = [];
   let time = 0;
   let tick = 0;
@@ -170,22 +219,26 @@ export function createCombatFx(game) {
     for (let i = 0; i < BLOOD; i++) bloodMesh.setMatrixAt(i, zero2);
     scene.add(bloodMesh);
 
-    debrisMesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      DEBRIS_MAX,
-    );
-    debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    const white = new THREE.Color(0x333333);
-    for (let i = 0; i < DEBRIS_MAX; i++) {
-      debrisMesh.setColorAt(i, white);
-      debrisMesh.setMatrixAt(i, zero2);
-    }
-    debrisMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-    debrisMesh.frustumCulled = false;
-    debrisMesh.name = 'cfx-debris';
-    debrisMesh.visible = false;
-    scene.add(debrisMesh);
+    // Parts: boxes (plain colour), doors (a window band) and wheels (a dark
+    // tyre round a light hub), the last two shaded by vertex colour.
+    const mk = (geo, vc, name) => {
+      const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: vc }), DEBRIS_MAX);
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const c0 = new THREE.Color(0x333333);
+      for (let i = 0; i < DEBRIS_MAX; i++) {
+        m.setColorAt(i, c0);
+        m.setMatrixAt(i, zero2);
+      }
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      m.frustumCulled = false;
+      m.name = name;
+      m.visible = false;
+      scene.add(m);
+      return m;
+    };
+    debrisMesh = mk(new THREE.BoxGeometry(1, 1, 1), false, 'cfx-parts');
+    doorMesh = mk(doorGeometry(), true, 'cfx-doors');
+    wheelMesh = mk(wheelGeometry(), true, 'cfx-wheels');
   }
 
   const q = () => clamp(game.quality == null ? 1 : +game.quality || 1, 0.25, 1);
@@ -396,101 +449,80 @@ export function createCombatFx(game) {
     droplets(t.x, (t.y || 0) + 1.0, t.z, n, big ? 5 : 3.2, big ? 7 : 4);
   }
 
-  // ---- wreck debris: dark metal, vehicle-coloured panels and tyres ----
-  const dx_ = new Float32Array(DEBRIS_MAX), dy_ = new Float32Array(DEBRIS_MAX), dz_ = new Float32Array(DEBRIS_MAX);
-  const dvx = new Float32Array(DEBRIS_MAX), dvy = new Float32Array(DEBRIS_MAX), dvz = new Float32Array(DEBRIS_MAX);
-  const drx = new Float32Array(DEBRIS_MAX), dry = new Float32Array(DEBRIS_MAX), drz = new Float32Array(DEBRIS_MAX);
-  const dwx = new Float32Array(DEBRIS_MAX), dwy = new Float32Array(DEBRIS_MAX), dwz = new Float32Array(DEBRIS_MAX);
-  const dsx = new Float32Array(DEBRIS_MAX), dsy = new Float32Array(DEBRIS_MAX), dsz = new Float32Array(DEBRIS_MAX);
-  const dage = new Float32Array(DEBRIS_MAX).fill(-1); // < 0 = free
-  const dbounced = new Uint8Array(DEBRIS_MAX);
-  let debrisHead = 0;
+  // ---- wreck parts (carparts.js): doors, wheels, bonnet, bumper, chunks ----
+  const parts = createParts(DEBRIS_MAX);
+  const partShown = new Uint8Array(DEBRIS_MAX); // 0 none, 1 box, 2 door, 3 wheel: which mesh holds slot i
+  const partSeen = new Int32Array(DEBRIS_MAX).fill(-1);
   const _col = THREE.Color ? new THREE.Color() : null;
+  const PRNG = createRng(0x9a27);
+  // A loose chunk (props hit by a blast).
   function chunk(x, y, z, vx, vy, vz, sx, sy, sz, hex) {
-    const i = debrisHead;
-    debrisHead = (debrisHead + 1) % DEBRIS_MAX;
-    dx_[i] = x; dy_[i] = y; dz_[i] = z;
-    dvx[i] = vx; dvy[i] = vy; dvz[i] = vz;
-    drx[i] = rnd() * 6.28; dry[i] = rnd() * 6.28; drz[i] = rnd() * 6.28;
-    dwx[i] = rs() * 9; dwy[i] = rs() * 9; dwz[i] = rs() * 9;
-    dsx[i] = sx; dsy[i] = sy; dsz[i] = sz;
-    dage[i] = 0;
-    dbounced[i] = 0;
-    if (debrisMesh) {
-      _col.setHex(hex);
-      debrisMesh.setColorAt(i, _col);
-      debrisMesh.instanceColor.needsUpdate = true;
-      debrisMesh.visible = true;
-    }
+    const h = Math.sqrt(vx * vx + vz * vz);
+    addPart(parts, PART.chunk, x, y, z, Math.sqrt(h * h + vy * vy), Math.atan2(vy, h), Math.atan2(vz, vx), sx, sy, sz, hex, PRNG);
   }
-  // 6 to 10 chunks per wreck (cars add tyres among them).
+  // 14 to 18 parts per car (tanks, boats and aircraft throw the same mix).
   function wreckDebris(c, x, y, z) {
-    const sp = c.spec || {};
-    const len = sp.length || 4, wid = sp.width || 1.8, hgt = sp.height || 1.4;
-    const big = Math.max(len, wid);
-    const n = 6 + Math.floor(rnd() * 5);
-    const hex = typeof c.color === 'number' ? c.color : 0x884433;
-    const tyres = c.kind === 'car' ? 2 + Math.floor(rnd() * 2) : 0;
-    const cy = Math.max(0.4, y);
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * 6.28 + rnd() * 0.8;
-      const out = (3 + rnd() * 5) * (0.7 + big * 0.06);
-      const tyre = i < tyres;
-      const col = tyre ? 0x141414 : i % 2 ? hex : 0x2e3034;
-      const k = 0.3 + rnd() * 0.4;
-      const sx = tyre ? 0.7 : Math.max(0.35, len * k * 0.35);
-      const sy = tyre ? 0.7 : Math.max(0.2, hgt * 0.25 * (0.5 + rnd()));
-      const sz = tyre ? 0.28 : Math.max(0.35, wid * k * 0.4);
-      chunk(x + Math.cos(a) * 0.6, cy, z + Math.sin(a) * 0.6, Math.cos(a) * out, 5 + rnd() * 7, Math.sin(a) * out, sx, sy, sz, col);
+    landsPer[parts.seq & 63] = 0;
+    launchCarParts(parts, c, x, y, z);
+  }
+  // First ground hit: sparks and dust; at most 4 clatters per blast for audio.
+  const LAND = { x: 0, z: 0, part: 'chunk', speed: 0 };
+  const PART_NAME = ['chunk', 'door', 'wheel', 'bonnet', 'bumper', 'panel'];
+  const landsPer = new Uint8Array(64);
+  function onPartLand(i, sp) {
+    const x = parts.x[i], z = parts.z[i];
+    if (near(x, z) && sp > 3) {
+      const n = Math.max(2, Math.round(5 * q()));
+      for (let k = 0; k < n; k++) add(x, 0.1, z, rs() * 4, 1 + rnd() * 3, rs() * 4, 0.25 + rnd() * 0.3, 0.14, 0.05, 2.2, 1, 0.75, 0.3, STREAK + 8, 9.8, 0.5);
+      dust(x, 0.2, z, rs() * 0.6, 0.5 + rnd() * 0.4, rs() * 0.6, 0.8, 0.3, 1.3, 0.4, 0.55);
     }
+    const b = parts.blast[i];
+    const slot = b < 0 ? -1 : b & 63;
+    if (slot >= 0 && landsPer[slot] >= 4) return;
+    if (slot >= 0) landsPer[slot]++;
+    LAND.x = x;
+    LAND.z = z;
+    LAND.part = PART_NAME[parts.kind[i]] || 'chunk';
+    LAND.speed = sp;
+    if (game.events && game.events.emit) game.events.emit('partLand', LAND);
   }
   function stepDebris(dt) {
+    stepParts(parts, dt, onPartLand);
+    if (!debrisMesh) return;
+    let dirtyC = 0;
     for (let i = 0; i < DEBRIS_MAX; i++) {
-      if (dage[i] < 0) continue;
-      dage[i] += dt;
-      if (dage[i] >= DEBRIS_LIFE) {
-        dage[i] = -1;
-        if (debrisMesh) {
+      const live = parts.age[i] >= 0;
+      const want = !live ? 0 : parts.kind[i] === PART.door ? 2 : parts.kind[i] === PART.wheel ? 3 : 1;
+      const mesh = want === 2 ? doorMesh : want === 3 ? wheelMesh : debrisMesh;
+      if (partShown[i] !== want || (live && partSeen[i] !== parts.gen[i])) {
+        // Moved to another mesh (or freed): hide it in the old one.
+        if (partShown[i]) {
+          const old = partShown[i] === 2 ? doorMesh : partShown[i] === 3 ? wheelMesh : debrisMesh;
           _m.makeScale(0, 0, 0);
-          debrisMesh.setMatrixAt(i, _m);
+          old.setMatrixAt(i, _m);
+          old.instanceMatrix.needsUpdate = true;
         }
-        continue;
-      }
-      dvy[i] -= 9.8 * dt;
-      dx_[i] += dvx[i] * dt;
-      dy_[i] += dvy[i] * dt;
-      dz_[i] += dvz[i] * dt;
-      drx[i] += dwx[i] * dt;
-      dry[i] += dwy[i] * dt;
-      drz[i] += dwz[i] * dt;
-      const floor = Math.max(dsx[i], dsy[i], dsz[i]) * 0.3;
-      if (dy_[i] < floor) {
-        dy_[i] = floor;
-        if (!dbounced[i] && dvy[i] < -1) {
-          dbounced[i] = 1;
-          dvy[i] *= -0.35;
-          dvx[i] *= 0.6;
-          dvz[i] *= 0.6;
-        } else {
-          dvy[i] = 0;
-          dvx[i] *= 0.85;
-          dvz[i] *= 0.85;
-          dwx[i] *= 0.7;
-          dwy[i] *= 0.7;
-          dwz[i] *= 0.7;
+        partShown[i] = want;
+        if (live) {
+          partSeen[i] = parts.gen[i];
+          _col.setHex(parts.col[i]);
+          mesh.setColorAt(i, _col);
+          mesh.instanceColor.needsUpdate = true;
+          mesh.visible = true;
+          dirtyC++;
         }
       }
-      if (!debrisMesh) continue;
-      const left = DEBRIS_LIFE - dage[i];
-      const sc = left < DEBRIS_SHRINK ? left / DEBRIS_SHRINK : 1;
-      _e.set(drx[i], dry[i], drz[i]);
+      if (!live) continue;
+      const sc = partScale(parts, i);
+      _e.set(parts.rx[i], parts.ry[i], parts.rz[i]);
       _q.setFromEuler(_e);
-      _p.set(dx_[i], dy_[i], dz_[i]);
-      _s.set(dsx[i] * sc, dsy[i] * sc, dsz[i] * sc);
+      _p.set(parts.x[i], parts.y[i], parts.z[i]);
+      _s.set(parts.sx[i] * sc, parts.sy[i] * sc, parts.sz[i] * sc);
       _m.compose(_p, _q, _s);
-      debrisMesh.setMatrixAt(i, _m);
+      mesh.setMatrixAt(i, _m);
+      mesh.instanceMatrix.needsUpdate = true;
     }
-    if (debrisMesh) debrisMesh.instanceMatrix.needsUpdate = true;
+    return dirtyC;
   }
 
   // ---- weapons ----
@@ -964,6 +996,8 @@ export function createCombatFx(game) {
           if (rnd() < 0.12) add(px, top, pz, rs() * 1.5, 2.5 + rnd() * 3, rs() * 1.5, 0.6 + rnd() * 0.6, 0.1, 0.04, 2.2, 1, 0.7, 0.25, STREAK + 8, 4, 0.5);
         }
         if ((tick & 7) === 0) add(c.x, top, c.z, 0, 0, 0, 0.3, 3 + 3 * hot, 4 + 3 * hot, 0.35 * hot + 0.1, 1, 0.55, 0.2, GLOW);
+        // Firelight on the road round the hull.
+        if ((tick & 7) === 4) add(c.x, 0.12, c.z, 0, 0, 0, 0.3, 8 + 6 * hot, 9 + 6 * hot, 0.45 * hot + 0.12, 1, 0.5, 0.18, GLOW + 4);
       }
       // Smoke: thick and black while it burns, then a grey column that
       // thins as the hull cools and sinks away.
@@ -1125,8 +1159,9 @@ export function createCombatFx(game) {
     name: 'combatfx',
     game,
     lastBlast: last,
+    parts,
     counts() {
-      return { alpha: S ? S.n : 0, additive: G ? G.n : 0, decals: decalCount, blood: liveCount(bt, -1e8, true), debris: liveCount(dage, 0, false) };
+      return { alpha: S ? S.n : 0, additive: G ? G.n : 0, decals: decalCount, blood: liveCount(bt, -1e8, true), debris: liveParts(parts) };
     },
     fixedUpdate(dt) {
       if (!(dt > 0) || game.paused) return;
@@ -1164,7 +1199,7 @@ export function createCombatFx(game) {
     dispose() {
       for (const off of offs) off();
       offs = [];
-      for (const m of [S && S.mesh, G && G.mesh, decalMesh, bloodMesh, debrisMesh]) {
+      for (const m of [S && S.mesh, G && G.mesh, decalMesh, bloodMesh, debrisMesh, doorMesh, wheelMesh]) {
         if (!m) continue;
         scene.remove(m);
         m.geometry.dispose();

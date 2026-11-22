@@ -71,23 +71,30 @@ test('blood decals are a hard-capped ring buffer', () => {
   assert.equal(fx.counts().blood, BLOOD_POOLS + BLOOD_SPLATS, 'ring is full and reuses its slots');
 });
 
-test('wreck debris: 6 to 10 chunks per vehicle, pooled with a hard cap, gone in a few seconds', () => {
+// W6 slice 3 (REVAMP 6.7 layer 7): parts now lie 20 s (they vanished in
+// 3.6 s) and a car throws 14 to 18 of them from a pool of 96 (was 6 to 10 of 48).
+test('wreck parts: 14 to 18 per car, they land, lie 20 s and fade; the pool is a hard cap', () => {
   const { events, fx, run } = fxGame();
-  const car = { kind: 'car', color: 0xc8402e, x: 5, z: 0, y: 0, spec: { length: 4.4, width: 1.8, height: 1.4 } };
-  events.emit('explosion', { x: 5, y: 0.7, z: 0, radius: 8, source: null, depth: 0, size: 'small', craft: car });
+  const lands = [];
+  events.on('partLand', (e) => lands.push(e.part));
+  const car = { id: 7, kind: 'car', color: 0xc8402e, x: 5, z: 0, y: 0, spec: { length: 4.4, width: 1.8, height: 1.4 } };
+  events.emit('explosion', { x: 5, y: 0.7, z: 0, radius: 10, scale: 1, source: null, depth: 0, size: 'huge', craft: car });
   const n = fx.counts().debris;
-  assert.ok(n >= 6 && n <= 10, `${n} chunks`);
-  run(1);
-  assert.equal(fx.counts().debris, n, 'still flying');
-  run(4);
-  assert.equal(fx.counts().debris, 0, 'faded away');
+  assert.ok(n >= 14 && n <= 18, `${n} parts`);
+  run(5);
+  assert.equal(fx.counts().debris, n, 'all lying at 5 s');
+  assert.ok(lands.length >= 1 && lands.length <= 4, `${lands.length} clatters (at most 4 per blast)`);
+  run(14);
+  assert.equal(fx.counts().debris, n, 'still lying at 19 s');
+  run(2.5);
+  assert.equal(fx.counts().debris, 0, 'faded after 21 s');
   for (let i = 0; i < 40; i++) {
-    events.emit('explosion', { x: i, y: 0.7, z: 0, radius: 8, source: null, depth: 2, size: 'small', craft: car });
+    events.emit('explosion', { x: i, y: 0.7, z: 0, radius: 10, scale: 1, source: null, depth: 2, size: 'huge', craft: { ...car, id: i } });
     assert.ok(fx.counts().debris <= DEBRIS_MAX);
   }
   assert.equal(fx.counts().debris, DEBRIS_MAX);
   events.emit('explosion', { x: 1, y: 0.7, z: 0, radius: 8, source: null, depth: 0, size: 'small', craft: null });
-  assert.equal(fx.counts().debris, DEBRIS_MAX, 'blasts without a craft add no chunks');
+  assert.equal(fx.counts().debris, DEBRIS_MAX, 'blasts without a craft add no parts');
 });
 
 test('blast shake scales with distance and size, and Reduce motion silences it', () => {

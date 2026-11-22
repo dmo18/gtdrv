@@ -33,6 +33,7 @@ export function createParts(max = PARTS_MAX) {
     sx: f(), sy: f(), sz: f(),
     age: new Float32Array(max).fill(-1), // < 0: free
     hits: new Uint8Array(max), // ground contacts so far (0, 1 = bounced, 2 = lying)
+    gen: new Uint16Array(max), // bumped each time the slot is reused (the drawer recolours)
   };
 }
 
@@ -75,6 +76,7 @@ export function addPart(P, kind, x, y, z, sp, el, az, sx, sy, sz, hex, rng, blas
   P.sx[i] = sx; P.sy[i] = sy; P.sz[i] = sz;
   P.age[i] = 0;
   P.hits[i] = 0;
+  P.gen[i] = (P.gen[i] + 1) & 0xffff;
   return i;
 }
 
@@ -101,6 +103,8 @@ export function launchCarParts(P, c, x, y, z, out = null) {
   const room = freeParts(P) >= PARTS_MAXPER;
   const y0 = Math.max(0.5, y);
   const wr = Math.max(0.3, Math.min(0.42, H * 0.24)), tw = 0.22;
+  // Doors, wheels, a bonnet and a bumper only come off cars.
+  const car = !c || !c.kind || c.kind === 'car';
   if (out) out.door = out.wheel = out.bonnet = out.bumper = out.n = 0;
   for (let k = 0; k < n; k++) {
     const az = (k / n) * 6.283 + rng.next() * 0.9;
@@ -108,7 +112,9 @@ export function launchCarParts(P, c, x, y, z, out = null) {
     const el = PART_EL0 + rng.next() * (PART_EL1 - PART_EL0);
     const ox = Math.cos(az) * L * 0.25, oz = Math.sin(az) * W * 0.25;
     let kind = PART.chunk, sx, sy, sz, hex;
-    if (k === 0 || (k === 4 && room)) {
+    if (!car && k < 6) {
+      kind = PART.panel; sx = 0.6 + rng.next() * 0.9; sy = 0.07; sz = 0.5 + rng.next() * 0.7; hex = skin;
+    } else if (k === 0 || (k === 4 && room)) {
       kind = PART.door; sx = L * 0.26; sy = 0.07; sz = H * 0.6; hex = skin;
     } else if (k === 1 || (k === 5 && room)) {
       kind = PART.wheel; sx = sz = wr * 2; sy = tw; hex = 0xffffff;
