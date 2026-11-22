@@ -79,6 +79,18 @@ Contract: docs/REVAMP.md section 6.6. In short:
   (`rustwater.explore.v1`), sanitised field by field.
 - The six secrets, the stunt ramps and the 14 courses are unchanged; an
   adventure step may point at a secret or ask for a medal on a ramp.
+- As built (milestone 1): world/garages.js, world/adventures.js,
+  core/explore.js, systems/garages.js, systems/adventures.js,
+  render/exploremesh.js, ui/explore.js. A roller door opens within 15 m;
+  GARAGE shows within 7 m of the door below 3 m/s. Exploring the 250 m
+  cells pays 50 points each without a toast. The three locked routes
+  are built apart from the 14 courses (`city.routes`, world/courses.js
+  `buildRoutes`) so the course list and its order never change. Where a
+  neighbourhood has no works yard, car park, grass or site lot within
+  300 m (The Roads, Little Havana, Virginia Key) a garage may stand on a
+  garden, plaza or park lot; Virginia Key has no road in the data, so its
+  shed is reached by boat or air. The Miami River has low bridges, so the
+  river adventure and route use the river mouth and the bay.
 
 ## Hard mode, respawn and health meter
 - Volume (Settings tab): `master` (0..1), `musicVol`, `sfxVol`,

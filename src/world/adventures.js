@@ -403,7 +403,8 @@ export function stepReached(s, x, y, z, pmode, stunt = null) {
 
 // Puts garages, adventures and the locked routes on a real map (the
 // island has no lots: nothing is added). Car park spots inside a garage's
-// rect are dropped so no parked car spawns in a shed. Call once, after
+// rect are dropped so no parked car spawns in a shed, and street props
+// in front of a door are removed. Call once, after
 // the city is built and before its tiles are drawn (dressLot then skips
 // the garage rects). Returns the city.
 export function attachExplore(city) {
@@ -411,12 +412,12 @@ export function attachExplore(city) {
   city.garages = placeGarages(city);
   city.adventures = placeAdventures(city, city.garages);
   city.routes = buildRoutes(city, ROUTE_SPECS);
+  const inside = (x, z, m) => city.garages.some((g) => x > g.x0 - m && x < g.x1 + m && z > g.z0 - m && z < g.z1 + m);
   const P = city.parkingSpots || [];
-  for (let i = P.length - 1; i >= 0; i--) {
-    const s = P[i];
-    for (const g of city.garages) {
-      if (s.x > g.x0 - 3 && s.x < g.x1 + 3 && s.z > g.z0 - 3 && s.z < g.z1 + 3) { P.splice(i, 1); break; }
-    }
-  }
+  for (let i = P.length - 1; i >= 0; i--) if (inside(P[i].x, P[i].z, 3)) P.splice(i, 1);
+  // Street lamps and trees on the pavement in front of a door would stand
+  // in the way in and out: they go.
+  const Q = city.props || [];
+  for (let i = Q.length - 1; i >= 0; i--) if (inside(Q[i].x, Q[i].z, 5)) Q.splice(i, 1);
   return city;
 }

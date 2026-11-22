@@ -510,3 +510,22 @@ None critical or high.
 - Still weak: canopies read as clumps up close; Little Havana has wide
   plain lawns between the street and the buildings; tall towers still
   share one window grid per style.
+
+## 2026-11-22: garages and adventures (W11, milestone 1)
+- Twelve garages (First Street Lock-up, Keyside Garage, The Paintshed,
+  Bayline Garage, Seaplane Sheds, Northwest Yard, Riverbend Garage, Ocho
+  Lock-up, Roads End Garage, Atelier Garage, Sandbar Garage, Key Point
+  Shed), placed from the lots with seed 7129. Store, take out, repaint,
+  favourite and release; the favourite is the Start car.
+- Sixteen adventures (seed 9241), four of each kind, eight in the core:
+  signs, talkers (TALK on foot), garage word and the start rumour; a
+  tracked adventure shows a fuzzy ring and the objective arrow.
+- Save: `rustwater.explore.v1`, strict sanitiser, unlocks derived from
+  the done list. Erase all progress clears it; New game keeps it.
+- Screens: Garage, Garages and Adventures through menu.registerScreen;
+  hub tiles show the counts on Miami only.
+- Tests: test/explore.test.js, test/garages.test.js,
+  test/adventures.test.js. Screenshots: docs/preview/m1-garage-*.png.
+- Not yet: the map draws explore markers as plain dots (no "?" glyph or
+  ring circle until mapui offers a layer with those shapes); the garage
+  shows no parked cars inside.

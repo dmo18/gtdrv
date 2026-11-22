@@ -256,6 +256,9 @@ export function createSession(game, storage) {
   function newSession() {
     const p = game.player;
     const old = p.vehicle;
+    // The favourite car from the garages (docs/REVAMP.md 6.6), else the
+    // sedan; read before the old car goes (it may be the favourite).
+    const fav = game.favouriteCar ? game.favouriteCar() : null;
     // Cars from the old garage are forgotten (and removed if parked ones).
     for (const e of garage) {
       if (e.vehicle && !e.vehicle.removed && e.vehicle !== old && !e.vehicle.driver) {
@@ -269,7 +272,9 @@ export function createSession(game, storage) {
       p.vehicle = null;
       game.removeVehicle(old);
     }
-    const car = createVehicle('sedan', city.spawn.x, city.spawn.z, city.spawn.heading, game.rng);
+    const favOk = !!(fav && specOf(fav.spec) && kindOfSpec(fav.spec) === 'car');
+    const car = createVehicle(favOk ? fav.spec : 'sedan', city.spawn.x, city.spawn.z, city.spawn.heading, game.rng);
+    if (favOk && typeof fav.color === 'number') car.color = fav.color;
     game.addVehicle(car);
     const w = p.walker;
     w.x = w.px = car.x;

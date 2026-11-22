@@ -234,9 +234,8 @@ export function createGarages(game) {
     return true;
   }
 
-  let btn = null;
   if (on && game.touch && game.touch.registerAction) {
-    btn = game.touch.registerAction({
+    game.touch.registerAction({
       id: 'garage', label: 'Use garage', text: 'GARAGE', group: 'primary', modes: ['foot', 'car'],
       icon: '<path d="M3 11l9-7 9 7v9H3z"/><path d="M7 20v-7h10v7M7 16h10"/>',
       press: () => open(),

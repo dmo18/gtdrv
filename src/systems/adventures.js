@@ -169,9 +169,8 @@ export function createAdventures(game, storage) {
   const nearTalk = [];
   let talkTarget = null;
   let talkPrompt = 0;
-  let talkBtn = null;
   if (on && game.touch && game.touch.registerAction) {
-    talkBtn = game.touch.registerAction({
+    game.touch.registerAction({
       id: 'talk', label: 'Talk', text: 'TALK', group: 'primary', modes: ['foot'],
       icon: '<path d="M4 5h16v10H9l-4 4v-4H4z"/>',
       press: () => talk(),
