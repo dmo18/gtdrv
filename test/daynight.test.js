@@ -92,7 +92,7 @@ test('sea shore map fills in slices and switches on', async () => {
 test('weather and a lack of scene leave the day/night logic working', () => {
   const game = { clock: 17.5, progress: { settings: { reduceMotion: true } } };
   const dn = createDayNight(game);
-  for (let i = 0; i < 120; i++) dn.update(1 / 60);
+  for (let i = 0; i < 120; i++) dn.fixedUpdate(1 / 60);
   assert.ok(Number.isFinite(game.clock));
   dn.setWeather('rain', true);
   assert.equal(game.weather.name, 'rain');

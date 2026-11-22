@@ -135,6 +135,11 @@ async function gameShots() {
           pv.z = pv.pz = p.z - fz * 60;
         }
         window.__base = { x: p.x, z: p.z, heading: h, h };
+        // Clear passing traffic out of the frame.
+        for (const v of g.vehicles.slice()) {
+          if (v === g.player.vehicle || v.kind !== 'car') continue;
+          if (Math.hypot(v.x - p.x, v.z - p.z) < 70) g.removeVehicle(v);
+        }
         if (id === 'street') {
           const ids = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwake', 'pickup', 'van', 'truck'];
           ids.forEach((sid, k) => put(sid, 14 + k * 3.4, (k % 2 ? 1 : -1) * (1.8 + (k % 3) * 1.6), h + (k % 2 ? 0 : Math.PI)));

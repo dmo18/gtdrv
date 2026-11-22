@@ -144,11 +144,14 @@ function tiles(items, cols, rows) {
 }
 
 const CAR_IDS = Object.keys(VEHICLE_SPECS);
-function carLine(view, far = false) {
+// The ten road vehicles, then the reward cars.
+const ROAD_IDS = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwake', 'pickup', 'van', 'truck'];
+const REWARD_IDS = CAR_IDS.filter((id) => !ROAD_IDS.includes(id));
+function carLine(view, far = false, ids = ROAD_IDS) {
   clear();
   ground.visible = true;
   sea.visible = false;
-  const items = CAR_IDS.map((id, k) => {
+  const items = ids.map((id, k) => {
     const v = createVehicle(id, 0, 0, 0);
     const spec = v.spec;
     const mesh = createVehicleMesh(spec, spec.colors[k % spec.colors.length]);
@@ -169,7 +172,7 @@ function carLine(view, far = false) {
       },
     };
   });
-  return tiles(items, 3, 3);
+  return ids.length > 6 ? tiles(items, 4, 3) : tiles(items, 3, Math.ceil(ids.length / 3));
 }
 
 function boatLine() {
@@ -679,6 +682,9 @@ const SHOTS = {
   'cars-side': () => carLine('side'),
   'cars-top': () => carLine('top'),
   'cars-far': () => carLine('front', true),
+  'cars-mid': () => carLine('side', false, ROAD_IDS, 40),
+  'rewards-front': () => carLine('front', false, REWARD_IDS),
+  'rewards-side': () => carLine('side', false, REWARD_IDS),
   boats: () => boatLine(),
   aircraft: () => airLine(),
   drift, damage, sparks: sparksShot, 'boat-spray': boatSpray, night, 'air-fx': airAction, street,

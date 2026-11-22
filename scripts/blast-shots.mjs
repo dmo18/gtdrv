@@ -238,25 +238,33 @@ if (only === 'all' || only.startsWith('w6')) {
       const g = window.__rw;
       g.daynight.setHour(14);
       const w = g.player.walker;
-      const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
       const sp = g.city.spawn;
       w.x = w.px = sp.x;
       w.z = w.pz = sp.z;
-      a.x = a.px = w.x + 7;
-      a.z = a.pz = w.z + 4;
-      a.heading = Math.PI / 2;
-      if (a.state !== undefined) a.state = 'idle';
-      a.vx = a.vz = 0;
+      const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
+      const pin = () => {
+        a.x = a.px = w.x + 4;
+        a.z = a.pz = w.z;
+        a.heading = Math.PI / 2;
+        a.vx = a.vz = 0;
+      };
       window.__victim = a;
-      window.__shot.cam = [a.x + 0.5, 1.6, a.z + 6.5, a.x + 1.2, 0.6, a.z];
-      window.__shot.run(2);
+      window.__shot.cam = [w.x + 5.2, 1.5, w.z + 6, w.x + 5.6, 0.7, w.z];
+      window.__shot.run(3, pin);
+      pin();
+      w.heading = 0;
       w.arms.weapon = 'scatter';
       w.arms.cool = 0;
-      const dx = a.x - w.x, dz = a.z - w.z, l = Math.hypot(dx, dz);
-      g.combat.fire(w, dx / l, (1.0 - 1.4) / l, dz / l);
-      window.__shot.run(9);
+      const hp0 = a.hp;
+      g.combat.fire(w, 1, (1.0 - 1.4) / 4, 0);
+      window.__trace = [[a.x - w.x, a.z - w.z, a.life, hp0, a.hp, w.x, a.rag && a.rag.vx]];
+      for (let i = 0; i < 12; i++) {
+        window.__shot.run(1);
+        window.__trace.push([+(a.x - w.x).toFixed(2), +(a.z - w.z).toFixed(2), a.life]);
+      }
     });
     await shot('w6-fall-hit');
+    console.log('victim', JSON.stringify(await page.evaluate(() => { const a = window.__victim; return { life: a.life, x: a.x - window.__rw.player.walker.x, rag: !!a.rag, tr: window.__trace }; })));
     await page.evaluate(() => window.__shot.run(100));
     await shot('w6-fall-lying');
   }

@@ -39,77 +39,123 @@ const FLOOR = 0x242321;
 // span; b: B-pillar span; base: glass base width share; tumble: inward
 // lean of the glass (m per m of height). seams: door shut lines (t).
 // q: deck superellipse exponent (higher is flatter with a tighter edge).
+const SEDAN = {
+  pF: 6, pR: 7, flare: 0.032, q: 3.4, lean: [0.13, 0.07, 0.07, 0.1], hoodCrease: [0.22, 0.44, 0.012],
+  top: [[-0.5, 0.56], [-0.492, 0.64], [-0.475, 0.675], [-0.44, 0.682], [-0.36, 0.672], [-0.3, 0.665], [0.2, 0.615], [0.3, 0.59], [0.4, 0.56], [0.46, 0.535], [0.49, 0.5], [0.5, 0.44]],
+  belt: [[-0.5, 0.52], [-0.49, 0.6], [-0.465, 0.635], [-0.4, 0.645], [-0.3, 0.64], [0, 0.605], [0.2, 0.575], [0.38, 0.535], [0.46, 0.505], [0.49, 0.47], [0.5, 0.42]],
+  bottom: [[-0.5, 0.24], [-0.465, 0.135], [0.44, 0.125], [0.5, 0.2]],
+  gh: { xC: -0.35, xR0: -0.205, xR1: -0.015, xA: 0.205, roof: 1, base: 0.885, tumble: 0.42, crown: 0.035, side: [-0.29, 0.168], b: [-0.088, -0.062], rear: true },
+  seams: [0.205, -0.07, -0.215], hood: 0.235, boot: -0.37, lip: true, exhaust: { n: 2, z: 0.3 },
+};
 const STYLES = {
-  sedan: {
-    pF: 6, pR: 7, flare: 0.032, q: 3.4, lean: [0.13, 0.07, 0.07, 0.1], hoodCrease: [0.22, 0.44, 0.012],
-    top: [[-0.5, 0.56], [-0.492, 0.64], [-0.475, 0.675], [-0.44, 0.682], [-0.36, 0.672], [-0.3, 0.665], [0.2, 0.615], [0.3, 0.59], [0.4, 0.56], [0.46, 0.535], [0.49, 0.5], [0.5, 0.44]],
-    belt: [[-0.5, 0.52], [-0.49, 0.6], [-0.465, 0.635], [-0.4, 0.645], [-0.3, 0.64], [0, 0.605], [0.2, 0.575], [0.38, 0.535], [0.46, 0.505], [0.49, 0.47], [0.5, 0.42]],
-    bottom: [[-0.5, 0.24], [-0.465, 0.135], [0.44, 0.125], [0.5, 0.2]],
-    gh: { xC: -0.35, xR0: -0.205, xR1: -0.015, xA: 0.205, roof: 1, base: 0.885, tumble: 0.42, crown: 0.035, side: [-0.29, 0.168], b: [-0.088, -0.062], rear: true },
-    seams: [0.205, -0.07, -0.215], hood: 0.235, boot: -0.37,
-    head: { bands: [3], z: [0.46, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.42, 0.97], rev: 0.56 },
-    grille: { bands: [1, 2], z: 0.46 }, intake: 0.75, exhaust: { n: 2, z: 0.3 },
+  sedan: SEDAN,
+  // Four-door fastback: the roof runs long and low into a short tail.
+  nightheron: {
+    ...SEDAN, lean: [0.12, 0.07, 0.05, 0.1], flare: 0.04, face: 'sedan',
+    top: [[-0.5, 0.55], [-0.49, 0.62], [-0.47, 0.645], [-0.44, 0.65], [-0.38, 0.648], [0.2, 0.6], [0.3, 0.575], [0.4, 0.545], [0.46, 0.52], [0.49, 0.49], [0.5, 0.43]],
+    belt: [[-0.5, 0.51], [-0.49, 0.585], [-0.465, 0.615], [-0.4, 0.625], [-0.3, 0.62], [0, 0.6], [0.2, 0.565], [0.38, 0.525], [0.46, 0.495], [0.49, 0.46], [0.5, 0.41]],
+    gh: { xC: -0.425, xR0: -0.13, xR1: -0.01, xA: 0.2, roof: 0.96, base: 0.86, tumble: 0.5, crown: 0.035, side: [-0.33, 0.165], b: [-0.088, -0.062], rear: true },
+    boot: -0.45, wingLip: true,
   },
-  hatch: {
-    pF: 4.6, pR: 7, flare: 0.02, drop: 0.07,
-    top: [[-0.5, 0.56], [-0.485, 0.64], [-0.45, 0.665], [-0.3, 0.665], [0.15, 0.64], [0.26, 0.615], [0.36, 0.585], [0.45, 0.545], [0.49, 0.505], [0.5, 0.47]],
-    bottom: [[-0.5, 0.2], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.19]],
-    gh: { xC: -0.478, xR0: -0.43, xR1: 0.03, xA: 0.205, roof: 1, base: 0.9, tumble: 0.15, crown: 0.03, side: [-0.395, 0.125], b: [-0.095, -0.07], rear: true },
-    seams: [0.185, -0.085, -0.215], hood: 0.19, boot: null,
-    head: { bands: [3], z: [0.46, 0.96], ind: 0.88 }, tail: { bands: [3, 4], z: [0.55, 0.98], rev: 0.68 },
-    grille: { bands: [2], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.32 }, roofSpoiler: true,
+  // Classic cab: a squarer three-box body, upright glass, flat bonnet.
+  taxi: {
+    pF: 10, pR: 11, flare: 0.012, q: 4.6, lean: [0.05, 0.05, 0.03, 0.05],
+    top: [[-0.5, 0.6], [-0.495, 0.645], [-0.48, 0.66], [-0.35, 0.665], [-0.3, 0.665], [0.2, 0.63], [0.42, 0.61], [0.48, 0.598], [0.5, 0.56]],
+    belt: [[-0.5, 0.58], [-0.49, 0.625], [-0.47, 0.64], [-0.3, 0.64], [0.2, 0.61], [0.42, 0.592], [0.48, 0.58], [0.5, 0.54]],
+    bottom: [[-0.5, 0.23], [-0.47, 0.15], [0.45, 0.14], [0.5, 0.21]],
+    gh: { xC: -0.315, xR0: -0.215, xR1: 0.065, xA: 0.2, roof: 1, base: 0.9, tumble: 0.26, crown: 0.022, side: [-0.29, 0.168], b: [-0.075, -0.05], rear: true },
+    seams: [0.195, -0.06, -0.21], hood: 0.22, boot: -0.335, exhaust: { n: 1, z: 0.3 },
   },
+  // Patrol interceptor: the sedan stretched, flatter roof, push bar.
+  police: {
+    ...SEDAN, lean: [0.09, 0.06, 0.06, 0.08], flare: 0.028, pushBar: true, lip: false, face: 'police',
+    top: [[-0.5, 0.58], [-0.492, 0.65], [-0.475, 0.672], [-0.44, 0.676], [-0.36, 0.668], [-0.3, 0.662], [0.2, 0.62], [0.3, 0.6], [0.4, 0.575], [0.46, 0.55], [0.49, 0.52], [0.5, 0.47]],
+    belt: [[-0.5, 0.55], [-0.49, 0.61], [-0.465, 0.635], [-0.4, 0.64], [-0.3, 0.635], [0, 0.61], [0.2, 0.585], [0.38, 0.55], [0.46, 0.525], [0.49, 0.495], [0.5, 0.45]],
+    gh: { xC: -0.34, xR0: -0.215, xR1: 0.0, xA: 0.205, roof: 0.985, base: 0.89, tumble: 0.36, crown: 0.025, side: [-0.29, 0.168], b: [-0.088, -0.062], rear: true },
+  },
+  compact: {
+    pF: 5, pR: 9, flare: 0.03, q: 3.2, lean: [0.12, 0.06, 0.03, 0.08], hoodCrease: [0.26, 0.42, 0.01],
+    top: [[-0.5, 0.62], [-0.49, 0.665], [-0.47, 0.68], [-0.42, 0.685], [0.2, 0.635], [0.3, 0.6], [0.4, 0.56], [0.46, 0.52], [0.49, 0.48], [0.5, 0.43]],
+    belt: [[-0.5, 0.6], [-0.48, 0.65], [-0.44, 0.665], [-0.3, 0.66], [0, 0.625], [0.2, 0.59], [0.38, 0.54], [0.46, 0.5], [0.49, 0.46], [0.5, 0.41]],
+    bottom: [[-0.5, 0.26], [-0.46, 0.14], [0.44, 0.13], [0.5, 0.2]],
+    gh: { xC: -0.487, xR0: -0.445, xR1: 0.02, xA: 0.24, roof: 1, base: 0.885, tumble: 0.38, crown: 0.035, side: [-0.405, 0.19], b: [-0.075, -0.05], rear: true },
+    seams: [0.215, -0.07, -0.3], hood: 0.25, boot: null, exhaust: { n: 1, z: 0.32 }, roofSpoiler: true,
+  },
+  // Low mid-engine wedge: the cabin sits forward, wide hips, a wing.
   sports: {
-    pF: 4, pR: 5.5, flare: 0.05, drop: 0.085,
-    top: [[-0.5, 0.52], [-0.485, 0.6], [-0.45, 0.66], [-0.38, 0.69], [-0.3, 0.685], [-0.12, 0.65], [0.1, 0.62], [0.24, 0.6], [0.36, 0.56], [0.45, 0.48], [0.49, 0.42], [0.5, 0.38]],
-    bottom: [[-0.5, 0.2], [-0.46, 0.11], [0.44, 0.11], [0.5, 0.13]],
-    gh: { xC: -0.34, xR0: -0.115, xR1: -0.01, xA: 0.175, roof: 1, base: 0.85, tumble: 0.2, crown: 0.025, side: [-0.25, 0.135], b: null, rear: true },
-    seams: [0.15, -0.19], hood: 0.165, boot: -0.37,
-    head: { bands: [3], z: [0.46, 0.94], ind: 0.86 }, tail: { bands: [3], z: [0.3, 0.97], rev: 0.4 },
-    grille: { bands: [1, 2], z: 0.46 }, intake: 0.75, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
+    pF: 4.5, pR: 6, flare: 0.06, q: 3.0, lean: [0.06, 0.04, 0.05, 0.1],
+    top: [[-0.5, 0.54], [-0.49, 0.6], [-0.46, 0.63], [-0.4, 0.64], [-0.3, 0.63], [-0.15, 0.6], [0.1, 0.5], [0.25, 0.46], [0.38, 0.42], [0.46, 0.38], [0.49, 0.34], [0.5, 0.3]],
+    belt: [[-0.5, 0.5], [-0.49, 0.57], [-0.46, 0.6], [-0.4, 0.61], [-0.25, 0.6], [-0.1, 0.57], [0.1, 0.48], [0.3, 0.43], [0.45, 0.36], [0.49, 0.32], [0.5, 0.28]],
+    bottom: [[-0.5, 0.2], [-0.46, 0.1], [0.44, 0.1], [0.5, 0.12]],
+    gh: { xC: -0.33, xR0: -0.13, xR1: -0.02, xA: 0.2, roof: 1, base: 0.82, tumble: 0.55, crown: 0.03, side: [-0.27, 0.15], b: null, rear: true },
+    seams: [0.15, -0.19], hood: 0.22, boot: -0.37, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
   },
+  // Long hood, short deck, fastback, upright square nose.
   muscle: {
-    pF: 7, pR: 7, flare: 0.05, drop: 0.085,
-    top: [[-0.5, 0.5], [-0.485, 0.58], [-0.45, 0.63], [-0.4, 0.645], [-0.3, 0.645], [-0.1, 0.632], [0.1, 0.605], [0.3, 0.6], [0.43, 0.585], [0.48, 0.56], [0.5, 0.52]],
-    bottom: [[-0.5, 0.21], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.18]],
-    gh: { xC: -0.335, xR0: -0.19, xR1: -0.04, xA: 0.105, roof: 1, base: 0.88, tumble: 0.18, crown: 0.025, side: [-0.26, 0.075], b: null, rear: true },
-    seams: [0.085, -0.225], hood: 0.09, boot: -0.37,
-    head: { bands: [3], z: [0.46, 0.9], ind: 2 }, tail: { bands: [3], z: [0.2, 0.96], rev: 0.32 },
-    grille: { bands: [2], z: 0.46 }, intake: 0.75, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
+    pF: 8, pR: 7, flare: 0.045, q: 3.6, lean: [0.04, 0.05, 0.03, 0.06],
+    top: [[-0.5, 0.56], [-0.49, 0.62], [-0.47, 0.655], [-0.42, 0.66], [-0.34, 0.655], [-0.1, 0.64], [0.1, 0.62], [0.3, 0.615], [0.44, 0.6], [0.48, 0.585], [0.5, 0.55]],
+    belt: [[-0.5, 0.54], [-0.49, 0.6], [-0.46, 0.625], [-0.35, 0.63], [-0.1, 0.6], [0.1, 0.58], [0.3, 0.58], [0.44, 0.575], [0.48, 0.56], [0.5, 0.53]],
+    bottom: [[-0.5, 0.22], [-0.46, 0.12], [0.44, 0.12], [0.5, 0.18]],
+    gh: { xC: -0.36, xR0: -0.17, xR1: -0.06, xA: 0.09, roof: 1, base: 0.86, tumble: 0.42, crown: 0.025, side: [-0.27, 0.06], b: null, rear: true },
+    seams: [0.085, -0.225], hood: 0.09, boot: -0.37, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
+  },
+  // Speedster: a long bonnet and a low chopped cabin set far back.
+  sunchaser: {
+    pF: 6, pR: 6, flare: 0.055, q: 3.2, lean: [0.08, 0.05, 0.06, 0.08], face: 'muscle',
+    top: [[-0.5, 0.56], [-0.49, 0.62], [-0.47, 0.645], [-0.42, 0.65], [-0.3, 0.645], [-0.1, 0.63], [0.1, 0.6], [0.3, 0.58], [0.44, 0.55], [0.48, 0.52], [0.5, 0.47]],
+    belt: [[-0.5, 0.53], [-0.49, 0.59], [-0.46, 0.615], [-0.35, 0.62], [-0.1, 0.6], [0.1, 0.57], [0.3, 0.555], [0.44, 0.53], [0.48, 0.5], [0.5, 0.45]],
+    bottom: [[-0.5, 0.2], [-0.46, 0.11], [0.44, 0.11], [0.5, 0.16]],
+    gh: { xC: -0.3, xR0: -0.24, xR1: -0.15, xA: -0.02, roof: 0.9, base: 0.84, tumble: 0.5, crown: 0.02, side: [-0.27, -0.04], b: null, rear: true },
+    seams: [-0.02, -0.26], hood: -0.01, boot: -0.38, exhaust: { n: 2, z: 0.34 }, ducktail: true, humps: true,
+  },
+  // The secret car: a teardrop canopy far forward, a long tapering tail
+  // with two fins.
+  ghostwake: {
+    pF: 3.8, pR: 3.4, flare: 0.07, q: 2.8, lean: [0.05, 0.03, 0.06, 0.05],
+    top: [[-0.5, 0.42], [-0.47, 0.5], [-0.4, 0.55], [-0.25, 0.58], [-0.1, 0.56], [0.1, 0.48], [0.3, 0.42], [0.45, 0.36], [0.5, 0.3]],
+    belt: [[-0.5, 0.38], [-0.47, 0.46], [-0.4, 0.52], [-0.25, 0.55], [-0.1, 0.52], [0.1, 0.45], [0.3, 0.4], [0.45, 0.34], [0.5, 0.28]],
+    bottom: [[-0.5, 0.18], [-0.45, 0.1], [0.44, 0.1], [0.5, 0.12]],
+    gh: { xC: -0.31, xR0: -0.12, xR1: 0.0, xA: 0.24, roof: 0.98, base: 0.72, tumble: 0.7, crown: 0.06, side: [-0.23, 0.2], b: null, rear: true },
+    seams: [0.2, -0.17], hood: 0.27, boot: null, exhaust: { n: 2, z: 0.14 }, skirt: true, fins: true,
   },
   pickup: {
-    pF: 6.5, pR: 10, flare: 0.035, drop: 0.07,
-    top: [[-0.5, 0.6], [-0.495, 0.615], [-0.48, 0.62], [-0.1, 0.62], [0.1, 0.612], [0.24, 0.59], [0.38, 0.565], [0.46, 0.54], [0.49, 0.51], [0.5, 0.48]],
-    bottom: [[-0.5, 0.25], [-0.47, 0.2], [0.44, 0.2], [0.5, 0.24]],
-    bed: [-0.478, -0.112], floor: 0.45,
-    gh: { xC: -0.106, xR0: -0.096, xR1: 0.07, xA: 0.205, roof: 1, base: 0.92, tumble: 0.1, crown: 0.025, side: [-0.085, 0.145], b: [0.015, 0.035], rear: true },
-    seams: [0.15, 0.025, -0.095], hood: 0.19, boot: null,
-    head: { bands: [2, 3], z: [0.46, 0.95], ind: 0.88 }, tail: { bands: [2, 3], z: [0.78, 0.99], rev: 0.86 },
-    grille: { bands: [1, 2, 3], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.5 }, skirt: true,
+    pF: 9, pR: 14, flare: 0.04, q: 4.5, lean: [0.06, 0.08, 0.0, 0.04],
+    top: [[-0.5, 0.6], [-0.495, 0.615], [-0.48, 0.62], [-0.1, 0.62], [0.1, 0.612], [0.3, 0.6], [0.44, 0.585], [0.48, 0.57], [0.5, 0.54]],
+    belt: [[-0.5, 0.58], [-0.495, 0.6], [-0.48, 0.605], [-0.1, 0.6], [0.1, 0.59], [0.3, 0.58], [0.44, 0.565], [0.48, 0.55], [0.5, 0.52]],
+    bottom: [[-0.5, 0.26], [-0.47, 0.2], [0.44, 0.2], [0.5, 0.25]],
+    bed: [-0.478, -0.2], floor: 0.45,
+    gh: { xC: -0.194, xR0: -0.186, xR1: 0.07, xA: 0.2, roof: 1, base: 0.9, tumble: 0.2, crown: 0.02, side: [-0.18, 0.15], b: [-0.015, 0.005], rear: true },
+    seams: [0.165, -0.005, -0.185], hood: 0.19, boot: null, exhaust: { n: 1, z: 0.5 }, skirt: true,
+  },
+  // Off-road wagon: the pickup's nose with a long closed roof, a roof
+  // rack and a spare wheel on the tailgate.
+  tidewinder: {
+    pF: 9, pR: 12, flare: 0.05, q: 4.5, lean: [0.06, 0.08, 0.02, 0.05], face: 'pickup',
+    top: [[-0.5, 0.6], [-0.495, 0.615], [-0.48, 0.62], [-0.1, 0.62], [0.1, 0.612], [0.3, 0.6], [0.44, 0.585], [0.48, 0.57], [0.5, 0.54]],
+    belt: [[-0.5, 0.58], [-0.495, 0.6], [-0.48, 0.605], [-0.1, 0.6], [0.1, 0.59], [0.3, 0.58], [0.44, 0.565], [0.48, 0.55], [0.5, 0.52]],
+    bottom: [[-0.5, 0.27], [-0.47, 0.21], [0.44, 0.21], [0.5, 0.26]],
+    gh: { xC: -0.49, xR0: -0.482, xR1: 0.06, xA: 0.19, roof: 1, base: 0.92, tumble: 0.14, crown: 0.02, side: [-0.18, 0.14], b: [-0.02, 0.0], rear: true, rearSide: [-0.46, -0.2] },
+    seams: [0.16, -0.01, -0.19], hood: 0.18, boot: null, exhaust: { n: 1, z: 0.5 }, skirt: true, rack: true, spare: true,
   },
   van: {
-    pF: 4.5, pR: 11, flare: 0.012, drop: 0.05,
-    top: [[-0.5, 0.48], [-0.495, 0.5], [0.3, 0.5], [0.36, 0.48], [0.42, 0.44], [0.47, 0.39], [0.5, 0.35]],
-    bottom: [[-0.5, 0.17], [-0.47, 0.14], [0.44, 0.14], [0.5, 0.19]],
-    gh: { xC: -0.495, xR0: -0.485, xR1: 0.19, xA: 0.37, roof: 1, base: 0.94, tumble: 0.07, crown: 0.02, side: [0.15, 0.33], b: null, rear: true, rearSide: [-0.46, -0.24] },
-    seams: [0.15, 0.1, -0.2], hood: 0.355, boot: null,
-    head: { bands: [3], z: [0.46, 0.95], ind: 0.86 }, tail: { bands: [2, 3], z: [0.8, 0.99], rev: 0.88 },
-    grille: { bands: [2, 3], z: 0.46 }, intake: 0.75, exhaust: { n: 1, z: 0.5 },
+    pF: 5, pR: 14, flare: 0.015, q: 5, lean: [0.1, 0.05, 0.0, 0.03],
+    top: [[-0.5, 0.47], [-0.495, 0.49], [0.25, 0.49], [0.32, 0.47], [0.4, 0.42], [0.46, 0.37], [0.49, 0.33], [0.5, 0.3]],
+    belt: [[-0.5, 0.45], [-0.495, 0.47], [0.25, 0.47], [0.32, 0.45], [0.4, 0.4], [0.46, 0.35], [0.49, 0.31], [0.5, 0.28]],
+    bottom: [[-0.5, 0.17], [-0.47, 0.14], [0.44, 0.13], [0.5, 0.18]],
+    gh: { xC: -0.497, xR0: -0.49, xR1: 0.17, xA: 0.34, roof: 1, base: 0.94, tumble: 0.1, crown: 0.02, side: [0.12, 0.31], b: null, rear: true, rearSide: [-0.46, -0.3] },
+    seams: [0.15, 0.1, -0.2], hood: 0.355, boot: null, exhaust: { n: 1, z: 0.5 }, cargo: true,
   },
   truck: {
-    range: [0.2, 0.5], pF: 12, pR: 14, flare: 0.02, drop: 0.035,
+    range: [0.2, 0.5], pF: 12, pR: 14, flare: 0.02, q: 5, lean: [0.06, 0.03, 0, 0],
     top: [[0.2, 0.47], [0.45, 0.47], [0.48, 0.455], [0.5, 0.42]],
+    belt: [[0.2, 0.45], [0.45, 0.45], [0.48, 0.44], [0.5, 0.4]],
     bottom: [[0.2, 0.22], [0.5, 0.22]],
     gh: { xC: 0.207, xR0: 0.213, xR1: 0.44, xA: 0.487, roof: 0.88, base: 0.95, tumble: 0.06, crown: 0.02, side: [0.36, 0.445], b: null, rear: false },
-    seams: [0.36, 0.265], hood: null, boot: null,
-    head: { bands: [1], z: [0.46, 0.94], ind: 0.86 }, tail: null,
-    grille: { bands: [2, 3], z: 0.61 }, intake: 0.75, exhaust: null,
+    seams: [0.36, 0.265], hood: null, boot: null, exhaust: null,
   },
 };
-STYLES.compact = STYLES.hatch;
+STYLES.hatch = STYLES.compact;
 STYLES.coupe = STYLES.sports;
-STYLES.taxi = STYLES.sedan;
-STYLES.police = STYLES.sedan;
 
 export function styleFor(spec) {
   return STYLES[spec.id] || STYLES[spec.body] || STYLES.sedan;
@@ -615,15 +661,36 @@ const FACES = {
     tail: { q: [0.36, 0.985], f: [0.7, 0.9], e: 4, slant: 0.04, taper: 0.35, bulge: 0.006, lift: 0.006, rev: 0.5, bar: true },
     plateF: 0.24, plateR: 0.45,
   },
-  hatch: { head: { q: [0.46, 0.96], f: [0.58, 0.88], e: 3, slant: 0.06, taper: 0.3, bulge: 0.014, lift: 0.006, ind: 0.88 }, tail: { q: [0.6, 0.985], f: [0.5, 0.88], e: 3, taper: 0.1, bulge: 0.008, lift: 0.006, rev: 0.75, bar: false }, grille: { q: [-0.36, 0.36], f: [0.42, 0.6], e: 5, lift: 0.004 } },
+  compact: {
+    head: { q: [0.42, 0.97], f: [0.6, 0.9], e: 3, slant: 0.12, taper: 0.5, bulge: 0.01, lift: 0.006, ind: 0.9, drl: 'L' },
+    grille: { q: [-0.4, 0.4], f: [0.46, 0.64], e: 6, lift: 0.004, slats: 2, slatHex: 0x2a2c30 },
+    intake: { q: [-0.64, 0.64], f: [0.08, 0.32], e: 6, lift: 0.003 },
+    tail: { q: [0.5, 0.985], f: [0.62, 0.9], e: 3.5, taper: 0.2, bulge: 0.008, lift: 0.006, rev: 0.66, bar: false },
+    plateR: 0.4,
+  },
+  taxi: {
+    head: { q: [0.52, 0.95], f: [0.5, 0.84], e: 7, bulge: 0.006, lift: 0.006, ind: 0.9 },
+    grille: { q: [-0.48, 0.48], f: [0.34, 0.76], e: 8, lift: 0.005, bezel: CHROME, slats: 4 },
+    intake: null,
+    tail: { q: [0.58, 0.985], f: [0.5, 0.86], e: 7, bulge: 0.004, lift: 0.006, rev: 0.7, bar: false },
+    plateF: 0.2, plateR: 0.3,
+  },
+  ghostwake: {
+    head: { q: [0.45, 0.96], f: [0.55, 0.8], e: 2.4, slant: 0.12, taper: 0.5, bulge: 0.01, lift: 0.006, ind: 0.9, drl: 'L' },
+    grille: null, intake: { q: [-0.7, 0.7], f: [0.1, 0.36], e: 4, lift: 0.004 },
+    tail: { q: [0.3, 0.985], f: [0.6, 0.76], e: 6, slant: 0.03, bulge: 0.004, lift: 0.006, rev: 0.4, bar: true },
+    plateF: 0.2,
+  },
   sports: { head: { q: [0.48, 0.97], f: [0.62, 0.8], e: 2.6, slant: 0.1, taper: 0.4, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: null, intake: { q: [-0.62, 0.62], f: [0.12, 0.38], e: 4, lift: 0.004 }, tail: { q: [0.4, 0.98], f: [0.62, 0.8], e: 4, slant: 0.05, bulge: 0.006, lift: 0.006, rev: 0.5, bar: true }, plateF: 0.2 },
   muscle: { head: { q: [0.52, 0.94], f: [0.5, 0.82], e: 6, lift: 0.006, bulge: 0.008, ind: 2 }, grille: { q: [-0.5, 0.5], f: [0.4, 0.82], e: 6, lift: 0.004, bezel: CHROME }, intake: { q: [-0.5, 0.5], f: [0.08, 0.26], e: 6, lift: 0.003 }, tail: { q: [0.3, 0.97], f: [0.56, 0.84], e: 6, bulge: 0.006, lift: 0.006, rev: 0.4, bar: true } },
   pickup: { head: { q: [0.56, 0.96], f: [0.55, 0.88], e: 5, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: { q: [-0.54, 0.54], f: [0.36, 0.86], e: 7, lift: 0.005, bezel: CHROME }, intake: { q: [-0.6, 0.6], f: [0.08, 0.24], e: 6, lift: 0.003 }, tail: { q: [0.76, 0.99], f: [0.55, 0.92], e: 6, bulge: 0.004, lift: 0.006, rev: 0.84, bar: false }, plateR: 0.3 },
-  van: { head: { q: [0.5, 0.96], f: [0.62, 0.92], e: 3, slant: 0.04, taper: 0.2, bulge: 0.012, lift: 0.006, ind: 0.88 }, grille: { q: [-0.42, 0.42], f: [0.42, 0.7], e: 5, lift: 0.004 }, tail: { q: [0.8, 0.995], f: [0.5, 0.97], e: 5, bulge: 0.004, lift: 0.006, rev: 0.88, bar: false }, plateR: 0.3 },
+  van: { head: { q: [0.5, 0.96], f: [0.62, 0.92], e: 3, slant: 0.04, taper: 0.2, bulge: 0.012, lift: 0.006, ind: 0.88, drl: 'L' }, grille: { q: [-0.42, 0.42], f: [0.42, 0.7], e: 5, lift: 0.004, slats: 2, slatHex: 0x2a2c30 }, intake: { q: [-0.6, 0.6], f: [0.08, 0.3], e: 6, lift: 0.003 }, tail: { q: [0.8, 0.95], f: [0.45, 0.92], e: 5, bulge: 0.004, lift: 0.006, rev: 0.86, bar: false }, plateR: 0.3 },
   truck: { head: { q: [0.6, 0.94], f: [0.1, 0.25], e: 5, bulge: 0.01, lift: 0.008, ind: 0.88 }, grille: { q: [-0.5, 0.5], f: [0.32, 0.7], e: 8, lift: 0.006, bezel: CHROME }, intake: null, tail: null, plateF: 0.06 },
 };
+FACES.police = { ...FACES.sedan, fog: null, grille: { ...FACES.sedan.grille, bezel: 0x1a1c1f } };
 function faceFor(spec) {
-  return { ...FACE_DEF, ...FACES[styleName(spec)] };
+  const n = styleName(spec);
+  return { ...FACE_DEF, ...(FACES[n] || FACES[styleFor(spec).face] || {}) };
 }
 
 function lens(acc, sh, fr, o, side, cellFn, hex, cls, N = 24) {
@@ -803,21 +870,31 @@ function cabin(acc, sh, gs, spec) {
   // Front seats sit a little behind the roof's front edge; a rear bench
   // under the rear glass when the cabin is long enough.
   const fx = Math.min(xR1 - (xR1 - xR0) * 0.45, xA - 0.95);
+  // Seat backs and headrests fit under the roof line (chopped roofs).
+  const room = (x) => Math.max(0.2, gs.roof(x) - belt - 0.08);
   const seat = (x, z, w) => {
+    const k = Math.min(1, room(x) / 0.62);
     const yb = belt - 0.12;
-    box(acc, SEAT, CLS.CABIN, 0.13, 0.5, w, x, yb + 0.25, z, 0, 0, 0.2);
-    box(acc, SEAT, CLS.CABIN, 0.1, 0.16, Math.min(w, 0.26) * 0.95, x - 0.07, yb + 0.58, z, 0, 0, 0.12);
+    box(acc, SEAT, CLS.CABIN, 0.13, 0.5 * k, w, x, yb + 0.25 * k, z, 0, 0, 0.2);
+    box(acc, SEAT, CLS.CABIN, 0.1, 0.16 * k, Math.min(w, 0.26) * 0.95, x - 0.07, yb + 0.58 * k, z, 0, 0, 0.12);
   };
-  const two = len > 2.0 && g.rear;
+  const two = len > 2.0 && g.rear && !sh.S.cargo;
   if (spec.body !== 'truck') {
     for (const s of [1, -1]) seat(fx, s * zw * 0.47, Math.min(0.5, zw * 0.8));
   } else {
     for (const s of [1, -1]) seat(fx, s * zw * 0.5, 0.5);
   }
+  if (sh.S.cargo) {
+    // Bulkhead behind the front seats; the load space stays dark.
+    const bx = fx - 0.3, top = gs.roof(bx) - 0.06;
+    const lean = g.tumble * (top - belt);
+    box(acc, DASH, CLS.CABIN, 0.05, top - belt + 0.12, (zw - lean) * 2, bx, (top + belt) / 2 - 0.06, 0);
+  }
   if (two) {
     const rx = Math.max(xC + 0.35, fx - 0.85);
-    box(acc, SEAT, CLS.CABIN, 0.14, 0.42, zw * 1.8, rx, belt - 0.12 + 0.21, 0, 0, 0, 0.26);
-    for (const s of [1, -1]) box(acc, SEAT, CLS.CABIN, 0.1, 0.14, 0.24, rx - 0.08, belt + 0.22, s * zw * 0.5, 0, 0, 0.2);
+    const k = Math.min(1, room(rx) / 0.56);
+    box(acc, SEAT, CLS.CABIN, 0.14, 0.42 * k, zw * 1.8, rx, belt - 0.12 + 0.21 * k, 0, 0, 0, 0.26);
+    for (const s of [1, -1]) box(acc, SEAT, CLS.CABIN, 0.1, 0.14 * k, 0.24, rx - 0.08, belt - 0.12 + 0.48 * k, s * zw * 0.5, 0, 0, 0.2);
   }
   // Steering wheel (driver on the left: -z) on a short column.
   const sx = xA - dx - 0.1;
@@ -1006,7 +1083,7 @@ export function buildCar(spec, near = true, lite = false) {
     }
     if (S.skirt && jj === 1 && Math.abs(n[2]) > 0.3) return pick(TRIM, CLS.TRIM);
     if (id === 'police' && jj >= 2 && jj <= 5 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0xf4f4f2, CLS.LIVERY);
-    if (id === 'taxi' && jj === 5 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0x161616, CLS.LIVERY);
+    if (id === 'taxi' && jj === 3 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0x161616, CLS.LIVERY);
     return out;
   });
   out.u = 0;
@@ -1108,8 +1185,27 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
     }
   }
   if (!near) {
+    // Mid distance: only what changes the outline.
     if (id === 'taxi') box(acc, 0xf2e8b0, CLS.GLOW, 0.5, 0.17, 0.26, -0.08 * L, gs.roofY + gs.crown + 0.12, 0);
-    if (S.wing) box(acc, TRIM, CLS.TRIM, 0.3, 0.035, sh.W * 0.92, sh.x0 + 0.2, sh.top(sh.x0 + 0.2) + 0.17, 0);
+    if (S.wing) {
+      const x = sh.x0 + 0.2, y = sh.top(x) + 0.17;
+      box(acc, TRIM, CLS.TRIM, 0.3, 0.035, sh.W * 0.92, x, y, 0, 0, 0, 0.12);
+      for (const s of [1, -1]) box(acc, TRIM, CLS.TRIM, 0.08, 0.17, 0.03, x + 0.04, y - 0.085, s * sh.hw * 0.62);
+    }
+    if (S.pushBar) box(acc, TRIM, CLS.TRIM, 0.06, 0.4, 0.86, sh.x1 + 0.1, 0.5, 0);
+    if (S.fins) {
+      for (const s of [1, -1]) {
+        const x = sh.x0 + 0.45;
+        acc.geo(new THREE.CylinderGeometry(0.02, 0.09, 0.5, 3, 1), WHITE, CLS.PAINT, place(x, sh.top(x) + 0.1, s * sh.planW(x) * 0.62, 0, Math.PI / 4, 1.15, 1, 1, 0.35));
+      }
+    }
+    if (S.humps) box(acc, WHITE, CLS.PAINT, 0.8, 0.14, 0.9, gs.xC - 0.35, sh.top(gs.xC - 0.35) + 0.02, 0);
+    if (S.rack) box(acc, TRIM, CLS.TRIM, gs.xR1 - gs.xR0 - 0.2, 0.06, gs.baseW(0) * 1.6, (gs.xR0 + gs.xR1) / 2, gs.roofY + gs.crown + 0.07, 0);
+    if (S.spare) {
+      const { wr, tw } = wheelLayout(spec);
+      acc.geo(new THREE.CylinderGeometry(wr * 0.95, wr * 0.95, tw * 0.9, 8, 1), 0x161617, CLS.RUBBER, place(sh.x0 + sh.lean(sh.x0 + 0.05, 1.0) - tw * 0.5, sh.yc(sh.x0 + 0.2) - 0.05, 0, 0, 0, Math.PI / 2));
+    }
+    if (id === 'van') box(acc, TRIM, CLS.TRIM, 2.6, 0.08, sh.hw * 1.45, -0.12 * L, gs.roofY + gs.crown + 0.07, 0);
     if (id === 'truck') truckParts(acc, tailAcc, sh, spec, false);
     return;
   }
@@ -1172,7 +1268,8 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
   }
   if (S.roofSpoiler) {
     const x = gs.xR0 - 0.02;
-    box(acc, WHITE, CLS.PAINT, 0.22, 0.04, gs.baseW(x) * 1.6, x - 0.06, gs.roofY + gs.crown * 0.6, 0, 0, 0, 0.08);
+    const rw = gs.baseW(x) - S.gh.tumble * (gs.roofY - gs.baseY(x));
+    box(acc, WHITE, CLS.PAINT, 0.24, 0.035, rw * 1.9, x - 0.04, gs.roofY + gs.crown * 0.5, 0, 0, 0, 0.1);
   }
   if (S.scoop) {
     const x = 0.27 * L;
@@ -1180,7 +1277,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
     acc.geo(new THREE.BoxGeometry(0.7, 0.09, 0.62), WHITE, CLS.PAINT, place(x, y + 0.02, 0, 0, 0, -0.03));
     box(acc, GRILLE, CLS.TRIM, 0.02, 0.06, 0.5, x + 0.352, y + 0.03, 0);
   }
-  if (S.belt && id !== 'police' && id !== 'taxi') {
+  if (S.lip || S.wingLip) {
     // A thin lip spoiler on the boot edge and a shark-fin aerial.
     const x0 = sh.x0 + 0.09;
     const x = x0 + sh.lean(x0, sh.top(x0));
@@ -1189,6 +1286,44 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
   if (S.belt) {
     const x = gs.xR0 + 0.06;
     acc.geo(new THREE.ConeGeometry(0.035, 0.07, 4, 1), TRIM, CLS.TRIM, place(x, gs.roofY + gs.crown + 0.03, 0, 0, Math.PI / 4, 0.45, 1.6, 1, 0.5));
+  }
+  if (S.pushBar) {
+    // Push bar ahead of the nose: two uprights, two rails, rubber pads.
+    const x = sh.x1 + 0.1;
+    for (const zz of [0.32, -0.32]) box(acc, TRIM, CLS.TRIM, 0.06, 0.5, 0.07, x, 0.5, zz);
+    for (const yy of [0.34, 0.66]) box(acc, TRIM, CLS.TRIM, 0.05, 0.07, 0.86, x + 0.01, yy, 0);
+    for (const zz of [0.32, -0.32]) box(acc, TRIM, CLS.TRIM, 0.16, 0.05, 0.05, x - 0.09, 0.42, zz);
+    // A spotlight at the driver's A pillar.
+    blob(acc, CHROME, CLS.CHROME, 0.12, 0.1, 0.1, gs.xA - 0.1, gs.baseY(gs.xA - 0.1) + 0.14, -(gs.baseW(gs.xA - 0.1) + 0.08), 6);
+  }
+  if (S.fins) {
+    // Two tail fins rising from the rear haunches.
+    for (const s of [1, -1]) {
+      const x = sh.x0 + 0.45;
+      const z = s * sh.planW(x) * 0.62;
+      acc.geo(new THREE.CylinderGeometry(0.02, 0.09, 0.5, 4, 1), WHITE, CLS.PAINT, place(x, sh.top(x) + 0.1, z, 0, Math.PI / 4, 1.15, 1, 1, 0.35));
+    }
+  }
+  if (S.humps) {
+    // Speedster humps behind the seats, faired into the deck.
+    for (const s of [1, -1]) {
+      const x = gs.xC - 0.35;
+      blob(acc, WHITE, CLS.PAINT, 0.9, 0.22, 0.42, x, sh.top(x) - 0.03, s * 0.38, 8);
+    }
+  }
+  if (S.rack) {
+    // Roof rack rails and bars.
+    const y = gs.roofY + gs.crown + 0.06;
+    const x0 = gs.xR0 + 0.1, x1 = gs.xR1 - 0.1;
+    for (const s of [1, -1]) box(acc, TRIM, CLS.TRIM, x1 - x0, 0.04, 0.05, (x0 + x1) / 2, y, s * gs.baseW(0) * 0.78);
+    for (let k = 0; k < 4; k++) box(acc, TRIM, CLS.TRIM, 0.05, 0.035, gs.baseW(0) * 1.6, x0 + ((x1 - x0) * (k + 0.5)) / 4, y + 0.02, 0);
+  }
+  if (S.spare) {
+    // Spare wheel on the tailgate.
+    const { wr, tw } = wheelLayout(spec);
+    const x = sh.x0 + sh.lean(sh.x0 + 0.05, 1.0) - tw * 0.5;
+    acc.geo(new THREE.CylinderGeometry(wr * 0.95, wr * 0.95, tw * 0.9, 12, 1), 0x161617, CLS.RUBBER, place(x, sh.yc(sh.x0 + 0.2) - 0.05, 0, 0, 0, Math.PI / 2));
+    acc.geo(new THREE.CircleGeometry(wr * 0.6, 10), 0x4a4d52, CLS.ALLOY, place(x - tw * 0.46, sh.yc(sh.x0 + 0.2) - 0.05, 0, 0, -Math.PI / 2, 0));
   }
   if (id === 'pickup') {
     // Roll bar behind the cab and a tailgate handle.

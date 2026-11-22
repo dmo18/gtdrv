@@ -65,6 +65,7 @@ function makeSlot(i) {
     wy: 0, wp: 0, wr: 0, lwp: 0, lwr: 0,
     contact: false, bounced: false,
     dir: false, tY: 0, tP: 0, tR: 0, // directed fall: the lying pose it ends in
+    t0: 0, thud: -1, // start count of this use of the slot; the last one a landing was reported for
     ang: new Float64Array(LIMB_COUNT),
     vel: new Float64Array(LIMB_COUNT),
   };
@@ -132,6 +133,7 @@ export function startRagdoll(pool, a, vx, vy, vz, rng) {
   s.contact = false;
   s.bounced = false;
   s.dir = false;
+  s.t0 = pool.started;
   for (let i = 0; i < LIMB_COUNT; i++) {
     s.ang[i] = i === LIMB.bend ? 0.1 : 0;
     s.vel[i] = (r() - 0.5) * 12;

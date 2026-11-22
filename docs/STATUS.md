@@ -7,6 +7,20 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## W7 Sky, light and water (2026-11-22)
+- Sky dome (src/systems/daynight.js): two procedural cloud layers (low deck, thin high veil) drift with the wind and
+  take the sun colour at dusk, go dark blue and pick up the city glow at night, grey out with overcast and rain and
+  vanish in fog. Sun disc with a warm haze, moon with halo, and a horizon haze band in the fog colour so far towers
+  fade into it. The old puff clouds are hidden (SHOW_PUFFS). Cloud drift is slowed with the reduce-motion setting.
+  All in the existing dome shader: no new draw call, no new program.
+- Sea (src/render/water.js): a small scrolling shore-distance map (two 128x128 R8 textures, filled 16 rows a frame,
+  swapped) gives lighter turquoise shallows and a lapping foam line along the seawall and beach; wake foam is twice
+  as bright. Wave simulation is unchanged. The shore function is `createWater({ shoreDist })`, or falls back to
+  `window.__rw.city.shoreDist` (game.js can pass `city.shoreDist` to drop the fallback).
+- Not done: softer shadow edge (lives in graphics.js, W2b), foam on the far sea plane, night glow on low clouds is
+  in the dome only (no separate mesh).
+- Shots: docs/preview/w7-*.png (scripts/w7-shots.mjs).
+
 ## Features now in the game
 - Driving: city with traffic and pedestrians, nine road vehicles, tank.
   Arcade handling (tight steering, the default) and Realistic handling.

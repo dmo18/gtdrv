@@ -491,7 +491,7 @@ function atlasTex(pixels, w) {
   t.needsUpdate = true;
   return t;
 }
-const HEAD_BASE = [0xdfe4ea, 0xdfe4ea, 0xeef0f2, 0xd8a050, 0x1c2026];
+const HEAD_BASE = [0xdfe4ea, 0xdfe4ea, 0xeef0f2, 0xd8a050, 0x50565e];
 const TAIL_BASE = [0x8a161a, 0x8a7e80, 0xc08a3a, 0x8a161a, 0x2a0507];
 const BAR_BASE = [0x8a1a1e, 0x1a2a8a, 0xe8e8e8, 0x1a1b1e, 0x1a1b1e];
 // Front half and rear half side by side (256 x 32).
@@ -514,7 +514,7 @@ function atlasFor(kind) {
 // read without conversion, so colours here are as authored.
 const HEAD_DAY = [0x24282c, 0x24282c, 0xd8e4f0, 0x5a3408];
 const HEAD_NIGHT = [0xffffff, 0xffffff, 0xffffff, 0x8a4a0a];
-const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x7a0606, TAIL_BRAKE = 0xe00c08;
+const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x5a0303, TAIL_BRAKE = 0xb00604;
 const REV_OFF = 0x000000, REV_ON = 0xffffff, IND_OFF = 0x000000, IND_ON = 0xffa424;
 const LAMP = { pair: [] };
 function lampMat(cells, kind) {

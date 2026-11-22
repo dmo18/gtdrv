@@ -127,7 +127,9 @@ export function hooksFor(c) {
 // ---------------------------------------------------------------------
 const EV = {
   shot: { shooter: null, weapon: null, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, hx: 0, hy: 0, hz: 0, hitKind: 'none' },
-  hit: { target: null, source: null, amount: 0, kind: 'bullet', x: 0, y: 0, z: 0 },
+  hit: { target: null, source: null, amount: 0, kind: 'bullet', x: 0, y: 0, z: 0, mat: 'flesh', byPlayer: false },
+  kill: { target: null, x: 0, z: 0, cause: 'bullet', byPlayer: false, dx: 0, dz: 0 },
+  bodyLand: { target: null, x: 0, z: 0 },
   down: { target: null, source: null, kind: 'bullet' },
   out: { target: null, source: null },
   explosion: { x: 0, y: 0, z: 0, radius: 0, source: null, depth: 0, size: 'small', puff: false, craft: null, scale: 1 },
@@ -306,6 +308,21 @@ function knockDown(game, a, source, kind) {
   d.kind = kind;
   emit(game, 'down');
   if (a.hp > 0) return;
+  if (a.team !== 'player') {
+    // A death: its fall direction for the sound and the kill freeze.
+    const k = EV.kill;
+    k.target = a;
+    k.x = a.x;
+    k.z = a.z;
+    k.cause = kind === 'ram' ? 'vehicle' : kind;
+    k.byPlayer = isPlayerSource(game, source);
+    const s = a.rag;
+    const v = s ? Math.sqrt(s.vx * s.vx + s.vz * s.vz) : 0;
+    k.dx = v > 1e-6 ? s.vx / v : 0;
+    k.dz = v > 1e-6 ? s.vz / v : 0;
+    emit(game, 'kill');
+    k.target = null;
+  }
   if (a.team === 'player') {
     const pd = EV.playerDown;
     pd.target = a;
@@ -331,6 +348,8 @@ function emitHit(game, target, source, amount, kind, y) {
   h.x = target.x;
   h.y = y;
   h.z = target.z;
+  h.mat = isCraft(target) ? 'metal' : 'flesh';
+  h.byPlayer = isPlayerSource(game, source);
   emit(game, 'hit');
 }
 
@@ -1904,6 +1923,22 @@ export function createCombat(game, { seed = 23023 } = {}) {
   }
   if (game.events && game.events.on) game.events.on('vehicleRemoved', onVehicleRemoved);
 
+  // A tumbling body touches the ground for the first time: a thud there.
+  function bodyLands() {
+    const sl = ragdolls.slots;
+    for (let i = 0; i < sl.length; i++) {
+      const s = sl[i];
+      if (!s.on || s.touchT < 0 || s.thud === s.t0) continue;
+      s.thud = s.t0;
+      const e = EV.bodyLand;
+      e.target = s.actor;
+      e.x = s.x;
+      e.z = s.z;
+      emit(game, 'bodyLand');
+      e.target = null;
+    }
+  }
+
   // Bodies: at most BODY_MAX lie at once; the oldest starts its fade early.
   function capBodies() {
     const actors = game.actors;
@@ -2412,6 +2447,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       stepBurning(dt);
       stepWrecks(dt);
       stepRagdolls(ragdolls, dt, ragFix);
+      bodyLands();
       const actors = game.actors;
       for (let i = 0; i < actors.length; i++) stepActor(actors[i], dt);
       capBodies();
