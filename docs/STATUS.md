@@ -708,6 +708,9 @@ None critical or high.
   boost and the siren, blasts near traffic, carjacks, every craft, a garage,
   the fire truck's water and the tow hook. Fails on any page or console error,
   any caught exception and any mesh without a material.
+  Run: 683 simulated s (50 legs) in 58 min wall, 0 exceptions, 0 errors.
+  perf.mjs against a HEAD copy: draw calls 315 / 297 and triangles the same,
+  step 0.78 ms (0.86 before), draw CPU 9.8 / 7.1 ms (9.4 / 7.2 before).
 - scripts/smoke-extra.mjs: the fighter take-off check holds BOOST (the
   afterburner has been on the BOOST button since b902efd) and reads the
   afterburner at lift-off; it failed on every run before this.
