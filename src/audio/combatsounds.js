@@ -50,13 +50,13 @@ function report(rng, o) {
   // too quiet to carry and the shot read as a click. The crack is now
   // softer and a little longer, the body and the low thump longer and
   // louder, so the report is a crack *and* a boom.
-  const ck = o.crack * 0.55;
+  const ck = o.crack * 0.7;
   addNWave(out, 0, o.crackMs * 1.4, ck);
   band(out, rng, 0, Math.max(0.003, o.crackMs * 0.004), ck * 1.1, 'hp', 1400);
   band(out, rng, 0, 0.01, ck * 0.9, 'bp', 2400, 0.9);
   band(out, rng, len(0.0006), o.bodyDecay * 1.6, o.body * 1.7, 'bp', o.bodyF, 0.8, 0.0008);
   band(out, rng, len(0.0006), o.bodyDecay * 2.4, o.body * 0.8, 'lp', o.bodyF * 0.6, 0.7, 0.001);
-  thump(out, o.f0, o.f1, 0.014, o.low * 0.75, o.lowTau * 1.4);
+  thump(out, o.f0, o.f1, 0.014, o.low * 0.5, o.lowTau * 1.4);
   thump(out, o.f0 * 2, o.f1 * 2, 0.014, o.low * 0.55, o.lowTau);
   band(out, rng, len(0.008), o.tail * 1.5, o.tailAmp * 1.6, 'lp', o.tailF, 0.7, 0.006);
   for (const [t, f, d, a] of o.mech || []) addMode(out, len(t), f, d, a, R.sr, rng.next() * TAU);
@@ -241,9 +241,9 @@ export const COMBAT_SHOTS = {
     thump(out, 95 + rng.next() * 40, 38, 0.05, 1, 0.08);
     band(out, rng, 0, 0.025, 0.7, 'bp', 320, 0.9, 0.001); // panel knock
     band(out, rng, 0, 0.004, 0.25, 'hp', 2000);
-    harmonize(out, 120, 1.1, { hi: 900 });
+    harmonize(out, 120, 1.4, { hi: 900 });
     warm(out, 1.8, 0.3);
-    return fadeEdges(normalize(removeDC(out), 0.9));
+    return fadeEdges(normalize(removeDC(out), 0.85));
   },
   casing(rng) {
     // a brass case dropping: three or four bright bounces

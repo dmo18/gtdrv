@@ -26,6 +26,8 @@ import { WEAPONS, selectWeapon } from '../core/weapons.js';
 import { fogSightScale } from '../core/weather.js';
 import { hasSiren } from '../core/yield.js';
 import { spawnPoliceHeli, setOrder as setHeliOrder } from './helipilot.js';
+import { createTank, barrelRay } from '../entities/tank.js';
+import { createTankUnit, tankDrive, tankGunnerStep } from './armor.js';
 
 // --- Heat rules. ---
 
@@ -65,6 +67,10 @@ export const wantedStars = (level, heliUp = false) => {
   const l = Math.max(0, Math.min(MAX_HEAT, level | 0));
   return l >= MAX_HEAT && heliUp ? 5 : l;
 };
+// Heat 5 (the helicopter is up): one police tank rolls in; a wrecked or bailed
+// one is replaced after a pause.
+export const TANK_DELAY = 8, TANK_REPEAT = 60; // s after the fifth star / after losing a tank
+export const TANK_MAX = 1;
 const HELI_DELAY = 6, HELI_REPEAT = 30; // s after reaching the top level / after losing a heli
 const GRACE = 4; // seconds between level steps
 const RAM_POINTS = 1;
@@ -660,7 +666,110 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     heliPilot = null;
     heliWait = HELI_DELAY;
   }
-  const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '' };
+  const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '', tanks: 0, tankShells: 0 };
+
+  // --- The heat 5 police tank (existing tank, armour and combat code). ---
+  let tankWait = TANK_DELAY, tankUnit = null, tankLeave = 0;
+  const tankBR = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, px: 0, py: 0, pz: 0 };
+  const tankCtx = { collision: null, onFoot: false, hurtBy: false, seaY: -0.6 };
+  const tankDriver = { dead: false, police: true };
+  const tankOld = []; // retired or wrecked police tanks, removed once far away
+  function retireTank(t) {
+    if (t.driver === tankDriver) t.driver = null;
+    t.controls = null;
+    t.police = false;
+    tankOld.push(t);
+  }
+  function dropTank(remove) {
+    const t = tankUnit && tankUnit.t;
+    tankUnit = null;
+    if (!t) return;
+    if (remove) game.removeVehicle(t);
+    else retireTank(t);
+  }
+  function spawnTank() {
+    if (!near.length) return null;
+    const p = game.player, rng = game.rng, col = game.collision;
+    let best = -Infinity, bx = 0, bz = 0, bh = 0;
+    for (let k = 0; k < 12; k++) {
+      const e = city.edges[near[rng.int(0, near.length - 1)]];
+      const from = rng.next() < 0.5 ? e.a : e.b;
+      const d0 = extAt(city.nodes[from], e) + 12, d1 = e.length - extAt(city.nodes[otherEnd(e, from)], e) - 18;
+      if (d1 <= d0) continue;
+      lanePoint(city, e, from, rng.range(d0, d1), 0, LP);
+      const dist = Math.hypot(LP.x - p.x, LP.z - p.z);
+      if (dist < SPAWN_MIN || dist > SPAWN_MAX || !spotClear(LP.x, LP.z, CLEARANCE + 6)) continue;
+      const hidden = col && col.lineClear ? !col.lineClear(p.x, p.z, LP.x, LP.z) : false;
+      const score = (hidden ? 2 : 0) + rng.next() * 0.3;
+      if (score > best) {
+        best = score;
+        bx = LP.x; bz = LP.z; bh = LP.heading;
+      }
+    }
+    if (best === -Infinity) return null;
+    const t = createTank('rustbackpolice', bx, bz, bh, game.rng);
+    t.police = true;
+    t.role = 'tank';
+    t.driver = tankDriver;
+    t.controls = { steer: 0, throttle: 0, brake: 0, handbrake: false };
+    t.asleep = false;
+    t.occupantTeam = 'police';
+    game.addVehicle(t);
+    tankUnit = { t, u: createTankUnit(), shot: 0 };
+    stats.tanks++;
+    return t;
+  }
+  // One step of the police tank: roll toward the player, aim, shoot.
+  function stepTankUnit(dt, want, idle) {
+    const p = game.player;
+    if (tankUnit) {
+      const t = tankUnit.t;
+      if (t.removed || t.wrecked || t.bailed) {
+        if (!t.removed) retireTank(t);
+        tankUnit = null;
+        tankWait = TANK_REPEAT;
+      } else if (!want) {
+        // Heat dropped: it stops and is taken away once out of sight.
+        hold(t.controls);
+        tankLeave += dt;
+        if (tankLeave > 8 || Math.hypot(t.x - p.x, t.z - p.z) > 150) {
+          dropTank(true);
+          tankLeave = 0;
+          tankWait = TANK_DELAY;
+        }
+      } else if (idle) hold(t.controls);
+      else {
+        tankLeave = 0;
+        const pv = p.vehicle;
+        const target = pv && !pv.removed ? pv : p.walker;
+        tankDrive(tankUnit.u, t, p.x, p.z, dt, t.controls);
+        tankCtx.collision = game.collision;
+        tankCtx.onFoot = !pv;
+        tankCtx.seaY = Number.isFinite(game.seaY) ? game.seaY : -0.6;
+        const ev = tankGunnerStep(tankUnit.u.g, t, target, tankCtx, dt);
+        if (ev === 'aim') {
+          if (game.armor && game.armor.telegraph) game.armor.telegraph(t, target);
+        } else if (ev === 'fire' && game.combat && game.combat.fireMount) {
+          barrelRay(t, tankBR);
+          if (game.combat.fireMount(t, 0, tankBR.dx, tankBR.dy, tankBR.dz, null, target)) stats.tankShells++;
+        }
+      }
+    } else if (want && !idle) {
+      tankWait -= dt;
+      if (tankWait <= 0) {
+        if (spawnTank()) tankWait = TANK_REPEAT;
+        else tankWait = 1;
+      }
+    } else tankWait = Math.max(tankWait, want ? 0 : TANK_DELAY);
+    for (let i = tankOld.length - 1; i >= 0; i--) {
+      const t = tankOld[i];
+      if (t.removed) tankOld.splice(i, 1);
+      else if (Math.hypot(t.x - p.x, t.z - p.z) > 150) {
+        game.removeVehicle(t);
+        tankOld.splice(i, 1);
+      }
+    }
+  }
 
   // --- Witnesses for violence heat. ---
   function civNear(x, z, r) {
@@ -1247,6 +1356,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         }
         resetHeat(heat);
         callOffHeli();
+        if (tankUnit) { dropTank(true); tankWait = TANK_DELAY; }
         sys.stars = 0;
         crashed = startled = false;
         violence = 0;
@@ -1382,6 +1492,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         }
       }
       sys.stars = wantedStars(heat.level, !!heliPilot);
+      stepTankUnit(dt, sys.stars >= 5 && !facts.atSea && !facts.airborne, city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150);
 
       // Drive the cars, retire the ones no longer needed.
       const idle = city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150;

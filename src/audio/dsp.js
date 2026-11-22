@@ -218,7 +218,7 @@ export function warm(buf, drive = 2, asym = 0.25) {
 // mostly lost there. This adds its harmonics (the ear hears the missing
 // fundamental): the low band is clipped hard, the result band-limited
 // to fc*1.6 .. hi and mixed back at `amount` of the low band's peak.
-export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false, sr = R.sr, drive = 2 } = {}) {
+export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false, sr = R.sr, drive = 3 } = {}) {
   const n = buf.length;
   const low = new Float32Array(n);
   // two low-pass stages: only the true lows reach the curve, so mids do

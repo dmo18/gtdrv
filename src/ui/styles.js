@@ -272,6 +272,24 @@ const CSS = `
   }
   .rw-fan-open .rw-sec, .rw-full .rw-sec { transform: none; }
 }
+/* Narrower than 780 (the owner's phone reports 748x360): the keep-out rect (36 to 64 percent of the width)
+   moves 20 px toward the right edge while everything is placed from the edge, so the weapon arc and the fan
+   would reach into it. The pedals are 56 wide with 8 between, the fire and lock column moves 16 px in,
+   the prompt is 240 wide (rule at the end of this sheet) and MORE, BOOST and the offers are 48 cells
+   (the fan cells already are), which brings the arc to 264 px from the edge. 780 and wider keep the contract rectangles above untouched. */
+@media (max-height: 380px) and (max-width: 779px) {
+  .rw-touch { --pw: 56px; --mx: 8px; }
+  .rw-brake, .rw-slot-run { --x: calc(8px + var(--pw) + 8px); }
+  .rw-slot-hand, .rw-slot-bomb { --x: 72px; }
+  .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 136px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 144px; }
+  .rw-slot-msl, .rw-slot-coax { --x: calc(144px + var(--ew) + 8px); }
+  .rw-more, .rw-extra, .rw-slot-boost { width: 48px; height: 48px; }
+  .rw-extra, .rw-slot-boost { --y: calc(var(--my) + 56px); }
+  .rw-sec {
+    --x: calc(var(--mx) + 56px + var(--c, 0) * 56px); --y: calc(var(--my) + var(--r, 0) * 56px);
+  }
+}
 
 /* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
    button by touch.js (kept off FIRE and pause). Never takes touches. */
@@ -588,6 +606,9 @@ const CSS = `
   .rw-btn.rw-ammo { width: 152px; height: 24px; top: calc(var(--rw-st) + 56px); }
   .rw-ammo-name, .rw-ammo-bar { display: none; }
   .rw-ammo-n { font-size: 14px; }
+}
+@media (max-height: 380px) and (max-width: 779px) {
+  .rw-prompt { width: 240px; margin-left: -120px; }
 }
 `;
 

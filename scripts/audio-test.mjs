@@ -325,7 +325,9 @@ try {
     far.speed = 20;
 
     // Police siren starts and stops with the event, at the police car.
-    const cop = mk('car', 'police', 52, { x: 25, z: 8, speed: 10, police: true, siren: true });
+    // (police.js sets v.siren and emits the event together; the audio
+    // hears a siren only on a vehicle whose siren runs)
+    const cop = mk('car', 'police', 52, { x: 25, z: 8, speed: 10, police: true, siren: false });
     game.vehicles.push(cop);
     const san = ctx.createAnalyser();
     san.fftSize = 2048;
@@ -340,9 +342,11 @@ try {
     };
     await run(20, () => {});
     const sOff0 = sirenRms();
+    cop.siren = true;
     events.emit('siren', true);
     let sOn = 0;
     await run(60, () => { sOn = Math.max(sOn, sirenRms()); });
+    cop.siren = false;
     events.emit('siren', false);
     await run(90, () => {});
     const sOff = sirenRms();

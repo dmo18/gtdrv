@@ -7,8 +7,10 @@ import { createRng } from '../src/core/rng.js';
 import { createEvents } from '../src/core/events.js';
 import {
   createHeat, updateHeat, updateBust, bustFine, isRam, escapeReward,
-  createCop, chaseStep, createPolice, COOLDOWN,
+  createCop, chaseStep, createPolice, COOLDOWN, TANK_DELAY, TANK_REPEAT,
 } from '../src/systems/police.js';
+import { createTank, stepTank } from '../src/entities/tank.js';
+import { createTankUnit, tankDrive } from '../src/systems/armor.js';
 
 const DT = 1 / 60;
 const city = generateCity();
@@ -382,4 +384,136 @@ test('system: pulled over ends the chase with no fine', () => {
   for (let k = 0; k < 300; k++) sys.fixedUpdate(DT);
   assert.equal(sys.officers.filter((o) => o.active).length, 0);
   assert.ok(game.vehicles.filter((v) => v.police).every((v) => v.role === 'leave' && !v.siren));
+});
+
+// --- Heat 5: the police tank (docs/PLAN_V1.md W8, owner decision 6). ---
+
+function tankWorld(game) {
+  return { collision, city, time: game.time };
+}
+// Run the police system with the heat held at the top level (the
+// helicopter and then the tank come on their own timers). Tanks and the
+// helicopter are stepped the way game.js does it.
+function runTop(game, sys, seconds, each = null) {
+  const world = tankWorld(game);
+  for (let k = 0; k < Math.round(seconds / DT); k++) {
+    game.time += DT;
+    world.time = game.time;
+    sys.heat.level = 4;
+    sys.heat.unseen = 0;
+    sys.heat.points = 0;
+    for (const v of game.vehicles) if (v.kind === 'tank') stepTank(v, v.controls, DT, world);
+    sys.fixedUpdate(DT);
+    if (each) each(k * DT);
+  }
+}
+
+test('heat 5: a police tank rolls in after the helicopter, only at the top level', () => {
+  const game = fakeGame(true);
+  const sys = createPolice(game);
+  game.police = sys;
+  // Heat 3: no helicopter, no tank, however long.
+  for (let k = 0; k < 60 * 30; k++) {
+    game.time += DT;
+    sys.heat.level = 3;
+    sys.heat.unseen = 0;
+    sys.fixedUpdate(DT);
+  }
+  assert.equal(game.vehicles.filter((v) => v.kind === 'tank').length, 0);
+  let spawnedAt = -1, startDist = 0;
+  runTop(game, sys, 40, (t) => {
+    const tk = game.vehicles.find((v) => v.kind === 'tank');
+    if (tk && spawnedAt < 0) {
+      spawnedAt = t;
+      startDist = Math.hypot(tk.x - game.player.x, tk.z - game.player.z);
+    }
+  });
+  const tanks = game.vehicles.filter((v) => v.kind === 'tank');
+  assert.equal(tanks.length, 1, 'one tank');
+  const tk = tanks[0];
+  assert.equal(tk.spec.id, 'rustbackpolice');
+  assert.ok(tk.police && tk.driver && tk.driver !== 'player' && tk.controls, 'police crewed and driven by the system');
+  assert.equal(sys.stars, 5);
+  assert.ok(spawnedAt >= 6 + TANK_DELAY - 1, `tank came ${spawnedAt.toFixed(1)} s in (after the helicopter)`);
+  assert.ok(startDist >= 100, `spawned ${startDist.toFixed(0)} m away`);
+  assert.equal(sys.stats.tanks, 1);
+  // The heat drops: it stops and is taken away.
+  sys.heat.level = 0;
+  for (let k = 0; k < 60 * 12; k++) {
+    game.time += DT;
+    sys.fixedUpdate(DT);
+  }
+  assert.equal(game.vehicles.filter((v) => v.kind === 'tank').length, 0);
+  assert.equal(game.player.wanted, 0);
+});
+
+test('heat 5: the police tank closes in, aims with a telegraph, fires shells and is replaced only after a pause', () => {
+  const game = fakeGame(true);
+  const sys = createPolice(game);
+  game.police = sys;
+  const shells = [], telegraphs = [];
+  game.combat = { fireMount(c, slot, dx, dy, dz) { shells.push([c, slot, dx, dy, dz]); return true; } };
+  game.armor = { telegraph(c, t) { telegraphs.push([c, t]); } };
+  // A clear flat shot: open the collision so the line of sight is free.
+  game.collision = createCollisionWorld();
+  runTop(game, sys, 22);
+  const tk = game.vehicles.find((v) => v.kind === 'tank');
+  assert.ok(tk, 'tank is out');
+  // Put it 90 m from the player on open ground and let it work.
+  tk.x = tk.px = game.player.x - 90;
+  tk.z = tk.pz = game.player.z;
+  tk.heading = 0;
+  const world = { collision: game.collision, city: null, time: 0 };
+  for (let k = 0; k < 60 * 40; k++) {
+    game.time += DT;
+    world.time = game.time;
+    sys.heat.level = 4;
+    sys.heat.unseen = 0;
+    stepTank(tk, tk.controls, DT, world);
+    sys.fixedUpdate(DT);
+  }
+  const d = Math.hypot(tk.x - game.player.x, tk.z - game.player.z);
+  assert.ok(d < 60 && d > 25, `closed to ${d.toFixed(0)} m and held`);
+  assert.ok(shells.length >= 2 && shells.every((s) => s[0] === tk && s[1] === 0), `${shells.length} shells`);
+  assert.ok(telegraphs.length >= shells.length, 'every shell was telegraphed first');
+  // Shot to bits: it is left behind and no new one comes for TANK_REPEAT seconds.
+  tk.wrecked = true;
+  tk.health = 0;
+  for (let k = 0; k < 60 * 20; k++) {
+    game.time += DT;
+    sys.heat.level = 4;
+    sys.heat.unseen = 0;
+    sys.fixedUpdate(DT);
+  }
+  assert.ok(!tk.police && !tk.controls, 'the wreck is no longer a police unit');
+  assert.equal(game.vehicles.filter((v) => v.kind === 'tank' && !v.wrecked).length, 0, 'no replacement yet');
+  runTop(game, sys, TANK_REPEAT);
+  assert.equal(game.vehicles.filter((v) => v.kind === 'tank' && !v.wrecked).length, 1, 'a new one after the pause');
+});
+
+test('police tank driver: pivots toward the target, stops at the standoff, backs off a wall', () => {
+  const c = { steer: 0, throttle: 0, brake: 0, handbrake: false };
+  // Target behind it: pivots before it drives.
+  const t = createTank('rustbackpolice', 0, 0, 0);
+  const u = createTankUnit();
+  const wf = { collision: createCollisionWorld(), city: null, time: 0 };
+  for (let k = 0; k < 60 * 5; k++) {
+    tankDrive(u, t, -120, 0, DT, c);
+    stepTank(t, c, DT, wf);
+  }
+  assert.ok(Math.abs(Math.cos(t.heading) + 1) < 0.2, `turned round (${t.heading.toFixed(2)})`);
+  assert.ok(t.x < -5, 'then drove off toward the target');
+  // A wall between: it bumps, backs off and keeps trying without sticking forever.
+  const w = { collision: createCollisionWorld(), city: null, time: 0 };
+  w.collision.addBox(30, -40, 34, 40, 8, 'building');
+  const t2 = createTank('rustbackpolice', 0, 0, 0);
+  const u2 = createTankUnit();
+  let backed = 0;
+  for (let k = 0; k < 60 * 30; k++) {
+    tankDrive(u2, t2, 80, 0, DT, c);
+    if (c.brake === 1 && t2.speed < -0.3) backed++;
+    stepTank(t2, c, DT, w);
+  }
+  assert.ok(backed > 20, 'backed away from the wall');
+  assert.ok(t2.x < 31, 'never through it');
 });

@@ -284,7 +284,7 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = LOOP_S) {
     // Gentle on purpose: the saturation runs at the engine buffer rate
     // with no oversampling, so a hard drive folds its harmonics back as
     // inharmonic fizz (A1: heard as "harsh and crackly" on the phone).
-    warm(out, (e.drive || 1.5) * (on ? 0.6 : 0.4), 0.3);
+    warm(out, (e.drive || 1.5) * (on ? 0.75 : 0.3), 0.3);
     harmonize(out, Math.min(160, Math.max(70, firingHz * 1.2)), on ? 0.3 : 0.2, { loop: true, sr, hi: 1100 });
     // then a 4-pole low-pass: no buzz edges left near the buffer's
     // Nyquist, which the browser's resampler would mirror upwards

@@ -80,7 +80,7 @@ export const MUSIC_SHOTS = {
       out[i] = Math.sin(ph) * Math.min(1, t / 0.001) * Math.exp(-t / 0.16);
     }
     warm(out, 2, 0.4); // harmonics so the kick reads on a phone
-    harmonize(out, 110, 1.2, { hi: 700 });
+    harmonize(out, 110, 1.5, { hi: 700 });
     return fadeEdges(normalize(removeDC(out), 0.85), 2, 600);
   },
   'm:snare'(rng) {

@@ -110,6 +110,52 @@ function stop(g) {
 }
 
 // ---------------------------------------------------------------------
+// Police tank driver (pure; police.js spawns the tank at heat 5)
+// ---------------------------------------------------------------------
+export const TANK_STANDOFF = 36; // m: the police tank closes to here, then holds and shoots
+export const TANK_STUCK_T = 2.5; // s of no progress before it backs off
+export const TANK_BACK_T = 1.8;
+
+export function createTankUnit() {
+  return { g: createGunner(), stuckT: 0, backT: 0, turn: 1, dist: 0 };
+}
+
+// Drive the tank `t` toward (tx, tz) with the controls object `c`
+// (steer, throttle, brake). Pivots to face the target first, closes to
+// TANK_STANDOFF and holds there, and backs off a wall it is stuck on.
+// Returns the distance to the target. No allocation.
+export function tankDrive(u, t, tx, tz, dt, c) {
+  const dx = tx - t.x, dz = tz - t.z;
+  const d = Math.sqrt(dx * dx + dz * dz);
+  u.dist = d;
+  c.throttle = 0;
+  c.brake = 0;
+  c.handbrake = false;
+  if (u.backT > 0) {
+    u.backT -= dt;
+    c.brake = 1;
+    c.steer = u.turn;
+    return d;
+  }
+  const err = angleDiff(Math.atan2(dz, dx), t.heading);
+  c.steer = Math.max(-1, Math.min(1, err * 2));
+  // Brake early enough to stop at the standoff, not past it.
+  const sp = t.speed > 0 ? t.speed : 0;
+  if (d - (sp * sp) / 9 > TANK_STANDOFF) {
+    c.throttle = Math.abs(err) > 0.9 ? 0.2 : 1;
+    if (c.throttle > 0.5 && Math.abs(t.speed) < 0.6) {
+      u.stuckT += dt;
+      if (u.stuckT > TANK_STUCK_T) {
+        u.stuckT = 0;
+        u.backT = TANK_BACK_T;
+        u.turn = err >= 0 ? -1 : 1;
+      }
+    } else u.stuckT = Math.max(0, u.stuckT - dt);
+  } else if (sp > 0.5) c.brake = 1;
+  return d;
+}
+
+// ---------------------------------------------------------------------
 // The system
 // ---------------------------------------------------------------------
 export function createArmor(game, uiRoot = null) {

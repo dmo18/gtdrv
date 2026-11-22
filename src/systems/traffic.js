@@ -871,6 +871,8 @@ export function createTraffic(game, { max = 14 } = {}) {
   // half oncoming, placed from the spawn alone (no rng but the game's, drawn
   // in a fixed order). Returns how many were placed.
   const SEED_LP = { x: 0, z: 0, heading: 0 };
+  const SEED_STEP = 17, SEED_SLIDE = [0, 7, -7, 14, -14, 21]; // m
+  const START_GAP = 8.5; // no two start cars closer than this (m)
   function seedStart(n) {
     const sv = city.startView;
     if (!sv || !sv.spawn || !(n > 0)) return 0;
@@ -894,20 +896,29 @@ export function createTraffic(game, { max = 14 } = {}) {
     let placed = 0;
     for (let i = 0; i < n; i++) {
       const oncoming = i % 2 === 1;
-      const ahead = 16 + Math.floor(i / 2) * 26 + (oncoming ? 10 : 0);
       const from = oncoming ? backFrom : fwdFrom;
-      const d = oncoming ? be.length - (spAlong + ahead) : spAlong + ahead;
-      const d0 = extAt(city.nodes[from], be) + 12, d1 = be.length - extAt(city.nodes[oncoming ? fwdFrom : backFrom], be) - 22;
-      if (d < d0 || d > d1) continue;
-      const lane = rng.int(0, lanesPerDirection(be) - 1);
-      lanePoint(city, be, from, d, lane, SEED_LP);
-      const qx = SEED_LP.x, qz = SEED_LP.z;
-      let clear = true;
-      for (let k = 0; k < game.vehicles.length; k++) {
-        const o = game.vehicles[k];
-        if ((o.x - qx) * (o.x - qx) + (o.z - qz) * (o.z - qz) < 8 * 8) { clear = false; break; }
+      const dMin = extAt(city.nodes[from], be) + 12, dMax = be.length - extAt(city.nodes[oncoming ? fwdFrom : backFrom], be) - 22;
+      // Spread along the street ahead of the spawn; if a spot is taken or
+      // off the street, slide it along until one is free (never within
+      // START_GAP of another car, so the first view has no queue).
+      const base = 14 + Math.floor(i / 2) * SEED_STEP + (oncoming ? 8 : 0);
+      let d = -1, qx = 0, qz = 0, lane = 0;
+      for (let k = 0; k < SEED_SLIDE.length && d < 0; k++) {
+        const ahead = base + SEED_SLIDE[k];
+        const dd = oncoming ? be.length - (spAlong + ahead) : spAlong + ahead;
+        if (dd < dMin || dd > dMax) continue;
+        lane = k === 0 ? rng.int(0, lanesPerDirection(be) - 1) : lane;
+        lanePoint(city, be, from, dd, lane, SEED_LP);
+        qx = SEED_LP.x;
+        qz = SEED_LP.z;
+        let clear = true;
+        for (let m = 0; m < game.vehicles.length; m++) {
+          const o = game.vehicles[m];
+          if ((o.x - qx) * (o.x - qx) + (o.z - qz) * (o.z - qz) < START_GAP * START_GAP) { clear = false; break; }
+        }
+        if (clear) d = dd;
       }
-      if (!clear) continue;
+      if (d < 0) continue;
       const kinds = MIX[city.districtOf(qx, qz)] || MIX.midtown;
       const v = createVehicle(rng.pick(kinds), qx, qz, SEED_LP.heading, rng);
       const dr = createDriver(city, rng);

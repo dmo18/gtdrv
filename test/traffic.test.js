@@ -4,6 +4,9 @@ import { generateCity, lanePoint, signalState } from '../src/world/citygen.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createVehicle, stepVehicle, collideVehicles } from '../src/entities/vehicle.js';
 import { createRng } from '../src/core/rng.js';
+import fs from 'node:fs';
+import { createMiamiCity } from '../src/world/miami.js';
+import { createParkedCars } from '../src/systems/parked.js';
 import { createDriver, placeDriver, driveStep, createTraffic } from '../src/systems/traffic.js';
 
 const DT = 1 / 60;
@@ -255,4 +258,106 @@ test('traffic system spawns around the player and despawns far cars', () => {
   game.player.z = -1400;
   for (let k = 0; k < 120; k++) traffic.fixedUpdate(DT);
   assert.equal(traffic.count, 0);
+});
+
+// ---------------------------------------------------------------------
+// Street life on the Miami map (docs/PLAN_V1.md W8): the first view's
+// moving cars, parked cars in car parks, service vehicles in traffic.
+// ---------------------------------------------------------------------
+const miami = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8')));
+const miamiCol = createCollisionWorld();
+for (const b of miami.buildings) miamiCol.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
+const sv = miami.startView;
+
+function miamiGame(seed, clock = 9) {
+  const g = {
+    city: miami, collision: miamiCol, rng: createRng(seed), vehicles: [], time: 0, clock, quality: 1,
+    player: { x: sv.spawn.x, z: sv.spawn.z, y: 0, heading: sv.spawn.heading, vehicle: null },
+    addVehicle(v) { this.vehicles.push(v); return v; },
+    removeVehicle(v) { const i = this.vehicles.indexOf(v); if (i >= 0) this.vehicles.splice(i, 1); v.removed = true; },
+    events: { emit() {} },
+  };
+  g.world = { collision: miamiCol, city: miami, time: 0 };
+  return g;
+}
+// The title camera's view: 45 degrees either side of the spawn heading.
+function inFirstView(x, z, R = 120) {
+  const fx = Math.cos(sv.spawn.heading), fz = Math.sin(sv.spawn.heading);
+  const cx = sv.spawn.x - fx * sv.camera.back - fz * sv.camera.side, cz = sv.spawn.z - fz * sv.camera.back + fx * sv.camera.side;
+  const dx = x - cx, dz = z - cz, d = Math.hypot(dx, dz);
+  return d > 1 && d <= R && (dx * fx + dz * fz) / d > Math.cos(Math.PI / 4);
+}
+const minGap = (vs) => {
+  let m = Infinity;
+  for (let i = 0; i < vs.length; i++) for (let j = i + 1; j < vs.length; j++) m = Math.min(m, Math.hypot(vs[i].x - vs[j].x, vs[i].z - vs[j].z));
+  return m;
+};
+
+test('first view: at least 6 moving cars, none closer than 8 m, still moving and apart after 8 s', () => {
+  for (const seed of [42, 7, 99]) {
+    const g = miamiGame(seed);
+    const traffic = createTraffic(g);
+    const n = traffic.seedStart(sv.traffic);
+    assert.ok(n >= 6, `seed ${seed}: ${n} start cars`);
+    const seen = g.vehicles.filter((v) => inFirstView(v.x, v.z));
+    assert.ok(seen.length >= 6, `seed ${seed}: ${seen.length} in the first view`);
+    for (const v of g.vehicles) assert.ok(v.traffic && Math.abs(v.speed) > 3, 'moving');
+    assert.ok(minGap(g.vehicles) >= 8, `seed ${seed}: closest start cars ${minGap(g.vehicles).toFixed(1)} m`);
+    // Eight seconds on: nobody has piled up.
+    const start = g.vehicles.slice();
+    let gap = Infinity;
+    for (let k = 0; k < 60 * 8; k++) {
+      g.time += DT;
+      g.world.time = g.time;
+      for (const v of g.vehicles) stepVehicle(v, v.controls, DT, g.world);
+      traffic.fixedUpdate(DT);
+      // Cars passing in opposite lanes come close by design: only pairs going the same way.
+      const sv0 = start.filter((v) => !v.removed);
+      for (let i = 0; i < sv0.length; i++) {
+        for (let j = i + 1; j < sv0.length; j++) {
+          if (Math.cos(sv0[i].heading - sv0[j].heading) > 0) gap = Math.min(gap, Math.hypot(sv0[i].x - sv0[j].x, sv0[i].z - sv0[j].z));
+        }
+      }
+    }
+    assert.ok(gap >= 4, `seed ${seed}: closest approach ${gap.toFixed(1)} m`);
+    const movers = start.filter((v) => !v.removed && Math.abs(v.speed) > 2).length;
+    assert.ok(movers >= 5, `seed ${seed}: ${movers} still moving`);
+  }
+});
+
+test('parked cars fill the car parks near the player (6 in the first view)', () => {
+  const g = miamiGame(3);
+  const parked = createParkedCars(g);
+  parked.fixedUpdate(DT);
+  const inView = parked.spots.filter((s) => s.vehicle && inFirstView(s.x, s.z, 80)).length;
+  assert.ok(inView >= 6, `${inView} parked cars in the first view`);
+  // A car park: its listed bays take cars when the player is close.
+  const bay = parked.spots.find((s) => s.lot);
+  assert.ok(bay, 'the map lists car park bays');
+  g.player.x = bay.x + 70;
+  g.player.z = bay.z;
+  for (let i = 0; i < 40; i++) parked.fixedUpdate(0.5);
+  const lotCars = parked.spots.filter((s) => s.lot && s.vehicle && Math.hypot(s.x - g.player.x, s.z - g.player.z) < 135).length;
+  assert.ok(lotCars >= 3, `${lotCars} cars in car parks`);
+});
+
+test('service vehicles turn up in traffic now and then, never more than two at once', () => {
+  const g = miamiGame(11, 9);
+  const traffic = createTraffic(g, { max: 14 });
+  const seen = new Set();
+  let most = 0;
+  for (let k = 0; k < 60 * 400; k++) {
+    g.time += DT;
+    g.world.time = g.time;
+    traffic.fixedUpdate(DT);
+    if (k % 30 === 0) {
+      let live = 0;
+      for (const v of g.vehicles) if (v.spec.service) { seen.add(v.spec.service); live++; }
+      most = Math.max(most, live);
+      // Cars never get anywhere (no physics here): clear them so new ones are drawn.
+      for (const v of g.vehicles.slice()) if (!v.spec.service || k % 600 === 0) { g.removeVehicle(v); }
+    }
+  }
+  assert.ok(seen.size >= 2, `service kinds seen: ${[...seen].join(', ') || 'none'}`);
+  assert.ok(most <= 2, `${most} at once`);
 });

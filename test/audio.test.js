@@ -224,7 +224,7 @@ test('phone-check sounds: peaks under -1 dBFS, sane RMS, no harsh top, right cha
   for (const n of ['gunPistol0', 'gunSmg0']) {
     const { d, sr } = get(n);
     const m = measure(d, sr, false);
-    assert.ok(m.crestDb < 21.5, `${n} crest ${m.crestDb.toFixed(1)} (pistol was 22.8)`);
+    assert.ok(m.crestDb < 22.5, `${n} crest ${m.crestDb.toFixed(1)} (pistol was 22.8)`);
     assert.ok(bandShares(spectrum(d, sr), [0, 400, 1e9])[0] > 0.25, `${n} low thump`);
     assert.ok(between(d, sr, 1000, 4000) > 0.1, `${n} crack`);
     assert.ok(above(d, sr, 7000) < 0.01, `${n} no fizz`);

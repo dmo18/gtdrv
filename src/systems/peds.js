@@ -29,6 +29,7 @@ const AS = { active: false, need: 0, dx: 0, dz: 0 };
 // Loop geometry
 // ---------------------------------------------------------------------
 function loopDims(b) {
+  if (b.seg) return { w: b.len, h: 0, p: 2 * b.len };
   const w = b.x1 - b.x0 - INSET * 2;
   const h = b.z1 - b.z0 - INSET * 2;
   return { w, h, p: 2 * (w + h) };
@@ -37,6 +38,16 @@ function loopDims(b) {
 // Point on the walking rectangle at arc length s (clockwise as seen on a
 // map with x east, z south). Writes to PT.
 function pointAt(b, s) {
+  if (b.seg) {
+    // A pavement line: out along it and back (a loop of 2 x its length).
+    const p2 = 2 * b.len;
+    s %= p2;
+    if (s < 0) s += p2;
+    const t = s < b.len ? s : p2 - s;
+    PT.x = b.ax + b.ux * t;
+    PT.z = b.az + b.uz * t;
+    return PT;
+  }
   const w = b.x1 - b.x0 - INSET * 2, h = b.z1 - b.z0 - INSET * 2;
   const p = 2 * (w + h);
   s %= p;
@@ -51,6 +62,7 @@ function pointAt(b, s) {
 
 // Arc length of the loop point nearest to (x, z).
 function nearestS(b, x, z) {
+  if (b.seg) return clamp((x - b.ax) * b.ux + (z - b.az) * b.uz, 0, b.len);
   const x0 = b.x0 + INSET, z0 = b.z0 + INSET, x1 = b.x1 - INSET, z1 = b.z1 - INSET;
   const w = x1 - x0, h = z1 - z0;
   const cx = clamp(x, x0, x1), cz = clamp(z, z0, z1);
@@ -504,7 +516,7 @@ export function crowdAt(district, clock) {
 export function blockCapacity(b, clock) {
   const d = DENSITY[b.district] || 0;
   if (!(d > 0)) return 0;
-  const per = 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
+  const per = b.seg ? b.len : 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
   return Math.min(BLOCK_MAX, Math.round((per / 100) * d * crowdAt(b.district, clock)));
 }
 const NEAR = 25, FAR = 110, RECYCLE = 150;
@@ -513,22 +525,40 @@ const JUMP = 150; // m moved between two scans that counts as a teleport
 const SKY = 120; // above this altitude nobody is simulated
 const SEA = -150; // this far out at sea nobody is simulated
 const CELL = 128;
-const LOT_WALK = new Set(['plaza', 'park', 'grass', 'beach']);
+const SIDE_GAP = 2.4; // walking line, metres beyond the kerb
+const SEG_MIN = 20; // shortest pavement line worth using
 
-// Walkable places: the city blocks plus plazas, parks and lawns from the
-// lot list (real maps), each with the same x0..z1 / district / id fields
-// a block has. Indexed by a coarse grid so a scan only looks near.
+// Walkable places: the city blocks plus the pavement on both sides of
+// every street in the core, as lines walked out and back (real maps).
+// Each has the id / district / x0..z1 fields a block has. Indexed by a
+// coarse grid so a scan only looks near.
 function buildAreas(city) {
   const areas = city.blocks.slice();
-  const lots = city.lots;
-  if (lots && lots.length) {
-    for (let i = 0; i < lots.length; i++) {
-      const l = lots[i];
-      if (!LOT_WALK.has(l.type) || l.area < 300 || !l.core) continue;
-      const w = l.x1 - l.x0, h = l.z1 - l.z0;
-      if (Math.min(w, h) < 14 || Math.max(w, h) > 340 || l.area < w * h * 0.15) continue;
-      const district = l.type === 'park' || l.type === 'grass' ? 'park' : l.type === 'beach' ? 'beach' : l.district;
-      areas.push({ id: areas.length, x0: l.x0, z0: l.z0, x1: l.x1, z1: l.z1, district, lot: true, ok: 0 });
+  const nodes = city.nodes, edges = city.edges;
+  if (edges && nodes && city.districtOf) {
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      if (e.bridge || e.causeway) continue;
+      const na = nodes[e.a], nb = nodes[e.b];
+      const L = e.length;
+      if (!(L > 0)) continue;
+      const ux = (nb.x - na.x) / L, uz = (nb.z - na.z) / L;
+      const t0 = (e.horizontal ? na.hx : na.hz) + 4, t1 = L - (e.horizontal ? nb.hx : nb.hz) - 4;
+      const len = t1 - t0;
+      if (!(len >= SEG_MIN)) continue;
+      const mx = na.x + ux * (t0 + t1) / 2, mz = na.z + uz * (t0 + t1) / 2;
+      if (city.inCore && !city.inCore(mx, mz)) continue;
+      const district = city.districtOf(mx, mz);
+      if (!(DENSITY[district] > 0)) continue;
+      const off = e.width / 2 + SIDE_GAP;
+      for (let side = -1; side <= 1; side += 2) {
+        const ax = na.x + ux * t0 - uz * off * side, az = na.z + uz * t0 + ux * off * side;
+        const bx = ax + ux * len, bz = az + uz * len;
+        areas.push({
+          id: areas.length, x0: Math.min(ax, bx), z0: Math.min(az, bz), x1: Math.max(ax, bx), z1: Math.max(az, bz),
+          district, seg: true, ax, az, ux, uz, len, ok: 0,
+        });
+      }
     }
   }
   const grid = new Map();
@@ -547,17 +577,16 @@ function buildAreas(city) {
   return { areas, grid };
 }
 
-// A lot is used once its walking loop is checked clear of buildings and
-// roads (done on first use, so the city start pays nothing).
-function lotUsable(city, b) {
+// A pavement line is used once checked clear of buildings and the road
+// (done on first use, so the city start pays nothing).
+function lineUsable(city, b) {
   if (b.ok) return b.ok === 1;
   let bad = 0, n = 0;
-  const per = 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
-  for (let s = 0; s < per; s += 6, n++) {
+  for (let s = 0; s < b.len; s += 6, n++) {
     pointAt(b, s);
     if ((city.inBuilding && city.inBuilding(PT.x, PT.z, 0.6)) || (city.onRoad && city.onRoad(PT.x, PT.z))) bad++;
   }
-  b.ok = bad <= n * 0.1 ? 1 : 2;
+  b.ok = bad <= n * 0.15 ? 1 : 2;
   return b.ok === 1;
 }
 
@@ -648,7 +677,7 @@ export function createPeds(game, { max = 30 } = {}) {
           const fx = Math.max(Math.abs(px - b.x0), Math.abs(px - b.x1));
           const fz = Math.max(Math.abs(pz - b.z0), Math.abs(pz - b.z1));
           if (Math.hypot(fx, fz) < nearMin) continue;
-          if (b.lot && !lotUsable(city, b)) continue;
+          if (b.seg && !lineUsable(city, b)) continue;
           cand[n] = i;
           candW[n] = DENSITY[b.district] * (d < 40 ? 3 : d < 80 ? 2 : 1);
           total += candW[n];
@@ -673,7 +702,7 @@ export function createPeds(game, { max = 30 } = {}) {
     if (!block) return false;
     const ped = slot.ped;
     const rng = game.rng;
-    const park = block.district === 'park';
+    const park = block.district === 'park' && !block.seg;
     const kind = park ? (rng.chance(0.5) ? 'jog' : 'loop') : rng.chance(0.14) && active + 1 < cap() ? 'chat' : 'loop';
     let fallback = false;
     let ok = false;
@@ -751,7 +780,7 @@ export function createPeds(game, { max = 30 } = {}) {
     let best = null, bd = Infinity;
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
-      if (b.lot || b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
+      if (b.seg || b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
       const dx = x < b.x0 ? b.x0 - x : x > b.x1 ? x - b.x1 : 0;
       const dz = z < b.z0 ? b.z0 - z : z > b.z1 ? z - b.z1 : 0;
       const d = dx * dx + dz * dz;

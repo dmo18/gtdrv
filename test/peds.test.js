@@ -4,7 +4,9 @@ import { generateCity } from '../src/world/citygen.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createRng } from '../src/core/rng.js';
 import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
-import { createPed, placePed, stepPed, createPeds } from '../src/systems/peds.js';
+import fs from 'node:fs';
+import { createMiamiCity } from '../src/world/miami.js';
+import { createPed, placePed, stepPed, createPeds, crowdAt } from '../src/systems/peds.js';
 import { createTraffic, createDriver, placeDriver } from '../src/systems/traffic.js';
 import { makeFightGame, step as fightStep, cityAndCollision } from './fightgame.js';
 
@@ -207,4 +209,87 @@ test('hijack: entering a traffic car with its driver pulls them out; they flee f
   game.player.vehicle = parked;
   fightStep(game, [game.peds, traffic], 2);
   assert.equal(bailed, 1);
+});
+
+// ---------------------------------------------------------------------
+// Street life (docs/PLAN_V1.md W8): people on pavements and plazas by
+// district and hour, on the real Miami map.
+// ---------------------------------------------------------------------
+const miami = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8')));
+const miamiCol = createCollisionWorld();
+for (const b of miami.buildings) miamiCol.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
+
+const FIVE_SPOTS = {
+  'start street': miami.startView.spawn,
+  'Tidewater Arena': { x: -749, z: -204 },
+  'Brickell Twin Spires': { x: -1216, z: 1458 },
+  'Opal Opera House': { x: -802, z: -1053 },
+  'Bayfront Sail': { x: -700, z: 650 },
+};
+
+function crowdGame(at, clock, seed = 5) {
+  return {
+    city: miami, collision: miamiCol, rng: createRng(seed), vehicles: [], actors: [], time: 0, clock, quality: 1,
+    player: { x: at.x, z: at.z, y: 0, heading: 0, vehicle: null }, events: { emit() {}, on() {} },
+  };
+}
+function walkersNear(g, peds, r) {
+  let n = 0;
+  for (const s of peds.slots) if (s.ped.active && Math.hypot(s.ped.x - g.player.x, s.ped.z - g.player.z) < r) n++;
+  return n;
+}
+
+test('crowd by hour: centres peak at lunch, the beach in the afternoon, nobody at night', () => {
+  assert.ok(crowdAt('downtown', 13) > crowdAt('downtown', 3) * 5);
+  assert.ok(crowdAt('beach', 14) > crowdAt('beach', 22) * 4);
+  assert.ok(crowdAt('residential', 7) > crowdAt('residential', 14) * 1.2, 'homes busiest in the morning rush');
+  assert.ok(crowdAt('docks', 10) > crowdAt('docks', 21) * 5);
+  assert.equal(crowdAt('airfield', 12), 0);
+  assert.ok(Math.abs(crowdAt('downtown', 23.5) - crowdAt('downtown', -0.5)) < 1e-9, 'the clock wraps');
+});
+
+test('at 14:00 at least 8 walkers within 80 m of the camera at five named spots', () => {
+  for (const [name, at] of Object.entries(FIVE_SPOTS)) {
+    const g = crowdGame(at, 14);
+    const peds = createPeds(g);
+    for (let i = 0; i < 600; i++) peds.fixedUpdate(DT);
+    const n = walkersNear(g, peds, 80);
+    assert.ok(n >= 8, `${name}: ${n} walkers within 80 m`);
+  }
+});
+
+test('street life is deterministic and thins out at night', () => {
+  const at = FIVE_SPOTS['start street'];
+  const run = (clock) => {
+    const g = crowdGame(at, clock);
+    const peds = createPeds(g);
+    for (let i = 0; i < 300; i++) peds.fixedUpdate(DT);
+    return { n: peds.count, pos: peds.slots.filter((s) => s.ped.active).map((s) => [Math.round(s.ped.x), Math.round(s.ped.z)]) };
+  };
+  const day = run(14), again = run(14), night = run(3);
+  assert.deepEqual(again, day);
+  assert.ok(night.n * 2 <= day.n, `night ${night.n} vs day ${day.n}`);
+});
+
+test('pavement walkers keep off the road and out of buildings, and a teleport refills the crowd', () => {
+  const g = crowdGame(FIVE_SPOTS['Opal Opera House'], 14);
+  const peds = createPeds(g);
+  let bad = 0, seen = 0;
+  for (let i = 0; i < 60 * 40; i++) {
+    peds.fixedUpdate(DT);
+    if (i % 60 !== 59) continue;
+    for (const s of peds.slots) {
+      if (!s.ped.active) continue;
+      seen++;
+      if (miami.inBuilding(s.ped.x, s.ped.z, 0) || miami.onRoad(s.ped.x, s.ped.z)) bad++;
+    }
+  }
+  assert.ok(seen > 200, `${seen} samples`);
+  assert.ok(bad <= seen * 0.03, `${bad} of ${seen} samples on a road or in a building`);
+  // Teleport 1.5 km: the crowd is around the new spot within a second.
+  const to = FIVE_SPOTS['Brickell Twin Spires'];
+  g.player.x = to.x;
+  g.player.z = to.z;
+  for (let i = 0; i < 60; i++) peds.fixedUpdate(DT);
+  assert.ok(walkersNear(g, peds, 80) >= 8, `${walkersNear(g, peds, 80)} walkers after a teleport`);
 });

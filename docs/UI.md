@@ -45,6 +45,32 @@ where this file differs from 6.12 it says so under "Differences from
   lowest adaptive resolution scale seen). The player and the car they were
   in are put back afterwards. Nothing leaves the phone. Tests:
   test/phonecheck.test.js (headless, shortened run and the line format).
+- About (0.6.0, U2): Settings is unchanged; the Help tab starts with an
+  "About Rustwater" row, and the title has an "About" button (top right,
+  48 high). Both show the same content (`fillAbout` in `src/ui/title.js`):
+  version (from the build), credits (original game, three.js MIT), the map
+  credit "Map data (c) OpenStreetMap contributors, ODbL" with the
+  ODbL line, a note that venue, shop and business names are invented, a
+  privacy summary (no network requests while playing, saves stay on the
+  phone) and a link to `privacy.html`. The privacy contact email lives on
+  that page only; the About screen shows none.
+- Sound test (0.6.0, U2): Settings, Display, Sound test. The eight
+  numbered sounds of the Phone check, taken from `SOUNDS` in
+  `src/ui/phonecheck.js` with a one-line note each (`SOUND_NOTES`) and a
+  "Start the Phone check" button. It does not play sounds by itself:
+  engine, tyre squeal, boost and siren need the test car.
+- Blood (0.6.0, U2): Settings, Game, "Blood", On by default (owner
+  decision). `settings.blood` (boolean; anything else reads as On).
+  `src/render/combatfx.js` should return early from `bloodHit` and
+  `bloodDeath` when `settings.blood === false`, and `src/core/save.js`
+  must keep the boolean (add `blood` to the boolean list and default).
+  Both are outside U2's files and are reported to the coordinator.
+- Menu text check (0.6.0, U2): New game said the starter car and that
+  garages are kept; it now says favourite car (sedan if none), parked cars
+  cleared, score, medals and found garages kept (`session.newSession`).
+  The Phone check, Sound test and About texts take their numbers from
+  `DRIVE_SECONDS`, `SOUND_SECONDS` and `SOUNDS`. Rows per Settings group
+  are still at most 6: Controls 5, Sound 6, Game 5, Display 6.
 - Own screens with a two-tap confirm: New game (new game, erase all
   progress), Map choice (Miami or the classic island; switching
   restarts). The first tap turns the button into "Cancel" in the same
@@ -55,7 +81,9 @@ where this file differs from 6.12 it says so under "Differences from
 ## HUD grid
 
 One grid for every mode, checked at 915x412 and 780x360 with a left
-safe-area inset of 0 and 40 px. Rectangles are in docs/REVAMP.md 6.5.
+safe-area inset of 0 and 40 px. Rectangles are in docs/REVAMP.md 6.5. 748x360 (the owner's phone) is
+checked too, without exact rectangles: overlap, gaps, sizes, keep-out and
+edges only.
 
 - The canvas covers the whole viewport, under the camera cut-out too.
   Only HUD items move in by the safe-area insets.
