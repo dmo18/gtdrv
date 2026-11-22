@@ -1061,6 +1061,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
   // (graphics.js): per car x, z, cos and sin of heading, headlight, tail
   // glow, half length, spare.
   const CL = { n: 0, max: 6, data: new Float32Array(6 * 8) };
+  let title = null; // clock and weather held back while the title shows
   const sys = {
     name: 'daynight',
     carLamps: CL,
@@ -1104,6 +1105,36 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     setHour(h) {
       game.clock = wrapHour(h);
       forceApply = true;
+    },
+    // The designed first view (docs/REVAMP.md 6.8): the clock is held at
+    // `sv.time` (17:30) under a clear sky while the title shows, whatever
+    // the player's Live day and night setting. The time before is kept.
+    enterTitle(sv) {
+      if (!sv || !Number.isFinite(sv.time) || title) return false;
+      title = { clock: game.clock, locked: !!game.timeLocked, weather: W.name };
+      game.clock = wrapHour(sv.time);
+      game.timeLocked = true;
+      this.setWeather(sv.weather || 'clear', true);
+      return true;
+    },
+    // Play begins. 'start' (a new start): 17:30 clear stays as the clock
+    // unless the player fixed a time in Settings, which applies instead.
+    // 'continue': the time before the title comes back.
+    leaveTitle(how) {
+      if (!title) return false;
+      const t = title;
+      title = null;
+      const st = game.progress && game.progress.settings;
+      const fixed = !!(st && st.liveTime === false && Number.isFinite(st.timeOfDay));
+      if (how === 'continue' || fixed) {
+        game.clock = fixed ? wrapHour(st.timeOfDay) : t.clock;
+        this.setWeather(t.weather, true);
+        game.timeLocked = fixed ? true : t.locked;
+      } else {
+        game.timeLocked = t.locked;
+      }
+      forceApply = true;
+      return true;
     },
     // Force a weather; `instant` skips the 20 s blend (previews, tests).
     setWeather(name, instant = false) {

@@ -19,18 +19,19 @@
 // tile also drops its small buildings, parapets and roof plant. Lots
 // (docs/REVAMP.md 6.2): their ground and dressing are part of a near
 // tile (lotmesh.js); far off the land takes the lots' colours.
-// Collision, street lamps and traffic-light bulbs are set up once for
-// the whole map, whatever is drawn; the lots' solid features get their
-// collision shapes when their tile is first built.
+// Collision (buildings and every lot's solid features), street lamps and
+// traffic-light bulbs are set up once for the whole map at build,
+// whatever is drawn: only meshes stream, never collision shapes, so the
+// simulation does not depend on when a frame happened.
 import * as THREE from 'three';
-import { ChunkedBuilder, MeshBuilder } from './meshbuilder.js';
+import { ChunkedBuilder, MeshBuilder, takeFloats, takeIndices, giveBack } from './meshbuilder.js';
 import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
-import { fillCollision } from '../world/collision.js';
+import { fillCollision, fillLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
-import { lotGround, lotJob, lotsByTile, setSolids } from './lotmesh.js';
+import { lotGround, lotJob, lotsByTile } from './lotmesh.js';
 import { dressLot } from '../world/lots.js';
 
 export const TILE = 300; // m, a near-detail tile
@@ -43,56 +44,125 @@ const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 export const SLICE_MS = 2;
 const PROP_PIECE = 16;
 
+// Near-tile mesh arrays come from the builders' pool (views of pooled
+// arrays, the pooled array kept on the attribute as rwPool) and go back
+// to it once on the GPU (nothing reads tile geometry back; bounds are
+// already set), or when the mesh is disposed before it was ever drawn.
 function releaseArray() {
+  if (this.rwPool) { giveBack(this.rwPool); this.rwPool = null; }
   this.array = null;
+}
+function pooledAttr(a, n, size) {
+  const at = new THREE.BufferAttribute(a.subarray(0, n), size);
+  at.rwPool = a;
+  at.onUpload(releaseArray);
+  return at;
+}
+function onTileGeoDispose(e) {
+  const g = e.target;
+  for (const k in g.attributes) {
+    const at = g.attributes[k];
+    if (at.rwPool) { giveBack(at.rwPool); at.rwPool = null; }
+  }
+  if (g.index && g.index.rwPool) { giveBack(g.index.rwPool); g.index.rwPool = null; }
 }
 
 // A tile builder (one ChunkedBuilder cell, up to three quality tiers)
-// turned into one mesh a slice at a time: the vertex arrays are copied
-// into typed arrays in pieces, so a big tile never costs one long frame.
-// The mesh (or nothing) is left in out[0]. Same result as buildInto.
-const COPY = 120000; // numbers per piece
-function* copyInto(dst, src, at, over, add = 0) {
-  for (let i = 0; i < src.length; i += COPY) {
-    const e = Math.min(src.length, i + COPY);
+// turned into one mesh a slice at a time: the builders' typed scratch
+// arrays are copied into arrays of the exact size in pieces, so a big
+// tile never costs one long frame, and the scratch arrays go back to the
+// pool. The mesh (or nothing) is left in out[0]. Same result as
+// buildInto.
+const COPY = 65536; // numbers per piece
+function* copyInto(dst, src, n, at, over, add = 0) {
+  for (let i = 0; i < n; i += COPY) {
+    const e = Math.min(n, i + COPY);
     if (add) for (let k = i; k < e; k++) dst[at + k] = src[k] + add;
-    else for (let k = i; k < e; k++) dst[at + k] = src[k];
+    else dst.set(src.subarray(i, e), at + i);
     if (over()) yield 'mesh';
   }
+}
+// The bounds of a mesh's positions (the first n numbers of pos), in
+// pieces: bb gets min x y z, max x y z and the bounding sphere radius,
+// worked out as three's computeBoundingBox and computeBoundingSphere do
+// (same numbers), but a slice at a time. The loops are plain functions:
+// numbers kept in a generator across a yield are boxed on every write.
+function boxPiece(pos, i, e, bb) {
+  let x0 = bb[0], y0 = bb[1], z0 = bb[2], x1 = bb[3], y1 = bb[4], z1 = bb[5];
+  for (let k = i; k < e; k += 3) {
+    const x = pos[k], y = pos[k + 1], z = pos[k + 2];
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  bb[0] = x0; bb[1] = y0; bb[2] = z0; bb[3] = x1; bb[4] = y1; bb[5] = z1;
+}
+function radiusPiece(pos, i, e, bb) {
+  const cx = (bb[0] + bb[3]) * 0.5, cy = (bb[1] + bb[4]) * 0.5, cz = (bb[2] + bb[5]) * 0.5;
+  let r2 = bb[6];
+  for (let k = i; k < e; k += 3) {
+    const dx = pos[k] - cx, dy = pos[k + 1] - cy, dz = pos[k + 2] - cz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > r2) r2 = d2;
+  }
+  bb[6] = r2;
+}
+function* boundsOf(pos, n, bb, over) {
+  bb[0] = bb[1] = bb[2] = Infinity;
+  bb[3] = bb[4] = bb[5] = -Infinity;
+  bb[6] = 0;
+  for (let i = 0; i < n; i += COPY) {
+    boxPiece(pos, i, Math.min(n, i + COPY), bb);
+    if (over()) yield 'mesh';
+  }
+  for (let i = 0; i < n; i += COPY) {
+    radiusPiece(pos, i, Math.min(n, i + COPY), bb);
+    if (over()) yield 'mesh';
+  }
+  bb[6] = Math.sqrt(bb[6]);
 }
 function* buildSliced(cb, material, o, over, out, sub = 0) {
   const parts = [cb.map.get(sub * 3), cb.map.get(sub * 3 + 1), cb.map.get(sub * 3 + 2)];
   let nv = 0, ni = 0;
-  for (const p of parts) if (p) { nv += p.count; ni += p.idx.length; }
-  if (!nv) return;
+  for (const p of parts) if (p) { nv += p.count; ni += p.ni; }
+  if (!nv) { for (const p of parts) if (p) p.release(); return; }
   const uv = cb.withUv;
-  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uvs = uv ? new Float32Array(nv * 2) : null;
-  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  const pos = takeFloats(nv * 3), col = takeFloats(nv * 3), nor = takeFloats(nv * 3), uvs = uv ? takeFloats(nv * 2) : null;
+  const idx = takeIndices(ni, nv > 65535);
   const tiered = !!(parts[1] || parts[2]);
   const counts = [];
   let v = 0, k = 0;
   for (const p of parts) {
     if (p) {
-      yield* copyInto(pos, p.pos, v * 3, over);
-      yield* copyInto(col, p.col, v * 3, over);
-      yield* copyInto(nor, p.nor, v * 3, over);
+      yield* copyInto(pos, p.P, p.count * 3, v * 3, over);
+      yield* copyInto(col, p.C, p.count * 3, v * 3, over);
+      yield* copyInto(nor, p.N, p.count * 3, v * 3, over);
       if (uvs) {
-        if (p.uv) yield* copyInto(uvs, p.uv, v * 2, over);
+        if (p.U) yield* copyInto(uvs, p.U, p.count * 2, v * 2, over);
+        else uvs.fill(0, v * 2, (v + p.count) * 2);
       }
-      yield* copyInto(idx, p.idx, k, over, v);
+      yield* copyInto(idx, p.I, p.ni, k, over, v);
       v += p.count;
-      k += p.idx.length;
+      k += p.ni;
+      p.release();
     }
     counts.push(k);
   }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  if (uvs) geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.setAttribute('position', pooledAttr(pos, nv * 3, 3));
+  geo.setAttribute('color', pooledAttr(col, nv * 3, 3));
+  geo.setAttribute('normal', pooledAttr(nor, nv * 3, 3));
+  if (uvs) geo.setAttribute('uv', pooledAttr(uvs, nv * 2, 2));
+  geo.setIndex(pooledAttr(idx, ni, 1));
+  geo.addEventListener('dispose', onTileGeoDispose);
   if (over()) yield 'mesh';
-  geo.computeBoundingSphere();
+  const bb = new Float64Array(7);
+  yield* boundsOf(pos, nv * 3, bb, over);
+  geo.boundingBox = new THREE.Box3(new THREE.Vector3(bb[0], bb[1], bb[2]), new THREE.Vector3(bb[3], bb[4], bb[5]));
+  geo.boundingSphere = new THREE.Sphere(geo.boundingBox.getCenter(new THREE.Vector3()), bb[6]);
   const m = new THREE.Mesh(geo, material);
   m.matrixAutoUpdate = false;
   if (tiered) {
@@ -427,8 +497,18 @@ export function buildRealCity(city, collision, opts = {}) {
   }
   lap('index');
 
+  // dressLot (src/world/lots.js), or another one with the same contract
+  // passed in by the caller (tests, fixtures).
+  const dress = opts.dressLot || dressLot;
+
   // ---- Whole map, once: collision, lamps, bulbs, glows. ----
   fillCollision(city, collision);
+  lap('collision');
+  // The lots' solid features (fences, walls, bins, cabins, parked cars):
+  // all of them now, in lot order, so a run is the same however the
+  // tiles stream. reset() swaps them when the lot list is replaced.
+  let lotShapes = fillLotCollision(city, collision, dress);
+  lap('lotCollision');
   const glows = [];
   const groundY = makeGroundY(city);
   const Cnull = { city, collision, R, DR, glows, groundY };
@@ -473,10 +553,7 @@ export function buildRealCity(city, collision, opts = {}) {
     const nI = Math.floor((G.w - 1) / s), nJ = Math.floor((G.h - 1) / s);
     const coarse = (v, o) => Math.ceil(((v - o) / G.cell - 0.5) / s);
     for (const t of tiles) {
-      for (const mb of all) {
-        mb.pos.length = mb.col.length = mb.nor.length = mb.idx.length = 0;
-        mb.count = 0;
-      }
+      for (const mb of all) mb.reset();
       // Land, one coarse cell over each side (the near tiles cover it).
       const i0 = Math.max(0, coarse(t.x0, G.x0) - 1), i1 = Math.min(nI, coarse(t.x1, G.x0) + 1);
       const j0 = Math.max(0, coarse(t.z0, G.z0) - 1), j1 = Math.min(nJ, coarse(t.z1, G.z0) + 1);
@@ -520,6 +597,7 @@ export function buildRealCity(city, collision, opts = {}) {
       supers[sk].push(winD, t.k, 1, 1);
       supers[sk].push(smallD, t.k, 2, 1);
     }
+    for (const mb of all) mb.release();
     for (const sc of supers) {
       const m = sc.build(farMat);
       if (m) { farRoot.add(m); farMeshes.push(m); }
@@ -597,9 +675,6 @@ export function buildRealCity(city, collision, opts = {}) {
     if (lotSrc !== city.lots) { lotSrc = city.lots; lotTiles = lotsByTile(city, tileOf, NT); }
     return lotTiles[t.k];
   }
-  // dressLot (src/world/lots.js), or another one with the same contract
-  // passed in by the caller (tests, fixtures).
-  const dress = opts.dressLot || dressLot;
   const dressOf = () => dress;
 
   // One tile, built a slice at a time: yields between pieces of work,
@@ -618,17 +693,20 @@ export function buildRealCity(city, collision, opts = {}) {
     // Lot cells of this tile (the lot grid shares the land raster).
     const ci = (v, o, n) => Math.max(0, Math.min(n, Math.round((v - o) / G.cell)));
     const li0 = ci(t.x0, G.x0, G.w), li1 = ci(t.x1, G.x0, G.w), lj0 = ci(t.z0, G.z0, G.h), lj1 = ci(t.z1, G.z0, G.h);
-    for (let j = j0; j < j1; j += 10) {
-      realLand(city, B, i0, i1, j, Math.min(j1, j + 10));
+    for (let j = j0; j < j1; j += 5) {
+      realLand(city, B, i0, i1, j, Math.min(j1, j + 5));
       if (over()) { yield 'land'; ts = now(); }
     }
-    for (let j = lj0; j < lj1; j += 20) {
-      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 20));
+    for (let j = lj0; j < lj1; j += 10) {
+      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 10));
       if (over()) { yield 'lotGround'; ts = now(); }
     }
-    realRoads(city, B, t.nodes, [], own);
-    for (let a = 0; a < t.edges.length; a += 12) {
-      realRoads(city, B, [], t.edges.slice(a, a + 12), own);
+    for (let a = 0; a < t.nodes.length; a += 16) {
+      realRoads(city, B, t.nodes.slice(a, a + 16), [], own);
+      if (over()) { yield 'roads'; ts = now(); }
+    }
+    for (let a = 0; a < t.edges.length; a += 4) {
+      realRoads(city, B, [], t.edges.slice(a, a + 4), own);
       if (over()) { yield 'roads'; ts = now(); }
     }
     for (const b of t.blocks) addBlock(B, b, DR);
@@ -653,17 +731,13 @@ export function buildRealCity(city, collision, opts = {}) {
     }
     // Lot dressing: solids and trees stay drawn at the middle level,
     // small things (bins, paint, fences, towels) hide with the props.
-    // Collision shapes are made the first time and switched on and off
-    // with the tile after that (dressLot gives the same list each time).
-    const firstSolids = !t.solids;
-    if (firstSolids) t.solids = [];
-    else setSolids(t.solids, true);
+    // Meshes only: the collision shapes exist from the build.
     const LC = {
-      city, R, DR, groundY, collision: firstSolids ? collision : null, solids: firstSolids ? t.solids : null, lotStats,
+      city, R, DR, groundY, lotStats,
       props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
       plain: B.props, trees: B.plain, treesDetail: B.treeDetail,
     };
-    const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.idx.length; return n; };
+    const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.ni; return n; };
     const before = {};
     for (const [k] of TILE_KEYS) before[k] = idxOf(k);
     for (const step of lotJob(LC, lotsOf(t), dressOf(), over)) { yield step; ts = now(); }
@@ -685,10 +759,6 @@ export function buildRealCity(city, collision, opts = {}) {
       const m = holder[0];
       if (m) {
         g.add(m);
-        // Once on the GPU the vertex arrays are not needed in memory
-        // (nothing reads tile geometry back; bounds are already set).
-        for (const k in m.geometry.attributes) m.geometry.attributes[k].onUpload(releaseArray);
-        if (m.geometry.index) m.geometry.index.onUpload(releaseArray);
         meshes.push(m);
         if (isSmall) small.push(m);
         if (m.userData.tierCounts) {
@@ -710,7 +780,6 @@ export function buildRealCity(city, collision, opts = {}) {
 
   function dropTile(t) {
     if (!t.group) return;
-    if (t.solids) setSolids(t.solids, false);
     group.remove(t.group);
     for (const m of t.meshes) {
       m.geometry.dispose();
@@ -831,13 +900,14 @@ export function buildRealCity(city, collision, opts = {}) {
     if (job) { job = null; jobTile = null; }
     for (const t of tiles) {
       if (t.group) dropTile(t);
-      if (t.solids) setSolids(t.solids, false);
-      t.solids = null;
     }
     lotSrc = null;
+    // The old lots' shapes go off, the new lots' shapes come in.
+    for (const sh of lotShapes) collision.setEnabled(sh, false);
+    lotShapes = fillLotCollision(city, collision, dress);
     buildFar();
   }
-  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD };
+  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotShapes.length };
 
   // Start: the tiles round the spawn point.
   flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });

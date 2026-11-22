@@ -19,7 +19,10 @@ const MIX = {
 };
 
 export function createParkedCars(game) {
+  // The designed start street's kerb spaces (`start`, docs/REVAMP.md 6.8)
+  // come first, so the first scan fills them before any other.
   const spots = game.city.parkingSpots.map((s) => ({ ...s, vehicle: null, used: false }));
+  spots.sort((a, b) => (b.start ? 1 : 0) - (a.start ? 1 : 0));
   let timer = 0;
   let first = true;
 

@@ -5,10 +5,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { ChunkedBuilder, MeshBuilder } from '../src/render/meshbuilder.js';
-import { lotGround, drawLotFeatures, addLotSolids, setSolids, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
+import { lotGround, drawLotFeatures, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
 import { realLand } from '../src/render/citymesh.js';
 import { compactFar, farBuilding } from '../src/render/realcity.js';
-import { createCollisionWorld } from '../src/world/collision.js';
+import { createCollisionWorld, addLotSolids, fillLotCollision } from '../src/world/collision.js';
 import { makeLotsFixture, fixtureDressLot, LOT_TYPES } from './fixtures/lots-fixture.js';
 import { createMiamiCity } from '../src/world/miami.js';
 import { dressLot } from '../src/world/lots.js';
@@ -83,11 +83,11 @@ test('land under full lot cells is left out; the rest of the land stays', () => 
   assert.ok(drawn < full * 0.5, `most land is under lots now (${drawn} of ${full} m2 drawn)`);
 });
 
-test('every lot type is dressed and drawn, solids collide while the tile is built', () => {
+test('every lot type is dressed and drawn; solids collide from the city build, drawn or not', () => {
   const city = makeLotsFixture();
   const col = createCollisionWorld();
   const B = builders();
-  const C = { city, R: null, collision: col, solids: [], ...B, lotStats: { lots: 0, features: 0 } };
+  const C = { city, R: null, ...B, lotStats: { lots: 0, features: 0 } };
   const feats = [];
   const drawnBy = {};
   // The whole job in one go (over() never says stop): no slices.
@@ -113,16 +113,21 @@ test('every lot type is dressed and drawn, solids collide while the tile is buil
   const B3 = builders();
   drawLotFeatures({ ...C, ...B3, collision: null }, cp, feats, feats.length, { tree() {}, palm() {}, lamp() {}, bench() {}, bin() {}, bollard() {}, planter() {}, umbrella() {} });
   assert.ok(B3.paint.map.size > 0 && B3.solid.map.size > 0, 'bay lines and parked cars');
-  // Collision: a solid feature blocks, then not once its tile goes.
-  const solid = C.solids;
+  // Drawing adds no collision: the shapes come from fillLotCollision.
+  assert.equal(col.boxes.length + col.circles.length, 0, 'lotJob makes no shapes');
+  const solid = fillLotCollision(city, col, fixtureDressLot);
+  assert.equal(solid.length, col.boxes.length + col.circles.length);
   assert.ok(solid.length > 5, `shapes ${solid.length}`);
+  let nSolid = 0;
+  for (const lot of city.lots) { if (lot.type === 'verge' || lot.type === 'airfield') continue; feats.length = 0; fixtureDressLot(city, lot, feats); nSolid += feats.filter((f) => f.solid).length; }
+  assert.ok(solid.filter((s) => s.tag === 'lot').length >= nSolid, 'a shape for every solid feature');
   const it = solid.find((s) => s.kind === 1) || solid[0];
   const px = it.kind === 1 ? it.x : (it.x0 + it.x1) / 2, pz = it.kind === 1 ? it.z : (it.z0 + it.z1) / 2;
   assert.ok(col.resolveCircle(px + 0.05, pz, 0.5).hit);
-  setSolids(solid, false);
-  assert.ok(!col.resolveCircle(px + 0.05, pz, 0.5).hit);
-  setSolids(solid, true);
-  assert.ok(col.resolveCircle(px + 0.05, pz, 0.5).hit);
+  // Same lots, same shapes in the same order (a second world).
+  const col2 = createCollisionWorld();
+  const again = fillLotCollision(city, col2, fixtureDressLot);
+  assert.deepEqual(again.map((s) => [s.kind, s.x, s.z, s.x0, s.z0, s.x1, s.z1, s.r, s.h, s.tag]), solid.map((s) => [s.kind, s.x, s.z, s.x0, s.z0, s.x1, s.z1, s.r, s.h, s.tag]));
 });
 
 test('solid shapes: circles, axis boxes and rows of circles for turned walls', () => {
@@ -203,7 +208,7 @@ test('the real map: the spawn street lots are dressed, fast enough to stream', (
   for (const [x, z] of ground) assert.ok(city.lotAt(x, z) && !city.onRoad(x, z), 'lot ground is never on a road');
   // Dressing the lots of that square, slice by slice.
   const lots = city.lots.filter((l) => Math.abs((l.x0 + l.x1) / 2 - s.x) < 150 && Math.abs((l.z0 + l.z1) / 2 - s.z) < 150 && l.type !== 'verge');
-  const C = { city, R: null, collision: createCollisionWorld(), solids: [], ...builders(), lotStats: { lots: 0, features: 0 } };
+  const C = { city, R: null, ...builders(), lotStats: { lots: 0, features: 0 } };
   const t0 = performance.now();
   let slices = 0;
   for (const step of lotJob(C, lots, dressLot, () => true)) { slices++; void step; }

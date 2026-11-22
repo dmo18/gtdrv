@@ -829,10 +829,73 @@ export function createTraffic(game, { max = 14 } = {}) {
     cars.push(v);
   }
 
+  // The designed first view (docs/REVAMP.md 6.8): `n` moving cars on the
+  // start street ahead of the spawn, half with the player's direction and
+  // half oncoming, placed from the spawn alone (no rng but the game's, drawn
+  // in a fixed order). Returns how many were placed.
+  const SEED_LP = { x: 0, z: 0, heading: 0 };
+  function seedStart(n) {
+    const sv = city.startView;
+    if (!sv || !sv.spawn || !(n > 0)) return 0;
+    const sp = sv.spawn, rng = game.rng;
+    const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
+    // The edge of the start street the spawn is on.
+    let be = null, bd = Infinity, bt = 0;
+    for (let i = 0; i < city.edges.length; i++) {
+      const e = city.edges[i];
+      if (e.name !== sp.street) continue;
+      const a = city.nodes[e.a];
+      const t = clamp((sp.x - a.x) * e.ux + (sp.z - a.z) * e.uz, 0, e.length);
+      const d = Math.hypot(a.x + e.ux * t - sp.x, a.z + e.uz * t - sp.z);
+      if (d < bd) { bd = d; be = e; bt = t; }
+    }
+    if (!be || bd > 12) return 0;
+    // `with` the player's heading: leave from node a when the edge runs that way.
+    const same = be.ux * fx + be.uz * fz >= 0;
+    const fwdFrom = same ? be.a : be.b, backFrom = same ? be.b : be.a;
+    const spAlong = same ? bt : be.length - bt; // spawn distance from fwdFrom
+    let placed = 0;
+    for (let i = 0; i < n; i++) {
+      const oncoming = i % 2 === 1;
+      const ahead = 16 + Math.floor(i / 2) * 26 + (oncoming ? 10 : 0);
+      const from = oncoming ? backFrom : fwdFrom;
+      const d = oncoming ? be.length - (spAlong + ahead) : spAlong + ahead;
+      const d0 = extAt(city.nodes[from], be) + 12, d1 = be.length - extAt(city.nodes[oncoming ? fwdFrom : backFrom], be) - 22;
+      if (d < d0 || d > d1) continue;
+      const lane = rng.int(0, lanesPerDirection(be) - 1);
+      lanePoint(city, be, from, d, lane, SEED_LP);
+      const qx = SEED_LP.x, qz = SEED_LP.z;
+      let clear = true;
+      for (let k = 0; k < game.vehicles.length; k++) {
+        const o = game.vehicles[k];
+        if ((o.x - qx) * (o.x - qx) + (o.z - qz) * (o.z - qz) < 8 * 8) { clear = false; break; }
+      }
+      if (!clear) continue;
+      const kinds = MIX[city.districtOf(qx, qz)] || MIX.midtown;
+      const v = createVehicle(rng.pick(kinds), qx, qz, SEED_LP.heading, rng);
+      const dr = createDriver(city, rng);
+      placeDriver(dr, v, be.id, from, d, lane);
+      const v0 = Math.min(laneSpeedOf(be) * dr.speedFactor, v.spec.maxSpeed * 0.8);
+      v.vx = Math.cos(v.heading) * v0;
+      v.vz = Math.sin(v.heading) * v0;
+      v.speed = v0;
+      v.controls = { steer: 0, throttle: 0, brake: 0, handbrake: false };
+      v.ai = dr;
+      v.driver = dr;
+      v.traffic = true;
+      v.asleep = false;
+      game.addVehicle(v);
+      cars.push(v);
+      placed++;
+    }
+    return placed;
+  }
+
   return {
     name: 'traffic',
     cars,
     wrecks,
+    seedStart,
     get count() {
       return cars.length;
     },

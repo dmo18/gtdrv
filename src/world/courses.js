@@ -984,3 +984,56 @@ export function buildSpecCourses(city, spec) {
   airmailCourse(city, list, mainPiersOf(city).northPier, spec.airmail.name, spec.airmail.blurb);
   return tidy(list);
 }
+
+// ---------------------------------------------------------------------------
+// Locked routes (docs/REVAMP.md 6.6): the three extra courses an adventure
+// opens, built like the spec courses from world/adventures.js ROUTE_SPECS.
+// Kept apart from buildCourses (city.routes) so the 14 courses and their
+// order never change; each route carries `locked: adventureId` and the
+// activities system offers it only once that adventure is done.
+// A `river` boat route follows a narrow river: its gates sit on the
+// deepest water near each point instead of being pushed out to open sea.
+// ---------------------------------------------------------------------------
+function deepestNear(city, p, R = 40) {
+  let best = { x: p.x, z: p.z }, bd = city.shoreDist(p.x, p.z);
+  for (let dx = -R; dx <= R; dx += 4) {
+    for (let dz = -R; dz <= R; dz += 4) {
+      if (dx * dx + dz * dz > R * R) continue;
+      const d = city.shoreDist(p.x + dx, p.z + dz);
+      if (d < bd) { bd = d; best = { x: p.x + dx, z: p.z + dz }; }
+    }
+  }
+  return { x: r1(best.x), z: r1(best.z) };
+}
+
+export function buildRoutes(city, specs) {
+  if (!city || !city.courseSpec || !specs || !city.airfield || !city.airfield.gate) return [];
+  const N = city.nodes;
+  const { gate } = city.airfield;
+  const avoidGate = new Set([gate.id]);
+  const junction = (n) => n.edges.length !== 2;
+  const junctions = N.filter((n) => n !== gate && junction(n));
+  const at = (p) => nearestNode(junctions, p.x, p.z);
+  const list = [];
+  for (const s of specs.street || []) {
+    const c = streetCircuit(city, s.via.map((p) => at(p).id), { avoid: avoidGate, ok: junction });
+    const cps = groundCheckpoints(city, c.nodeIds, c.start.heading);
+    const lap = roadLength(city, cps[cps.length - 1].node, c.nodeIds);
+    list.push(finish({ id: s.id, name: s.name, type: 'street', kinds: ['car'], start: c.start, checkpoints: cps, laps: s.laps, blurb: s.blurb, locked: s.locked }, lap * s.laps));
+  }
+  for (const b of specs.boats || []) {
+    let start, pts;
+    if (b.river) {
+      const s0 = deepestNear(city, b.start, 16);
+      pts = b.gates.map((p) => deepestNear(city, p, 8));
+      start = { x: s0.x, z: s0.z, y: 0, heading: headingOf(s0.x, s0.z, pts[0].x, pts[0].z) };
+    } else {
+      const p = pushToSea(city, b.start);
+      start = { x: r1(p.x), z: r1(p.z), y: 0, heading: headingOf(p.x, p.z, b.gates[0].x, b.gates[0].z) };
+      pts = refineSea(city, [start, ...b.gates.map((q) => pushToSea(city, q))], false, b.maxLeg || 320, pushToSea).slice(1);
+    }
+    boatCourse(list, b.id, b.name, b.blurb, start, pts, b.r);
+    list[list.length - 1].locked = b.locked;
+  }
+  return tidy(list);
+}

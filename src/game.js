@@ -15,6 +15,7 @@ import { createRng } from './core/rng.js';
 import { createVehicle, stepVehicle, collideVehicles } from './entities/vehicle.js';
 import { createVehicleMesh, updateVehicleMesh, setVehicleLights } from './render/vehiclemesh.js';
 import { createChaseCamera } from './render/chasecam.js';
+import { createTitleCam } from './render/titlecam.js';
 import { createTouchControls } from './ui/touch.js';
 import { createHud } from './ui/hud.js';
 import { injectStyles } from './ui/styles.js';
@@ -188,6 +189,9 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
 
   const chase = createChaseCamera(camera);
   game.chase = chase;
+  // The title shot (6.8) and the blend from it to the chase camera.
+  const titleCam = createTitleCam(camera, chase);
+  game.titleCam = titleCam;
   const camTarget = { x: car.x, z: car.z, y: 0, heading: car.heading, pitch: 0, roll: 0, speed: 0, height: 1.2 };
   game.camHeading = car.heading;
   game.camTarget = camTarget;
@@ -341,6 +345,8 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   game.session = game.addSystem(createSession(game, storage));
   game.fleet = game.addSystem(createFleet(game));
   game.traffic = game.addSystem(createTraffic(game));
+  // The designed first view: moving cars on the start street (6.8).
+  if (city.startView) game.traffic.seedStart(city.startView.traffic);
   game.daynight = game.addSystem(createDayNight(game));
   game.seaY = SEA_Y;
   game.activities = game.addSystem(createActivities(game, uiRoot));
@@ -609,6 +615,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       chase.snap(camTarget);
     }
     chase.update(camTarget, dt, input, collision);
+    if (titleCam.active) titleCam.apply(game.time, dt);
     game.camHeading = Math.atan2(camTarget.z - camera.position.z, camTarget.x - camera.position.x);
 
     for (let i = 0; i < game.systems.length; i++) {

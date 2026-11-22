@@ -6,15 +6,30 @@ import { mapFromSearch, MAP_CHOICE_KEY } from './world/maps.js';
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
 
-function start(game) {
+const uiRoot = document.getElementById('ui');
+const showUi = (on) => {
+  if (uiRoot) uiRoot.style.visibility = on ? '' : 'hidden';
+};
+
+function start(game, blend) {
   title.hide();
   // Play begins: from here the place is autosaved again.
   game.session.hold(false);
   game.resize();
   game.loop.start();
-  // First visit only: let the player pick how they want to steer.
-  // (Skipped for the automated checks, which start with ?autostart.)
-  if (!new URLSearchParams(location.search).has('autostart')) game.menu.maybeAskSteering();
+  // The HUD and controls show when the camera has blended to the chase view
+  // (docs/REVAMP.md 6.8); then, on the first visit only, the player may pick
+  // how they want to steer. (Skipped for the automated checks, which start
+  // with ?autostart.)
+  const begin = () => {
+    showUi(true);
+    if (!new URLSearchParams(location.search).has('autostart')) game.menu.maybeAskSteering();
+  };
+  if (blend && game.titleCam && game.titleCam.active) game.titleCam.blend(begin);
+  else {
+    if (game.titleCam) game.titleCam.stop();
+    begin();
+  }
 }
 
 // The real-map city (the default), loaded as its own chunk (the map data
@@ -60,6 +75,16 @@ function fadeVeil() {
   };
 }
 
+// Best effort: go full screen and lock sideways. Not every browser allows it.
+function goFullscreen() {
+  Promise.resolve()
+    .then(() => document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }))
+    .then(() => screen.orientation?.lock?.('landscape'))
+    .catch(() => {
+      /* fine without */
+    });
+}
+
 async function startUp() {
   const city = await loadCity();
   const game = createGame({
@@ -73,19 +98,29 @@ async function startUp() {
   // While the title shows, the saved place is kept as it is.
   const autostart = new URLSearchParams(location.search).has('autostart');
   if (!autostart) game.session.hold(true);
+  // The designed first view (6.8): the camera on the start street at 17:30
+  // clear, the simulation running behind the title, no HUD.
+  const sv = city && city.startView;
+  if (sv && !autostart && game.titleCam) {
+    const st = game.progress && game.progress.settings;
+    const reduced = !!(st && st.reduceMotion) || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (game.daynight && game.daynight.enterTitle) game.daynight.enterTitle(sv);
+    game.titleCam.start(sv, reduced);
+    showUi(false);
+    game.loop.start();
+    game.draw(1, 0);
+    title.showView(true);
+  }
   title.setReady(true);
   title.setCanContinue(game.session.canContinue());
-  title.onStart(async () => {
+  title.onStart(() => {
     game.audio.unlock();
     // Best effort: go full screen and lock sideways. Not every browser allows it.
-    try {
-      await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
-      await screen.orientation?.lock?.('landscape');
-    } catch {
-      /* fine without */
-    }
+    // The camera blend must not wait on this: some browsers never settle it.
+    goFullscreen();
+    if (game.daynight && game.daynight.leaveTitle) game.daynight.leaveTitle('start');
     game.session.startFresh();
-    start(game);
+    start(game, true);
   });
   title.onContinue(async () => {
     game.audio.unlock();
@@ -97,6 +132,7 @@ async function startUp() {
     }
     const veil = fadeVeil();
     await veil.to(1);
+    if (game.daynight && game.daynight.leaveTitle) game.daynight.leaveTitle('continue');
     let ok;
     try {
       ok = game.session.continueSaved();

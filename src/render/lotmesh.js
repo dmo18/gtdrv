@@ -3,23 +3,22 @@
 // and dirt, sand), clipped to city.lotGrid cell by cell, and the dressing
 // that dressLot lists for a lot (fences, hedges, drives, car park bays
 // with parked cars, trees, bins, plaza furniture, works yard stacks),
-// merged into the tile's builders per material. Solid features get a
-// collision shape while their tile is built.
+// merged into the tile's builders per material. Their collision shapes
+// are not made here: the simulation has them for the whole map from the
+// city build (fillLotCollision in world/collision.js), whatever is drawn.
 //
 // No three.js here beyond the mesh builders: the functions only fill
 // MeshBuilder-like objects (`B.key.at(x, z)`), so node tests run them.
 // Every consumer treats a city without lots (the island) as "no lots".
 import { lotStamps } from './props.js';
+import { bayCar } from '../world/collision.js';
 
 // A flat quad through four corners (as citymesh's orientedQuad; kept
 // here so the two modules do not import each other).
 function orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, color) {
   bld.quad(ax, y, az, bx, y, bz, cx, y, cz, dx, y, dz, color, 0, 1, 0);
-  if (bld.uv) {
-    const k = 1 / bld.uvScale, u = bld.uv, o = u.length - 8;
-    u[o] = ax * k; u[o + 1] = az * k; u[o + 2] = bx * k; u[o + 3] = bz * k;
-    u[o + 4] = cx * k; u[o + 5] = cz * k; u[o + 6] = dx * k; u[o + 7] = dz * k;
-  }
+  const k = 1 / bld.uvScale;
+  bld.lastQuadUv(ax * k, az * k, bx * k, bz * k, cx * k, cz * k, dx * k, dz * k);
 }
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park', 'wateredge', 'site', 'verge', 'airfield'];
@@ -120,18 +119,6 @@ const CARS = [0xe8e8e6, 0x2a2c30, 0x8a9096, 0xb8bcc0, 0x7a1e22, 0x1e3a6a, 0x3c5a
 const HEDGE = 0x3f6e34, WALLS = [0xe6dccb, 0xd4d0c8, 0xf0e8da, 0xc4b8a4], CONTAINERS = [0xb4442c, 0x2c5a8a, 0x3a7a4a, 0xd89a2a, 0x8a8e92, 0x6a3a6a];
 const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 
-// Lots whose bays the parked-car system fills (city.parkingSpots entries
-// with lot: true), so a drawn car never sits under a live one.
-const listedCache = new WeakMap();
-function listedBays(city) {
-  let s = listedCache.get(city);
-  if (s) return s;
-  s = new Set();
-  for (const p of city.parkingSpots || []) if (p.lot) s.add(Math.round(p.x * 2) * 65536 + Math.round(p.z * 2));
-  listedCache.set(city, s);
-  return s;
-}
-
 // One parked car, about 4.4 by 1.8 m, centred at (x, z), facing h.
 function parkedCar(P, x, z, y, h, col) {
   P.obox(x, z, 2.2, 0.88, y + 0.18, y + 0.95, h, col, col, 0.55, 1);
@@ -159,7 +146,6 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
   const city = C.city;
   const y = LOT_Y;
   const R = C.R || {};
-  const listed = listedBays(city);
   let drawn = 0;
   for (let q = from; q < n; q++) {
     const f = feats[q];
@@ -203,8 +189,9 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
       }
       case 'bay': {
         // One bay (2.5 by 5 m: l across the row, w the depth) or a row of
-        // them when l is longer: side lines, and parked cars in about
-        // half of the bays the parked-car system does not fill.
+        // them when l is longer (W1 emits rows, eachBay splits them the
+        // same way): side lines, and parked cars where bayCar says (about
+        // half of the bays the parked-car system does not fill).
         const lb = C.paint.at(x, z);
         const bw = 2.5, nb = Math.max(1, Math.round((f.l || bw) / bw)), depth = f.w || 5;
         const half = (nb * bw) / 2, dh = depth / 2;
@@ -219,13 +206,11 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         for (let s = 0; s < nb; s++) {
           const o = -half + (s + 0.5) * bw;
           const bx = x + ca * o, bz = z + sa * o;
-          const key = Math.round(bx * 2) * 65536 + Math.round(bz * 2);
-          const u = cellHash(Math.round(bx * 3), Math.round(bz * 3) + f.v);
-          if (listed.has(key) || u > 0.55) continue;
+          const u = bayCar(city, bx, bz, f.v);
+          if (u < 0) continue;
           const ch = h + Math.PI / 2 + (u < 0.2 ? Math.PI : 0) + (u - 0.27) * 0.08;
           parkedCar(C.solid.at(bx, bz), bx, bz, y, ch, CARS[(u * 97 | 0) % CARS.length]);
           C.ao.at(bx, bz).aoDisc(bx, bz, 2.4, y + 0.012, 0.6, 6);
-          if (C.collision && C.solids) C.solids.push(C.collision.addCircle(bx - cx * 1.2, bz - cz * 1.2, 1.0, 1.4, 'car'), C.collision.addCircle(bx + cx * 1.2, bz + cz * 1.2, 1.0, 1.4, 'car'));
         }
         break;
       }
@@ -303,42 +288,6 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
   return drawn;
 }
 
-// Collision shapes for the solid features of one lot (pushed to `list`
-// so the tile can switch them off when it goes): a circle for round
-// ones (r), a box for boxes along the world axes, else a row of circles.
-export function addLotSolids(collision, feats, n, list) {
-  for (let q = 0; q < n; q++) {
-    const f = feats[q];
-    if (!f.solid) continue;
-    const hgt = f.h || 1.5;
-    if (f.r > 0) {
-      list.push(collision.addCircle(f.x, f.z, f.r, hgt, 'lot'));
-      continue;
-    }
-    const h = f.heading || 0, c = Math.cos(h), s = Math.sin(h);
-    const hl = (f.l || 0) / 2, hw = Math.max(0.15, (f.w || 0) / 2);
-    if (Math.abs(s) < 0.02 || Math.abs(c) < 0.02) {
-      const ex = Math.abs(c) * hl + Math.abs(s) * hw, ez = Math.abs(s) * hl + Math.abs(c) * hw;
-      list.push(collision.addBox(f.x - ex, f.z - ez, f.x + ex, f.z + ez, hgt, 'lot'));
-    } else {
-      const k = Math.max(1, Math.ceil(hl / hw));
-      for (let i = 0; i <= k; i++) {
-        const o = -hl + (2 * hl * i) / k;
-        list.push(collision.addCircle(f.x + c * o, f.z + s * o, hw, hgt, 'lot'));
-      }
-    }
-  }
-}
-
-// Switches a tile's lot shapes off (the collision world has no removal:
-// a shape lower than anything tested is skipped) or back on.
-export function setSolids(list, on) {
-  for (const it of list) {
-    if (on) { if (it.rwH !== undefined) it.h = it.rwH; }
-    else { if (it.rwH === undefined) it.rwH = it.h; it.h = -1e9; }
-  }
-}
-
 // Lots by the tile that owns them (the tile of the lot rect's centre).
 export function lotsByTile(city, tileOf, nTiles) {
   const out = [];
@@ -353,7 +302,7 @@ export function lotsByTile(city, tileOf, nTiles) {
 // Everything for one tile's lots, a slice at a time: a generator that
 // yields when `over()` says the slice is used up. C holds the tile's
 // builders (props, solid, detail, paint, pavement, ao, glow, trees,
-// treesDetail), `solids` gets the collision shapes.
+// treesDetail). Drawing only: no collision shapes.
 export function* lotJob(C, lots, dress, over) {
   if (!lots.length || !dress) return;
   const stamps = lotStamps(C);
@@ -368,7 +317,6 @@ export function* lotJob(C, lots, dress, over) {
       drawLotFeatures(C, lot, feats, Math.min(n, q + 4), stamps, q);
       if (over()) yield 'lots';
     }
-    if (C.collision && C.solids) addLotSolids(C.collision, feats, n, C.solids);
     if (stats) { stats.lots++; stats.features += n; }
     if (over()) yield 'lots';
   }

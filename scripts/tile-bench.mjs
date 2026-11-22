@@ -3,6 +3,10 @@
 // (docs/REVAMP.md W2: no slice over 5 ms) for the tiles round a few
 // points. Garbage collection pauses are timed apart (a PerformanceObserver
 // on 'gc'), so a slice is reported with and without the pauses inside it.
+// The main thread's own CPU time per slice (process.threadCpuUsage) is
+// reported too: it counts the garbage collection done on the main thread
+// but not time lost to other processes, so it is the steadiest number on
+// a busy machine.
 // usage: node scripts/tile-bench.mjs [rounds]
 import fs from 'node:fs';
 import { PerformanceObserver } from 'node:perf_hooks';
@@ -34,7 +38,8 @@ const points = [
 const rounds = +process.argv[2] || 1;
 const worst = { all: 0, work: 0 }, byKind = {};
 let slices = 0, over5 = 0, over5work = 0;
-const cpus = [];
+const cpus = [], threads = [];
+const tcpu = typeof process.threadCpuUsage === 'function' ? () => process.threadCpuUsage() : null;
 await new Promise((r) => setTimeout(r, 10));
 for (let round = 0; round < rounds; round++) {
   for (const [, x, z] of points) {
@@ -46,11 +51,14 @@ for (let round = 0; round < rounds; round++) {
       const job = st.tileJob(t);
       for (;;) {
         const c0 = process.cpuUsage();
+        const m0 = tcpu && tcpu();
         const a = performance.now();
         const r = job.next();
         const b = performance.now();
+        const m1 = tcpu && process.threadCpuUsage(m0);
         const c1 = process.cpuUsage(c0);
         cpus.push((c1.user + c1.system) / 1000);
+        if (m1) threads.push((m1.user + m1.system) / 1000);
         // GC entries arrive late: settle them after the loop.
         slices++;
         const d = b - a;
@@ -88,4 +96,9 @@ console.log(`slice work without GC: median ${pc(0.5)} ms, 95th ${pc(0.95)}, 99th
 cpus.sort((a, b) => a - b);
 const pcc = (q) => cpus[Math.min(cpus.length - 1, Math.floor(q * cpus.length))].toFixed(1);
 console.log(`slice CPU time (process, all threads; not slowed by other processes): median ${pcc(0.5)} ms, 95th ${pcc(0.95)}, 99th ${pcc(0.99)}, max ${pcc(1)}`);
+if (threads.length) {
+  threads.sort((a, b) => a - b);
+  const pt = (q) => threads[Math.min(threads.length - 1, Math.floor(q * threads.length))].toFixed(1);
+  console.log(`slice main-thread CPU time (GC on the main thread included): median ${pt(0.5)} ms, 95th ${pt(0.95)}, 99th ${pt(0.99)}, max ${pt(1)}; ${threads.filter((t) => t > 5).length} over 5 ms`);
+}
 console.log(`slices ${slices}; worst ${worst.all.toFixed(1)} ms (${over5} over 5 ms); worst without GC pauses ${worst.work.toFixed(1)} ms (${over5work} over 5 ms); GC pauses ${gcs.length}, longest ${Math.max(...gcs.map(([a, b]) => b - a)).toFixed(1)} ms`);

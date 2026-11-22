@@ -698,6 +698,7 @@ FEATURE_KINDS = ['fence', 'hedge', 'wall', 'gate', 'drive', 'bay', 'tree', 'shru
 - Parking: every `bay` is also added to `city.parkingSpots` at build time as `{ x, z, heading,
   lot: true }` (the field exists today), with at most 60 % of a car park's bays listed, chosen
   by the lot seed. The parked-car system then fills them with no change. W8 tunes the fill later.
+- Correction (W2, owner approved): a `bay` is a row of bays (`l` = n x 2.5 m along `heading`, `w` = 5 m, split by `eachBay`), a single 2.5 by 5 m bay being the row of one; the renderer and the collision fill take both; collision shapes for all lots are made once at city build (`fillLotCollision`), not per tile.
 - Collision: W2 adds a collision shape for each `solid` feature when its tile is built and
   removes it with the tile (the pattern src/render/props.js uses for trees today).
 
