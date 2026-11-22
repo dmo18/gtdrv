@@ -178,3 +178,11 @@ test('hud setting: minimal by default, only minimal or full accepted', () => {
   assert.equal(h('minimal'), 'minimal');
   for (const bad of ['Full', 'busy', 1, null, {}, undefined]) assert.equal(h(bad), 'minimal');
 });
+
+test('the Blood setting survives a load only as a real boolean', () => {
+  const p = defaultProgress();
+  p.settings.blood = false;
+  assert.equal(sanitizeProgress(JSON.parse(JSON.stringify(p))).settings.blood, false);
+  p.settings.blood = 'no';
+  assert.equal(sanitizeProgress(JSON.parse(JSON.stringify(p))).settings.blood, undefined);
+});

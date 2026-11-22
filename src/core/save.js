@@ -157,7 +157,7 @@ export function sanitizeProgress(raw) {
       if (own(s, 'muteAll') && typeof s.muteAll === 'boolean') d.muteAll = s.muteAll;
       if (own(s, 'liveTime') && typeof s.liveTime === 'boolean') d.liveTime = s.liveTime;
       if (own(s, 'timeOfDay') && isNum(s.timeOfDay)) d.timeOfDay = Math.max(0, Math.min(23.5, s.timeOfDay));
-      for (const k of ['invertPitch', 'leftHanded', 'police', 'music', 'mortal']) {
+      for (const k of ['invertPitch', 'leftHanded', 'police', 'music', 'mortal', 'blood']) {
         if (own(s, k) && typeof s[k] === 'boolean') d[k] = s[k];
       }
       if (own(s, 'quality') && QUALITIES.includes(s.quality)) d.quality = s.quality;

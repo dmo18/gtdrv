@@ -446,6 +446,7 @@ export function createCombatFx(game) {
   }
   const isPerson = (t) => !!t && !(t.spec && t.hp === undefined);
   function bloodHit(e) {
+    if (game.progress && game.progress.settings && game.progress.settings.blood === false) return;
     const t = e.target;
     if (!isPerson(t)) return;
     const k = e.kind;
@@ -456,6 +457,7 @@ export function createCombatFx(game) {
     droplets(e.x, e.y, e.z, n, 2.2, 3);
   }
   function bloodDeath(t, kind) {
+    if (game.progress && game.progress.settings && game.progress.settings.blood === false) return;
     const big = kind === 'blast';
     bloodAdd(true, t.x + rs() * 0.3, t.z + rs() * 0.3, big ? 3.2 : 2.3);
     const extra = big ? 3 : 1;
