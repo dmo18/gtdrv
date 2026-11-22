@@ -580,7 +580,7 @@ try {
   check('touching the wheel alone does not steer', (await read('rw.input.steer')) === 0);
   await turn(1, wb, 0, 60);
   let st60 = await read('rw.input.steer');
-  check('wheel 60 deg -> half input through the curve', near(st60, await shape(0.5)), `${st60}`);
+  check('wheel 60 deg -> 0.545 of 110 deg lock through the curve', near(st60, await shape(60 / 110)), `${st60}`);
   check('wheel graphic rotates', /rotate\(6\d(\.\d)?deg\)|rotate\(59\.\ddeg\)/.test(await wheelRot()), await wheelRot());
   await turn(1, wb, 60, 150);
   check('wheel past 120 deg -> full right', (await read('rw.input.steer')) === 1);
@@ -589,7 +589,7 @@ try {
   // The finger went 30 deg past the stop; turning back moves the wheel at once.
   await turn(1, wb, -150, -60);
   const stm30 = await read('rw.input.steer');
-  check('wheel back to -30 deg -> proportional left', near(stm30, await shape(-0.25)), `${stm30}`);
+  check('wheel back to -20 deg -> proportional left (110 deg lock)', near(stm30, await shape(-20 / 110)), `${stm30}`);
   await shot('car-wheel-active-915x412.png');
   await up(1);
   check('wheel released -> steer 0', (await read('rw.input.steer')) === 0);
@@ -626,18 +626,18 @@ try {
   check('button: no steer before update', (await read('rw.input.steer')) === 0);
   await tick(6);
   const b1 = await read('rw.input.steer');
-  check('button ramp 0.1 s -> 0.4 raw', near(b1, await shape(0.4)), `${b1}`);
-  await tick(9);
-  check('button ramp 0.25 s -> full lock', (await read('rw.input.steer')) === 1);
+  check('button ramp 0.1 s -> 1/3 raw (0.3 s to full lock)', near(b1, await shape(1 / 3)), `${b1}`);
+  await tick(12);
+  check('button ramp 0.3 s -> full lock', (await read('rw.input.steer')) === 1);
   await up(3);
   await tick(5);
   const b2 = await read('rw.input.steer');
-  check('button release returns over 0.15 s', b2 > 0.05 && b2 < 0.4, `${b2}`);
+  check('button release: target 0 at once (the car returns the wheel)', b2 === 0, `${b2}`);
   await tick(5);
   check('button back at centre', (await read('rw.input.steer')) === 0);
-  await tick(15, 1 / 30); // frame-rate independent: 0.25 s at 30 Hz
+  await tick(15, 1 / 30); // frame-rate independent: 0.3 s at 30 Hz
   await down(3, sl.x, sl.y);
-  await tick(8, 1 / 30);
+  await tick(10, 1 / 30);
   check('button ramp same at 30 Hz', (await read('rw.input.steer')) === -1);
   await up(3);
   await tick(10);
@@ -647,22 +647,22 @@ try {
   await shot('car-buttons-780x360.png');
   await page.setViewportSize({ width: 915, height: 412 });
 
-  // ---- steering style: slider (110 px throw, curved) ----
+  // ---- steering style: slider (absolute, 90 px from the bar centre is full lock, docs/REVAMP.md 6.3) ----
   await page.evaluate(() => rw.touch.setSteering('slider', 1));
-  await down(1, 140, 330);
-  await drag(1, 140, 330, 195, 330);
+  const pb = await page.evaluate(() => { const r = document.querySelector('.rw-pad').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await down(1, pb.x + 45, pb.y);
   const s55 = await read('rw.input.steer');
-  check('slider 55 px -> curved half', near(s55, await shape((0.5 - 0.04) / 0.96)), `${s55}`);
-  await drag(1, 195, 330, 260, 330);
-  check('slider 110+ px -> full right', (await read('rw.input.steer')) === 1);
-  await drag(1, 260, 330, 20, 330, 16);
-  check('slider far left -> full left', (await read('rw.input.steer')) === -1);
-  await move(1, 140, 330);
+  check('slider: where the thumb lands is the value (45 px -> raw 0.5, curved)', near(s55, await shape(0.5)) && s55 > 0.4 && s55 < 0.5, `${s55}`);
+  await drag(1, pb.x + 45, pb.y, pb.x + 120, pb.y);
+  check('slider 90+ px -> full right', (await read('rw.input.steer')) === 1);
+  await drag(1, pb.x + 120, pb.y, pb.x - 300, pb.y, 16);
+  check('slider far left (off the bar) still steers full left', (await read('rw.input.steer')) === -1);
+  await move(1, pb.x, pb.y);
   check('slider centre -> 0', (await read('rw.input.steer')) === 0);
   await page.evaluate(() => rw.touch.setSteering('slider', 1.5));
-  await move(1, 195, 330);
+  await move(1, pb.x + 45, pb.y);
   const s55b = await read('rw.input.steer');
-  check('higher sensitivity -> more steer', s55b > s55 + 0.1 && near(s55b, await shape((0.5 - 0.04) / 0.96, 1.5)), `${s55b} vs ${s55}`);
+  check('higher sensitivity -> more steer', s55b > s55 + 0.1 && near(s55b, await shape(45 / 60)), `${s55b} vs ${s55}`);
   await up(1);
   check('slider released -> 0', (await read('rw.input.steer')) === 0);
   await down(1, 140, 330);
@@ -751,7 +751,7 @@ try {
   p0 = rimPt(lw, 0);
   await down(1, p0.x, p0.y);
   await turn(1, lw, 0, 60);
-  check('lefty: wheel steers', near(await read('rw.input.steer'), await shape(0.5)));
+  check('lefty: wheel steers', near(await read('rw.input.steer'), await shape(60 / 110)));
   await up(1);
   await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
   await down(4, 420, 120);
