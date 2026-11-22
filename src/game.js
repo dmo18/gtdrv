@@ -10,6 +10,7 @@ import { createInput, attachKeyboard } from './core/input.js';
 import { defaultProgress } from './core/save.js';
 import { respawnPlacement } from './core/health.js';
 import { createLoop } from './core/loop.js';
+import { createErrorLog, consoleLog } from './core/errorlog.js';
 import { createEvents } from './core/events.js';
 import { createRng } from './core/rng.js';
 import { createVehicle, stepVehicle, collideVehicles } from './entities/vehicle.js';
@@ -141,6 +142,8 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     systems: [],
     resizeHooks: [], // functions (width, height, pixelRatio) called on resize
     renderFrame: null, // optional replacement for the final draw call
+    // Errors caught round each system and at the frame loop (shown once each).
+    errors: createErrorLog({ log: consoleLog }),
     time: 0, // simulated seconds since start
     clock: 9, // time of day in hours, 0..24 (the day/night system advances it)
     cityMesh,
@@ -181,6 +184,21 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       return v;
     },
     removeVehicle(v) {
+      // Never leave the player sitting in a craft that is gone (its mesh is
+      // dropped below): out onto the spot where it was.
+      if (v && v === game.player.vehicle) {
+        const p = game.player, w = p.walker;
+        v.driver = null;
+        p.vehicle = null;
+        if (w) {
+          w.x = w.px = v.x;
+          w.z = w.pz = v.z;
+          w.heading = w.pheading = v.heading;
+          w.vx = w.vz = 0;
+        }
+        if (game.setPlayerMode) game.setPlayerMode('foot');
+        events.emit('exit', v);
+      }
       const i = game.vehicles.indexOf(v);
       if (i >= 0) game.vehicles.splice(i, 1);
       if (v.mesh) scene.remove(v.mesh);
@@ -267,12 +285,16 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   };
   game.enterVehicle = (v) => {
     const p = game.player;
+    // A craft already taken off the map (swept, towed in, a hull gone) has
+    // no mesh any more: driving it would break every draw.
+    if (!v || v.removed || !v.mesh) return false;
     v.driver = 'player';
     v.asleep = false;
     v.parked = false;
     p.vehicle = v;
     game.setPlayerMode(v.kind);
     events.emit('enter', v);
+    return true;
   };
   game.findRescueSpot = findRescueSpot;
   // ENTER on a craft: empty ones are entered at once, occupied ones are
@@ -427,7 +449,12 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     }
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
-      if (s.always) s.always(dt);
+      if (!s.always) continue;
+      try {
+        s.always(dt);
+      } catch (e) {
+        game.errors.report(s.name + '.always', e);
+      }
     }
     if (game.paused) {
       input.endStep();
@@ -544,7 +571,12 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     }
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
-      if (s.fixedUpdate) s.fixedUpdate(dt);
+      if (!s.fixedUpdate) continue;
+      try {
+        s.fixedUpdate(dt);
+      } catch (e) {
+        game.errors.report(s.name + '.fixedUpdate', e);
+      }
     }
     input.endStep();
   }
@@ -588,7 +620,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     wake.update(dt, game.time);
     if (p.vehicle) {
       const v = p.vehicle;
-      if (v.kind === 'car') setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });
+      if (v.kind === 'car' && v.mesh) setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });
       camTarget.x = v.px + (v.x - v.px) * alpha;
       camTarget.z = v.pz + (v.z - v.pz) * alpha;
       camTarget.y = v.py + (v.y - v.py) * alpha;
@@ -642,7 +674,12 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
 
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];
-      if (s.render) s.render(alpha, dt);
+      if (!s.render) continue;
+      try {
+        s.render(alpha, dt);
+      } catch (e) {
+        game.errors.report(s.name + '.render', e);
+      }
     }
 
     const h = game.hudState;
@@ -673,8 +710,12 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     // Real map: build and swap detail tiles round the camera.
     if (cityMesh.userData.stream) cityMesh.userData.stream.update(camera);
     // A graphics module may take over the final draw (post effects).
-    if (game.renderFrame) game.renderFrame(dt);
-    else renderer.render(scene, camera);
+    try {
+      if (game.renderFrame) game.renderFrame(dt);
+      else renderer.render(scene, camera);
+    } catch (e) {
+      game.errors.report('renderFrame', e);
+    }
   }
 
   function resize() {
@@ -706,7 +747,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // game; a session saved on another map stays with that map).
   game.restoreSession();
 
-  game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1 });
+  game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1, errors: game.errors });
   game.resize = resize;
   game.step = fixedUpdate; // for tests
   game.draw = render;

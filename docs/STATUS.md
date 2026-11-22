@@ -676,3 +676,38 @@ None critical or high.
   car in water or a building, no parked car woken.
 - Not yet: no indicator blink (the meshes have no per-side signal); the audio
   siren ignores emergency specs without `police`.
+
+## 2026-11-22: frame loop errors (release blocker)
+
+- Root cause found and fixed: "g.draw threw a null userData error after the
+  car drove far from the start". The Phone check (src/ui/phonecheck.js)
+  leaves the player's car at the start, drives the test car 1.1 km away, and
+  on finish got back into the saved car if it was not wrecked. The 3 s sweep
+  in game.js had removed that car (over 300 m away, nobody in it), so its
+  mesh was null and every later draw threw in setVehicleLights. Introduced
+  with the Phone check (e088395). Fix: finish skips a removed car (the player
+  stays on foot); `game.enterVehicle` refuses a removed or meshless craft and
+  returns false; `game.removeVehicle` of the craft the player sits in puts
+  the player out on foot first; the player-car lights call checks the mesh.
+- The frame loop no longer stops on a throw: `createLoop` catches a step or
+  a draw, the step still counts (same clock), and game.js also catches round
+  each system's always, fixedUpdate and render and the final draw, so one bad
+  system cannot stop the rest. Each distinct message is logged once
+  (`console.error`), all are counted in `game.errors` (src/core/errorlog.js).
+- "Cannot read properties of undefined (reading 'visible')": not reproduced
+  on the current tree. It is what three.js throws for a drawn mesh with no
+  material; test/meshmaterials.test.js checks every car style, service
+  vehicle, boat, aircraft and tank through damage, lamps, siren, LOD and a
+  wreck, every light bar phase, and the soak checks the whole scene each leg.
+- Tests: errorlog.test.js (once per message; a throwing step or draw keeps
+  the loop and the clock), phonecheck.test.js (no re-entry of a removed car),
+  meshmaterials.test.js. 693 to 699.
+- scripts/soak.mjs [simSeconds=600] [drawEvery=12]: unminified build, loop
+  stopped, a regression prelude (swept car re-entered, craft removed with the
+  player in it), then legs over ten places across the Miami box: driving with
+  boost and the siren, blasts near traffic, carjacks, every craft, a garage,
+  the fire truck's water and the tow hook. Fails on any page or console error,
+  any caught exception and any mesh without a material.
+- scripts/smoke-extra.mjs: the fighter take-off check holds BOOST (the
+  afterburner has been on the BOOST button since b902efd) and reads the
+  afterburner at lift-off; it failed on every run before this.

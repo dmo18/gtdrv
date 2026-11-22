@@ -126,3 +126,38 @@ test('the scripted driver follows the route for 20 s on the real vehicle physics
   }
   assert.ok(dist > 120, `drove ${dist.toFixed(0)} m in 20 s`);
 });
+
+// Regression: the check drives far from the start, and the car the player
+// left there can be swept away (removed, its mesh gone). Getting back into
+// it made every later draw throw ("null userData"): stay on foot instead.
+test('finish never puts the player back in a car that was removed meanwhile', () => {
+  const game = checkGame();
+  const { city } = cityAndCollision();
+  const n = city.nodes[3];
+  const own = game.debug.spawnCar('sedan', n.x, n.z, 0);
+  game.player.x = game.player.walker.x = n.x;
+  game.player.z = game.player.walker.z = n.z;
+  game.enterVehicle(own);
+  const entered = [];
+  const enter = game.enterVehicle;
+  game.enterVehicle = (v) => { entered.push(v); enter(v); };
+  const run = createCheckRun(game, { driveSeconds: 6, soundSeconds: 0.5, source: game.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false }) });
+  assert.equal(run.start(), true);
+  assert.equal(own.driver, null, 'left at the start');
+  // Cleared away while the check drives off.
+  game.vehicles.splice(game.vehicles.indexOf(own), 1);
+  own.removed = true;
+  own.mesh = null;
+  run.finish();
+  assert.ok(!entered.includes(own), 'the removed car is not entered again');
+  assert.equal(game.player.vehicle, null, 'on foot');
+  assert.equal(game.player.mode, 'foot');
+  // The same car still on the map is entered again as before.
+  const game2 = checkGame();
+  const own2 = game2.debug.spawnCar('sedan', n.x, n.z, 0);
+  game2.enterVehicle(own2);
+  const run2 = createCheckRun(game2, { driveSeconds: 6, soundSeconds: 0.5, source: game2.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false }) });
+  assert.equal(run2.start(), true);
+  run2.finish();
+  assert.equal(game2.player.vehicle, own2, 'back in the car left at the start');
+});

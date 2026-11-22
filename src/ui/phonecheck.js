@@ -262,7 +262,10 @@ export function createCheckRun(game, opts = {}) {
       p.walker.x = p.walker.px = saved.x;
       p.walker.z = p.walker.pz = saved.z;
       p.x = saved.x; p.z = saved.z;
-      if (saved.vehicle && !saved.vehicle.wrecked && game.enterVehicle) safe(() => game.enterVehicle(saved.vehicle));
+      // The car left at the start may have been cleared away while the
+      // check drove far off (removed, no mesh): then stay on foot.
+      const back = saved.vehicle;
+      if (back && !back.wrecked && !back.removed && game.enterVehicle) safe(() => game.enterVehicle(back));
     }
     run.phase = 'idle';
     run.car = null;

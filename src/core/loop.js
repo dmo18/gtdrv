@@ -1,5 +1,7 @@
 // Fixed-step game loop: the simulation always advances in equal slices
 // (60 per second) regardless of how fast the screen draws.
+import { createErrorLog, consoleLog } from './errorlog.js';
+
 export const STEP = 1 / 60;
 
 // `getScale` (optional) returns the game's time scale: real time is scaled
@@ -8,7 +10,27 @@ export const STEP = 1 / 60;
 // loop runs no simulation steps and adds no time; the world simply stops,
 // then carries on from the same step (no wall clock reaches the logic).
 export const HOLD_MAX = 4;
-export function createLoop({ fixedUpdate, render, maxSteps = 5, getScale = null }) {
+// errors (optional): a createErrorLog to report to. A step or a draw that
+// throws is caught here, reported once per distinct message, and the loop
+// keeps going: the step still counts (the clock never stalls or repeats),
+// and the next frame is requested before any work, so one bad frame never
+// stops the game.
+export function createLoop({ fixedUpdate, render, maxSteps = 5, getScale = null, errors = null }) {
+  const errs = errors || createErrorLog({ log: consoleLog });
+  const safeStep = () => {
+    try {
+      fixedUpdate(STEP);
+    } catch (e) {
+      errs.report('step', e);
+    }
+  };
+  const safeRender = (alpha, dt) => {
+    try {
+      render(alpha, dt);
+    } catch (e) {
+      errs.report('draw', e);
+    }
+  };
   let acc = 0;
   let held = 0;
   let last = 0;
@@ -23,7 +45,7 @@ export function createLoop({ fixedUpdate, render, maxSteps = 5, getScale = null 
     if (dt > 0.25) dt = 0.25;
     if (held > 0) {
       held--;
-      render(acc / STEP, dt);
+      safeRender(acc / STEP, dt);
       return;
     }
     let scale = getScale ? getScale() : 1;
@@ -31,12 +53,12 @@ export function createLoop({ fixedUpdate, render, maxSteps = 5, getScale = null 
     acc += dt * scale;
     let steps = 0;
     while (acc >= STEP && steps < maxSteps) {
-      fixedUpdate(STEP);
+      safeStep();
       acc -= STEP;
       steps++;
     }
     if (steps === maxSteps) acc = 0;
-    render(acc / STEP, dt);
+    safeRender(acc / STEP, dt);
   }
   return {
     start() {
@@ -61,5 +83,6 @@ export function createLoop({ fixedUpdate, render, maxSteps = 5, getScale = null 
     get held() {
       return held;
     },
+    errors: errs,
   };
 }

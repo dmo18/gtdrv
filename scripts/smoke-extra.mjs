@@ -616,15 +616,19 @@ export default async function extra(page, check) {
     f.heading = f.pheading = 0;
     f.z = f.pz = (g.city.airfield.runway.z0 + g.city.airfield.runway.z1) / 2;
     f.x = f.px = g.city.airfield.runway.x0 + 40;
-    let lift = -1;
+    let lift = -1, abLift = 0;
     for (let i = 0; i < 60 * 8; i++) {
       window.__src33.throttle = 1;
+      window.__src33.boost = true; // the afterburner is on the BOOST button
       window.__src33.pitch = i > 60 ? 0.35 : 0;
       g.step(1 / 60);
-      if (lift < 0 && !f.onGround) lift = i / 60;
+      if (lift < 0 && !f.onGround) { lift = i / 60; abLift = f.afterburner; }
     }
     window.__src33.pitch = 0;
-    return { lift: +lift.toFixed(2), y: +f.y.toFixed(1), v: +f.airspeed.toFixed(1), ab: +f.afterburner.toFixed(2), wrecked: f.wrecked };
+    window.__src33.boost = false;
+    // The afterburner as the wheels leave the runway (a full BOOST meter
+    // lasts 6 s, so it has run dry by the end of the 8 s climb).
+    return { lift: +lift.toFixed(2), y: +f.y.toFixed(1), v: +f.airspeed.toFixed(1), ab: +abLift.toFixed(2), wrecked: f.wrecked };
   });
   check(jet.lift > 0 && jet.lift < 4 && jet.y > 30 && !jet.wrecked && jet.ab > 0.9, `the fighter takes off on afterburner (${JSON.stringify(jet)})`);
   await snapFrame();
