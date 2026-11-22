@@ -7,7 +7,7 @@
 //
 // Coordinates: x east, z south, metres. Heading 0 faces +x and grows
 // toward +z.
-import { createRng } from '../core/rng.js';
+import { createRng, firstNext } from '../core/rng.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -118,12 +118,10 @@ for (const id of Object.keys(DRESS_SETS)) {
 // follows the free land, not the raster. `owner` (optional, SRC_ID only)
 // gets, per reached cell, the source id it was reached from.
 export const SRC_FLAG = 0, SRC_ID = 1, SRC_ZERO = 2;
-export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, mode = SRC_FLAG, pv = 1) {
-  dist.fill(255);
-  const N = W * H;
+// The cells of list next to a source (the first of the four sides, then
+// the corners), at step 1, queued in list order. Returns the queue length.
+function seedSources(W, N, src, pass, pv, sg, bias, dist, owner, queue, list, n) {
   let qt = 0;
-  // sg * src + bias >= 0 is the source test for every mode.
-  const sg = mode === SRC_ZERO ? -1 : 1, bias = mode === SRC_FLAG ? -1 : 0;
   for (let k = 0; k < n; k++) {
     const c = list[k];
     if (pass[c] !== pv) continue;
@@ -143,6 +141,14 @@ export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, 
     if (owner) owner[c] = src[o];
     queue[qt++] = c;
   }
+  return qt;
+}
+export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, mode = SRC_FLAG, pv = 1) {
+  dist.fill(255);
+  const N = W * H;
+  // sg * src + bias >= 0 is the source test for every mode.
+  const sg = mode === SRC_ZERO ? -1 : 1, bias = mode === SRC_FLAG ? -1 : 0;
+  let qt = seedSources(W, N, src, pass, pv, sg, bias, dist, owner, queue, list, n);
   let qh = 0;
   while (qh < qt) {
     const c = queue[qh++];
@@ -367,7 +373,7 @@ export function buildLots(city, inp) {
   const lid = new Int32Array(N).fill(-1);
   const lots = [];
   const tmp = []; // per raw piece: { cls, building, n, i0, i1, j0, j1 }
-  const byBuilding = new Map();
+  const byBuilding = new Int32Array(B.length).fill(-1); // building -> piece
   const gridKey = (c) => {
     const i = c % W, j = (c - i) / W;
     return Math.floor((G.x0 + (i + 0.5) * cell) / CUT) * 100003 + Math.floor((G.z0 + (j + 0.5) * cell) / CUT);
@@ -412,8 +418,8 @@ export function buildLots(city, inp) {
     if (!k || lid[c] !== -1) continue;
     if (k === 5) {
       const m = mainOf[own[c]];
-      let id = byBuilding.get(m);
-      if (id === undefined) { id = newPiece(5, m); byBuilding.set(m, id); }
+      let id = byBuilding[m];
+      if (id < 0) { id = newPiece(5, m); byBuilding[m] = id; }
       lid[c] = id;
       grow(tmp[id], c);
       continue;
@@ -494,7 +500,7 @@ export function buildLots(city, inp) {
     remap[p] = id;
     lots.push({
       id, type, x0: lx0, z0: lz0, x1: lx1, z1: lz1, area, district, place: city.placeOf ? city.placeOf(cx, cz) : '',
-      seed: lotSeedV, dress: sets[createRng(lotSeedV).int(0, sets.length - 1)],
+      seed: lotSeedV, dress: sets[Math.floor(0 + (sets.length - 1 - 0 + 1) * firstNext(lotSeedV))], // createRng(lotSeedV).int(0, sets.length - 1)
       building: b ? P.building : -1, edge, front, core: city.inCore ? city.inCore(cx, cz) : false,
     });
   }

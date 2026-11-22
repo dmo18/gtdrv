@@ -7,6 +7,25 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## City build time (2026-11-22, after the 0.5.0 CI failure)
+- CI failed the 3 s whole-box build tests (wall 3984 ms, cpu 4256 ms). Profile: `node scripts/city-build-bench.mjs`
+  (cold runs in fresh processes, median; `--slow` shares one CPU with a busy loop; `--child` under `node --cpu-prof`).
+- Cause: createMiamiCity is too big for the optimiser, so its inline loops ran unoptimised; hot closures deoptimised
+  10 to 13 times each (the rect-shaped objects' maps were deprecated during the build). Fixes, all byte-identical
+  (fingerprint of nodes, edges, buildings, lots, lot grid, every land cell's shoreDist, garages, adventures, routes,
+  every lot's dressing and all 226,317 lot collision shapes, whole box and core crop):
+  hot loops moved to small top-level functions (free cells, land votes, footprint rasters, block flood, junction
+  splits, owner stamps, landmark spot search); the signed shore field done with capped column sweeps and a row
+  envelope over the near cells only, with lookup tables; a span fill for the land regions; fillPolygon without per
+  row arrays or sort closures; raster and crop lookups from constants; buildLots without a Map per cell or a
+  generator per lot (`firstNext` in core/rng.js); garage placement tests the cheap rules first.
+- Node, median of cold runs: createMiamiCity wall 1622 to 1214 ms, cpu 2036 to 1689 ms; single-threaded node
+  (compile and GC on the main thread) about 2110 to 1485 ms (-30 %); `--slow` wall 3692 to 3188 ms (-14 %).
+  The 35 % goal for the slow-runner simulation is not met: background TurboFan compiles (about 450 to 550 ms CPU)
+  and the lot stages are the next targets. Chromium (scripts/perf.mjs): cityMs 1511 to 1313-1366.
+- Guard: test/build-budget.test.js (three cold builds in child processes, each against a fixed calibration
+  workload; best ratio of the three, whole build and per stage). The 3 s tests are unchanged.
+
 ## V1 Service vehicles (2026-11-22)
 - Fire truck (Brandwell), ambulance (Careline), garbage truck (Haulmark), tow truck (Hookton): specs in
   src/entities/servicevehicles.js (6.11 table), merged into `VEHICLE_SPECS` (one import and one merge line in

@@ -128,6 +128,10 @@ function inRect(r, x, z) {
 }
 function rectGround(city, g, types) {
   const r = g.rect, fp = g.footprint;
+  // The corners first: the cheap test rejects most candidates near water.
+  for (const [x, z] of [[r.x0, r.z0], [r.x1, r.z0], [r.x0, r.z1], [r.x1, r.z1]]) {
+    if (city.mainShore(x, z) < 12) return false;
+  }
   for (let x = r.x0; x <= r.x1 + 1e-6; x += 2) {
     for (let z = r.z0; z <= r.z1 + 1e-6; z += 2) {
       if (city.onRoad(x, z)) return false;
@@ -136,9 +140,6 @@ function rectGround(city, g, types) {
         if (!lot || !types.has(lot.type)) return false;
       } else if (!city.isLand(x, z) || (city.inBuilding && city.inBuilding(x, z, 0))) return false;
     }
-  }
-  for (const [x, z] of [[r.x0, r.z0], [r.x1, r.z0], [r.x0, r.z1], [r.x1, r.z1]]) {
-    if (city.mainShore(x, z) < 12) return false;
   }
   return true;
 }
@@ -233,13 +234,27 @@ function offRoadCandidates(def, rng) {
   return out;
 }
 
+// The shed centre garageShape gives for a door (its x and z), into out.
+function shapeCentre(doorX, doorZ, front, out) {
+  const heading = HEAD[front];
+  const ux = Math.round(Math.cos(heading)), uz = Math.round(Math.sin(heading));
+  const px = -uz, pz = ux, f = -SHED_D / 2, s = 0;
+  out[0] = r1(doorX + ux * f + px * s);
+  out[1] = r1(doorZ + uz * f + pz * s);
+  return out;
+}
+const CENTRE = [0, 0];
+
 export function tryAt(city, def, c, taken, keep, types) {
+  // The distance tests need only the centre: the shape is made after them.
+  const [gx, gz] = shapeCentre(c.x, c.z, c.front, CENTRE);
+  for (let k = 0; k < keep.length; k++) if (Math.hypot(keep[k].x - gx, keep[k].z - gz) < 30) return null;
+  if (def.nearStart && city.spawn && Math.hypot(city.spawn.x - gx, city.spawn.z - gz) > def.nearStart) return null;
+  for (let k = 0; k < taken.length; k++) if (Math.hypot(taken[k].x - gx, taken[k].z - gz) < GARAGE_APART) return null;
   const g = garageShape(def, c.x, c.z, c.front);
-  if (keep.some((p) => Math.hypot(p.x - g.x, p.z - g.z) < 30)) return null;
-  if (def.nearStart && city.spawn && Math.hypot(city.spawn.x - g.x, city.spawn.z - g.z) > def.nearStart) return null;
-  if (taken.some((t) => Math.hypot(t.x - g.x, t.z - g.z) < GARAGE_APART)) return null;
-  if (!rectGround(city, g, types)) return null;
+  // All pure tests: the cheaper one first (the result is the same).
   if (!clearOfBuildings(city, g.rect, 6)) return null;
+  if (!rectGround(city, g, types)) return null;
   if (c.road && doorToRoad(city, g) > DOOR_ROAD) return null;
   return g;
 }

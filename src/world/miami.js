@@ -114,6 +114,14 @@ const cellOf = (R, x, z) => {
   const i = Math.floor((x - R.x0) / R.cell), j = Math.floor((z - R.z0) / R.cell);
   return i < 0 || j < 0 || i >= R.w || j >= R.h ? -1 : j * R.w + i;
 };
+// cellOf(R, x, z) as a function of (x, z), R's bounds read once.
+function cellLookup(R) {
+  const x0 = R.x0, z0 = R.z0, cell = R.cell, w = R.w, h = R.h;
+  return (x, z) => {
+    const i = Math.floor((x - x0) / cell), j = Math.floor((z - z0) / cell);
+    return i < 0 || j < 0 || i >= w || j >= h ? -1 : j * w + i;
+  };
+}
 // Every cell within r of segment ab gets value v.
 function stampCapsule(R, ax, az, bx, bz, r, v) {
   const c = R.cell;
@@ -134,23 +142,30 @@ function stampRect(R, x0, z0, x1, z1, v) {
   for (let j = j0; j <= j1; j++) R.data.fill(v, j * R.w + i0, j * R.w + i1 + 1);
 }
 // Even-odd fill of a closed polygon (pts metres, implicit closing edge).
+let POLY_XS = new Float64Array(64); // scratch: the crossings of one row
 function fillPolygon(R, pts, v) {
   const n = pts.length / 2;
   let zmin = Infinity, zmax = -Infinity;
   for (let k = 0; k < n; k++) { zmin = Math.min(zmin, pts[2 * k + 1]); zmax = Math.max(zmax, pts[2 * k + 1]); }
   const c = R.cell;
   const j0 = Math.max(0, Math.ceil((zmin - R.z0) / c - 0.5)), j1 = Math.min(R.h - 1, Math.floor((zmax - R.z0) / c - 0.5));
-  const xs = [];
+  if (POLY_XS.length < n) POLY_XS = new Float64Array(n * 2);
+  const xs = POLY_XS;
   for (let j = j0; j <= j1; j++) {
     const z = R.z0 + (j + 0.5) * c;
-    xs.length = 0;
+    let nx = 0;
     for (let k = 0; k < n; k++) {
       const ax = pts[2 * k], az = pts[2 * k + 1];
-      const b = (k + 1) % n, bx = pts[2 * b], bz = pts[2 * b + 1];
-      if ((az <= z) !== (bz <= z)) xs.push(ax + ((z - az) / (bz - az)) * (bx - ax));
+      const b = k + 1 === n ? 0 : k + 1, bx = pts[2 * b], bz = pts[2 * b + 1];
+      if ((az <= z) !== (bz <= z)) {
+        // Insertion in ascending order (a handful of crossings per row).
+        const x = ax + ((z - az) / (bz - az)) * (bx - ax);
+        let q = nx++;
+        while (q > 0 && xs[q - 1] > x) { xs[q] = xs[q - 1]; q--; }
+        xs[q] = x;
+      }
     }
-    xs.sort((p, q) => p - q);
-    for (let k = 0; k + 1 < xs.length; k += 2) {
+    for (let k = 0; k + 1 < nx; k += 2) {
       const i0 = Math.max(0, Math.ceil((xs[k] - R.x0) / c - 0.5)), i1 = Math.min(R.w - 1, Math.floor((xs[k + 1] - R.x0) / c - 0.5));
       if (i1 >= i0) R.data.fill(v, j * R.w + i0, j * R.w + i1 + 1);
     }
@@ -172,61 +187,93 @@ function stampLine(R, ax, az, bx, bz, v) {
   }
 }
 
-// Felzenszwalb squared distance transform, in place on f (cells).
-function edt2d(f, w, h) {
-  const n = Math.max(w, h);
-  const d = new Float64Array(n), v = new Int32Array(n), zz = new Float64Array(n + 1), g = new Float64Array(n);
-  const pass = (len) => {
-    let k = 0;
-    v[0] = 0;
-    zz[0] = -Infinity;
-    zz[1] = Infinity;
-    for (let q = 1; q < len; q++) {
-      let s = (g[q] + q * q - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-      while (s <= zz[k]) {
-        k--;
-        s = (g[q] + q * q - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
-      }
-      k++;
-      v[k] = q;
-      zz[k] = s;
-      zz[k + 1] = Infinity;
-    }
-    k = 0;
-    for (let q = 0; q < len; q++) {
-      while (zz[k + 1] < q) k++;
-      d[q] = (q - v[k]) * (q - v[k]) + g[v[k]];
-    }
-  };
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) g[y] = f[y * w + x];
-    pass(h);
-    for (let y = 0; y < h; y++) f[y * w + x] = d[y];
-  }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) g[x] = f[y * w + x];
-    pass(w);
-    for (let x = 0; x < w; x++) f[y * w + x] = d[x];
-  }
-}
-
-// Signed distance (decimetres, Int16) from a land mask: + on land.
+// Signed distance (decimetres, Int16) from a land mask: + on land, the
+// exact Euclidean distance between cell centres (Felzenszwalb squared
+// distance transform of each side) less half a cell, clamped to CLAMP.
+// A squared distance of FAR cells or more always clamps, so the column
+// pass caps at FAR (squared run length to the nearest cell of the other
+// side, two row-major sweeps for both sides at once), and the row pass
+// builds the lower envelope of the cells under FAR only.
 function signedField(R) {
-  const N = R.w * R.h, m = R.data;
-  const toWater = new Float32Array(N), toLand = new Float32Array(N);
-  const INF = 1e20;
-  for (let k = 0; k < N; k++) {
-    toWater[k] = m[k] ? INF : 0;
-    toLand[k] = m[k] ? 0 : INF;
-  }
-  edt2d(toWater, R.w, R.h);
-  edt2d(toLand, R.w, R.h);
-  const out = new Int16Array(N);
+  const W = R.w, H = R.h, N = W * H, m = R.data;
   const lim = CLAMP * 10;
-  for (let k = 0; k < N; k++) {
-    const s = m[k] ? (Math.sqrt(toWater[k]) - 0.5) * R.cell : -(Math.sqrt(toLand[k]) - 0.5) * R.cell;
-    const dm = Math.round(s * 10);
-    out[k] = dm > lim ? lim : dm < -lim ? -lim : dm;
+  const FAR = (Math.ceil(lim / (10 * R.cell) + 0.5) + 1) ** 2;
+  // Every squared distance under FAR, as the output it gives.
+  const posOf = new Int16Array(FAR), negOf = new Int16Array(FAR);
+  for (let d = 0; d < FAR; d++) {
+    const p = Math.round((Math.sqrt(d) - 0.5) * R.cell * 10), q = Math.round(-(Math.sqrt(d) - 0.5) * R.cell * 10);
+    posOf[d] = p > lim ? lim : p < -lim ? -lim : p;
+    negOf[d] = q > lim ? lim : q < -lim ? -lim : q;
+  }
+  // Column pass: one field for both sides (a cell's distance is to the
+  // other side), squared, capped at FAR.
+  const col = new Int32Array(N);
+  {
+    const run = new Int32Array(W).fill(-1); // rows since the side changed (-1 none)
+    const side = new Uint8Array(W).fill(2);
+    for (let j = 0, c = 0; j < H; j++) {
+      for (let i = 0; i < W; i++, c++) {
+        const t = m[c] ? 1 : 0;
+        if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
+        if (run[i] >= 0) run[i]++;
+        col[c] = run[i];
+      }
+    }
+    run.fill(-1);
+    side.fill(2);
+    for (let j = H - 1, c = N - 1; j >= 0; j--) {
+      for (let i = W - 1; i >= 0; i--, c--) {
+        const t = m[c] ? 1 : 0;
+        if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
+        if (run[i] >= 0) run[i]++;
+        const up = col[c], dn = run[i];
+        const r = up < 0 ? dn : dn < 0 ? up : up < dn ? up : dn;
+        col[c] = r < 0 || r * r >= FAR ? FAR : r * r;
+      }
+    }
+  }
+  // Row pass: per row and side, the parabolas (q - p)^2 + g[p] of the
+  // other side's cells (g = 0) and of this side's cells under FAR.
+  const out = new Int16Array(N);
+  const v = new Int32Array(W), zz = new Float64Array(W + 1), gv = new Float64Array(W);
+  for (let y = 0, row = 0; y < H; y++, row += W) {
+    for (let t = 0; t < 2; t++) {
+      // t = 1: land cells, distance to water; t = 0: water cells, to land.
+      const tab = t ? posOf : negOf;
+      let k = -1;
+      for (let x = 0; x < W; x++) {
+        const c = row + x;
+        const own = (m[c] ? 1 : 0) === t;
+        const g = own ? col[c] : 0;
+        if (g >= FAR) continue;
+        // A cell of the other side is a source at 0.
+        const gq = g + x * x;
+        let s = -Infinity;
+        while (k >= 0) {
+          s = (gq - (gv[k] + v[k] * v[k])) / (2 * x - 2 * v[k]);
+          if (s > zz[k]) break;
+          k--;
+        }
+        if (k < 0) s = -Infinity;
+        k++;
+        v[k] = x;
+        gv[k] = g;
+        zz[k] = s;
+      }
+      if (k < 0) {
+        for (let x = 0; x < W; x++) if ((m[row + x] ? 1 : 0) === t) out[row + x] = t ? lim : -lim;
+        continue;
+      }
+      zz[k + 1] = Infinity;
+      let e = 0;
+      for (let x = 0; x < W; x++) {
+        const c = row + x;
+        if ((m[c] ? 1 : 0) !== t) continue;
+        while (zz[e + 1] < x) e++;
+        const d = (x - v[e]) * (x - v[e]) + gv[e];
+        out[c] = d < FAR ? tab[d] : t ? lim : -lim;
+      }
+    }
   }
   return out;
 }
@@ -246,27 +293,65 @@ function makeSampler(R, f) {
   };
 }
 
-// Labels the 4-connected regions of cells where wall is 0. Returns the count.
+// Labels the 4-connected regions of cells where wall is 0. Returns the
+// count. Regions are numbered in the row order of their first cell (a
+// span fill: each run of a row is labelled at once, and one seed per
+// open run above and below it is stacked). queue: unused scratch.
 function labelRegions(wall, W, H, label, queue) {
   const NC = W * H;
   label.fill(-1);
+  void queue;
+  const stack = [];
   let n = 0;
   for (let s = 0; s < NC; s++) {
     if (wall[s] || label[s] >= 0) continue;
-    let qh = 0, qt = 0;
-    queue[qt++] = s;
-    label[s] = n;
-    while (qh < qt) {
-      const c = queue[qh++];
-      const i = c % W;
-      if (i > 0 && !wall[c - 1] && label[c - 1] < 0) { label[c - 1] = n; queue[qt++] = c - 1; }
-      if (i < W - 1 && !wall[c + 1] && label[c + 1] < 0) { label[c + 1] = n; queue[qt++] = c + 1; }
-      if (c >= W && !wall[c - W] && label[c - W] < 0) { label[c - W] = n; queue[qt++] = c - W; }
-      if (c < NC - W && !wall[c + W] && label[c + W] < 0) { label[c + W] = n; queue[qt++] = c + W; }
+    stack.length = 0;
+    stack.push(s);
+    while (stack.length) {
+      const c = stack.pop();
+      if (label[c] >= 0) continue;
+      const row = c - (c % W), end = row + W - 1;
+      let l = c, r = c;
+      while (l > row && !wall[l - 1] && label[l - 1] < 0) l--;
+      while (r < end && !wall[r + 1] && label[r + 1] < 0) r++;
+      for (let k = l; k <= r; k++) label[k] = n;
+      if (row >= W) seedRuns(wall, label, l - W, r - W, stack);
+      if (row + W < NC) seedRuns(wall, label, l + W, r + W, stack);
     }
     n++;
   }
   return n;
+}
+// Stacks the first cell of every open, unlabelled run in a..b.
+function seedRuns(wall, label, a, b, stack) {
+  let inRun = false;
+  for (let k = a; k <= b; k++) {
+    const open = !wall[k] && label[k] < 0;
+    if (open && !inRun) stack.push(k);
+    inRun = open;
+  }
+}
+
+// Each region's vote from one coast line: +1 per sample on its land side
+// (6 m to the left of the line), -1 on its water side. Segments wholly
+// outside the raster (x0..bx1, z0..bz1) are skipped.
+function voteCoast(pts, R, label, votes, bx1, bz1) {
+  for (let k = 0; k + 3 < pts.length; k += 2) {
+    const ax = pts[k], az = pts[k + 1], bx = pts[k + 2], bz = pts[k + 3];
+    const L = Math.hypot(bx - ax, bz - az);
+    if (L < 1e-6) continue;
+    if ((ax < R.x0 && bx < R.x0) || (ax > bx1 && bx > bx1) || (az < R.z0 && bz < R.z0) || (az > bz1 && bz > bz1)) continue;
+    const nx = (bz - az) / L, nz = -(bx - ax) / L; // toward land
+    for (let t = 2; t < L; t += 6) {
+      const px = ax + ((bx - ax) * t) / L, pz = az + ((bz - az) * t) / L;
+      const cl = cellOf(R, px + nx * 6, pz + nz * 6), cw = cellOf(R, px - nx * 6, pz - nz * 6);
+      if (cl >= 0 && label[cl] >= 0) votes[label[cl]] += 1;
+      if (cw >= 0 && label[cw] >= 0) votes[label[cw]] -= 1;
+    }
+  }
+}
+function applyVotes(label, votes, data, NC) {
+  for (let c = 0; c < NC; c++) if (label[c] >= 0) data[c] = votes[label[c]] > 0 ? 1 : 0;
 }
 
 // Coastline wall cells (1) take the majority of their settled neighbours.
@@ -322,6 +407,85 @@ function largestRects(cells, cw, ch, filled, hist, stack, out) {
   return n;
 }
 
+// Free lot cells: drawn land (visual 1) off the road strips (near 0) and
+// outside every building box (owner < 0). Sets free[c] = 1 and returns
+// the free cells in row order. (Hot loops live in small top-level
+// functions: the optimiser takes them at once, not the whole build.)
+function freeCells(visual, near, owner, free, NC) {
+  let n = 0;
+  for (let c = 0; c < NC; c++) {
+    if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; n++; }
+  }
+  const list = new Int32Array(n);
+  for (let c = 0, k = 0; k < n; c++) if (free[c]) list[k++] = c;
+  return list;
+}
+
+// Bounding box and area of a closed polygon: out = [x0, z0, x1, z1, area].
+function polyBox(pts, out) {
+  const n = pts.length / 2;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, area = 0;
+  for (let k = 0; k < n; k++) {
+    const ax = pts[2 * k], az = pts[2 * k + 1], q = (k + 1) % n;
+    x0 = Math.min(x0, ax); x1 = Math.max(x1, ax); z0 = Math.min(z0, az); z1 = Math.max(z1, az);
+    area += ax * pts[2 * q + 1] - pts[2 * q] * az;
+  }
+  out[0] = x0; out[1] = z0; out[2] = x1; out[3] = z1; out[4] = Math.abs(area) / 2;
+}
+
+// A footprint rasterised on R (its cells at 2 m, R.data the buffer) and
+// covered by largestRects (into rects). Returns the rectangle count (0
+// when no cell centre is inside the polygon).
+function footprintRects(R, pts, hist, stack, rects) {
+  const cw = R.w, ch = R.h, cells = R.data;
+  cells.fill(0, 0, cw * ch);
+  fillPolygon(R, pts, 1);
+  let filled = 0;
+  for (let k = 0; k < cw * ch; k++) filled += cells[k];
+  if (!filled) return 0;
+  return largestRects(cells, cw, ch, filled, hist, stack, rects);
+}
+
+// Building box k on the owner raster (CELL cells from x0, z0): the cells
+// whose centre is strictly inside the box (as inBuilding); a box too
+// small to cover a cell centre still holds its own cell.
+function stampOwnerBox(owner, b, k, x0, z0, W, H) {
+  const e = 1e-6;
+  const i0 = Math.max(0, Math.ceil((b.x0 - x0) / CELL - 0.5 + e)), i1 = Math.min(W - 1, Math.floor((b.x1 - x0) / CELL - 0.5 - e));
+  const j0 = Math.max(0, Math.ceil((b.z0 - z0) / CELL - 0.5 + e)), j1 = Math.min(H - 1, Math.floor((b.z1 - z0) / CELL - 0.5 - e));
+  for (let j = j0; j <= j1; j++) for (let c = j * W + i0, e1 = j * W + i1; c <= e1; c++) owner[c] = k;
+  const ci = Math.floor(((b.x0 + b.x1) / 2 - x0) / CELL), cj = Math.floor(((b.z0 + b.z1) / 2 - z0) / CELL);
+  const c = ci < 0 || cj < 0 || ci >= W || cj >= H ? -1 : cj * W + ci;
+  if (c >= 0 && owner[c] < 0) owner[c] = k;
+}
+
+// Indices of the boxes (not the depot's) whose centre is within r of (x, z).
+function boxesWithin(boxes, x, z, r) {
+  const out = [];
+  for (let k = 0; k < boxes.length; k++) {
+    const b = boxes[k];
+    if (b.depot || Math.hypot((b.x0 + b.x1) / 2 - x, (b.z0 + b.z1) / 2 - z) > r) continue;
+    out.push(k);
+  }
+  return out;
+}
+// True when every cell of i0..i1 x j0..j1 is inside the W x H raster and set.
+function allSet(a, W, H, i0, i1, j0, j1) {
+  if (!(i0 >= 0 && j0 >= 0 && i1 < W && j1 < H)) return false;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (!a[j * W + i]) return false;
+  return true;
+}
+// Cells of the rect held by a building (owner >= 0) are no longer free.
+function clearOwned(free, owner, W, i0, i1, j0, j1) {
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (owner[j * W + i] >= 0) free[j * W + i] = 0;
+}
+// Drops the cells of list[0..n) that are no longer free; returns the count.
+function keepFree(list, n, free) {
+  let m = 0;
+  for (let k = 0; k < n; k++) if (free[list[k]]) list[m++] = list[k];
+  return m;
+}
+
 // Flood fills one road-free land region from cell s (inside the crop
 // window ci0..ci1, cj0..cj1). out: [cells, i0, i1, j0, j1, park cells,
 // 1 if it stays clear of the window edge].
@@ -344,6 +508,110 @@ function floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, out)
     if (cj < cj1 && lab[c + W] < 0 && land[c + W] === 1 && road[c + W] === 0) { lab[c + W] = s; queue[qt++] = c + W; }
   }
   out[0] = qt; out[1] = i0; out[2] = i1; out[3] = j0; out[4] = j1; out[5] = parks; out[6] = ok;
+}
+
+// floodBlock from every unlabelled road-free land cell of the window, in
+// row order. Returns an Int32Array of 7 values per region (as FB).
+function floodRegions(W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, FB) {
+  let out = new Int32Array(7 * 4096), n = 0;
+  for (let j = cj0; j <= cj1; j++) {
+    for (let i = ci0; i <= ci1; i++) {
+      const s = j * W + i;
+      if (lab[s] >= 0 || land[s] !== 1 || road[s] !== 0) continue;
+      floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, FB);
+      if (n + 7 > out.length) { const o = new Int32Array(out.length * 2); o.set(out); out = o; }
+      for (let k = 0; k < 7; k++) out[n++] = FB[k];
+    }
+  }
+  return out.subarray(0, n);
+}
+
+// Junctions the simplified data lost: a vertex lying on another road, or
+// two streets crossing with no shared vertex. Splits the segments
+// (segA, segB, segW) there; returns the new [segA, segB, segW], or null
+// when nothing was split. vertexOf(x, z, flag) adds a vertex.
+function splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf) {
+  const SG = 40;
+  const gx0 = crop.x0 - 10, gz0 = crop.z0 - 10;
+  const gw = Math.ceil((crop.x1 - crop.x0 + 20) / SG) + 1, gh = Math.ceil((crop.z1 - crop.z0 + 20) / SG) + 1;
+  const cells = Array.from({ length: gw * gh }, () => []);
+  const ns = segA.length;
+  for (let s = 0; s < ns; s++) {
+    const ax = vx[segA[s]], az = vz[segA[s]], bx = vx[segB[s]], bz = vz[segB[s]];
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - SNAP - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, bx) + SNAP - gx0) / SG));
+    const j0 = Math.max(0, Math.floor((Math.min(az, bz) - SNAP - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, bz) + SNAP - gz0) / SG));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cells[j * gw + i].push(s);
+  }
+  const splits = new Map(); // seg -> [{t, v}]
+  const addSplit = (s, t, v) => {
+    let l = splits.get(s);
+    if (!l) splits.set(s, (l = []));
+    if (!l.some((q) => q.v === v)) l.push({ t, v });
+  };
+  // Vertex on a segment.
+  const nv = vx.length;
+  for (let v = 0; v < nv; v++) {
+    const i = Math.floor((vx[v] - gx0) / SG), j = Math.floor((vz[v] - gz0) / SG);
+    if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
+    for (const s of cells[j * gw + i]) {
+      const a = segA[s], b = segB[s];
+      if (a === v || b === v) continue;
+      const sb = ways[segW[s]].bridge;
+      const f = vflag[v];
+      if (!(f & 4) && !(sb ? f & 2 : f & 1)) continue;
+      const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
+      const L = Math.hypot(dx, dz);
+      const t = ((vx[v] - ax) * dx + (vz[v] - az) * dz) / L;
+      if (t < 1 || t > L - 1) continue;
+      const ox = ax + (dx * t) / L - vx[v], oz = az + (dz * t) / L - vz[v];
+      if (ox * ox + oz * oz < SNAP * SNAP) addSplit(s, t, v);
+    }
+  }
+  // Street crossings without a shared vertex (never with a bridge).
+  const seen = new Int32Array(ns).fill(-1);
+  for (let s = 0; s < ns; s++) {
+    if (ways[segW[s]].bridge) continue;
+    const a = segA[s], b = segB[s];
+    const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
+    const i0 = Math.max(0, Math.floor((Math.min(ax, vx[b]) - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, vx[b]) - gx0) / SG));
+    const j0 = Math.max(0, Math.floor((Math.min(az, vz[b]) - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, vz[b]) - gz0) / SG));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        for (const u of cells[j * gw + i]) {
+          if (u <= s || seen[u] === s || ways[segW[u]].bridge) continue;
+          seen[u] = s;
+          const c = segA[u], d = segB[u];
+          if (c === a || c === b || d === a || d === b) continue;
+          const ex = vx[d] - vx[c], ez = vz[d] - vz[c];
+          const den = dx * ez - dz * ex;
+          if (Math.abs(den) < 1e-9) continue;
+          const wx = vx[c] - ax, wz = vz[c] - az;
+          const p = (wx * ez - wz * ex) / den, q = (wx * dz - wz * dx) / den;
+          const La = Math.hypot(dx, dz), Lb = Math.hypot(ex, ez);
+          if (p * La < 0.5 || p * La > La - 0.5 || q * Lb < 0.5 || q * Lb > Lb - 0.5) continue;
+          const v = vertexOf(ax + dx * p, az + dz * p, 1);
+          addSplit(s, p * La, v);
+          addSplit(u, q * Lb, v);
+        }
+      }
+    }
+  }
+  if (splits.size) {
+    const A = [], B = [], Wd = [];
+    for (let s = 0; s < ns; s++) {
+      const l = splits.get(s);
+      if (!l) { A.push(segA[s]); B.push(segB[s]); Wd.push(segW[s]); continue; }
+      l.sort((p, q) => p.t - q.t);
+      let prev = segA[s];
+      for (const q of l) {
+        if (q.v !== prev) { A.push(prev); B.push(q.v); Wd.push(segW[s]); }
+        prev = q.v;
+      }
+      if (prev !== segB[s]) { A.push(prev); B.push(segB[s]); Wd.push(segW[s]); }
+    }
+    return [A, B, Wd];
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------
@@ -410,21 +678,8 @@ export function createMiamiCity(data, opts = {}) {
     const nLab = labelRegions(wall.data, W, H, label, queueBuf);
     lap('land.fill');
     const votes = new Float64Array(nLab);
-    for (const pts of coast) {
-      for (let k = 0; k + 3 < pts.length; k += 2) {
-        const ax = pts[k], az = pts[k + 1], bx = pts[k + 2], bz = pts[k + 3];
-        const L = Math.hypot(bx - ax, bz - az);
-        if (L < 1e-6 || outside(ax, az, bx, bz)) continue;
-        const nx = (bz - az) / L, nz = -(bx - ax) / L; // toward land
-        for (let t = 2; t < L; t += 6) {
-          const px = ax + ((bx - ax) * t) / L, pz = az + ((bz - az) * t) / L;
-          const cl = cellOf(land, px + nx * 6, pz + nz * 6), cw = cellOf(land, px - nx * 6, pz - nz * 6);
-          if (cl >= 0 && label[cl] >= 0) votes[label[cl]] += 1;
-          if (cw >= 0 && label[cw] >= 0) votes[label[cw]] -= 1;
-        }
-      }
-    }
-    for (let c = 0; c < NC; c++) if (label[c] >= 0) land.data[c] = votes[label[c]] > 0 ? 1 : 0;
+    for (const pts of coast) voteCoast(pts, land, label, votes, bx1, bz1);
+    applyVotes(label, votes, land.data, NC);
     lap('land.votes');
     // Wall cells: majority of their labelled neighbours.
     settleWalls(wall.data, land.data, W, H);
@@ -461,14 +716,18 @@ export function createMiamiCity(data, opts = {}) {
     }
   }
   const baseLand = land.data.slice(); // before the islet: "is it real land"
+  // Hot lookups read the raster bounds from constants, not the raster
+  // object (whose shape the optimiser may see change during the build).
+  const landCell = cellLookup(land);
   const baseAt = (x, z) => {
-    const c = cellOf(land, x, z);
+    const c = landCell(x, z);
     return c >= 0 && baseLand[c] === 1;
   };
   lap('land');
 
   // ---- 2. Roads: drivable ways inside the crop. ----
-  const inCrop = (x, z) => x >= crop.x0 && x <= crop.x1 && z >= crop.z0 && z <= crop.z1;
+  const CX0 = crop.x0, CX1 = crop.x1, CZ0 = crop.z0, CZ1 = crop.z1;
+  const inCrop = (x, z) => x >= CX0 && x <= CX1 && z >= CZ0 && z <= CZ1;
   const ways = [];
   for (const r of data.roads) {
     if (!DRIVE.has(r.class)) continue;
@@ -478,7 +737,7 @@ export function createMiamiCity(data, opts = {}) {
     const pts = decodePolyline(r.p);
     const nearWater = (x, z) => {
       for (let k = 0; k < 8; k++) {
-        const c = cellOf(land, x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
+        const c = landCell(x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
         if (c < 0 || !coastLand[c]) return true;
       }
       return false;
@@ -570,86 +829,8 @@ export function createMiamiCity(data, opts = {}) {
   // Junctions the simplified data lost: a vertex lying on another road,
   // or two streets crossing with no shared vertex.
   {
-    const SG = 40;
-    const gx0 = crop.x0 - 10, gz0 = crop.z0 - 10;
-    const gw = Math.ceil((crop.x1 - crop.x0 + 20) / SG) + 1, gh = Math.ceil((crop.z1 - crop.z0 + 20) / SG) + 1;
-    const cells = Array.from({ length: gw * gh }, () => []);
-    const ns = segA.length;
-    for (let s = 0; s < ns; s++) {
-      const ax = vx[segA[s]], az = vz[segA[s]], bx = vx[segB[s]], bz = vz[segB[s]];
-      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - SNAP - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, bx) + SNAP - gx0) / SG));
-      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - SNAP - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, bz) + SNAP - gz0) / SG));
-      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cells[j * gw + i].push(s);
-    }
-    const splits = new Map(); // seg -> [{t, v}]
-    const addSplit = (s, t, v) => {
-      let l = splits.get(s);
-      if (!l) splits.set(s, (l = []));
-      if (!l.some((q) => q.v === v)) l.push({ t, v });
-    };
-    // Vertex on a segment.
-    const nv = vx.length;
-    for (let v = 0; v < nv; v++) {
-      const i = Math.floor((vx[v] - gx0) / SG), j = Math.floor((vz[v] - gz0) / SG);
-      if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
-      for (const s of cells[j * gw + i]) {
-        const a = segA[s], b = segB[s];
-        if (a === v || b === v) continue;
-        const sb = ways[segW[s]].bridge;
-        const f = vflag[v];
-        if (!(f & 4) && !(sb ? f & 2 : f & 1)) continue;
-        const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
-        const L = Math.hypot(dx, dz);
-        const t = ((vx[v] - ax) * dx + (vz[v] - az) * dz) / L;
-        if (t < 1 || t > L - 1) continue;
-        const ox = ax + (dx * t) / L - vx[v], oz = az + (dz * t) / L - vz[v];
-        if (ox * ox + oz * oz < SNAP * SNAP) addSplit(s, t, v);
-      }
-    }
-    // Street crossings without a shared vertex (never with a bridge).
-    const seen = new Int32Array(ns).fill(-1);
-    for (let s = 0; s < ns; s++) {
-      if (ways[segW[s]].bridge) continue;
-      const a = segA[s], b = segB[s];
-      const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
-      const i0 = Math.max(0, Math.floor((Math.min(ax, vx[b]) - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, vx[b]) - gx0) / SG));
-      const j0 = Math.max(0, Math.floor((Math.min(az, vz[b]) - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, vz[b]) - gz0) / SG));
-      for (let j = j0; j <= j1; j++) {
-        for (let i = i0; i <= i1; i++) {
-          for (const u of cells[j * gw + i]) {
-            if (u <= s || seen[u] === s || ways[segW[u]].bridge) continue;
-            seen[u] = s;
-            const c = segA[u], d = segB[u];
-            if (c === a || c === b || d === a || d === b) continue;
-            const ex = vx[d] - vx[c], ez = vz[d] - vz[c];
-            const den = dx * ez - dz * ex;
-            if (Math.abs(den) < 1e-9) continue;
-            const wx = vx[c] - ax, wz = vz[c] - az;
-            const p = (wx * ez - wz * ex) / den, q = (wx * dz - wz * dx) / den;
-            const La = Math.hypot(dx, dz), Lb = Math.hypot(ex, ez);
-            if (p * La < 0.5 || p * La > La - 0.5 || q * Lb < 0.5 || q * Lb > Lb - 0.5) continue;
-            const v = vertexOf(ax + dx * p, az + dz * p, 1);
-            addSplit(s, p * La, v);
-            addSplit(u, q * Lb, v);
-          }
-        }
-      }
-    }
-    if (splits.size) {
-      const A = [], B = [], Wd = [];
-      for (let s = 0; s < ns; s++) {
-        const l = splits.get(s);
-        if (!l) { A.push(segA[s]); B.push(segB[s]); Wd.push(segW[s]); continue; }
-        l.sort((p, q) => p.t - q.t);
-        let prev = segA[s];
-        for (const q of l) {
-          if (q.v !== prev) { A.push(prev); B.push(q.v); Wd.push(segW[s]); }
-          prev = q.v;
-        }
-        if (prev !== segB[s]) { A.push(prev); B.push(segB[s]); Wd.push(segW[s]); }
-      }
-      segA = A; segB = B; segW = Wd;
-    }
+    const split = splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf);
+    if (split) [segA, segB, segW] = split;
   }
 
   // Merge junction vertices closer than MERGE m (dual carriageways, ramps).
@@ -1029,12 +1210,14 @@ export function createMiamiCity(data, opts = {}) {
     const a = nodes[e.a], b = nodes[e.b];
     stampCapsule(land, a.x, a.z, b.x, b.z, e.width / 2 + 3, 1);
   }
+  lap('shore.stamp');
   const fieldAll = signedField(land);
+  lap('shore.field');
   const shoreDist = makeSampler(land, fieldAll);
   // Real land (and the islet) only: no bridges or road strips. Not a
   // true distance at sea (-1 anywhere off the drawn land).
   const visualAt = (x, z) => {
-    const c = cellOf(land, x, z);
+    const c = landCell(x, z);
     return c >= 0 && visual[c] === 1;
   };
   const mainShore = (x, z) => (visualAt(x, z) ? Math.max(0.01, shoreDist(x, z)) : -1);
@@ -1045,9 +1228,10 @@ export function createMiamiCity(data, opts = {}) {
   const dist = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, DC);
   for (const r of S.districts) stampRect(dist, r.x0, r.z0, r.x1, r.z1, DKEYS.indexOf(r.key));
   stampRect(dist, islet.x0 - 60, islet.z0 - 60, islet.x1 + 60, islet.z1 + 60, DKEYS.indexOf('airfield'));
+  const distCell = cellLookup(dist), distData = dist.data;
   function districtOf(x, z) {
-    const c = cellOf(dist, x, z);
-    return c < 0 ? 'midtown' : DKEYS[dist.data[c]];
+    const c = distCell(x, z);
+    return c < 0 ? 'midtown' : DKEYS[distData[c]];
   }
   // Real neighbourhood names for the HUD (placeOf, below), baked at 16 m:
   // index into placeNames, 0 = none.
@@ -1089,13 +1273,11 @@ export function createMiamiCity(data, opts = {}) {
     const FB = new Int32Array(7);
     const ci0 = Math.max(0, Math.floor((crop.x0 - land.x0) / CELL)), ci1 = Math.min(W - 1, Math.floor((crop.x1 - land.x0) / CELL));
     const cj0 = Math.max(0, Math.floor((crop.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((crop.z1 - land.z0) / CELL));
-    const free = (c) => baseLand[c] === 1 && road.data[c] === 0;
-    for (let j = cj0; j <= cj1; j++) {
-      for (let i = ci0; i <= ci1; i++) {
-        const s = j * W + i;
-        if (lab[s] >= 0 || !free(s)) continue;
-        floodBlock(s, W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, queue, FB);
-        const qt = FB[0], bi0 = FB[1], bi1 = FB[2], bj0 = FB[3], bj1 = FB[4], parks = FB[5], ok = FB[6] === 1;
+    // Every road-free land region of the crop window, in scan order.
+    const regions = floodRegions(W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, queue, FB);
+    for (let r = 0; r < regions.length; r += 7) {
+      {
+        const qt = regions[r], bi0 = regions[r + 1], bi1 = regions[r + 2], bj0 = regions[r + 3], bj1 = regions[r + 4], parks = regions[r + 5], ok = regions[r + 6] === 1;
         const bw = (bi1 - bi0 + 1) * CELL, bh = (bj1 - bj0 + 1) * CELL;
         if (!ok || qt * CELL * CELL < 0.85 * bw * bh || Math.min(bw, bh) < 24 || Math.max(bw, bh) > 320) continue;
         // Start from the cell centres (clear of the road), then grow.
@@ -1149,33 +1331,26 @@ export function createMiamiCity(data, opts = {}) {
     const hist = new Int32Array(201);
     const stack = new Int32Array(202);
     const rects = new Int32Array(24);
+    const FB4 = new Float64Array(5);
+    const R2 = { x0: 0, z0: 0, cell: BC, w: 0, h: 0, data: cellsBuf };
     for (let fp = 0; fp < data.buildings.length; fp++) {
       const b = data.buildings[fp];
       if (SKIP_BUILDING.has(b.kind) || !inCrop(b.p[0] / 10, b.p[1] / 10)) continue;
       const pts = decodePolyline(b.p);
       const n = pts.length / 2;
       if (n < 3) continue;
-      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, area = 0;
-      for (let k = 0; k < n; k++) {
-        const ax = pts[2 * k], az = pts[2 * k + 1], q = (k + 1) % n;
-        x0 = Math.min(x0, ax); x1 = Math.max(x1, ax); z0 = Math.min(z0, az); z1 = Math.max(z1, az);
-        area += ax * pts[2 * q + 1] - pts[2 * q] * az;
-      }
-      area = Math.abs(area) / 2;
+      polyBox(pts, FB4);
+      const x0 = FB4[0], z0 = FB4[1], x1 = FB4[2], z1 = FB4[3], area = FB4[4];
       if (area < 25 || !inCrop((x0 + x1) / 2, (z0 + z1) / 2)) continue;
       const cw = Math.ceil((x1 - x0) / BC), ch = Math.ceil((z1 - z0) / BC);
       if (cw < 2 || ch < 2 || cw > 200 || ch > 200) continue;
-      // Rasterise at 2 m (cell centres inside the polygon).
-      const R = { x0, z0, cell: BC, w: cw, h: ch, data: cellsBuf };
-      cellsBuf.fill(0, 0, cw * ch);
-      fillPolygon(R, pts, 1);
-      let filled = 0;
-      for (let k = 0; k < cw * ch; k++) filled += cellsBuf[k];
-      if (!filled) continue;
+      // Rasterise at 2 m (cell centres inside the polygon), then the
+      // largest all-inside rectangles, until 85 % is covered.
+      R2.x0 = x0; R2.z0 = z0; R2.w = cw; R2.h = ch;
+      const nb = footprintRects(R2, pts, hist, stack, rects);
+      if (!nb) continue;
       const kindTag = b.kind || '';
       const h = Math.max(3, b.h || 8);
-      // Greedy: the largest all-inside rectangles, until 85 % is covered.
-      const nb = largestRects(cellsBuf, cw, ch, filled, hist, stack, rects);
       for (let k = 0; k < nb; k++) {
         const bi0 = rects[4 * k], bj0 = rects[4 * k + 1], bi1 = rects[4 * k + 2], bj1 = rects[4 * k + 3];
         const bx0 = bi0 === 0 ? x0 : x0 + bi0 * BC, bz0 = bj0 === 0 ? z0 : z0 + bj0 * BC;
@@ -1320,18 +1495,9 @@ export function createMiamiCity(data, opts = {}) {
     }
     for (const n of nodes) stampRect(R, n.x - n.hx - SIDEWALK, n.z - n.hz - SIDEWALK, n.x + n.hx + SIDEWALK, n.z + n.hz + SIDEWALK, 1);
     const owner = labelBuf.fill(-1); // free since the blocks step
-    const stampOwner = (k) => {
-      const b = buildings[k];
-      // Cells whose centre is strictly inside the box (as inBuilding).
-      const e = 1e-6;
-      const i0 = Math.max(0, Math.ceil((b.x0 - land.x0) / CELL - 0.5 + e)), i1 = Math.min(W - 1, Math.floor((b.x1 - land.x0) / CELL - 0.5 - e));
-      const j0 = Math.max(0, Math.ceil((b.z0 - land.z0) / CELL - 0.5 + e)), j1 = Math.min(H - 1, Math.floor((b.z1 - land.z0) / CELL - 0.5 - e));
-      for (let j = j0; j <= j1; j++) owner.fill(k, j * W + i0, j * W + i1 + 1);
-      // A box too small to cover a cell centre still holds its own cell.
-      const c = cellOf(land, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
-      if (c >= 0 && owner[c] < 0) owner[c] = k;
-    };
-    for (let k = 0; k < buildings.length; k++) stampOwner(k);
+    const LX0 = land.x0, LZ0 = land.z0;
+    const stampOwner = (k) => stampOwnerBox(owner, buildings[k], k, LX0, LZ0, W, H);
+    for (let k = 0; k < buildings.length; k++) stampOwnerBox(owner, buildings[k], k, LX0, LZ0, W, H);
     lap('infill.stamp');
     // Lot masks: `parkCells` from the blocks step (1 park or forest, 2
     // grass) gets the park district rects too; beaches are rects
@@ -1345,13 +1511,9 @@ export function createMiamiCity(data, opts = {}) {
       return false;
     };
     const free = new Uint8Array(NC);
-    let nList = 0;
-    for (let c = 0; c < NC; c++) {
-      if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; nList++; }
-    }
     // The free cells in row order (every lot cell is one of them).
-    const list = new Int32Array(nList);
-    for (let c = 0, k = 0; k < nList; c++) if (free[c]) list[k++] = c;
+    const list = freeCells(visual, near, owner, free, NC);
+    let nList = list.length;
     const mask = parkCells; // never filled: park and grass (a beach is near the water, which infill keeps off)
     // Steps of 5 m to the water and to a building, through free land.
     const water = new Uint8Array(NC);
@@ -1366,9 +1528,8 @@ export function createMiamiCity(data, opts = {}) {
       const site = { id: L.id, name: L.name, shape: L.shape, x: L.x, z: L.z, l: 0, w: 0, h: L.h, heading: 0, buildings: [] };
       if (L.fit === 'site') {
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-        for (let k = 0; k < buildings.length; k++) {
+        for (const k of boxesWithin(buildings, L.x, L.z, L.r)) {
           const b = buildings[k];
-          if (b.depot || Math.hypot((b.x0 + b.x1) / 2 - L.x, (b.z0 + b.z1) / 2 - L.z) > L.r) continue;
           b.landmark = L.id;
           site.buildings.push(k);
           x0 = Math.min(x0, b.x0); z0 = Math.min(z0, b.z0); x1 = Math.max(x1, b.x1); z1 = Math.max(z1, b.z1);
@@ -1385,9 +1546,7 @@ export function createMiamiCity(data, opts = {}) {
             const x = L.x + Math.cos((k / n) * TAU) * r, z = L.z + Math.sin((k / n) * TAU) * r;
             const i0 = Math.floor((x - hx - land.x0) / CELL), i1 = Math.floor((x + hx - land.x0) / CELL);
             const j0 = Math.floor((z - hz - land.z0) / CELL), j1 = Math.floor((z + hz - land.z0) / CELL);
-            let ok = i0 >= 0 && j0 >= 0 && i1 < W && j1 < H;
-            for (let j = j0; j <= j1 && ok; j++) for (let i = i0; i <= i1 && ok; i++) if (!free[j * W + i]) ok = false;
-            if (ok) spot = { x: Math.round(x), z: Math.round(z) };
+            if (allSet(free, W, H, i0, i1, j0, j1)) spot = { x: Math.round(x), z: Math.round(z) };
           }
         }
         if (!spot) continue;
@@ -1400,7 +1559,7 @@ export function createMiamiCity(data, opts = {}) {
         const b = buildings[buildings.length - 1];
         const ci0 = Math.max(0, Math.floor((b.x0 - land.x0) / CELL)), ci1 = Math.min(W - 1, Math.floor((b.x1 - land.x0) / CELL));
         const cj0 = Math.max(0, Math.floor((b.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((b.z1 - land.z0) / CELL));
-        for (let j = cj0; j <= cj1; j++) for (let i = ci0; i <= ci1; i++) if (owner[j * W + i] >= 0) free[j * W + i] = 0;
+        clearOwned(free, owner, W, ci0, ci1, cj0, cj1);
       }
       landmarkSites.push(site);
     }
@@ -1422,13 +1581,11 @@ export function createMiamiCity(data, opts = {}) {
       // The new boxes' cells are no longer free.
       const i0 = Math.max(0, Math.floor((f.x0 - land.x0) / CELL)), i1 = Math.min(W - 1, Math.floor((f.x1 - land.x0) / CELL));
       const j0 = Math.max(0, Math.floor((f.z0 - land.z0) / CELL)), j1 = Math.min(H - 1, Math.floor((f.z1 - land.z0) / CELL));
-      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (owner[j * W + i] >= 0) free[j * W + i] = 0;
+      clearOwned(free, owner, W, i0, i1, j0, j1);
     }
     {
       // Landmark and infill boxes took some cells.
-      let m = 0;
-      for (let k = 0; k < nList; k++) if (free[list[k]]) list[m++] = list[k];
-      nList = m;
+      nList = keepFree(list, nList, free);
     }
     lap('infill.plan');
     lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList, scratch8: near };
@@ -1527,6 +1684,7 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 10. Kerb parking, lamps, street trees, signals. ----
   const parkingSpots = [], props = [], furniture = [], signals = [];
+  const dr = createRng(seed ^ 0x5eed51);
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b];
     const half = e.width / 2;
@@ -1554,7 +1712,6 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
   }
-  const dr = createRng(seed ^ 0x5eed51);
   const TREE_P = { downtown: 0.55, midtown: 0.5, residential: 0.7, beach: 0.7, docks: 0.08, industrial: 0.1, park: 0.7, airfield: 0 };
   for (const e of edges) {
     if (e.causeway || e.bridge) continue;
@@ -1827,10 +1984,11 @@ export function createMiamiCity(data, opts = {}) {
   // The real neighbourhood (or water, or bridge) name at a point, for the
   // HUD. No allocation: the edge scratch list is reused.
   const placeEdges = [];
+  const landPlaceCell = cellLookup(landPlace), waterPlaceCell = cellLookup(waterPlace);
   function placeOf(x, z) {
     if (x > islet.x0 - 60 && x < islet.x1 + 60 && z > islet.z0 - 60 && z < islet.z1 + 60) return DISTRICTS.airfield.name;
     if (mainShore(x, z) > 0) {
-      const c = cellOf(landPlace, x, z);
+      const c = landPlaceCell(x, z);
       const k = c < 0 ? 0 : landPlace.data[c];
       if (k) return placeNames[k];
     }
@@ -1843,7 +2001,7 @@ export function createMiamiCity(data, opts = {}) {
       }
       if (mainShore(x, z) > 0) return 'Miami';
     }
-    const c = cellOf(waterPlace, x, z);
+    const c = waterPlaceCell(x, z);
     const k = c < 0 ? 0 : waterPlace.data[c];
     return k ? placeNames[k] : 'Biscayne Bay';
   }
@@ -1933,13 +2091,16 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
   }
+  lap('places.ramps');
   if (S.secrets) {
     const sec = placeSecrets(city, S.secrets);
     for (const sp of sec.spots) if (S.secretNotes && S.secretNotes[sp.id]) sp.note = S.secretNotes[sp.id];
     city.secretSpots = sec.spots;
     city.secretGarage = sec.garage;
   }
+  lap('places.secrets');
   if (city.courseSpec) city.courses = buildCourses(city);
+  lap('places.courses');
   lap('places');
   city.buildMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart);
   return city;
