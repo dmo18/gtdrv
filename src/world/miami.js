@@ -1065,7 +1065,7 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 6. Blocks: road-free land regions that are nearly rectangles. ----
   const blocks = [];
-  let parkCells = null; // 1 park or forest, 2 grass (data.parks)
+  let parkCells; // 1 park or forest, 2 grass (data.parks)
   {
     const road = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, CELL);
     for (const e of edges) {
@@ -1140,7 +1140,8 @@ export function createMiamiCity(data, opts = {}) {
   // osm: the OSM building kind; fp: the footprint the box was cut from
   // (-1 for made boxes); gen: an infill box (world/lots.js planInfill).
   const addBuilding = (x0, z0, x1, z1, h, district, kind = 'building', color = null, osm = '', fp = -1, gen = false) => {
-    buildings.push({ x0, z0, x1, z1, h, district, kind, color: color ?? rng.pick(PALETTES[district] ?? PALETTES.midtown), osm, fp, gen, landmark: '' });
+    // Every field step 11 fills is declared here, so all boxes share one shape.
+    buildings.push({ x0, z0, x1, z1, h, district, kind, color: color ?? rng.pick(PALETTES[district] ?? PALETTES.midtown), osm, fp, gen, landmark: '', style: '', tint: 0, vseed: 0, block: -1, street: 0 });
   };
   {
     const BC = 2;
@@ -1308,7 +1309,7 @@ export function createMiamiCity(data, opts = {}) {
   // free: drawn land clear of every road strip and its pavement and
   // outside every building box; owner: the building box at a cell. Big
   // empty pieces of built-up districts get plain infill boxes (`gen`).
-  let lotIn = null;
+  let lotIn;
   const landmarkSites = [];
   {
     const near = new Uint8Array(NC);
@@ -1344,11 +1345,13 @@ export function createMiamiCity(data, opts = {}) {
       return false;
     };
     const free = new Uint8Array(NC);
-    const list = new Int32Array(NC);
     let nList = 0;
     for (let c = 0; c < NC; c++) {
-      if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; list[nList++] = c; }
+      if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; nList++; }
     }
+    // The free cells in row order (every lot cell is one of them).
+    const list = new Int32Array(nList);
+    for (let c = 0, k = 0; k < nList; c++) if (free[c]) list[k++] = c;
     const mask = parkCells; // never filled: park and grass (a beach is near the water, which infill keeps off)
     // Steps of 5 m to the water and to a building, through free land.
     const water = new Uint8Array(NC);
@@ -1428,7 +1431,7 @@ export function createMiamiCity(data, opts = {}) {
       nList = m;
     }
     lap('infill.plan');
-    lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList };
+    lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList, scratch8: near };
   }
   lap('infill');
 
@@ -1883,7 +1886,6 @@ export function createMiamiCity(data, opts = {}) {
   {
     lotIn.timings = timings;
     const L = buildLots(city, lotIn);
-    lotIn = null;
     city.lots = L.lots;
     city.lotGrid = L.lotGrid;
     city.lotAt = L.lotAt;

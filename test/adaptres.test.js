@@ -8,12 +8,43 @@ const run = (c, dt, seconds) => {
   return c.scale;
 };
 
-test('steps down when frames are slow and stops at the minimum', () => {
+test('steps down when frames are slow and stops at the 1.0 floor', () => {
   const c = createAdaptiveRes({ max: 2, start: 1.5 });
   const s1 = run(c, 1 / 40, 1.5);
   assert.ok(s1 < 1.5, `dropped from 1.5 to ${s1}`);
   run(c, 1 / 20, 30);
-  assert.equal(c.scale, 0.6);
+  assert.equal(c.scale, 1);
+  // A start below the floor is lifted to it.
+  assert.equal(createAdaptiveRes({ max: 2, start: 0.6 }).scale, 1);
+});
+
+test('at the floor it sheds detail instead, and gives it back', () => {
+  const c = createAdaptiveRes({ max: 2, start: 1 });
+  run(c, 1 / 60, 3);
+  assert.equal(c.shed, 0);
+  // A device that cannot hold 60 at 1.0: one step, then the second.
+  run(c, 1 / 40, 3.5);
+  assert.equal(c.shed, 1);
+  assert.equal(c.scale, 1);
+  run(c, 1 / 40, 4);
+  assert.equal(c.shed, 2);
+  run(c, 1 / 40, 10);
+  assert.equal(c.shed, 2, 'never more than two steps');
+  // Frames well under budget for a long spell: detail comes back one
+  // step at a time before the resolution goes up again.
+  run(c, 1 / 90, 13);
+  assert.equal(c.shed, 1);
+  assert.equal(c.scale, 1);
+  run(c, 1 / 90, 13);
+  assert.equal(c.shed, 0);
+  run(c, 1 / 90, 10);
+  assert.ok(c.scale > 1, `resolution climbs once nothing is shed, got ${c.scale}`);
+});
+
+test('a level the device holds at the floor sheds nothing', () => {
+  const c = createAdaptiveRes({ max: 1.6, start: 1 });
+  run(c, 1 / 58, 60);
+  assert.equal(c.shed, 0);
 });
 
 test('holds steady at a solid 60 fps once at the maximum', () => {
@@ -26,7 +57,7 @@ test('holds steady at a solid 60 fps once at the maximum', () => {
 });
 
 test('recovers quality when there is headroom', () => {
-  const c = createAdaptiveRes({ max: 2, start: 0.6 });
+  const c = createAdaptiveRes({ max: 2, start: 1 });
   run(c, 1 / 120, 60);
   assert.equal(c.scale, 2);
 });
@@ -68,7 +99,8 @@ test('device and quality caps', () => {
   assert.equal(maxRatioFor(3.5, 0.75), 1.2);
   assert.equal(maxRatioFor(1, 1.25), 1);
   assert.equal(maxRatioFor(0, 1), 1);
+  // MSAA on every device (the ratio never drops under 1.0).
   assert.equal(wantsAntialias(1), true);
   assert.equal(wantsAntialias(1.5), true);
-  assert.equal(wantsAntialias(3.5), false);
+  assert.equal(wantsAntialias(3.5), true);
 });

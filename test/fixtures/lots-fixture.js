@@ -51,8 +51,10 @@ function makeLot(city, id, type, x0, z0, x1, z1, area, building = -1, front = 1)
 export function makeLotsFixture() {
   const W = 40, H = 30; // cells: 200 by 150 m
   const grid = { x0: 0, z0: 0, cell: CELL, w: W, h: H, id: new Int32Array(W * H).fill(-1), type: new Uint8Array(W * H) };
+  // Land everywhere (the land raster shares the lot grid's cells).
+  const landGrid = { x0: 0, z0: 0, cell: CELL, w: W, h: H, data: new Uint8Array(W * H).fill(1) };
   const city = {
-    map: 'fixture', seed: 7, lots: null, lotGrid: null, parkingSpots: [],
+    map: 'fixture', seed: 7, lots: null, lotGrid: null, parkingSpots: [], landGrid,
     buildings: [{ x0: 12, z0: 12, x1: 22, z1: 22, h: 6, style: 'house' }],
     districtOf: () => 'residential', placeOf: () => 'Fixture',
     mainShore: (x, z) => 150 - z, // water to the south, past z 150

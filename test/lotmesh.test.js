@@ -1,0 +1,215 @@
+// Lot ground and dressing for the real-map renderer (src/render/lotmesh.js,
+// docs/REVAMP.md 6.2), on the 12-lot fixture (test/fixtures/lots-fixture.js)
+// and on the real map's lots round the spawn street.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { ChunkedBuilder, MeshBuilder } from '../src/render/meshbuilder.js';
+import { lotGround, drawLotFeatures, addLotSolids, setSolids, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
+import { realLand } from '../src/render/citymesh.js';
+import { compactFar, farBuilding } from '../src/render/realcity.js';
+import { createCollisionWorld } from '../src/world/collision.js';
+import { makeLotsFixture, fixtureDressLot, LOT_TYPES } from './fixtures/lots-fixture.js';
+import { createMiamiCity } from '../src/world/miami.js';
+import { dressLot } from '../src/world/lots.js';
+
+const KEYS = ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand', 'paint', 'ao', 'props', 'solid', 'detail', 'glow', 'trees', 'treesDetail', 'plain'];
+const builders = () => {
+  const B = {};
+  for (const k of KEYS) B[k] = new ChunkedBuilder(1e7, 1, true, 4);
+  return B;
+};
+// Every quad (4 vertices) of a builder set, as [cx, cz, key].
+const quads = (B, keys) => {
+  const out = [];
+  for (const k of keys) {
+    for (const mb of B[k].map.values()) {
+      for (let v = 0; v + 3 < mb.count; v += 4) {
+        let x = 0, z = 0;
+        for (let q = 0; q < 4; q++) { x += mb.pos[(v + q) * 3]; z += mb.pos[(v + q) * 3 + 2]; }
+        out.push([x / 4, z / 4, k]);
+      }
+    }
+  }
+  return out;
+};
+const tris = (B) => { let n = 0; for (const k of KEYS) for (const mb of B[k].map.values()) n += mb.idx.length / 3; return n; };
+
+test('the renderer and the fixture use the contract\'s lot types', () => {
+  assert.deepEqual(LT, LOT_TYPES);
+  for (const t of LOT_TYPES) assert.equal(!!LOT_GROUND[t], t !== 'verge' && t !== 'airfield', t);
+  for (let k = 0; k < LOT_TYPES.length; k++) assert.equal(DRAWN_T[k + 1], LOT_GROUND[LOT_TYPES[k]] ? 1 : 0);
+  assert.equal(DRAWN_T[0], 0, 'no lot: no lot ground');
+});
+
+test('lot ground covers exactly the lot cells, in the material of each type', () => {
+  const city = makeLotsFixture();
+  const G = city.lotGrid;
+  const B = builders();
+  lotGround(city, B, 0, G.w, 0, G.h);
+  const ground = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  let area = 0;
+  for (const mb of ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand'].flatMap((k) => [...B[k].map.values()])) {
+    for (let v = 0; v + 3 < mb.count; v += 4) area += Math.abs(mb.pos[(v + 1) * 3] - mb.pos[v * 3]) * Math.abs(mb.pos[(v + 2) * 3 + 2] - mb.pos[(v + 1) * 3 + 2]);
+  }
+  let cells = 0;
+  for (let k = 0; k < G.w * G.h; k++) if (DRAWN_T[G.type[k]]) cells++;
+  assert.equal(Math.round(area), cells * 25, 'drawn area = drawn lot cells');
+  for (const [x, z, key] of ground) {
+    const lot = city.lotAt(x, z);
+    assert.ok(lot, `ground at ${x}, ${z} is in a lot`);
+    assert.equal(LOT_GROUND[lot.type].key, key, `${lot.type} in ${key}`);
+  }
+  // The road band (z 70..80) and the building cells get nothing.
+  assert.ok(ground.every(([, z]) => z < 70 || z > 80));
+  assert.ok(!ground.some(([x, z]) => x > 10 && x < 20 && z > 10 && z < 20));
+  // Lots of one type differ a little in tone (lot seed); types differ.
+  const kinds = new Set(ground.map((q) => q[2]));
+  assert.ok(kinds.size >= 5, [...kinds].join(' '));
+});
+
+test('land under full lot cells is left out; the rest of the land stays', () => {
+  const city = makeLotsFixture();
+  city.districtOf = () => 'residential';
+  const L = city.landGrid;
+  const B = builders();
+  realLand(city, B, 0, L.w - 1, 0, L.h - 1, 1, -0.06, false);
+  const land = quads(B, ['land', 'ground']).concat();
+  // Land quads are merged runs; count the drawn length instead.
+  let drawn = 0;
+  for (const k of ['land', 'ground']) for (const mb of B[k].map.values()) for (let v = 0; v + 3 < mb.count; v += 4) drawn += Math.abs(mb.pos[(v + 1) * 3] - mb.pos[v * 3]) * 5;
+  const full = (L.w - 1) * (L.h - 1) * 25;
+  assert.ok(land.length > 0, 'the road band and verges keep land');
+  assert.ok(drawn < full * 0.5, `most land is under lots now (${drawn} of ${full} m2 drawn)`);
+});
+
+test('every lot type is dressed and drawn, solids collide while the tile is built', () => {
+  const city = makeLotsFixture();
+  const col = createCollisionWorld();
+  const B = builders();
+  const C = { city, R: null, collision: col, solids: [], ...B, lotStats: { lots: 0, features: 0 } };
+  const feats = [];
+  const drawnBy = {};
+  // The whole job in one go (over() never says stop): no slices.
+  for (const step of lotJob(C, city.lots.filter((l) => l.type !== 'verge' && l.type !== 'airfield'), fixtureDressLot, () => false)) assert.fail(step);
+  for (const lot of city.lots) {
+    feats.length = 0;
+    fixtureDressLot(city, lot, feats);
+    const B2 = builders();
+    drawnBy[lot.type] = (drawnBy[lot.type] || 0) + drawLotFeatures({ ...C, ...B2, collision: null }, lot, feats, feats.length, { tree() {}, palm() {}, lamp() {}, bench() {}, bin() {}, bollard() {}, planter() {}, umbrella() {} });
+    assert.ok(feats.length <= 24, `${lot.type}: at most 24 features`);
+    assert.ok(feats.filter((f) => f.solid).length <= 12, `${lot.type}: at most 12 solid`);
+    for (const f of feats) assert.equal(city.lotAt(f.x, f.z), lot, `${f.kind} of ${lot.type} lies in its lot`);
+  }
+  for (const t of ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park', 'wateredge', 'site']) assert.ok(drawnBy[t] > 0, `${t} drew features`);
+  assert.equal(drawnBy.verge, 0, 'verge stays bare');
+  assert.ok(C.lotStats.lots >= 10 && C.lotStats.features > 40, JSON.stringify(C.lotStats));
+  assert.ok(tris(B) > 500, 'geometry made');
+  // Bays drew paint lines and parked cars in some of them.
+  const cp = city.lots.find((l) => l.type === 'carpark');
+  feats.length = 0;
+  fixtureDressLot(city, cp, feats);
+  assert.ok(feats.some((f) => f.kind === 'bay'));
+  const B3 = builders();
+  drawLotFeatures({ ...C, ...B3, collision: null }, cp, feats, feats.length, { tree() {}, palm() {}, lamp() {}, bench() {}, bin() {}, bollard() {}, planter() {}, umbrella() {} });
+  assert.ok(B3.paint.map.size > 0 && B3.solid.map.size > 0, 'bay lines and parked cars');
+  // Collision: a solid feature blocks, then not once its tile goes.
+  const solid = C.solids;
+  assert.ok(solid.length > 5, `shapes ${solid.length}`);
+  const it = solid.find((s) => s.kind === 1) || solid[0];
+  const px = it.kind === 1 ? it.x : (it.x0 + it.x1) / 2, pz = it.kind === 1 ? it.z : (it.z0 + it.z1) / 2;
+  assert.ok(col.resolveCircle(px + 0.05, pz, 0.5).hit);
+  setSolids(solid, false);
+  assert.ok(!col.resolveCircle(px + 0.05, pz, 0.5).hit);
+  setSolids(solid, true);
+  assert.ok(col.resolveCircle(px + 0.05, pz, 0.5).hit);
+});
+
+test('solid shapes: circles, axis boxes and rows of circles for turned walls', () => {
+  const col = createCollisionWorld();
+  const list = [];
+  addLotSolids(col, [
+    { kind: 'tree', x: 0, z: 0, r: 0.4, h: 6, solid: true },
+    { kind: 'wall', x: 10, z: 0, heading: 0, l: 8, w: 0.3, h: 1.6, solid: true },
+    { kind: 'wall', x: 20, z: 0, heading: 0.6, l: 8, w: 0.3, h: 1.6, solid: true },
+    { kind: 'towel', x: 30, z: 0, heading: 0, l: 2, w: 1, h: 0, solid: false },
+  ], 4, list);
+  assert.equal(list[0].kind, 1);
+  assert.equal(list[1].kind, 0);
+  assert.ok(Math.abs(list[1].x1 - list[1].x0 - 8) < 1e-9);
+  assert.ok(list.length > 3 && list.slice(2).every((s) => s.kind === 1), 'turned wall: circles');
+  assert.ok(col.resolveCircle(20 + Math.cos(0.6) * 3, Math.sin(0.6) * 3, 0.3).hit);
+  assert.ok(!col.resolveCircle(30, 0, 0.3).hit, 'not solid: no shape');
+});
+
+test('lots go to the tile of their centre; verge and airfield are skipped', () => {
+  const city = makeLotsFixture();
+  const tileOf = (x, z) => (x < 100 ? 0 : 1) + (z < 75 ? 0 : 2);
+  const by = lotsByTile(city, tileOf, 4);
+  const all = by.flat();
+  assert.equal(all.length, city.lots.filter((l) => l.type !== 'verge' && l.type !== 'airfield').length);
+  for (let k = 0; k < 4; k++) for (const l of by[k]) assert.equal(tileOf((l.x0 + l.x1) / 2, (l.z0 + l.z1) / 2), k);
+  assert.deepEqual(lotsByTile({}, tileOf, 4), [[], [], [], []], 'no lots (the island)');
+});
+
+test('far buildings: hipped house roofs, parapets on the detail level', () => {
+  const walls = new MeshBuilder(), plain = new MeshBuilder(), detail = new MeshBuilder();
+  farBuilding(walls, plain, { x0: 0, z0: 0, x1: 12, z1: 8, h: 6 }, 0xf0e0c0, 0xb4583c, -0.3, true, detail);
+  assert.equal(walls.idx.length / 3, 8, 'four walls');
+  assert.equal(plain.idx.length / 3, 6, 'hipped roof: two slopes and two hips');
+  let top = 0;
+  for (let i = 1; i < plain.pos.length; i += 3) top = Math.max(top, plain.pos[i]);
+  assert.ok(top > 7.5 && top < 9.5, `ridge at ${top}`);
+  for (let i = 1; i < plain.nor.length; i += 3) assert.ok(plain.nor[i] > 0.5, 'roof faces up');
+  const w2 = new MeshBuilder(), p2 = new MeshBuilder(), d2 = new MeshBuilder();
+  farBuilding(w2, p2, { x0: 0, z0: 0, x1: 30, z1: 30, h: 40, vseed: 9 }, 0xd0d0d0, 0xb0b0b0, -0.3, false, d2);
+  assert.equal(p2.idx.length / 3, 2, 'flat roof on the base level');
+  assert.ok(d2.idx.length / 3 >= 24, 'parapet and roof plant on the detail level');
+});
+
+test('compactFar leaves out near tiles and far detail', () => {
+  const full = Uint16Array.from({ length: 30 }, (_, i) => i);
+  const ranges = [{ tile: 0, lvl: 0, start: 0, count: 12 }, { tile: 0, lvl: 1, start: 12, count: 6 }, { tile: 1, lvl: 0, start: 18, count: 12 }];
+  let drawn = -1;
+  const mesh = {
+    visible: true,
+    userData: { far: { full, ranges, state: new Uint8Array(3).fill(2) } },
+    geometry: { index: { array: new Uint16Array(30), needsUpdate: false }, setDrawRange: (a, n) => { drawn = n; } },
+  };
+  assert.ok(compactFar(mesh, Uint8Array.of(0, 0), Uint8Array.of(1, 1)));
+  assert.equal(drawn, 30);
+  assert.ok(!compactFar(mesh, Uint8Array.of(0, 0), Uint8Array.of(1, 1)), 'nothing changed');
+  compactFar(mesh, Uint8Array.of(0, 0), Uint8Array.of(0, 0));
+  assert.equal(drawn, 24, 'detail off');
+  compactFar(mesh, Uint8Array.of(1, 0), Uint8Array.of(0, 0));
+  assert.equal(drawn, 12, 'tile 0 near');
+  assert.deepEqual([...mesh.geometry.index.array.slice(0, 12)], [...full.slice(18, 30)]);
+  compactFar(mesh, Uint8Array.of(1, 1), Uint8Array.of(0, 0));
+  assert.equal(drawn, 0);
+  assert.equal(mesh.visible, false);
+});
+
+test('the real map: the spawn street lots are dressed, fast enough to stream', () => {
+  const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
+  const city = createMiamiCity(data);
+  assert.ok(city.lots.length > 1000 && city.lotGrid);
+  const s = city.spawn, G = city.lotGrid;
+  // The 300 m square round the spawn: lot ground on every typed cell.
+  const i0 = Math.floor((s.x - 150 - G.x0) / G.cell), j0 = Math.floor((s.z - 150 - G.z0) / G.cell);
+  const B = builders();
+  lotGround(city, B, i0, i0 + 60, j0, j0 + 60);
+  const ground = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  assert.ok(ground.length > 20);
+  for (const [x, z] of ground) assert.ok(city.lotAt(x, z) && !city.onRoad(x, z), 'lot ground is never on a road');
+  // Dressing the lots of that square, slice by slice.
+  const lots = city.lots.filter((l) => Math.abs((l.x0 + l.x1) / 2 - s.x) < 150 && Math.abs((l.z0 + l.z1) / 2 - s.z) < 150 && l.type !== 'verge');
+  const C = { city, R: null, collision: createCollisionWorld(), solids: [], ...builders(), lotStats: { lots: 0, features: 0 } };
+  const t0 = performance.now();
+  let slices = 0;
+  for (const step of lotJob(C, lots, dressLot, () => true)) { slices++; void step; }
+  const ms = performance.now() - t0;
+  assert.equal(C.lotStats.lots, lots.length);
+  assert.ok(C.lotStats.features > lots.length, `features ${C.lotStats.features} for ${lots.length} lots`);
+  assert.ok(slices >= lots.length, 'a slice per lot at least');
+  assert.ok(ms / slices < 2, `average slice ${(ms / slices).toFixed(2)} ms`);
+});

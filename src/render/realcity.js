@@ -189,9 +189,10 @@ class FarChunks {
     this.verts = 0;
     this.idx = 0;
   }
-  push(mb, tile, win) {
+  // lvl 0: always drawn; 1: only while the block is near (FAR_DETAIL).
+  push(mb, tile, win, lvl = 0) {
     if (!mb.count) return;
-    this.parts.push({ pos: new Float32Array(mb.pos), nor: new Float32Array(mb.nor), col: new Float32Array(mb.col), idx: Uint32Array.from(mb.idx), tile, win, n: mb.count });
+    this.parts.push({ pos: new Float32Array(mb.pos), nor: new Float32Array(mb.nor), col: new Float32Array(mb.col), idx: Uint32Array.from(mb.idx), tile, win, lvl, n: mb.count });
     this.verts += mb.count;
     this.idx += mb.idx.length;
   }
@@ -211,8 +212,8 @@ class FarChunks {
       win.fill(p.win, v, v + p.n);
       for (let i = 0; i < p.idx.length; i++) idx[k + i] = p.idx[i] + v;
       const last = ranges.length ? ranges[ranges.length - 1] : null;
-      if (last && last.tile === p.tile && last.start + last.count === k) last.count += p.idx.length;
-      else ranges.push({ tile: p.tile, start: k, count: p.idx.length });
+      if (last && last.tile === p.tile && last.lvl === p.lvl && last.start + last.count === k) last.count += p.idx.length;
+      else ranges.push({ tile: p.tile, lvl: p.lvl, start: k, count: p.idx.length });
       v += p.n;
       k += p.idx.length;
     }
@@ -229,24 +230,27 @@ class FarChunks {
     const m = new THREE.Mesh(g, material);
     m.matrixAutoUpdate = false;
     m.name = 'far';
-    m.userData.far = { full: idx, ranges, state: new Uint8Array(ranges.length) };
+    m.userData.far = { full: idx, ranges, state: new Uint8Array(ranges.length).fill(2) };
     return m;
   }
 }
 
 // Rebuilds a far block's drawn index without the tiles shown near
-// (near[k] 1). Returns true when something changed.
-export function compactFar(mesh, near) {
+// (near[k] 1), and without the detail level (small buildings, parapets,
+// roof plant) of tiles far off (detail[k] 0). Returns true when
+// something changed.
+export function compactFar(mesh, near, detail) {
   const F = mesh.userData.far;
   let dirty = false;
-  for (let r = 0; r < F.ranges.length; r++) if (F.state[r] !== near[F.ranges[r].tile]) { dirty = true; break; }
+  const on = (R) => (near[R.tile] || (R.lvl && !detail[R.tile]) ? 0 : 1);
+  for (let r = 0; r < F.ranges.length; r++) if (F.state[r] !== on(F.ranges[r])) { dirty = true; break; }
   if (!dirty) return false;
   const out = mesh.geometry.index.array, full = F.full;
   let n = 0;
   for (let r = 0; r < F.ranges.length; r++) {
     const R = F.ranges[r];
-    F.state[r] = near[R.tile];
-    if (near[R.tile]) continue;
+    F.state[r] = on(R);
+    if (!F.state[r]) continue;
     out.set(full.subarray(R.start, R.start + R.count), n);
     n += R.count;
   }
@@ -260,7 +264,13 @@ export function compactFar(mesh, near) {
 // its builder is the window one), and a roof that reads at a distance:
 // a hipped roof on houses, a parapet and roof plant on flat roofs.
 const FAR_PARAPET = 0.8;
-export function farBuilding(walls, plain, b, wall, roof, y0, house) {
+// Small buildings (lower than this) are far detail: off past FAR_DETAIL.
+export const FAR_SMALL_H = 9;
+export const FAR_DETAIL = 900; // m from the camera to a tile's edge
+// walls, plain: the always-drawn level; detail: parapets and roof plant.
+// The caller passes detail-level builders as walls and plain for a
+// small building.
+export function farBuilding(walls, plain, b, wall, roof, y0, house, detail = plain) {
   const { x0, z0, x1, z1, h } = b;
   const dx = x1 - x0, dz = z1 - z0;
   if (house) {
@@ -292,16 +302,16 @@ export function farBuilding(walls, plain, b, wall, roof, y0, house) {
   // Parapet: the walls go on up past the roof, a lighter cap on top.
   const top = h + FAR_PARAPET, inset = 0.45;
   walls.walls(x0, z0, x1, z1, y0, h, wall, 1, 1, 0.75, 1);
-  plain.walls(x0, z0, x1, z1, h, top, wall, 1, 1, 1, 1.04);
-  plain.ring(x0, z0, x1, z1, inset, top, shadeHexF(wall, 1.12));
-  plain.innerWalls(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h, top, shadeHexF(roof, 0.8), 0.7, 0.9);
-  plain.flat(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h, roof);
+  plain.flat(x0, z0, x1, z1, h, roof);
+  detail.walls(x0, z0, x1, z1, h, top, wall, 1, 1, 1, 1.04);
+  detail.ring(x0, z0, x1, z1, inset, top, shadeHexF(wall, 1.12));
+  detail.innerWalls(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h, top, shadeHexF(roof, 0.8), 0.7, 0.9);
   // Roof plant on bigger roofs: a lift room or cooling units.
   if (h >= 20 && dx * dz >= 400) {
     const u = ((b.vseed | 0) >>> 3) % 7;
     const w = Math.min(dx, dz) * (0.22 + u * 0.02);
     const cx = (x0 + x1) / 2 + (u - 3) * dx * 0.04, cz = (z0 + z1) / 2 - (u - 3) * dz * 0.03;
-    plain.box(cx - w, cz - w * 0.7, cx + w, cz + w * 0.7, h, h + 2.6 + (u % 3), 0xb8b6b0, 0x8e8c88, 0.75, 1);
+    detail.box(cx - w, cz - w * 0.7, cx + w, cz + w * 0.7, h, h + 2.6 + (u % 3), 0xb8b6b0, 0x8e8c88, 0.75, 1);
   }
 }
 function shadeHexF(hex, f) {
@@ -429,6 +439,9 @@ export function buildRealCity(city, collision, opts = {}) {
   // ---- Far blocks: the whole map, coarse. ----
   // 1 where a tile is shown near (its far copy is left out).
   const nearMask = new Uint8Array(NT);
+  // 1 where a tile's far copy shows its detail level (FAR_DETAIL).
+  const farDetail = new Uint8Array(NT);
+  let farChanged = false;
   const farMeshes = [];
   const farMat = makeFarMaterial();
   M.farMat = farMat;
@@ -444,17 +457,17 @@ export function buildRealCity(city, collision, opts = {}) {
     const supers = [];
     for (let k = 0; k < SX * SZ; k++) supers.push(new FarChunks());
     const plain = new MeshBuilder(false), win = new MeshBuilder(false), small = new MeshBuilder(false);
+    const plainD = new MeshBuilder(false), winD = new MeshBuilder(false), smallD = new MeshBuilder(false);
+    const all = [plain, win, small, plainD, winD, smallD];
     const one = { at: () => plain };
     const LB = { land: one, ground: one, pavement: one };
     const nI = Math.floor((G.w - 1) / s), nJ = Math.floor((G.h - 1) / s);
     const coarse = (v, o) => Math.ceil(((v - o) / G.cell - 0.5) / s);
     for (const t of tiles) {
-      plain.pos.length = plain.col.length = plain.nor.length = plain.idx.length = 0;
-      plain.count = 0;
-      win.pos.length = win.col.length = win.nor.length = win.idx.length = 0;
-      win.count = 0;
-      small.pos.length = small.col.length = small.nor.length = small.idx.length = 0;
-      small.count = 0;
+      for (const mb of all) {
+        mb.pos.length = mb.col.length = mb.nor.length = mb.idx.length = 0;
+        mb.count = 0;
+      }
       // Land, one coarse cell over each side (the near tiles cover it).
       const i0 = Math.max(0, coarse(t.x0, G.x0) - 1), i1 = Math.min(nI, coarse(t.x1, G.x0) + 1);
       const j0 = Math.max(0, coarse(t.z0, G.z0) - 1), j1 = Math.min(nJ, coarse(t.z1, G.z0) + 1);
@@ -485,19 +498,24 @@ export function buildRealCity(city, collision, opts = {}) {
         const wall = L ? (st === 'glass' ? shade(L.tint, 0.9) : shade(L.wall, 0.9)) : b.style === 'glass' ? shade(b.tint, 0.95) : b.style === 'container' ? b.color : shade(b.color, 0.92);
         const roof = L ? (st === 'house' || L.tile ? L.roof : shade(L.roof, 0.85)) : b.style === 'house' ? 0x9a6a58 : shade(b.color, 0.78);
         const house = st === 'house';
-        const walls = WINDOW_STYLES.has(st) ? (b.h <= 12 && st !== 'glass' && st !== 'office' ? small : win) : house ? small : plain;
-        farBuilding(walls, plain, b, wall, roof, FAR_LAND_Y, house);
+        const lo = b.h < FAR_SMALL_H;
+        const smallW = WINDOW_STYLES.has(st) ? b.h <= 12 && st !== 'glass' && st !== 'office' : house;
+        const walls = WINDOW_STYLES.has(st) || house ? (smallW ? (lo ? smallD : small) : lo ? winD : win) : lo ? plainD : plain;
+        farBuilding(walls, lo ? plainD : plain, b, wall, roof, FAR_LAND_Y, house, plainD);
       }
       const sk = Math.floor((t.k % NX) / SUPER) + Math.floor(Math.floor(t.k / NX) / SUPER) * SX;
       supers[sk].push(plain, t.k, 0);
       supers[sk].push(win, t.k, 1);
       supers[sk].push(small, t.k, 2);
+      supers[sk].push(plainD, t.k, 0, 1);
+      supers[sk].push(winD, t.k, 1, 1);
+      supers[sk].push(smallD, t.k, 2, 1);
     }
     for (const sc of supers) {
       const m = sc.build(farMat);
       if (m) { farRoot.add(m); farMeshes.push(m); }
     }
-    for (const m of farMeshes) compactFar(m, nearMask);
+    for (const m of farMeshes) compactFar(m, nearMask, farDetail);
   }
   buildFar();
   lap('far');
@@ -694,7 +712,7 @@ export function buildRealCity(city, collision, opts = {}) {
     if (t.shown) {
       t.shown = false;
       nearMask[t.k] = 0;
-      for (const m of farMeshes) compactFar(m, nearMask);
+      for (const m of farMeshes) compactFar(m, nearMask, farDetail);
     }
   }
 
@@ -714,6 +732,9 @@ export function buildRealCity(city, collision, opts = {}) {
     for (let k = 0; k < NT; k++) {
       const t = tiles[k];
       const d = dist(t, x, z, hy);
+      // The far copy's detail level (small buildings, roofs) near by.
+      const fd = d < (farDetail[k] ? FAR_DETAIL + LOD.hyst : FAR_DETAIL) ? 1 : 0;
+      if (fd !== farDetail[k]) { farDetail[k] = fd; farChanged = true; }
       if (t.group) {
         const show = d < (t.shown ? LOD.near + LOD.hyst : LOD.near);
         if (show !== t.shown) {
@@ -739,6 +760,10 @@ export function buildRealCity(city, collision, opts = {}) {
       }
     }
     stats.near = near;
+    if (farChanged) {
+      farChanged = false;
+      if (!changed) for (const m of farMeshes) compactFar(m, nearMask, farDetail);
+    }
     // A tile right under the camera that is not ready yet gets more time.
     const urgent = (jobTile && dist(jobTile, x, z, hy) < LOD.near * 0.5) || (best && bd < LOD.near * 0.5);
     const budget = budgetMs === Infinity ? Infinity : urgent ? Math.max(budgetMs, 10) : budgetMs;
@@ -783,7 +808,7 @@ export function buildRealCity(city, collision, opts = {}) {
     }
     stats.buildMs += now() - t0;
     if (changed) {
-      for (const m of farMeshes) compactFar(m, nearMask);
+      for (const m of farMeshes) compactFar(m, nearMask, farDetail);
       refillBulbs();
     }
   }

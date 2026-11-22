@@ -289,11 +289,11 @@ function makeLotTemplates(rng, R) {
     const g = LEAF[(v * 2) % LEAF.length];
     const th = rng.range(0.3, 0.4);
     t.cyl(0, 0, 0, th + 0.12, 0.05, 0.032, 5, bark, false, 0.65, 1);
-    leafy(f, R.leaves, 0, th + 0.32, 0, 0.24, 0.17, 0.24, hexShade(g, 0.8), 6, 3, jit);
+    leafy(f, R.leaves, 0, th + 0.36, 0, 0.21, 0.22, 0.21, hexShade(g, 0.95), 6, 3, jit);
     for (let i = 0; i < 3; i++) {
       const a = i * 2.09 + v;
       const r = rng.range(0.13, 0.16);
-      leafy(f, R.leaves, Math.cos(a) * 0.15, th + 0.3 + (i % 2) * 0.12, Math.sin(a) * 0.15, r, r * 0.8, r, hexShade(LEAF[(v + i * 3) % LEAF.length], rng.range(0.85, 1.12)), 5, 3, jit);
+      leafy(f, R.leaves, Math.cos(a) * 0.13, th + 0.3 + (i % 2) * 0.16, Math.sin(a) * 0.13, r, r * 1.05, r, hexShade(LEAF[(v + i * 3) % LEAF.length], rng.range(0.95, 1.2)), 5, 3, jit);
     }
     T.canopies.push(t);
     T.foliage.push(f);

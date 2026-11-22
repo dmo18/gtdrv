@@ -725,3 +725,67 @@ Deviations from the plan:
 5. The other developer screenshot scripts that assumed the island on the
    default page (`scripts/*-shots.mjs` except the Miami ones) were not
    changed: add `&map=island` to their URL to get the island.
+
+### W1 done: core area and lots (2026-11-22)
+
+The contracts are docs/REVAMP.md 6.1 (core), 6.2 (lots) and 6.8 (first
+view). What is where:
+
+- `src/world/miami-spots.js`: `MIAMI_CORE` (x -2700..2450, z
+  -2700..1900), `MIAMI_SPOTS.startView` (6.8; the spawn is shared with
+  `MIAMI_SPOTS.spawn`), `MIAMI_SPOTS.beaches` (Watson Island north shore
+  in the core, the Rickenbacker Causeway shore at the south edge),
+  `MIAMI_SPOTS.landmarks` (12 invented landmarks with their own shapes),
+  and the map labels of venue brands renamed (D1: Tidewater Arena, Opal
+  Opera House, Brickell Twin Spires, Riverfront Hall, Flagler Street
+  Theatre, Downtown Rail Hub, Design District; `src` keeps the data name).
+  Watson Island's district is now midtown (its park polygons stay parks).
+- `src/world/lots.js` (new, pure): `LOT_TYPES`, `FEATURE_KINDS`,
+  `TREE_VARIANTS` (the `v` of a tree or shrub: royalpalm, coconut, oak,
+  seagrape, ficus, pine, mahogany), the named constants of 6.2, `DRESS`
+  and `DRESS_SETS` (two sets per type per district), `lotTypeFor` (the
+  rule table), `buildLots`, `dressLot`, `featureCap`, `eachBay`,
+  `planInfill`, `lotSeed`, `hash32`, `lotShares`, `stepDistance`.
+- `src/world/miami.js`: buildings carry `osm` (the OSM kind), `fp` (the
+  footprint), `gen` (an infill box) and `landmark` (a landmark id or '').
+  Step 8b stamps the lot rasters, stands the open landmarks on free
+  ground and adds the infill boxes; step 10b dresses the start street;
+  step 11b builds the lots and lists car park bays as parking spots. The
+  city gets `core`, `inCore`, `lots`, `lotGrid`, `lotAt`, `lotTypeAt`,
+  `dressLot(lot, out)`, `startView` (spawn snapped) and `landmarkSites`
+  (`{ id, name, shape, x, z, l, w, h, heading, buildings }`);
+  `mapLandmarks` is the real places then the invented landmarks.
+
+Rules beyond the contract (each is the same everywhere in the box):
+
+1. Infill. The data has big empty pieces in built-up districts (port
+   yards, Park West, Watson Island): with the data alone the core's 10th
+   percentile was 9 buildings within 150 m (wanted 15). `planInfill` puts
+   a plain box on a world grid of parcels (docks 34 m, industrial 38 m,
+   downtown 34 m, midtown 31 m, residential 26 m) where every cell under
+   the box plus 5 m is free, 15 m from any building and 20 m from the
+   water, never in a park or grass polygon or near a hand place; a seeded
+   10 to 40 % of parcels stay open. 2,925 boxes (1,283 in the core).
+2. A `bay` feature is a row of bays (heading along the row, `l` = 2.5 m a
+   bay, `w` = 5 m), as the W2 renderer draws it; the car faces across
+   the row. `eachBay` lists the single bays. At most 3 bays a car park
+   (never over 60 %) are parking spots: every listed spot spawns a real
+   car near the player in parked.js.
+3. The feature cap is `featureCap(lot)`: 120 a hectare and 24 a lot, but
+   never below the type's minimum content (a 150 m2 yard needs its
+   boundary, drive and tree). The core averages 75 features a hectare.
+4. The start street (core hand content): street trees every 7 m on both
+   kerbs and kerb spots marked `start: true` along Southeast 1st Street
+   ahead of the title camera.
+
+Numbers (`test/world-density.test.js` prints them): 27,058 lots (6,715 in
+the core, 7.3 km2 of lot land); core shares yard 16 %, carpark 18 %, plaza
+32 %, grass 1.4 %, works 14 %, beach 0.2 %, park 7.8 %, wateredge 6.3 %,
+site 0.2 %, verge 0.7 %, airfield 2.7 %; bare paving 0.7 % in the core,
+0.6 % outside. Core road nodes: 10th percentile 15 buildings within 150 m
+(median 33); no node on land more than 60 m from a building or a solid
+or tall feature (bridge nodes excepted). Start view: 69 buildings within
+150 m, 14 trees and 9 parked spots in the camera cone within 80 m. Build
+in node: about 1.9 to 2.2 s wall on a loaded 4-core machine (1.2 to 2.0
+s before), about 0.3 s more CPU. `dressLot` about 0.02 ms a lot warm.
+The lot grid keeps 16 MB (Int32 ids and Uint8 types). No new data file.

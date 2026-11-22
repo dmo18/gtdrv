@@ -28,23 +28,19 @@
 // update(dt), which the game calls once per simulation step.
 import { injectStyles } from './styles.js';
 import {
-  shapeSteer, rampSteer, angleDelta, tiltAngle, tiltToSteer, clampSensitivity,
-  STEER_STYLES, WHEEL_LOCK_DEG,
+  wheelCurve, steerTravel, rampSteer, angleDelta, tiltAngle, tiltToSteer, tiltFilter, sliderRaw,
+  clampSensitivity, STEER_STYLES, TILT_WAIT, WHEEL_CORE_PX,
 } from '../core/input.js';
 import { WEAPONS, WEAPON_IDS } from '../core/weapons.js';
 import { HOLD_MS, RING_PX, WHEEL_KEEP, WHEEL_CANCEL, wheelIndex, placeWheel } from './wheel.js';
 
-const SLIDER_RANGE = 110; // px of drag for full lock
-const SLIDER_DEAD = 0.04;
 const STICK_RANGE = 56; // px of drag for full stick
 const STICK_DEAD = 0.1;
 const SPRINT_AT = 0.85;
-const WHEEL_CORE = 16; // px around the wheel centre where angle is ignored
 const PAD_H = 56; // the slider pad is the steering slot wide (160, or 140 at 780x360; docs/REVAMP.md 6.5)
 const PAD_KNOB_RANGE = 56; // px of knob travel drawn inside the pad
 const STICK_W = 128;
-const TILT_WAIT_MS = 2500; // no orientation events by then: no sensor
-const TILT_SMOOTH = 0.07; // s, low-pass time constant
+const TILT_WAIT_MS = TILT_WAIT * 1000; // no orientation events by then: no sensor
 
 // Hand-drawn 24x24 line icons.
 const ICONS = {
@@ -203,7 +199,7 @@ export function createTouchControls(root, input, opts = {}) {
   const steerMode = () => mode === 'car' || mode === 'boat';
   const setRaw = (x) => {
     raw = clamp(x, -1, 1);
-    src.steer = steerMode() ? shapeSteer(raw, sensitivity) : 0;
+    src.steer = steerMode() ? wheelCurve(raw) : 0; // sensitivity changes the travel, not the curve (docs/REVAMP.md 6.3)
   };
 
   // ----- camera drag (60% of the screen away from the stick, under the buttons) -----
@@ -266,18 +262,19 @@ export function createTouchControls(root, input, opts = {}) {
   }
 
   function setWheelAngle(deg, spring) {
-    wh.angle = clamp(deg, -WHEEL_LOCK_DEG, WHEEL_LOCK_DEG);
+    const lock = steerTravel('wheel', sensitivity);
+    wh.angle = clamp(deg, -lock, lock);
     wheel.classList.toggle('rw-spring', !!spring);
     wheelRot.style.transform = wh.angle ? `rotate(${wh.angle.toFixed(1)}deg)` : '';
   }
   function wheelPoint(e) {
     const dx = e.clientX - wh.cx, dy = e.clientY - wh.cy;
-    if (dx * dx + dy * dy < WHEEL_CORE * WHEEL_CORE) return false;
+    if (dx * dx + dy * dy < WHEEL_CORE_PX * WHEEL_CORE_PX) return false;
     // Screen y grows downward, so atan2 grows clockwise: right turn positive.
     const a = Math.atan2(dy, dx);
     if (wh.have) {
       setWheelAngle(wh.angle + angleDelta(a, wh.last) * 180 / Math.PI, false);
-      setRaw(wh.angle / WHEEL_LOCK_DEG);
+      setRaw(wh.angle / steerTravel('wheel', sensitivity));
     }
     wh.last = a;
     wh.have = true;
@@ -302,15 +299,10 @@ export function createTouchControls(root, input, opts = {}) {
           setWheelAngle(wh.angle, false);
           wheelPoint(e);
         } else if (style === 'slider') {
-          const r = root.getBoundingClientRect();
-          const padW = slotSize(r);
-          // Steering is measured from the touch-down point; the drawn base
-          // is nudged so it stays fully on screen.
-          origin.x = e.clientX;
-          origin.y = e.clientY;
-          placeBase(pad,
-            clamp(e.clientX, r.left + padW / 2 + 6, r.right - padW / 2 - 6),
-            clamp(e.clientY, r.top + PAD_H / 2 + 6, r.bottom - PAD_H / 2 - 6));
+          // Absolute: the bar stays in the steering slot and where the thumb
+          // lands is the value (docs/REVAMP.md 6.3).
+          const b = pad.getBoundingClientRect();
+          origin.x = b.left + b.width / 2;
           pad.classList.add('rw-active');
           applySlider(e.clientX);
         }
@@ -353,9 +345,8 @@ export function createTouchControls(root, input, opts = {}) {
   });
 
   function applySlider(x) {
-    const v = clamp((x - origin.x) / SLIDER_RANGE, -1, 1);
-    const a = Math.abs(v);
-    setRaw(a < SLIDER_DEAD ? 0 : Math.sign(v) * (a - SLIDER_DEAD) / (1 - SLIDER_DEAD));
+    const v = sliderRaw(x, origin.x, sensitivity);
+    setRaw(v);
     padKnob.style.transform = `translateX(${(v * PAD_KNOB_RANGE).toFixed(1)}px)`;
   }
 
@@ -859,7 +850,7 @@ export function createTouchControls(root, input, opts = {}) {
       if (nextSens !== undefined) sensitivity = clampSensitivity(+nextSens);
       if (typeof onFallback === 'function') tilt.onFallback = onFallback;
       if (st !== style) applyStyle(st);
-      else setRaw(raw);
+      else { setWheelAngle(wh.angle, false); setRaw(raw); }
       if (st === 'tilt') {
         tilt.asked = false;
         maybeAskTilt();
@@ -952,12 +943,11 @@ export function createTouchControls(root, input, opts = {}) {
       refreshActions();
       if (!(dt > 0) || !steerMode()) return;
       if (style === 'buttons') {
-        setRaw(rampSteer(raw, btnTarget(), dt));
+        setRaw(rampSteer(raw, btnTarget(), dt, sensitivity));
       } else if (style === 'tilt') {
-        const k = 1 - Math.exp(-dt / TILT_SMOOTH);
         const target = tilt.gotEvent ? angleDelta(tilt.deg * Math.PI / 180, tilt.zero * Math.PI / 180) * 180 / Math.PI : 0;
-        tilt.smooth += (target - tilt.smooth) * k;
-        setRaw(tiltToSteer(tilt.smooth));
+        tilt.smooth = tiltFilter(tilt.smooth, target, dt);
+        setRaw(tiltToSteer(tilt.smooth, sensitivity));
         drawTilt(raw);
       }
     },

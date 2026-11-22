@@ -194,7 +194,7 @@ const ABS_K = 0.95; // ABS keeps braking at this share of the tyre limit
 const HB_K = 0.8; // locked rear tyres slide at this share of grip
 const LONG_K = 1.08; // tyres grip a little more in a straight line than sideways
 const COMB = 0.85; // friction ellipse weight of the longitudinal force
-const PEDAL_S = 1.0; // brake pedal S-curve strength (see brakePedal)
+const PEDAL_S = 1.0; // brake pedal S-curve strength (see brakePedal); 0 = linear
 const BRAKE_BUILD = 9; // brake pressure rise, full pedal per second
 const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
 const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse

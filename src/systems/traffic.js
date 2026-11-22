@@ -685,6 +685,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   } else if (err > 0.05) {
     c.throttle = clamp(err * 0.4, 0, 1);
   } else if (err < -0.6) {
+    // Gain scaled to the car's own brake, so a firm stop asks for the same pedal in every car.
     if (sp > 1) c.brake = clamp(-err * 0.35, 0, 1);
     else c.handbrake = true;
   }

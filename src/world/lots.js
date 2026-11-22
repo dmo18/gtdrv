@@ -186,8 +186,9 @@ const INFILL = {
 export const INFILL_GAP = 3; // cells (15 m) from any existing building
 
 // inp: { W, H, x0, z0, cell, free, bdist, water, mask, districtOf, seed, keep }
-// free: 1 for free land; bdist: step distance to a building; water: step
-// distance to water; mask: 1 where never filled (park, grass, beach).
+// free: 1 for free land; bdist: step distance to a building through free
+// land; water: step distance to water; mask: non-zero where never filled
+// (park, grass).
 // Returns [{ x0, z0, x1, z1, h, district, kind, osm }].
 export function planInfill(inp) {
   const { W, H, x0, z0, cell, free, bdist, water, mask, districtOf, seed } = inp;
@@ -324,7 +325,7 @@ export function buildLots(city, inp) {
   const beachSteps = Math.ceil(BEACH_DEPTH / cell - 0.5);
   // Class per free cell: 1 beach, 2 water edge, 3 park, 4 grass, 5 to a
   // building, 6 open.
-  const cls = new Uint8Array(N);
+  const cls = inp.scratch8 ? inp.scratch8.fill(0) : new Uint8Array(N);
   for (let k = 0; k < nList; k++) {
     const c = list[k];
     const d = water[c];

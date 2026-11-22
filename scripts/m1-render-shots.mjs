@@ -108,6 +108,22 @@ await page.evaluate(([x, z, h]) => {
 await step(60, 4);
 await shot('spawn-street', { x: Math.round(sp.x), z: Math.round(sp.z) });
 
+// Extra: the far level (past 340 m) from a rooftop height, looking over
+// Overtown and Little Havana: windows, parapets and hipped roofs.
+await hour(15);
+await page.evaluate(() => {
+  const g = window.__rw;
+  g.camera.position.set(-1250, 60, 650);
+  g.camera.lookAt(-2400, 0, 1100);
+  g.camera.updateMatrixWorld();
+  g.cityMesh.userData.stream.flush(g.camera);
+  for (const s of g.systems) if (s.render) s.render(1, 0);
+  g.renderFrame(1 / 60);
+});
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${out}/${prefix}-far.png`, timeout: 180000 });
+console.log('wrote', `${out}/${prefix}-far.png`);
+
 console.log(errors.length ? `${errors.length} page errors: ${errors.slice(0, 5).join(' | ')}` : 'no page errors');
 await browser.close();
 server.close();
