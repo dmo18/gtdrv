@@ -397,11 +397,27 @@ const CSS = `
 }
 .rw-full .rw-clock { display: block; }
 
+/* top centre stack (docs/REVAMP.md 6.12): 335 by 92 (300 by 92 at 780x360), centred, top at 8.
+   Status row (stars, objective cell), then two one-line message rows at y 32 and 64 of the box.
+   Rows never move: an empty row stays empty. */
+.rw-stack {
+  position: absolute; left: 50%; top: calc(var(--rw-st) + 8px); width: 335px; height: 92px; margin-left: -167.5px;
+  pointer-events: none;
+}
 /* stars: centred, only while wanted; the cooldown bar sits right under */
 .rw-wanted {
-  position: absolute; left: 50%; top: calc(var(--rw-st) + 8px); width: 150px; height: 24px; margin-left: -75px;
+  position: absolute; left: 50%; top: 0; width: 150px; height: 24px; margin-left: -75px;
   display: flex; align-items: center; justify-content: center;
 }
+/* objective arrow and distance: beside the stars, right end of the status row */
+.rw-objcell {
+  position: absolute; right: 0; top: 0; width: 84px; height: 24px; padding: 0 6px; gap: 4px;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; overflow: hidden;
+}
+.rw-objcell.rw-none { display: none; }
+.rw-objarrow { display: block; width: 16px; height: 16px; flex: 0 0 16px; will-change: transform; }
+.rw-objarrow svg { display: block; width: 16px; height: 16px; }
+.rw-objdist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rw-wanted.rw-none { display: none; }
 .rw-stars { display: flex; gap: 4px; }
 .rw-badge {
@@ -430,26 +446,26 @@ const CSS = `
 .rw-bar.rw-low .rw-fill { background: #ff6a50; }
 .rw-bar.rw-empty { display: none; }
 
-/* the strip: district title for 3 s, then toasts stacking downward; it never grows past its box */
-.rw-strip {
-  position: absolute; left: 50%; top: calc(var(--rw-st) + 56px); width: 335px; height: 80px; margin-left: -167.5px;
-  display: flex; flex-direction: column; align-items: center; gap: 6px; overflow: hidden;
+/* message rows: one line in one pill of fixed height; nothing wraps, long text ends in an ellipsis */
+.rw-msg {
+  position: absolute; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: 100%; height: 28px; padding: 0 12px;
+  font-size: 14px; font-weight: 700; line-height: 28px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 4px solid transparent; transition: opacity 0.3s;
 }
-.rw-title {
-  display: none; max-width: 100%; height: 32px; padding: 0 14px; flex: 0 0 auto;
-  font-size: 18px; font-weight: 800; line-height: 32px; letter-spacing: 0.12em; text-transform: uppercase;
-  overflow: hidden; text-overflow: ellipsis;
-}
-.rw-title.rw-show { display: block; animation: rw-title 3s ease-out forwards; }
-@keyframes rw-title { 0% { opacity: 0; } 10% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
-.rw-toasts { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; }
-.rw-toast {
-  max-width: 100%; height: 32px; padding: 0 14px; font-size: 14px; font-weight: 600; line-height: 32px; text-align: center;
-  overflow: hidden; text-overflow: ellipsis; border-left: 4px solid var(--rw-accent);
-  animation: rw-toast-in 0.2s ease-out; transition: opacity 0.3s;
-}
-.rw-toast.rw-out { opacity: 0; }
+.rw-msg[hidden] { display: none; }
+.rw-m1 { top: 32px; }
+.rw-m2 { top: 64px; }
+.rw-msg.rw-in { animation: rw-toast-in 0.2s ease-out; }
+.rw-msg.rw-out { opacity: 0; }
+.rw-k-police { border-left-color: #ff4a3a; }
+.rw-k-score { border-left-color: #ffb43a; }
+.rw-k-hint { border-left-color: #4a8bff; }
+.rw-k-district { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; }
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rw-msg.rw-in { animation: none; } }
+/* with the minimap grown the speed readout reaches further right: keep long lines clear of it */
+.rw-mapbig .rw-msg { max-width: calc(100vw - 2 * (var(--rw-sl) + 24px + var(--mapw) + 88px)); }
 
 /* prompt strip: centred, under the keep-out rect */
 .rw-prompt {
@@ -547,7 +563,8 @@ const CSS = `
   .rw-clock { top: calc(var(--rw-st) + 68px); }
   .rw-tr { width: 152px; }
   .rw-money { height: 26px; line-height: 26px; }
-  .rw-strip { width: 300px; height: 72px; margin-left: -150px; }
+  .rw-stack { width: 300px; margin-left: -150px; }
+  .rw-objcell { width: 67px; padding: 0 4px; gap: 3px; font-size: 11px; }
   .rw-btn.rw-ammo { width: 152px; height: 24px; top: calc(var(--rw-st) + 56px); }
   .rw-ammo-name, .rw-ammo-bar { display: none; }
   .rw-ammo-n { font-size: 14px; }

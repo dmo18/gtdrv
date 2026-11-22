@@ -21,6 +21,108 @@ const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
 
 export const MAP_SHRINK_MS = 5000; // the expanded minimap shrinks after this long untouched
 
+// ---------------------------------------------------------------------------
+// The top centre stack (docs/REVAMP.md 6.12). Pure logic, no DOM: two message
+// rows with fixed priorities. Row 1: police toast, then objective text, then
+// the district banner. Row 2: a tutorial hint, then score or other toasts.
+// Lower items are dropped or wait a few seconds, never queued for long.
+// ---------------------------------------------------------------------------
+export const KINDS = ['police', 'objective', 'district', 'hint', 'score', 'info'];
+const ROW_OF = { police: 0, objective: 0, district: 0, hint: 1, score: 1, info: 1 };
+const PRIO1 = { police: 3, objective: 2, district: 1 };
+export const WAIT1_S = 3; // an objective line waits this long behind a police toast
+export const WAIT2_S = 5; // a toast waits this long behind a hint
+export const TOAST_MIN_S = 0.6; // a toast stays at least this long before a newer one replaces it
+export const HINT_GAP_S = 3; // no hint starts within this long of a police toast
+
+// Text to kind for callers that predate the third argument of toast().
+const POLICE_RE = /^(The police|Officers on foot|They mean business|Roadblocks ahead|More patrol cars|You lost them|Pulled over)/;
+const SCORE_RE = /\s\+[\d,]+(\s+x[\d.]+)?$/;
+export function toastKind(text, kind) {
+  if (kind && Object.hasOwn(ROW_OF, kind)) return kind;
+  const t = String(text);
+  if (POLICE_RE.test(t)) return 'police';
+  if (t.length <= 40 && SCORE_RE.test(t)) return 'score';
+  return 'info';
+}
+
+function slot() { return { kind: '', text: '', left: 0, age: 0, wait: 0, rev: 0 }; }
+function put(s, kind, text, sec) { s.kind = kind; s.text = text; s.left = sec; s.age = 0; s.rev++; }
+function clear(s) { if (s.kind) { s.kind = ''; s.rev++; } }
+
+export function createTopStack() {
+  const rows = [slot(), slot()];
+  const wait = [slot(), slot()]; // at most one waiting item per row (kind '' = none)
+  const st = { rows, wanted: false, sincePolice: 99 };
+
+  function park(i, kind, text, left, waitS) {
+    const w = wait[i];
+    w.kind = kind; w.text = text; w.left = left; w.wait = waitS; w.age = 0;
+  }
+  function promote(i) {
+    const w = wait[i];
+    if (!w.kind) return;
+    put(rows[i], w.kind, w.text, w.left);
+    w.kind = '';
+  }
+
+  st.add = function add(kind, text, seconds) {
+    const sec = Math.max(0.2, +seconds || 3);
+    const i = ROW_OF[kind];
+    const r = rows[i];
+    if (i === 0) {
+      if (kind === 'district' && st.wanted) return; // never while wanted
+      const have = r.kind ? PRIO1[r.kind] : 0;
+      const mine = PRIO1[kind];
+      if (mine >= have) {
+        // a displaced objective line waits; a displaced banner is dropped
+        if (r.kind === 'objective' && kind === 'police') park(0, 'objective', r.text, r.left, WAIT1_S);
+        if (kind === 'police') st.sincePolice = 0;
+        put(r, kind, text, sec);
+      } else if (kind === 'objective') park(0, kind, text, sec, WAIT1_S);
+      return; // a banner under a higher item is dropped, never shown late
+    }
+    if (kind === 'hint') {
+      if (r.kind === 'info') park(1, 'info', r.text, r.left, WAIT2_S);
+      put(r, kind, text, sec);
+      return;
+    }
+    if (r.kind === 'hint') { // score toasts are dropped, other toasts wait (the newest)
+      if (kind === 'info') park(1, kind, text, sec, WAIT2_S);
+      return;
+    }
+    if (!r.kind || r.age >= TOAST_MIN_S) put(r, kind, text, sec);
+    else park(1, kind, text, sec, WAIT2_S);
+  };
+
+  st.tick = function tick(dt) {
+    if (st.sincePolice < 99) st.sincePolice += dt;
+    for (let i = 0; i < 2; i++) {
+      const r = rows[i], w = wait[i];
+      if (r.kind) {
+        r.age += dt;
+        r.left -= dt;
+        if (r.left <= 0) clear(r);
+      }
+      if (w.kind) {
+        const freeNow = !r.kind || (i === 1 && r.kind !== 'hint' && r.age >= TOAST_MIN_S);
+        if (freeNow) promote(i);
+        else {
+          w.wait -= dt;
+          if (w.wait <= 0) w.kind = '';
+        }
+      }
+    }
+    if (st.wanted && rows[0].kind === 'district') clear(rows[0]);
+  };
+
+  st.setWanted = (on) => { st.wanted = !!on; if (on && rows[0].kind === 'district') clear(rows[0]); };
+  // The tutorial asks first: no hint while wanted or just after a police toast.
+  st.canHint = () => !st.wanted && st.sincePolice >= HINT_GAP_S && rows[0].kind !== 'police';
+  st.reset = () => { for (let i = 0; i < 2; i++) { clear(rows[i]); wait[i].kind = ''; } st.sincePolice = 99; };
+  return st;
+}
+
 export function createHud(root) {
   injectStyles();
   if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
@@ -80,11 +182,14 @@ export function createHud(root) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMapBig(!mapBig); }
   });
 
-  // top-centre strip: the district title for 3 s, then toasts stacking downward
-  const strip = el('div', 'rw-strip', hud);
-  const titleEl = el('div', 'rw-title rw-pill', strip);
-  titleEl.addEventListener('animationend', () => titleEl.classList.remove('rw-show'));
-  const toasts = el('div', 'rw-toasts', strip);
+  // top-centre stack (docs/REVAMP.md 6.12): status row (stars, objective arrow
+  // and distance), then two one-line message rows. Rows never move.
+  const stackEl = el('div', 'rw-stack', hud);
+  const stack = createTopStack();
+  const msgEls = [el('div', 'rw-msg rw-m1 rw-pill', stackEl), el('div', 'rw-msg rw-m2 rw-pill', stackEl)];
+  const msgRev = [-1, -1];
+  const msgOut = [false, false];
+  for (const m of msgEls) m.hidden = true;
 
   // top-right: score and the points waiting on the combo, left of the pause button
   const tr = el('div', 'rw-tr', hud);
@@ -93,7 +198,7 @@ export function createHud(root) {
   comboEl.style.display = 'none';
 
   // top-centre: police attention (stars, then the escape meter), only while wanted
-  const wantedEl = el('div', 'rw-wanted rw-pill rw-none', hud);
+  const wantedEl = el('div', 'rw-wanted rw-pill rw-none', stackEl);
   wantedEl.setAttribute('role', 'img');
   wantedEl.setAttribute('aria-label', 'Police attention: none');
   const BADGES = 5;
@@ -102,6 +207,13 @@ export function createHud(root) {
   for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', starRow));
   const coolBar = el('div', 'rw-cool', wantedEl);
   const coolFill = el('div', 'rw-coolfill', coolBar);
+  // The objective arrow and its distance sit beside the stars (the objective
+  // system calls setObjective each frame).
+  const objEl = el('div', 'rw-objcell rw-pill rw-none', stackEl);
+  objEl.setAttribute('aria-hidden', 'true');
+  const objArrow = el('i', 'rw-objarrow', objEl);
+  objArrow.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 2 L21 21 L12 16 L3 21 Z" fill="#ffd34d" stroke="#1a120d" stroke-width="2" stroke-linejoin="round"/></svg>';
+  const objText = el('span', 'rw-objdist', objEl);
 
   // speed (a craft only) beside the minimap, and the prompt strip at the bottom
   const speedBox = el('div', 'rw-speedbox rw-pill rw-none', hud);
@@ -128,7 +240,16 @@ export function createHud(root) {
     score: undefined, pending: undefined, combo: undefined, wanted: undefined, cool: undefined, district: undefined, clock: undefined,
     veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
     fx: undefined, boost: undefined, boostOn: undefined, boostLock: undefined,
+    objOn: undefined, objAngle: 1e9, objDist: undefined,
   };
+  // The stack timers run on UI time, 10 times a second (never game logic).
+  let clockMs = typeof performance !== 'undefined' ? performance.now() : 0;
+  const clockTimer = setInterval(() => {
+    const now = typeof performance !== 'undefined' ? performance.now() : clockMs + 100;
+    const dt = Math.min(0.25, (now - clockMs) / 1000);
+    clockMs = now;
+    tick(dt);
+  }, 100);
 
   function setBar(b, pct) {
     b.fill.style.width = pct + '%';
@@ -166,6 +287,7 @@ export function createHud(root) {
       wantedEl.classList.toggle('rw-hot', stars >= 3);
       for (let i = 0; i < BADGES; i++) badges[i].classList.toggle('rw-on', i < stars);
       wantedEl.setAttribute('aria-label', 'Police attention: ' + (stars > 0 ? stars + ' of ' + BADGES + ' stars' : 'none'));
+      stack.setWanted(stars > 0);
     }
     const cool = stars > 0 && s.cooling > 0 ? Math.round(Math.min(1, s.cooling) * 50) : 0;
     if (cool !== last.cool) {
@@ -178,12 +300,7 @@ export function createHud(root) {
     }
     if (s.district !== last.district) {
       last.district = s.district;
-      titleEl.textContent = s.district;
-      // restart the CSS animation
-      titleEl.classList.remove('rw-show');
-      void titleEl.offsetWidth;
-      titleEl.classList.add('rw-show');
-      trimToasts();
+      if (s.district) stack.add('district', s.district, 3);
     }
     const minutes = Math.floor(s.time * 60) % 1440;
     if (minutes !== last.clock) {
@@ -232,24 +349,54 @@ export function createHud(root) {
     }
   }
 
-  // The strip holds the title (32 px) and toasts (32 px each) in 72 px: two
-  // toasts, or one while the district title shows.
-  function trimToasts() {
-    const room = titleEl.classList.contains('rw-show') ? 1 : 2;
-    while (toasts.children.length > room) toasts.firstChild.remove();
+  // Paint the two message rows from the stack state (only on change).
+  function paintRows() {
+    for (let i = 0; i < 2; i++) {
+      const r = stack.rows[i], m = msgEls[i];
+      if (r.rev !== msgRev[i]) {
+        msgRev[i] = r.rev;
+        msgOut[i] = false;
+        m.classList.remove('rw-out');
+        if (r.kind) {
+          m.textContent = r.text;
+          m.className = 'rw-msg rw-m' + (i + 1) + ' rw-pill rw-k-' + r.kind + (r.kind === 'district' ? ' rw-title' : '');
+          m.hidden = false;
+          // restart the slide-in
+          void m.offsetWidth;
+          m.classList.add('rw-in');
+        } else {
+          m.hidden = true;
+          m.classList.remove('rw-in');
+        }
+      }
+      const out = !!r.kind && r.left < 0.3;
+      if (out !== msgOut[i]) { msgOut[i] = out; m.classList.toggle('rw-out', out); }
+    }
   }
 
-  function toast(text, seconds = 3) {
-    const t = el('div', 'rw-toast rw-pill', toasts);
-    t.textContent = text;
-    trimToasts();
-    const fade = setTimeout(() => {
-      timers.delete(fade);
-      t.classList.add('rw-out');
-      const gone = setTimeout(() => { timers.delete(gone); t.remove(); }, 320);
-      timers.add(gone);
-    }, Math.max(0.2, seconds) * 1000);
-    timers.add(fade);
+  // Advance the stack timers: seconds of UI time (the game calls update every frame).
+  function tick(dt) {
+    if (!(dt > 0)) return;
+    stack.tick(dt);
+    paintRows();
+  }
+
+  // hud.toast(text, seconds, kind): kind picks the row and the priority
+  // ('police', 'objective', 'district', 'hint', 'score', 'info'); callers that
+  // pass none get a kind from the text. Nobody places their own top centre text.
+  function toast(text, seconds = 3, kind) {
+    stack.add(toastKind(text, kind), String(text), seconds);
+    paintRows();
+  }
+
+  // Objective arrow and distance (status row), driven by systems/objective.js.
+  function setObjective(on, angle, distText) {
+    const v = !!on;
+    if (v !== last.objOn) { last.objOn = v; objEl.classList.toggle('rw-none', !v); }
+    if (!v) return;
+    const a = Math.round(angle || 0);
+    if (a !== last.objAngle) { last.objAngle = a; objArrow.style.transform = 'rotate(' + a + 'deg)'; }
+    if (distText !== last.objDist) { last.objDist = distText; objText.textContent = distText; }
   }
 
   function setPrompt(text) {
@@ -269,10 +416,11 @@ export function createHud(root) {
   }
 
   function dispose() {
+    clearInterval(clockTimer);
     for (const t of timers) clearTimeout(t);
     timers.clear();
     hud.remove();
   }
 
-  return { update, toast, setPrompt, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
+  return { update, toast, tick, setObjective, canHint: stack.canHint, stack, setPrompt, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
 }

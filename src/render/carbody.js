@@ -1083,7 +1083,7 @@ export function buildCar(spec, near = true, lite = false) {
     // Dark lower sill and bumper lip all round.
     if (jj === 0) return pick(TRIM, CLS.TRIM);
     // The end walls of each wheel arch read as dark wheel-well liner.
-    if (Math.abs(n[0]) > 0.5 && c[1] < sh.wr + 0.12) {
+    if (jj < nSide && Math.abs(n[0]) > 0.5 && c[1] < sh.wr + 0.12) {
       for (const wx of sh.wheels) if (Math.abs(Math.abs(x - wx) - sh.R) < 0.012) return pick(ARCH, CLS.TRIM);
     }
     if (S.skirt && jj === 1 && Math.abs(n[2]) > 0.3) return pick(TRIM, CLS.TRIM);
