@@ -151,6 +151,119 @@ function makeTemplates(rng) {
   return T;
 }
 
+// ---- Miami templates (own random stream: the island is unchanged) --------
+const LEAF = [0x3f7a34, 0x4d8a3a, 0x2f6a34, 0x5c9a40, 0x3a7448, 0x6a9c3c, 0x48823c];
+
+// One palm frond as a folded strip with the leaflet picture (atlas
+// rect r): from (x, y, z) out along heading a, rising at `elev`
+// radians and bending down by `droop` toward the tip.
+function frond(B, r, x, y, z, a, elev, len, droop, color) {
+  const S = 5, ca = Math.cos(a), sa = Math.sin(a);
+  const sx = -sa, sz = ca;
+  let px = x, py = y, pz = z;
+  const vm = (r.v0 + r.v1) / 2;
+  let prev = null;
+  for (let k = 0; k <= S; k++) {
+    const t = k / S;
+    const w = len * 0.2 * Math.sin(Math.PI * Math.min(1, t * 0.95 + 0.12)) + 0.004;
+    const fold = w * 0.45;
+    const cur = [px, py, pz, w, fold, r.u0 + (r.u1 - r.u0) * t];
+    if (prev) {
+      const [ax, ay, az, aw, af, au] = prev;
+      const [bx, by, bz, bw, bf, bu] = cur;
+      const tx = bx - ax, ty = by - ay, tz = bz - az;
+      for (const side of [-1, 1]) {
+        // Edge points: out to the side and folded down a little.
+        const aex = ax + sx * aw * side, aey = ay - af, aez = az + sz * aw * side;
+        const bex = bx + sx * bw * side, bey = by - bf, bez = bz + sz * bw * side;
+        const ex = sx * side, ey = -0.45, ez = sz * side;
+        let nx = ty * ez - tz * ey, ny = tz * ex - tx * ez, nz = tx * ey - ty * ex;
+        if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        const l = Math.hypot(nx, ny, nz) || 1;
+        const ve = side > 0 ? r.v1 : r.v0;
+        B.quadUv(ax, ay, az, bx, by, bz, bex, bey, bez, aex, aey, aez, color, nx / l, ny / l, nz / l, au, vm, bu, vm, bu, ve, au, ve);
+      }
+    }
+    prev = cur;
+    const e = elev - droop * t * t;
+    const step = len / S;
+    px += ca * Math.cos(e) * step;
+    pz += sa * Math.cos(e) * step;
+    py += Math.sin(e) * step;
+  }
+}
+
+function makeMiamiTemplates(rng, R) {
+  const T = { canopies: [], palmTrunks: [], palmCrowns: [] };
+  const jit = () => rng.next() - 0.5;
+  for (let v = 0; v < 6; v++) {
+    // Rounded canopy: a big central mass and a ring of overlapping
+    // clusters in several greens, on a short trunk with two limbs.
+    const t = new MeshBuilder();
+    const bark = hexShade(0x5e4632, rng.range(0.85, 1.15));
+    const g = LEAF[v];
+    const th = rng.range(0.3, 0.4);
+    t.cyl(0, 0, 0, th + 0.12, 0.05, 0.032, 6, bark, false, 0.65, 1);
+    for (const a of [rng.range(0, TAU), rng.range(0, TAU)]) {
+      t.cyl(Math.cos(a) * 0.05, Math.sin(a) * 0.05, th, th + 0.18, 0.022, 0.012, 4, bark, false, 0.8, 1);
+    }
+    t.blob(0, th + 0.32, 0, 0.26, 0.21, 0.26, g, 7, 4, 0.48, 1.08, jit);
+    const n = 5 + (v % 3);
+    const spread = rng.range(0.17, 0.24);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + rng.range(-0.3, 0.3);
+      const d = spread * rng.range(0.75, 1.05);
+      const r = rng.range(0.13, 0.19);
+      t.blob(Math.cos(a) * d, th + rng.range(0.2, 0.42), Math.sin(a) * d, r, r * 0.78, r, hexShade(LEAF[(v + i + 1) % LEAF.length], rng.range(0.82, 1.12)), 6, 4, 0.48, 1.1, jit);
+    }
+    t.blob(rng.range(-0.05, 0.05), th + 0.52, rng.range(-0.05, 0.05), 0.15, 0.1, 0.15, hexShade(g, 1.12), 6, 3, 0.7, 1.15, jit);
+    T.canopies.push(t);
+  }
+  for (let v = 0; v < 4; v++) {
+    // Palm: a ringed, slightly leaning trunk (plain mesh) and a crown
+    // of leafy fronds (detail mesh, the leaflet picture, see-through).
+    const t = new MeshBuilder();
+    const lean = rng.range(0.03, 0.1), la = rng.range(0, TAU);
+    const lx = Math.cos(la) * lean, lz = Math.sin(la) * lean;
+    const SEG = 8, H = 0.95;
+    const trunk = v % 2 ? 0x9a8a74 : 0x8c7a62;
+    for (let i = 0; i < SEG; i++) {
+      const k0 = i / SEG, k1 = (i + 1) / SEG;
+      const ox = lx * k1 * k1, oz = lz * k1 * k1;
+      const r0 = (i === 0 ? 0.04 : 0.027 - k0 * 0.008), r1 = 0.027 - k1 * 0.008;
+      t.cyl(ox, oz, k0 * H, k1 * H + 0.004, r0, r1, 6, hexShade(trunk, i % 2 ? 0.88 : 1.06), false, 0.82, 1);
+    }
+    // Crown shaft and boot.
+    t.cyl(lx, lz, H - 0.01, H + 0.035, 0.021, 0.026, 6, 0x6a7a4a, false, 0.85, 1);
+    t.blob(lx, H + 0.03, lz, 0.034, 0.03, 0.034, 0x4a5a30, 5, 3, 0.7, 1);
+    for (let i = 0; i < 3; i++) {
+      const a = rng.range(0, TAU);
+      t.blob(lx + Math.cos(a) * 0.025, H + 0.012, lz + Math.sin(a) * 0.025, 0.012, 0.012, 0.012, 0x6a5228, 4, 2, 0.8, 1);
+    }
+    T.palmTrunks.push(t);
+    const c = new MeshBuilder(true);
+    const nF = 12 + (v % 2) * 3;
+    for (let i = 0; i < nF; i++) {
+      const a = (i / nF) * TAU + rng.range(-0.18, 0.18);
+      const tier = i % 3;
+      const elev = [0.75, 0.3, -0.15][tier] + rng.range(-0.12, 0.12);
+      const len = rng.range(0.3, 0.4) * (tier === 0 ? 0.85 : 1);
+      const col = hexShade(0xe8f0d8, rng.range(0.82, 1.05));
+      frond(c, R.frond, lx, H + 0.035, lz, a, elev, len, rng.range(1.4, 2.4), col);
+    }
+    // A couple of old fronds hanging down, browned.
+    for (let i = 0; i < 2; i++) {
+      frond(c, R.frond, lx, H, lz, rng.range(0, TAU), -1.0, rng.range(0.18, 0.24), 0.6, 0xd8b070);
+    }
+    T.palmCrowns.push(c);
+  }
+  return T;
+}
+
+// Which Miami streets get palms (the rest get round shade trees).
+const PALM_PLACES = new Set(['Brickell', 'Downtown Miami', 'Brickell Key', 'Bayfront Park', 'Park West', 'Edgewater', 'Margaret Pace Park', 'Museum Park',
+  'Miami Beach', 'Watson Island', 'Fisher Island', 'Venetian Islands', 'Hibiscus Island', 'Palm Island', 'Virginia Key', 'Miami']);
+
 // Upright picture centred at (x, z), facing direction `rot`.
 function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
   const dx = Math.sin(rot) * w * 0.5, dz = -Math.cos(rot) * w * 0.5;
@@ -166,10 +279,20 @@ export function addProps(C, own = null, side = true) {
   const rng = createRng(city.seed + 4242);
   const T = makeTemplates(rng);
   const R = C.R;
+  const miami = city.map === 'miami' && R && R.frond;
+  const MT = miami ? makeMiamiTemplates(createRng(city.seed + 9191), R) : null;
   const L = city.landmarks || { cranes: [], billboards: [], runwayLights: [] };
   const hash = (x, z) => {
     const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
     return v - Math.floor(v);
+  };
+  // A Miami street tree that is a palm: most of them in the palm
+  // neighbourhoods and by the water, a few elsewhere.
+  const streetPalm = (x, z) => {
+    const k = hash(z + 7, x);
+    const shore = city.mainShore ? city.mainShore(x, z) : 999;
+    if (shore < 90) return k < 0.8;
+    return k < (PALM_PLACES.has(city.placeOf(x, z)) ? 0.7 : 0.18);
   };
   // Keep trees off the landmarks.
   const blocked = (x, z) => {
@@ -181,6 +304,14 @@ export function addProps(C, own = null, side = true) {
   function tree(x, z, h, q, autumn) {
     const P = C.plain.at(x, z, q);
     const k = hash(x, z);
+    if (MT) {
+      const v = 0.86 + hash(x + 3, z) * 0.3;
+      const gy = C.groundY(x, z);
+      const w = h * (1.15 + hash(x, z + 1) * 0.3);
+      (C.trees || C.plain).at(x, z, q).add(MT.canopies[(k * MT.canopies.length) | 0], x, gy - 0.04, z, k * TAU, w, h, w, v * 0.96, v, v * 0.92);
+      C.ao.at(x, z).aoDisc(x, z, w * 0.32, gy + 0.012, 0.5, 8);
+      return;
+    }
     const conifer = hash(z, x) < 0.14;
     const t = conifer ? T.conifers[(k * 2) | 0] : T.trees[(k * T.trees.length) | 0];
     const v = 0.82 + hash(x + 3, z) * 0.36;
@@ -193,6 +324,13 @@ export function addProps(C, own = null, side = true) {
     const k = hash(x, z);
     const v = 0.85 + hash(x + 3, z) * 0.3;
     const gy = C.groundY(x, z);
+    if (MT) {
+      const i = (k * MT.palmTrunks.length) | 0, s = h * (0.9 + hash(z, x) * 0.2);
+      (C.trees || C.plain).at(x, z, q).add(MT.palmTrunks[i], x, gy - 0.04, z, k * TAU, h, h, h, v, v, v);
+      (C.treesDetail || C.detail).at(x, z, q).add(MT.palmCrowns[i], x, gy - 0.04, z, k * TAU, s, h, s, v, v * 1.02, v * 0.95);
+      C.ao.at(x, z).aoDisc(x, z, h * 0.3, gy + 0.012, 0.66, 8);
+      return;
+    }
     C.plain.at(x, z, q).add(T.palms[(k * 3) | 0], x, gy - 0.04, z, k * TAU, h * 1.15, h, h * 1.15, v, v, v);
     C.ao.at(x, z).aoDisc(x, z, h * 0.22, gy + 0.012, 0.72, 6);
   }
@@ -215,6 +353,32 @@ export function addProps(C, own = null, side = true) {
     }
   }
 
+  // ---- Miami: palms down the avenues of the palm neighbourhoods ----
+  if (MT) {
+    const lampNear = new Set();
+    for (const l of lamps) lampNear.add(Math.round(l.x / 4) * 100000 + Math.round(l.z / 4));
+    const nearLamp = (x, z) => {
+      const i = Math.round(x / 4), j = Math.round(z / 4);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (lampNear.has((i + a) * 100000 + j + b)) return true;
+      return false;
+    };
+    for (const e of city.edges) {
+      if (e.width < 18 || e.causeway || e.bridge) continue;
+      const a = city.nodes[e.a], bn = city.nodes[e.b];
+      if (!PALM_PLACES.has(city.placeOf((a.x + bn.x) / 2, (a.z + bn.z) / 2))) continue;
+      const half = e.width / 2, rx = -e.uz, rz = e.ux;
+      for (const sd of [-1, 1]) {
+        for (let d = (a.hx || 0) + 8; d + 8 <= e.length - (bn.hx || 0); d += 13) {
+          const x = a.x + e.ux * d + rx * sd * (half + 1.15), z = a.z + e.uz * d + rz * sd * (half + 1.15);
+          if (!city.blockAt(x, z) || (city.inBuilding && city.inBuilding(x, z, 1)) || nearLamp(x, z)) continue;
+          const h = 8 + hash(x, z + 5) * 4;
+          if (side) collision.addCircle(x, z, 0.3, h, 'tree');
+          if (mine(x, z)) palm(x, z, h, 0);
+        }
+      }
+    }
+  }
+
   // ---- street furniture ----
   for (const f of city.furniture || []) {
     const { x, z, rot, q, v } = f;
@@ -225,7 +389,8 @@ export function addProps(C, own = null, side = true) {
     const ay = y + 0.012;
     switch (f.type) {
       case 'streettree':
-        tree(x, z, 5 + v * 3, 0, false);
+        if (MT && streetPalm(x, z)) palm(x, z, 7 + v * 4, 0);
+        else tree(x, z, 5 + v * 3, 0, false);
         // Tree pit: a square of bare earth in the pavement.
         if (y > 0) C.decal.at(x, z).flatRect(x - 0.7, z - 0.7, x + 0.7, z + 0.7, y + 0.015, 0x6a5a48, C.DR.stain1);
         break;

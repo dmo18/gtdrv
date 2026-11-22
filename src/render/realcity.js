@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { ChunkedBuilder, MeshBuilder } from './meshbuilder.js';
 import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
+import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
@@ -30,7 +31,7 @@ export const TILE = 300; // m, a near-detail tile
 export const SUPER = 4; // tiles per far block side
 export const LOD = { near: 340, mid: 170, build: 520, drop: 860, hyst: 40 };
 const FAR_LAND_Y = -0.3, FAR_ROAD_Y = -0.1;
-const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco']);
+const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 
 // Builders that draw nothing (the one-off pass that only wants the side
 // effects: collision circles, lamp and glow lists).
@@ -141,7 +142,7 @@ const TILE_KEYS = [
   ['asphalt', true, 8], ['ground', true, 6], ['land', true, 10], ['pavement', true, 4.8], ['grass', true, 10], ['wood', true, 2],
   ['paint', true, 2], ['decal', true, 1], ['ao', false, 1], ['plain', false, 1], ['detail', true, 1], ['glow', false, 1],
   ['glass', true, 1], ['brick', true, 1], ['office', true, 1], ['stucco', true, 1], ['siding', true, 1], ['corrugated', true, 1],
-  ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1],
+  ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1], ['havana', true, 1], ['treeDetail', true, 1],
 ];
 // key: material, draw options, hidden at the middle level
 function tileMeshPlan(M) {
@@ -156,6 +157,10 @@ function tileMeshPlan(M) {
     ['siding', M.siding, { ...solid, name: 'facade-siding' }], ['corrugated', M.corrugated, { ...solid, name: 'facade-corrugated' }],
     ['roofing', M.roofing, { ...solid, name: 'facade-roofing' }], ['shopfront', M.shopfront, { ...solid, name: 'facade-shopfront' }],
     ['props', M.plainMat, { ...solid, name: 'props' }, true], ['propsDetail', M.detailMat, { ...solid, name: 'props-detail' }, true],
+    ['havana', M.havana, { ...solid, name: 'facade-havana' }],
+    // Trees and palms stay drawn at the middle level (no pop-in): trunks
+    // and canopies go in 'plain', palm fronds here.
+    ['treeDetail', M.detailMat, { ...solid, name: 'trees-detail' }],
   ];
 }
 
@@ -284,9 +289,11 @@ export function buildRealCity(city, collision) {
       }
       // Buildings: one box each.
       for (const b of t.buildings) {
-        const wall = b.style === 'glass' ? shade(b.tint, 0.95) : b.style === 'container' ? b.color : shade(b.color, 0.92);
-        const roof = b.style === 'house' ? 0x9a6a58 : shade(b.color, 0.78);
-        (WINDOW_STYLES.has(b.style) ? win : plain).box(b.x0, b.z0, b.x1, b.z1, FAR_LAND_Y, b.h, wall, roof, 0.75, 1);
+        const L = lookOf(city, b);
+        const st = L ? L.style : b.style;
+        const wall = L ? (st === 'glass' ? shade(L.tint, 0.9) : shade(L.wall, 0.9)) : b.style === 'glass' ? shade(b.tint, 0.95) : b.style === 'container' ? b.color : shade(b.color, 0.92);
+        const roof = L ? (st === 'house' || L.tile ? L.roof : shade(L.roof, 0.85)) : b.style === 'house' ? 0x9a6a58 : shade(b.color, 0.78);
+        (WINDOW_STYLES.has(st) ? win : plain).box(b.x0, b.z0, b.x1, b.z1, FAR_LAND_Y, b.h, wall, roof, 0.75, 1);
       }
       const sk = Math.floor((t.k % NX) / SUPER) + Math.floor(Math.floor(t.k / NX) / SUPER) * SX;
       supers[sk].push(plain, t.k, 0);
@@ -354,7 +361,7 @@ export function buildRealCity(city, collision) {
   const tiered = [];
   const ud = {
     water, materials: M,
-    glowMats: [M.glass, M.brick, M.office, M.stucco, M.shopfront, M.detailMat, farMat],
+    glowMats: [M.glass, M.brick, M.office, M.stucco, M.havana, M.shopfront, M.detailMat, farMat],
     wet: M.wet, lamps, glows, signals, windsock, tiered, textures: T, buildMs: 0, timings,
   };
 
@@ -382,7 +389,7 @@ export function buildRealCity(city, collision) {
       if (n % 16 === 15) yield 'buildings';
     }
     yield 'buildings';
-    addProps({ ...C, plain: B.props, detail: B.propsDetail }, own, false);
+    addProps({ ...C, plain: B.props, detail: B.propsDetail, trees: B.plain, treesDetail: B.treeDetail }, own, false);
     yield 'props';
     const g = new THREE.Group();
     g.name = 'tile';

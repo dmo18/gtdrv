@@ -16,6 +16,7 @@ const STYLE = {
   office: [1.0, 1, 0.03],
   brick: [0.95, 0, 0.16],
   stucco: [1.0, 0, 0.14],
+  havana: [0.95, 0, 0.16],
 };
 
 const HASH = `

@@ -627,7 +627,7 @@ function makeGlassFacade(rng, N) {
   grain(c, N.coarse, 512, 0.1, rng);
   const emissiveMap = windowMask(rng, 8, 8, () => [0.02, sp / cw + 0.02, 0.96, 1 - sp / cw - 0.03], 0.4, true, 1);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
-  return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex };
+  return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex, normalMap: normalFromHeight(heightOf(c), S, 0.7) };
 }
 
 function brickPattern(g, S, rng, bw, bh) {
@@ -741,7 +741,7 @@ function makeConcreteFacade(rng, N) {
   for (let x = 0; x < n; x++) g.fillRect(x * cw, 0, 2, S);
   const emissiveMap = windowMask(rng, 8, 8, () => [0.03, band[0] + 0.01, 0.94, band[1] - 0.02], 0.42, true, 1);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
-  return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex };
+  return { map: toTexture(c), emissiveMap, roughnessMap: rmTex, metalnessMap: rmTex, normalMap: normalFromHeight(heightOf(c), S, 1.2) };
 }
 
 function makeStuccoFacade(rng, N) {
@@ -773,6 +773,15 @@ function makeStuccoFacade(rng, N) {
       }
       g.fillStyle = grey(250);
       g.fillRect(px + w / 2 - 1.5, py, 3, h);
+      // Recessed: the reveal throws a shadow at the top and one side;
+      // a sill stands out below with its own shadow.
+      g.fillStyle = grey(20, 0.42);
+      g.fillRect(px, py, w, 6);
+      g.fillRect(px, py + 6, 4, h - 6);
+      g.fillStyle = grey(255);
+      g.fillRect(px - 7, py + h, w + 14, 6);
+      g.fillStyle = grey(40, 0.32);
+      g.fillRect(px - 7, py + h + 6, w + 14, 5);
     }
     // Floor slab line with a soft shadow below it.
     g.fillStyle = grey(255);
@@ -781,7 +790,109 @@ function makeStuccoFacade(rng, N) {
     g.fillRect(0, y * cw, S, 8);
   }
   const emissiveMap = windowMask(rng, 8, 8, () => [win[0] + 0.01, win[1] + 0.01, win[2] - 0.02, win[3] - 0.03], 0.38, false, 1);
-  return { map: toTexture(c), emissiveMap };
+  return { map: toTexture(c), emissiveMap, normalMap: normalFromHeight(heightOf(c), S, 1.4) };
+}
+
+// Low-rise Miami stucco (Little Havana and the like): tall windows with
+// round arches, louvred shutters, moulded surrounds and sills, some with
+// a little iron balconette. Four bays by four floors like the others.
+function makeHavanaFacade(rng, N) {
+  const S = 512, n = 4, cw = S / n;
+  const c = canvas(S), e = canvas(S);
+  const g = c.getContext('2d'), ge = e.getContext('2d');
+  g.fillStyle = grey(238);
+  g.fillRect(0, 0, S, S);
+  ge.fillStyle = '#000';
+  ge.fillRect(0, 0, S, S);
+  grain(c, N.fine, 512, 0.12, rng, 0.05);
+  grain(c, N.coarse, 512, 0.12, rng);
+  const w = cw * 0.36, top = cw * 0.2, bot = cw * 0.84, r = w / 2;
+  const arch = (ctx, x, y0, y1, rr) => {
+    ctx.beginPath();
+    ctx.moveTo(x - rr, y1);
+    ctx.lineTo(x - rr, y0 + rr);
+    ctx.arc(x, y0 + rr, rr, Math.PI, 0);
+    ctx.lineTo(x + rr, y1);
+    ctx.closePath();
+  };
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const mx = x * cw + cw / 2, y0 = y * cw + top, y1 = y * cw + bot;
+      const closed = rng.chance(0.18);
+      // Moulded surround.
+      g.fillStyle = grey(252);
+      arch(g, mx, y0 - 6, y1, r + 6);
+      g.fill();
+      // Glass, darker at the top of the arch.
+      const v = rng.range(50, 86);
+      const gr = g.createLinearGradient(0, y0, 0, y1);
+      gr.addColorStop(0, rgb(v - 12, v - 4, v + 6));
+      gr.addColorStop(0.4, rgb(v + 30, v + 40, v + 52));
+      gr.addColorStop(1, rgb(v - 6, v, v + 8));
+      g.fillStyle = gr;
+      arch(g, mx, y0, y1, r);
+      g.fill();
+      if (!closed) {
+        ge.fillStyle = '#fff';
+        arch(ge, mx, y0 + 2, y1 - 2, r - 2);
+        ge.fill();
+      }
+      // Reveal shadow, glazing bars.
+      g.strokeStyle = grey(20, 0.45);
+      g.lineWidth = 5;
+      arch(g, mx, y0 + 2, y1 + 3, r - 2.5);
+      g.stroke();
+      g.fillStyle = grey(245);
+      g.fillRect(mx - 1.5, y0 + r, 3, y1 - y0 - r);
+      g.fillRect(mx - r, y0 + r, w, 3);
+      g.fillRect(mx - r, y0 + r + (y1 - y0 - r) * 0.5, w, 2.5);
+      // Louvred shutters (open beside the window, or closed over it).
+      const sw = w * 0.5, tone = rng.range(96, 140);
+      const shut = (sx, sy, ww, hh) => {
+        g.fillStyle = rgb(tone * 0.8, tone, tone * 0.94);
+        g.fillRect(sx, sy, ww, hh);
+        g.fillStyle = grey(30, 0.4);
+        for (let k = sy + 3; k < sy + hh; k += 4) g.fillRect(sx + 2, k, ww - 4, 1.5);
+        g.strokeStyle = grey(40, 0.5);
+        g.lineWidth = 1.5;
+        g.strokeRect(sx + 0.75, sy + 0.75, ww - 1.5, hh - 1.5);
+      };
+      if (closed) {
+        shut(mx - r, y0 + r * 0.7, r, y1 - y0 - r * 0.7);
+        shut(mx, y0 + r * 0.7, r, y1 - y0 - r * 0.7);
+      } else {
+        shut(mx - r - 8 - sw, y0 + r * 0.6, sw, y1 - y0 - r * 0.6);
+        shut(mx + r + 8, y0 + r * 0.6, sw, y1 - y0 - r * 0.6);
+      }
+      // Sill and its shadow.
+      g.fillStyle = grey(255);
+      g.fillRect(mx - r - 9, y1, w + 18, 6);
+      g.fillStyle = grey(40, 0.3);
+      g.fillRect(mx - r - 9, y1 + 6, w + 18, 6);
+      if (rng.chance(0.35)) {
+        // Iron balconette over the lower part of the window.
+        g.fillStyle = grey(34);
+        const bt = y1 - (y1 - y0) * 0.3;
+        g.fillRect(mx - r - 4, bt, w + 8, 2.5);
+        g.fillRect(mx - r - 4, y1 - 2, w + 8, 2);
+        for (let k = mx - r - 2; k < mx + r + 4; k += 5) g.fillRect(k, bt, 1.5, y1 - bt);
+      }
+    }
+    // Floor band with a soft shadow below it, and grime from the band.
+    g.fillStyle = grey(250);
+    g.fillRect(0, y * cw + 0.93 * cw, S, 0.07 * cw);
+    g.fillStyle = grey(40, 0.2);
+    g.fillRect(0, y * cw, S, 7);
+  }
+  for (let i = 0; i < 22; i++) {
+    const x = rng.range(0, S), y = rng.range(0, S);
+    const gr = g.createLinearGradient(0, y, 0, y + 60);
+    gr.addColorStop(0, 'rgba(70,60,50,0.14)');
+    gr.addColorStop(1, 'rgba(70,60,50,0)');
+    g.fillStyle = gr;
+    g.fillRect(x, y, rng.range(3, 10), 60);
+  }
+  return { map: toTexture(c), emissiveMap: toTexture(e, { aniso: 4 }), normalMap: normalFromHeight(heightOf(c), S, 1.5) };
 }
 
 function makeSiding(rng, N) {
@@ -1221,6 +1332,48 @@ function makeDetails(rng, streetNames) {
     g.lineWidth = 3;
     g.strokeRect(1.5, 1.5, w - 3, h - 3);
   });
+  // Glass balcony front: frosted panels, posts and a handrail.
+  A.add('rail', 128, 32, (g, ge, w, h) => {
+    const gr = g.createLinearGradient(0, 0, w, h);
+    gr.addColorStop(0, 'rgb(214,232,240)');
+    gr.addColorStop(0.45, 'rgb(170,196,210)');
+    gr.addColorStop(0.55, 'rgb(236,246,250)');
+    gr.addColorStop(1, 'rgb(150,176,192)');
+    g.fillStyle = gr;
+    g.fillRect(0, 4, w, h - 4);
+    g.fillStyle = 'rgb(96,102,108)';
+    g.fillRect(0, 0, w, 4);
+    for (let x = 0; x < w; x += 32) g.fillRect(x, 0, 2.5, h);
+  });
+  // Roof railing: posts and two rails, see-through.
+  A.add('railing', 128, 32, (g, ge, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = 'rgb(150,156,162)';
+    g.fillRect(0, 0, w, 3.5);
+    g.fillRect(0, h * 0.5, w, 2.5);
+    g.fillRect(0, h - 3, w, 3);
+    for (let x = 1; x < w; x += 21.3) g.fillRect(x, 0, 3, h);
+  });
+  // Palm frond seen from above: a rib with leaflets, along +u.
+  A.add('frond', 128, 32, (g, ge, w, h) => {
+    g.clearRect(0, 0, w, h);
+    for (let i = 0; i < 46; i++) {
+      const t = i / 46, x = 4 + t * (w - 8);
+      const len = (h * 0.5 - 1) * Math.sin(Math.PI * Math.min(1, t * 1.15 + 0.08));
+      const v = 70 + ((i * 37) % 30);
+      g.strokeStyle = rgb(v * 0.55, v + 40, v * 0.45);
+      g.lineWidth = 1.6;
+      for (const sgn of [-1, 1]) {
+        g.beginPath();
+        g.moveTo(x, h / 2);
+        g.lineTo(x + len * 0.55, h / 2 + sgn * len);
+        g.stroke();
+      }
+    }
+    g.strokeStyle = 'rgb(150,150,90)';
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+  });
   A.add('white', 64, 64, (g, ge, w, h) => {
     g.fillStyle = '#fff';
     g.fillRect(0, 0, w, h);
@@ -1259,5 +1412,6 @@ export function createTextures(seed, streetNames = []) {
     roofing: makeRoofing(rng, N),
     shopfront: makeShopfront(rng, N),
     details: makeDetails(rng, streetNames),
+    havana: makeHavanaFacade(rng, N),
   };
 }

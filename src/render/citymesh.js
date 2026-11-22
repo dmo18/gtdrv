@@ -84,10 +84,11 @@ export function makeMaterials(T) {
     plainMat: std({ roughness: 0.82 }),
     detailMat: std({ map: T.details.map, emissiveMap: T.details.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7 }),
     glowMat: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
-    glass: std({ map: T.glass.map, emissiveMap: T.glass.emissiveMap, roughnessMap: T.glass.roughnessMap, metalnessMap: T.glass.metalnessMap, roughness: 1, metalness: 0.6, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.7 }),
+    glass: std({ map: T.glass.map, emissiveMap: T.glass.emissiveMap, roughnessMap: T.glass.roughnessMap, metalnessMap: T.glass.metalnessMap, normalMap: T.glass.normalMap, normalScale: ns(0.6), roughness: 1, metalness: 0.6, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.7 }),
     brick: std({ map: T.brick.map, emissiveMap: T.brick.emissiveMap, normalMap: T.brick.normalMap, normalScale: ns(0.5), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.9 }),
-    office: std({ map: T.office.map, emissiveMap: T.office.emissiveMap, roughnessMap: T.office.roughnessMap, metalnessMap: T.office.metalnessMap, roughness: 1, metalness: 1, emissive: 0xffffff, emissiveIntensity: 0 }),
-    stucco: std({ map: T.stucco.map, emissiveMap: T.stucco.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
+    office: std({ map: T.office.map, emissiveMap: T.office.emissiveMap, roughnessMap: T.office.roughnessMap, metalnessMap: T.office.metalnessMap, normalMap: T.office.normalMap, normalScale: ns(0.7), roughness: 1, metalness: 1, emissive: 0xffffff, emissiveIntensity: 0 }),
+    stucco: std({ map: T.stucco.map, emissiveMap: T.stucco.emissiveMap, normalMap: T.stucco.normalMap, normalScale: ns(0.8), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
+    havana: std({ map: T.havana.map, emissiveMap: T.havana.emissiveMap, normalMap: T.havana.normalMap, normalScale: ns(0.9), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
     siding: std({ map: T.siding.map, roughness: 0.8 }),
     corrugated: std({ map: T.corrugated.map, roughness: 0.55, metalness: 0.35 }),
     roofing: std({ map: T.roofing.map, roughness: 0.9 }),
@@ -125,18 +126,32 @@ export function makeMaterials(T) {
   // ground, a faint lift toward the top of tall buildings, so blocks do
   // not read as flat cut-outs. Worked out per pixel from the world
   // height: no extra vertices, textures or passes.
-  for (const k of ['glass', 'brick', 'office', 'stucco', 'siding', 'corrugated', 'roofing', 'shopfront']) facadeShade(M[k]);
+  for (const k of ['glass', 'brick', 'office', 'stucco', 'havana', 'siding', 'corrugated', 'roofing', 'shopfront']) facadeShade(M[k]);
   return M;
 }
 
 function facadeShade(mat) {
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vRwY;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;');
+      .replace('#include <common>', '#include <common>\nvarying float vRwY;\nvarying vec3 vRwP;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwP = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRwY = vRwP.y;');
+    // Wear: a darker, dirtier band near the pavement, rain streaks
+    // running down from each floor line in a few columns, and a slow
+    // patchy tone change over the wall. The streaks fade out with
+    // distance (no shimmer far off).
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vRwY;')
-      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= mix( 0.58, 1.0, smoothstep( 0.0, 1.8, vRwY ) ) * mix( 0.93, 1.05, smoothstep( 3.0, 60.0, vRwY ) );');
+      .replace('#include <common>', '#include <common>\nvarying float vRwY;\nvarying vec3 vRwP;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+	diffuseColor.rgb *= mix( 0.58, 1.0, smoothstep( 0.0, 1.8, vRwY ) ) * mix( 0.93, 1.05, smoothstep( 3.0, 60.0, vRwY ) );
+	{
+		float rwAlong = vRwP.x + vRwP.z;
+		float rwCol = fract( sin( floor( rwAlong * 1.35 ) * 91.17 ) * 4375.85 );
+		float rwRun = 1.0 - fract( vRwY / 3.4 + rwCol * 0.5 );
+		float rwFar = 1.0 - smoothstep( 60.0, 150.0, length( vRwP - cameraPosition ) );
+		float rwStreak = step( 0.62, rwCol ) * rwRun * rwRun * 0.16 * rwFar;
+		float rwPatch = sin( rwAlong * 0.21 + vRwY * 0.13 ) * sin( rwAlong * 0.067 - vRwY * 0.05 + 1.7 );
+		diffuseColor.rgb *= ( 1.0 - rwStreak ) * ( 1.0 + 0.045 * rwPatch ) * mix( 0.86, 1.0, smoothstep( 0.4, 3.2, vRwY ) );
+	}`);
   };
   mat.customProgramCacheKey = () => 'rw-facade';
 }

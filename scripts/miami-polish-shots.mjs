@@ -104,7 +104,8 @@ await hour(10.5);
 {
   const [x, z, h] = await onStreet('Southwest 8th Street', -2100, 1530, 0.25);
   await park(x, z, h);
-  await step(30);
+  // Long enough for the neighbourhood banner to fade.
+  await step(260);
   await shot('havana');
 }
 
@@ -127,8 +128,10 @@ await hour(15);
 {
   const [x, z, h] = await onStreet('Brickell Avenue', -1440, 2580, 0.2);
   await park(x, z, h);
-  await step(30);
+  await step(260);
   await shot('palms');
+  // Looking up at the Brickell towers from the pavement.
+  await shot('towers', [[x - Math.sin(h) * 9, 1.7, z + Math.cos(h) * 9], [x + Math.cos(h) * 60 - Math.sin(h) * 30, 32, z + Math.sin(h) * 60 + Math.cos(h) * 30]]);
 }
 
 console.log(errors.length ? `${errors.length} page errors: ${errors.slice(0, 5).join(' | ')}` : 'no page errors');
