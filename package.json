@@ -10,7 +10,9 @@
     "dev": "node scripts/build.mjs --serve",
     "test": "node --test \"test/*.test.js\"",
     "lint": "eslint .",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "release:record": "node scripts/release-check.mjs --record"
   },
   "dependencies": {
     "three": "0.187.0"
