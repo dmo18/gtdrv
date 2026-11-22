@@ -1,3 +1,7 @@
+## Release rule
+
+Every publish bumps the version: `version` in package.json and android/package.json (patch number for fixes, minor number for a new batch of features), `VERSION_CODE` and `VERSION_NAME` in android/native/version.properties, and the version shows on the splash screen and in the pause menu.
+
 # Status
 
 Last updated: 2026-11-20. The game is playable and published. Work is at
