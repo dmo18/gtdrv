@@ -572,7 +572,7 @@ const CSS = `
 .rw-cfade-text.rw-on { opacity: 1; }
 
 @media (max-height: 380px) {
-  .rw-hud { --map: 76px; --map-big: 140px; --spw: 80px; }
+  .rw-hud { --map: 72px; --map-big: 140px; --spw: 80px; }
   .rw-speedbox, .rw-hpmeter, .rw-clock { width: 80px; }
   .rw-speedbox { height: 40px; padding-top: 2px; }
   .rw-speed { font-size: 28px; line-height: 32px; height: 32px; }

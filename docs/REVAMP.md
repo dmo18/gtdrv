@@ -947,7 +947,7 @@ wheel while held, the open "more" fan, toasts in their own strip above it.
 
 | item | 915x412 | 780x360 | notes |
 |---|---|---|---|
-| Minimap | 8, 8, 84, 84 | 8, 8, 76, 76 | tap grows it to 170 (140) square from the same corner, shrinks after 5 s |
+| Minimap | 8, 8, 84, 84 | 8, 8, 72, 72 | tap grows it to 170 (140) square from the same corner, shrinks after 5 s |
 | Speed | 100, 8, 88, 44 | 92, 8, 80, 40 | always 8 px right of the minimap, also when it is grown; number 28 px bold, unit 11 px; in a craft only |
 | Health (hard mode only) | 100, 56, 88, 12 | 92, 52, 80, 12 | under the speed |
 | Stars | 383, 8, 150, 24 | 315, 8, 150, 24 | centred; only while wanted; cooldown bar 150 by 4 right under it |

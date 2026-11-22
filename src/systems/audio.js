@@ -1429,7 +1429,7 @@ export function createAudio(game) {
     radioPlayer.tick(now, canListen(m), play);
     // music steps back under a close siren, on its own gain after the explosion duck
     if (sirenDuck) {
-      const want = sirenOn && sirenNear ? 0.55 : 1;
+      const want = sirenNear ? 0.55 : 1;
       if (want !== sirenDuckV) {
         sirenDuckV = want;
         sirenDuck.gain.setTargetAtTime(want, now, 0.2);
