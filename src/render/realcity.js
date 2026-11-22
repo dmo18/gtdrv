@@ -33,6 +33,10 @@ export const LOD = { near: 340, mid: 170, build: 520, drop: 860, hyst: 40 };
 const FAR_LAND_Y = -0.3, FAR_ROAD_Y = -0.1;
 const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 
+function releaseArray() {
+  this.array = null;
+}
+
 // Builders that draw nothing (the one-off pass that only wants the side
 // effects: collision circles, lamp and glow lists).
 const NOOP = () => undefined;
@@ -397,6 +401,10 @@ export function buildRealCity(city, collision) {
     for (const [key, mat, opts, isSmall] of plan) {
       const made = B[key].buildInto(g, mat, opts);
       for (const m of made) {
+        // Once on the GPU the vertex arrays are not needed in memory
+        // (nothing reads tile geometry back; bounds are already set).
+        for (const k in m.geometry.attributes) m.geometry.attributes[k].onUpload(releaseArray);
+        if (m.geometry.index) m.geometry.index.onUpload(releaseArray);
         meshes.push(m);
         if (isSmall) small.push(m);
         if (m.userData.tierCounts) {

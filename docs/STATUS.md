@@ -464,3 +464,45 @@ None critical or high.
   be reached on foot; the beam's shader compiles when the first heli
   appears (one program, not warmed at start); the falling wreck is dark
   and hard to see at night.
+
+## 2026-11-22: Miami street polish (owner report: "very CGA and alpha again")
+- Buildings (new src/render/miamilook.js, buildings.js): each Miami
+  building gets a look from its neighbourhood and a seeded hash: Brickell
+  and Downtown glass towers (teal and blue tints, fins, spandrel ledges,
+  setbacks, roof railings, a plant penthouse) and white condo towers
+  with a balcony and glass railing on every floor; Little Havana,
+  Shenandoah and the like in pastel stucco with a new arched-window
+  facade (shutters, sills, balconettes) and terracotta tile copings or
+  hipped tile roofs; art-deco pastel blocks on Miami Beach (eyebrow
+  ledges, a centre fin over the roof, speed-line bands); port sheds in
+  light greys. All get a stone plinth, corner pilasters, string courses
+  per floor and an entrance canopy on tall ones. Facades have normal
+  maps (recessed windows, sills) and wear in the shader (darker, dirtier
+  base, rain streaks under floor lines that fade by 150 m, patchy tone).
+  The far blocks use the same colours. The island is unchanged.
+- Trees (props.js): Miami street trees are round canopies of many leafy
+  clumps (a foliage picture on them), or palms (ringed leaning trunk,
+  crown of see-through leafy fronds, two old fronds hanging) in the palm
+  neighbourhoods and by the water; extra palms down the avenues there,
+  Brickell Avenue, Biscayne Boulevard, Calle Ocho and other named
+  boulevards, and along the seawalls (with colliders). Trees stay drawn
+  at the middle level (no pop-in at 170 m).
+- Ground: edge lines along the kerbs, zebra crossings and stop lines at
+  junctions; grass and open land vary in slow lusher and drier patches.
+- Sky and sea: deeper blue overhead and a warm haze at the horizon by
+  day, with the fog close to it so far towers fade into it
+  (daynight.js, colours only); the sea is deeper and greener looking
+  down, paler at a glancing view, with slow large patches (water.js,
+  shading only; the waves are unchanged).
+- Night: the new arched facade lights its windows like the others
+  (nightlights.js: one style entry).
+- Cost (scripts/perf.mjs, spawn street): day 221 -> 249 draw calls,
+  311k -> 489k triangles; night 223 -> 249, 333k -> 491k. Kept in budget
+  by merging everything per tile and material (2 new meshes per tile),
+  fewer fins and railing panels, balconies on two sides only, no hidden
+  balcony tops, and the tile vertex arrays freed once on the GPU.
+- Screenshots: docs/preview/miami-polish-*.png (before:
+  miami-polish-before-*.png), `node scripts/miami-polish-shots.mjs`.
+- Still weak: canopies read as clumps up close; Little Havana has wide
+  plain lawns between the street and the buildings; tall towers still
+  share one window grid per style.

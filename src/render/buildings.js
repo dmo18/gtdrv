@@ -273,10 +273,11 @@ function face(B, p, color, k = 1.5, s = 1) {
 }
 
 // A thin slab out from a wall (canopy, balcony, eyebrow): front, top
-// and the underside seen from the street.
-function slab(P, s, a0, a1, o, y0, y1, color, under) {
+// (unless noTop: a balcony's floor is hidden by its railing) and the
+// underside seen from the street.
+function slab(P, s, a0, a1, o, y0, y1, color, under, noTop = false) {
   span(P, s, a0, a1, y0, y1, o, color, 0, 0, 1, 1, 0.92, 1);
-  P.quad(px(s, a0, o), y1, pz(s, a0, o), px(s, a1, o), y1, pz(s, a1, o), px(s, a1, 0), y1, pz(s, a1, 0), px(s, a0, 0), y1, pz(s, a0, 0), color, 0, 1, 0);
+  if (!noTop) P.quad(px(s, a0, o), y1, pz(s, a0, o), px(s, a1, o), y1, pz(s, a1, o), px(s, a1, 0), y1, pz(s, a1, 0), px(s, a0, 0), y1, pz(s, a0, 0), color, 0, 1, 0);
   P.quad(px(s, a0, 0), y0, pz(s, a0, 0), px(s, a1, 0), y0, pz(s, a1, 0), px(s, a1, o), y0, pz(s, a1, o), px(s, a0, o), y0, pz(s, a0, o), under, 0, -1, 0);
 }
 
@@ -342,7 +343,7 @@ function railing(C, b, x0, z0, x1, z1, y, hgt) {
   const r = C.R.railing;
   if (!r) return;
   for (const s of sidesOf(x0, z0, x1, z1)) {
-    const n = Math.max(1, Math.round(s.L / 6));
+    const n = Math.max(1, Math.round(s.L / 9));
     const st = s.L / n;
     for (let i = 0; i < n; i++) panel(D, s, i * st, (i + 1) * st, y, y + hgt, 0, 0xa8aeb4, r);
   }
@@ -358,7 +359,7 @@ function tileCoping(C, b, x0, z0, x1, z1, y, col) {
     const P2 = [px(s, s.L - oi, oi), yi, pz(s, s.L - oi, oi)], P3 = [px(s, oi, oi), yi, pz(s, oi, oi)];
     face(RF, [P0, P1, P2, P3], col, 0.9);
     // Underside (dark) and the edge.
-    P.quad(P3[0], yo - 0.02, P3[2], P2[0], yo - 0.02, P2[2], P1[0], yo - 0.02, P1[2], P0[0], yo - 0.02, P0[2], shade(col, 0.45), 0, -1, 0);
+    P.quad(P3[0], yo - 0.14, P3[2], P2[0], yo - 0.14, P2[2], P1[0], yo - 0.14, P1[2], P0[0], yo - 0.14, P0[2], shade(col, 0.45), 0, -1, 0);
     span(P, s, -oo, s.L + oo, yo - 0.14, yo, oo, shade(col, 0.8), 0, 0, 1, 1);
   }
 }
@@ -373,8 +374,11 @@ function hipRoof(C, b, x0, z0, x1, z1, y, col, trim) {
   const rh = Math.min(3.4, Math.min(w, d) * 0.3);
   const top = y + rh;
   P.walls(x0 - 0.06, z0 - 0.06, x1 + 0.06, z1 + 0.06, y - 0.35, y, trim, 1, 1, 0.9, 1);
-  // Eaves underside.
-  P.ring(X0, Z0, X1, Z1, e + 0.06, y - 0.02, shade(col, 0.4));
+  // Eaves underside, seen from the street.
+  for (const s of sidesOf(x0, z0, x1, z1)) {
+    const o = e + 0.02, yb = y - 0.02;
+    P.quad(px(s, -e, 0), yb, pz(s, -e, 0), px(s, s.L + e, 0), yb, pz(s, s.L + e, 0), px(s, s.L + e, o), yb, pz(s, s.L + e, o), px(s, -e, o), yb, pz(s, -e, o), shade(col, 0.42), 0, -1, 0);
+  }
   if (w >= d) {
     const r0 = X0 + d / 2, r1 = X1 - d / 2, m = (Z0 + Z1) / 2;
     face(RF, [[X0, y, Z1], [X1, y, Z1], [r1, top, m], [r0, top, m]], col);
@@ -428,15 +432,18 @@ function balconies(C, b, L, tiers, gf, h, floors, trim) {
     const nf = Math.max(1, Math.round((t.y1 - t.y0) / 3.25));
     const fh = (t.y1 - t.y0) / nf;
     const all = sidesOf(b.x0 + t.i, b.z0 + t.i, b.x1 - t.i, b.z1 - t.i);
-    let sides = all.filter((s) => s.L >= 8 && (L.balconies === 2 || (b.street & s.m)));
+    // The street fronts (or, on a full condo tower, the two longest
+    // sides when it has no street front): at most two sides.
+    let sides = all.filter((s) => s.L >= 8 && (b.street & s.m));
+    if (!sides.length && L.balconies === 2) sides = all.slice().sort((p, q) => q.L - p.L).slice(0, 2);
     if (!sides.length) sides = [all.reduce((a, q) => (q.L > a.L ? q : a))];
-    if (L.balconies !== 2) sides = sides.slice(0, 2);
-    const maxF = Math.min(nf, 48);
+    sides = sides.slice(0, 2);
+    const maxF = Math.min(nf, 40);
     for (const s of sides) {
       const a0 = 0.8, a1 = s.L - 0.8, o = 1.5;
       for (let f = 1; f < maxF; f++) {
         const y = t.y0 + f * fh;
-        slab(P, s, a0, a1, o, y - 0.2, y, trim, under);
+        slab(P, s, a0, a1, o, y - 0.2, y, trim, under, true);
         if (r) panel(D, s, a0, a1, y, y + 1.05, o - 0.05, glassCol, r);
       }
     }

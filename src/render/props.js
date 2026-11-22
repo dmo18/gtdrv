@@ -223,13 +223,13 @@ function makeMiamiTemplates(rng, R) {
     // A hidden core, then a dome of smaller clumps round it: reads as
     // foliage, not as one ball.
     leafy(f, R.leaves, 0, th + 0.3, 0, 0.2, 0.15, 0.2, hexShade(g, 0.7), 6, 3, jit);
-    const n = 11 + (v % 3);
+    const n = 8 + (v % 3);
     const rad = rng.range(0.19, 0.24);
     for (let i = 0; i < n; i++) {
       const a = i * 2.39996 + v;
       const up = (i + 0.5) / n;
       const ring = Math.sqrt(1 - up * up * 0.75);
-      const r = rng.range(0.085, 0.12) * (1.1 - up * 0.3);
+      const r = rng.range(0.1, 0.135) * (1.1 - up * 0.3);
       leafy(f, R.leaves, Math.cos(a) * rad * ring, th + 0.22 + up * 0.24, Math.sin(a) * rad * ring, r, r * 0.8, r, hexShade(LEAF[(v + i) % LEAF.length], rng.range(0.82, 1.14) * (0.88 + up * 0.22)), 6, 3, jit);
     }
     T.canopies.push(t);
@@ -281,7 +281,59 @@ const PALM_PLACES = new Set(['Brickell', 'Downtown Miami', 'Brickell Key', 'Bayf
   'Miami Beach', 'Watson Island', 'Fisher Island', 'Venetian Islands', 'Hibiscus Island', 'Palm Island', 'Virginia Key', 'Miami']);
 
 // Named boulevards lined with palms whatever their width.
-const PALM_STREET = /Brickell Avenue|Brickell Bay|Biscayne Boulevard|Bayshore|Ocean Drive|Collins Avenue|Alton Road|Venetian|MacArthur|Coral Way|Port Boulevard/;
+const PALM_STREET = /Southwest 8th Street|Brickell Avenue|Brickell Bay|Biscayne Boulevard|Bayshore|Ocean Drive|Collins Avenue|Alton Road|Venetian|MacArthur|Coral Way|Port Boulevard/;
+
+// Where the extra Miami palms stand (x, z, height triples): down the
+// avenues of the palm neighbourhoods and the named palm boulevards, and
+// along the seawalls there. Worked out once per city (the whole map is
+// scanned) and kept, so a streamed tile only filters the list.
+const palmCache = new WeakMap(), templateCache = new WeakMap();
+function miamiPalmSpots(city, lamps, hash, blocked) {
+  let out = palmCache.get(city);
+  if (out) return out;
+  out = [];
+  const lampNear = new Set();
+  for (const l of lamps) lampNear.add(Math.round(l.x / 4) * 100000 + Math.round(l.z / 4));
+  const nearLamp = (x, z) => {
+    const i = Math.round(x / 4), j = Math.round(z / 4);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (lampNear.has((i + a) * 100000 + j + b)) return true;
+    return false;
+  };
+  for (const e of city.edges) {
+    if (e.causeway || e.bridge) continue;
+    const named = !!(e.name && PALM_STREET.test(e.name));
+    if (e.width < 18 && !named) continue;
+    const a = city.nodes[e.a], bn = city.nodes[e.b];
+    if (!named && !PALM_PLACES.has(city.placeOf((a.x + bn.x) / 2, (a.z + bn.z) / 2))) continue;
+    const half = e.width / 2, rx = -e.uz, rz = e.ux;
+    for (const sd of [-1, 1]) {
+      for (let d = (a.hx || 0) + 8; d + 8 <= e.length - (bn.hx || 0); d += 13) {
+        const x = a.x + e.ux * d + rx * sd * (half + 1.15), z = a.z + e.uz * d + rz * sd * (half + 1.15);
+        // Diagonal streets have no block beside them: any open land will do.
+        const ground = city.blockAt(x, z) || (city.isLand && city.isLand(x, z) && city.onRoad && !city.onRoad(x, z));
+        if (!ground || (city.inBuilding && city.inBuilding(x, z, 1)) || nearLamp(x, z)) continue;
+        out.push(x, z, 8 + hash(x, z + 5) * 4);
+      }
+    }
+  }
+  if (city.mainShore && city.bounds) {
+    const B = city.bounds, st = 15;
+    for (let z = B.z0 + 7; z < B.z1; z += st) {
+      for (let x = B.x0 + 7; x < B.x1; x += st) {
+        const sd = city.mainShore(x, z);
+        if (sd < 4 || sd >= 4 + st * 0.7) continue;
+        const jx = x + (hash(x, z) - 0.5) * 6, jz = z + (hash(z, x) - 0.5) * 6;
+        const s2 = city.mainShore(jx, jz);
+        if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
+        if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
+        if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || blocked(jx, jz)) continue;
+        out.push(jx, jz, 7.5 + hash(jx, jz + 5) * 4.5);
+      }
+    }
+  }
+  palmCache.set(city, out);
+  return out;
+}
 
 // Upright picture centred at (x, z), facing direction `rot`.
 function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
@@ -299,7 +351,11 @@ export function addProps(C, own = null, side = true) {
   const T = makeTemplates(rng);
   const R = C.R;
   const miami = city.map === 'miami' && R && R.frond;
-  const MT = miami ? makeMiamiTemplates(createRng(city.seed + 9191), R) : null;
+  let MT = null;
+  if (miami) {
+    MT = templateCache.get(city);
+    if (!MT) templateCache.set(city, (MT = makeMiamiTemplates(createRng(city.seed + 9191), R)));
+  }
   const L = city.landmarks || { cranes: [], billboards: [], runwayLights: [] };
   const hash = (x, z) => {
     const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
@@ -374,52 +430,13 @@ export function addProps(C, own = null, side = true) {
     }
   }
 
-  // ---- Miami: palms down the avenues of the palm neighbourhoods ----
+  // ---- Miami: palms down the avenues and along the seawalls ----
   if (MT) {
-    const lampNear = new Set();
-    for (const l of lamps) lampNear.add(Math.round(l.x / 4) * 100000 + Math.round(l.z / 4));
-    const nearLamp = (x, z) => {
-      const i = Math.round(x / 4), j = Math.round(z / 4);
-      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (lampNear.has((i + a) * 100000 + j + b)) return true;
-      return false;
-    };
-    for (const e of city.edges) {
-      if (e.causeway || e.bridge) continue;
-      const named = !!(e.name && PALM_STREET.test(e.name));
-      if (e.width < 18 && !named) continue;
-      const a = city.nodes[e.a], bn = city.nodes[e.b];
-      if (!named && !PALM_PLACES.has(city.placeOf((a.x + bn.x) / 2, (a.z + bn.z) / 2))) continue;
-      const half = e.width / 2, rx = -e.uz, rz = e.ux;
-      for (const sd of [-1, 1]) {
-        for (let d = (a.hx || 0) + 8; d + 8 <= e.length - (bn.hx || 0); d += 13) {
-          const x = a.x + e.ux * d + rx * sd * (half + 1.15), z = a.z + e.uz * d + rz * sd * (half + 1.15);
-          // Diagonal streets have no block beside them: any open land will do.
-          const ground = city.blockAt(x, z) || (city.isLand && city.isLand(x, z) && city.onRoad && !city.onRoad(x, z));
-          if (!ground || (city.inBuilding && city.inBuilding(x, z, 1)) || nearLamp(x, z)) continue;
-          const h = 8 + hash(x, z + 5) * 4;
-          if (side) collision.addCircle(x, z, 0.3, h, 'tree');
-          if (mine(x, z)) palm(x, z, h, 0);
-        }
-      }
-    }
-  }
-
-  // ---- Miami: palms along the seawalls of the palm neighbourhoods ----
-  if (MT && city.mainShore) {
-    const B = city.bounds, st = 15;
-    for (let z = B.z0 + 7; z < B.z1; z += st) {
-      for (let x = B.x0 + 7; x < B.x1; x += st) {
-        const sd = city.mainShore(x, z);
-        if (sd < 4 || sd >= 4 + st * 0.7) continue;
-        const jx = x + (hash(x, z) - 0.5) * 6, jz = z + (hash(z, x) - 0.5) * 6;
-        const s2 = city.mainShore(jx, jz);
-        if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
-        if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
-        if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || blocked(jx, jz)) continue;
-        const h = 7.5 + hash(jx, jz + 5) * 4.5;
-        if (side) collision.addCircle(jx, jz, 0.3, h, 'tree');
-        if (mine(jx, jz)) palm(jx, jz, h, 0);
-      }
+    const spots = miamiPalmSpots(city, lamps, hash, blocked);
+    for (let i = 0; i < spots.length; i += 3) {
+      const x = spots[i], z = spots[i + 1], h = spots[i + 2];
+      if (side) collision.addCircle(x, z, 0.3, h, 'tree');
+      if (mine(x, z)) palm(x, z, h, 0);
     }
   }
 

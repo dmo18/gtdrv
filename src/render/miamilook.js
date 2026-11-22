@@ -91,7 +91,7 @@ function computeLook(city, b) {
       L.style = 'glass';
       L.tint = vary(pick(GLASS, u(5)), u(6));
       L.trim = pick([0xe8eaec, 0xb8c0c6, 0x8c969e], u(7));
-      L.fins = u(8) < 0.6 ? (u(9) < 0.5 ? 1 : 2) : 0;
+      L.fins = u(8) < 0.6 ? (u(9) < 0.5 ? 2 : 3) : 0;
     } else if (r < 0.88) {
       // A white condo tower with a balcony on every floor.
       L.style = 'stucco';
@@ -102,7 +102,7 @@ function computeLook(city, b) {
       L.style = 'office';
       L.tint = vary(pick(CONCRETE, u(5)), u(6));
       L.trim = 0xe6e4de;
-      L.fins = 1;
+      L.fins = 2;
     }
   } else if (DECO.has(place) && b.h < 26) {
     L.style = 'stucco';
@@ -114,7 +114,7 @@ function computeLook(city, b) {
     L.tint = L.style === 'glass' ? vary(pick(GLASS, u(5)), u(6)) : vary(pick(CONDO, u(5)), u(6));
     L.trim = 0xffffff;
     L.balconies = L.style === 'stucco' ? 1 : 0;
-    L.fins = L.style === 'glass' ? 1 : 0;
+    L.fins = L.style === 'glass' ? 2 : 0;
   } else if (PORT.has(place)) {
     L.style = 'office';
     L.tint = vary(pick(CONCRETE, u(5)), u(6));
@@ -124,7 +124,7 @@ function computeLook(city, b) {
   } else {
     // Low-rise stucco: Little Havana, Shenandoah and the like.
     const r = u(4);
-    L.style = b.h <= 16 && r < 0.6 ? 'havana' : r < 0.85 ? 'stucco' : 'office';
+    L.style = b.h <= 16 && r < 0.62 ? 'havana' : r < 0.95 ? 'stucco' : 'office';
     L.tint = L.style === 'office' ? vary(pick(CONCRETE, u(5)), u(6)) : vary(pick(STUCCO, u(5)), u(6));
     L.trim = u(7) < 0.75 ? 0xf8f6f0 : mix(L.tint, 0xffffff, 0.55);
     L.tile = L.style === 'havana' && u(8) < 0.7;
