@@ -81,7 +81,7 @@ export const MUSIC_SHOTS = {
     }
     warm(out, 2, 0.4); // harmonics so the kick reads on a phone
     harmonize(out, 110, 1.2, { hi: 700 });
-    return fadeEdges(normalize(removeDC(out), 0.9), 2, 600);
+    return fadeEdges(normalize(removeDC(out), 0.85), 2, 600);
   },
   'm:snare'(rng) {
     const n = len(0.3);
@@ -151,7 +151,9 @@ export function createComposer(rng, opt = {}) {
     // bass: root on one, then a syncopated answer
     notes.push({ beat: 0, inst: 'bass', semi: root + chord[0], vel: 0.9 });
     const sync = [[1.5, 2.5], [2, 3.5], [1.75, 2.5, 3.25]][groove.bassSync];
-    for (const b of sync) notes.push({ beat: b, inst: 'bass', semi: root + chord[0] + (rng.next() < 0.3 ? 7 : 0), vel: 0.6 + 0.2 * rng.next() });
+    // (the answer may jump to the chord's own fifth; a fixed +7 semitones
+    // left the mode on some chords: a tritone clash under the pad)
+    for (const b of sync) notes.push({ beat: b, inst: 'bass', semi: root + (rng.next() < 0.3 ? chord[2] : chord[0]), vel: 0.6 + 0.2 * rng.next() });
     // arpeggio in eighths over the chord, an octave up
     for (let k = 0; k < 8; k++) {
       const a = arp[k];

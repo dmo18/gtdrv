@@ -4,11 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VEHICLE_SPECS, createVehicle, stepVehicle, setHandlingMode, steerLock, fullLockCurvature, lateralGrip, tyreCurve, handlingParams,
+  brakePedal,
 } from '../src/entities/vehicle.js';
 import {
   MODES, LAT_G_FACTOR, LAT_TEST_SPEEDS, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, MODE_BRAKE_DIFF,
   MODE_STRAIGHT_DIFF, BANDS, A1_LINEAR, A2_OVERSHOOT, A2_SETTLE, A3_MIRROR, A4_DRIFT, A5, B1_HALF, B2, B4_KEEP,
-  ARCADE_SLIP_MAX_DEG, SAG, ASK, HB_SLIP_CAP, SQUEAL, HALF_TRAVEL, SLALOM,
+  ARCADE_SLIP_MAX_DEG, SAG, ASK, HB_SLIP_CAP, SQUEAL, HALF_TRAVEL, SLALOM, LAT_G_LINE, ORDINARY_CARS, BRAKE_PEDAL_S,
 } from '../src/entities/handlingbands.js';
 import {
   wheelCurve, steerTravel, rawFromTravel, createWheelTracker, rampSteer, tiltToSteer, tiltFilter, sliderRaw,
@@ -200,6 +201,11 @@ test('bands: steady lateral grip on full lock at 15 and 30 m/s, per mode', () =>
           const u = u0 === 30 && s.maxSpeed < 36 ? 0.8 * s.maxSpeed : u0;
           const k = latShare(id, u);
           assert.ok(inBand(k, LAT_G_FACTOR[mode]), `${mode} ${id} at ${u.toFixed(1)} m/s: ${k.toFixed(3)} x grip, band ${LAT_G_FACTOR[mode]}`);
+          // K10: ordinary cars sit on the section 2 line in both modes.
+          if (ORDINARY_CARS.includes(id)) {
+            const g = k * s.grip;
+            assert.ok(inBand(g, LAT_G_LINE), `${mode} ${id} at ${u.toFixed(1)} m/s: ${g.toFixed(3)} g, line ${LAT_G_LINE}`);
+          }
         }
       }
     });
@@ -506,17 +512,13 @@ function invCurve(t) {
 // (first on the +z side). The scripted driver follows a weave of
 // amplitude `amp` through the style's own input, rate limited like a
 // thumb or a phone. Returns the car centre's side offset at each cone.
-// Driver tuning per style (a player adapts to the control): preview time,
-// lateral and heading gains, and the weave amplitude asked for.
-const SLALOM_DRIVER = {
-  wheel: [0.3, 0.13, 0.3, 1.1],
-  slider: [0.2, 0.13, 0.5, 1.1],
-  tilt: [0.3, 0.13, 0.1, 0.7],
-  buttons: [0.3, 0.13, 0.1, 1.1],
-};
+// One driver for every style (the contract rule, K9): preview time,
+// lateral and heading gains and the weave amplitude asked for are the
+// same; only the input device and its rate limit differ.
+const SLALOM_DRIVER = [0.3, 0.13, 0.1, 0.7];
 function slalom(id, u, style) {
-  const [tau, k1, k2, amp] = SLALOM_DRIVER[style];
-  const GAP = SLALOM.gap, N = 6, Wk = Math.PI / GAP;
+  const [tau, k1, k2, amp] = SLALOM_DRIVER;
+  const GAP = SLALOM.gap, N = SLALOM.cones, Wk = Math.PI / GAP;
   const env = (x) => (x <= 0 ? 0 : x >= GAP ? 1 : 0.5 - 0.5 * Math.cos(Math.PI * x / GAP));
   const z = (x) => (x > GAP * (N + 1) ? 0 : amp * env(x) * Math.cos(Wk * (x - GAP)));
   const v = createVehicle(id, -30, 0, 0);
@@ -563,20 +565,20 @@ function slalom(id, u, style) {
   }
   return { offs, minSp };
 }
-// m: the car's centre passes each cone on its own side by this much. Full
-// body clearance (half the width) is out of reach: at 20 m/s an 18 m weave
-// that clears a 1.85 m wide car needs about 1.1 g even with instant
-// steering, above the sedan's Arcade grip (see the W3 report).
-const SLALOM_CLEAR = 0.4;
+// SLALOM.clear (m): the car's centre passes each cone on its own side by
+// at least this much (docs/REVAMP.md 6.3, the slalom pass rule). Full body
+// clearance (half the width) is out of reach within the contract's lock
+// and return times: at 20 m/s an 18 m weave gives 0.9 s per side, of which
+// about 0.55 s goes on moving the wheel from one lock to the other.
 
 test('slalom: every style weaves through six cones 18 m apart (Arcade 20 m/s, Sim 17 m/s)', () => {
   for (const style of ['wheel', 'buttons', 'tilt', 'slider']) {
     for (const [mode, u] of [['arcade', SLALOM.speed], ['sim', SLALOM.simSpeed]]) {
       const r = inMode(mode, () => slalom('sedan', u, style));
       const tag = `${style} ${mode} at ${u}`;
-      assert.equal(r.offs.length, 6, `${tag} reached every cone`);
-      for (const o of r.offs) assert.ok(o >= SLALOM_CLEAR, `${tag}: cones ${r.offs.map((x) => x.toFixed(2)).join(' ')}`);
-      assert.ok(r.minSp > u * 0.95, `${tag} kept its speed (${r.minSp.toFixed(1)})`);
+      assert.equal(r.offs.length, SLALOM.cones, `${tag} reached every cone`);
+      for (const o of r.offs) assert.ok(o >= SLALOM.clear, `${tag}: cones ${r.offs.map((x) => x.toFixed(2)).join(' ')}`);
+      assert.ok(r.minSp > u * SLALOM.keep, `${tag} kept its speed (${r.minSp.toFixed(1)})`);
     }
   }
 });
@@ -713,5 +715,60 @@ test('boost: hands off at speed with boost held runs straight (A4)', () => {
     const z0 = v.z;
     for (let i = 0; i < 300; i++) { holdThrottle(v, c, u); stepBoosted(v, c); }
     assert.ok(Math.abs(v.z - z0) < A4_DRIFT, `${id} boosted drift ${v.z - z0}`);
+  }
+});
+
+// ---- K11 and the owner's accuracy checks (H1). ----
+
+test('brake pedal S-curve (PEDAL_S = 1.0) is pinned: it replaces the traffic brake gain scale', () => {
+  const S = BRAKE_PEDAL_S;
+  assert.equal(S, 1.0);
+  for (let i = 0; i <= 100; i++) {
+    const p = i / 100;
+    const want = p + S * p * (1 - p) * (1 - 2 * p);
+    assert.ok(Math.abs(brakePedal(p) - want) < 1e-12, `pedal ${p}: ${brakePedal(p)} vs ${want}`);
+    // Point symmetric about half pedal: firmer in the first half, softer in the second.
+    assert.ok(Math.abs(brakePedal(p) + brakePedal(1 - p) - 1) < 1e-12, `symmetry at ${p}`);
+  }
+  assert.ok(Math.abs(brakePedal(0.25) - 0.34375) < 1e-12);
+  assert.ok(Math.abs(brakePedal(0.75) - 0.65625) < 1e-12);
+  assert.ok(Math.abs(brakePedal(0.1) - 0.172) < 1e-12);
+  assert.equal(brakePedal(0.5), 0.5);
+  assert.equal(brakePedal(-1), 0);
+  assert.equal(brakePedal(3), 1);
+  // Slope 1 + S at the top of the pedal travel, 1 - S / 2 at half: still rising.
+  const e = 1e-6;
+  assert.ok(Math.abs(brakePedal(e) / e - (1 + S)) < 1e-4, 'slope at 0');
+  assert.ok(Math.abs((brakePedal(0.5 + e) - brakePedal(0.5 - e)) / (2 * e) - (1 - S / 2)) < 1e-6, 'slope at half');
+});
+
+test('owner check: 60 to 0 mph on dry ground is the same distance in Arcade and Sim', () => {
+  const a = straightTable('arcade'), s = straightTable('sim');
+  for (const id of IDS) {
+    assert.ok(Math.abs(a[id].stop / s[id].stop - 1) <= 0.001, `${id} stop arcade ${a[id].stop.toFixed(3)} m, sim ${s[id].stop.toFixed(3)} m`);
+  }
+});
+
+test('owner check: steering at the wheel centre is near linear, at the curve and at the car', () => {
+  // The touch curve: within 1.2 % of its centre slope over the first quarter of the travel.
+  for (let i = 1; i <= 25; i++) {
+    const x = i / 100;
+    assert.ok(Math.abs(wheelCurve(x) / (0.85 * x) - 1) <= 0.012, `wheelCurve(${x}) ${wheelCurve(x)}`);
+  }
+  // At the car: thumb degrees on the wheel to path curvature at 10 m/s, both
+  // modes. Curvature per degree at 10, 20 and 30 degrees stays within 5 % of
+  // its value at 5 degrees (the A1 linear steering through the touch curve).
+  for (const mode of MODES) {
+    inMode(mode, () => {
+      for (const id of ACCURACY_CARS) {
+        const per = (deg) => curvature(id, 10, wheelCurve(rawFromTravel('wheel', deg)), 3, 1) / deg;
+        const k5 = per(5);
+        assert.ok(k5 > 0, `${mode} ${id} turns`);
+        for (const deg of [10, 20, 30]) {
+          const r = per(deg) / k5;
+          assert.ok(Math.abs(r - 1) <= 0.05, `${mode} ${id} ${deg} deg: ${(r * 100).toFixed(1)} % of the 5 deg rate`);
+        }
+      }
+    });
   }
 });

@@ -754,7 +754,7 @@ Car spec table: fields that change in `VEHICLE_SPECS` (W3). Start values; the ba
 
 | id | grip | steerMax (rad) | lockRate (1/s) | returnRate (1/s) | maxSpeed (m/s) | mass (kg) |
 |---|---|---|---|---|---|---|
-| compact | 0.92 | 0.43 | 3.3 | 4.2 | 44.7 | 1100 |
+| compact | 0.95 | 0.43 | 3.3 | 4.2 | 44.7 | 1100 |
 | sedan | 0.95 | 0.48 | 3.3 | 4.2 | 51.4 | 1450 |
 | taxi | 0.95 | 0.48 | 3.3 | 4.2 | 51.4 | 1500 |
 | police | 1.05 | 0.49 | 3.6 | 4.5 | 60.4 | 1700 |
@@ -790,6 +790,15 @@ What is the same in both modes (D3: accurate steering and braking in both):
    - A4 straight: hands off at 30 m/s for 5 s drifts under 0.2 m sideways.
    - A5 lane change: 3.5 m sideways within 30 m of road at 20 m/s (truck 15 m/s), ending within
      0.4 m of the new lane centre and 3 degrees of straight, 1.5 s after the move.
+Brake pedal (H1, replaces the traffic brake gain scale): every brake input, the player's and
+every AI planner's, goes through one S-curve before the hydraulic build-up,
+`brakePedal(p) = p + PEDAL_S * p * (1 - p) * (1 - 2p)` with `PEDAL_S = 1.0` (vehicle.js; pinned
+by `BRAKE_PEDAL_S` in handlingbands.js and a test). It is exact at 0, half and full pedal (so B1
+holds), point symmetric about half pedal, strictly rising, and firmer in the first half of the
+travel (0.25 gives 0.344 of the full brake), where drivers and the AI trim their speed. The
+per-car traffic brake gain scale planned earlier is not built: planners send their pedal
+unchanged, and the car's own `brake` and tyre limit set the deceleration.
+
 5. Braking accuracy tests, both modes:
    - B1 linear: a brake input of 0.5 gives 45 to 55 % of the full-brake deceleration at 20 m/s.
    - B2 straight: a full stop from 26.82 m/s turns the car less than 1 degree and moves it less
@@ -815,7 +824,10 @@ What differs:
 
 Nothing else may differ. The mode table in vehicle.js (`HANDLING`) keeps only the fields that
 implement these rows. `lateralGrip(spec)` becomes `factor * spec.grip` with factor 1.06 (Arcade)
-and 0.94 (Sim) as start values. Traffic, police and crew planners use `steerLock(spec, u)` from
+and 1.00 (Sim; H1 raised it from the 0.94 start value, and the compact's grip from 0.92 to
+0.95, so that the ordinary cars, compact, sedan and taxi, hold the section 2 line of 0.9 to 1.1
+g at 15 and 30 m/s in Sim too: measured 0.92 to 0.94 g in Sim, 0.99 to 1.01 g in Arcade;
+`LAT_G_LINE` and `ORDINARY_CARS` in handlingbands.js). Traffic, police and crew planners use `steerLock(spec, u)` from
 vehicle.js and no private copy of the curve (today: traffic.js lines 243 and 663, police.js line
 551); they drive the same in both modes because they stay under 0.6 g.
 
@@ -849,6 +861,16 @@ A style may not add its own smoothing, except the two named below.
 | buttons | LEFT and RIGHT. While one is held the target ramps from its current value toward -1 or 1 over `steerTravel('buttons')` seconds (this ramp is the one allowed input filter; it equals the car's own lock time so the two do not add up). Release: target 0. Both held: target 0. The keyboard uses the same mapping. | Hold to full lock takes 0.25 to 0.40 s measured at the car's wheels. A 0.10 s tap peaks between 0.25 and 0.40 of lock. Both held gives 0. The slalom passes with a scripted press and release driver. |
 | tilt | `tiltAngle(beta, gamma, screenAngle)` gives the roll of the phone like a steering wheel. Dead zone 1.5 degrees, then raw = (degrees - 1.5) / `steerTravel('tilt')`, then `wheelCurve`. A low-pass with a 0.08 s time constant is the one allowed filter. If no orientation event arrives within 1.0 s of choosing tilt, or permission is refused, the game shows a toast, uses the wheel for this run and keeps the saved setting. | 12.5 degrees gives raw 0.5. Both landscape ways give the same sign. Lying flat gives 0. Noise of 0.5 degrees at rest gives 0. The fallback fires in a test with no events. The slalom passes with the roll limited to 60 degrees per second. |
 | slider | A bar 180 px wide. raw = (pointer x - bar centre x) / `steerTravel('slider')`, then `wheelCurve`. Absolute: where the thumb lands is the value. The pointer is tracked by id until it lifts, even off the bar. On lift the target is 0. | 45 px gives raw 0.5. A pointer that leaves the bar still steers. Ends clamp at 1. The slalom passes with the thumb limited to 400 px per second. |
+
+Slalom pass rule (all four styles, `SLALOM` in handlingbands.js): six cones on a straight line
+18 m apart, passed on alternate sides by the sedan at 20 m/s (Arcade) or 17 m/s (Sim). It
+passes when the car reaches all six cones in order, passes each on its own side with its centre
+at least 0.4 m out (`clear`) and never drops under 95 % of the speed (`keep`). One scripted
+driver (the same preview, gains and weave) serves every style; only the input device and its
+rate limit (thumb 300 degrees per second, roll 60 degrees per second, slider 400 px per second,
+buttons pressed and released) differ. Full body clearance is not asked: at 20 m/s the weave
+leaves 0.9 s per side, and about 0.55 s of that goes on moving the wheels from lock to lock at
+the `lockRate` and `returnRate` above.
 
 The first-run "Choose steering" dialog stays (W4), with the wheel as the default.
 

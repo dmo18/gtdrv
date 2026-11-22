@@ -201,6 +201,16 @@ try {
   const help = await page.locator('.rw-menu-body').innerText();
   check('help has the credit line and the version', help.includes('Map data (c) OpenStreetMap contributors, ODbL') && /Rustwater/.test(help), help.slice(-120));
 
+  // About (Help tab, and the title): version, credits, map licence, names, privacy link.
+  await page.locator('[data-role="about"]').tap();
+  const about = await page.locator('.rw-menu-body').innerText();
+  check('about: title, version, map credit, invented names, privacy', (await page.locator('.rw-menu-title').innerText()) === 'About'
+    && /Version v?\d+\.\d+\.\d+|Version dev/.test(about) && about.includes('Map data (c) OpenStreetMap contributors, ODbL') && /ODbL|Open Database Licence/.test(about)
+    && /names .* are invented/.test(about) && /privacy/i.test(about), about);
+  check('about: privacy link goes to privacy.html, no email', (await page.locator('[data-role="about-privacy-link"]').getAttribute('href')) === 'privacy.html' && !/@/.test(about));
+  check('about: Help stays the selected section', (await page.locator('.rw-menu-tab[aria-selected="true"]').innerText()) === 'Help');
+  await page.locator('.rw-menu-back').tap();
+  check('about: Back returns to Help', (await page.locator('.rw-menu-title').innerText()) === 'Help');
   // The back button is the same place on every screen; on a top screen it resumes.
   await tab('Resume');
   const bk1 = await page.locator('.rw-menu-back').boundingBox();
@@ -234,11 +244,20 @@ try {
   await grp('sound');
   check('sound: 6 rows, no music on/off switch', (await rowCount()) === 6 && (await page.locator('[data-setting="music"]').count()) === 0);
   await grp('game');
-  check('game: 4 rows (police, hard, map, new game)', (await rowCount()) === 4);
+  check('game: 5 rows (police, hard, blood, map, new game)', (await rowCount()) === 5);
+  // Blood (owner decision): on by default, switchable, stored with the other settings.
+  check('blood: on by default', (await page.locator('[data-setting="blood"]').getAttribute('aria-checked')) === 'true' && (await page.locator('[data-setting="blood"]').innerText()) === 'On');
   await grp('display');
-  // 5 rows from 0.5.0: the Phone check (docs/PLAN_V1.md 4.2) joins HUD, graphics quality, live day and night and time of day (at most 6)
-  check('display: 5 rows (HUD, quality, live time, time of day, Phone check)', (await rowCount()) === 5 && (await page.locator('[data-role="phonecheck"]').count()) === 1);
+  // 6 rows: the Phone check (docs/PLAN_V1.md 4.2) and the Sound test join HUD, graphics quality, live day and night and time of day (at most 6)
+  check('display: 6 rows (HUD, quality, live time, time of day, Phone check, Sound test)', (await rowCount()) === 6 && (await page.locator('[data-role="phonecheck"]').count()) === 1 && (await page.locator('[data-role="soundtest"]').count()) === 1);
   check('time of day greyed while live is on', await ev(() => document.querySelector('[data-setting="timeOfDay"]').disabled === true));
+  // Sound test: the eight numbered sounds of the Phone check, reachable from Settings.
+  await page.locator('[data-role="soundtest"]').tap();
+  const names = await page.locator('.rw-menu-sounds li').evaluateAll((l) => l.map((e) => e.dataset.sound + ' ' + e.querySelector('b').textContent));
+  check('sound test: 8 numbered sounds, same names as the Phone check', JSON.stringify(names) === JSON.stringify(['Engine', 'Tyre squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'].map((n, i) => (i + 1) + ' ' + n)), JSON.stringify(names));
+  check('sound test: has a Start the Phone check button', (await page.locator('[data-role="phonecheck-start"]').count()) === 1);
+  await page.locator('.rw-menu-back').tap();
+  check('sound test: Back returns to Settings', (await page.locator('.rw-menu-groups').isVisible()));
   await grp('controls');
   check('settings: four steering choices', (await page.locator('.rw-menu-body [data-steering]').count()) === 4);
   check('settings: current style marked', (await page.locator('.rw-menu-body [data-steering="buttons"]').getAttribute('aria-checked')) === 'true');
@@ -273,6 +292,12 @@ try {
   await page.locator('[data-setting="leftHanded"]').tap();
   await grp('game');
   await page.locator('[data-setting="police"]').tap();
+  await page.locator('[data-setting="blood"]').tap();
+  check('blood: off is stored as false and shown', (await progress()).settings.blood === false && (await page.locator('[data-setting="blood"]').innerText()) === 'Off');
+  await page.locator('[data-setting="blood"]').tap();
+  check('blood: back on', (await progress()).settings.blood === true);
+  await ev(() => { window.rw.game.progress.settings.blood = 'yes'; window.rw.game.events.emit('progress'); });
+  check('blood: a bad value reads as on', (await page.locator('[data-setting="blood"]').getAttribute('aria-checked')) === 'true' && (await progress()).settings.blood === undefined);
   await grp('display');
   check('settings: two HUD choices, minimal marked', (await page.locator('.rw-menu-body [data-hud]').count()) === 2
     && (await page.locator('.rw-menu-body [data-hud="minimal"]').getAttribute('aria-checked')) === 'true');
@@ -416,7 +441,7 @@ try {
   await page.waitForTimeout(200);
 
   // Smaller phone: every screen at both sizes, every group; rows 48 px or more; nothing scrolls except Help.
-  for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }]) {
+  for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }, { width: 748, height: 360 }]) {
     await page.setViewportSize(size);
     await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
     const probe = () => ev(() => {
@@ -444,6 +469,21 @@ try {
       check(`layout Settings ${g} ${size.width}: targets 48+, in view, no scroll`, !m.bad.length && !m.over && !m.sx && m.sy <= 1 && m.bot, JSON.stringify(m));
       await page.screenshot({ path: path.join(out, `settings-${g}-${size.width}x${size.height}.png`) });
     }
+    await tab('Help');
+    for (const role of ['about']) {
+      await page.locator(`[data-role="${role}"]`).tap();
+      const m = await probe();
+      check(`layout ${role} screen ${size.width}: targets 48+, in view`, !m.bad.length && !m.over && !m.sx, JSON.stringify(m));
+      await page.screenshot({ path: path.join(out, `${role}-${size.width}x${size.height}.png`) });
+      await page.locator('.rw-menu-back').tap();
+    }
+    await tab('Settings');
+    await grp('display');
+    await page.locator('[data-role="soundtest"]').tap();
+    const mst = await probe();
+    check(`layout sound test ${size.width}: targets 48+, no scroll`, !mst.bad.length && !mst.over && !mst.sx && mst.sy <= 1, JSON.stringify(mst));
+    await page.screenshot({ path: path.join(out, `soundtest-${size.width}x${size.height}.png`) });
+    await page.locator('.rw-menu-back').tap();
     await grp('game');
     for (const role of ['newgame', 'map']) {
       await page.locator(`[data-role="${role}"]`).tap();

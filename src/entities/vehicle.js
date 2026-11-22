@@ -35,7 +35,7 @@ export const VEHICLE_SPECS = {
   compact: {
     id: 'compact', label: 'Bramlet', body: 'hatch',
     length: 3.8, width: 1.7, height: 1.45, wheelBase: 2.4, wheelRadius: 0.3,
-    mass: 1100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.8, grip: 0.92, steerMax: 0.43,
+    mass: 1100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.8, grip: 0.95, steerMax: 0.43,
     lockRate: 3.3, returnRate: 4.2,
     drive: 'fwd', gears: 5, power: 58, firstGear: 13, cgFront: 0.62,
     health: 700, colors: [0xc8402e, 0x3a7bd5, 0xe8e2d0, 0x6bbf59, 0xf0a030],
@@ -232,7 +232,7 @@ const HANDLING = {
     tc: true, cutMin: 0.3, hbCap: true, hbBeta: 0.6, hbYaw: 2.2, transfer: 0.5, squeal: 1.3,
   },
   sim: {
-    latK: 0.98, fall: 0.2, ask: 1.1, assist: false, yawK: 1.2, yawFirm: 1.2, betaK: 0,
+    latK: 1.0, fall: 0.2, ask: 1.1, assist: false, yawK: 1.2, yawFirm: 1.2, betaK: 0,
     tc: false, cutMin: 1, hbCap: false, hbBeta: 0, hbYaw: 0, transfer: 1, squeal: 0.9,
   },
 };
@@ -277,7 +277,9 @@ function tyre(x) {
 // Brake pedal to share of the full brake: a gentle S that is exact at 0,
 // half and full (half pedal is half the stop, test B1) and a little
 // firmer in the first half of the travel, where drivers and the AI trim
-// their speed. Strictly rising.
+// their speed. Strictly rising. Every brake input (player and AI) goes
+// through it; it replaces the traffic brake gain scale (docs/REVAMP.md 6.3,
+// pinned by BRAKE_PEDAL_S in handlingbands.js).
 export function brakePedal(p) {
   const x = p < 0 ? 0 : p > 1 ? 1 : p;
   return x + PEDAL_S * x * (1 - x) * (1 - 2 * x);

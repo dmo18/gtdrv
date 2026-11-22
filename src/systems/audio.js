@@ -35,7 +35,8 @@ const SLICE_MS = 5; // generation budget per slice
 
 // Default bus levels (the master is set separately). Engines sit under
 // the world so the city still reads.
-const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.2 };
+// (A1: music up 3 dB; it sat 6 dB under every effect in the phone check)
+const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.28 };
 const GESTURES = ['touchend', 'pointerup', 'click', 'keydown'];
 
 const URBAN = { downtown: 1, midtown: 0.85, industrial: 0.8, docks: 0.6, residential: 0.45, park: 0.35, beach: 0.3, airfield: 0.25, shore: 0.3 };
@@ -788,8 +789,7 @@ export function createAudio(game) {
       best = SIREN_TEST_CAR;
       best.x = fin(game.player.x) - 20;
       best.z = fin(game.player.z) + 4;
-      best.vx = playerVel(best).vx; // keeps pace: no doppler
-      best.vz = pvel.vz;
+      playerVel(best); // keeps pace with the player: no doppler
     }
     if (best) {
       spatial(best.x, best.z, 320);
@@ -797,7 +797,7 @@ export function createAudio(game) {
       dop = doppler(best.vx, best.vz);
       // the siren buffer is dense (RMS about -5 dBFS): keep it under the mix
       // (the buffer is now a clean near-sine at about -10 dBFS RMS)
-      g = 0.6 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
+      g = 0.5 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
       const occ = occluded(sp.d) ? 0.45 : 1;
       set(siren.lp.frequency, (1500 + 6000 * Math.max(0, 1 - sp.d / 200)) * occ, now, 0.1);
       if (siren.pan) set(siren.pan.pan, sp.pan, now, 0.1);
@@ -1043,8 +1043,8 @@ export function createAudio(game) {
   // Everything is positioned: distance falloff, stereo pan, and a delay
   // for sound travel. Quiet detail sounds give way when voices run low.
   const GUNS = {
-    pistol: { buf: 'gunPistol', n: 3, g: 0.85, range: 200, gap: 0.03, last: -9, casing: true },
-    smg: { buf: 'gunSmg', n: 3, g: 0.68, range: 200, gap: 0.05, last: -9, casing: true },
+    pistol: { buf: 'gunPistol', n: 3, g: 1.15, range: 200, gap: 0.03, last: -9, casing: true },
+    smg: { buf: 'gunSmg', n: 3, g: 0.9, range: 200, gap: 0.05, last: -9, casing: true },
     scatter: { buf: 'gunScatter', n: 1, g: 1, range: 260, gap: 0.2, last: -9 },
     lobber: { buf: 'gunLobber', n: 1, g: 0.9, range: 220, gap: 0.2, last: -9 },
     coax: { buf: 'gunRifle', n: 2, g: 0.7, range: 240, gap: 0.06, last: -9 }, // tank (task 32)

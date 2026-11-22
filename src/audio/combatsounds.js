@@ -56,8 +56,8 @@ function report(rng, o) {
   band(out, rng, 0, 0.01, ck * 0.9, 'bp', 2400, 0.9);
   band(out, rng, len(0.0006), o.bodyDecay * 1.6, o.body * 1.7, 'bp', o.bodyF, 0.8, 0.0008);
   band(out, rng, len(0.0006), o.bodyDecay * 2.4, o.body * 0.8, 'lp', o.bodyF * 0.6, 0.7, 0.001);
-  thump(out, o.f0, o.f1, 0.014, o.low * 1.1, o.lowTau * 1.4);
-  thump(out, o.f0 * 2, o.f1 * 2, 0.014, o.low * 0.45, o.lowTau);
+  thump(out, o.f0, o.f1, 0.014, o.low * 0.75, o.lowTau * 1.4);
+  thump(out, o.f0 * 2, o.f1 * 2, 0.014, o.low * 0.55, o.lowTau);
   band(out, rng, len(0.008), o.tail * 1.5, o.tailAmp * 1.6, 'lp', o.tailF, 0.7, 0.006);
   for (const [t, f, d, a] of o.mech || []) addMode(out, len(t), f, d, a, R.sr, rng.next() * TAU);
   harmonize(out, 130, 0.3, { hi: 1100 });
@@ -118,7 +118,10 @@ export const COMBAT_SHOTS = {
   blastBody(rng) {
     const n = len(2.2);
     const out = z(n);
-    thump(out, 85 + rng.next() * 10, 28, 0.14, 1, 0.45);
+    // a low sine drop (110 to 40 Hz, long decay) with its octave, so a
+    // phone speaker that cannot play 40 Hz still hears the drop
+    thump(out, 100 + rng.next() * 12, 40, 0.16, 1, 0.5);
+    thump(out, 210, 80, 0.16, 0.45, 0.35);
     // the fireball roar: noise whose low-pass closes as it dies
     const b = envelope(white(n, rng), 0.006, 0.32);
     const lo = svf(b, z(n), (u) => 180 + 3200 * Math.exp(-u * 7), 0.8, 'lp');
@@ -135,9 +138,9 @@ export const COMBAT_SHOTS = {
     const mid = out.slice();
     lp1(out, 160, { loop: false, passes: 3 });
     lp1(mid, 700, { loop: false, passes: 2 });
-    for (let i = 0; i < n; i++) out[i] = out[i] * 7 + mid[i] * 0.6;
+    for (let i = 0; i < n; i++) out[i] = out[i] * 6 + mid[i] * 1.1; // more of the audible rumble
     harmonize(out, 120, 0.8, { hi: 800 });
-    return fadeEdges(normalize(removeDC(out), 0.9), 64, 6000);
+    return fadeEdges(normalize(removeDC(out), 0.85), 64, 6000);
   },
   debris(rng) {
     const n = len(2.6);

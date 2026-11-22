@@ -196,13 +196,20 @@ export function createCheckRun(game, opts = {}) {
     const x = c.x, z = c.z;
     if (i === 2) { for (let k = 0; k < 3; k++) emit('shot', { weapon: 'pistol', x, z, shooter: p.walker, hitKind: 'none', k }); }
     else if (i === 3) { const a = ahead(30); emit('explosion', { x: a.x, z: a.z, radius: 8, size: 'big' }); }
-    else if (i === 4) emit('siren', true);
+    else if (i === 4) {
+      emit('siren', true);
+      // the test car is not a police car: ask the audio for a siren nearby
+      if (game.audio && game.audio.testSiren) game.audio.testSiren(true);
+    }
     else if (i === 6 && game.audio && game.audio.setStation) game.audio.setStation(nextStation(prevStation || 'off', 1) === 'off' ? 'chill' : nextStation(prevStation || 'off', 1));
     else if (i === 7) emit('boost', { vehicle: c, craft: 'car', on: true });
   }
   function endSound(i) {
     const c = run.car;
-    if (i === 4) emit('siren', false);
+    if (i === 4) {
+      emit('siren', false);
+      if (game.audio && game.audio.testSiren) game.audio.testSiren(false);
+    }
     else if (i === 6 && game.audio && game.audio.setStation) game.audio.setStation(prevStation || 'off');
     else if (i === 7) emit('boost', { vehicle: c, craft: 'car', on: false });
   }
@@ -233,7 +240,10 @@ export function createCheckRun(game, opts = {}) {
     }
     if (run.sound === 0) src.throttle = 1; // engine: floor it
     if (run.sound === 1 && into > 0.3 && into < 1.5) { src.steer = 1; src.handbrake = true; src.throttle = 1; } // tyres: a slide
-    if (run.sound === 4 || run.sound === 5) { /* siren and music: the car just drives */ }
+    // from the gunshot on, the car rolls to a stop and idles, so each test
+    // sound is heard on its own and not under engine and road roar
+    // (brake only while rolling: held at a standstill it would reverse)
+    if (run.sound >= 2) { src.throttle = 0; src.brake = Math.abs(c.speed || 0) > 0.5 ? 1 : 0; src.steer = 0; }
     if (k >= SOUNDS.length) {
       endSound(SOUNDS.length - 1);
       run.phase = 'done';

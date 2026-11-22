@@ -530,18 +530,18 @@ const SHOTS = {
   // Boost: a whoosh of noise whose low-pass opens from about 300 Hz to
   // 4 kHz over 0.7 s while a band-pass rises with it, then falls away.
   boostWhoosh(rng) {
-    const n = len(1.4);
+    const n = len(1.2);
     const src = white(n, rng);
-    const lo = svf(src, z(n), (u) => 300 + 3700 * Math.pow(Math.min(1, u / 0.5), 1.5), 0.9, 'lp');
-    const bp = svf(src, z(n), (u) => 500 + 2300 * Math.min(1, u / 0.5), 2.2, 'bp');
+    const lo = svf(src, z(n), (u) => 300 + 3700 * Math.pow(Math.min(1, u / 0.58), 1.5), 0.9, 'lp');
+    const bp = svf(src, z(n), (u) => 500 + 2300 * Math.min(1, u / 0.58), 2.2, 'bp');
     const out = z(n);
     for (let i = 0; i < n; i++) {
       const t = i / R.sr;
       const e = Math.min(1, t / 0.12) * (t < 0.6 ? 1 : Math.exp(-(t - 0.6) / 0.22));
       out[i] = (lo[i] * 0.8 + bp[i] * 0.9) * e;
     }
-    lp1(out, 6000, { loop: false });
-    return fadeEdges(normalize(removeDC(out), 0.8), 64, 2000);
+    lp1(out, 4500, { loop: false });
+    return fadeEdges(normalize(removeDC(out), 0.8), 64, 1200);
   },
   gull(rng) {
     const n = len(1.2);
@@ -847,7 +847,8 @@ delete SHOTS.blast; // replaced by the layered blastCrack/Body/Tail + debris
 const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'tail']);
 
 // Deep one-shots rendered at half rate too.
-const LOW_SHOTS = new Set(['blastTail', 'm:pad', 'm:bass', 'm:kick', ...RADIO_LOW]);
+// (whoosh and boostWhoosh hold nothing above 4.5 kHz: half rate saves memory)
+const LOW_SHOTS = new Set(['blastTail', 'whoosh', 'boostWhoosh', 'm:pad', 'm:bass', 'm:kick', ...RADIO_LOW]);
 
 // Made after the bank is playable: ambience beds and calls, the siren.
 const EXTRA = new Set(['crickets', 'surf', 'lap', 'sirenWail', 'sirenYelp', 'gull', 'clank', 'whoosh',

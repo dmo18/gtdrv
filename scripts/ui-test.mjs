@@ -186,6 +186,11 @@ const GRID = {
     fanX: [660, 604, 548], fanY: [156, 100], fanS: 48, slot: [16, 204, 140, 140],
   },
 };
+// The owner's real phone reports 748x360. The contract table has no rectangles for it, so it is
+// checked loosely: every rule that does not need a table rectangle (overlap, 8 px gaps, 48 px
+// hit boxes, keep-out rect, safe edges, inset strip, leaving the screen, contrast, the canvas)
+// runs as at the other sizes; only the exact-rectangle comparisons are skipped.
+GRID.C = { ...GRID.B, V: 748, H: 360, loose: true };
 const lum = ([r, g, b]) => {
   const f = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
@@ -341,7 +346,7 @@ async function liveLayout(check) {
       const kRect = [0.36 * grid.V, 0.40 * grid.H, 0.64 * grid.V, 0.90 * grid.H];
       const expect = (key, e, tol = 2) => {
         let t = grid[key];
-        if (!t) return;
+        if (!t || grid.loose) return;
         if (key === 'boostbar') { // 6.12: under the speed; 16 lower with the health meter, under the clock in Full
           const lo = grid.V === 915;
           t = [t[0], hud === 'full' ? (lo ? 91 : 85) : (m.mortal === false ? t[1] : (lo ? 72 : 68)), t[2], t[3]];
@@ -364,7 +369,7 @@ async function liveLayout(check) {
           expect(e.key, e);
         }
         if (e.key === 'ammo') expect('ammo', e);
-        if (e.key.startsWith('fan:')) {
+        if (e.key.startsWith('fan:') && !grid.loose) {
           const [, c, r] = e.key.split(':').map(Number);
           let x = grid.fanX[c];
           if (hand) x = grid.V - x - grid.fanS + L;
@@ -384,12 +389,12 @@ async function liveLayout(check) {
         if (e.x < kRect[2] && e.r > kRect[0] && e.y < kRect[3] && e.b > kRect[1]) bad(`${e.label || e.key} (${e.name}) is inside the keep-out rect`);
       }
       // steering widget inside the steering slot (mirrored when left-handed)
-      for (const e of el.filter((q) => q.key === 'steer' && !q.hit)) {
+      for (const e of el.filter((q) => q.key === 'steer' && !q.hit && !grid.loose)) {
         const s = grid.slot;
         const sx = hand ? grid.V - s[0] - s[2] : s[0] + L;
         if (e.x < sx - 3 || e.r > sx + s[2] + 3 || e.y < s[1] - 3 || e.b > s[1] + s[3] + 3) bad(`steering widget ${e.name} ${e.x.toFixed(0)},${e.y.toFixed(0)},${e.w.toFixed(0)}x${e.h.toFixed(0)} is outside the slot ${sx},${s[1]},${s[2]}x${s[3]}`);
       }
-      for (const e of el.filter((q) => q.key === 'steer' && q.hit)) {
+      for (const e of el.filter((q) => q.key === 'steer' && q.hit && !grid.loose)) {
         const s = grid.slot;
         const sx = hand ? grid.V - s[0] - s[2] : s[0] + L;
         if (e.x < sx - 3 || e.r > sx + s[2] + 3 || e.y < s[1] - 3 || e.b > s[1] + s[3] + 3) bad(`steering button ${e.label} is outside the slot`);
@@ -422,7 +427,7 @@ async function liveLayout(check) {
       // a message pill is centred in its row
       for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
         const row = grid[k.key];
-        if (Math.abs((k.x + k.r) / 2 - (row[0] + row[2] / 2)) > 2) bad(`${k.key} is not centred in its row`);
+        if (Math.abs((k.x + k.r) / 2 - (grid.loose ? grid.V / 2 : row[0] + row[2] / 2)) > 2) bad(`${k.key} is not centred in its row`);
       }
       // HG-2: at most one control in the BOOST cell (BOOST, or GARAGE and TALK); BOOST hides while an offer shows
       const cell = el.filter((q) => q.key === 'boost');
@@ -466,7 +471,7 @@ async function liveLayout(check) {
       if (m.boot !== 'none') bad('the title screen is still showing');
     };
 
-    for (const grid of [GRID.A, GRID.B]) {
+    for (const grid of [GRID.A, GRID.B, GRID.C]) {
       await pg.setViewportSize({ width: grid.V, height: grid.H });
       for (const L of [0, 40]) {
         await pg.evaluate((l) => { document.documentElement.style.setProperty('--rw-test-sl', l + 'px'); window.dispatchEvent(new Event('resize')); }, L);
@@ -635,7 +640,7 @@ async function liveLayout(check) {
     for (const p of hgProblems.slice(0, 40)) console.log('   ', p);
     check(`top centre stack: ${hgStates} states: HG-3 everything on at once, HG-4 long toast, HG-5 clear of the speed readout, score, fan and ammo panel`, hgProblems.length === 0, `(${hgProblems.length} problems)`);
     // The title screen (docs/REVAMP.md 6.8): name, Start (Loading until ready), Continue only when offered, credit, version.
-    for (const [w, h] of [[915, 412], [780, 360]]) {
+    for (const [w, h] of [[915, 412], [780, 360], [748, 360]]) {
       const tc = await br.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
       const tp = await tc.newPage();
       await tp.goto(base);
@@ -657,6 +662,26 @@ async function liveLayout(check) {
         check(`${tag}: Continue (180x56) hidden on a fresh profile, left of Start with 16 between`, r.before === true && r.cont.w === 180 && r.cont.h === 56 && Math.abs(r.play.x - r.cont.r - 16) < 1.5 && r.cont.x < r.play.x, JSON.stringify([r.cont, r.play]));
         check(`${tag}: name at 24 + inset, 20, 40 high; credit bottom left; version bottom right`, Math.abs(r.h1.x - (24 + L)) < 1.5 && Math.abs(r.h1.y - 20) < 1.5 && Math.abs(r.h1.h - 40) < 1.5
           && /OpenStreetMap contributors, ODbL/.test(r.credit.text) && r.credit.x >= L + 7.5 && /^v\d+\.\d+\.\d+/.test(r.ver.text) && r.ver.r <= w - 7.5, JSON.stringify([r.h1, r.credit, r.ver]));
+        // The About button (top right) and its panel: 48 px, clear of the name, the message and the other buttons, inside the safe edges.
+        const ab = await tp.evaluate(() => {
+          const rc = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+          const btn = document.getElementById('aboutbtn');
+          const out = { btn: rc(btn), others: ['#boot h1', '#bootmsg', '#play', '#bootcredit', '#bootver'].map((q) => rc(document.querySelector(q))) };
+          btn.click();
+          const box = document.querySelector('.rw-aboutbox');
+          const body = document.querySelector('.rw-aboutbody');
+          out.box = rc(box);
+          out.text = body.textContent;
+          out.small = [...box.querySelectorAll('button, a')].filter((e) => { const b = e.getBoundingClientRect(); return b.height < 47.5 || b.width < 47.5 || (e.tagName === 'BUTTON' && (b.bottom > innerHeight || b.right > innerWidth)); }).length;
+          out.link = document.querySelector('.rw-aboutbox a').getAttribute('href');
+          document.querySelector('.rw-aboutclose').click();
+          out.closed = !document.querySelector('.rw-aboutbox');
+          return out;
+        });
+        const hit = (o) => Math.min(ab.btn.r, o.r) - Math.max(ab.btn.x, o.x) > 0.5 && Math.min(ab.btn.b, o.b) - Math.max(ab.btn.y, o.y) > 0.5;
+        check(`${tag}: About button 48 high, inside the right edge, clear of everything else on the title`, ab.btn.h >= 47.5 && ab.btn.w >= 47.5 && ab.btn.r <= w - 7.5 && ab.btn.y >= 7.5 && !ab.others.some(hit), JSON.stringify(ab));
+        check(`${tag}: About panel fits, buttons 48+, version, OpenStreetMap ODbL credit, invented names, privacy link, closes`, ab.box.x >= L - 0.5 && ab.box.r <= w + 0.5 && ab.box.b <= h + 0.5 && ab.box.y >= -0.5 && ab.small === 0 && /Version v\d/.test(ab.text)
+          && /OpenStreetMap contributors, ODbL/.test(ab.text) && /invented/.test(ab.text) && ab.link === 'privacy.html' && ab.closed, JSON.stringify(ab));
       }
       await tc.close();
     }

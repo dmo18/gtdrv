@@ -8,6 +8,9 @@ import { SERVICE_BANDS } from './servicevehicles.js'; // V1: the four service ve
 
 export const MODES = ['arcade', 'sim']; // settings.handling, default 'arcade'
 export const LAT_G_FACTOR = { arcade: [1.00, 1.12], sim: [0.88, 1.00] }; // times spec.grip
+// Section 2 line (K10): ordinary cars hold 0.9 to 1.1 g at the test speeds, in both modes.
+export const LAT_G_LINE = [0.9, 1.1];
+export const ORDINARY_CARS = ['compact', 'sedan', 'taxi'];
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
 export const LOCK_TIME = [0.25, 0.40]; // s, centre to full lock, at 0 to 10 m/s
 export const RETURN_TIME = [0.20, 0.30]; // s, full lock to centre, hands off
@@ -45,6 +48,9 @@ export const A5 = { side: 3.5, road: 30, speed: 20, truckSpeed: 15, endErr: 0.4,
 export const B1_HALF = [0.45, 0.55];
 export const B2 = { deg: 1, side: 0.3 };
 export const B4_KEEP = 0.6;
+// Brake pedal S-curve (K11): share of the full brake = p + S * p * (1 - p) * (1 - 2p).
+// It replaces the traffic brake gain scale; AI planners send their pedal through it unchanged.
+export const BRAKE_PEDAL_S = 1.0;
 // Assist rows of the Arcade versus Sim table.
 export const ARCADE_SLIP_MAX_DEG = { fwd: 8, rwd: 16 };
 export const SAG = { arcade: [0, 0.06], sim: [0.18, 0.22] };
@@ -53,6 +59,12 @@ export const HB_SLIP_CAP = 0.6; // rad, Arcade handbrake slide cap
 export const SQUEAL = { arcade: 1.3, sim: 0.9 };
 // Touch curve and travel.
 export const HALF_TRAVEL = [0.40, 0.55];
-export const SLALOM = { gap: 18, speed: 20, simSpeed: 17, thumbDegPerS: 300, tiltDegPerS: 60, sliderPxPerS: 400 };
+// Slalom pass rule (K9): all `cones` reached in order, each passed on its own side
+// with the car's centre at least `clear` m out, at least `keep` of the speed held,
+// one scripted driver for every style (only the input device and its rate limit differ).
+export const SLALOM = {
+  gap: 18, speed: 20, simSpeed: 17, thumbDegPerS: 300, tiltDegPerS: 60, sliderPxPerS: 400,
+  cones: 6, clear: 0.4, keep: 0.95,
+};
 // Chase camera (6.3): roll into the turn, yaw lag, pitch under braking.
 export const CAMERA = { rollMaxDeg: 2, yawLag: 0.18, pitchMaxDeg: 1.5 };

@@ -1,6 +1,6 @@
 import { formatDistance, formatMiles } from '../core/units.js';
 import { createPhoneCheck, SOUNDS, SOUND_NOTES, DRIVE_SECONDS, SOUND_SECONDS } from './phonecheck.js';
-import { fillAbout, MAP_CREDIT } from './title.js';
+import { fillAbout } from './title.js';
 // The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
 // Settings, Help), Settings in four groups, destructive actions on their own
 // confirm screens, and a registry for screens other systems add.
@@ -12,7 +12,7 @@ import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
 
 const STYLE_ID = 'rw-menu-style';
-const CREDIT = MAP_CREDIT;
+const CREDIT = 'Map data (c) OpenStreetMap contributors, ODbL';
 
 const CSS = `
 .rw-menu {
@@ -126,7 +126,7 @@ const CSS = `
 .rw-about-dim { color: var(--rw-dim); }
 .rw-about-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; color: #ffd08a; font-weight: 700; }
 .rw-menu-sounds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-flow: column; grid-template-rows: repeat(4, auto); gap: 4px 12px; margin: 4px 0 6px; padding: 0; list-style: none; }
-.rw-menu-sounds li { margin: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; }
+.rw-menu-sounds li { margin: 0; display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .rw-menu-sounds .rw-menu-num { flex: 0 0 36px; height: 36px; border-radius: 18px; background: var(--rw-accent); color: #1b120d; font-weight: 800; display: flex; align-items: center; justify-content: center; }
 .rw-menu-sounds b { display: block; font-size: 15px; }
 .rw-menu-sounds span.rw-menu-note { display: block; font-size: 12px; color: var(--rw-dim); }

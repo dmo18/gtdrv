@@ -474,23 +474,104 @@ export function stepPed(ped, dt, ctx) {
 // ---------------------------------------------------------------------
 // System
 // ---------------------------------------------------------------------
-const WEIGHT = {
-  downtown: 3, midtown: 2.5, beach: 2.5, park: 3, residential: 1.5,
-  docks: 0.5, industrial: 0.4, airfield: 0,
+// How busy each kind of place is through the day (hour 0..23, linear
+// between hours): town centres peak at lunch and in the evening, beach
+// and parks in the afternoon, homes in the morning and evening, docks
+// and works in working hours (docs/PLAN_V1.md W8).
+const PROFILES = {
+  city: [0.1, 0.08, 0.06, 0.05, 0.06, 0.1, 0.25, 0.5, 0.75, 0.8, 0.85, 0.95, 1, 1, 1, 0.95, 0.95, 1, 0.95, 0.85, 0.7, 0.55, 0.35, 0.2],
+  leisure: [0.03, 0.02, 0.02, 0.02, 0.03, 0.08, 0.2, 0.35, 0.5, 0.7, 0.9, 1, 1, 1, 1, 1, 0.95, 0.85, 0.7, 0.5, 0.3, 0.15, 0.08, 0.05],
+  home: [0.05, 0.03, 0.03, 0.03, 0.05, 0.15, 0.4, 0.7, 0.6, 0.45, 0.45, 0.5, 0.55, 0.55, 0.5, 0.5, 0.6, 0.8, 0.85, 0.8, 0.6, 0.35, 0.15, 0.08],
+  work: [0.03, 0.03, 0.03, 0.03, 0.05, 0.2, 0.5, 0.85, 0.95, 0.95, 0.95, 0.8, 0.8, 0.95, 0.95, 0.9, 0.7, 0.4, 0.2, 0.1, 0.05, 0.04, 0.03, 0.03],
 };
-const PER_BLOCK = { downtown: 4, midtown: 3, beach: 3, park: 5, residential: 2, docks: 1, industrial: 1 };
+const PROFILE_OF = {
+  downtown: PROFILES.city, midtown: PROFILES.city, beach: PROFILES.leisure, park: PROFILES.leisure,
+  residential: PROFILES.home, docks: PROFILES.work, industrial: PROFILES.work,
+};
+// Walkers per 100 m of pavement loop at the busiest hour.
+export const DENSITY = {
+  downtown: 2.4, midtown: 1.8, beach: 2.2, park: 1.6, residential: 0.9, docks: 0.4, industrial: 0.3, airfield: 0,
+};
+const BLOCK_MAX = 10; // most walkers on one block or plaza
+export function crowdAt(district, clock) {
+  const prof = PROFILE_OF[district];
+  if (!prof) return 0;
+  const h = (((clock % 24) + 24) % 24);
+  const i = Math.floor(h), f = h - i;
+  return prof[i] + (prof[(i + 1) % 24] - prof[i]) * f;
+}
+// Walkers a block or plaza holds at this hour.
+export function blockCapacity(b, clock) {
+  const d = DENSITY[b.district] || 0;
+  if (!(d > 0)) return 0;
+  const per = 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
+  return Math.min(BLOCK_MAX, Math.round((per / 100) * d * crowdAt(b.district, clock)));
+}
 const NEAR = 25, FAR = 110, RECYCLE = 150;
+const NEAR_FIRST = 8, FAR_FIRST = 80; // first fill and after a jump: people close around the camera
+const JUMP = 150; // m moved between two scans that counts as a teleport
 const SKY = 120; // above this altitude nobody is simulated
 const SEA = -150; // this far out at sea nobody is simulated
+const CELL = 128;
+const LOT_WALK = new Set(['plaza', 'park', 'grass', 'beach']);
 
-export function createPeds(game, { max = 22 } = {}) {
+// Walkable places: the city blocks plus plazas, parks and lawns from the
+// lot list (real maps), each with the same x0..z1 / district / id fields
+// a block has. Indexed by a coarse grid so a scan only looks near.
+function buildAreas(city) {
+  const areas = city.blocks.slice();
+  const lots = city.lots;
+  if (lots && lots.length) {
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      if (!LOT_WALK.has(l.type) || l.area < 300 || !l.core) continue;
+      const w = l.x1 - l.x0, h = l.z1 - l.z0;
+      if (Math.min(w, h) < 14 || Math.max(w, h) > 340 || l.area < w * h * 0.15) continue;
+      const district = l.type === 'park' || l.type === 'grass' ? 'park' : l.type === 'beach' ? 'beach' : l.district;
+      areas.push({ id: areas.length, x0: l.x0, z0: l.z0, x1: l.x1, z1: l.z1, district, lot: true, ok: 0 });
+    }
+  }
+  const grid = new Map();
+  for (let i = 0; i < areas.length; i++) {
+    const b = areas[i];
+    if (!(DENSITY[b.district] > 0)) continue;
+    for (let cx = Math.floor(b.x0 / CELL); cx <= Math.floor(b.x1 / CELL); cx++) {
+      for (let cz = Math.floor(b.z0 / CELL); cz <= Math.floor(b.z1 / CELL); cz++) {
+        const key = cx * 8192 + cz;
+        let list = grid.get(key);
+        if (!list) grid.set(key, (list = []));
+        list.push(i);
+      }
+    }
+  }
+  return { areas, grid };
+}
+
+// A lot is used once its walking loop is checked clear of buildings and
+// roads (done on first use, so the city start pays nothing).
+function lotUsable(city, b) {
+  if (b.ok) return b.ok === 1;
+  let bad = 0, n = 0;
+  const per = 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
+  for (let s = 0; s < per; s += 6, n++) {
+    pointAt(b, s);
+    if ((city.inBuilding && city.inBuilding(PT.x, PT.z, 0.6)) || (city.onRoad && city.onRoad(PT.x, PT.z))) bad++;
+  }
+  b.ok = bad <= n * 0.1 ? 1 : 2;
+  return b.ok === 1;
+}
+
+export function createPeds(game, { max = 30 } = {}) {
   const city = game.city;
   const slots = []; // { ped, mesh }
   const ctx = { city, collision: game.collision, vehicles: game.vehicles, player: game.player, sirens: [] };
-  const blocks = city.blocks;
-  const onBlock = new Int16Array(blocks.length); // active peds per block
+  const { areas: blocks, grid } = buildAreas(city);
+  const onBlock = new Int16Array(blocks.length); // active peds per block or plaza
   const cand = new Int32Array(blocks.length);
   const candW = new Float32Array(blocks.length);
+  const seenScan = new Int32Array(blocks.length);
+  let scanNo = 0, lastX = NaN, lastZ = NaN;
+  const clockNow = () => (Number.isFinite(game.clock) ? game.clock : 12);
   let timer = 0;
   let active = 0;
   let first = true;
@@ -525,7 +606,9 @@ export function createPeds(game, { max = 22 } = {}) {
 
   function cap() {
     const q = game.quality === undefined ? 1 : clamp(+game.quality || 1, 0.25, 1);
-    return Math.max(1, Math.round(max * q));
+    // Fewer people at night and where the place is quiet at this hour.
+    const busy = crowdAt(city.districtOf ? city.districtOf(game.player.x, game.player.z) : 'downtown', clockNow());
+    return Math.max(1, Math.round(max * q * (0.3 + 0.7 * busy)));
   }
 
   // Is the point probably hidden from the player?
@@ -539,26 +622,39 @@ export function createPeds(game, { max = 22 } = {}) {
     return game.collision.lineClear(x0, z0, x1, z1);
   }
 
-  // Pick a block near the player by weight. Returns block or null.
-  function pickBlock(px, pz) {
+  // Pick a block or plaza near the player by weight (busier places at
+  // this hour and closer ones first). Returns it or null.
+  function pickBlock(px, pz, nearMin, farMax) {
     let n = 0, total = 0;
-    for (let i = 0; i < blocks.length; i++) {
-      const b = blocks[i];
-      const w = WEIGHT[b.district] ?? 1;
-      if (w <= 0) continue;
-      if (onBlock[i] >= (PER_BLOCK[b.district] ?? 2)) continue;
-      const dx = px < b.x0 ? b.x0 - px : px > b.x1 ? px - b.x1 : 0;
-      const dz = pz < b.z0 ? b.z0 - pz : pz > b.z1 ? pz - b.z1 : 0;
-      const d = Math.hypot(dx, dz);
-      if (d > FAR) continue;
-      // Farthest corner must reach into the band too.
-      const fx = Math.max(Math.abs(px - b.x0), Math.abs(px - b.x1));
-      const fz = Math.max(Math.abs(pz - b.z0), Math.abs(pz - b.z1));
-      if (Math.hypot(fx, fz) < NEAR) continue;
-      cand[n] = i;
-      candW[n] = w;
-      total += w;
-      n++;
+    const clock = clockNow();
+    scanNo++;
+    const c0x = Math.floor((px - farMax) / CELL), c1x = Math.floor((px + farMax) / CELL);
+    const c0z = Math.floor((pz - farMax) / CELL), c1z = Math.floor((pz + farMax) / CELL);
+    for (let cx = c0x; cx <= c1x; cx++) {
+      for (let cz = c0z; cz <= c1z; cz++) {
+        const list = grid.get(cx * 8192 + cz);
+        if (!list) continue;
+        for (let k = 0; k < list.length; k++) {
+          const i = list[k];
+          if (seenScan[i] === scanNo) continue;
+          seenScan[i] = scanNo;
+          const b = blocks[i];
+          if (onBlock[i] >= blockCapacity(b, clock)) continue;
+          const dx = px < b.x0 ? b.x0 - px : px > b.x1 ? px - b.x1 : 0;
+          const dz = pz < b.z0 ? b.z0 - pz : pz > b.z1 ? pz - b.z1 : 0;
+          const d = Math.hypot(dx, dz);
+          if (d > farMax) continue;
+          // Farthest corner must reach into the band too.
+          const fx = Math.max(Math.abs(px - b.x0), Math.abs(px - b.x1));
+          const fz = Math.max(Math.abs(pz - b.z0), Math.abs(pz - b.z1));
+          if (Math.hypot(fx, fz) < nearMin) continue;
+          if (b.lot && !lotUsable(city, b)) continue;
+          cand[n] = i;
+          candW[n] = DENSITY[b.district] * (d < 40 ? 3 : d < 80 ? 2 : 1);
+          total += candW[n];
+          n++;
+        }
+      }
     }
     if (n === 0) return null;
     let r = game.rng.next() * total;
@@ -572,7 +668,8 @@ export function createPeds(game, { max = 22 } = {}) {
   function spawnOne(px, pz, anywhere) {
     const slot = freeSlot();
     if (!slot) return false;
-    const block = pickBlock(px, pz);
+    const nearMin = anywhere ? NEAR_FIRST : NEAR, farMax = anywhere ? FAR_FIRST : FAR;
+    const block = pickBlock(px, pz, nearMin, farMax);
     if (!block) return false;
     const ped = slot.ped;
     const rng = game.rng;
@@ -583,7 +680,7 @@ export function createPeds(game, { max = 22 } = {}) {
     for (let tries = 0; tries < 10 && !ok; tries++) {
       placePed(ped, block, rng, kind);
       const d = Math.hypot(ped.x - px, ped.z - pz);
-      if (d < NEAR || d > FAR) continue;
+      if (d < nearMin || d > farMax) continue;
       if (unseen(px, pz, ped.x, ped.z) || anywhere) ok = true;
       else if (d > 60) fallback = true; // visible but far: acceptable last resort
       if (!ok && fallback && tries === 9) ok = true;
@@ -615,6 +712,10 @@ export function createPeds(game, { max = 22 } = {}) {
 
   function scan() {
     const px = game.player.x, pz = game.player.z;
+    // A teleport or respawn: fill again around the new place at once.
+    if (Number.isFinite(lastX) && Math.hypot(px - lastX, pz - lastZ) > JUMP) first = true;
+    lastX = px;
+    lastZ = pz;
     // Recycle the far ones and count.
     active = 0;
     for (let i = 0; i < slots.length; i++) {
@@ -637,8 +738,11 @@ export function createPeds(game, { max = 22 } = {}) {
       deactivate(slots[far]);
       active--;
     }
-    let budget = first ? limit : 1;
-    while (active < limit && budget-- > 0) if (!spawnOne(px, pz, first)) break;
+    let budget = first ? limit + 6 : active < limit * 0.6 ? 3 : 1;
+    let misses = 0;
+    while (active < limit && budget-- > 0) {
+      if (!spawnOne(px, pz, first) && ++misses > 3) break;
+    }
     first = false;
   }
 
@@ -647,7 +751,7 @@ export function createPeds(game, { max = 22 } = {}) {
     let best = null, bd = Infinity;
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
-      if (b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
+      if (b.lot || b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
       const dx = x < b.x0 ? b.x0 - x : x > b.x1 ? x - b.x1 : 0;
       const dz = z < b.z0 ? b.z0 - z : z > b.z1 ? z - b.z1 : 0;
       const d = dx * dx + dz * dz;

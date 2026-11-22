@@ -144,3 +144,117 @@ test('the whole bank: finite, never clips, fits memory', () => {
   }
   assert.ok(bank.bytes < 12.5 * 1048576, `${(bank.bytes / 1048576).toFixed(2)} MB`);
 });
+
+// ---- A1: the eight phone-check sounds (owner: "harsh and crackly") ----
+import { safetyCurve, bassCurve, SAFETY_CEIL, BASS_HELPER } from '../src/audio/master.js';
+
+test('master curves: safety curve linear, under -1 dBFS; bass helper curve smooth', () => {
+  const c = safetyCurve();
+  const n = c.length;
+  let max = 0;
+  for (let i = 1; i < n; i++) {
+    assert.ok(c[i] >= c[i - 1], 'monotonic');
+    max = Math.max(max, Math.abs(c[i]));
+  }
+  assert.ok(max <= SAFETY_CEIL + 1e-6 && 20 * Math.log10(max) < -1, `ceiling ${max}`);
+  const at = (x) => c[Math.round(((x + 1) / 2) * (n - 1))];
+  assert.ok(Math.abs(at(0.5) - 0.5) < 2e-3, 'linear well below the knee');
+  // the bass curve: zero at rest, no corner (second difference small
+  // everywhere, as against the old |tanh| rectifier), helper mixed low
+  const b = bassCurve();
+  const m = b.length;
+  const mid = (m - 1) / 2;
+  assert.ok(Math.abs(b[Math.floor(mid)]) < 0.01 && Math.abs(b[Math.ceil(mid)]) < 0.01);
+  let worst = 0;
+  for (let i = 1; i < m - 1; i++) worst = Math.max(worst, Math.abs(b[i + 1] - 2 * b[i] + b[i - 1]));
+  const old = (x) => Math.tanh(3 * x) * 0.5 + Math.abs(Math.tanh(2.4 * x)) * 0.6;
+  const h = 2 / (m - 1);
+  const oldCorner = Math.abs(old(h) - 2 * old(0) + old(-h));
+  assert.ok(worst < oldCorner / 4, `curvature ${worst} vs old corner ${oldCorner}`);
+  assert.ok(BASS_HELPER <= 0.25);
+});
+
+test('phone-check sounds: peaks under -1 dBFS, sane RMS, no harsh top, right character', () => {
+  const bank = buildAll(48000);
+  const B = bank.buffers;
+  const get = (name) => {
+    const x = B[name];
+    assert.ok(x, `${name} exists`);
+    return { d: x.getChannelData(0), sr: x.sampleRate, loop: bank.loops.includes(name) };
+  };
+  const above = (d, sr, f) => 1 - bandShares(spectrum(d, sr), [0, f, 1e9])[0];
+  const between = (d, sr, lo, hi) => bandShares(spectrum(d, sr), [0, lo, hi, 1e9])[1];
+  const names = ['eng:v6:0:on', 'eng:v6:2:on', 'eng:v6:4:on', 'eng:v8:4:on', 'eng:sports:4:on', 'eng:i4:4:on', 'squeal',
+    'gunPistol0', 'gunPistol1', 'gunSmg0', 'blastCrack0', 'blastBody0', 'blastThump', 'blastTail', 'sirenWail', 'sirenYelp',
+    'm:bass', 'm:pad', 'm:pluck', 'm:kick', 'm:snare', 'm:hat', 'boostWhoosh'];
+  for (const n of names) {
+    const { d, sr, loop } = get(n);
+    const m = measure(d, sr, loop);
+    assert.equal(m.clipped, 0, `${n} clips`);
+    assert.ok(m.peakDb < -1, `${n} peak ${m.peakDb.toFixed(2)} dBFS`);
+    assert.ok(m.rmsDb > -30 && m.rmsDb < -5, `${n} RMS ${m.rmsDb.toFixed(1)} dBFS`);
+    let s = 0;
+    for (let i = 0; i < d.length; i++) s += d[i];
+    assert.ok(Math.abs(s / d.length) < 0.01, `${n} DC`);
+    if (!loop) {
+      // no click at either end
+      assert.ok(Math.abs(d[0]) < 0.02 && Math.abs(d[d.length - 1]) < 0.01, `${n} edges ${d[0]} ${d[d.length - 1]}`);
+    }
+  }
+  // engines: no fizz above 4.5 kHz (it was overdriven up to the 6 kHz Nyquist)
+  for (const n of ['eng:v6:4:on', 'eng:v8:4:on', 'eng:sports:4:on', 'eng:i4:4:on']) {
+    const { d, sr } = get(n);
+    assert.ok(above(d, sr, 4500) < 0.01, `${n} above 4.5 kHz ${above(d, sr, 4500)}`);
+    assert.ok(between(d, sr, 300, 4000) > 0.25, `${n} carries on a phone (${between(d, sr, 300, 4000).toFixed(2)})`);
+  }
+  // tyre squeal: band noise around 1 to 3 kHz, not saturated into a dense block
+  {
+    const { d, sr } = get('squeal');
+    const m = measure(d, sr, true);
+    assert.ok(m.crestDb > 10, `squeal crest ${m.crestDb.toFixed(1)} (was 9.6, saturated)`);
+    assert.ok(m.bands[3] > 0.6 && above(d, sr, 4500) < 0.02);
+  }
+  // siren: a clean near-sine sweep in the 500 Hz..2 kHz band, almost no upper harmonics
+  for (const n of ['sirenWail', 'sirenYelp']) {
+    const { d, sr } = get(n);
+    assert.ok(between(d, sr, 450, 2600) > 0.95, `${n} in band ${between(d, sr, 450, 2600)}`);
+    assert.ok(above(d, sr, 3000) < 0.005, `${n} upper harmonics ${above(d, sr, 3000)}`);
+  }
+  // gunshot: a crack and a body with a low thump, not a lone tick
+  for (const n of ['gunPistol0', 'gunSmg0']) {
+    const { d, sr } = get(n);
+    const m = measure(d, sr, false);
+    assert.ok(m.crestDb < 21.5, `${n} crest ${m.crestDb.toFixed(1)} (pistol was 22.8)`);
+    assert.ok(bandShares(spectrum(d, sr), [0, 400, 1e9])[0] > 0.25, `${n} low thump`);
+    assert.ok(between(d, sr, 1000, 4000) > 0.1, `${n} crack`);
+    assert.ok(above(d, sr, 7000) < 0.01, `${n} no fizz`);
+  }
+  // blast: long decay with a low drop, the crack not saturated noise
+  {
+    const body = get('blastBody0');
+    assert.ok(measure(body.d, body.sr, false).decay > 1.5);
+    const tail = get('blastTail');
+    assert.ok(measure(tail.d, tail.sr, false).decay > 3);
+    const crack = get('blastCrack0');
+    assert.ok(above(crack.d, crack.sr, 7000) < 0.03, 'blast crack top');
+  }
+  // boost: the low-pass opens, so the sound rises: centroid of the
+  // second quarter is above that of the first 0.12 s
+  {
+    const { d, sr } = get('boostWhoosh');
+    const seg = (a, b) => centroid(spectrum(d.slice(Math.round(a * sr), Math.round(b * sr)), sr, 512));
+    assert.ok(seg(0.3, 0.6) > seg(0, 0.15) * 1.4, `boost sweep ${seg(0, 0.15).toFixed(0)} -> ${seg(0.3, 0.6).toFixed(0)} Hz`);
+  }
+});
+
+test('music composer stays in key: every pitched note is a degree of its mode', () => {
+  const c = createComposer(createRng(11));
+  for (let i = 0; i < 64; i++) {
+    for (const nt of c.bar(i)) {
+      if (nt.inst === 'kick' || nt.inst === 'snare' || nt.inst === 'hat') continue;
+      const deg = ((((nt.semi - c.root) % 12) + 12) % 12);
+      assert.ok(c.mode.includes(deg), `bar ${i} ${nt.inst} degree ${deg}`);
+    }
+  }
+  assert.ok(c.tempo >= 88 && c.tempo < 104);
+});
