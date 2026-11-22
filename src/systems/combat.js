@@ -28,7 +28,7 @@ import {
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
-import { targetPoint, angleTo, lineOfSight } from '../core/aim.js';
+import { targetPoint, angleTo, lineOfSight, AIR_REACH, airborne } from '../core/aim.js';
 import { createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
 import { poseRagdoll } from '../render/ragdoll.js';
 
@@ -457,6 +457,17 @@ export function craftBase(game, c) {
 
 // Nearest hit along (x,y,z) + t*(dx,dy,dz) for t in 0..len. The
 // direction must be a unit vector. Writes and returns `out`.
+// Turn a trace result into a miss at distance len along d.
+function missAt(out, x, y, z, d, len) {
+  out.kind = 'none';
+  out.t = len;
+  out.actor = null;
+  out.craft = null;
+  out.x = x + d.x * len;
+  out.y = y + d.y * len;
+  out.z = z + d.z * len;
+}
+
 export function trace(game, x, y, z, dx, dy, dz, len, skipActor, skipCraft, out) {
   out.kind = 'none';
   out.t = len;
@@ -1112,7 +1123,10 @@ export function createCombat(game, { seed = 23023 } = {}) {
     if (w.type === 'hitscan') {
       for (let k = 0; k < w.pellets; k++) {
         const d = spreadDir(dx, dy, dz, w.spread);
-        trace(game, mx, my, mz, d.x, d.y, d.z, w.range, actor, craft, TR);
+        // Out to AIR_REACH for craft in the air (aim.js); anything else
+        // past the gun's own range is a miss.
+        trace(game, mx, my, mz, d.x, d.y, d.z, Math.max(w.range, AIR_REACH), actor, craft, TR);
+        if (TR.t > w.range && !(TR.kind === 'craft' && airborne(TR.craft))) missAt(TR, mx, my, mz, d, w.range);
         const kind = TR.kind;
         const hx = TR.x, hy = TR.y, hz = TR.z;
         const target = TR.actor || TR.craft;

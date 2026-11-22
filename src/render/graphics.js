@@ -12,7 +12,8 @@ import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
 import { vehicleStats } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { makeWindowAtlas } from './textures.js';
-import { patchWindows, bakeLampLight, patchLampLight, CARS } from './nightlights.js';
+import { patchWindows, bakeLampLight, patchLampLight, setSpotLight, CARS } from './nightlights.js';
+import { setBeamDaylight, BEAM_TAN } from './aircraftmesh.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -425,7 +426,9 @@ export function createGraphics(game) {
           lampU.uCarB.value[i].set(d[o + 4] * k, d[o + 5] * k, d[o + 6], 0);
         }
         lampU.uCarN.value = n;
+        setSpotLight(lampU, game.vehicles, sky ? 1 - sky.night : 0, BEAM_TAN);
       }
+      setBeamDaylight(sky ? 1 - sky.night : 0);
       if (win) {
         win.uniforms.uWinNight.value = sky ? sky.night : 0;
         win.uniforms.uWinTime.value = (game.time || 0) % 1000;

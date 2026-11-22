@@ -15,15 +15,19 @@
 //   setOrder(pilot, order, opts): 'orbit' | 'strafe' | 'hover' | 'retreat'
 //     (alias 'evade') | 'leave' | 'land'. opts: target, radius, x, z, y.
 //   pilot fields to read: state ('arrive', 'orbit', 'strafe', 'hover',
-//     'evade', 'leave', 'land', 'landed', 'crash', 'done'), sees (clear 3D
+//     'evade', 'leave', 'land', 'landed', 'ditch' (pilot shot: settles,
+//     then left empty), 'crash', 'done'), sees (clear 3D
 //     line to the target within SIGHT m, refreshed every 0.25 s), dist,
 //     shots, hits. pilot.weaponsFree (default true) lets the caller hold
 //     fire (one heavy shooter at a time).
 //   createHeliPilots(game): the system (game.helipilot); steps every pilot,
 //     ramps police spotlights, and adds the spotlight toggle for the player.
-// Rules: orbit 55..70 m around the target, 35..50 m above the highest roof
-// within 40 m; strafe = orbit plus a straight pass every 8..12 s with
-// 1.2 s bursts; evade below 40% health (back off to 120 m); leave = climb
+// Rules: orbit 76..106 m around the target (ahead of a moving one, to one
+// side, so a chase camera sees it), 16..24 m above the highest roof within
+// 40 m, further out over tall roofs (never more than maxElev above the
+// target's horizon, never overhead); strafe = orbit plus a straight pass
+// every 8..12 s with 1.2 s bursts; evade below 40% health (back off to
+// 150 m); leave = climb
 // away and despawn 400 m out; crash = spin down, explode on contact.
 // Roof avoidance: heightAt ahead, climb to max + 15 m, hold forward speed
 // while the way ahead is above the craft.
@@ -35,10 +39,15 @@ import { MOUNTS, tryMount, USE_NO } from '../core/weapons.js';
 import { damage, canBeHit, craftBase, EVENT_PAYLOADS, craftBlast, CRAFT_HOOKS } from './combat.js';
 
 export const PILOT = {
-  orbitR: 62, orbitMin: 55, orbitMax: 70, orbitV: 17,
-  altMin: 35, altMax: 50, roofNear: 40,
+  orbitR: 90, orbitMin: 76, orbitMax: 106, orbitV: 9,
+  altMin: 16, altMax: 24, roofNear: 40,
+  // Station keeping: with the target moving faster than leadSpeed the
+  // heli swings round (at most leadV across) to a bearing leadSide rad off
+  // the target's track, ahead of it: in view of a chase camera, never
+  // overhead. Slower targets get a slow circle (orbitV).
+  leadSpeed: 4, leadSide: 0.45, leadV: 18, maxElev: 0.6,
   passEvery: [8, 12], burst: 1.2, passV: 30,
-  evadeAt: 0.4, evadeR: 120,
+  evadeAt: 0.4, evadeR: 150,
   spawnDist: 350, spawnY: 80, leaveDist: 400,
   sight: 160, aimRamp: 1.0, quiet: 3,
   climbOver: 15, crashMax: 9, spin: 2.6,
@@ -71,7 +80,7 @@ export function createHeliPilot(craft, { target = null, order = 'orbit', radius 
 }
 
 export function setOrder(p, order, opts = null) {
-  if (!p || p.state === 'crash' || p.state === 'done') return;
+  if (!p || p.state === 'crash' || p.state === 'done' || p.state === 'ditch') return;
   if (order === 'evade') order = 'retreat';
   if (opts) {
     if (opts.target !== undefined) p.target = opts.target;
@@ -106,6 +115,20 @@ function roofNear(game, x, z, r) {
     if (h > m) m = h;
     const h2 = roofAt(game, x + Math.cos(a) * r * 0.5, z + Math.sin(a) * r * 0.5);
     if (h2 > m) m = h2;
+  }
+  return m;
+}
+// Highest roof along a strip from (x, z) in direction (ux, uz), len m
+// long and 2 x lat wide, sampled every PATH_STEP m from 3 m out.
+const PATH_STEP = 7;
+function pathRoof(game, x, z, ux, uz, len, lat) {
+  let m = 0;
+  const n = Math.min(12, Math.ceil(len / PATH_STEP));
+  for (let k = 0; k < n; k++) {
+    const d = Math.min(len, 3 + k * PATH_STEP);
+    const px = x + ux * d, pz = z + uz * d;
+    const h = Math.max(roofAt(game, px, pz), roofAt(game, px - uz * lat, pz + ux * lat), roofAt(game, px + uz * lat, pz - ux * lat));
+    if (h > m) m = h;
   }
   return m;
 }
@@ -170,13 +193,14 @@ function fly(game, p, wvx, wvz, wy, face, landing = false) {
   // Hovering or settling: only the spot itself (rotor clearance).
   const still = ws < 3 && sp < 3;
   const look = still ? 3 : 14 + Math.max(sp, ws) * 2.6, lat = still ? 2.5 : 5;
-  let ahead = roofAt(game, a.x, a.z);
-  for (let k = 1; k <= 3; k++) {
-    const d = (look * k) / 3;
-    const x = a.x + hx * d, z = a.z + hz * d;
-    const h = Math.max(roofAt(game, x, z), roofAt(game, x - hz * lat, z + hx * lat), roofAt(game, x + hz * lat, z - hx * lat));
-    if (h > ahead) ahead = h;
-  }
+  // Near the craft too (a wall within the rotor's reach), then every few
+  // metres out, so a narrow tower between samples is not missed.
+  let ahead = Math.max(roofAt(game, a.x, a.z), pathRoof(game, a.x, a.z, hx, hz, look, lat));
+  // The way the craft is actually drifting (it turns slower than the
+  // wanted path does): far enough to stop in.
+  let drift = 0;
+  if (!still && sp > 2) drift = pathRoof(game, a.x, a.z, a.vx / sp, a.vz / sp, 10 + sp * 2.2, lat);
+  if (drift > ahead) ahead = drift;
   if (!landing && wy < ahead + PILOT.climbOver) wy = ahead + PILOT.climbOver;
   // Way ahead still above us: stop going forward and climb first.
   const blocked = ahead > a.y - 6;
@@ -309,6 +333,27 @@ export function stepHeliPilot(game, p, dt) {
     }
     return;
   }
+  // ---- pilot shot dead (seat 0): the craft autorotates down in one
+  // piece, and once down it is an empty police heli anyone can take ----
+  if (a.occ && !(a.occ[0] > 0) && p.state !== 'ditch') {
+    p.state = 'ditch';
+    a.siren = false;
+    a.spotOn = false;
+  }
+  if (p.state === 'ditch') {
+    if (a.onGround || a.onWater) {
+      hold(p);
+      a.driver = null;
+      a.ai = null;
+      a.pilot = null;
+      a.occ = null;
+      a.occDown = null;
+      p.state = 'done';
+      return;
+    }
+    fly(game, p, -a.vx * 0.5, -a.vz * 0.5, roofAt(game, a.x, a.z) - 10, NaN, true);
+    return;
+  }
   const t = p.target;
   const tx = t ? t.x : p.hx, tz = t ? t.z : p.hz;
   // Target velocity from its motion (works for any target object).
@@ -350,9 +395,18 @@ export function stepHeliPilot(game, p, dt) {
     }
     case 'orbit':
     case 'evade': {
-      const R = p.state === 'evade' ? PILOT.evadeR : p.radius;
+      // Over tall roofs it stands further off, so it is never steeply
+      // overhead (at most PILOT.maxElev above the target's horizon).
+      const R = Math.max(p.state === 'evade' ? PILOT.evadeR : p.radius, (Math.max(orbitY, a.y) - ty) / Math.tan(PILOT.maxElev));
       const corr = clamp((R - d) * 0.9, -16, 16);
-      const v = PILOT.orbitV * p.dir;
+      // Across speed: a slow circle, or round to the station ahead of a
+      // moving target (bearing measured from the target to the heli).
+      let v = PILOT.orbitV * p.dir;
+      const ts = Math.hypot(p.tvx, p.tvz);
+      if (p.state === 'orbit' && ts > PILOT.leadSpeed) {
+        const want = Math.atan2(p.tvz, p.tvx) + PILOT.leadSide * p.dir;
+        v = clamp(angleDiff(want, Math.atan2(uz, ux)) * R * 0.6, -PILOT.leadV, PILOT.leadV);
+      }
       fly(game, p, p.tvx - uz * v + ux * corr, p.tvz + ux * v + uz * corr, orbitY + (p.state === 'evade' ? 20 : 0), NaN);
       if (p.order === 'strafe' && p.state === 'orbit') {
         p.passT -= dt;

@@ -30,6 +30,16 @@ export const TIER_ATTACKER = 0, TIER_CREW = 1, TIER_POLICE = 2, TIER_CRAFT = 3, 
 export const isActor = (t) => !!t && typeof t.hp === 'number';
 export const isCraft = (t) => !!t && !!t.spec && typeof t.health === 'number' && t.hp === undefined;
 
+// Open sky: a hand gun's bullet carries far further up at a helicopter or
+// a plane than its street range (buildings, people, cars), so guns reach
+// craft in the air out to AIR_REACH m. Used by aim assist, LOCK and the
+// combat trace (combat.js).
+export const AIR_REACH = 130;
+export function airborne(t) {
+  return isCraft(t) && (t.kind === 'heli' || t.kind === 'plane') && !t.onGround && (t.y || 0) > 3;
+}
+export const reachFor = (t, range) => (range < AIR_REACH && airborne(t) ? AIR_REACH : range);
+
 // Is this a person or craft that can still be shot?
 export function alive(t) {
   if (!t) return false;
@@ -118,7 +128,8 @@ function usable(ctx, t, eye, fwd, muzzle, range) {
   targetPoint(t, ctx.seaY, TP);
   const mx = TP.x - muzzle.x, my = TP.y - muzzle.y, mz = TP.z - muzzle.z;
   const d2 = mx * mx + my * my + mz * mz;
-  if (d2 > range * range || d2 < 0.04) return -1;
+  const r = reachFor(t, range);
+  if (d2 > r * r || d2 < 0.04) return -1;
   // In front of the eye at all?
   const ex = TP.x - eye.x, ey = TP.y - eye.y, ez = TP.z - eye.z;
   if (ex * fwd.x + ey * fwd.y + ez * fwd.z <= 0) return -1;
@@ -143,8 +154,8 @@ function consider(ctx, t, eye, fwd, muzzle) {
     if (isCraft(t) && !crewedCraft(t)) return;
     if (isActor(t) && lockTier(t, ctx.self) === TIER_CIV) return;
     targetPoint(t, ctx.seaY, TP);
-    const mx = TP.x - muzzle.x, mz = TP.z - muzzle.z;
-    if (mx * mx + mz * mz > Q.range * Q.range) return;
+    const mx = TP.x - muzzle.x, mz = TP.z - muzzle.z, r = reachFor(t, Q.range);
+    if (mx * mx + mz * mz > r * r) return;
     // Screen right is +yaw (heading grows toward +z, which is to the right).
     const a = angleDiff(Math.atan2(TP.z - eye.z, TP.x - eye.x), Q.curYaw);
     if (a * Q.side <= 0.01 || Math.abs(a) > FLICK_CONE || Math.abs(a) >= Q.score) return;
@@ -283,7 +294,8 @@ export function keepLock(st, ctx, muzzle, range, dt) {
   }
   targetPoint(t, ctx.seaY, TP);
   const dx = TP.x - muzzle.x, dy = TP.y - muzzle.y, dz = TP.z - muzzle.z;
-  const ok = dx * dx + dy * dy + dz * dz <= range * range
+  const r = reachFor(t, range);
+  const ok = dx * dx + dy * dy + dz * dz <= r * r
     && lineOfSight(ctx.collision, muzzle.x, muzzle.y, muzzle.z, TP.x, TP.y, TP.z);
   st.lostT = ok ? 0 : st.lostT + dt;
   if (st.lostT >= LOCK_LOSE_T) {

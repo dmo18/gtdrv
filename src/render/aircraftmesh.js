@@ -573,16 +573,19 @@ function buildHeavyHeli(k, gk, color, trim) {
   return { discs: [{ o: [0.3, 4.02, 0], d: [0, 1, 0], r: 6.5 }, { o: [-8.9, 3.75, 0.27], d: [0, 0, 1], r: 1.1 }], rotor: true };
 }
 
+// Police livery: white all over (it is mostly seen from below, against a
+// dark city or a night sky), a bold blue band, blue tail band and fin.
+const POLICE_BLUE = 0x1d56d0;
 function buildPatrolHeli(k, gk, color) {
   const keys = [[0.6, 1.38, 0.94, 0.96, 0.72, 2.5], [-0.9, 1.46, 0.9, 0.94, 0.7, 2.7], [-2.1, 1.68, 0.4, 0.52, 0.32, 2.2]];
   k.loft(keys, color, L, {
     steps: 12, seg: 24, capEnds: true,
-    col: (x, a, p) => (p[1] < 0.98 ? [WHITE, L] : p[1] < 1.14 ? [ORANGE, L] : [color, L]),
+    col: (x, a, p) => (p[1] < 0.98 || p[1] > 1.26 ? [color, L] : [POLICE_BLUE, L]),
   });
   const gkeys = [[0.6, 1.38, 0.94, 0.96, 0.72, 2.5], [1.6, 1.3, 0.86, 0.86, 0.64, 2.3], [2.4, 1.2, 0.56, 0.58, 0.45, 2.2], [2.8, 1.12, 0.1, 0.1, 0.08, 2]];
   glassLoft(k, gk, gkeys);
   canopyFrame(k, gkeys, 0.6, 2.75);
-  k.loft([[0.55, 0.88, 0.9, 0.22, 0.24, 3], [1.8, 0.86, 0.72, 0.2, 0.22, 3], [2.6, 0.98, 0.32, 0.12, 0.12, 2.5]], WHITE, L, { steps: 6, seg: 14, capEnds: true });
+  k.loft([[0.55, 0.88, 0.9, 0.22, 0.24, 3], [1.8, 0.86, 0.72, 0.2, 0.22, 3], [2.6, 0.98, 0.32, 0.12, 0.12, 2.5]], color, L, { steps: 6, seg: 14, capEnds: true });
   if (k.q > 0.8) {
     pilot(k, 1.45, 1.74, 0.38);
     pilot(k, 1.45, 1.74, -0.38);
@@ -590,7 +593,7 @@ function buildPatrolHeli(k, gk, color) {
   }
   k.loft([[-2.0, 2.4, 0.26, 0.18, 0.05, 2.6], [-1.0, 2.5, 0.55, 0.28, 0.05, 3], [0.5, 2.5, 0.55, 0.26, 0.05, 3], [1.0, 2.42, 0.24, 0.12, 0.05, 2.6]], color, L, { steps: 8, seg: 14, capEnds: true });
   k.loft([[-6.4, 2.0, 0.09, 0.11, 0.09, 2], [-1.8, 1.78, 0.27, 0.32, 0.25, 2.2]], color, L, {
-    steps: 8, seg: 14, col: (x) => (x > -4.2 && x < -2.6 ? [WHITE, L] : [color, L]),
+    steps: 8, seg: 14, col: (x) => (x > -4.4 && x < -2.6 ? [POLICE_BLUE, L] : [color, L]),
   });
   // Shrouded tail fan in the fin.
   k.lathe([
@@ -599,7 +602,7 @@ function buildPatrolHeli(k, gk, color) {
     { pts: [[0.3, 0.78], [0, 0.78]], hex: color, cls: L },
     { pts: [[0, 0.78], [0, 0.62]], hex: color, cls: L },
   ], 18, [-6.85, 2.15, -0.15], [0, 0, 1]);
-  finPanel(k, { le: [-6.0, 2.4, 0], c: 1.4, t: 0.2 }, { le: [-7.2, 3.35, 0], c: 0.7, t: 0.12 }, color, null, ORANGE, 0.8);
+  finPanel(k, { le: [-6.0, 2.4, 0], c: 1.4, t: 0.2 }, { le: [-7.2, 3.35, 0], c: 0.7, t: 0.12 }, POLICE_BLUE, null, color, 0.8);
   wingPair(k, { root: { le: [-4.9, 1.93, 0.08], c: 0.55, t: 0.1 }, tip: { le: [-5.0, 1.93, 0.95], c: 0.42, t: 0.1 }, hex: color });
   // Chin gun pod and the gimballed searchlight.
   k.lathe([{ pts: [[0, 0], [0, 0.17], [0.55, 0.17], [0.7, 0.08], [0.72, 0]], hex: DARK, cls: T }], 10, [1.75, 0.6, 0.45], [1, 0, 0]);
@@ -627,11 +630,97 @@ const EXTRA_MAT = {
     vertexColors: true, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide, fog: false,
   }),
   lamp: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
-  beam: new THREE.MeshBasicMaterial({
-    color: 0xfff1c8, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false,
-    side: THREE.DoubleSide, toneMapped: false,
-  }),
 };
+
+// The searchlight beam: a faint lit volume, not a solid cone. The cone
+// mesh only marks which pixels the beam can touch (its back faces: one
+// fragment per pixel, from outside or inside); each pixel then takes the
+// light along its view ray from how close that ray passes to the beam's
+// axis (a soft round falloff, no hard rim), brightest near the lamp, and
+// none near the camera (the beam is usually aimed at the player, so the
+// camera often sits in it) or at the far end (the light pool on the ground
+// takes over there; nightlights.js). Additive, one thin pass.
+// uK: strength (spot ramp x day/night); uA / uD: apex and unit direction
+// in world space; uL: (length, half-angle tangent).
+const BEAM_VS = `
+varying vec3 vW;
+void main() {
+	vec4 w = modelMatrix * vec4( position, 1.0 );
+	vW = w.xyz;
+	gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+const BEAM_FS = `
+uniform float uK;
+uniform vec3 uCol;
+uniform vec3 uA;
+uniform vec3 uD;
+uniform vec2 uL;
+varying vec3 vW;
+void main() {
+	vec3 rd = vW - cameraPosition;
+	float tMax = length( rd );
+	rd /= tMax;
+	vec3 w0 = cameraPosition - uA;
+	float b = dot( rd, uD ), d = dot( rd, w0 ), e = dot( uD, w0 );
+	float den = max( 1.0 - b * b, 1e-4 );
+	float tr = clamp( ( b * e - d ) / den, 0.0, tMax );
+	vec3 p = cameraPosition + rd * tr;
+	float s = clamp( dot( p - uA, uD ), 0.0, uL.x );
+	float q = length( p - ( uA + uD * s ) ) / ( 0.2 + s * uL.y );
+	float u = s / uL.x;
+	float along = mix( 1.0, 0.22, sqrt( u ) ) * smoothstep( 0.0, 0.03, u ) * ( 1.0 - smoothstep( 0.8, 1.0, u ) );
+	float near = smoothstep( 3.0, 12.0, tr );
+	gl_FragColor = vec4( uCol, uK * exp( - q * q * 3.5 ) * along * near );
+}`;
+function beamMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uK: { value: 0 }, uCol: { value: new THREE.Color(1, 0.93, 0.8) },
+      uA: { value: new THREE.Vector3() }, uD: { value: new THREE.Vector3(0, -1, 0) }, uL: { value: new THREE.Vector2(1, 0.06) },
+    },
+    vertexShader: BEAM_VS, fragmentShader: BEAM_FS,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide, fog: false, toneMapped: false,
+  });
+}
+// Beam half-angle (tangent): a narrow searchlight. The ground pool
+// (nightlights.js, spotUniforms) uses the same cone.
+export const BEAM_TAN = 0.06;
+
+// Small soft glows: light bar flashes and the searchlight lens. A fixed
+// size on screen (about 14 px on a 412 px tall view for the bar), so they
+// read at 120 m and never cover the screen up close.
+let glowTex = null;
+function glowTexture() {
+  if (glowTex) return glowTex;
+  const S = 32, px = new Uint8Array(S * S * 4);
+  for (let j = 0; j < S; j++) {
+    for (let i = 0; i < S; i++) {
+      const x = (i + 0.5) / S * 2 - 1, y = (j + 0.5) / S * 2 - 1;
+      const r = Math.min(1, Math.sqrt(x * x + y * y));
+      const a = Math.pow(1 - r, 2.2) * 0.85 + Math.max(0, 1 - r * 4) * 0.15;
+      const o = (j * S + i) * 4;
+      px[o] = px[o + 1] = px[o + 2] = 255;
+      px[o + 3] = Math.round(255 * Math.min(1, a));
+    }
+  }
+  glowTex = new THREE.DataTexture(px, S, S, THREE.RGBAFormat);
+  glowTex.magFilter = THREE.LinearFilter;
+  glowTex.minFilter = THREE.LinearFilter;
+  glowTex.needsUpdate = true;
+  return glowTex;
+}
+function glowSprite(hex, size) {
+  const m = new THREE.SpriteMaterial({
+    map: glowTexture(), color: hex, transparent: true, blending: THREE.AdditiveBlending,
+    depthWrite: false, sizeAttenuation: false, toneMapped: false, fog: false,
+  });
+  const sp = new THREE.Sprite(m);
+  sp.scale.set(size, size, 1);
+  sp.renderOrder = 7;
+  sp.visible = false;
+  sp.userData.size = size;
+  return sp;
+}
 let extraGeo = null;
 // Unit afterburner plume along -x: an outer orange cone, an inner white
 // core and shock diamonds, vertex colours fading to black (additive).
@@ -661,18 +750,26 @@ function plumeGeometry() {
 }
 function extraGeometry() {
   if (extraGeo) return extraGeo;
+  // Light bar: housing with dark lenses (always there), and one lit lens
+  // per side shown while that side flashes.
   const lk = new Kit(1);
   lk.box(0, 0, 0, 0.34, 0.08, 1.3, 0x202226, T);
-  lk.box(0, 0.1, -0.33, 0.3, 0.14, 0.56, 0xff2a2a, GL);
-  lk.box(0, 0.1, 0.33, 0.3, 0.14, 0.56, 0x2a6bff, GL);
-  const beam = new THREE.CylinderGeometry(0.03, 1, 1, 16, 1, false);
+  lk.box(0, 0.1, -0.33, 0.3, 0.14, 0.56, 0x4a1414, T);
+  lk.box(0, 0.1, 0.33, 0.3, 0.14, 0.56, 0x14224a, T);
+  const rk = new Kit(1);
+  rk.box(0, 0.1, -0.33, 0.31, 0.15, 0.57, 0xff2418, GL);
+  const bk = new Kit(1);
+  bk.box(0, 0.1, 0.33, 0.31, 0.15, 0.57, 0x2a66ff, GL);
+  // Open cone (no end cap: a cap drew a flat white disc on the ground).
+  const beam = new THREE.CylinderGeometry(0.02, 1, 1, 24, 1, true);
   beam.translate(0, -0.5, 0);
-  extraGeo = { glow: plumeGeometry(), lightbar: buildKit(lk), beam };
+  extraGeo = { glow: plumeGeometry(), lightbar: buildKit(lk), lensR: buildKit(rk), lensB: buildKit(bk), beam };
   return extraGeo;
 }
 const Q1 = new THREE.Quaternion();
 const Q2 = new THREE.Quaternion();
 const V1 = new THREE.Vector3();
+const V2 = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
 const BEAM_TILT = 0.55; // rad forward of straight down when not aimed
 const BEAM_MAX = 170; // metres
@@ -681,6 +778,19 @@ const BEAM_MAX = 170; // metres
 export function lightbarPhase(time) {
   const k = Math.floor((Number.isFinite(time) ? time : 0) * 6) & 3;
   return k;
+}
+// Flash levels 0..1 of the red and blue sides at `time`: each side
+// double-flashes in its half of a 0.8 s cycle, with soft edges (no
+// one-frame pops), so the two colours read clearly and never mix.
+const FLASH = { r: 0, b: 0 };
+export function lightbarLevels(time, out = FLASH) {
+  const u = (((Number.isFinite(time) ? time : 0) / 0.8) % 1 + 1) % 1;
+  const side = u < 0.5 ? 0 : 1, w = (u - side * 0.5) * 4; // two flashes per half
+  const f = w % 1;
+  const lvl = f < 0.7 ? Math.sin((f / 0.7) * Math.PI) : 0;
+  out.r = side === 0 ? lvl : 0;
+  out.b = side === 1 ? lvl : 0;
+  return out;
 }
 
 // ---- caches ---------------------------------------------------------------------
@@ -743,7 +853,7 @@ export function createAircraftMesh(spec, color) {
   group.add(lod);
 
   const lay = entry.layout;
-  let glow = null, lightbar = null, beam = null;
+  let glow = null, lightbar = null, beam = null, bar = null, lensGlow = null;
   if (lay.nozzle || lay.lightbar || lay.spot) {
     const xg = extraGeometry();
     if (lay.nozzle) {
@@ -760,17 +870,31 @@ export function createAircraftMesh(spec, color) {
       group.add(glow);
     }
     if (lay.lightbar) {
-      lightbar = new THREE.Mesh(xg.lightbar, EXTRA_MAT.lamp);
+      // `lightbar` is the group (shown while the siren runs); its lit
+      // lenses and glows flash by side (lightbarLevels).
+      lightbar = new THREE.Group();
       lightbar.position.set(lay.lightbar[0], lay.lightbar[1], lay.lightbar[2]);
+      lightbar.add(new THREE.Mesh(xg.lightbar, EXTRA_MAT.lamp));
+      const lr = new THREE.Mesh(xg.lensR, EXTRA_MAT.lamp), lb = new THREE.Mesh(xg.lensB, EXTRA_MAT.lamp);
+      const gr = glowSprite(0xff2a1e, 0.04), gb = glowSprite(0x3a72ff, 0.04);
+      gr.position.set(0, 0.16, -0.36);
+      gb.position.set(0, 0.16, 0.36);
+      lr.visible = lb.visible = false;
+      lightbar.add(lr, lb, gr, gb);
+      lightbar.visible = false;
+      bar = { lr, lb, gr, gb };
       group.add(lightbar);
     }
     if (lay.spot) {
-      beam = new THREE.Mesh(xg.beam, EXTRA_MAT.beam);
+      beam = new THREE.Mesh(xg.beam, beamMaterial());
       beam.position.set(lay.spot[0], lay.spot[1], lay.spot[2]);
       beam.visible = false;
       beam.frustumCulled = false;
       beam.renderOrder = 6;
       group.add(beam);
+      lensGlow = glowSprite(0xfff0d2, 0.05);
+      lensGlow.position.set(lay.spot[0], lay.spot[1] - 0.05, lay.spot[2]);
+      group.add(lensGlow);
     }
   }
 
@@ -778,7 +902,10 @@ export function createAircraftMesh(spec, color) {
   // the nose axis (the usual aircraft order).
   group.rotation.order = 'YZX';
   group.userData = {
-    spec, body, glass, disc, lod, skin, glow, lightbar, beam, layout: lay, tris: entry.tris,
+    spec, body, glass, disc, lod, skin, glow, lightbar, bar, beam, lensGlow, layout: lay, tris: entry.tris,
+    // World searchlight cone while lit (for the ground pool): apex, unit
+    // direction, length, strength 0..1.
+    spotW: beam ? { on: false, x: 0, y: 0, z: 0, dx: 0, dy: -1, dz: 0, len: 0, k: 0 } : null,
     rig: { ail: 0, elev: 0, rud: 0, flap: 0, gear: 0, pitch: NaN }, lastT: NaN, look: -1,
     // Kept for callers that look for these parts.
     prop: lay.prop ? body : null, rotor: lay.rotor ? body : null, rack: null,
@@ -832,22 +959,51 @@ export function updateAircraftMesh(mesh, a, alpha = 1, time = 0) {
       ud.glow.scale.set((0.9 + 2.4 * ab) * flick, r * (0.7 + 0.3 * ab), r * (0.7 + 0.3 * ab));
     }
   }
-  if (ud.lightbar) {
-    const k = lightbarPhase(time);
-    const on = !!a.siren && !a.wrecked;
-    // Siren on: flash, swapping sides; off: lamps dark (hidden).
-    ud.lightbar.visible = on && (k & 1) === 0;
-    ud.lightbar.rotation.y = k === 2 ? Math.PI : 0;
+  // Night readability for the police livery: the craft flies above the
+  // street lamps' reach, so lift its response to the dim night light
+  // (white body and blue band still read; by day it is unchanged).
+  if (spec.police) {
+    const n = a.wrecked ? 1 : 1 + 0.7 * (1 - daylight);
+    if (ud.skin.color.r !== n) ud.skin.color.setScalar(n);
   }
-  if (ud.beam) aimBeam(mesh, ud.beam, a);
+  if (ud.lightbar) {
+    const on = !!a.siren && !a.wrecked;
+    ud.lightbar.visible = on;
+    if (on) {
+      const f = lightbarLevels(time);
+      const b = ud.bar;
+      b.lr.visible = f.r > 0.3;
+      b.lb.visible = f.b > 0.3;
+      flash(b.gr, f.r);
+      flash(b.gb, f.b);
+    }
+  }
+  if (ud.beam) aimBeam(mesh, ud, a);
+}
+function flash(sp, k) {
+  sp.visible = k > 0.02;
+  if (!sp.visible) return;
+  const s = sp.userData.size * (0.75 + 0.25 * k);
+  sp.scale.set(s, s, 1);
+  sp.material.opacity = 0.9 * k;
+}
+
+// Daylight 0..1 for the searchlight's strength (graphics.js sets it each
+// frame from the sky; night until then).
+let daylight = 0;
+export function setBeamDaylight(k) {
+  daylight = k > 0 ? Math.min(1, k) : 0;
 }
 
 // Point the fake spotlight cone at (spotX, spotY, spotZ) when the craft
 // has an aim point (spotAim), else forward and down. Length reaches the
 // ground below (sea level when unknown), capped.
-function aimBeam(mesh, beam, a) {
+function aimBeam(mesh, ud, a) {
+  const beam = ud.beam, sw = ud.spotW;
   const on = (a.spot || 0) > 0.05 && !a.wrecked;
   beam.visible = on;
+  ud.lensGlow.visible = on;
+  sw.on = false;
   if (!on) return;
   mesh.updateMatrixWorld();
   beam.getWorldPosition(V1);
@@ -867,6 +1023,7 @@ function aimBeam(mesh, beam, a) {
   let len = Math.sqrt(dx * dx + dy * dy + dz * dz);
   if (!(len > 0.5)) {
     beam.visible = false;
+    ud.lensGlow.visible = false;
     return;
   }
   // World rotation that takes -y to the beam direction, then into the
@@ -876,6 +1033,27 @@ function aimBeam(mesh, beam, a) {
   mesh.getWorldQuaternion(Q2).invert();
   beam.quaternion.copy(Q2.multiply(Q1));
   len = Math.min(len, BEAM_MAX);
-  const r = (0.6 + len * 0.13) * (0.6 + 0.4 * Math.min(1, a.spot));
+  const k = Math.min(1, a.spot);
+  const r = 0.2 + len * BEAM_TAN;
   beam.scale.set(r, len, r);
+  // Faint by day (a searchlight barely shows in sunlight), clear at night.
+  const day = daylight;
+  const bu = beam.material.uniforms;
+  bu.uK.value = k * (0.34 - 0.27 * day);
+  const lg = ud.lensGlow, gs = lg.userData.size * (0.6 + 0.4 * k);
+  lg.scale.set(gs, gs, 1);
+  lg.material.opacity = k * (0.95 - 0.45 * day);
+  sw.on = true;
+  sw.dx = V1.x;
+  sw.dy = V1.y;
+  sw.dz = V1.z;
+  beam.getWorldPosition(V2);
+  bu.uA.value.copy(V2);
+  bu.uD.value.copy(V1);
+  bu.uL.value.set(len, BEAM_TAN);
+  sw.x = V2.x;
+  sw.y = V2.y;
+  sw.z = V2.z;
+  sw.len = len;
+  sw.k = k;
 }

@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeFightGame, DT } from './fightgame.js';
+import { makeFightGame, yard, DT } from './fightgame.js';
 import {
   spawnPoliceHeli, stepPilots, setOrder, gunnerChance, createHeliPilots, toggleSpot, PILOT,
 } from '../src/systems/helipilot.js';
 import { stepAircraft } from '../src/entities/aircraft.js';
-import { damage } from '../src/systems/combat.js';
+import { damage, HP } from '../src/systems/combat.js';
+import { createArms, WEAPONS } from '../src/core/weapons.js';
+import { AIR_REACH } from '../src/core/aim.js';
+import { findEnterable } from '../src/entities/onfoot.js';
+import { canJack, isOccupied } from '../src/core/carjack.js';
 
 // The tallest Glasswell (downtown) tower, and a point beside it.
 function glasswell(g) {
@@ -58,7 +62,7 @@ test('spawn: a flying police Lampwatch 350 m out, 80 m up, with a pilot', () => 
   assert.equal(p.state, 'arrive');
 });
 
-test('orbits a moving target over Glasswell for 60 s at 55..70 m, never touching a roof', () => {
+test('orbits a moving target over Glasswell for 60 s: never closer than the ring, never steeply overhead, never touching a roof', () => {
   const g = makeFightGame({});
   const c = glasswell(g);
   assert.ok(c.b.h > 60, 'a real tower');
@@ -73,7 +77,8 @@ test('orbits a moving target over Glasswell for 60 s at 55..70 m, never touching
     if (i > 60 * 15) {
       const r = Math.hypot(a.x - tgt.x, a.z - tgt.z);
       n++;
-      if (r < PILOT.orbitMin || r > PILOT.orbitMax) out++;
+      // Over the towers it stands further off (elevation capped, a little lag).
+      if (r < PILOT.orbitMin || Math.atan2(a.y, r) > PILOT.maxElev + 0.15) out++;
       minClear = Math.min(minClear, a.y - g.collision.heightAt(a.x, a.z));
     }
   });
@@ -85,9 +90,41 @@ test('orbits a moving target over Glasswell for 60 s at 55..70 m, never touching
   assert.ok(a.spotOn && a.spotAim, 'beam on the target');
 });
 
+// A junction with open sky around it (no roof within 9 m).
+function openNode(g, skip = 0) {
+  const col = g.collision;
+  const open = (x, z) => [0, 1, 2, 3, 4, 5, 6, 7].every((k) => col.heightAt(x + Math.cos(k * 0.785) * 9, z + Math.sin(k * 0.785) * 9) === 0);
+  return g.city.nodes.filter((q) => open(q.x, q.z)).sort((u, v) => Math.hypot(u.x, u.z) - Math.hypot(v.x, v.z))[skip];
+}
+
+test('over open streets: the ring, low enough to see, and ahead of a moving target (in view, not overhead)', () => {
+  const { city, collision } = yard();
+  const g = makeFightGame({ city, collision });
+  const tgt = { x: 0, z: 0, y: 0 };
+  const p = spawnPoliceHeli(g, { target: tgt, dist: 200, angle: 2, seed: 7 });
+  const a = p.craft;
+  let n = 0, ring = 0, ahead = 0, over = 0, elevSum = 0;
+  run(g, p, 60 * 70, (i) => {
+    if (i < 60 * 30) return; // parked, then driving east at 14 m/s
+    tgt.x += 14 * DT;
+    if (i < 60 * 45) return;
+    const r = Math.hypot(a.x - tgt.x, a.z - tgt.z), e = Math.atan2(a.y, r);
+    n++;
+    elevSum += e;
+    if (r >= PILOT.orbitMin - 4 && r <= PILOT.orbitMax + 6) ring++;
+    if (Math.abs(Math.atan2(a.z - tgt.z, a.x - tgt.x)) < 1.1) ahead++;
+    if (e > 1.0) over++;
+  });
+  assert.ok(ring / n > 0.9, `in the ring ${ring} of ${n}`);
+  assert.ok(ahead / n > 0.9, `ahead of the target ${ahead} of ${n}`);
+  assert.equal(over, 0, 'never steeply overhead');
+  const mean = elevSum / n;
+  assert.ok(mean > 0.12 && mean < 0.4, `mean elevation ${mean}`);
+});
+
 test('strafe: passes every 8..12 s with bursts at the player; hold fire works', () => {
   const g = makeFightGame({});
-  const c = g.city.spawn; // a downtown street among towers
+  const c = openNode(g, 3); // a street with sky over it (among towers the heli stays above the roofs)
   movePlayer(g, c.x, c.z);
   const p = spawnPoliceHeli(g, { dist: 160, angle: 0, order: 'strafe', seed: 9 });
   let firstShot = -1, passes = 0, was = '';
@@ -157,7 +194,8 @@ test('shot down: spins down, explodes on the ground, wreck released', () => {
   assert.equal(p.state, 'done');
   assert.ok(a.onGround || a.onWater);
   assert.equal(booms.length, 1);
-  assert.ok(booms[0].y < 40);
+  // On whatever is under it: the ground or a roof.
+  assert.ok(Math.abs(booms[0].y - 1.2 - g.collision.heightAt(a.x, a.z)) < 3, `blast at ${booms[0].y}`);
   assert.equal(a.ai, null);
 });
 
@@ -194,4 +232,54 @@ test('system: spotlight ramps; player toggle', () => {
   const own = { spec: { police: true }, spotOn: false };
   assert.ok(toggleSpot(g, own) && own.spotOn);
   assert.ok(!toggleSpot(g, { spec: {} }));
+});
+
+test('pistol from the street reaches the heli in the air; the pilot dies, it settles in one piece, ENTER takes it and it flies', () => {
+  const { city, collision } = yard();
+  const g = makeFightGame({ city, collision });
+  const w = g.player.walker;
+  w.arms = createArms('pistol');
+  const p = spawnPoliceHeli(g, { dist: 200, angle: 0.4, seed: 3 });
+  const a = p.craft;
+  a.occ = [HP.police, HP.police]; // police.crewUp in the game
+  run(g, p, 60 * 25);
+  assert.equal(p.state, 'orbit');
+  const d3 = () => Math.hypot(a.x - w.x, a.y + 1.6 - 1.4, a.z - w.z);
+  const far = d3();
+  assert.ok(far > WEAPONS.pistol.range + 20 && far < AIR_REACH, `heli ${far} m away`);
+  let hits = 0;
+  g.events.on('shot', (e) => { if (e.hitKind === 'craft' && e.shooter === w) hits++; });
+  run(g, p, 60 * 30, () => {
+    if (p.state !== 'orbit' && p.state !== 'evade') return;
+    w.hp = 100;
+    g.combat.fire(w, a.x - w.x, a.y + 1.6 - 1.4, a.z - w.z, null, null);
+  });
+  assert.ok(hits > 0, 'bullets reach it');
+  assert.ok(!a.wrecked, 'came down in one piece');
+  assert.equal(p.state, 'done');
+  assert.ok(a.onGround && a.driver === null && a.ai === null && !a.siren);
+  // Walk up to it: the ENTER prompt finds it.
+  w.x = a.x + 6;
+  w.z = a.z;
+  assert.equal(findEnterable(w, g.vehicles), a);
+  // The player's controls lift it.
+  a.driver = 'player';
+  const ctl = { steer: 0, pitch: 0, throttle: 1, brake: 0, handbrake: false };
+  for (let i = 0; i < 60 * 6; i++) stepAircraft(a, ctl, DT, g.world);
+  assert.ok(!a.onGround && a.y > 8, `climbed to ${a.y}`);
+});
+
+test('a police heli on the ground with its crew aboard can be taken (carjack), one in the air cannot', () => {
+  const g = makeFightGame({});
+  const p = spawnPoliceHeli(g, { dist: 60, angle: 0, seed: 8 });
+  const a = p.craft;
+  assert.ok(!canJack(a), 'flying');
+  a.y = 0;
+  a.onGround = true;
+  a.vx = a.vz = a.speed = 0;
+  assert.ok(canJack(a));
+  const w = g.player.walker;
+  w.x = a.x + 6;
+  w.z = a.z;
+  assert.equal(findEnterable(w, g.vehicles, 3.2, (v) => !isOccupied(v) || canJack(v)), a);
 });

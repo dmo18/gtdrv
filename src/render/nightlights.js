@@ -176,6 +176,21 @@ const LAMP_FRAG = `
 			rwL += vec3( 1.0, 0.06, 0.03 ) * ( b.y * exp( - r * r * 0.4 ) * exp( - up * 1.5 ) );
 		}
 	}
+	// Police searchlight: a narrow cone from the heli's lamp (apex
+	// uSpotA.xyz, strength uSpotA.w; unit direction uSpotB.xyz, half-angle
+	// tangent uSpotB.w). A bright core with a soft rim, on the ground and
+	// on any wall or roof inside the cone.
+	if ( uSpotA.w > 0.0 ) {
+		vec3 sd = vRwLampW - uSpotA.xyz;
+		float s = dot( sd, uSpotB.xyz );
+		if ( s > 1.0 ) {
+			float rr = length( sd - uSpotB.xyz * s );
+			float R = 0.25 + s * uSpotB.w;
+			float q = rr / R;
+			float c = exp( - q * q * 3.0 ) * ( 1.0 - smoothstep( 0.8, 1.2, q ) );
+			rwL += vec3( 1.0, 0.95, 0.86 ) * ( c * uSpotA.w );
+		}
+	}
 	// Dark asphalt still shows a pool (its sheen scatters some light back).
 	reflectedLight.indirectDiffuse += max( material.diffuseColor, vec3( 0.07, 0.065, 0.06 ) ) * rwL;
 }`;
@@ -183,10 +198,28 @@ const LAMP_FRAG = `
 // Cars whose lamps light the ground (the player's and the nearest).
 export const CARS = 6;
 
+// Police searchlight pool: the first lit beam among the craft (aircraft
+// meshes keep their world cone in userData.spotW). `day` 0..1 dims it in
+// sunlight. No allocation.
+export function setSpotLight(U, crafts, day, tan) {
+  const A = U.uSpotA.value, B = U.uSpotB.value;
+  A.w = 0;
+  for (let i = 0; i < crafts.length; i++) {
+    const v = crafts[i];
+    const sw = v.mesh && v.mesh.userData && v.mesh.userData.spotW;
+    if (!sw || !sw.on || !v.mesh.visible) continue;
+    A.set(sw.x, sw.y, sw.z, sw.k * (4.5 - 3.6 * day));
+    B.set(sw.dx, sw.dy, sw.dz, tan);
+    return true;
+  }
+  return false;
+}
+
 // Adds the baked lamp light and the car lamps to the given materials.
-// Returns the shared uniforms: set uLampK (0 by day) every frame, and
-// per car uCarA = (x, z, cos heading, sin heading), uCarB = (headlight,
-// tail glow, half length, 0) for the first uCarN entries.
+// Returns the shared uniforms: set uLampK (0 by day) every frame, the
+// searchlight uSpotA / uSpotB (setSpotLight), and per car uCarA = (x, z,
+// cos heading, sin heading), uCarB = (headlight, tail glow, half length,
+// 0) for the first uCarN entries.
 export function patchLampLight(mats, baked) {
   const U = {
     uLampMap: { value: baked.texture },
@@ -195,6 +228,8 @@ export function patchLampLight(mats, baked) {
     uCarN: { value: 0 },
     uCarA: { value: Array.from({ length: CARS }, () => new THREE.Vector4()) },
     uCarB: { value: Array.from({ length: CARS }, () => new THREE.Vector4()) },
+    uSpotA: { value: new THREE.Vector4() },
+    uSpotB: { value: new THREE.Vector4(0, -1, 0, 0.06) },
   };
   for (const m of mats) {
     if (!m || m.userData.rwLamp) continue;
@@ -208,7 +243,7 @@ export function patchLampLight(mats, baked) {
         .replace('#include <common>', '#include <common>\nvarying vec3 vRwLampW;')
         .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwLampW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\n#define RW_CARS ${CARS}\nvarying vec3 vRwLampW;\nuniform sampler2D uLampMap;\nuniform vec4 uLampBox;\nuniform float uLampK;\nuniform float uCarN;\nuniform vec4 uCarA[ RW_CARS ];\nuniform vec4 uCarB[ RW_CARS ];`)
+        .replace('#include <common>', `#include <common>\n#define RW_CARS ${CARS}\nvarying vec3 vRwLampW;\nuniform sampler2D uLampMap;\nuniform vec4 uLampBox;\nuniform float uLampK;\nuniform float uCarN;\nuniform vec4 uCarA[ RW_CARS ];\nuniform vec4 uCarB[ RW_CARS ];\nuniform vec4 uSpotA;\nuniform vec4 uSpotB;`)
         .replace('#include <lights_fragment_end>', LAMP_FRAG);
     };
     m.customProgramCacheKey = () => prevKey + '|rw-lamp';

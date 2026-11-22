@@ -87,7 +87,7 @@ export const AIRCRAFT_SPECS = {
     spoolUp: 0.35, spoolDown: 0.12, rotorRadius: 4.8, blades: 4,
     floats: false, hitRadius: 1.7,
     mounts: ['chingun'], police: true,
-    colors: [0x1d2f52],
+    colors: [0xeef1f4], // white with a blue band (aircraftmesh.js)
   },
 };
 
@@ -344,12 +344,26 @@ function stepWreck(a, dt, world) {
 
 // Beyond the world edge the craft is steered back toward the island.
 // Returns the steer input to use.
-function edgeSteer(a, steerIn) {
-  const d2 = a.x * a.x + a.z * a.z;
-  if (d2 > EDGE * EDGE) a.turningBack = true;
-  else if (d2 < (EDGE - 100) * (EDGE - 100)) a.turningBack = false;
+// A map with a land box (the real map is about 9 by 8 km) turns craft
+// back EDGE_OUT m past the box; others (the island) EDGE m from the origin.
+const EDGE_OUT = 600;
+function edgeSteer(a, steerIn, world) {
+  const box = world && world.city && world.city.crop;
+  let cx = 0, cz = 0;
+  if (box) {
+    cx = (box.x0 + box.x1) / 2;
+    cz = (box.z0 + box.z1) / 2;
+    const ox = Math.max(box.x0 - a.x, a.x - box.x1, 0), oz = Math.max(box.z0 - a.z, a.z - box.z1, 0);
+    const out = Math.max(ox, oz);
+    if (out > EDGE_OUT) a.turningBack = true;
+    else if (out < EDGE_OUT - 100) a.turningBack = false;
+  } else {
+    const d2 = a.x * a.x + a.z * a.z;
+    if (d2 > EDGE * EDGE) a.turningBack = true;
+    else if (d2 < (EDGE - 100) * (EDGE - 100)) a.turningBack = false;
+  }
   if (!a.turningBack) return steerIn;
-  const want = Math.atan2(-a.z, -a.x);
+  const want = Math.atan2(cz - a.z, cx - a.x);
   return clamp(angleDiff(want, a.heading) * 1.5, -0.75, 0.75);
 }
 
@@ -380,7 +394,7 @@ function stepPlane(a, controls, dt, world) {
   if (s.afterburner && (a.onGround || !controls)) a.afterburner = approach(a.afterburner, controls && throttle > 0.9 ? 1 : 0, 2.5 * dt);
   const parked = controls == null && a.onGround;
   if (parked) a.turningBack = false;
-  else steerIn = edgeSteer(a, steerIn);
+  else steerIn = edgeSteer(a, steerIn, world);
   a.steer = approach(a.steer, steerIn, (steerIn === 0 ? 6 : 4) * dt);
 
   if (a.onGround) planeGround(a, s, controls != null, pitchIn, throttle, brake, dt, world);
@@ -625,7 +639,7 @@ function stepHeli(a, controls, dt, world) {
     return;
   }
 
-  steerIn = edgeSteer(a, steerIn);
+  steerIn = edgeSteer(a, steerIn, world);
   if (a.turningBack && pitchIn < 0.6) pitchIn = 0.6;
   a.steer = approach(a.steer, steerIn, (steerIn === 0 ? 6 : 4) * dt);
 
