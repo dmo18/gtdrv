@@ -4,8 +4,9 @@
 // that dressLot lists for a lot (fences, hedges, drives, car park bays
 // with parked cars, trees, bins, plaza furniture, works yard stacks),
 // merged into the tile's builders per material. Their collision shapes
-// are not made here: the simulation has them for the whole map from the
-// city build (fillLotCollision in world/collision.js), whatever is drawn.
+// are not made here: the simulation makes them itself, cell by cell (the
+// lazy lot layer, attachLotCollision in world/collision.js), whatever is
+// drawn.
 //
 // No three.js here beyond the mesh builders: the functions only fill
 // MeshBuilder-like objects (`B.key.at(x, z)`), so node tests run them.
@@ -310,11 +311,12 @@ export function* lotJob(C, lots, dress, over) {
   const stats = C.lotStats || null;
   for (const lot of lots) {
     feats.length = 0;
-    dress(C.city, lot, feats);
-    const n = feats.length;
+    // dress fills feats, or returns its own (shared, read-only) list.
+    const fs = dress(C.city, lot, feats) || feats;
+    const n = fs.length;
     // A few features at a time (a lot can hold 24 trees).
     for (let q = 0; q < n; q += 4) {
-      drawLotFeatures(C, lot, feats, Math.min(n, q + 4), stamps, q);
+      drawLotFeatures(C, lot, fs, Math.min(n, q + 4), stamps, q);
       if (over()) yield 'lots';
     }
     if (stats) { stats.lots++; stats.features += n; }

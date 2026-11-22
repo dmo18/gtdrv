@@ -29,10 +29,10 @@ import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
-import { fillCollision, fillLotCollision } from '../world/collision.js';
+import { fillCollision, attachLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { lotGround, lotJob, lotsByTile } from './lotmesh.js';
-import { dressLot } from '../world/lots.js';
+import { dressLot, lotDressCache } from '../world/lots.js';
 
 export const TILE = 300; // m, a near-detail tile
 export const SUPER = 4; // tiles per far block side
@@ -506,9 +506,11 @@ export function buildRealCity(city, collision, opts = {}) {
   fillCollision(city, collision);
   lap('collision');
   // The lots' solid features (fences, walls, bins, cabins, parked cars):
-  // all of them now, in lot order, so a run is the same however the
-  // tiles stream. reset() swaps them when the lot list is replaced.
-  let lotShapes = fillLotCollision(city, collision, dress);
+  // a lazy layer of the collision world, filled cell by cell by the
+  // simulation's own queries as a pure function of the city, so a run is
+  // the same however the tiles stream. reset() swaps it when the lot list
+  // is replaced. The tiles draw from the same dressing cache.
+  let lotLayer = attachLotCollision(city, collision, dress);
   lap('lotCollision');
   const glows = [];
   const groundY = makeGroundY(city);
@@ -676,7 +678,11 @@ export function buildRealCity(city, collision, opts = {}) {
     if (lotSrc !== city.lots) { lotSrc = city.lots; lotTiles = lotsByTile(city, tileOf, NT); }
     return lotTiles[t.k];
   }
-  const dressOf = () => dress;
+  // The shared dressing cache (lots.js lotDressCache): the collision
+  // layer and the tiles dress a lot once between them.
+  const dressCache = lotDressCache(city, dress);
+  const cachedDress = (c, lot) => dressCache.get(lot);
+  const dressOf = () => cachedDress;
 
   // One tile, built a slice at a time: yields between pieces of work,
   // at the first break point after SLICE_MS of work.
@@ -732,7 +738,7 @@ export function buildRealCity(city, collision, opts = {}) {
     }
     // Lot dressing: solids and trees stay drawn at the middle level,
     // small things (bins, paint, fences, towels) hide with the props.
-    // Meshes only: the collision shapes exist from the build.
+    // Meshes only: the collision shapes are the lazy lot layer's.
     const LC = {
       city, R, DR, groundY, lotStats,
       props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
@@ -742,6 +748,13 @@ export function buildRealCity(city, collision, opts = {}) {
     const before = {};
     for (const [k] of TILE_KEYS) before[k] = idxOf(k);
     for (const step of lotJob(LC, lotsOf(t), dressOf(), over)) { yield step; ts = now(); }
+    // Warm-up: the lazy lot collision cells under this tile's lots, filled
+    // now from the features just dressed (cached), so a step seldom has to.
+    // The simulation answers the same with or without it.
+    for (const lot of lotsOf(t)) {
+      lotLayer.prepare(lot.x0, lot.z0, lot.x1, lot.z1);
+      if (over()) { yield 'lots'; ts = now(); }
+    }
     // Triangles the lots added, by builder (perf.mjs reports them).
     for (const [k] of TILE_KEYS) {
       const d = (idxOf(k) - before[k]) / 3;
@@ -903,12 +916,11 @@ export function buildRealCity(city, collision, opts = {}) {
       if (t.group) dropTile(t);
     }
     lotSrc = null;
-    // The old lots' shapes go off, the new lots' shapes come in.
-    for (const sh of lotShapes) collision.setEnabled(sh, false);
-    lotShapes = fillLotCollision(city, collision, dress);
+    // The old lots' layer goes, the new lots' layer comes in.
+    lotLayer = attachLotCollision(city, collision, dress);
     buildFar();
   }
-  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotShapes.length };
+  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
 
   // Start: the tiles round the spawn point.
   flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });

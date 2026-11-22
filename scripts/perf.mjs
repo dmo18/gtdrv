@@ -65,9 +65,16 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
   // adaptive controller had picked on this (software) renderer.
   const adaptiveScale = g.graphics && g.graphics.res ? g.graphics.res.scale : null;
   if (g.graphics && 'adaptive' in g.graphics) { g.graphics.adaptive = false; g.resize(); }
+  // Lazy lot collision cells (world/collision.js) the 300 steps fill.
+  const lotLayer = g.cityMesh.userData.stream && g.cityMesh.userData.stream.lotLayer ? g.cityMesh.userData.stream.lotLayer() : null;
+  const cells0 = lotLayer ? lotLayer.stats.cells : 0;
   let t0 = performance.now();
   for (let i = 0; i < 300; i++) g.step(1 / 60);
   const stepMs = (performance.now() - t0) / 300;
+  const stepLotCells = lotLayer ? lotLayer.stats.cells - cells0 : null;
+  t0 = performance.now();
+  for (let i = 0; i < 300; i++) g.step(1 / 60);
+  const stepMs2 = (performance.now() - t0) / 300;
   // A fixed street view: the player car parked at the spawn point.
   const v = g.player.vehicle, c = g.city;
   if (v) { v.x = v.px = c.spawn.x; v.z = v.pz = c.spawn.z; v.heading = v.pheading = c.spawn.heading; v.vx = v.vz = 0; v.speed = 0; }
@@ -133,7 +140,7 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
   for (const x of g.vehicles) kinds[x.kind] = (kinds[x.kind] || 0) + 1;
   const worstJs = Object.entries(window.__rwWorst).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + ' ' + v.toFixed(1));
   return {
-    day, night, worstJs, stepMs: +stepMs.toFixed(3),
+    day, night, worstJs, stepMs: +stepMs.toFixed(3), stepMsNext300: +stepMs2.toFixed(3), stepLotCells,
     pixelRatio: g.renderer.getPixelRatio(), adaptiveScale, warmMs: g.graphics && g.graphics.warmMs ? +g.graphics.warmMs.toFixed(0) : null,
     programs: info.programs ? info.programs.length : 0, programsAtStart,
     firstFrames: { count: gaps.length, worstMs: sorted.slice(0, 5).map((x) => +x.toFixed(0)), over50ms: gaps.filter((x) => x > 50).length },

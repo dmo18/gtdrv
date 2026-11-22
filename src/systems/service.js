@@ -30,7 +30,7 @@ import {
   EXTRAS, SERVICE_SPOTS, SPOT_RULES, BEACON_HOLD, specSiren, specBeacon,
 } from '../entities/servicevehicles.js';
 import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
-import { dressLot } from '../world/lots.js';
+import { dressLot, lotDressCache } from '../world/lots.js';
 import { resetActor } from './combat.js';
 import { scarePed } from './peds.js';
 import { attachServiceLook } from '../render/servicebody.js';
@@ -316,7 +316,8 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       }
       for (const lot of LOTS_SEEN) {
         let fs = lotCache.get('b' + lot.id);
-        if (!fs) lotCache.set('b' + lot.id, (fs = dressLot(city, lot, []).filter((f) => f.kind === 'bin')));
+        // The shared dressing cache (the tiles and the collision use it too).
+        if (!fs) lotCache.set('b' + lot.id, (fs = lotDressCache(city).get(lot).filter((f) => f.kind === 'bin')));
         for (const f of fs) consider(f.x, f.z);
       }
     }

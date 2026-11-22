@@ -81,39 +81,47 @@ export function roadPath(city, from, to, cost = null, avoid = null) {
 }
 
 // The same search with a binary heap, for a real map (thousands of nodes).
+// The heap lives in module typed arrays (reused, grown as needed): one
+// entry per improved distance, so at most one per edge end plus the start.
+let HN = new Int32Array(1024), HD = new Float64Array(1024), HLEN = 0;
+function heapPush(v, d) {
+  const hn = HN, hd = HD;
+  let i = HLEN++;
+  while (i > 0) {
+    const p = (i - 1) >> 1;
+    if (hd[p] <= d) break;
+    hn[i] = hn[p]; hd[i] = hd[p];
+    i = p;
+  }
+  hn[i] = v; hd[i] = d;
+}
+function heapPop() {
+  const hn = HN, hd = HD;
+  const v = hn[0];
+  const len = --HLEN;
+  const lv = hn[len], ld = hd[len];
+  if (len) {
+    let i = 0;
+    for (;;) {
+      let c = 2 * i + 1;
+      if (c >= len) break;
+      if (c + 1 < len && hd[c + 1] < hd[c]) c++;
+      if (hd[c] >= ld) break;
+      hn[i] = hn[c]; hd[i] = hd[c];
+      i = c;
+    }
+    hn[i] = lv; hd[i] = ld;
+  }
+  return v;
+}
 function heapPath(city, from, to, cost, avoid, dist, prev, done) {
-  const hn = [], hd = [];
-  const push = (v, d) => {
-    let i = hn.length;
-    hn.push(v); hd.push(d);
-    while (i > 0) {
-      const p = (i - 1) >> 1;
-      if (hd[p] <= d) break;
-      hn[i] = hn[p]; hd[i] = hd[p];
-      i = p;
-    }
-    hn[i] = v; hd[i] = d;
-  };
-  const pop = () => {
-    const v = hn[0], lv = hn.pop(), ld = hd.pop();
-    const len = hn.length;
-    if (len) {
-      let i = 0;
-      for (;;) {
-        let c = 2 * i + 1;
-        if (c >= len) break;
-        if (c + 1 < len && hd[c + 1] < hd[c]) c++;
-        if (hd[c] >= ld) break;
-        hn[i] = hn[c]; hd[i] = hd[c];
-        i = c;
-      }
-      hn[i] = lv; hd[i] = ld;
-    }
-    return v;
-  };
+  const cap = 2 * city.edges.length + 2;
+  if (HN.length < cap) { HN = new Int32Array(cap); HD = new Float64Array(cap); }
+  HLEN = 0;
+  const push = heapPush, pop = heapPop;
   push(from, 0);
   let found = false;
-  while (hn.length) {
+  while (HLEN) {
     const u = pop();
     if (done[u]) continue;
     if (u === to) { found = true; break; }

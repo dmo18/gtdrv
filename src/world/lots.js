@@ -197,53 +197,60 @@ export const INFILL_GAP = 3; // cells (15 m) from any existing building
 // (park, grass).
 // Returns [{ x0, z0, x1, z1, h, district, kind, osm }].
 export function planInfill(inp) {
-  const { W, H, x0, z0, cell, free, bdist, water, mask, districtOf, seed } = inp;
-  const keepOpen = inp.keep || []; // [{ x, z, r }]: hand places stay open
+  const { W, H, x0, z0, cell, free, bdist, water, mask } = inp;
   const out = [];
   const gx0 = x0, gz0 = z0, gx1 = x0 + W * cell, gz1 = z0 + H * cell;
-  for (const [district, P] of Object.entries(INFILL)) {
+  for (const district of Object.keys(INFILL)) {
+    const P = INFILL[district];
     const pi0 = Math.floor(gx0 / P.pitch), pi1 = Math.floor(gx1 / P.pitch);
     const pj0 = Math.floor(gz0 / P.pitch), pj1 = Math.floor(gz1 / P.pitch);
     for (let pj = pj0; pj <= pj1; pj++) {
+      // Quick reject on the parcel's centre cell; the rest (rare) in
+      // infillParcel.
+      const cz = (pj + 0.5) * P.pitch;
+      const cj = Math.floor((cz - z0) / cell);
+      if (cj < 0 || cj >= H) continue;
       for (let pi = pi0; pi <= pi1; pi++) {
-        const cx = (pi + 0.5) * P.pitch, cz = (pj + 0.5) * P.pitch;
-        // Quick reject on the parcel's centre cell.
-        const ci = Math.floor((cx - x0) / cell), cj = Math.floor((cz - z0) / cell);
-        if (ci < 0 || cj < 0 || ci >= W || cj >= H) continue;
+        const cx = (pi + 0.5) * P.pitch;
+        const ci = Math.floor((cx - x0) / cell);
+        if (ci < 0 || ci >= W) continue;
         const cc = cj * W + ci;
         if (!free[cc] || mask[cc] || bdist[cc] < INFILL_GAP || water[cc] < 4) continue;
-        if (districtOf(cx, cz) !== district) continue;
-        const h0 = hash32(seed, pi, pj, 77 + P.pitch);
-        if ((h0 % 1000) / 1000 >= P.keep) continue;
-        const r = createRng(h0);
-        const sx = r.range(P.size[0], P.size[1]), sz = r.range(P.size[0], P.size[1]);
-        const bx0 = cx - sx / 2, bz0 = cz - sz / 2, bx1 = cx + sx / 2, bz1 = cz + sz / 2;
-        let open = false;
-        for (const k of keepOpen) {
-          if (Math.hypot(Math.max(bx0 - k.x, 0, k.x - bx1), Math.max(bz0 - k.z, 0, k.z - bz1)) < k.r) { open = true; break; }
-        }
-        if (open) continue;
-        // Every cell under the box plus 5 m is free, far enough from the
-        // existing buildings and the water, and not in a park.
-        const i0 = Math.floor((bx0 - 5 - x0) / cell), i1 = Math.floor((bx1 + 5 - x0) / cell);
-        const j0 = Math.floor((bz0 - 5 - z0) / cell), j1 = Math.floor((bz1 + 5 - z0) / cell);
-        if (i0 < 0 || j0 < 0 || i1 >= W || j1 >= H) continue;
-        let ok = true;
-        for (let j = j0; j <= j1 && ok; j++) {
-          for (let i = i0; i <= i1; i++) {
-            const c = j * W + i;
-            if (!free[c] || mask[c] || bdist[c] < INFILL_GAP || water[c] < 4) { ok = false; break; }
-          }
-        }
-        if (!ok) continue;
-        out.push({
-          x0: Math.round(bx0 * 10) / 10, z0: Math.round(bz0 * 10) / 10, x1: Math.round(bx1 * 10) / 10, z1: Math.round(bz1 * 10) / 10,
-          h: Math.round(r.range(P.h[0], P.h[1])), district, kind: P.kind, osm: r.pick(P.osm), color: r.next(),
-        });
+        infillParcel(inp, district, P, pi, pj, cx, cz, out);
       }
     }
   }
   return out;
+}
+// One parcel that passed the quick reject: its box, if it may be built.
+function infillParcel(inp, district, P, pi, pj, cx, cz, out) {
+  const { W, H, x0, z0, cell, free, bdist, water, mask, districtOf, seed } = inp;
+  const keepOpen = inp.keep || []; // [{ x, z, r }]: hand places stay open
+  if (districtOf(cx, cz) !== district) return;
+  const h0 = hash32(seed, pi, pj, 77 + P.pitch);
+  if ((h0 % 1000) / 1000 >= P.keep) return;
+  const r = createRng(h0);
+  const sx = r.range(P.size[0], P.size[1]), sz = r.range(P.size[0], P.size[1]);
+  const bx0 = cx - sx / 2, bz0 = cz - sz / 2, bx1 = cx + sx / 2, bz1 = cz + sz / 2;
+  for (let q = 0; q < keepOpen.length; q++) {
+    const k = keepOpen[q];
+    if (Math.hypot(Math.max(bx0 - k.x, 0, k.x - bx1), Math.max(bz0 - k.z, 0, k.z - bz1)) < k.r) return;
+  }
+  // Every cell under the box plus 5 m is free, far enough from the
+  // existing buildings and the water, and not in a park.
+  const i0 = Math.floor((bx0 - 5 - x0) / cell), i1 = Math.floor((bx1 + 5 - x0) / cell);
+  const j0 = Math.floor((bz0 - 5 - z0) / cell), j1 = Math.floor((bz1 + 5 - z0) / cell);
+  if (i0 < 0 || j0 < 0 || i1 >= W || j1 >= H) return;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const c = j * W + i;
+      if (!free[c] || mask[c] || bdist[c] < INFILL_GAP || water[c] < 4) return;
+    }
+  }
+  out.push({
+    x0: Math.round(bx0 * 10) / 10, z0: Math.round(bz0 * 10) / 10, x1: Math.round(bx1 * 10) / 10, z1: Math.round(bz1 * 10) / 10,
+    h: Math.round(r.range(P.h[0], P.h[1])), district, kind: P.kind, osm: r.pick(P.osm), color: r.next(),
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -292,6 +299,144 @@ function segRectDist(ax, az, bx, bz, x0, z0, x1, z1) {
   const d = Math.min(ptRect2(ax, az, x0, z0, x1, z1), ptRect2(bx, bz, x0, z0, x1, z1), segD2(x0, z0, ax, az, bx, bz),
     segD2(x1, z0, ax, az, bx, bz), segD2(x0, z1, ax, az, bx, bz), segD2(x1, z1, ax, az, bx, bz));
   return Math.sqrt(d);
+}
+
+// ---- buildLots steps (small top-level functions: the optimiser takes
+// them at once, not the whole of buildLots) ----
+function newPiece(tmp, k, building, W, H) {
+  tmp.push({ cls: k, building, n: 0, i0: W, i1: -1, j0: H, j1: -1 });
+  return tmp.length - 1;
+}
+function growPiece(p, c, W) {
+  const i = c % W, j = (c - i) / W;
+  p.n++;
+  if (i < p.i0) p.i0 = i;
+  if (i > p.i1) p.i1 = i;
+  if (j < p.j0) p.j0 = j;
+  if (j > p.j1) p.j1 = j;
+}
+// Flood fill of one piece from cell s: same class, and the same grid
+// square when `cut`. Returns the piece id.
+function floodPiece(PS, s, k, cut) {
+  const { W, N, lid, cls, queue, tmp, colKey, rowKey } = PS;
+  const id = newPiece(tmp, k, -1, W, PS.H);
+  const p = tmp[id];
+  let gk = 0;
+  if (cut) { const i = s % W; gk = colKey[i] + rowKey[(s - i) / W]; }
+  let qh = 0, qt = 0;
+  queue[qt++] = s;
+  lid[s] = id;
+  while (qh < qt) {
+    const c = queue[qh++];
+    growPiece(p, c, W);
+    const i = c % W;
+    for (let q = 0; q < 4; q++) {
+      const n = q === 0 ? (i > 0 ? c - 1 : -1) : q === 1 ? (i < W - 1 ? c + 1 : -1) : q === 2 ? c - W : c + W;
+      if (n < 0 || n >= N || lid[n] !== -1 || cls[n] !== k) continue;
+      if (cut) { const ni = n % W; if (colKey[ni] + rowKey[(n - ni) / W] !== gk) continue; }
+      lid[n] = id;
+      queue[qt++] = n;
+    }
+  }
+  return id;
+}
+// Pieces: one lot per building (cells sharing it, connected or not);
+// other classes are connected pieces, shore runs cut by the 80 m grid,
+// park, grass and open pieces cut by it only when over LOT_MAX_AREA.
+function piecesOf(PS, list, nList, own, mainOf, byBuilding, cell) {
+  const { W, H, N, lid, cls, queue, tmp } = PS;
+  for (let q = 0; q < nList; q++) {
+    const c = list[q];
+    const k = cls[c];
+    if (!k || lid[c] !== -1) continue;
+    if (k === 5) {
+      const m = mainOf[own[c]];
+      let id = byBuilding[m];
+      if (id < 0) { id = newPiece(tmp, 5, m, W, H); byBuilding[m] = id; }
+      lid[c] = id;
+      growPiece(tmp[id], c, W);
+      continue;
+    }
+    const id = floodPiece(PS, c, k, k <= 2);
+    if (k >= 3 && tmp[id].n * cell * cell > LOT_MAX_AREA) {
+      // Too big: undo and cut it by the world grid.
+      let qh = 0, qt = 0;
+      queue[qt++] = c;
+      lid[c] = -2;
+      while (qh < qt) {
+        const q2 = queue[qh++];
+        const i = q2 % W;
+        for (let t = 0; t < 4; t++) {
+          const n = t === 0 ? (i > 0 ? q2 - 1 : -1) : t === 1 ? (i < W - 1 ? q2 + 1 : -1) : t === 2 ? q2 - W : q2 + W;
+          if (n < 0 || n >= N || lid[n] !== id) continue;
+          lid[n] = -2;
+          queue[qt++] = n;
+        }
+      }
+      tmp[id].n = 0;
+      tmp[id].dead = true;
+      // Collect the cells (the queue holds them), then fill each square.
+      const cells = queue.slice(0, qt);
+      for (let t = 0; t < qt; t++) lid[cells[t]] = -1;
+      for (let t = 0; t < qt; t++) if (lid[cells[t]] === -1) floodPiece(PS, cells[t], k, true);
+    }
+  }
+}
+
+// Lot objects from the pieces (tiny or thin pieces become verge).
+function lotObjects(city, tmp, remap, lots, G, cell) {
+  const B = city.buildings;
+  const x0 = G.x0, z0 = G.z0;
+  const EN = [];
+  const seed = city.seed >>> 0;
+  for (let p = 0; p < tmp.length; p++) {
+    const P = tmp[p];
+    if (P.dead || !P.n) continue;
+    const lx0 = x0 + P.i0 * cell, lz0 = z0 + P.j0 * cell, lx1 = x0 + (P.i1 + 1) * cell, lz1 = z0 + (P.j1 + 1) * cell;
+    const area = P.n * cell * cell;
+    const cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2;
+    const district = city.districtOf(cx, cz);
+    const b = P.building >= 0 ? B[P.building] : null;
+    let type;
+    if (area < LOT_MIN_AREA || Math.min(lx1 - lx0, lz1 - lz0) < LOT_MIN_WIDTH) type = 'verge';
+    else if (P.cls === 1) type = 'beach';
+    else if (P.cls === 2) type = 'wateredge';
+    else if (P.cls === 3) type = 'park';
+    else if (P.cls === 4) type = 'grass';
+    else type = lotTypeFor(b, district, area);
+    // A seeded 2 % of the large grass lots are building sites.
+    if (type === 'grass' && area >= 1500 && lotSeed(seed, cx, cz, 'grass') % 50 === 0) type = 'site';
+    // The lot's road: the nearest edge that touches it.
+    let edge = -1, front = 3, ed = Infinity;
+    city.edgesNear(cx, cz, Math.hypot(lx1 - lx0, lz1 - lz0) / 2 + 10, EN);
+    for (let k = 0; k < EN.length; k++) {
+      const e = city.edges[EN[k]];
+      const a = city.nodes[e.a], q = city.nodes[e.b];
+      const d = segRectDist(a.x, a.z, q.x, q.z, lx0, lz0, lx1, lz1) - e.width / 2;
+      if (d < ed) { ed = d; edge = e.id; }
+    }
+    if (edge >= 0 && ed > 8) edge = -1;
+    if (edge >= 0) {
+      const e = city.edges[edge], a = city.nodes[e.a], q = city.nodes[e.b];
+      // Closest point of the edge to the lot centre.
+      const dx = q.x - a.x, dz = q.z - a.z, L2 = dx * dx + dz * dz || 1;
+      let t = ((cx - a.x) * dx + (cz - a.z) * dz) / L2;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const px = a.x + dx * t - cx, pz = a.z + dz * t - cz;
+      // Normalise by the rect's half sizes so a long thin lot faces its side.
+      const nx = px / ((lx1 - lx0) / 2 + 1), nz = pz / ((lz1 - lz0) / 2 + 1);
+      front = Math.abs(nx) >= Math.abs(nz) ? (nx >= 0 ? 0 : 2) : nz >= 0 ? 1 : 3;
+    }
+    const lotSeedV = lotSeed(seed, cx, cz, type);
+    const sets = DRESS[type][DRESS[type][district] ? district : 'midtown'];
+    const id = lots.length;
+    remap[p] = id;
+    lots.push({
+      id, type, x0: lx0, z0: lz0, x1: lx1, z1: lz1, area, district, place: city.placeOf ? city.placeOf(cx, cz) : '',
+      seed: lotSeedV, dress: sets[Math.floor(0 + (sets.length - 1 - 0 + 1) * firstNext(lotSeedV))], // createRng(lotSeedV).int(0, sets.length - 1)
+      building: b ? P.building : -1, edge, front, core: city.inCore ? city.inCore(cx, cz) : false,
+    });
+  }
 }
 
 // inp (from createMiamiCity): { free, owner, park, inBeach, water, queue,
@@ -374,136 +519,17 @@ export function buildLots(city, inp) {
   const lots = [];
   const tmp = []; // per raw piece: { cls, building, n, i0, i1, j0, j1 }
   const byBuilding = new Int32Array(B.length).fill(-1); // building -> piece
-  const gridKey = (c) => {
-    const i = c % W, j = (c - i) / W;
-    return Math.floor((G.x0 + (i + 0.5) * cell) / CUT) * 100003 + Math.floor((G.z0 + (j + 0.5) * cell) / CUT);
-  };
-  const grow = (p, c) => {
-    const i = c % W, j = (c - i) / W;
-    p.n++;
-    if (i < p.i0) p.i0 = i;
-    if (i > p.i1) p.i1 = i;
-    if (j < p.j0) p.j0 = j;
-    if (j > p.j1) p.j1 = j;
-  };
-  const newPiece = (k, building) => {
-    const p = { cls: k, building, n: 0, i0: W, i1: -1, j0: H, j1: -1 };
-    tmp.push(p);
-    return tmp.length - 1;
-  };
-  // Flood fill of one piece: same class, and same grid square when `cut`.
-  const fill = (s, k, cut) => {
-    const id = newPiece(k, -1);
-    const gk = cut ? gridKey(s) : 0;
-    let qh = 0, qt = 0;
-    queue[qt++] = s;
-    lid[s] = id;
-    while (qh < qt) {
-      const c = queue[qh++];
-      grow(tmp[id], c);
-      const i = c % W;
-      for (let q = 0; q < 4; q++) {
-        const n = q === 0 ? (i > 0 ? c - 1 : -1) : q === 1 ? (i < W - 1 ? c + 1 : -1) : q === 2 ? c - W : c + W;
-        if (n < 0 || n >= N || lid[n] !== -1 || cls[n] !== k) continue;
-        if (cut && gridKey(n) !== gk) continue;
-        lid[n] = id;
-        queue[qt++] = n;
-      }
-    }
-    return id;
-  };
-  for (let q = 0; q < nList; q++) {
-    const c = list[q];
-    const k = cls[c];
-    if (!k || lid[c] !== -1) continue;
-    if (k === 5) {
-      const m = mainOf[own[c]];
-      let id = byBuilding[m];
-      if (id < 0) { id = newPiece(5, m); byBuilding[m] = id; }
-      lid[c] = id;
-      grow(tmp[id], c);
-      continue;
-    }
-    const id = fill(c, k, k <= 2);
-    if (k >= 3 && tmp[id].n * cell * cell > LOT_MAX_AREA) {
-      // Too big: undo and cut it by the world grid.
-      const n0 = tmp[id].n;
-      let qh = 0, qt = 0;
-      queue[qt++] = c;
-      lid[c] = -2;
-      while (qh < qt) {
-        const q = queue[qh++];
-        const i = q % W;
-        for (let t = 0; t < 4; t++) {
-          const n = t === 0 ? (i > 0 ? q - 1 : -1) : t === 1 ? (i < W - 1 ? q + 1 : -1) : t === 2 ? q - W : q + W;
-          if (n < 0 || n >= N || lid[n] !== id) continue;
-          lid[n] = -2;
-          queue[qt++] = n;
-        }
-      }
-      void n0;
-      tmp[id].n = 0;
-      tmp[id].dead = true;
-      // Collect the cells (the queue holds them), then fill each square.
-      const cells = queue.slice(0, qt);
-      for (const q of cells) lid[q] = -1;
-      for (const q of cells) if (lid[q] === -1) fill(q, k, true);
-    }
-  }
+  // The 80 m world grid square of a cell, as a column part plus a row
+  // part (the same key as floor(x / CUT) * 100003 + floor(z / CUT)).
+  const colKey = new Float64Array(W), rowKey = new Float64Array(H);
+  for (let i = 0; i < W; i++) colKey[i] = Math.floor((G.x0 + (i + 0.5) * cell) / CUT) * 100003;
+  for (let j = 0; j < H; j++) rowKey[j] = Math.floor((G.z0 + (j + 0.5) * cell) / CUT);
+  const PS = { W, H, N, lid, cls, queue, tmp, colKey, rowKey };
+  piecesOf(PS, list, nList, own, mainOf, byBuilding, cell);
   lap('lots.pieces');
   // Lot objects; tiny or thin pieces become verge.
   const remap = new Int32Array(tmp.length).fill(-1);
-  const x0 = G.x0, z0 = G.z0;
-  const EN = [];
-  const seed = city.seed >>> 0;
-  for (let p = 0; p < tmp.length; p++) {
-    const P = tmp[p];
-    if (P.dead || !P.n) continue;
-    const lx0 = x0 + P.i0 * cell, lz0 = z0 + P.j0 * cell, lx1 = x0 + (P.i1 + 1) * cell, lz1 = z0 + (P.j1 + 1) * cell;
-    const area = P.n * cell * cell;
-    const cx = (lx0 + lx1) / 2, cz = (lz0 + lz1) / 2;
-    const district = city.districtOf(cx, cz);
-    const b = P.building >= 0 ? B[P.building] : null;
-    let type;
-    if (area < LOT_MIN_AREA || Math.min(lx1 - lx0, lz1 - lz0) < LOT_MIN_WIDTH) type = 'verge';
-    else if (P.cls === 1) type = 'beach';
-    else if (P.cls === 2) type = 'wateredge';
-    else if (P.cls === 3) type = 'park';
-    else if (P.cls === 4) type = 'grass';
-    else type = lotTypeFor(b, district, area);
-    // A seeded 2 % of the large grass lots are building sites.
-    if (type === 'grass' && area >= 1500 && lotSeed(seed, cx, cz, 'grass') % 50 === 0) type = 'site';
-    // The lot's road: the nearest edge that touches it.
-    let edge = -1, front = 3, ed = Infinity;
-    city.edgesNear(cx, cz, Math.hypot(lx1 - lx0, lz1 - lz0) / 2 + 10, EN);
-    for (let k = 0; k < EN.length; k++) {
-      const e = city.edges[EN[k]];
-      const a = city.nodes[e.a], q = city.nodes[e.b];
-      const d = segRectDist(a.x, a.z, q.x, q.z, lx0, lz0, lx1, lz1) - e.width / 2;
-      if (d < ed) { ed = d; edge = e.id; }
-    }
-    if (edge >= 0 && ed > 8) edge = -1;
-    if (edge >= 0) {
-      const e = city.edges[edge], a = city.nodes[e.a], q = city.nodes[e.b];
-      // Closest point of the edge to the lot centre.
-      const dx = q.x - a.x, dz = q.z - a.z, L2 = dx * dx + dz * dz || 1;
-      let t = ((cx - a.x) * dx + (cz - a.z) * dz) / L2;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const px = a.x + dx * t - cx, pz = a.z + dz * t - cz;
-      // Normalise by the rect's half sizes so a long thin lot faces its side.
-      const nx = px / ((lx1 - lx0) / 2 + 1), nz = pz / ((lz1 - lz0) / 2 + 1);
-      front = Math.abs(nx) >= Math.abs(nz) ? (nx >= 0 ? 0 : 2) : nz >= 0 ? 1 : 3;
-    }
-    const lotSeedV = lotSeed(seed, cx, cz, type);
-    const sets = DRESS[type][DRESS[type][district] ? district : 'midtown'];
-    const id = lots.length;
-    remap[p] = id;
-    lots.push({
-      id, type, x0: lx0, z0: lz0, x1: lx1, z1: lz1, area, district, place: city.placeOf ? city.placeOf(cx, cz) : '',
-      seed: lotSeedV, dress: sets[Math.floor(0 + (sets.length - 1 - 0 + 1) * firstNext(lotSeedV))], // createRng(lotSeedV).int(0, sets.length - 1)
-      building: b ? P.building : -1, edge, front, core: city.inCore ? city.inCore(cx, cz) : false,
-    });
-  }
+  lotObjects(city, tmp, remap, lots, G, cell);
   lap('lots.objects');
   const typeGrid = new Uint8Array(N);
   for (let q = 0; q < nList; q++) {
@@ -546,6 +572,21 @@ export function featureCap(lot) {
 }
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
+// Scratch per feature index of the lot being dressed (put fills it):
+// centre and radius, 1 for a drive, bay or path, with the cosine and sine
+// of its heading and its half length and width.
+const F_X = new Float64Array(MAX_FEATURES), F_Z = new Float64Array(MAX_FEATURES), F_R = new Float64Array(MAX_FEATURES);
+const F_FLAT = new Uint8Array(MAX_FEATURES);
+const F_COS = new Float64Array(MAX_FEATURES), F_SIN = new Float64Array(MAX_FEATURES);
+const F_HL = new Float64Array(MAX_FEATURES), F_HW = new Float64Array(MAX_FEATURES);
+// Math.hypot(dx, dz) < r (r > 0), with hypot only where the squared sum
+// is within rounding of r squared.
+function nearer(dx, dz, r) {
+  const s = dx * dx + dz * dz, r2 = r * r;
+  if (s < r2 * (1 - 1e-9)) return true;
+  if (s > r2 * (1 + 1e-9)) return false;
+  return Math.hypot(dx, dz) < r;
+}
 export function dressLot(city, lot, out = []) {
   out.length = 0;
   const G = city.lotGrid;
@@ -605,7 +646,13 @@ export function dressLot(city, lot, out = []) {
     // Rounded to the centimetre first, so the stored point is the tested one.
     const x = Math.round(x0f * 100) / 100, z = Math.round(z0f * 100) / 100;
     if (!inLot(x, z) || inGarage(x, z) || !offBuildings(x, z, heading, l, w, r)) return false;
+    const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
+    // What scatter tests against this feature, in flat scratch arrays
+    // (out never holds more than cap <= MAX_FEATURES features).
+    const flat = kind === 'drive' || kind === 'bay' || kind === 'path';
+    F_X[q] = x; F_Z[q] = z; F_R[q] = r; F_FLAT[q] = flat ? 1 : 0;
+    if (flat) { F_COS[q] = Math.cos(heading); F_SIN[q] = Math.sin(heading); F_HL[q] = l / 2; F_HW[q] = w / 2; }
     if (isSolid) solid++;
     return true;
   };
@@ -682,13 +729,13 @@ export function dressLot(city, lot, out = []) {
     for (let t = 0; t < count * 8 && n < count; t++) {
       const x = x0 + margin + rng.next() * (x1 - x0 - 2 * margin), z = z0 + margin + rng.next() * (z1 - z0 - 2 * margin);
       let clear = true;
-      for (let k = 0; k < out.length && clear; k++) {
-        const f = out[k];
-        if (f.r > 0 && Math.hypot(f.x - x, f.z - z) < gapM + f.r) clear = false;
-        if (f.kind === 'drive' || f.kind === 'bay' || f.kind === 'path') {
+      for (let k = 0, n2 = out.length; k < n2; k++) {
+        const fr = F_R[k];
+        if (fr > 0 && nearer(F_X[k] - x, F_Z[k] - z, gapM + fr)) { clear = false; break; }
+        if (F_FLAT[k]) {
           // Never on a drive, a bay or a path.
-          const dx = x - f.x, dz = z - f.z, c = Math.cos(f.heading), s = Math.sin(f.heading);
-          if (Math.abs(dx * c + dz * s) < f.l / 2 + r && Math.abs(-dx * s + dz * c) < f.w / 2 + r) clear = false;
+          const dx = x - F_X[k], dz = z - F_Z[k], c = F_COS[k], s = F_SIN[k];
+          if (Math.abs(dx * c + dz * s) < F_HL[k] + r && Math.abs(-dx * s + dz * c) < F_HW[k] + r) { clear = false; break; }
         }
       }
       // Round solids keep their whole disc in the lot.
@@ -999,4 +1046,46 @@ export function eachBay(f, fn) {
     const o = -half + (s + 0.5) * 2.5;
     fn(f.x + ca * o, f.z + sa * o, f.heading + Math.PI / 2, s);
   }
+}
+
+// ---- Shared dressing cache ----
+// One cache per city and dressing function: the lot's features from
+// dress(city, lot, []) by lot id, made the first time they are asked for
+// and kept for the last DRESS_CACHE_MAX lots asked for (the oldest go
+// first; asked for again, a lot is dressed again, to the same features).
+// The collision world (world/collision.js) and the renderer read the same
+// arrays, so a lot is dressed once whichever asks first. The arrays are
+// shared: callers must not change them. Emptied when the city's lot list
+// or garages are replaced (the dressing depends on both).
+export const DRESS_CACHE_MAX = 4096;
+const dressCaches = new WeakMap();
+export function lotDressCache(city, dress = dressLot) {
+  let byFn = dressCaches.get(city);
+  if (!byFn) dressCaches.set(city, (byFn = new Map()));
+  let c = byFn.get(dress);
+  if (c) return c;
+  const map = new Map();
+  let lots = city.lots, garages = city.garages;
+  const stats = { dressed: 0, hits: 0 };
+  c = {
+    stats,
+    get(lot) {
+      if (city.lots !== lots || city.garages !== garages) {
+        map.clear();
+        lots = city.lots;
+        garages = city.garages;
+      }
+      let f = map.get(lot.id);
+      if (f) { stats.hits++; return f; }
+      f = [];
+      dress(city, lot, f);
+      stats.dressed++;
+      if (map.size >= DRESS_CACHE_MAX) map.delete(map.keys().next().value);
+      map.set(lot.id, f);
+      return f;
+    },
+    size: () => map.size,
+  };
+  byFn.set(dress, c);
+  return c;
 }

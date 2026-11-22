@@ -7,6 +7,46 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## City build time, second pass (2026-11-22)
+- Lot collision is lazy (src/world/collision.js `attachLotCollision`, `createLotLayer`): no lot shape is made at
+  build. A collision cell (32 m) gets its lot shapes the first time any query (resolveCircle, raycast, lineClear,
+  heightAt) touches it: the lots whose box plus `LOT_SHAPE_REACH` (6 m; the largest reach measured is 0.5 m)
+  overlaps the cell, in lot id order, each lot's shapes made once (addLotSolids, then addBayCars) and the ones
+  overlapping the cell listed in that order. A cell's list is a pure function of the city, so no answer depends on
+  when or in what order cells are touched; a query walks a cell's static shapes, then its lot shapes. A long ray
+  fills only the cells it passes through. `boxes` and `circles` (getters) make every lot shape and list them after
+  the static ones by lot id. A full sweep has exactly the 226,317 shapes of the eager fill (fillLotCollision is
+  kept for tests and tools). test/collision-lazy.test.js: a cell touched first or after others, two visit orders,
+  every answer against the eager fill, the reach. test/collision-determinism.test.js unchanged and passing.
+- One dressing cache (lots.js `lotDressCache`, per city and dressing function, by lot id, the last 4,096 lots,
+  emptied when the lot list or the garages change): the collision layer, the tiles (lotJob takes the returned list)
+  and the bin search of service.js read the same arrays. A built tile also fills the collision cells under its lots
+  (from the features it just dressed), so a step seldom has to; the answers are the same either way.
+- dressLot: scatter tests against flat scratch arrays of the features already put and squares distances first
+  (hypot only at the rounding edge); about 20 % faster, the same features.
+- Garages: the candidates in flat arrays, the centre tests (keep-outs, start, other garages) on squared distances
+  before sorting, the survivors walked in 1 m bands of distance (only the bands reached are sorted), the ground
+  tests on a scratch shape (the shape made for the winner only), the type test first and type-free failures
+  remembered for the fallback pass. The same twelve sites (byte equal).
+- Smaller: planInfill's rare path in its own function, the heap of roadPath in typed arrays with top-level push and
+  pop, buildLots' piece flood and lot objects as top-level functions, the capsule stamp filling one run per row,
+  owner boxes by fill, parking spot removal by an in-place filter. Background TurboFan compile in createMiamiCity
+  about 520 to 410 ms. Every output identical (fingerprint as in the first pass, whole box and core crop, plus the
+  lazy layer's shapes and every cell's list in two visit orders).
+- Bench (scripts/city-build-bench.mjs, median of 5; it now times the game's start path and a full sweep for
+  reference): createMiamiCity normal about the same (1255 / 1294 ms, noise), slow 3162 to 2912 ms (-8 %); after
+  it, garages 275 to 106, attachExplore 236 to 90, lot collision 413 to 19 ms (normal), 625 to 295, 486 to 206,
+  868 to 65 (slow). Game start path (city to service spots) normal about 2218 to 1540 ms (-31 %), slow about 5242
+  to 3573 ms (-32 %). Chromium (scripts/perf.mjs): meshMs 1366 to 773-867, heap 364 to 304 MB, draw calls and
+  triangles unchanged, step ms within run-to-run noise (0.77-1.00 before, 0.88-1.02 after; 28 lazy cells filled
+  in the 300 measured steps). Fast 2 km drive (soak.mjs, new first leg): mean step 0.53-0.58 ms before, 0.50 after
+  with the tile warm-up, worst step 33-37 before, 27-40 after (JIT and GC spikes in both), steps over 8 ms 10 before,
+  7 after.
+- Not met: the 2.6 s slow-runner goal for createMiamiCity itself (the 3 s test). The lazy collision, garages and
+  attachExplore are outside createMiamiCity; inside it the profile is flat and moving loops out of it trades main
+  thread time for compile time on a shared CPU (tried and reverted for the extras loops). Budget guard limits left
+  as they are.
+
 ## City build time (2026-11-22, after the 0.5.0 CI failure)
 - CI failed the 3 s whole-box build tests (wall 3984 ms, cpu 4256 ms). Profile: `node scripts/city-build-bench.mjs`
   (cold runs in fresh processes, median; `--slow` shares one CPU with a busy loop; `--child` under `node --cpu-prof`).

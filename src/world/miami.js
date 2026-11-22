@@ -128,11 +128,16 @@ function stampCapsule(R, ax, az, bx, bz, r, v) {
   const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - r - R.x0) / c)), i1 = Math.min(R.w - 1, Math.floor((Math.max(ax, bx) + r - R.x0) / c));
   const j0 = Math.max(0, Math.floor((Math.min(az, bz) - r - R.z0) / c)), j1 = Math.min(R.h - 1, Math.floor((Math.max(az, bz) + r - R.z0) / c));
   const r2 = r * r;
+  // The capsule is convex, so its cells in a row are one run: found from
+  // both ends with the same test, then filled.
   for (let j = j0; j <= j1; j++) {
     const z = R.z0 + (j + 0.5) * c;
-    for (let i = i0; i <= i1; i++) {
-      if (segDist2(R.x0 + (i + 0.5) * c, z, ax, az, bx, bz) <= r2) R.data[j * R.w + i] = v;
-    }
+    let a = i0;
+    while (a <= i1 && segDist2(R.x0 + (a + 0.5) * c, z, ax, az, bx, bz) > r2) a++;
+    if (a > i1) continue;
+    let b = i1;
+    while (b > a && segDist2(R.x0 + (b + 0.5) * c, z, ax, az, bx, bz) > r2) b--;
+    R.data.fill(v, j * R.w + a, j * R.w + b + 1);
   }
 }
 function stampRect(R, x0, z0, x1, z1, v) {
@@ -453,7 +458,7 @@ function stampOwnerBox(owner, b, k, x0, z0, W, H) {
   const e = 1e-6;
   const i0 = Math.max(0, Math.ceil((b.x0 - x0) / CELL - 0.5 + e)), i1 = Math.min(W - 1, Math.floor((b.x1 - x0) / CELL - 0.5 - e));
   const j0 = Math.max(0, Math.ceil((b.z0 - z0) / CELL - 0.5 + e)), j1 = Math.min(H - 1, Math.floor((b.z1 - z0) / CELL - 0.5 - e));
-  for (let j = j0; j <= j1; j++) for (let c = j * W + i0, e1 = j * W + i1; c <= e1; c++) owner[c] = k;
+  if (i1 >= i0) for (let j = j0; j <= j1; j++) owner.fill(k, j * W + i0, j * W + i1 + 1);
   const ci = Math.floor(((b.x0 + b.x1) / 2 - x0) / CELL), cj = Math.floor(((b.z0 + b.z1) / 2 - z0) / CELL);
   const c = ci < 0 || cj < 0 || ci >= W || cj >= H ? -1 : cj * W + ci;
   if (c >= 0 && owner[c] < 0) owner[c] = k;
@@ -612,6 +617,21 @@ function splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf) {
     return [A, B, Wd];
   }
   return null;
+}
+
+// Removes the spots (only car park ones when lotOnly) with
+// Math.hypot(dx, dz) < r from (x, z), keeping the order of the rest;
+// hypot only where the squared distance is within rounding of r squared.
+function dropSpotsNear(spots, x, z, r, lotOnly) {
+  const r2 = r * r, lo = r2 * (1 - 1e-9), hi = r2 * (1 + 1e-9);
+  let w = 0;
+  for (let i = 0; i < spots.length; i++) {
+    const p = spots[i];
+    const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
+    const near = (!lotOnly || p.lot) && (d2 < lo || (d2 <= hi && Math.hypot(dx, dz) < r));
+    if (!near) spots[w++] = p;
+  }
+  spots.length = w;
 }
 
 // ---------------------------------------------------------------------
@@ -2073,9 +2093,7 @@ export function createMiamiCity(data, opts = {}) {
     lap('lots.build');
     for (const t of tankSpots) {
       if (t.place !== 'cinder') continue;
-      for (let i = parkingSpots.length - 1; i >= 0; i--) {
-        if (parkingSpots[i].lot && Math.hypot(parkingSpots[i].x - t.x, parkingSpots[i].z - t.z) < 6) parkingSpots.splice(i, 1);
-      }
+      dropSpotsNear(parkingSpots, t.x, t.z, 6, true);
     }
   }
   lap('lots');
@@ -2086,9 +2104,7 @@ export function createMiamiCity(data, opts = {}) {
     // No parked car on a street ramp.
     for (const r of city.rampSpots) {
       if (r.water) continue;
-      for (let i = parkingSpots.length - 1; i >= 0; i--) {
-        if (Math.hypot(parkingSpots[i].x - r.x, parkingSpots[i].z - r.z) < r.r + 6) parkingSpots.splice(i, 1);
-      }
+      dropSpotsNear(parkingSpots, r.x, r.z, r.r + 6, false);
     }
   }
   lap('places.ramps');

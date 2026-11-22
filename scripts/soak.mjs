@@ -134,6 +134,67 @@ const teleport = (g, pl) => {
   if (g.snapCam) g.snapCam();
 };
 
+// A fast 2 km drive (50 m/s along a chain of roads from the start, the
+// car carried along it step by step, each step a full g.step with a draw
+// every drawEvery steps): the worst and mean step time, as the lot
+// collision cells are filled by the queries the first time they are
+// touched (world/collision.js, the lazy lot layer).
+const drive = await page.evaluate((drawEvery) => {
+  const g = window.__rw, c = g.city;
+  const p = g.player;
+  if (p.vehicle) { const o = p.vehicle; o.driver = null; o.speed = o.vx = o.vz = 0; p.vehicle = null; g.setPlayerMode('foot'); }
+  const v = g.debug.spawnCar('sedan', p.x, p.z, p.heading);
+  g.player.walker.x = v.x; g.player.walker.z = v.z;
+  g.enterVehicle(v);
+  // The road chain: from the node nearest the car, the most straight-on
+  // edge each time (not back, a visited node only when nothing else is
+  // left), until 2 km.
+  let n = c.nodes.reduce((b, q) => (Math.hypot(q.x - v.x, q.z - v.z) < Math.hypot(b.x - v.x, b.z - v.z) ? q : b), c.nodes[0]);
+  const pts = [n.x, n.z], seen = new Set([n.id]);
+  let hx = Math.cos(v.heading), hz = Math.sin(v.heading), len = 0, back = -1;
+  for (let hop = 0; hop < 400 && len < 2000; hop++) {
+    let best = null, bs = -Infinity;
+    for (const eid of n.edges) {
+      const e = c.edges[eid], o = c.nodes[e.a === n.id ? e.b : e.a];
+      if (o.id === back || e.causeway) continue;
+      const l = Math.hypot(o.x - n.x, o.z - n.z) || 1;
+      const sc = ((o.x - n.x) * hx + (o.z - n.z) * hz) / l - (seen.has(o.id) ? 4 : 0);
+      if (sc > bs) { bs = sc; best = o; }
+    }
+    back = n.id;
+    if (!best) break;
+    const l = Math.hypot(best.x - n.x, best.z - n.z) || 1;
+    hx = (best.x - n.x) / l; hz = (best.z - n.z) / l;
+    len += l;
+    pts.push(best.x, best.z);
+    seen.add(best.id);
+    n = best;
+  }
+  const SPEED = 50, dt = 1 / 60;
+  let seg = 0, along = 0, worst = 0, sum = 0, steps = 0, over8 = 0, done = 0;
+  while (seg + 3 < pts.length) {
+    const ax = pts[seg], az = pts[seg + 1], bx = pts[seg + 2], bz = pts[seg + 3];
+    const l = Math.hypot(bx - ax, bz - az) || 1;
+    if (along > l) { along -= l; seg += 2; continue; }
+    const h = Math.atan2(bz - az, bx - ax);
+    v.x = v.px = ax + ((bx - ax) * along) / l; v.z = v.pz = az + ((bz - az) * along) / l;
+    v.heading = v.pheading = h;
+    v.vx = Math.cos(h) * SPEED; v.vz = Math.sin(h) * SPEED; v.speed = SPEED;
+    const t0 = performance.now();
+    g.step(dt);
+    const ms = performance.now() - t0;
+    if (++steps % drawEvery === 0) g.draw(1, drawEvery / 60);
+    worst = Math.max(worst, ms);
+    sum += ms;
+    if (ms > 8) over8++;
+    along += SPEED * dt;
+    done += SPEED * dt;
+  }
+  const L = g.cityMesh.userData.stream && g.cityMesh.userData.stream.lotLayer ? g.cityMesh.userData.stream.lotLayer() : null;
+  return { m: Math.round(done), steps, worstStepMs: +worst.toFixed(2), meanStepMs: +(sum / Math.max(1, steps)).toFixed(3), over8ms: over8, lotCells: L ? L.stats.cells : null, lotShapes: L ? L.stats.shapes : null };
+}, drawEvery);
+log(`fast drive: ${JSON.stringify(drive)}`);
+
 const startT = await page.evaluate(() => window.__rw.time);
 let simDone = 0, leg = 0;
 const legSteps = 600; // 10 simulated seconds per leg

@@ -50,7 +50,7 @@ async function child() {
   const { attachExplore, placeAdventures, ROUTE_SPECS } = await import('../src/world/adventures.js');
   const { buildRoutes } = await import('../src/world/courses.js');
   const { placeGarages } = await import('../src/world/garages.js');
-  const { createCollisionWorld, fillCollision, fillLotCollision } = await import('../src/world/collision.js');
+  const { createCollisionWorld, fillCollision, attachLotCollision } = await import('../src/world/collision.js');
   const { dressLot } = await import('../src/world/lots.js');
   const { createService } = await import('../src/systems/service.js');
   lap('module load');
@@ -75,23 +75,32 @@ async function child() {
   lap('routes');
   attachExplore(city);
   lap('attachExplore (all)');
-  const F = [];
-  let nf = 0;
-  for (const lot of city.lots) nf += dressLot(city, lot, F).length;
-  lap('dressLot all lots');
-  out.features = nf;
   const col = createCollisionWorld();
   fillCollision(city, col);
   lap('static collision fill');
-  const shapes = fillLotCollision(city, col);
-  lap('lot collision fill');
-  out.lotShapes = shapes.length;
+  // The lots' solids: a lazy layer (cells filled by the first query that
+  // touches them), as buildRealCity attaches it.
+  const layer = attachLotCollision(city, col);
+  lap('lot collision attach');
   try {
     createService({ city, events: null });
     lap('service spots');
   } catch {
     out['service spots'] = NaN;
   }
+  // createMiamiCity to here: the node part of the game's start.
+  out['game path wall'] = now() - t0;
+  out['game path cpu'] = process.cpuUsage(c0).user / 1000;
+  // Not on the game's start path, for reference: every lot's shapes (a
+  // full sweep of the lazy layer, which dresses every lot once).
+  t = now();
+  out.lotShapes = layer.count();
+  lap('lot full sweep (ref)');
+  let nf = 0;
+  const F = [];
+  for (const lot of city.lots) nf += dressLot(city, lot, F).length;
+  lap('dressLot all again (ref)');
+  out.features = nf;
   out['process cpu'] = process.cpuUsage(cpu0).user / 1000;
   process.stdout.write(JSON.stringify(out) + '\n');
 }
