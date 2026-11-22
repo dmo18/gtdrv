@@ -29,7 +29,10 @@ const POI_STYLE = {
   race: { color: '#f6efe6', name: 'Race' },
   helipad: { color: '#b9a6ee', name: 'Helipad' },
   depot: { color: '#c9b98a', name: 'Military depot' },
+  landmark: { color: '#ffd24a', name: 'Landmark' },
 };
+const LANDMARK_NAME_ZOOM = 330; // minimap zoom (metres) at which landmark names show
+const LANDMARK_TAP_PX = 30; // a tap this close to a landmark names it
 // Activity markers passed in `state.markers` (races, sky courses, deliveries).
 const ACT_STYLE = {
   street: { color: '#e2733a', name: 'Street race' },
@@ -217,6 +220,38 @@ export function createMinimap(canvas, mapRenderer) {
       ctx.fill();
       ctx.stroke();
     }
+    const lms = mapRenderer.city.mapLandmarks;
+    if (lms) {
+      // Dots for every landmark in view; the name of the one nearest the
+      // centre (inside 60% of the radius) when zoomed in enough to read.
+      let best = -1, bestD = (R * 0.6) ** 2;
+      for (let i = 0; i < lms.length; i++) {
+        const lm = lms[i];
+        project(lm.x - s.x, lm.z - s.z);
+        if (clamped) continue;
+        ctx.fillStyle = '#ffd24a';
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, py, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        const d = (px - cx) ** 2 + (py - cy) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best >= 0 && s.zoomMetres <= LANDMARK_NAME_ZOOM) {
+        project(lms[best].x - s.x, lms[best].z - s.z);
+        ctx.font = '700 9px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(14, 26, 32, 0.9)';
+        ctx.fillStyle = '#fff6d6';
+        ctx.strokeText(lms[best].name, px, py + 5);
+        ctx.fillText(lms[best].name, px, py + 5);
+      }
+    }
     const blips = s.blips;
     const n = Math.min(s.blipCount | 0, blips ? blips.length : 0);
     for (let i = 0; i < n; i++) {
@@ -339,6 +374,11 @@ const MAP_CSS = `
   background: ${COL.panel}; border: 1px solid rgba(246,239,230,0.22); border-radius: 12px;
   font-size: 12px; pointer-events: none;
 }
+.rw-map-toast {
+  position: absolute; left: 50%; bottom: calc(var(--rw-map-sb) + 16px); transform: translateX(-50%);
+  padding: 8px 16px; border-radius: 999px; background: ${COL.panel}; border: 1px solid ${COL.accent};
+  font-size: 14px; font-weight: 700; pointer-events: none; opacity: 0; transition: opacity 0.25s;
+}
 .rw-map-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .rw-map-legend canvas { width: 18px; height: 18px; }
 `;
@@ -431,6 +471,21 @@ function drawIcon(g, type, color, s) {
     for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
       if ((a + b) % 2 === 0) g.fillRect(-s * 0.85 + a * q, -s * 0.85 + b * q, q, q);
     }
+  } else if (type === 'landmark') { // teardrop pin with a star
+    g.moveTo(0, s * 1.1);
+    g.bezierCurveTo(-s * 1.25, -s * 0.2, -s * 0.9, -s * 1.05, 0, -s * 1.05);
+    g.bezierCurveTo(s * 0.9, -s * 1.05, s * 1.25, -s * 0.2, 0, s * 1.1);
+    g.closePath();
+    g.stroke(); g.fill();
+    g.fillStyle = '#1a120d';
+    g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 ? s * 0.2 : s * 0.48;
+      if (k) g.lineTo(Math.cos(a) * r, Math.sin(a) * r - s * 0.25);
+      else g.moveTo(Math.cos(a) * r, Math.sin(a) * r - s * 0.25);
+    }
+    g.closePath();
+    g.fill();
   } else if (type === 'depot') { // shield with a star
     g.moveTo(-s * 0.85, -s * 0.8); g.lineTo(s * 0.85, -s * 0.8); g.lineTo(s * 0.85, s * 0.05);
     g.quadraticCurveTo(s * 0.7, s * 0.7, 0, s); g.quadraticCurveTo(-s * 0.7, s * 0.7, -s * 0.85, s * 0.05);
@@ -480,6 +535,9 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   const legend = document.createElement('div');
   legend.className = 'rw-map-legend';
   el.appendChild(legend);
+  const toast = document.createElement('div');
+  toast.className = 'rw-map-toast';
+  el.appendChild(toast);
   root.appendChild(el);
 
   const g = canvas.getContext('2d');
@@ -488,6 +546,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   let cw = 1, ch = 1, dpr = 1;
   let opened = false;
   let st = { x: 0, z: 0, heading: 0, waypoint: null, markers: null };
+  let lmBoxes = new Float32Array(0);
   let waypoint = null;
   let dirty = false;
   const pointers = new Map(); // id -> {x, y}
@@ -496,6 +555,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   function buildLegend() {
     legend.textContent = '';
     const types = new Set((city.pois || []).map((p) => p.type));
+    if (city.mapLandmarks && city.mapLandmarks.length) types.add('landmark');
     const entries = [['player', 'You', COL.accent]];
     for (const t of Object.keys(POI_STYLE)) if (types.has(t)) entries.push([t, POI_STYLE[t].name, POI_STYLE[t].color]);
     const acts = new Set((st.markers || []).map((m) => m.type));
@@ -615,6 +675,39 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
         g.fillText(p.label, tmpS.x, tmpS.y + iconS + 3);
       }
     }
+    // Real places: icons always, names in list order unless one would
+    // overlap a name already placed (zoom in to see the rest).
+    const lms = city.mapLandmarks;
+    if (lms) {
+      if (lmBoxes.length < lms.length * 4) lmBoxes = new Float32Array(lms.length * 4);
+      let placed = 0;
+      g.font = '700 12px system-ui, sans-serif';
+      for (let i = 0; i < lms.length; i++) {
+        const lm = lms[i];
+        toScreen(lm.x, lm.z, tmpS);
+        if (tmpS.x < -80 || tmpS.y < -40 || tmpS.x > cw + 80 || tmpS.y > ch + 40) continue;
+        g.save();
+        g.translate(tmpS.x, tmpS.y - iconS * 0.9);
+        drawIcon(g, 'landmark', POI_STYLE.landmark.color, iconS * 0.8);
+        g.restore();
+        const hw = g.measureText(lm.name).width / 2 + 2, y0 = tmpS.y + 1, y1 = y0 + 15;
+        let hit = false;
+        for (let k = 0; k < placed && !hit; k++) {
+          hit = tmpS.x - hw < lmBoxes[k * 4 + 2] && tmpS.x + hw > lmBoxes[k * 4] && y0 < lmBoxes[k * 4 + 3] && y1 > lmBoxes[k * 4 + 1];
+        }
+        if (hit) continue;
+        lmBoxes[placed * 4] = tmpS.x - hw; lmBoxes[placed * 4 + 1] = y0;
+        lmBoxes[placed * 4 + 2] = tmpS.x + hw; lmBoxes[placed * 4 + 3] = y1;
+        placed++;
+        g.lineWidth = 3.5;
+        g.strokeStyle = 'rgba(14, 26, 32, 0.9)';
+        g.fillStyle = '#fff6d6';
+        g.lineJoin = 'round';
+        g.strokeText(lm.name, tmpS.x, tmpS.y + 2);
+        g.fillText(lm.name, tmpS.x, tmpS.y + 2);
+      }
+      g.font = '600 12px system-ui, sans-serif';
+    }
     // Activity markers (live list owned by the game).
     const marks = st.markers;
     if (marks) {
@@ -725,8 +818,27 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
     }
     toWorld(sx, sy, tmpW);
     waypoint = { x: tmpW.x, z: tmpW.z };
-    if (onWaypoint) onWaypoint({ x: tmpW.x, z: tmpW.z });
+    // Close to a landmark: the waypoint snaps to it and its name shows.
+    const lms = city.mapLandmarks;
+    let near = null, nearD = LANDMARK_TAP_PX;
+    if (lms) {
+      for (let i = 0; i < lms.length; i++) {
+        toScreen(lms[i].x, lms[i].z, tmpS);
+        const d = Math.min(Math.hypot(sx - tmpS.x, sy - tmpS.y), Math.hypot(sx - tmpS.x, sy - (tmpS.y - 12)));
+        if (d < nearD) { nearD = d; near = lms[i]; }
+      }
+    }
+    if (near) { waypoint.x = near.x; waypoint.z = near.z; }
+    showToast(near ? 'Waypoint set to ' + near.name : '');
+    if (onWaypoint) onWaypoint({ x: waypoint.x, z: waypoint.z });
     schedule();
+  }
+  let toastTimer = 0;
+  function showToast(text) {
+    toast.textContent = text;
+    toast.style.opacity = text ? '1' : '0';
+    clearTimeout(toastTimer);
+    if (text) toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2200);
   }
 
   const localPos = (e) => {
@@ -793,6 +905,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
     el.classList.remove('rw-map-open');
     pointers.clear();
     gesture = null;
+    toast.style.opacity = '0';
     if (onClose) onClose();
   }
   closeBtn.addEventListener('click', close);

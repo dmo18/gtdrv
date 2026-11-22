@@ -5,6 +5,7 @@
 import { createRng } from '../core/rng.js';
 import { SIDEWALK } from '../world/citygen.js';
 import { SHOP_NAMES } from './textures.js';
+import { lookOf } from './miamilook.js';
 
 export function shade(hex, f) {
   const r = Math.min(255, ((hex >> 16) & 255) * f) | 0;
@@ -82,14 +83,23 @@ function flatRoof(C, b, x0, z0, x1, z1, y, capColor, rng, opts = {}) {
   const P = C.plain.at((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
   const e = opts.cornice || 0;
   const drop = 0.7, pw = 0.35;
-  const roofCol = rng.pick(ROOF_FLAT);
+  const pickRoof = rng.pick(ROOF_FLAT);
+  const roofCol = opts.roofCol || pickRoof;
   P.flat(x0 + pw, z0 + pw, x1 - pw, z1 - pw, y - drop, roofCol, 0.9);
   P.innerWalls(x0 + pw, z0 + pw, x1 - pw, z1 - pw, y - drop, y, capColor, 0.55, 0.85);
   P.ring(x0 - e, z0 - e, x1 + e, z1 + e, pw + e, y, capColor);
   if (e > 0) P.walls(x0 - e, z0 - e, x1 + e, z1 + e, y - 0.6, y, capColor, 1, 1, 0.8, 1);
+  if (opts.tile) tileCoping(C, b, x0 - e, z0 - e, x1 + e, z1 + e, y, opts.tile);
+  if (opts.rail) railing(C, b, x0 + 0.1, z0 + 0.1, x1 - 0.1, z1 - 0.1, y, 1.0);
   const w = x1 - x0, d = z1 - z0;
   const ry = y - drop;
   if (Math.min(w, d) < 7) return;
+  if (opts.plant && Math.min(w, d) > 16) {
+    // Mechanical penthouse behind louvred screens.
+    const ix = w * 0.28, iz = d * 0.28;
+    P.box(x0 + ix, z0 + iz, x1 - ix, z1 - iz, ry, ry + 4.2, shade(capColor, 0.86), 0x8c8e90, 0.75, 1);
+    P.walls(x0 + ix - 0.1, z0 + iz - 0.1, x1 - ix + 0.1, z1 - iz + 0.1, ry + 3.6, ry + 4.4, capColor, 1, 1, 1, 1);
+  }
   // Stair bulkhead in a corner.
   const bx = rng.chance(0.5) ? x0 + 1.4 : x1 - 4.6, bz = rng.chance(0.5) ? z0 + 1.4 : z1 - 5.2;
   P.box(bx, bz, bx + 3.2, bz + 3.8, ry, ry + 2.7, shade(capColor, 0.85), shade(roofCol, 0.9), 0.7, 1);
@@ -149,14 +159,16 @@ function tower(C, b) {
   const { x0, z0, x1, z1, h } = b;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
   const P = C.plain.at(cx, cz);
-  const style = b.style;
+  // The real Miami map: a look from the neighbourhood (miamilook.js).
+  const L = lookOf(C.city, b);
+  const style = L ? L.style : b.style;
   const F = C[style].at(cx, cz);
   const minDim = Math.min(x1 - x0, z1 - z0);
   const gf = Math.min(style === 'glass' ? 5.2 : 4.2, h * 0.45);
-  const tint = b.tint;
-  const bay = style === 'glass' ? 3 : style === 'office' ? 3.4 : style === 'stucco' ? 3.6 : 3.1;
-  const floorH = style === 'glass' ? 3.7 : style === 'office' ? 3.5 : 3.25;
-  const trim = style === 'glass' ? 0x7c8288 : style === 'brick' ? STONE : style === 'stucco' ? mixHex(tint, WHITE, 0.6) : mixHex(tint, 0xc0c0c0, 0.5);
+  const tint = L ? L.tint : b.tint;
+  const bay = style === 'glass' ? 3 : style === 'office' ? 3.4 : style === 'stucco' || style === 'havana' ? 3.6 : 3.1;
+  const floorH = style === 'glass' ? 3.7 : style === 'office' ? 3.5 : style === 'havana' ? 3.6 : 3.25;
+  const trim = L ? L.trim : style === 'glass' ? 0x7c8288 : style === 'brick' ? STONE : style === 'stucco' ? mixHex(tint, WHITE, 0.6) : mixHex(tint, 0xc0c0c0, 0.5);
 
   // Ground floor: shopfronts onto streets, blank service walls behind.
   const S = C.shopfront.at(cx, cz);
@@ -167,10 +179,11 @@ function tower(C, b) {
       span(S, s, 0, s.L, 0.16, gf, 0, trim, uo, 0, uo + n / 4, 1, 0.68, 1);
       shopRow(C, b, s, gf, rng);
     } else {
-      span(P, s, 0, s.L, 0.16, gf, 0, shade(trim, 0.72), 0, 0, 1, 1, 0.55, 0.92);
+      span(P, s, 0, s.L, 0.16, gf, 0, L ? shade(tint, 0.86) : shade(trim, 0.72), 0, 0, 1, 1, 0.55, 0.92);
     }
   }
-  if (style === 'brick' || style === 'stucco') P.walls(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, gf - 0.05, gf + 0.3, trim, 1, 1, 0.85, 1);
+  if (style === 'brick' || style === 'stucco' || style === 'havana') P.walls(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, gf - 0.05, gf + 0.3, trim, 1, 1, 0.85, 1);
+  if (L) groundFloor(C, b, L, style, gf, trim, tint, rng);
 
   // Upper storeys, stepping back on tall towers.
   const tiers = [];
@@ -186,21 +199,31 @@ function tower(C, b) {
   tiers.forEach((t, k) => {
     const ax0 = x0 + t.i, az0 = z0 + t.i, ax1 = x1 - t.i, az1 = z1 - t.i;
     floors = facadeWalls(F, ax0, az0, ax1, az1, t.y0, t.y1, tint, bay, floorH, rng, k === 0 ? 1 : 0.8, 1);
+    if (L) relief(C, b, L, style, ax0, az0, ax1, az1, t.y0, t.y1, floors, bay, trim, tint, k === 0);
     if (k < tiers.length - 1) {
       const nx = tiers[k + 1].i - t.i;
-      P.ring(ax0, az0, ax1, az1, nx + 0.05, t.y1, rng.pick(ROOF_FLAT), 1, 0.6);
+      P.ring(ax0, az0, ax1, az1, nx + 0.05, t.y1, L ? L.roof : rng.pick(ROOF_FLAT), 1, 0.6);
       P.walls(ax0 - 0.08, az0 - 0.08, ax1 + 0.08, az1 + 0.08, t.y1 - 0.4, t.y1 + 0.25, trim, 1, 1, 0.9, 1);
+      if (L) railing(C, b, ax0 + nx, az0 + nx, ax1 - nx, az1 - nx, t.y1, 1.05);
+    } else if (L && L.tile && minDim < 16 && h < 16) {
+      hipRoof(C, b, ax0, az0, ax1, az1, t.y1, terracotta(b), trim);
     } else {
       flatRoof(C, b, ax0, az0, ax1, az1, t.y1, trim, rng, {
-        cornice: style === 'brick' ? 0.28 : style === 'stucco' ? 0.15 : 0.04,
-        tank: style === 'brick' && h < 40 && rng.chance(0.5),
+        cornice: style === 'brick' ? 0.28 : style === 'stucco' || style === 'havana' ? 0.15 : 0.04,
+        tank: (style === 'brick' && h < 40 && rng.chance(0.5)) || (L && h > 12 && h < 45 && (b.vseed & 7) === 3),
         mast: h > 72 ? h * rng.range(0.1, 0.2) : 0,
+        roofCol: L ? L.roof : 0,
+        tile: L && L.tile ? terracotta(b) : 0,
+        rail: L && h >= 20 && !L.tile,
+        plant: L && h > 45,
       });
     }
   });
+  if (L && L.deco) deco(C, b, L, gf, h, floors, trim, tint);
+  if (L && L.balconies) balconies(C, b, L, tiers, gf, h, floors, trim);
 
   // Hotel balconies with solid white fronts.
-  if (style === 'stucco') {
+  if (style === 'stucco' && !L) {
     const fh = (h - gf) / floors;
     const sides = sidesOf(x0, z0, x1, z1).filter((s) => s.L >= 8 && (b.street ? b.street & s.m : s.m === 2));
     const col = mixHex(tint, WHITE, 0.75);
@@ -219,6 +242,205 @@ function tower(C, b) {
   }
 
   if (b.billboard) billboard(C, b, h);
+}
+
+// ---- Miami map structure (only with a look from miamilook.js) ----------
+
+const terracotta = (b) => [0xb8583a, 0xc0684a, 0xa85034, 0xc4785a][b.vseed & 3];
+
+// One face from 3 or 4 points (counter-clockwise seen from the front),
+// its normal from the points, texture in metres / k along a and up b.
+function face(B, p, color, k = 1.5, s = 1) {
+  const [a, b2, c] = p;
+  const ux = b2[0] - a[0], uy = b2[1] - a[1], uz = b2[2] - a[2];
+  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  const l = Math.hypot(nx, ny, nz) || 1;
+  nx /= l; ny /= l; nz /= l;
+  const el = Math.hypot(ux, uy, uz) || 1;
+  const ex = ux / el, ey = uy / el, ez = uz / el;
+  // v axis: in the face, across the first edge.
+  const fx = ny * ez - nz * ey, fy = nz * ex - nx * ez, fz = nx * ey - ny * ex;
+  const uv = (q) => [((q[0] - a[0]) * ex + (q[1] - a[1]) * ey + (q[2] - a[2]) * ez) / k, ((q[0] - a[0]) * fx + (q[1] - a[1]) * fy + (q[2] - a[2]) * fz) / k];
+  if (p.length === 3) {
+    const A = uv(a), Bv = uv(b2), Cv = uv(c);
+    B.tri(a[0], a[1], a[2], b2[0], b2[1], b2[2], c[0], c[1], c[2], color, nx, ny, nz, A[0], A[1], Bv[0], Bv[1], Cv[0], Cv[1], s);
+  } else {
+    const d = p[3];
+    const A = uv(a), Bv = uv(b2), Cv = uv(c), D = uv(d);
+    B.quadUv(a[0], a[1], a[2], b2[0], b2[1], b2[2], c[0], c[1], c[2], d[0], d[1], d[2], color, nx, ny, nz, A[0], A[1], Bv[0], Bv[1], Cv[0], Cv[1], D[0], D[1], s);
+  }
+}
+
+// A thin slab out from a wall (canopy, balcony, eyebrow): front, top
+// and the underside seen from the street.
+function slab(P, s, a0, a1, o, y0, y1, color, under) {
+  span(P, s, a0, a1, y0, y1, o, color, 0, 0, 1, 1, 0.92, 1);
+  P.quad(px(s, a0, o), y1, pz(s, a0, o), px(s, a1, o), y1, pz(s, a1, o), px(s, a1, 0), y1, pz(s, a1, 0), px(s, a0, 0), y1, pz(s, a0, 0), color, 0, 1, 0);
+  P.quad(px(s, a0, 0), y0, pz(s, a0, 0), px(s, a1, 0), y0, pz(s, a1, 0), px(s, a1, o), y0, pz(s, a1, o), px(s, a0, o), y0, pz(s, a0, o), under, 0, -1, 0);
+}
+
+// An upright fin or pier standing out `o` from the wall: front and sides.
+function fin(P, s, a0, a1, o, y0, y1, color, s0 = 0.9) {
+  span(P, s, a0, a1, y0, y1, o, color, 0, 0, 1, 1, s0, 1);
+  P.wall(px(s, a1, o), pz(s, a1, o), px(s, a1, 0), pz(s, a1, 0), y0, y1, shade(color, 0.9), 0, 0, 1, 1, s0, 1);
+  P.wall(px(s, a0, 0), pz(s, a0, 0), px(s, a0, o), pz(s, a0, o), y0, y1, shade(color, 0.9), 0, 0, 1, 1, s0, 1);
+}
+
+// Stone plinth all round; an entrance canopy on taller buildings.
+function groundFloor(C, b, L, style, gf, trim, tint) {
+  const { x0, z0, x1, z1 } = b;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  const P = C.plain.at(cx, cz);
+  const stone = style === 'glass' || style === 'office' ? 0x8a8e92 : shade(mixHex(tint, 0x9a948a, 0.55), 0.82);
+  P.walls(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.16, 0.55, stone, 1, 1, 0.62, 0.9);
+  P.ring(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.1, 0.55, shade(stone, 1.12));
+  if (b.h < 24) return;
+  let best = null;
+  for (const s of sidesOf(x0, z0, x1, z1)) if ((b.street & s.m) && s.L >= 10 && (!best || s.L > best.L)) best = s;
+  if (!best) return;
+  const w = Math.min(best.L * 0.5, 14), mid = best.L / 2;
+  slab(P, best, mid - w / 2, mid + w / 2, 2.8, gf - 0.1, gf + 0.32, trim, shade(trim, 0.55));
+  for (const a of [mid - w / 2 + 0.3, mid + w / 2 - 0.5]) frameBox(P, best, a, a + 0.2, 2.45, 2.65, 0.16, gf - 0.1, shade(trim, 0.8));
+}
+
+// Fins, piers, corner pilasters and floor lines on one tier.
+function relief(C, b, L, style, x0, z0, x1, z1, y0, y1, floors, bay, trim, tint, first) {
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const P = C.plain.at(cx, cz);
+  const sides = sidesOf(x0, z0, x1, z1);
+  const fh = (y1 - y0) / floors;
+  if (style === 'glass' || style === 'office') {
+    const glass = style === 'glass';
+    const every = L.fins || 0;
+    const col = glass ? trim : shade(tint, 1.04);
+    const w = glass ? 0.08 : 0.22, o = glass ? 0.42 : 0.32;
+    for (const s of sides) {
+      const n = Math.max(1, Math.round(s.L / bay));
+      const st = s.L / n;
+      if (every) for (let i = every; i < n; i += every) fin(P, s, i * st - w, i * st + w, o, y0, y1, col);
+      // Corner piers.
+      fin(P, s, -0.05, glass ? 0.35 : 0.6, glass ? 0.2 : 0.36, y0, y1, glass ? shade(trim, 0.92) : col);
+    }
+    // A spandrel ledge every few floors on glass towers.
+    if (glass) for (let f = 4; f < floors; f += 4) P.walls(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, y0 + f * fh - 0.06, y0 + f * fh + 0.22, shade(trim, 0.95), 1, 1, 0.85, 1);
+    return;
+  }
+  // Stucco, Havana and brick: corner pilasters and a string course per floor.
+  for (const s of sides) fin(P, s, -0.06, 0.55, 0.16, first ? 0.55 : y0, y1, trim);
+  if (L.balconies) return;
+  const top = Math.min(floors, 14);
+  for (let f = 1; f < top; f++) {
+    const y = y0 + f * fh;
+    P.walls(x0 - 0.07, z0 - 0.07, x1 + 0.07, z1 + 0.07, y - 0.05, y + 0.16, trim, 1, 1, 0.82, 1);
+  }
+}
+
+// Railing panels (one atlas picture each, see-through) round a roof.
+function railing(C, b, x0, z0, x1, z1, y, hgt) {
+  const D = C.detail.at((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+  const r = C.R.railing;
+  if (!r) return;
+  for (const s of sidesOf(x0, z0, x1, z1)) {
+    const n = Math.max(1, Math.round(s.L / 6));
+    const st = s.L / n;
+    for (let i = 0; i < n; i++) panel(D, s, i * st, (i + 1) * st, y, y + hgt, 0, 0xa8aeb4, r);
+  }
+}
+
+// Terracotta tile coping round a flat roof (mission style).
+function tileCoping(C, b, x0, z0, x1, z1, y, col) {
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const RF = C.roofing.at(cx, cz), P = C.plain.at(cx, cz);
+  const oi = -0.2, oo = 0.6, yi = y + 0.42, yo = y + 0.02;
+  for (const s of sidesOf(x0, z0, x1, z1)) {
+    const P0 = [px(s, -oo, oo), yo, pz(s, -oo, oo)], P1 = [px(s, s.L + oo, oo), yo, pz(s, s.L + oo, oo)];
+    const P2 = [px(s, s.L - oi, oi), yi, pz(s, s.L - oi, oi)], P3 = [px(s, oi, oi), yi, pz(s, oi, oi)];
+    face(RF, [P0, P1, P2, P3], col, 0.9);
+    // Underside (dark) and the edge.
+    P.quad(P3[0], yo - 0.02, P3[2], P2[0], yo - 0.02, P2[2], P1[0], yo - 0.02, P1[2], P0[0], yo - 0.02, P0[2], shade(col, 0.45), 0, -1, 0);
+    span(P, s, -oo, s.L + oo, yo - 0.14, yo, oo, shade(col, 0.8), 0, 0, 1, 1);
+  }
+}
+
+// Hipped roof of tiles on a small low-rise building.
+function hipRoof(C, b, x0, z0, x1, z1, y, col, trim) {
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const RF = C.roofing.at(cx, cz), P = C.plain.at(cx, cz);
+  const e = 0.5;
+  const X0 = x0 - e, Z0 = z0 - e, X1 = x1 + e, Z1 = z1 + e;
+  const w = X1 - X0, d = Z1 - Z0;
+  const rh = Math.min(3.4, Math.min(w, d) * 0.3);
+  const top = y + rh;
+  P.walls(x0 - 0.06, z0 - 0.06, x1 + 0.06, z1 + 0.06, y - 0.35, y, trim, 1, 1, 0.9, 1);
+  // Eaves underside.
+  P.ring(X0, Z0, X1, Z1, e + 0.06, y - 0.02, shade(col, 0.4));
+  if (w >= d) {
+    const r0 = X0 + d / 2, r1 = X1 - d / 2, m = (Z0 + Z1) / 2;
+    face(RF, [[X0, y, Z1], [X1, y, Z1], [r1, top, m], [r0, top, m]], col);
+    face(RF, [[X1, y, Z0], [X0, y, Z0], [r0, top, m], [r1, top, m]], col, 1.5, 0.86);
+    face(RF, [[X1, y, Z1], [X1, y, Z0], [r1, top, m]], col, 1.5, 0.93);
+    face(RF, [[X0, y, Z0], [X0, y, Z1], [r0, top, m]], col, 1.5, 0.9);
+  } else {
+    const r0 = Z0 + w / 2, r1 = Z1 - w / 2, m = (X0 + X1) / 2;
+    face(RF, [[X1, y, Z1], [X1, y, Z0], [m, top, r0], [m, top, r1]], col, 1.5, 0.93);
+    face(RF, [[X0, y, Z0], [X0, y, Z1], [m, top, r1], [m, top, r0]], col, 1.5, 0.88);
+    face(RF, [[X0, y, Z1], [X1, y, Z1], [m, top, r1]], col);
+    face(RF, [[X1, y, Z0], [X0, y, Z0], [m, top, r0]], col, 1.5, 0.86);
+  }
+}
+
+// Art-deco details on the street fronts: eyebrow ledges over the
+// windows, a centre fin rising over the roof, speed-line bands.
+function deco(C, b, L, gf, h, floors, trim, tint) {
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const P = C.plain.at(cx, cz);
+  const all = sidesOf(b.x0, b.z0, b.x1, b.z1);
+  const sides = all.filter((s) => (b.street & s.m) && s.L >= 7).slice(0, 2);
+  if (!sides.length) sides.push(all[0]);
+  const fh = (h - gf) / floors;
+  const accent = mixHex(shade(tint, 0.72), (b.vseed & 1) ? 0x2a8a8a : 0xd8604a, 0.35);
+  for (const s of sides) {
+    for (let f = 0; f < floors; f++) {
+      const y = gf + f * fh + fh * 0.8 + 0.06;
+      slab(P, s, 0.25, s.L - 0.25, 0.55, y, y + 0.12, trim, shade(trim, 0.6));
+    }
+    for (let k = 0; k < 3; k++) span(P, s, 0.1, s.L - 0.1, h - 1.5 + k * 0.38, h - 1.32 + k * 0.38, 0.06, accent, 0, 0, 1, 1);
+    if (s.L >= 10) {
+      const mid = s.L / 2, w = Math.min(3.2, s.L * 0.22);
+      fin(P, s, mid - w / 2, mid + w / 2, 0.4, gf, h + 2.2, trim);
+      fin(P, s, mid - w * 0.28, mid + w * 0.28, 0.5, h + 2.2, h + 3.6, trim);
+      frameBox(P, s, mid - w / 2, mid + w / 2, -0.6, 0.4, h + 2.2, h + 2.3, trim);
+      frameBox(P, s, mid - w * 0.28, mid + w * 0.28, -0.4, 0.5, h + 3.6, h + 3.7, trim);
+      // An accent stripe up the fin.
+      span(P, s, mid - 0.18, mid + 0.18, gf + 0.5, h + 3.3, 0.53, accent, 0, 0, 1, 1);
+    }
+  }
+}
+
+// Balconies: a slab on every floor with a glass railing.
+function balconies(C, b, L, tiers, gf, h, floors, trim) {
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const P = C.plain.at(cx, cz), D = C.detail.at(cx, cz);
+  const r = C.R.rail;
+  const under = shade(trim, 0.58), glassCol = 0xb8d4dc;
+  for (const t of tiers) {
+    const nf = Math.max(1, Math.round((t.y1 - t.y0) / 3.25));
+    const fh = (t.y1 - t.y0) / nf;
+    const all = sidesOf(b.x0 + t.i, b.z0 + t.i, b.x1 - t.i, b.z1 - t.i);
+    let sides = all.filter((s) => s.L >= 8 && (L.balconies === 2 || (b.street & s.m)));
+    if (!sides.length) sides = [all.reduce((a, q) => (q.L > a.L ? q : a))];
+    if (L.balconies !== 2) sides = sides.slice(0, 2);
+    const maxF = Math.min(nf, 48);
+    for (const s of sides) {
+      const a0 = 0.8, a1 = s.L - 0.8, o = 1.5;
+      for (let f = 1; f < maxF; f++) {
+        const y = t.y0 + f * fh;
+        slab(P, s, a0, a1, o, y - 0.2, y, trim, under);
+        if (r) panel(D, s, a0, a1, y, y + 1.05, o - 0.05, glassCol, r);
+      }
+    }
+  }
 }
 
 // A lit hoarding on posts at the roof edge.
@@ -243,12 +465,14 @@ function house(C, b) {
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
   const P = C.plain.at(cx, cz), D = C.detail.at(cx, cz), W = C.siding.at(cx, cz), RF = C.roofing.at(cx, cz);
   const base = 0.6;
-  const tint = mixHex(b.color, WHITE, 0.25);
+  const L = lookOf(C.city, b);
+  const tint = L ? L.wall : mixHex(b.color, WHITE, 0.25);
   P.walls(x0 - 0.04, z0 - 0.04, x1 + 0.04, z1 + 0.04, 0.16, base, 0x8f8b84, 1, 1, 0.55, 0.9);
   W.walls(x0, z0, x1, z1, base, h, tint, 2.4, 2.4, 0.86, 1);
 
   // Pitched roof along the longer side, with shingles.
-  const roof = rng.pick(ROOFS);
+  const pickRoof = rng.pick(ROOFS);
+  const roof = L ? L.roof : pickRoof;
   const rh = Math.min(3, Math.min(x1 - x0, z1 - z0) * 0.3), e = 0.5, k3 = 1 / 3;
   const ex0 = x0 - e, ex1 = x1 + e, ez0 = z0 - e, ez1 = z1 + e;
   const yE = h - 0.12;
@@ -349,7 +573,8 @@ function shed(C, b) {
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
   const P = C.plain.at(cx, cz), D = C.detail.at(cx, cz), K = C.corrugated.at(cx, cz);
   const hangar = b.style === 'hangar';
-  const tint = mixHex(b.color, WHITE, 0.3);
+  const L = lookOf(C.city, b);
+  const tint = L && !hangar ? L.wall : mixHex(b.color, WHITE, 0.3);
   const base = 1.1;
   P.walls(x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, 0.16, base, 0x8f8c86, 1, 1, 0.5, 0.9);
   const sides = sidesOf(x0, z0, x1, z1);

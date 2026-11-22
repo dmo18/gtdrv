@@ -216,3 +216,33 @@ export const MIAMI_SPOTS = {
     'lone-ride': 'A playground in Margaret Pace Park with one ride too many.',
   },
 };
+
+// Real Miami places shown on the full map and the minimap, so a player can
+// find them (not game places). `src` is the name in the map data (a label,
+// building or park), `name` is what the map prints. Metres, same frame as
+// the data. Virginia Key lies south of the data box, so it is not listed.
+export const MIAMI_LANDMARKS = [
+  { name: 'Kaseya Center', src: 'Kaseya Center', x: -749, z: -203.9 },
+  { name: 'Freedom Tower', src: 'Freedom Tower', x: -1060.9, z: -55.2 },
+  { name: 'Bayfront Park', src: 'Bayfront Park', x: -733.5, z: 762.1 },
+  { name: 'Adrienne Arsht Center', src: 'Adrienne Arsht Center', x: -802.2, z: -1052.9 },
+  { name: 'Miami Central Station', src: 'Miami Central', x: -1574.4, z: 261.1 },
+  { name: 'Government Center', src: 'Government Center', x: -1612.6, z: 437.8 },
+  { name: 'Museum Park', src: 'Museum Park', x: -797.7, z: -658.1 },
+  { name: 'Brickell City Centre', src: 'Brickell City Centre', x: -1215.7, z: 1458.1 },
+  { name: 'Miami Design District', src: 'Miami Design District', x: -1131.4, z: -3629.8 },
+  { name: 'Little Havana', src: 'Latin Quarter', x: -3977.3, z: 1266.4 },
+  { name: 'Vizcaya', src: 'Vizcaya', x: -3178.6, z: 3367.9 },
+  { name: 'Port of Miami', src: 'Cruise Terminal D', x: 960, z: 347.7 },
+  { name: 'Watson Island', src: 'Watson Park', x: 234.1, z: -562.7 },
+  { name: 'Fisher Island', src: 'Fisher Island', x: 3944.9, z: 2120.2 },
+  { name: 'Miami Beach', src: 'Miami Beach', x: 4475.7, z: -1436.6 },
+  { name: 'Overtown', src: 'Historic Overtown/Lyric Theatre', x: -1630.3, z: -101.9 },
+  { name: 'Wynwood', src: 'Wynwood Walls', x: -1517.3, z: -2381.3 },
+  { name: 'Torch of Friendship', src: 'Torch of Friendship', x: -636.5, z: 584.7 },
+  { name: 'Brickell Key', src: 'Brickell Key', x: -502.1, z: 1406.7 },
+  { name: 'Venetian Islands', src: 'Venetian Islands', x: 1692, z: -1339.1 },
+  { name: 'Gusman Center', src: 'Olympia Theater at Gusman Center', x: -1049, z: 655.6 },
+  { name: 'Knight Center', src: 'James L. Knight Center Theater', x: -1145.8, z: 984.2 },
+  { name: 'Lummus Park', src: 'Lummus Park', x: -2312, z: 405.4 },
+];

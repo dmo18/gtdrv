@@ -7,7 +7,7 @@
 // Coordinates: x east, z south, metres, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W } from './citygen.js';
-import { MIAMI_CROP, LAND_MARGIN, MIAMI_SPOTS } from './miami-spots.js';
+import { MIAMI_CROP, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
@@ -1677,6 +1677,7 @@ export function createMiamiCity(data, opts = {}) {
     props, parkingSpots, spawn,
     furniture, signals, landmarks, streetNames,
     extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
+    mapLandmarks: MIAMI_LANDMARKS,
     tankSpots, roofPads, depot,
     airfield: { islet, runway, apron, gate },
     // Activities, secrets and stunt ramps: filled in below, from the spots.
