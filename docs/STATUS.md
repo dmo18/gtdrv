@@ -358,3 +358,26 @@ None critical or high.
   the world bus no longer follows the effects slider. Tests:
   `test/levels.test.js`, `scripts/volume-test.mjs` (real gains),
   `scripts/menu-test.mjs`. Preview: docs/preview/settings-audio.png.
+
+## People: realistic clothed figures
+- `src/render/personbody.js` (new) builds the person body: sculpted
+  lofted torso (shoulders, chest, waist, hips wider than the waist),
+  deltoids, tapered arms, closed fists with thumbs, thighs thicker than
+  calves, trousers with volume and hems, shaped shoes with soles, a neck,
+  a head with jaw, eyes (white and iris), brows, nose, mouth and ears,
+  hair shells (short, long, bun, cap, beanie) and clothes in volume
+  (tee sleeves, collars, open jackets with lapels, hoodie hood and
+  pocket, police vest, badge, radio, holster, peaked cap). Smooth normals
+  from the surface grid, a little baked shading per vertex.
+- `src/render/personmesh.js`: same API and poses; the person now holds
+  a THREE.LOD with a near body (about 2.2k to 2.5k triangles) and a far
+  body past `PERSON_LOD_M` (40 m, about 600 to 720 triangles), both
+  skinned to one skeleton: one draw call per person (plus a held gun).
+  Before: about 1.85k triangles at every distance.
+- Tests (`test/carmesh.test.js`): the "one skinned mesh" test now
+  expects the two LOD bodies on one skeleton (and checks normals); new
+  tests for the triangle budget (near 1.5k..2.5k, far coarse) and for
+  one visible body per person near and far.
+- Screenshots: docs/preview/people-*.png (close day and night, street
+  day and night, police, crowd, poses, face, pair), made with
+  `node scripts/vehicle-shots.mjs people-close-day ... --size=915x412`.

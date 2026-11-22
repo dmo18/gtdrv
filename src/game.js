@@ -5,6 +5,7 @@ import { generateCity } from './world/citygen.js';
 import { hudPlace } from './world/maps.js';
 import { createCollisionWorld } from './world/collision.js';
 import { buildCityMesh } from './render/citymesh.js';
+import { buildRealCity } from './render/realcity.js';
 import { createInput, attachKeyboard } from './core/input.js';
 import { defaultProgress } from './core/save.js';
 import { respawnPlacement } from './core/health.js';
@@ -84,7 +85,8 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
   sun.position.set(0.55, 1, 0.35);
   scene.add(hemi, sun);
-  const cityMesh = buildCityMesh(city, collision);
+  // A real map (city.landGrid) is streamed in tiles round the camera.
+  const cityMesh = city.landGrid ? buildRealCity(city, collision) : buildCityMesh(city, collision);
   scene.add(cityMesh);
   // Animated sea in place of the flat placeholder. Sea level sits a
   // little below the land so waves never wash over the beach.
@@ -634,6 +636,8 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       events.emit('district', h.district, placeNow.key);
     }
     hud.update(h);
+    // Real map: build and swap detail tiles round the camera.
+    if (cityMesh.userData.stream) cityMesh.userData.stream.update(camera);
     // A graphics module may take over the final draw (post effects).
     if (game.renderFrame) game.renderFrame(dt);
     else renderer.render(scene, camera);

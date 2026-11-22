@@ -296,12 +296,19 @@ export function createGraphics(game) {
 
   // ---- traffic-light lamps ----
   const sig = ud.signals && ud.signals.mesh ? ud.signals : null;
-  const sigState = sig ? new Uint8Array(sig.bulbs.length).fill(2) : null;
+  // A streamed map refills the bulb list as tiles come and go (sig.cap
+  // slots, sig.version counts the refills).
+  const sigState = sig ? new Uint8Array(sig.cap || sig.bulbs.length).fill(2) : null;
+  let sigVersion = sig ? sig.version : 0;
   const ON = [new THREE.Color(1, 0.1, 0.06), new THREE.Color(1, 0.6, 0.04), new THREE.Color(0.1, 1, 0.42)];
   const OFF = [new THREE.Color(0.07, 0.015, 0.012), new THREE.Color(0.07, 0.045, 0.01), new THREE.Color(0.012, 0.06, 0.03)];
   const LAMP = { red: 0, amber: 1, green: 2 };
   function updateSignals() {
     if (!sig) return;
+    if (sig.version !== sigVersion) {
+      sigVersion = sig.version;
+      sigState.fill(2);
+    }
     const bulbs = sig.bulbs, nodes = game.city.nodes;
     let dirty = false;
     for (let i = 0; i < bulbs.length; i++) {
@@ -320,6 +327,7 @@ export function createGraphics(game) {
   function applyQuality(q) {
     quality = q;
     const tier = q < 1 ? 0 : q > 1 ? 2 : 1;
+    ud.tier = tier; // for tiles a streamed map builds later
     for (const m of ud.tiered || []) {
       const c = m.userData.tierCounts;
       if (c) m.geometry.setDrawRange(0, c[tier]);

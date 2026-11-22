@@ -587,7 +587,7 @@ function peopleScene(kind, night) {
   const P = PERSON_PALETTES;
   let list, spread = 0.9;
   if (kind === 'police') list = [cop, cop, crew];
-  else if (kind === 'crowd') list = [];
+  else if (kind === 'crowd' || kind === 'poses') list = [];
   else if (kind === 'one') list = (window.__oneList || '0,1').split(',').map((i) => (i === 'c' ? cop : i === 'k' ? crew : P[+i]));
   else list = [P[0], P[2], P[1], P[3], P[4], P[5]];
   const put = (look, x, z, h, k, opts = {}) => {
@@ -598,7 +598,18 @@ function peopleScene(kind, night) {
     holder.add(m);
     return m;
   };
-  if (kind === 'crowd') {
+  if (kind === 'poses') {
+    // Run, walk, aim, down: knees and elbows bend.
+    put(P[3], 0, -1.6, 0.3, 1, { moving: true, speed: 6 });
+    put(P[0], 0, -0.5, 0.3, 2, { moving: true, speed: 1.6 });
+    put(cop, 0, 0.6, 0.6, 0, { weapon: 'smg', moving: false });
+    const m = put(P[1], 0.6, 1.9, 0.2, 0, { moving: false });
+    m.rotation.order = 'YXZ';
+    const w = { x: 0.6, z: 1.9, px: 0.6, pz: 1.9, heading: 0.2, pheading: 0.2, moving: false, speed: 0, stride: 0, y: 0, life: 'out' };
+    updatePersonMesh(m, w, 1);
+    m.rotation.z = Math.PI / 2;
+    m.position.y += 0.15;
+  } else if (kind === 'crowd') {
     let k = 0;
     for (let i = 0; i < 7; i++) for (let j = 0; j < 6; j++) {
       const look = k % 13 === 5 ? cop : k % 11 === 7 ? crew : P[(k * 7) % P.length];
@@ -622,6 +633,9 @@ function peopleScene(kind, night) {
   } else if (far) {
     camera.position.set(24, 4.5, 7);
     camera.lookAt(0, 0.9, 0);
+  } else if (kind === 'poses') {
+    camera.position.set(5.2, 1.7, 0.6);
+    camera.lookAt(0, 0.8, 0.2);
   } else if (kind === 'one' && window.__bust) {
     camera.position.set(1.3, 1.45, 0.15);
     camera.lookAt(0, 1.3, 0);
@@ -652,6 +666,7 @@ const SHOTS = {
   'people-police': () => peopleScene('police', false),
   'people-crowd': () => peopleScene('crowd', false),
   'people-one': () => peopleScene('one', false),
+  'people-poses': () => peopleScene('poses', false),
   people: () => people(false),
   'people-close': () => people(true),
   ptest,

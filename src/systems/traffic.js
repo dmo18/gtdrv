@@ -356,11 +356,31 @@ function projectAhead(dr, x, z, range, out) {
 }
 
 // Re-attach to the nearest lane (after being shoved off the route).
+// Edges to look at near (x, z): a real map's edge grid (city.edgesNear,
+// ids in ascending order, as a full scan would visit them), else every
+// edge (null). Grows the radius until something is found.
+const NEAR_IDS = [];
+const byId = (a, b) => a - b;
+export function edgesAround(city, x, z, r, out = NEAR_IDS) {
+  if (!city.edgesNear) return null;
+  for (let k = 0; k < 3; k++, r *= 4) {
+    city.edgesNear(x, z, r, out);
+    if (out.length) {
+      out.sort(byId);
+      return out;
+    }
+  }
+  return null;
+}
+
 function attachNearest(dr, v) {
   const city = dr.city;
   let best = Infinity, be = -1, bf = -1, bl = 0;
   const fx = Math.cos(v.heading), fz = Math.sin(v.heading);
-  for (let i = 0; i < city.edges.length; i++) {
+  const ids = edgesAround(city, v.x, v.z, 60);
+  const n = ids ? ids.length : city.edges.length;
+  for (let j = 0; j < n; j++) {
+    const i = ids ? ids[j] : j;
     const e = city.edges[i];
     for (let k = 0; k < 2; k++) {
       const from = k ? e.b : e.a;
@@ -719,9 +739,14 @@ export function createTraffic(game, { max = 14 } = {}) {
     if (game.events && game.events.emit) game.events.emit('driverBailed', v);
   }
 
+  const nearIds = [];
   function refreshNear(px, pz) {
     near.length = 0;
-    for (let i = 0; i < city.edges.length; i++) {
+    // Only edges within reach (the edge grid on a real map).
+    const ids = city.edgesNear ? city.edgesNear(px, pz, SPAWN_MAX, nearIds).sort(byId) : null;
+    const n = ids ? ids.length : city.edges.length;
+    for (let j = 0; j < n; j++) {
+      const i = ids ? ids[j] : j;
       const e = city.edges[i];
       const a = city.nodes[e.a], b = city.nodes[e.b];
       const ux = (b.x - a.x) / e.length, uz = (b.z - a.z) / e.length;

@@ -12,7 +12,7 @@
 // createPolice is the game system that spawns cars and officers.
 import { lanePoint, lanesPerDirection } from '../world/citygen.js';
 import { createVehicle } from '../entities/vehicle.js';
-import { createDriver, placeDriver, driveStep, LANE_SPEED } from './traffic.js';
+import { createDriver, placeDriver, driveStep, LANE_SPEED, edgesAround } from './traffic.js';
 import { setVehicleLights } from '../render/vehiclemesh.js';
 import { clamp, createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
@@ -256,10 +256,16 @@ function segDist(city, e, x, z) {
   return Math.hypot(a.x + ux * t - x, a.z + uz * t - z);
 }
 
+const byId = (a, b) => a - b;
+
 function attach(cop, v, tx, tz) {
   const city = cop.city;
   let best = Infinity, be = -1;
-  for (let i = 0; i < city.edges.length; i++) {
+  // A real map: only the edges near the car (its edge grid).
+  const ids = edgesAround(city, v.x, v.z, 60);
+  const n = ids ? ids.length : city.edges.length;
+  for (let j = 0; j < n; j++) {
+    const i = ids ? ids[j] : j;
     const d = segDist(city, city.edges[i], v.x, v.z);
     if (d < best) {
       best = d;
@@ -991,9 +997,13 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     patrolDelay = PATROL_DELAY;
   }
 
+  const nearIds = [];
   function refreshNear(px, pz) {
     near.length = 0;
-    for (let i = 0; i < city.edges.length; i++) {
+    const ids = city.edgesNear ? city.edgesNear(px, pz, SPAWN_MAX, nearIds).sort(byId) : null;
+    const n = ids ? ids.length : city.edges.length;
+    for (let j = 0; j < n; j++) {
+      const i = ids ? ids[j] : j;
       const e = city.edges[i];
       if (e.causeway) continue;
       const a = city.nodes[e.a], b = city.nodes[e.b];

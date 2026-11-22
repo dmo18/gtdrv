@@ -6,7 +6,8 @@ import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
 import { buildCar, buildWheel, wheelLayout, wheelStyle, tyreProfile } from '../src/render/carbody.js';
 import { createVehicleMesh, vehicleStats, MID_LOD_M } from '../src/render/vehiclemesh.js';
 import { lampAtlasPixels, PLATE_TEXT } from '../src/render/vehiclemats.js';
-import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTES } from '../src/render/personmesh.js';
+import * as THREE from 'three';
+import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTES, PERSON_LOD_M } from '../src/render/personmesh.js';
 
 const tris = (g) => g.index.count / 3;
 
@@ -112,24 +113,58 @@ test('people: police and crew looks are recognised from their colours', () => {
   assert.equal(resolveLook({}).outfit, 'tee');
 });
 
-test('people: one skinned mesh per person, sensible triangle count', () => {
-  for (const p of [...PERSON_PALETTES, { shirt: 0x26406b }]) {
-    const g = personGeometry(p);
-    const t = tris(g);
-    assert.ok(t > 900 && t < 2200, `${t} triangles`);
-    assert.ok(g.attributes.skinIndex && g.attributes.skinWeight);
-    const w = g.attributes.skinWeight;
-    for (let i = 0; i < w.count; i += 37) assert.ok(Math.abs(w.getX(i) + w.getY(i) + w.getZ(i) + w.getW(i) - 1) < 1e-5);
+test('people: near and far bodies, one skeleton, sensible triangle count', () => {
+  for (const p of [...PERSON_PALETTES, { shirt: 0x26406b }, { shirt: 0x6e1f4f }]) {
+    for (const g of [personGeometry(p, 0), personGeometry(p, 1)]) {
+      assert.ok(g.attributes.skinIndex && g.attributes.skinWeight);
+      const w = g.attributes.skinWeight;
+      for (let i = 0; i < w.count; i += 37) assert.ok(Math.abs(w.getX(i) + w.getY(i) + w.getZ(i) + w.getW(i) - 1) < 1e-5);
+      const n = g.attributes.normal;
+      for (let i = 0; i < n.count; i += 11) assert.ok(Math.abs(Math.hypot(n.getX(i), n.getY(i), n.getZ(i)) - 1) < 1e-3);
+    }
   }
   const m = createPersonMesh(PERSON_PALETTES[3]);
   const P = m.userData.person;
   for (const k of ['body', 'torso', 'head', 'legL', 'legR', 'armL', 'armR', 'kneeL', 'elbowR']) assert.ok(P[k] && P[k].isBone, k);
-  let meshes = 0;
+  // Two LOD levels (near and far body), both skinned to the same skeleton.
+  const skins = [];
   m.traverse((o) => {
-    if (o.isMesh) meshes++;
+    if (o.isMesh) skins.push(o);
   });
-  assert.equal(meshes, 1);
+  assert.equal(skins.length, 2);
+  assert.ok(skins.every((o) => o.isSkinnedMesh && o.skeleton === P.skin.skeleton));
   assert.ok(P.skin.isSkinnedMesh && P.skin.boundingSphere.radius > 0.9);
+});
+
+test('people: triangle budget near (1.5k..2.5k) and far (coarse)', () => {
+  for (const p of [...PERSON_PALETTES, { shirt: 0x26406b }, { shirt: 0x6e1f4f }]) {
+    const near = tris(personGeometry(p, 0)), far = tris(personGeometry(p, 1));
+    assert.ok(near >= 1500 && near <= 2500, `near ${near}`);
+    assert.ok(far >= 250 && far <= 800 && far < near * 0.35, `far ${far}`);
+  }
+  assert.ok(PERSON_LOD_M >= 30 && PERSON_LOD_M <= 50);
+});
+
+test('people: one draw call per person near and far', () => {
+  const m = createPersonMesh(PERSON_PALETTES[0]);
+  const cam = new THREE.PerspectiveCamera(50, 2, 0.3, 1000);
+  const drawn = (d) => {
+    cam.position.set(d, 1.6, 0);
+    cam.updateMatrixWorld(true);
+    m.updateMatrixWorld(true);
+    m.userData.person.lod.update(cam);
+    let n = 0;
+    m.traverseVisible((o) => {
+      if (o.isMesh) n++;
+    });
+    return n;
+  };
+  assert.equal(drawn(5), 1);
+  assert.equal(m.userData.person.skin.visible, true);
+  assert.equal(drawn(25), 1);
+  assert.equal(drawn(80), 1);
+  assert.equal(m.userData.person.far.visible, true);
+  assert.equal(m.userData.person.skin.visible, false);
 });
 
 test('walk pose: legs swing opposite, knees only fold backward', () => {

@@ -121,7 +121,8 @@ export function bakeLampLight(lamps, glows = []) {
     z0 = Math.min(z0, spots[i + 1]); z1 = Math.max(z1, spots[i + 1]);
   }
   x0 -= 40; z0 -= 40; x1 += 40; z1 += 40;
-  const S = 1024, sx = S / (x1 - x0), sz = S / (z1 - z0);
+  // A real map spans km: a finer map keeps the pools round there.
+  const S = Math.max(x1 - x0, z1 - z0) > 4000 ? 2048 : 1024, sx = S / (x1 - x0), sz = S / (z1 - z0);
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');

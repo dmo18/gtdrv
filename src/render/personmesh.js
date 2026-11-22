@@ -1,6 +1,9 @@
-// Stylised-realistic person, about 1.78 m tall, facing local +x. One
-// skinned mesh per person (a single draw call): rounded lofted limbs and
-// torso, a shaped head with hair, clothing coloured per vertex. The bones
+// Realistic clothed person, about 1.78 m tall, facing local +x. The body
+// (render/personbody.js) is a sculpted, smooth-shaded figure: shoulders,
+// chest, waist, hips, tapered limbs, fists, shoes, a face and hair, with
+// clothes in volume. Near the camera it is about 2k triangles, past
+// PERSON_LOD_M a coarse copy; a THREE.LOD shows one of the two, both
+// skinned to one skeleton, so a person is a single draw call. The bones
 // keep the old box-man names (body, torso, head, legL / legR, armL / armR)
 // so the walk, aim and lying poses drive them the same way; knees and
 // elbows are extra bones. Geometry is shared per look (palette + outfit),
