@@ -8,6 +8,7 @@ import { initActor, addActor, damage, craftBlast, explosionSize, TOSS_G } from '
 import { createVehicle } from '../src/entities/vehicle.js';
 import { createTank } from '../src/entities/tank.js';
 import { makeFightGame, step, yard } from './fightgame.js';
+import { BLAST, ROLL_V, fireRadius, smokeReach, shakeAt, blastScale, dustTone } from '../src/render/blastplan.js';
 
 function arena() {
   const { city, collision } = yard();
@@ -34,7 +35,13 @@ test('bigger craft explode bigger', () => {
   const tank = createTank('rustback', 0, 0, 0);
   const jet = { kind: 'plane', spec: { id: 'fighter' } };
   const prop = { kind: 'plane', spec: { id: 'prop' } };
-  assert.equal(craftBlast(car, out).r, 8);
+  // REVAMP 6.7 scale by craft (was car 8, tank 12).
+  assert.equal(craftBlast(car, out).r, 10);
+  assert.equal(craftBlast(car, out).scale, 1);
+  assert.deepEqual({ ...craftBlast(tank, out) }, { r: 14, scale: 1.5 });
+  assert.deepEqual({ ...craftBlast(jet, out) }, { r: 13, scale: 1.3 });
+  assert.deepEqual({ ...craftBlast({ kind: 'heli', spec: {} }, out) }, { r: 12, scale: 1.2 });
+  assert.deepEqual({ ...craftBlast({ kind: 'car', spec: { mass: 2600 } }, out) }, { r: 11, scale: 1.1 });
   const rc = craftBlast(car, out).r;
   assert.ok(craftBlast(tank, out).r > rc && craftBlast(jet, out).r > rc && craftBlast(prop, out).r > rc);
   assert.equal(explosionSize(craftBlast(tank, out).r), 'huge');
@@ -115,4 +122,44 @@ test('people killed by a blast fly, tumble and land; the player is never thrown'
   g.player.x = 2;
   g.combat.explode(0, 0.5, 0, 8);
   assert.equal(w.ky || 0, 0);
+});
+
+test('blast look: contract numbers, smoke seen 12 m out by 0.5 s for a car, farther for a tank or jet', () => {
+  assert.equal(BLAST.fire.n, 3);
+  assert.ok(Math.abs(fireRadius(1, 0) - 2) < 1e-9, 'fireball starts at 2 m');
+  assert.ok(Math.abs(fireRadius(1, 0.25) - 7) < 1e-9, 'and is 7 m across by 0.25 s');
+  const car = smokeReach(1, 0.5), tank = smokeReach(1.5, 0.5), jet = smokeReach(1.3, 0.5);
+  assert.ok(car >= 12, `car smoke reach ${car.toFixed(1)} m`);
+  assert.ok(tank > car && jet > car, `tank ${tank.toFixed(1)} m, jet ${jet.toFixed(1)} m`);
+  assert.equal(smokeReach(1, 0.05), 0, 'the roll starts at 0.08 s');
+  assert.ok(ROLL_V.length >= BLAST.roll.n1);
+  // Shake: 1 at the centre, straight line to 0 at 60 m.
+  assert.equal(shakeAt(1, 0), 1);
+  assert.ok(Math.abs(shakeAt(1, 30) - 0.5) < 1e-9);
+  assert.equal(shakeAt(1, 60), 0);
+  assert.ok(shakeAt(1.5, 60) > 0, 'a tank blast reaches farther');
+  // Visual scale: craft scale, else the radius over a car's 10 m.
+  assert.equal(blastScale(10, 1.5, true), 1.5);
+  assert.equal(blastScale(5, 1, false), 0.5);
+  assert.notDeepEqual(dustTone('beach'), dustTone(''));
+  assert.notDeepEqual(dustTone('works'), dustTone(''));
+});
+
+test('a car blast lays every layer, sized by craft scale', async () => {
+  const { createCombatFx } = await import('../src/render/combatfx.js');
+  const { createEvents } = await import('../src/core/events.js');
+  const events = createEvents();
+  const game = {
+    events, quality: 1, paused: false, player: { x: 0, z: 0 },
+    city: { lotTypeAt: () => 'beach' },
+    combat: { decals: { x: new Float32Array(24), z: new Float32Array(24), r: new Float32Array(24), t: new Float32Array(24).fill(-1e9) }, projectiles: [], hulls: [] },
+  };
+  const fx = createCombatFx(game);
+  const car = { kind: 'car', color: 0xc8402e, x: 5, z: 0, y: 0, spec: { length: 4.4, width: 1.8, height: 1.4 } };
+  events.emit('explosion', { x: 5, y: 0.7, z: 0, radius: 10, scale: 1, size: 'big', craft: car });
+  assert.equal(fx.lastBlast.vs, 1);
+  const tankish = { ...car, kind: 'tank' };
+  events.emit('explosion', { x: 5, y: 0.7, z: 0, radius: 14, scale: 1.5, size: 'huge', craft: tankish });
+  assert.equal(fx.lastBlast.vs, 1.5);
+  fx.dispose();
 });

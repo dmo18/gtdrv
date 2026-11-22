@@ -625,10 +625,11 @@ export function createEffects(game) {
     return i;
   }
   // One tailpipe flame particle blowing backward (car and boat boost).
-  function flame(x, y, z, fwdx, fwdz, spd, size) {
-    const back = -(5 + rnd() * 4) + spd * 0.05;
-    const i = emitP(B, x, y, z, fwdx * back + rs() * 0.25, 0.1 + rs() * 0.15, fwdz * back + rs() * 0.25,
-      0.14 + rnd() * 0.1, size * (0.9 + rnd() * 0.4), 0.06, 0.95, 1, 0.62 + rnd() * 0.15, 0.2, 3, 0, 1.2);
+  function flame(x, y, z, fwdx, fwdz, cvx, cvz, size) {
+    // Blows backward from the craft, which carries the particle along at its own speed.
+    const back = -(4 + rnd() * 3);
+    const i = emitP(B, x, y, z, cvx + fwdx * back + rs() * 0.25, 0.1 + rs() * 0.15, cvz + fwdz * back + rs() * 0.25,
+      0.18 + rnd() * 0.12, size * (0.9 + rnd() * 0.4), 0.1, 1, 1, 0.62 + rnd() * 0.15, 0.2, 3, 0, 1.2);
     if (i >= 0) {
       B.fadeIn[i] = 0.02;
       tintP(B, i, 0.9, 0.18, 0.04);
@@ -824,7 +825,7 @@ export function createEffects(game) {
           const e = ei === 0 ? an.exhaust : an.exhaust2;
           if (!e) continue;
           const p = toWorld(v, e[0] - 0.1, e[2]);
-          flame(p.x, e[1], p.z, fwdx, fwdz, spd, 0.5);
+          flame(p.x, e[1], p.z, fwdx, fwdz, v.vx || 0, v.vz || 0, 0.9);
         }
       }
     }
@@ -891,7 +892,7 @@ export function createEffects(game) {
         s.flame -= 1;
         for (let k = 0; k < (L > 8 ? 2 : 1); k++) {
           const p = toWorld(v, -L * 0.5 - 0.15, (L > 8 ? (k === 0 ? 1 : -1) * Wd * 0.2 : 0));
-          flame(p.x, wy + spec.height * 0.3, p.z, fwdx, fwdz, spd, 0.6 + L * 0.03);
+          flame(p.x, wy + spec.height * 0.3, p.z, fwdx, fwdz, v.vx || 0, v.vz || 0, 0.8 + L * 0.04);
         }
       }
     }

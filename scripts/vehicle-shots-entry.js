@@ -24,12 +24,15 @@ canvas.style.height = H + 'px';
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
 renderer.setSize(W, H, false);
+// Closer to the game's look: filmic tone mapping, less flat fill light.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 const scene = new THREE.Scene();
 const SKY = 0xa9cde8;
 scene.background = new THREE.Color(SKY);
 scene.fog = new THREE.Fog(SKY, 220, 1050);
-const hemi = new THREE.HemisphereLight(0xe4f1ff, 0x8a8272, 1.9);
-const sun = new THREE.DirectionalLight(0xfff0d8, 1.7);
+const hemi = new THREE.HemisphereLight(0xe4f1ff, 0x6a6458, 1.3);
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
 sun.position.set(0.55, 1, 0.35);
 scene.add(hemi, sun);
 const camera = new THREE.PerspectiveCamera(40, W / H, 0.3, 2000);
@@ -61,6 +64,7 @@ function skyEnv() {
   return rt.texture;
 }
 scene.environment = skyEnv();
+scene.environmentIntensity = 0.75;
 
 // Ground: asphalt with lane marks.
 function groundTex() {
@@ -408,7 +412,7 @@ function night() {
   for (let k = 0; k < 20; k++) fx.render(1, dt);
   renderer.render(scene, camera);
   scene.environment = env;
-  hemi.intensity = 1.9; sun.intensity = 1.7;
+  hemi.intensity = 1.3; sun.intensity = 2.6;
   scene.background = new THREE.Color(SKY);
 }
 
@@ -652,8 +656,8 @@ function peopleScene(kind, night) {
   renderer.render(scene, camera);
   const r = { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
   scene.environment = env;
-  hemi.intensity = 1.9;
-  sun.intensity = 1.7;
+  hemi.intensity = 1.3;
+  sun.intensity = 2.6;
   scene.background = new THREE.Color(SKY);
   return r;
 }

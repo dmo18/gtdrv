@@ -71,21 +71,53 @@ const step = (n, draws = 30) => page.evaluate(([k, d]) => {
 }, [n, draws]);
 const hour = (h) => page.evaluate((h) => { window.__rw.daynight.setHour(h); }, h);
 const shot = async (name, where) => {
-  const i = await step(5, 3);
+  const i = { calls: await page.evaluate(() => window.__rw.graphics.calls) };
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${out}/${prefix}-${name}.png`, timeout: 180000 });
   console.log('wrote', `${out}/${prefix}-${name}.png`, JSON.stringify({ ...where, ...i }));
 };
 await page.evaluate(() => { const g = window.__rw; if (g.traffic && g.traffic.clear) g.traffic.clear(); });
-const views = { havana: [-2300, 1090, 8, false], waterfront: [-620, 1000, 8, false] };
+// After place(): put the camera somewhere with sky in view. 'shore' stands
+// 30 m out to sea from the nearest shoreline looking back at it; 'street' sits a
+// little behind and above the car looking along the street.
+const aim = (mode) => page.evaluate((mode) => {
+  const g = window.__rw, c = g.city, v = g.player.vehicle;
+  let px = v.x, pz = v.z, lx = Math.cos(v.heading), lz = Math.sin(v.heading), y = 5, ly = 90;
+  if (mode === 'shore') {
+    let best = null, bd = 1e9;
+    for (let a = 0; a < 16; a++) {
+      const dx = Math.cos(a * Math.PI / 8), dz = Math.sin(a * Math.PI / 8);
+      for (let t = 5; t < 700; t += 5) {
+        if (c.shoreDist(v.x + dx * t, v.z + dz * t) < 0) { if (t < bd) { bd = t; best = [dx, dz, t]; } break; }
+      }
+    }
+    if (best) {
+      // 30 m out in the water, looking back at the wall and the city.
+      px = v.x + best[0] * (best[2] + 30); pz = v.z + best[1] * (best[2] + 30);
+      lx = -best[0]; lz = -best[1]; y = 3.0; ly = 60;
+    }
+  } else { px = v.x - lx * 12; pz = v.z - lz * 12; y = 7; ly = 140; }
+  g.camera.position.set(px, y, pz);
+  g.camera.lookAt(px + lx * 200, ly * 0.3, pz + lz * 200);
+  g.camera.updateMatrixWorld();
+  for (let i = 0; i < 4; i++) {
+    g.cityMesh.userData.stream.flush(g.camera);
+    for (const sys of g.systems) if (sys.render) sys.render(1, 0);
+    g.renderFrame(1 / 60);
+  }
+}, mode);
+const views = { havana: [-2300, 1090, 8, false, 'street'], waterfront: [-620, 1000, 8, false, 'shore'] };
 const times = { noon: 12.5, dusk: 18.9, night: 22.5 };
-for (const [vn, [x, z, mw, fl]] of Object.entries(views)) {
+const only = process.argv.slice(4);
+for (const [vn, [x, z, mw, fl, mode]] of Object.entries(views)) {
+  if (only.length && !only.includes(vn)) continue;
   await hour(12.5);
   const w = await place(x, z, mw, fl);
   await step(60, 4);
   for (const [tn, h] of Object.entries(times)) {
     await hour(h);
     await step(30, 6);
+    await aim(mode);
     await shot(`${vn}-${tn}`, w);
   }
 }

@@ -51,17 +51,22 @@ export const REGEN_DELAY = 5, REGEN_RATE = 10;
 export const RAM_MIN = 4; // m/s closing speed that knocks a person down
 export const RAM_DMG = 4; // damage per m/s of closing speed
 export const BLAST_DMG = 120, BLAST_CRAFT_MULT = 1.5;
-export const CRAFT_BLAST_R = 8, CRAFT_PUSH = 12;
-// Bigger craft blow up bigger: blast radius and damage scale by kind.
+export const CRAFT_BLAST_R = 10, CRAFT_PUSH = 12, CRAFT_PUSH_MAX = 14;
+// Bigger craft blow up bigger (REVAMP 6.7 "Scale by craft"): damage radius
+// car 10 m, heavy car (2,500 kg or more) 11, heli 12, plane 12 (fighter 13),
+// tank 14; visual scale 1, 1.1, 1.2, 1.3, 1.5. (Was car 8, tank 12: a pop
+// on a 20 m street.)
 export function craftBlast(c, out) {
   const m = (c && c.spec && c.spec.mass) || 0;
-  if (c && c.kind === 'tank') { out.r = 12; out.scale = 1.5; }
-  else if (c && c.kind === 'plane') { out.r = (c.spec && c.spec.id === 'fighter') ? 11 : 10; out.scale = 1.3; }
-  else if (c && c.kind === 'heli') { out.r = 10; out.scale = 1.2; }
-  else if (c && c.kind === 'car' && m >= 2500) { out.r = 9; out.scale = 1.1; }
+  if (c && c.kind === 'tank') { out.r = 14; out.scale = 1.5; }
+  else if (c && c.kind === 'plane') { out.r = (c.spec && c.spec.id === 'fighter') ? 13 : 12; out.scale = 1.3; }
+  else if (c && c.kind === 'heli') { out.r = 12; out.scale = 1.2; }
+  else if (c && c.kind === 'car' && m >= 2500) { out.r = 11; out.scale = 1.1; }
   else { out.r = CRAFT_BLAST_R; out.scale = 1; }
   return out;
 }
+// Shove on craft at the centre: 12 m/s for a car blast up to 14 for a tank.
+export const craftPush = (scale) => Math.min(CRAFT_PUSH_MAX, CRAFT_PUSH + Math.max(0, (scale || 1) - 1) * 4);
 const CB = { r: CRAFT_BLAST_R, scale: 1 };
 // Blast throw: cars are launched (and flipped), people ragdoll.
 export const TOSS_G = 9.81;
@@ -804,7 +809,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         amount = Math.min(amount * OWN_BLAST, Math.max(0, (c.health - 1) / (mult || 1)));
         if (!(amount > 0)) continue;
       }
-      if (hd > 1e-3 && !c.wrecked) setPush((ex / hd) * CRAFT_PUSH * k, (ez / hd) * CRAFT_PUSH * k);
+      if (hd > 1e-3 && !c.wrecked) setPush((ex / hd) * craftPush(scale) * k, (ez / hd) * craftPush(scale) * k);
       damage(game, c, amount, source, 'blast');
       if (c !== pv) tossCraft(c, hd > 1e-3 ? ex / hd : 0, hd > 1e-3 ? ez / hd : 0, k, false);
     }

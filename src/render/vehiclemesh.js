@@ -1,17 +1,20 @@
-// Car meshes. Each spec's geometry is built once (smooth lofted body with
-// glass, trim and details merged into one geometry; head lamps; tail
-// lamps; one wheel) and shared by every car of that spec. Paint materials
-// are shared by colour. Near model draw calls: body, head, tail, 4 wheels
-// (+1 light bar on police cars). Far model: one call.
+// Car meshes. Each spec's geometry is built once and shared by every car
+// of that spec: a body (paint, trim, cabin and details merged into one
+// geometry), the glass (tinted, see-through, with the contact shadow in
+// the same draw), the lamps (head and tail in one mesh) and one wheel.
+// Paint materials are shared by colour. Near and mid model: 4 draw calls
+// (body, glass, lamps, the four wheels instanced), +1 for a police light
+// bar. Far model: one call.
 // Origin is the ground centre of the car; the car points along local +x.
 //
 // Hierarchy: group (position, yaw) -> rig (body pitch / roll) -> body,
-// far, head, tail, bar; group -> 4 wheel pivots (steer) -> mount -> wheel
-// (spin). Wheels stay planted while the body leans over them.
+// glass, lamps, far, bar; group -> wheels (one instanced mesh per LOD
+// level, the four instance matrices carry steer, spin and travel). Wheels
+// stay planted while the body leans over them.
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
 import { buildCar, buildWheel, wheelLayout, wheelStyle, styleFor } from './carbody.js';
-import { paintMaterial, ownPaintMaterial, releaseMaterial, farMaterial, wheelMaterial, LAMP } from './vehiclemats.js';
+import { paintMaterial, ownPaintMaterial, releaseMaterial, farMaterial, wheelMaterial, lampMaterial, carGlassMaterial, LAMP } from './vehiclemats.js';
 
 // ---- per-spec geometry cache ------------------------------------------------------
 const specCache = new Map();
@@ -102,10 +105,11 @@ function specEntry(spec) {
   const far = buildCar(spec, false);
   const sh = near.shape, gs = near.gh;
   const S = styleFor(spec);
-  const { wr, ax, az } = wheelLayout(spec);
+  const { wr, tw, ax, az } = wheelLayout(spec);
   // Anchor points the effects system uses (car local frame).
   const exY = sh.bottom(sh.x0 + 0.3) + 0.04;
   const exZ = S.exhaust ? S.exhaust.z * sh.hw * 2 * (S.exhaust.n === 2 ? 1 : -1) : -0.4;
+  const tris = (g) => (g && g.index ? g.index.count / 3 : 0);
   const anchors = {
     exhaust: [spec.body === 'truck' ? sh.x0 - 0.2 : sh.x0 - 0.05, spec.body === 'truck' ? spec.height + 0.2 : exY, exZ],
     exhaust2: S.exhaust && S.exhaust.n === 2 ? [sh.x0 - 0.05, exY, -exZ] : null,
@@ -113,18 +117,36 @@ function specEntry(spec) {
     head: [sh.x1 + 0.05, sh.yc(sh.x1 - 0.1) - 0.06, sh.hw * 0.68],
     tail: spec.body === 'truck' ? [-spec.length / 2 - 0.05, 0.55, spec.width / 2 - 0.22] : [sh.x0 - 0.05, sh.yc(sh.x0 + 0.1) - 0.06, sh.hw * 0.7],
     roofY: gs.roofY + gs.crown,
+    // Roof mount for a light bar or sign: centre x and height (local).
+    roofX: (gs.xR0 + gs.xR1) / 2,
     wr, ax, az,
-    bodyTris: near.body.index.count / 3, midTris: mid.body.index.count / 3, farTris: far.body.index.count / 3,
+    bodyTris: tris(near.body), midTris: tris(mid.body), farTris: tris(far.body),
   };
-  e = { body: near.body, mid: mid.body, head: near.head || EMPTY, tail: near.tail || EMPTY, far: far.body, wheel: wheelGeo(spec), wheelMid: wheelGeo(spec, true), anchors };
+  e = {
+    body: near.body, mid: mid.body, far: far.body,
+    glass: near.glass, glassMid: mid.glass,
+    lamps: near.lamps || EMPTY, lampsMid: mid.lamps || EMPTY,
+    wheel: wheelGeo(spec), wheelMid: wheelGeo(spec, true),
+    wheelSphere: new THREE.Sphere(new THREE.Vector3(0, wr, 0), Math.hypot(ax + wr, az + tw) + 0.05),
+    anchors,
+  };
   specCache.set(spec.id, e);
   return e;
 }
 
-// Triangle counts per spec (near body, far body, one wheel), for tools.
+// Triangle counts per spec (near body, far body, one wheel, glass with
+// the contact shadow, lamps), for tools and tests.
 export function vehicleStats(spec) {
   const e = specEntry(spec);
-  return { body: e.anchors.bodyTris, mid: e.anchors.midTris, far: e.anchors.farTris, wheel: e.wheel.index.count / 3, wheelMid: e.wheelMid.index.count / 3, head: e.head.index ? e.head.index.count / 3 : 0, tail: e.tail.index ? e.tail.index.count / 3 : 0 };
+  const t = (g) => (g && g.index ? g.index.count / 3 : 0);
+  return {
+    body: e.anchors.bodyTris, mid: e.anchors.midTris, far: e.anchors.farTris,
+    wheel: t(e.wheel), wheelMid: t(e.wheelMid),
+    glass: t(e.glass), glassMid: t(e.glassMid), lamps: t(e.lamps), lampsMid: t(e.lampsMid),
+    // Whole near and mid car (four wheels).
+    near: e.anchors.bodyTris + t(e.glass) + t(e.lamps) + 4 * t(e.wheel),
+    midAll: e.anchors.midTris + t(e.glassMid) + t(e.lampsMid) + 4 * t(e.wheelMid),
+  };
 }
 
 // Camera distance (m) beyond which the lighter body is drawn.
@@ -142,6 +164,7 @@ function linkLod(ud) {
     set(v) {
       vis = !!v;
       ud.bodyLod.visible = vis;
+      ud.glass.visible = vis;
       ud.far.visible = !vis;
       if (ud.bar) ud.bar.visible = vis;
       ud.lodFar = !vis;
@@ -155,11 +178,26 @@ export function setVehicleLod(mesh, far) {
   const ud = mesh.userData;
   if (ud.lodFar === !!far) return;
   ud.head.visible = !far;
-  ud.tail.visible = !far;
   for (let i = 0; i < ud.wheels.length; i++) ud.wheels[i].visible = !far;
 }
 
+// Light bar geometry and its roof mount, for service vehicles (police,
+// and the fire truck / ambulance kit that builds on this one).
+export { lightBarGeometry };
+export function roofMount(spec) {
+  const a = specEntry(spec).anchors;
+  return { x: a.roofX, y: a.roofY };
+}
+
 // ---- public API -------------------------------------------------------------------
+function lodPair(a, b, mat) {
+  const lod = new THREE.LOD();
+  const m0 = new THREE.Mesh(a, mat), m1 = new THREE.Mesh(b, mat);
+  lod.addLevel(m0, 0);
+  lod.addLevel(m1, MID_LOD_M);
+  return [lod, m0, m1];
+}
+
 export function createVehicleMesh(spec, color) {
   const col = color == null ? spec.colors[0] : color;
   const e = specEntry(spec);
@@ -168,48 +206,33 @@ export function createVehicleMesh(spec, color) {
   group.add(rig);
 
   const paint = paintMaterial(col);
-  const body = new THREE.Mesh(e.body, paint);
-  const bodyMid = new THREE.Mesh(e.mid, paint);
-  // The renderer picks the full or the lighter body by camera distance;
-  // the one-call far model (game.js, 75 m) hides both.
-  const bodyLod = new THREE.LOD();
-  bodyLod.addLevel(body, 0);
-  bodyLod.addLevel(bodyMid, MID_LOD_M);
+  // The renderer picks the full or the lighter level by camera distance;
+  // the one-call far model (game.js, 75 m) hides them all.
+  const [bodyLod, body, bodyMid] = lodPair(e.body, e.mid, paint);
+  const [glass, glassNear, glassMid] = lodPair(e.glass, e.glassMid, carGlassMaterial('clean'));
+  const [lamps, lampNear, lampMid] = lodPair(e.lamps, e.lampsMid, lampMaterial(false, 0));
+  glass.renderOrder = 1;
   const far = new THREE.Mesh(e.far, farMaterial(col));
   far.visible = false;
-  const head = new THREE.Mesh(e.head, LAMP.head);
-  const tail = new THREE.Mesh(e.tail, LAMP.tail0);
-  rig.add(bodyLod, far, head, tail);
+  rig.add(bodyLod, glass, far, lamps);
 
-  const { wr, ax, az } = e.anchors;
-  const wheels = [];
-  const frontWheels = [];
-  const pivots = [];
+  // Four wheels per LOD level in one instanced draw; both levels share
+  // the instance matrices, written by updateVehicleMesh.
   const wmat = wheelMaterial();
-  for (let i = 0; i < 4; i++) {
-    const front = i < 2;
-    const right = i % 2 === 0;
-    const pivot = new THREE.Group();
-    pivot.position.set(front ? ax : -ax, wr, right ? az : -az);
-    const mount = new THREE.Group();
-    if (!right) mount.rotation.y = Math.PI;
-    // Full wheel near the camera, a lighter one from MID_LOD_M.
-    const m = new THREE.LOD();
-    m.addLevel(new THREE.Mesh(e.wheel, wmat), 0);
-    m.addLevel(new THREE.Mesh(e.wheelMid, wmat), MID_LOD_M);
-    m.userData.sign = right ? -1 : 1;
-    mount.add(m);
-    pivot.add(mount);
-    group.add(pivot);
-    wheels.push(m);
-    pivots.push(pivot);
-    if (front) frontWheels.push(pivot);
-  }
+  const wNear = new THREE.InstancedMesh(e.wheel, wmat, 4);
+  const wMid = new THREE.InstancedMesh(e.wheelMid, wmat, 4);
+  wMid.instanceMatrix = wNear.instanceMatrix;
+  wNear.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  wNear.boundingSphere = wMid.boundingSphere = e.wheelSphere;
+  const wheelLod = new THREE.LOD();
+  wheelLod.addLevel(wNear, 0);
+  wheelLod.addLevel(wMid, MID_LOD_M);
+  group.add(wheelLod);
 
   let bar = null;
   if (spec.id === 'police') {
     bar = new THREE.Mesh(lightBarGeometry(), LAMP.bar0);
-    bar.position.set(-spec.length * 0.08, e.anchors.roofY - 0.01, 0);
+    bar.position.set(e.anchors.roofX, e.anchors.roofY - 0.01, 0);
     rig.add(bar);
   }
 
@@ -218,11 +241,14 @@ export function createVehicleMesh(spec, color) {
   group.rotation.order = 'YXZ';
   const L = spec.length;
   group.userData = {
-    spec, color: col, rig, body, bodyMid, bodyLod, far, head, tail, wheels, frontWheels, pivots, bar,
-    barRed: bar, barBlue: bar,
+    spec, color: col, rig, body, bodyMid, bodyLod, far, glass, glassLevels: [glassNear, glassMid],
+    // head and tail are the one lamp mesh (game.js toggles both for LOD).
+    head: lamps, tail: lamps, lamps, lampLevels: [lampNear, lampMid],
+    wheels: [wheelLod], wheelLevels: [wNear, wMid], wheelMatrix: wNear.instanceMatrix,
+    bar, barRed: bar, barBlue: bar,
     anchors: e.anchors,
     lodFar: false,
-    hf: 1, wrecked: false, ownPaint: null,
+    hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,
     hits: [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(-1, 0, 0, 0)], hitN: 0, hitDirty: false,
     crushF: 0, crushR: 0,
     box: new THREE.Vector4(L / 2, spec.width / 2, spec.height, 0),
@@ -230,12 +256,35 @@ export function createVehicleMesh(spec, color) {
     seed: (Math.abs(col * 0.618) % 97) + 1,
   };
   linkLod(group.userData);
+  writeWheels(group.userData, 0, 0, 0, 0);
   // Only the body casts a sun shadow (wheels and lamps add draw calls to
   // the shadow pass and barely change the shadow). The flag tells the
   // graphics system the casters are already marked.
   body.castShadow = bodyMid.castShadow = far.castShadow = true;
   group.userData.rwShadow = true;
   return group;
+}
+
+// Write the four wheel instance matrices: rotation Ry(yaw) * Rz(spin) at
+// the wheel centre. Wheels 0, 1 front (right, left), 2, 3 rear.
+function writeWheels(ud, steer, spin, roll, pitch) {
+  const a = ud.anchors;
+  const m = ud.wheelMatrix.array;
+  for (let i = 0; i < 4; i++) {
+    const front = i < 2, right = i % 2 === 0;
+    const px = front ? a.ax : -a.ax, pz = right ? a.az : -a.az;
+    const dy = -roll * pz + pitch * px;
+    const py = a.wr + Math.max(-0.03, Math.min(0.035, dy * 0.45));
+    const yaw = (front ? -steer : 0) + (right ? 0 : Math.PI);
+    const sp = right ? -spin : spin;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cz = Math.cos(sp), sz = Math.sin(sp);
+    const o = i * 16;
+    m[o] = cy * cz; m[o + 1] = sz; m[o + 2] = -sy * cz; m[o + 3] = 0;
+    m[o + 4] = -cy * sz; m[o + 5] = cz; m[o + 6] = sy * sz; m[o + 7] = 0;
+    m[o + 8] = sy; m[o + 9] = 0; m[o + 10] = cy; m[o + 11] = 0;
+    m[o + 12] = px; m[o + 13] = py; m[o + 14] = pz; m[o + 15] = 1;
+  }
+  ud.wheelMatrix.needsUpdate = true;
 }
 
 // Remember a hit for damage decals. (lx, ly, lz) is the direction from
@@ -272,6 +321,10 @@ export function releaseVehicleMesh(mesh) {
   ud.ownPaint = null;
 }
 
+function setLevels(list, mat) {
+  for (let i = 0; i < list.length; i++) list[i].material = mat;
+}
+
 function applyDamage(ud, v) {
   const hf = ud.hf;
   const wear = 1 - hf;
@@ -288,14 +341,23 @@ function applyDamage(ud, v) {
     u.uHit1.value.copy(ud.hits[1]);
     u.uCrush.value.set(ud.crushF, ud.crushR, ud.box.x, -ud.box.x);
   }
-  ud.head.position.x = -ud.crushF * 0.9;
-  ud.tail.position.x = ud.crushR * 0.9;
-  ud.far.material = farMaterial(ud.color, ud.wrecked);
-  const wm = wheelMaterial(ud.wrecked);
-  for (let i = 0; i < ud.wheels.length; i++) {
-    const lv = ud.wheels[i].levels;
-    for (let k = 0; k < lv.length; k++) lv[k].object.material = wm;
+  // Lamps follow the crumple (morph targets: head back, tail forward).
+  for (let i = 0; i < ud.lampLevels.length; i++) {
+    const inf = ud.lampLevels[i].morphTargetInfluences;
+    if (inf) {
+      inf[0] = ud.crushF;
+      inf[1] = ud.crushR;
+    }
   }
+  // Glass: crazed once badly hurt or hit hard, blown out when wrecked.
+  const hit = Math.max(ud.hits[0].w, ud.hits[1].w);
+  const gst = ud.wrecked ? 'gone' : hf < 0.45 || hit > 0.85 ? 'crack' : 'clean';
+  if (gst !== ud.glassState) {
+    ud.glassState = gst;
+    setLevels(ud.glassLevels, carGlassMaterial(gst));
+  }
+  ud.far.material = farMaterial(ud.color, ud.wrecked);
+  setLevels(ud.wheelLevels, wheelMaterial(ud.wrecked));
   void v;
 }
 
@@ -305,19 +367,23 @@ function hash(n) {
 }
 
 function applyLamps(ud, time) {
+  let m;
   if (ud.wrecked) {
-    ud.head.material = LAMP.headOff;
-    ud.tail.material = LAMP.tailOff;
+    m = lampMaterial(false, 0, true);
   } else {
-    // A damaged car's left headlight flickers.
-    let h = LAMP.head;
+    // A damaged car's left headlight flickers; a badly damaged one runs
+    // its hazards.
+    let out = false;
     if (ud.hf < 0.5) {
       const k = Math.floor(time * 14);
-      if (hash(k + ud.seed * 7) < 0.25 + (0.5 - ud.hf) * 1.2) h = LAMP.headFlickL;
+      out = hash(k + ud.seed * 7) < 0.25 + (0.5 - ud.hf) * 1.2;
     }
-    ud.head.material = h;
     const haz = ud.hf < 0.25 && Math.floor(time * 2.6) % 2 === 0;
-    ud.tail.material = LAMP['tail' + ((ud.brakeOn ? 1 : 0) | (ud.reverseOn ? 2 : 0) | (haz ? 4 : 0))];
+    m = lampMaterial(out, (ud.brakeOn ? 1 : 0) | (ud.reverseOn ? 2 : 0) | (haz ? 4 : 0));
+  }
+  if (m !== ud.lampMat) {
+    ud.lampMat = m;
+    setLevels(ud.lampLevels, m);
   }
   if (ud.bar) ud.bar.material = ud.sirenPhase === 0 ? LAMP.bar1 : ud.sirenPhase === 1 ? LAMP.bar2 : LAMP.bar0;
 }
@@ -344,16 +410,8 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   rig.scale.y = v.crushed ? 0.45 : 1;
 
   // Wheels: spin, steer, and follow part of the body's travel.
-  const spin = v.wheelSpin || 0;
-  for (let i = 0; i < ud.wheels.length; i++) {
-    const w = ud.wheels[i];
-    w.rotation.z = w.userData.sign * spin;
-    const pv = ud.pivots[i];
-    const dy = -roll * pv.position.z + pitch * pv.position.x;
-    pv.position.y = ud.anchors.wr + Math.max(-0.03, Math.min(0.035, dy * 0.45));
-  }
   const steer = v.steerAngle != null ? v.steerAngle : (v.steer || 0) * (v.spec.steerMax || 0.6);
-  for (let i = 0; i < ud.frontWheels.length; i++) ud.frontWheels[i].rotation.y = -steer;
+  writeWheels(ud, steer, v.wheelSpin || 0, roll, pitch);
 
   // Distance LOD (also driven by game.js through head.visible).
   if (v.lodFar != null && !!v.lodFar !== ud.lodFar) setVehicleLod(mesh, v.lodFar);

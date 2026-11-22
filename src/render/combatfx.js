@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt } from './effects.js';
+import { BLAST, ROLL_V, ROLL_S0, ROLL_S1, blastScale, fireRadius, shakeAt, dustTone } from './blastplan.js';
 
 const MAX_ALPHA = 420;
 const MAX_ADD = 300;
@@ -657,11 +658,12 @@ export function createCombatFx(game) {
     }
     return !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion) || reduced;
   }
-  // Shake kick for a blast of radius r at distance d metres from the camera.
-  function shakeFor(r, d) {
-    const reach = 45 + r * 5;
-    const f = 1 - d / reach;
-    return f > 0 ? f * f * (12 + r * 2.6) : 0;
+  // Shake kick for a blast at visual scale vs seen from d m: chasecam trauma
+  // 1 at the centre, a straight line to 0 at 60 m (REVAMP 6.7 layer 10).
+  // kick(strength) adds (strength - 1.5) / 18 trauma.
+  function shakeFor(vs, d) {
+    const t = shakeAt(vs, d);
+    return t > 0 ? 1.5 + 18 * t : 0;
   }
   // Small props near a blast (bins, benches, boxes) throw a few chunks.
   const PROP_HEX = { bin: 0x2f4a3a, bench: 0x8a6a48, hydrant: 0xb23a2c, mailbox: 0x2d4f8a, planter: 0x6a5a48, barrier: 0xd7a02b, meter: 0x555a60, bikes: 0x444444 };
@@ -682,14 +684,22 @@ export function createCombatFx(game) {
       n++;
     }
   }
+  // Live blasts: the smoke roll starts BLAST.roll.t0 after the flash.
+  const MAX_BLASTS = 4;
+  const blasts = [];
+  for (let i = 0; i < MAX_BLASTS; i++) blasts.push({ on: false, x: 0, y: 0, z: 0, vs: 1, t: 0, rolled: false, air: false });
+  let blastHead = 0;
+  // Layer counts of the last blast (tests and the shot scripts read them).
+  const last = { flash: 0, light: 0, fire: 0, roll: 0, ring: 0, dust: 0, sparks: 0, vs: 0 };
   function onExplosion(e) {
     const x = e.x, y = Math.max(0, e.y), z = e.z;
     const R = Math.max(3, e.radius || 6);
+    const vs = blastScale(R, e.scale, !!e.craft);
     const d2 = dist2(x, z);
     const dd = Math.sqrt(d2);
     if (!e.puff && game.chase && game.chase.kick && !reduceMotion()) {
-      const sh = shakeFor(R, dd);
-      if (sh > 1) game.chase.kick(sh);
+      const sh = shakeFor(vs, dd);
+      if (sh > 1.5) game.chase.kick(sh);
     }
     if (e.craft) wreckDebris(e.craft, x, y, z);
     if (e.puff) {
@@ -702,64 +712,95 @@ export function createCombatFx(game) {
     const air = y > 3;
     const gy = air ? y : (y < 0.5 ? 0.4 : y);
     const calm = reduceMotion() ? 0.5 : 1; // softer flash with Reduce motion
-    // 1. Flash: one very bright step, a warmer second sprite, a glow on the ground.
-    add(x, gy + 0.6, z, 0, 0, 0, 0.1, R * 2.6, R * 3.4, 3 * calm, 1, 0.96, 0.8, GLOW);
-    add(x, gy + 0.8, z, 0, 0, 0, 0.3, R * 1.5, R * 2.4, 1.5 * calm, 1, 0.62, 0.24, GLOW);
-    if (!air) add(x, 0.12, z, 0, 0, 0, 0.7, R * 3.4, R * 4.2, 0.9 * calm, 1, 0.5, 0.16, GLOW + 4);
-    // 2. Fireball: hot core (additive), orange body (additive), red billows
-    // that cool to black (alpha). 3 to 5 layered puffs each.
+    last.vs = vs;
+    let n = 0;
+    // 1. Flash (frame 0) and the warm light it throws on the street and the
+    // walls round it for 0.35 s: a flat glow 60 m across on the ground and a
+    // soft upright one in the air (pooled sprites; no real light).
+    const L = BLAST.light;
+    n += add(x, gy + 0.8, z, 0, 0, 0, BLAST.flash.life, BLAST.flash.d * vs, BLAST.flash.d * vs * 1.2, 3.2 * calm, 1, 0.97, 0.84, GLOW) >= 0;
+    n += add(x, gy + 0.6, z, 0, 0, 0, BLAST.flash.life * 2, BLAST.flash.d * vs * 2.2, BLAST.flash.d * vs * 2.6, 1.4 * calm, 1, 0.9, 0.6, GLOW) >= 0;
+    last.flash = n;
+    n = 0;
+    if (!air) n += add(x, 0.15, z, 0, 0, 0, L.life, L.r * 2 * vs, L.r * 2.1 * vs, 1.25 * calm, L.rgb[0], L.rgb[1], L.rgb[2], GLOW + 4) >= 0;
+    n += add(x, gy + 3 * vs, z, 0, 0, 0, L.life * 0.85, L.r * 1.3 * vs, L.r * 1.4 * vs, 0.55 * calm, L.rgb[0], L.rgb[1] * 0.9, L.rgb[2] * 0.8, GLOW) >= 0;
+    last.light = n;
+    // 2. Fireball: three additive billboards, 2 m to 7 m radius by 0.25 s,
+    // white to yellow to orange to dark red, gone by 0.7 s; a hot core inside.
+    const F = BLAST.fire;
+    const end = fireRadius(1, F.life) * 2;
+    n = 0;
+    for (let i = 0; i < F.n; i++) {
+      const a = (i / F.n) * 6.28 + rnd() * 0.6, rr = 0.6 * vs;
+      const j = add(x + Math.cos(a) * rr, gy + 0.6 * vs + i * 0.5 * vs, z + Math.sin(a) * rr, Math.cos(a) * 1.2 * vs, (1.5 + rnd() * 1.5) * vs, Math.sin(a) * 1.2 * vs,
+        F.life * (0.9 + rnd() * 0.1), F.r0 * 2 * vs, end * vs * (0.85 + rnd() * 0.2), 1.5, 1, 0.96, 0.8, PUFF, -0.6, 2.2);
+      tintP(G, j, 0.42, 0.05, 0.015);
+      n += j >= 0;
+    }
+    last.fire = n;
     const core = Math.max(2, Math.round(3 * qq));
     for (let i = 0; i < core; i++) {
-      add(x + rs() * 0.15 * R, gy + 0.5 + rnd() * 0.15 * R, z + rs() * 0.15 * R, rs() * 0.8, 1.5 + rnd() * 2, rs() * 0.8, 0.3 + rnd() * 0.2, R * 0.55, R * 1.35, 1.4, 1, 0.9, 0.55, PUFF, -0.5, 1.5);
+      const j = add(x + rs() * 0.8 * vs, gy + 0.6 + rnd() * vs, z + rs() * 0.8 * vs, rs() * 0.8, 2 + rnd() * 2, rs() * 0.8, 0.28 + rnd() * 0.12, 2.5 * vs, 7 * vs, 1.6, 1, 0.92, 0.6, PUFF, -0.5, 1.5);
+      tintP(G, j, 1, 0.45, 0.1);
     }
-    const body = Math.max(3, Math.round(5 * qq));
-    for (let i = 0; i < body; i++) {
-      const a = (i / body) * 6.28 + rnd(), rr = rnd() * 0.35 * R;
-      const j = add(x + Math.cos(a) * rr, gy + 0.4 + rnd() * 0.25 * R, z + Math.sin(a) * rr, Math.cos(a) * R * 0.5, 3 + rnd() * R * 0.5, Math.sin(a) * R * 0.5, 0.55 + rnd() * 0.35, R * 0.45, R * 1.25, 1, 1, 0.5 + rnd() * 0.15, 0.1, PUFF, -0.4, 1.8);
-      tintP(G, j, 0.7, 0.18, 0.04);
-    }
+    // Red billows that cool to black (alpha pool), rolling through the fire.
     const bill = Math.max(3, Math.round(5 * qq));
     for (let i = 0; i < bill; i++) {
-      const a = (i / bill) * 6.28 + rnd() * 1.2, rr = rnd() * 0.4 * R;
-      const j = alpha(x + Math.cos(a) * rr, gy + 0.6 + rnd() * 0.3 * R, z + Math.sin(a) * rr, Math.cos(a) * R * 0.3, 3 + rnd() * R * 0.45, Math.sin(a) * R * 0.3, 1.1 + rnd() * 0.5, R * 0.5, R * 1.6, 0.9, 0.95, 0.38, 0.1, PUFF, -0.3, 1.5, 0.05);
-      tintP(S, j, 0.1, 0.09, 0.085);
+      const a = (i / bill) * 6.28 + rnd() * 1.2, rr = rnd() * 2.5 * vs;
+      const j = alpha(x + Math.cos(a) * rr, gy + 0.8 + rnd() * 2 * vs, z + Math.sin(a) * rr, Math.cos(a) * 3 * vs, (3 + rnd() * 3) * vs, Math.sin(a) * 3 * vs, 1.1 + rnd() * 0.5, 4 * vs, 11 * vs, 0.9, 0.95, 0.38, 0.1, PUFF, -0.3, 1.5, 0.05);
+      tintP(S, j, 0.08, 0.07, 0.065);
       if (j >= 0) S.rotV[j] = rs() * 0.5;
     }
-    // 3. Shockwave: a fast bright ring and a dusty one, plus a skirt of dust.
+    // 4. Pressure ring (0 to 16 m in 0.3 s) and a slower dusty one; 5. the dust
+    // skirt along the ground, coloured by what lies under the blast.
+    n = 0;
     if (!air) {
-      add(x, 0.3, z, 0, 0, 0, 0.32, R * 0.6, R * 5.2, 1, 1, 0.88, 0.6, RING + 4);
-      alpha(x, 0.22, z, 0, 0, 0, 0.7, R * 0.8, R * 4.2, 0.7, 0.8, 0.74, 0.66, RING + 4, 0, 0, 0.02);
-      const nd = Math.max(5, Math.round(12 * qq));
+      n += add(x, 0.3, z, 0, 0, 0, BLAST.ring.life, 1, BLAST.ring.r * 2 * vs, 1.1, 1, 0.9, 0.66, RING + 4) >= 0;
+      alpha(x, 0.22, z, 0, 0, 0, 0.8, 2 * vs, BLAST.ring.r * 2.2 * vs, 0.55, 0.8, 0.74, 0.66, RING + 4, 0, 0, 0.02);
+      const tone = dustTone(game.city && game.city.lotTypeAt ? game.city.lotTypeAt(x, z) : '');
+      const D = BLAST.dust;
+      const nd = Math.max(5, Math.round(D.n * qq));
+      let m = 0;
       for (let i = 0; i < nd; i++) {
         const a = (i / nd) * 6.28 + rnd() * 0.4;
-        const sp = (R * 1.3) * (0.7 + rnd() * 0.5);
-        dust(x + Math.cos(a), 0.4, z + Math.sin(a), Math.cos(a) * sp, 0.3 + rnd() * 0.6, Math.sin(a) * sp, 1.1 + rnd() * 0.7, R * 0.15, R * 0.4, 0.5, 0.58);
+        const sp = D.v * vs * (0.8 + rnd() * 0.4);
+        const k = 0.85 + rnd() * 0.3;
+        m += alpha(x + Math.cos(a) * vs, 0.5, z + Math.sin(a) * vs, Math.cos(a) * sp, 0.4 + rnd() * 0.8, Math.sin(a) * sp, D.life * (0.85 + rnd() * 0.3), 1.6 * vs, 5.5 * vs, 0.6, tone[0] * k, tone[1] * k, tone[2] * k, PUFF, -0.2, 1.1, 0.05) >= 0;
       }
+      last.dust = m;
     } else {
       // In the air the ring stands up: a flat disc seen from the side.
-      add(x, y, z, 0, 0, 0, 0.3, R * 0.6, R * 4, 0.9, 1, 0.88, 0.6, RING);
+      n += add(x, y, z, 0, 0, 0, BLAST.ring.life, 1, BLAST.ring.r * 1.6 * vs, 0.9, 1, 0.88, 0.6, RING) >= 0;
+      last.dust = 0;
     }
-    // 4. Sparks (fast, gravity) and embers (slow, glowing, drifting).
-    const nsp = Math.max(6, Math.round(22 * qq * Math.min(1.6, R / 8)));
+    last.ring = n;
+    // 6. Sparks (fast, gravity) and embers (slow, glowing, drifting).
+    const SP = BLAST.sparks;
+    const nsp = Math.max(8, Math.round(SP.n * qq * Math.min(1.5, vs)));
+    n = 0;
     for (let i = 0; i < nsp; i++) {
-      const a = rnd() * 6.28, sp = (5 + rnd() * 12) * (R / 8 + 0.4);
-      add(x, gy + 0.5, z, Math.cos(a) * sp, (6 + rnd() * 12) * (R / 8 + 0.3), Math.sin(a) * sp, 0.7 + rnd() * 0.9, 0.24, 0.06, 2.4, 1, 0.62 + rnd() * 0.25, 0.22, STREAK + 8, 9.8, 0.2);
+      const a = rnd() * 6.28, sp = (6 + rnd() * 14) * (0.6 + 0.4 * vs);
+      n += add(x, gy + 0.5, z, Math.cos(a) * sp, (5 + rnd() * 12) * (0.6 + 0.4 * vs), Math.sin(a) * sp, SP.life0 + rnd() * (SP.life1 - SP.life0), 0.26, 0.06, 2.4, 1, 0.62 + rnd() * 0.25, 0.22, STREAK + 8, 9.8, 0.2) >= 0;
     }
+    last.sparks = n;
     const nem = Math.max(4, Math.round(12 * qq));
     for (let i = 0; i < nem; i++) {
-      const a = rnd() * 6.28, sp = (1 + rnd() * 5) * (R / 8);
-      const j = add(x + rs() * 0.4 * R, gy + rnd() * 0.3 * R, z + rs() * 0.4 * R, Math.cos(a) * sp, 3 + rnd() * 7 * (R / 8), Math.sin(a) * sp, 1.4 + rnd() * 1.4, 0.2, 0.07, 1.9, 1, 0.5 + rnd() * 0.2, 0.12, GLOW, 2.2, 0.7);
+      const a = rnd() * 6.28, sp = (1 + rnd() * 5) * vs;
+      const j = add(x + rs() * 3 * vs, gy + rnd() * 2.4 * vs, z + rs() * 3 * vs, Math.cos(a) * sp, 3 + rnd() * 7 * vs, Math.sin(a) * sp, 1.4 + rnd() * 1.4, 0.2, 0.07, 1.9, 1, 0.5 + rnd() * 0.2, 0.12, GLOW, 2.2, 0.7);
       if (j >= 0) G.floor[j] = 0.05;
     }
-    // 5. Smoke: a dark billow now, then a column that keeps feeding for 2.5 s;
-    // each puff lives 6 to 10 s, grows, thins and leans downwind.
-    const ns = Math.max(4, Math.round(8 * qq));
-    for (let i = 0; i < ns; i++) {
-      const g = 0.1 + rnd() * 0.1;
-      const f = i / ns;
-      const j = alpha(x + rs() * 0.3 * R, gy + 0.5 + f * 0.4 * R, z + rs() * 0.3 * R, rs() * 1.5, (3 + f * 6) * (R / 8 + 0.3), rs() * 1.5, 5 + rnd() * 3, R * 0.25, R * (0.6 + f * 0.4), 0.62, g, g, g * 1.05, PUFF, -0.1, 0.45, 0.05);
-      if (j >= 0) S.rotV[j] = rs() * 0.3;
-    }
+    // 3. Smoke roll from 0.08 s (stepBlasts), then the column that keeps feeding.
+    const bl = blasts[blastHead];
+    blastHead = (blastHead + 1) % MAX_BLASTS;
+    bl.on = true;
+    bl.x = x;
+    bl.y = gy;
+    bl.z = z;
+    bl.vs = vs;
+    bl.t = 0;
+    bl.rolled = false;
+    bl.air = air;
+    last.roll = 0;
     const c = cols[colHead];
     colHead = (colHead + 1) % MAX_COLUMNS;
     c.on = true;
@@ -768,19 +809,48 @@ export function createCombatFx(game) {
     c.z = z;
     c.t = 0;
     c.dur = 2.4 + R * 0.08;
-    c.k = R / 8;
+    c.k = vs * 1.25;
     c.acc = 0;
-    // 6. Big and huge blasts (bombs, missiles, shells, tanks, jets): a second
+    // Big and huge blasts (bombs, missiles, shells, tanks, jets): a second
     // shockwave and thrown black billows.
     if (e.size === 'big' || e.size === 'huge') {
       const hk = e.size === 'huge' ? 1.35 : 1;
-      if (!air) alpha(x, 0.3, z, 0, 0, 0, 1.2 * hk, R * 0.5, R * 5.5 * hk, 0.45, 0.62, 0.58, 0.52, RING + 4, 0, 0, 0.03);
+      if (!air) alpha(x, 0.3, z, 0, 0, 0, 1.2 * hk, 3 * vs, 30 * vs * hk, 0.45, 0.62, 0.58, 0.52, RING + 4, 0, 0, 0.03);
       const nh = Math.max(4, Math.round(10 * qq * hk));
       for (let i = 0; i < nh; i++) {
-        const a = rnd() * 6.28, sp = (6 + rnd() * 10) * (R / 8);
-        const j = alpha(x, gy + 0.6, z, Math.cos(a) * sp, (9 + rnd() * 12) * (R / 8), Math.sin(a) * sp, 1.6 + rnd() * 0.8, 0.5, 0.4, 1, 0.14, 0.12, 0.1, PUFF, 9.8, 0.1, 0);
+        const a = rnd() * 6.28, sp = (6 + rnd() * 10) * vs;
+        const j = alpha(x, gy + 0.6, z, Math.cos(a) * sp, (9 + rnd() * 12) * vs, Math.sin(a) * sp, 1.6 + rnd() * 0.8, 0.5, 0.4, 1, 0.14, 0.12, 0.1, PUFF, 9.8, 0.1, 0);
         if (j >= 0) S.floor[j] = 0.1;
       }
+    }
+  }
+  // The smoke roll: 8 to 12 dark puffs from 0.08 s, rising 3 m/s and thrown
+  // out so smoke is seen 12 m from the centre by 0.5 s; each lives 2.5 s.
+  function stepBlasts(dt, qq) {
+    const RL = BLAST.roll;
+    for (let i = 0; i < MAX_BLASTS; i++) {
+      const b = blasts[i];
+      if (!b.on) continue;
+      b.t += dt;
+      if (b.rolled) {
+        if (b.t > 3) b.on = false;
+        continue;
+      }
+      if (b.t < RL.t0) continue;
+      b.rolled = true;
+      const n = Math.round(RL.n0 + (RL.n1 - RL.n0) * qq);
+      let m = 0;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * 6.28 + rnd() * 0.5;
+        const v = ROLL_V[k % ROLL_V.length] * b.vs;
+        const g = 0.07 + rnd() * 0.07;
+        const j = alpha(b.x + Math.cos(a) * b.vs, b.y + 0.8 + rnd() * 1.5 * b.vs, b.z + Math.sin(a) * b.vs, Math.cos(a) * v, RL.rise * (0.8 + rnd() * 0.4) + (b.air ? Math.sin(a) * v * 0.3 : 0), Math.sin(a) * v,
+          RL.life * (0.9 + rnd() * 0.2), ROLL_S0 * b.vs, ROLL_S1 * b.vs, 0.8, g * 2.4, g * 1.4, g, PUFF, -0.05, RL.drag, 0.04);
+        tintP(S, j, g, g * 0.96, g * 0.92);
+        if (j >= 0) S.rotV[j] = rs() * 0.4;
+        m += j >= 0;
+      }
+      if (b === blasts[(blastHead + MAX_BLASTS - 1) % MAX_BLASTS]) last.roll = m;
     }
   }
   // Feed the lingering smoke columns.
@@ -895,14 +965,15 @@ export function createCombatFx(game) {
         }
         if ((tick & 7) === 0) add(c.x, top, c.z, 0, 0, 0, 0.3, 3 + 3 * hot, 4 + 3 * hot, 0.35 * hot + 0.1, 1, 0.55, 0.2, GLOW);
       }
-      // Smoke: thick and black while it burns, then a thinner grey wisp.
-      const rate = (1.2 + 7 * hot + 1.6) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
+      // Smoke: thick and black while it burns, then a grey column that
+      // thins as the hull cools and sinks away.
+      const rate = (2.6 + 6 * hot) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
       c.fxSmoke = (c.fxSmoke || 0) + dt * rate;
       while (c.fxSmoke >= 1) {
         c.fxSmoke -= 1;
-        const g = hot > 0 ? 0.06 + rnd() * 0.06 : 0.2 + rnd() * 0.12;
-        const life = hot > 0 ? 4 + rnd() * 2.5 : 3.5 + rnd() * 2;
-        const j = alpha(c.x + rs() * len * 0.5, top, c.z + rs() * wid * 0.6, rs() * 0.4 + 0.25, 1.6 + rnd() * 1.4 + hot * 1.5, rs() * 0.4, life, 0.9 + hot, 3.2 + hot * 2.6, 0.5 + 0.25 * hot, g, g, g * 1.05, PUFF, -0.08, 0.45, 0.12);
+        const g = hot > 0 ? 0.06 + rnd() * 0.06 : 0.16 + rnd() * 0.12;
+        const life = hot > 0 ? 4.5 + rnd() * 2.5 : 5 + rnd() * 2.5;
+        const j = alpha(c.x + rs() * len * 0.5, top, c.z + rs() * wid * 0.6, rs() * 0.4 + 0.3, 1.5 + rnd() * 1.2 + hot * 1.6, rs() * 0.4, life, 1.4 + hot, 5.5 + hot * 3, 0.55 + 0.25 * hot, g, g, g * 1.05, PUFF, -0.06, 0.4, 0.1);
         if (j >= 0) S.rotV[j] = rs() * 0.3;
       }
     }
@@ -1053,6 +1124,7 @@ export function createCombatFx(game) {
   const sys = {
     name: 'combatfx',
     game,
+    lastBlast: last,
     counts() {
       return { alpha: S ? S.n : 0, additive: G ? G.n : 0, decals: decalCount, blood: liveCount(bt, -1e8, true), debris: liveCount(dage, 0, false) };
     },
@@ -1067,6 +1139,7 @@ export function createCombatFx(game) {
       }
       stepBurn(dt, qq);
       stepHulls(dt, qq);
+      stepBlasts(dt, qq);
       stepColumns(dt, qq);
       stepProjectiles(qq);
       stepArms();

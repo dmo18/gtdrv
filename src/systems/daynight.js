@@ -182,9 +182,9 @@ void main() {
     vec2 pl = d.xz / (y + 0.09);
     float night = uCloud.w;
     float face = dot(normalize(d.xz + vec2(1e-4)), normalize(uSunDir.xz + vec2(1e-4))) * 0.5 + 0.5;
-    float low = rwFbm(pl * 0.55 + uDrift.xy);
+    float low = rwFbm(pl * 2.1 + uDrift.xy);
     float dl = smoothstep(0.62 - 0.3 * uCloud.x, 0.9 - 0.3 * uCloud.x, low);
-    float high = rwFbm(pl * vec2(0.9, 2.2) * 0.4 + uDrift.zw + 40.0);
+    float high = rwFbm(pl * vec2(1.3, 3.4) + uDrift.zw + 40.0);
     float dh = smoothstep(0.55 - 0.22 * uCloud.x, 0.95 - 0.2 * uCloud.x, high) * 0.55;
     float edge = smoothstep(0.0, 0.5, dl) * (1.0 - smoothstep(0.5, 1.0, dl));
     // Day: white lit by the sun; dusk: takes the sun colour on the sun's
@@ -1141,7 +1141,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       cloudDrift += drift;
       if (V) {
         const reduced = !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion);
-        const k = (reduced ? 0.15 : 1) * 0.0009;
+        const k = (reduced ? 0.15 : 1) * 0.0035;
         const dr = V.domeU.uDrift.value, wx = Math.cos(W.windDir), wz = Math.sin(W.windDir);
         dr.x += wx * drift * k; dr.y += wz * drift * k;
         dr.z += wx * drift * k * 0.45; dr.w += wz * drift * k * 0.45;

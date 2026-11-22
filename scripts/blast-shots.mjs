@@ -1,9 +1,13 @@
 // Developer helper: a big car explosion at three moments (flash, fireball,
 // smoke column), a cop shot dead on the street and a missile hitting a tank,
 // at phone size, saved to docs/preview/. Prints draw calls and step cost.
-// usage: node scripts/blast-shots.mjs [explosion|cop|missile]
+// usage: node scripts/blast-shots.mjs [explosion|cop|missile|w6|w6-day|w6-night|w6-fall]
+// w6: a car blast at 0.1, 0.5, 5 and 30 s after it, by day and by night,
+// and a body falling away from a shot (docs/preview/w6-*.png).
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildGame, serve } from './build.mjs';
 
 let chromium;
@@ -12,8 +16,10 @@ try {
 } catch {
   ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
 }
-await buildGame({ minify: false });
-const server = await serve(0);
+// Its own build folder: other scripts may be building dist/ at the same time.
+const OUT = join(tmpdir(), 'rw-blast-shots');
+await buildGame({ minify: false, outDir: OUT });
+const server = await serve(0, OUT);
 await mkdir('docs/preview', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 915, height: 412 }, deviceScaleFactor: 1 });
@@ -190,6 +196,67 @@ if (only === 'all' || only === 'missile') {
   await shot('missile-tank-impact');
   await page.evaluate(() => window.__shot.run(40));
   await shot('missile-tank-after');
+}
+if (only === 'all' || only.startsWith('w6')) {
+  const moments = [[0.1, '0.1s'], [0.5, '0.5s'], [5, '5s'], [30, '30s']];
+  for (const [hour, tag] of [[14, 'day'], [21.5, 'night']]) {
+    if (only !== 'all' && only !== 'w6' && only !== 'w6-' + tag) continue;
+    await page.evaluate((hour) => {
+      const g = window.__rw;
+      g.daynight.setHour(hour);
+      g.daynight.setWeather('clear', true);
+      const w = g.player.walker;
+      if (window.__car && !window.__car.removed) g.removeVehicle(window.__car);
+      // Down the start street: the car in the road ahead, the camera behind
+      // and a little up, so the whole 12 m blast and the street round it show.
+      const sp = g.city.spawn;
+      const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
+      const cx = sp.x + fx * 30, cz = sp.z + fz * 30;
+      const c = g.debug.spawnCar('sedan', cx, cz, sp.heading + 0.5);
+      c.vx = c.vz = c.speed = 0;
+      window.__car = c;
+      window.__shot.cam = [cx - fx * 19 + fz * 2.5, 4.2, cz - fz * 19 - fx * 2.5, cx, 2.2, cz];
+      window.__shot.run(2);
+      g.combat.damage(c, 1e5, w, 'blast');
+      window.__blastT = 0;
+    }, hour);
+    for (const [t, name] of moments) {
+      await page.evaluate((t) => {
+        const n = Math.max(0, Math.round((t - window.__blastT) * 60));
+        window.__blastT = t;
+        window.__shot.run(n);
+      }, t);
+      await shot(`w6-blast-${tag}-${name}`);
+    }
+  }
+  if (only === 'all' || only === 'w6' || only === 'w6-fall') {
+    // A civilian shot from the side falls away from the shot.
+    await page.evaluate(() => {
+      const g = window.__rw;
+      g.daynight.setHour(14);
+      const w = g.player.walker;
+      const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
+      const sp = g.city.spawn;
+      w.x = w.px = sp.x;
+      w.z = w.pz = sp.z;
+      a.x = a.px = w.x + 7;
+      a.z = a.pz = w.z + 4;
+      a.heading = Math.PI / 2;
+      if (a.state !== undefined) a.state = 'idle';
+      a.vx = a.vz = 0;
+      window.__victim = a;
+      window.__shot.cam = [a.x + 0.5, 1.6, a.z + 6.5, a.x + 1.2, 0.6, a.z];
+      window.__shot.run(2);
+      w.arms.weapon = 'scatter';
+      w.arms.cool = 0;
+      const dx = a.x - w.x, dz = a.z - w.z, l = Math.hypot(dx, dz);
+      g.combat.fire(w, dx / l, (1.0 - 1.4) / l, dz / l);
+      window.__shot.run(9);
+    });
+    await shot('w6-fall-hit');
+    await page.evaluate(() => window.__shot.run(100));
+    await shot('w6-fall-lying');
+  }
 }
 await browser.close();
 server.close();

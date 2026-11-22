@@ -403,7 +403,7 @@ test('craft: damage multipliers, burning below 25%, explodes after 6 s', () => {
   assert.ok(Math.abs(h0 - car.health - max * 0.03) < 1, 'loses 3% of max per s');
   steps(game, 60 * 5 + 5);
   assert.equal(ex.length, 1);
-  assert.equal(ex[0].radius, 8);
+  assert.equal(ex[0].radius, 10, 'a car blast is 10 m (REVAMP 6.7; was 8)');
   assert.equal(car.wrecked, true);
   assert.equal(car.burning, false);
   // Crash damage alone (not from combat) does not set craft on fire.

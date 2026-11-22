@@ -87,7 +87,12 @@ float rwNoise(vec3 p) {
 vec3 rwStreet(vec3 r, vec3 w, float night, out float m) {
   m = 0.0;
   float h = r.y;
-  if (h < -0.04 || h > 0.36) return vec3(0.0);
+  if (h < -0.02) {
+    // The road: dark asphalt, a touch lighter toward the horizon.
+    m = smoothstep(-0.02, -0.08, h) * 0.85;
+    return mix(vec3(0.05, 0.05, 0.052), vec3(0.008), night) * (1.0 + 0.6 * smoothstep(-0.3, -0.02, h));
+  }
+  if (h > 0.36) return vec3(0.0);
   float u = atan(r.z, r.x) * 3.2 + w.x * 0.09 + w.z * 0.07;
   float cell = floor(u);
   float hs = fract(sin(cell * 91.7) * 4375.85);
@@ -98,7 +103,7 @@ vec3 rwStreet(vec3 r, vec3 w, float night, out float m) {
   float wu = u * 7.0, wh = h * 70.0;
   float aa = clamp(1.6 - 0.9 * max(fwidth(wu), fwidth(wh)), 0.0, 1.0);
   float win = mix(0.3, step(0.42, fract(wu)) * step(0.35, fract(wh)), aa);
-  vec3 day = mix(fac, vec3(0.11, 0.15, 0.2), win * 0.75);
+  vec3 day = mix(fac, vec3(0.16, 0.2, 0.25), win * 0.4);
   float lit = step(0.6, fract(sin(dot(floor(vec2(wu, wh)), vec2(12.9898, 78.233))) * 43758.55));
   vec3 nite = mix(vec3(0.006, 0.007, 0.01), vec3(0.95, 0.6, 0.3) * 0.55, win * mix(0.4, lit, aa));
   return mix(day, nite, night);
@@ -193,6 +198,11 @@ const FRAG_CC = /* glsl */`
 #include <lights_physical_fragment>
 #ifdef USE_CLEARCOAT
 material.clearcoat *= rwCC;
+#ifdef RW_STREET
+// A slightly hotter clear coat than physical: the sky and street read on
+// the panels at every angle, as they do in car games.
+material.clearcoatF0 = vec3(0.075);
+#endif
 #endif
 `;
 
@@ -585,7 +595,7 @@ float rwK = 0.0;
 `;
 const GLASS_OUT = /* glsl */`
 float rwNV = saturate(dot(normal, normalize(vViewPosition)));
-float rwAl = mix(0.58, 0.96, pow(1.0 - rwNV, 3.0));
+float rwAl = mix(0.7, 0.97, pow(1.0 - rwNV, 3.0));
 #ifdef RW_CRACK
 rwAl = max(rwAl, 0.55 + 0.4 * rwK);
 #endif
