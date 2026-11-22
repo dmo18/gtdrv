@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createLoop, STEP } from '../src/core/loop.js';
+import { createLoop, STEP, HOLD_MAX } from '../src/core/loop.js';
 import { createChaseCamera } from '../src/render/chasecam.js';
 import {
-  SLOWMO, PULL, createSlowMo, createPullback, pullCurve, isBigKill, createCinematic,
+  SLOWMO, PULL, createSlowMo, createPullback, pullCurve, isBigKill, createCinematic, createHitStop, FREEZE,
 } from '../src/systems/cinematic.js';
 import { wantedStars, unitsFor, LEVEL_RULES, COOLDOWN, createHeat, updateHeat } from '../src/systems/police.js';
 import { createEvents } from '../src/core/events.js';
@@ -182,4 +182,69 @@ test('cinematic system: events drive slow motion and pull-back, reduce motion tu
   ev2.emit('takedown', { target: { team: 'police', hp: 0 }, source: null, kind: 'bullet' });
   cin2.render(0, 1 / 60);
   assert.equal(game.timeScale, 1);
+});
+
+test('kill freeze: 3 frames for a kill, 4 for a vehicle, gated 0.25 s, within 60 m, off under reduced motion', () => {
+  const h = createHitStop();
+  assert.equal(FREEZE.kill, 3);
+  assert.equal(FREEZE.vehicle, 4);
+  assert.equal(h.request(false, 10, 1.0), 3);
+  assert.equal(h.request(false, 10, 1.1), 0, 'not again within 0.25 s');
+  assert.equal(h.request(false, 10, 1.3), 3);
+  assert.equal(h.request(true, 10, 1.3), 4, 'a vehicle in the same step upgrades to 4');
+  assert.equal(h.request(true, 10, 1.3), 0, 'but never stacks');
+  assert.equal(h.request(false, 61, 5), 0, 'too far');
+  assert.equal(h.request(true, 30, 6, true), 0, 'reduced motion');
+  assert.equal(h.request(true, 30, 7), 4);
+});
+
+test('the loop runs no simulation steps while held, then carries on', () => {
+  let steps = 0, draws = 0;
+  const frames = [];
+  globalThis.requestAnimationFrame = (f) => {
+    frames.push(f);
+    return frames.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+  const loop = createLoop({ fixedUpdate: () => steps++, render: () => draws++ });
+  loop.start();
+  let t = performance.now();
+  const tick = () => {
+    t += 1000 / 60;
+    frames.shift()(t);
+  };
+  tick();
+  tick();
+  const before = steps;
+  assert.ok(before >= 1);
+  assert.equal(loop.hold(9), HOLD_MAX, 'capped at 4 frames');
+  for (let i = 0; i < HOLD_MAX; i++) tick();
+  assert.equal(steps, before, 'frozen for 4 frames');
+  assert.equal(draws >= 6, true, 'still drawing');
+  tick();
+  tick();
+  assert.ok(steps > before, 'running again');
+  loop.stop();
+  delete globalThis.requestAnimationFrame;
+  delete globalThis.cancelAnimationFrame;
+});
+
+test('the cinematic system freezes on a player kill and a destroyed vehicle', () => {
+  const events = createEvents();
+  const held = [];
+  const game = {
+    events, time: 2, player: { x: 0, z: 0 }, actors: [], progress: { settings: {} },
+    loop: { held: 0, hold: (n) => held.push(n) },
+  };
+  createCinematic(game, null);
+  events.emit('kill', { x: 5, z: 0, byPlayer: true, cause: 'bullet' });
+  assert.deepEqual(held, [3]);
+  events.emit('kill', { x: 5, z: 0, byPlayer: false, cause: 'bullet' });
+  game.time = 3;
+  events.emit('takedown', { target: { x: 10, z: 0, spec: {}, health: 0 }, kind: 'blast', source: null });
+  assert.deepEqual(held, [3, 4]);
+  game.progress.settings.reduceMotion = true;
+  game.time = 4;
+  events.emit('kill', { x: 5, z: 0, byPlayer: true, cause: 'bullet' });
+  assert.deepEqual(held, [3, 4], 'none under reduced motion');
 });

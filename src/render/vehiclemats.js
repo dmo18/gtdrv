@@ -100,12 +100,12 @@ vec3 rwStreet(vec3 r, vec3 w, float night, out float m) {
   float fu = fract(u);
   m = smoothstep(top + 0.006, top - 0.006, h) * smoothstep(0.0, 0.03, fu) * smoothstep(1.0, 0.94, fu);
   vec3 fac = mix(vec3(0.42, 0.38, 0.33), vec3(0.26, 0.3, 0.35), fract(hs * 7.3));
-  float wu = u * 7.0, wh = h * 70.0;
+  float wu = u * 10.0, wh = h * 95.0;
   float aa = clamp(1.6 - 0.9 * max(fwidth(wu), fwidth(wh)), 0.0, 1.0);
   float win = mix(0.3, step(0.42, fract(wu)) * step(0.35, fract(wh)), aa);
-  vec3 day = mix(fac, vec3(0.16, 0.2, 0.25), win * 0.4);
+  vec3 day = mix(fac, vec3(0.18, 0.22, 0.27), win * 0.25);
   float lit = step(0.6, fract(sin(dot(floor(vec2(wu, wh)), vec2(12.9898, 78.233))) * 43758.55));
-  vec3 nite = mix(vec3(0.006, 0.007, 0.01), vec3(0.95, 0.6, 0.3) * 0.55, win * mix(0.4, lit, aa));
+  vec3 nite = mix(vec3(0.006, 0.007, 0.01), vec3(0.95, 0.6, 0.3) * 0.32, win * mix(0.4, lit, aa));
   return mix(day, nite, night);
 }
 #endif
@@ -584,9 +584,8 @@ const GLASS_FRAG = /* glsl */`
 float rwC = floor(vCls + 0.5);
 roughnessFactor = 0.05;
 metalnessFactor = 0.0;
-#ifdef RW_CRACK
 float rwK = 0.0;
-{
+if (uRwGlass.x > 0.5) {
   float m = smoothstep(0.32, 0.5, rwNoise(vObj * 2.3));
   float c1 = 1.0 - smoothstep(0.0, 0.05, abs(rwNoise(vObj * 11.0) - 0.5));
   float c2 = 1.0 - smoothstep(0.0, 0.06, abs(rwNoise(vObj * 29.0 + 3.1) - 0.5));
@@ -594,19 +593,14 @@ float rwK = 0.0;
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.5, 0.52, 0.54), max(rwK, m * 0.35));
   roughnessFactor = mix(0.05, 0.6, m);
 }
-#endif
 `;
 const GLASS_OUT = /* glsl */`
 float rwNV = saturate(dot(normal, normalize(vViewPosition)));
 float rwAl = mix(0.7, 0.97, pow(1.0 - rwNV, 3.0));
-#ifdef RW_CRACK
-rwAl = max(rwAl, 0.55 + 0.4 * rwK);
-#endif
+if (uRwGlass.x > 0.5) rwAl = max(rwAl, 0.55 + 0.4 * rwK);
 gl_FragColor = vec4(totalDiffuse * rwAl + totalSpecular, rwAl);
 if (rwC > 8.5) gl_FragColor = vec4(0.0, 0.0, 0.0, vRwA);
-#ifdef RW_GONE
-if (rwC < 8.5) discard;
-#endif
+else if (uRwGlass.y > 0.5) discard;
 `;
 const GLASS_FOG = /* glsl */`
 #include <fog_fragment>
@@ -621,20 +615,24 @@ export function carGlassMaterial(state = 'clean') {
   let m = glassCache[state];
   if (m) return m;
   m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.05, metalness: 0, transparent: true, depthWrite: false, premultipliedAlpha: true });
-  const def = '#define RW_STREET\n' + (state === 'crack' ? '#define RW_CRACK\n' : state === 'gone' ? '#define RW_GONE\n' : '');
+  // One shader program for all three states (no compile on first damage):
+  // the state is a uniform (x crazed, y blown out).
+  const def = '#define RW_STREET\n';
+  const uRwGlass = { value: new THREE.Vector2(state === 'crack' ? 1 : 0, state === 'gone' ? 1 : 0) };
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uLamp = shared.uLamp;
+    shader.uniforms.uRwGlass = uRwGlass;
     shader.vertexShader = def + VERT_HEAD + 'varying float vRwA;\n' + shader.vertexShader
       .replace('#include <begin_vertex>', VERT_BODY)
       .replace('#include <project_vertex>', GLASS_VERT);
-    shader.fragmentShader = def + FRAG_HEAD + 'varying float vRwA;\n' + shader.fragmentShader
+    shader.fragmentShader = def + FRAG_HEAD + 'varying float vRwA;\nuniform vec2 uRwGlass;\n' + shader.fragmentShader
       .replace('#include <metalnessmap_fragment>', GLASS_FRAG)
       .replace('#include <lights_fragment_maps>', FRAG_REFL)
       .replace('#include <opaque_fragment>', GLASS_OUT)
       .replace('#include <fog_fragment>', GLASS_FOG)
       .replace('#include <premultiplied_alpha_fragment>', '');
   };
-  m.customProgramCacheKey = () => 'rwglass' + state;
+  m.customProgramCacheKey = () => 'rwglass';
   m.userData.envScale = 1.3;
   glassCache[state] = track(m);
   return m;

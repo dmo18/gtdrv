@@ -107,6 +107,31 @@ export function createPullback(cfg = PULL) {
   return p;
 }
 
+// Kill freeze (REVAMP 6.7): a kill by the player within 60 m stops the
+// simulation for 3 drawn frames, a vehicle the player destroys for 4. Not
+// more than once per 0.25 s of game time, never past 4 frames, off under
+// Reduce motion. The loop (core/loop.js hold) runs no steps meanwhile.
+export const FREEZE = { kill: 3, vehicle: 4, range: 60, gap: 0.25, max: 4 };
+export function createHitStop(cfg = FREEZE) {
+  const h = {
+    last: -1e9,
+    count: 0,
+    // Frames to freeze for a kill at distance d (m) at game time t, or 0.
+    lastVehicle: false,
+    request(vehicle, d, t, reduced = false) {
+      if (reduced || !(d <= cfg.range)) return 0;
+      if (t - h.last < cfg.gap) {
+        // A vehicle destroyed in the same step as a kill: the longer freeze.
+        if (!(vehicle && t === h.last && !h.lastVehicle)) return 0;
+      } else h.count++;
+      h.last = t;
+      h.lastVehicle = vehicle;
+      return Math.min(cfg.max, vehicle ? cfg.vehicle : cfg.kill);
+    },
+  };
+  return h;
+}
+
 // Does this takedown call for slow motion? `target` is what went down.
 // `hostiles` is a function (x, z, range, except) -> count of other live
 // enemies near the player, supplied by the system.
@@ -120,18 +145,46 @@ export function isBigKill(kind, target, isCraftTarget, othersNear) {
 export function createCinematic(game, uiRoot) {
   const slow = createSlowMo();
   const pull = createPullback();
+  const stop = createHitStop();
   game.timeScale = 1;
   game.slowmo = slow;
+  game.hitStopper = stop;
+  // Freeze the simulation for n drawn frames (the loop is made after the systems).
+  game.hitStop = (n) => (game.loop && game.loop.hold ? game.loop.hold(n) : 0);
   let overlay = null;
   let lastOp = -1;
   const reduced = () => !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion);
 
+  // Kill flash on the crosshair: a white-red burst of four ticks at the
+  // screen centre (the crosshair on foot and in drive-by).
+  let flash = null;
   if (typeof document !== 'undefined' && uiRoot && uiRoot.appendChild) {
     overlay = document.createElement('div');
     overlay.className = 'rw-slowmo';
     overlay.setAttribute('aria-hidden', 'true');
     uiRoot.appendChild(overlay);
+    flash = document.createElement('div');
+    flash.setAttribute('aria-hidden', 'true');
+    flash.style.cssText = 'position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;pointer-events:none;opacity:0;z-index:6';
+    flash.innerHTML = '<svg viewBox="-22 -22 44 44" width="44" height="44"><g stroke="#ff3b2f" stroke-width="3.2" stroke-linecap="round">'
+      + '<path d="M-15-15L-7-7M15-15L7-7M-15 15L-7 7M15 15L7 7"/></g><g stroke="#fff" stroke-width="1.4" stroke-linecap="round">'
+      + '<path d="M-14-14L-8-8M14-14L8-8M-14 14L-8 8M14 14L8 8"/></g></svg>';
+    uiRoot.appendChild(flash);
   }
+  function killFlash(big) {
+    if (!flash || !flash.animate) return;
+    const p = game.player;
+    if (p && p.vehicle && p.vehicle.kind !== 'car' && p.vehicle.kind !== 'boat') return;
+    flash.animate([
+      { opacity: 1, transform: `scale(${big ? 0.8 : 0.6})` },
+      { opacity: 1, transform: `scale(${big ? 1.5 : 1.15})`, offset: 0.35 },
+      { opacity: 0, transform: `scale(${big ? 1.9 : 1.4})` },
+    ], { duration: big ? 380 : 280, easing: 'ease-out' });
+  }
+  const dist = (x, z) => {
+    const p = game.player;
+    return p ? Math.hypot(x - p.x, z - p.z) : Infinity;
+  };
 
   function enemiesNear(except) {
     const list = game.actors, p = game.player;
@@ -150,9 +203,21 @@ export function createCinematic(game, uiRoot) {
 
   const ev = game.events;
   if (ev) {
+    // A kill by the player: the crosshair flash and the freeze.
+    ev.on('kill', (e) => {
+      if (!e || !e.byPlayer) return;
+      killFlash(false);
+      const n = stop.request(false, dist(e.x, e.z), game.time || 0, reduced());
+      if (n) game.hitStop(n);
+    });
     ev.on('takedown', (e) => {
-      if (reduced()) return;
       const craft = !!(e.target && e.target.spec && typeof e.target.health === 'number' && e.target.hp === undefined);
+      if (craft && e.target) {
+        killFlash(true);
+        const n = stop.request(true, dist(e.target.x, e.target.z), game.time || 0, reduced());
+        if (n) game.hitStop(n);
+      }
+      if (reduced()) return;
       if (isBigKill(e.kind, e.target, craft, craft ? 0 : enemiesNear(e.target))) slow.trigger();
     });
     ev.on('explosion', (e) => {
@@ -172,8 +237,11 @@ export function createCinematic(game, uiRoot) {
     name: 'cinematic',
     slow,
     pull,
+    stop,
     render(alpha, dt) {
       if (game.paused || !(dt > 0)) return;
+      // The slow motion starts after the kill freeze.
+      if (game.loop && game.loop.held > 0) return;
       game.timeScale = reduced() ? 1 : slow.update(dt);
       if (reduced()) slow.reset();
       const fx = game.chase && game.chase.fx;

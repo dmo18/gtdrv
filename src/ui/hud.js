@@ -186,7 +186,9 @@ export function createHud(root) {
   // and distance), then two one-line message rows. Rows never move.
   const stackEl = el('div', 'rw-stack', hud);
   const stack = createTopStack();
-  const msgEls = [el('div', 'rw-msg rw-m1 rw-pill', stackEl), el('div', 'rw-msg rw-m2 rw-pill', stackEl)];
+  // The wrapper has no box (display: contents); old screenshot scripts still find .rw-toasts, .rw-toast and .rw-title.
+  const toastsEl = el('div', 'rw-toasts', stackEl);
+  const msgEls = [el('div', 'rw-msg rw-m1 rw-pill', toastsEl), el('div', 'rw-msg rw-m2 rw-pill', toastsEl)];
   const msgRev = [-1, -1];
   const msgOut = [false, false];
   for (const m of msgEls) m.hidden = true;
@@ -359,7 +361,7 @@ export function createHud(root) {
         m.classList.remove('rw-out');
         if (r.kind) {
           m.textContent = r.text;
-          m.className = 'rw-msg rw-m' + (i + 1) + ' rw-pill rw-k-' + r.kind + (r.kind === 'district' ? ' rw-title' : '');
+          m.className = 'rw-msg rw-m' + (i + 1) + ' rw-pill rw-k-' + r.kind + (r.kind === 'district' ? ' rw-title' : ' rw-toast');
           m.hidden = false;
           // restart the slide-in
           void m.offsetWidth;

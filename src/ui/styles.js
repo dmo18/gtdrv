@@ -187,8 +187,10 @@ const CSS = `
 .rw-more { --x: var(--mx); --y: var(--my); width: var(--ew); height: var(--ew); }
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
-/* extra primaries other systems register without a slot: a column above MORE */
-.rw-extra { --x: calc(var(--mx) + var(--kx, 0) * 64px); --y: calc(var(--my) + 64px + var(--k, 0) * 64px); width: var(--ew); height: var(--ew); }
+/* extra primaries other systems register without a slot (GARAGE, TALK): the BOOST cell above MORE
+   (docs/REVAMP.md 6.12). BOOST hides while one shows; a second one waits; the cell above is never used. */
+.rw-extra { --x: var(--mx); --y: calc(var(--my) + 64px); width: var(--ew); height: var(--ew); }
+.rw-extra.rw-spare { display: none; }
 .rw-slot { width: var(--ew); height: var(--ew); }
 /* HAND (car, boat), SWAP (foot): above BRAKE. RUN (foot): the BRAKE rect. */
 .rw-slot-hand { --x: 100px; --y: 108px; width: var(--ew); height: var(--ew); }
@@ -211,7 +213,16 @@ const CSS = `
 .rw-slot-gun, .rw-slot-cannon { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
 .rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
 .rw-slot-bomb { --x: 100px; --y: 108px; }
-.rw-slot-alock, .rw-slot-tlock, .rw-slot-siren { --x: 184px; --y: 84px; }
+.rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 184px; --y: 84px; }
+/* SIREN: 8 px beside the steering slot on the side toward the screen centre, centred on its height
+   (915x412: 184, 292; 780x360: 164, 246). It moves with the left inset and mirrors with the slot. */
+.rw-btn.rw-slot-siren { right: auto; left: calc(var(--rw-sl) + var(--sx)); bottom: calc(var(--rw-sb) + var(--sy)); width: var(--ew); height: var(--ew); }
+.rw-lefty .rw-btn.rw-slot-siren { left: auto; right: calc(var(--rw-sr) + var(--sx)); }
+.rw-touch { --sx: 184px; --sy: 64px; }
+/* EXTRA: a 4 px fill bar along the bottom of the face; dim (40 %) when it cannot act */
+.rw-xbar { position: absolute; left: 8px; right: 8px; bottom: 4px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); overflow: hidden; display: none; }
+.rw-xbar i { display: block; height: 100%; background: #6fd1ff; transform-origin: left; transform: scaleX(0); }
+.rw-pri.rw-weak .rw-face { opacity: 0.4; }
 .rw-slot-det { --x: 272px; --y: 148px; }
 .rw-slot-gun svg, .rw-slot-cannon svg { width: 28px; height: 28px; }
 .rw-mode-tank .rw-exit { --x: 16px; --y: 108px; }
@@ -249,9 +260,17 @@ const CSS = `
   .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 88px; }
   .rw-slot-hand, .rw-slot-bomb { --x: 88px; --y: 88px; }
   .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 156px; }
-  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-siren { --x: 160px; --y: 80px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 160px; --y: 80px; }
+  .rw-touch { --sx: 164px; --sy: 58px; }
   .rw-slot-msl, .rw-slot-coax { --x: calc(160px + var(--ew) + 8px); --y: 80px; }
   .rw-slot-det { --x: 288px; --y: 80px; }
+  /* the fan at 780x360 (docs/REVAMP.md 6.12): 48 px cells, 8 apart, columns at x 660, 604, 548, rows at y 156 and 100 */
+  .rw-sec {
+    --x: calc(var(--mx) + 64px + var(--c, 0) * 56px); --y: calc(var(--my) + 4px + var(--r, 0) * 56px);
+    width: 48px; height: 48px;
+    transform: translate(calc(var(--dir) * (var(--c, 0) + 1) * 56px), calc(var(--r, 0) * 56px)) scale(0.3);
+  }
+  .rw-fan-open .rw-sec, .rw-full .rw-sec { transform: none; }
 }
 
 /* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
@@ -453,6 +472,7 @@ const CSS = `
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   border-left: 4px solid transparent; transition: opacity 0.3s;
 }
+.rw-toasts { display: contents; }
 .rw-msg[hidden] { display: none; }
 .rw-m1 { top: 32px; }
 .rw-m2 { top: 64px; }

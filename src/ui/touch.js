@@ -71,6 +71,7 @@ const ICONS = {
   bomb: '<path d="M12 3v3"/><path d="M8 6h8l1 3v5a5 5 0 0 1-10 0V9z"/><path d="M9 21l3-2 3 2"/>',
   detonate: '<rect x="5" y="9" width="14" height="11" rx="2"/><path d="M9 9V6h6v3M12 4V2M8 14h8"/>',
   siren: '<path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M5 18h14v3H5zM12 3v2M4 7l1.5 1M20 7l-1.5 1"/>',
+  extra: '<path d="M12 3c3 4 5 6.5 5 10a5 5 0 0 1-10 0c0-2 1-3.6 2-5 .6 1.2 1.2 1.8 2 2 .6-2.4 0-4.6 1-7z"/>',
   cannon: '<circle cx="8" cy="15" r="5"/><path d="M11 12l9-6M12 14l9-5"/>',
 };
 const FAN_MS = 4000; // the fan folds away this long after the last use
@@ -461,12 +462,11 @@ export function createTouchControls(root, input, opts = {}) {
   // ----- action registry, the "more" fan and the layout slots -----
   // pri: stays on screen. sec: folds into the fan behind the "more" button.
   // Positions come from CSS slots (see styles.js): the code only numbers
-  // the fan items (--c column, --r row) and the extra primary slots (--k).
+  // the fan items (--c column, --r row).
   const pri = (b) => { b.classList.add('rw-pri'); return b; };
   const actions = [];
   let fanOpen = false, fanTimer = 0, fanHeld = 0, hudFull = false;
   let fanDirty = true;
-  let extraShift = 0;
   const more = pri(makeButton('rw-more', 'More controls', 'more', '', () => {
     setFan(!fanOpen);
     armFan();
@@ -504,8 +504,9 @@ export function createTouchControls(root, input, opts = {}) {
     const release = def.release || (named ? () => input.release(named) : () => {});
     const a = {
       id: String(def.id), sec, visible: typeof def.visible === 'function' ? def.visible : null,
+      hideWhen: typeof def.hideWhen === 'function' ? def.hideWhen : null, // hidden while this is true (BOOST yields its cell)
       modes: Array.isArray(def.modes) && def.modes.length ? def.modes.filter((m) => MODES.includes(m)) : MODES.slice(),
-      vis: true, c: -1, r: -1, k: -1, el: null,
+      vis: true, c: -1, r: -1, el: null,
     };
     // def.pointer { down(e), move(e), up(e) } replaces press/release for
     // fingers (keyboard clicks still use press/release): the SWAP wheel.
@@ -532,6 +533,7 @@ export function createTouchControls(root, input, opts = {}) {
     });
     a.el = b;
     if (a.visible) a.vis = !!a.visible();
+    if (a.hideWhen && a.hideWhen()) a.vis = false;
     b.classList.toggle('rw-off', !a.vis);
     actions.push(a);
     fanDirty = true;
@@ -549,33 +551,42 @@ export function createTouchControls(root, input, opts = {}) {
   }
 
   // Re-evaluate visible() callbacks (cheap; allocation free), then renumber.
+  // Actions with hideWhen run in a second pass so they see this step's state.
   function refreshActions() {
-    for (let i = 0; i < actions.length; i++) {
-      const a = actions[i];
-      if (!a.visible) continue;
-      const v = !!a.visible();
-      if (v !== a.vis) {
-        a.vis = v;
-        a.el.classList.toggle('rw-off', !v);
-        fanDirty = true;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < actions.length; i++) {
+        const a = actions[i];
+        if ((pass === 1) !== !!a.hideWhen) continue;
+        if (!a.visible && !a.hideWhen) continue;
+        let v = a.visible ? !!a.visible() : true;
+        if (v && a.hideWhen && a.hideWhen()) v = false;
+        if (v !== a.vis) {
+          a.vis = v;
+          a.el.classList.toggle('rw-off', !v);
+          fanDirty = true;
+        }
       }
     }
     if (fanDirty) layoutActions();
   }
 
-  // Number the fan items and the extra primary slots for the current mode.
+  // An unslotted primary (GARAGE, TALK) is on offer: it takes the BOOST cell.
+  function offerShowing() {
+    for (let i = 0; i < actions.length; i++) {
+      const a = actions[i];
+      if (!a.sec && !a.slot && a.vis && a.modes.includes(mode)) return true;
+    }
+    return false;
+  }
+
+  // Number the fan items; unslotted primaries share the one cell above MORE
+  // (the BOOST cell, docs/REVAMP.md 6.12): a second one waits, nothing ever
+  // uses the cell above it.
   function layoutActions() {
     fanDirty = false;
     let n = 0, e = 0;
     // The fan is 3 columns by 2 rows (docs/REVAMP.md 6.5); slot actions
     // (HAND, SWAP, RUN, the weapon arc) have fixed rectangles of their own.
-    // BOOST owns the first cell above MORE: unslotted extras (GARAGE, TALK)
-    // slide one cell toward the screen centre (--kx) while it shows.
-    let kx = 0;
-    for (const a of actions) {
-      if (a.slot === 'boost' && a.vis && a.modes.includes(mode)) kx = 1;
-    }
-    if (kx !== extraShift) { extraShift = kx; layer.style.setProperty('--kx', kx); }
     for (const a of actions) {
       if (!a.vis || !a.modes.includes(mode) || a.slot) continue;
       if (a.sec) {
@@ -584,7 +595,7 @@ export function createTouchControls(root, input, opts = {}) {
         if (c !== a.c) { a.c = c; a.el.style.setProperty('--c', c); }
         if (r !== a.r) { a.r = r; a.el.style.setProperty('--r', r); }
       } else {
-        if (e !== a.k) { a.k = e; a.el.style.setProperty('--k', e); }
+        a.el.classList.toggle('rw-spare', e > 0);
         e++;
       }
     }
@@ -778,15 +789,24 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'handbrake', group: 'primary', slot: 'hand', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
     press() { src.handbrake = true; }, release() { src.handbrake = false; } });
   // BOOST (turbo, planing surge, afterburner, heli surge): hold. Its own slot
-  // above MORE (docs/REVAMP.md 6.5, the first cell of the extra column).
+  // above MORE (docs/REVAMP.md 6.12). GARAGE and TALK take this cell while they
+  // are offered, so BOOST hides then.
   addAction({ id: 'boost', group: 'primary', slot: 'boost', label: 'Boost', icon: 'boost', text: 'BOOST', modes: ['car', 'boat', 'plane', 'heli'],
-    press() { src.boost = true; }, release() { src.boost = false; }, buzz: false });
+    press() { src.boost = true; }, release() { src.boost = false; }, buzz: false, hideWhen: offerShowing });
   // SIREN (a stolen police car, later any emergency vehicle): toggles the siren
-  // and lights. Its own slot on the LOCK rect, which a car never uses
-  // (docs/REVAMP.md 6.5). src/systems/police.js calls setSiren().
+  // and lights. Its own slot, 8 px beside the steering slot (docs/REVAMP.md
+  // 6.12). src/systems/police.js calls setSiren().
   let sirenCan = false, sirenLit = false;
   const sirenAct = addAction({ id: 'carsiren', group: 'primary', slot: 'siren', label: 'Siren and lights', icon: 'siren', text: 'SIREN',
     modes: ['car'], input: 'siren', visible: () => sirenCan });
+  // EXTRA (a service vehicle's one working extra, docs/REVAMP.md 6.11): the
+  // LOCK rect in car mode. src/systems/service.js calls setExtra().
+  let extraCan = false, extraText = '', extraFill = -1, extraWeak = false;
+  const extraAct = addAction({ id: 'extra', group: 'primary', slot: 'extra', label: 'Vehicle extra', icon: 'extra', text: 'EXTRA',
+    modes: ['car'], input: 'extra', visible: () => extraCan, buzz: true });
+  const extraCap = extraAct.el.querySelector('.rw-face span');
+  const extraBar = el('i', 'rw-xbar', extraAct.el.querySelector('.rw-face'));
+  extraBar.appendChild(document.createElement('i'));
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
   addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
@@ -959,6 +979,24 @@ export function createTouchControls(root, input, opts = {}) {
         sirenAct.el.classList.toggle('rw-on', on);
         sirenAct.el.setAttribute('aria-pressed', String(on));
       }
+    },
+    // The player's vehicle has an extra (can) and how it stands: text is the
+    // caption (WATER, TREAT, LIFT, HOOK, DROP), fill 0..1 the 4 px bar along the
+    // bottom (below 0 hides it), weak dims it to 40 % when it cannot act now.
+    setExtra(c) {
+      const can = !!(c && c.can);
+      if (can !== extraCan) { extraCan = can; refreshActions(); }
+      if (!can) return;
+      const text = (c.text || 'EXTRA').slice(0, 6);
+      if (text !== extraText) { extraText = text; if (extraCap) extraCap.textContent = text; }
+      const fill = c.fill >= 0 ? Math.round(Math.min(1, c.fill) * 50) / 50 : -1;
+      if (fill !== extraFill) {
+        extraFill = fill;
+        extraBar.style.display = fill < 0 ? 'none' : '';
+        if (fill >= 0) extraBar.firstChild.style.transform = `scaleX(${fill.toFixed(2)})`;
+      }
+      const weak = !!c.weak;
+      if (weak !== extraWeak) { extraWeak = weak; extraAct.el.classList.toggle('rw-weak', weak); extraAct.el.setAttribute('aria-disabled', String(weak)); }
     },
     setLeftHanded(v) {
       const next = !!v;

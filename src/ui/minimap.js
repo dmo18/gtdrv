@@ -49,6 +49,54 @@ const ACT_STYLE = {
 };
 const LABEL_ZOOM = 2; // full-map zoom at which marker labels appear
 
+// Adventure and garage markers (src/systems/adventures.js, through mapui.addLayer): an adventure is
+// a ring with a question mark, a check mark once done; a garage is the garage glyph; the tracked
+// adventure's step is a dashed ring of its fuzzy radius. Landmarks keep their pin.
+export const EXPLORE_TYPES = { 'explore-rumour': 'Adventure', 'explore-garage': 'Garage', 'explore-ring': 'Search area' };
+const EXPLORE_ADV_COLOR = '#ffd34d';
+const isExplore = (t) => typeof t === 'string' && t.charCodeAt(0) === 101 && Object.hasOwn(EXPLORE_TYPES, t);
+// '?' is the rumour label until the adventure is done (then its name).
+const isDone = (m) => m.type === 'explore-rumour' && !!m.label && m.label !== '?';
+function drawQuest(g, color, s, done) {
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.beginPath();
+  g.arc(0, 0, s, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(26, 18, 13, 0.9)';
+  g.fill();
+  g.lineWidth = Math.max(2, s * 0.24);
+  g.strokeStyle = color;
+  g.stroke();
+  g.lineWidth = Math.max(1.8, s * 0.26);
+  g.beginPath();
+  if (done) { // check mark
+    g.moveTo(-s * 0.45, s * 0.02); g.lineTo(-s * 0.1, s * 0.4); g.lineTo(s * 0.5, -s * 0.38);
+    g.stroke();
+  } else { // question mark: hook, stem and dot
+    g.arc(0, -s * 0.22, s * 0.34, Math.PI, Math.PI * 2.5);
+    g.lineTo(0, s * 0.2);
+    g.stroke();
+    g.beginPath();
+    g.arc(0, s * 0.52, Math.max(1.1, s * 0.1), 0, Math.PI * 2);
+    g.fillStyle = color;
+    g.fill();
+  }
+}
+// One explore marker centred at (0, 0) of the current transform; ringPx is the ring's radius in px.
+function drawExplore(g, m, s, ringPx) {
+  if (m.type === 'explore-rumour') drawQuest(g, m.color || EXPLORE_ADV_COLOR, s, isDone(m));
+  else if (m.type === 'explore-garage') drawIcon(g, 'garage', m.color || '#9aa0a6', s);
+  else if (ringPx > 0) { // the tracked step: a dashed ring, off centre by design
+    g.lineWidth = 3;
+    g.strokeStyle = m.color || '#ff8a3d';
+    g.setLineDash([7, 5]);
+    g.beginPath();
+    g.arc(0, 0, ringPx, 0, Math.PI * 2);
+    g.stroke();
+    g.setLineDash([]);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pre-rendered map
 // ---------------------------------------------------------------------------
@@ -190,7 +238,7 @@ export function createMinimap(canvas, mapRenderer) {
   function signature(s) {
     let sum = 0;
     const blips = s.blips;
-    if (blips) for (let i = 0; i < blips.length; i++) sum += blips[i].x * 1.37 + blips[i].z * 0.73;
+    if (blips) for (let i = 0; i < blips.length; i++) sum += blips[i].x * 1.37 + blips[i].z * 0.73 + (blips[i].label ? blips[i].label.length * 0.011 : 0);
     if (s.waypoint) sum += s.waypoint.x * 3.1 + s.waypoint.z * 2.3;
     return sum;
   }
@@ -274,6 +322,13 @@ export function createMinimap(canvas, mapRenderer) {
     for (let i = 0; i < n; i++) {
       const b = blips[i];
       project(b.x - s.x, b.z - s.z);
+      if (isExplore(b.type)) {
+        ctx.save();
+        ctx.translate(px, py);
+        drawExplore(ctx, b, clamped ? 5 : 6.5, b.r > 0 && !clamped ? Math.min(b.r * curK, R) : 0);
+        ctx.restore();
+        continue;
+      }
       ctx.fillStyle = b.color || '#ffffff';
       ctx.strokeStyle = 'rgba(0,0,0,0.75)';
       ctx.lineWidth = 1.5;
@@ -577,6 +632,8 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
     for (const t of Object.keys(POI_STYLE)) if (types.has(t)) entries.push([t, POI_STYLE[t].name, POI_STYLE[t].color]);
     const acts = new Set((st.markers || []).map((m) => m.type));
     for (const t of Object.keys(ACT_STYLE)) if (acts.has(t)) entries.push([t, ACT_STYLE[t].name, ACT_STYLE[t].color]);
+    if (acts.has('explore-rumour')) entries.push(['explore-rumour', EXPLORE_TYPES['explore-rumour'], EXPLORE_ADV_COLOR]);
+    if (acts.has('explore-garage') && !types.has('garage')) entries.push(['explore-garage', EXPLORE_TYPES['explore-garage'], '#f2b84b']);
     entries.push(['waypoint', 'Waypoint', '#ffffff']);
     for (const [t, name, color] of entries) {
       const span = document.createElement('span');
@@ -586,6 +643,8 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
       lg.translate(18, 18);
       if (t === 'player') drawArrow(lg, 0, 0, 1, 12);
       else if (t === 'waypoint') drawPin(lg, 0, 6, 11);
+      else if (t === 'explore-rumour') drawQuest(lg, color, 10, false);
+      else if (t === 'explore-garage') drawIcon(lg, 'garage', color, 11);
       else drawIcon(lg, t, color, 11);
       span.appendChild(c);
       span.appendChild(document.createTextNode(name));
@@ -733,9 +792,11 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
         toScreen(m.x, m.z, tmpS);
         if (tmpS.x < -40 || tmpS.y < -40 || tmpS.x > cw + 40 || tmpS.y > ch + 40) continue;
         const style = ACT_STYLE[m.type];
+        const ex = isExplore(m.type);
         g.save();
         g.translate(tmpS.x, tmpS.y);
-        if (style) drawIcon(g, m.type, m.color || style.color, iconS);
+        if (ex) drawExplore(g, m, iconS, m.r > 0 ? m.r * view.ppm : 0);
+        else if (style) drawIcon(g, m.type, m.color || style.color, iconS);
         else { // checkpoints and anything else: a small dot
           g.fillStyle = m.color || '#ffffff';
           g.strokeStyle = '#1a120d';
@@ -745,7 +806,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
           g.stroke(); g.fill();
         }
         g.restore();
-        if (style && m.label && view.zoom >= LABEL_ZOOM) {
+        if ((style || (ex && m.type !== 'explore-ring')) && m.label && m.label !== '?' && view.zoom >= LABEL_ZOOM) {
           g.lineWidth = 3.5;
           g.strokeStyle = 'rgba(14, 26, 32, 0.9)';
           g.fillStyle = COL.text;

@@ -237,7 +237,8 @@ export default async function extra(page, check) {
     const g = window.__rw;
     const p = window.__downed;
     let out = false, maxFade = 0, freed = false, gotUp = false;
-    for (let i = 0; i < 60 * 6 && !freed; i++) {
+    // Bodies lie 30 s now (REVAMP 6.7, W6), then fade over 1 s.
+    for (let i = 0; i < 60 * 36 && !freed; i++) {
       g.step(1 / 60);
       // A ped that faded out and then shows up alive again was recycled (its slot
       // was freed and refilled out of view at once: actor cap 40); getting up
@@ -789,19 +790,23 @@ export default async function extra(page, check) {
     const off = g.events.on('explosion', () => booms++);
     g.combat.damage(car, 1e5, null, 'blast');
     const listedAfterBlast = g.vehicles.includes(car);
-    for (let i = 0; i < 60 * 6; i++) {
+    // The hull lies 60 s now and sinks away over 2 s (REVAMP 6.7, W6).
+    let at30 = false;
+    for (let i = 0; i < 60 * 65; i++) {
       g.step(1 / 60);
+      if (i === 60 * 30) at30 = g.vehicles.includes(car) && !car.removed;
       if (car.wrecked && wreckedAt < 0) wreckedAt = i;
       maxDebris = Math.max(maxDebris, g.combatFx.counts().debris);
       if (car.removed && removedAt < 0) removedAt = i;
     }
     off();
     return { booms, maxDebris, wreckedAt, removedAt, listedAfterBlast, listed: g.vehicles.includes(car), meshGone: !car.mesh,
-      player: g.player.mode };
+      player: g.player.mode, at30 };
   });
   check(wreck.booms >= 1 && wreck.wreckedAt >= 0 && wreck.listedAfterBlast, `a destroyed car explodes and is wrecked (${JSON.stringify(wreck)})`);
-  check(wreck.maxDebris >= 6 && wreck.maxDebris <= 48, `the wreck throws 6 to 48 debris chunks (${wreck.maxDebris})`);
-  check(wreck.removedAt > 60 && wreck.removedAt < 60 * 6 && !wreck.listed && wreck.meshGone, `the wreck is removed from game.vehicles within 6 s (${wreck.removedAt} steps)`);
+  check(wreck.maxDebris >= 14 && wreck.maxDebris <= 96, `the wreck throws 14 to 96 parts (${wreck.maxDebris})`);
+  check(wreck.at30, 'the burnt hull still stands 30 s after the blast');
+  check(wreck.removedAt > 60 * 60 && wreck.removedAt < 60 * 64 && !wreck.listed && wreck.meshGone, `the hull is removed from game.vehicles 60 to 64 s after the blast (${wreck.removedAt} steps)`);
 
   // ---- Cops are killable; missiles and blasts hit what they should (docs/COMBAT.md) ----
   // Shoot the officers of a patrol car through the car; then a missile from the

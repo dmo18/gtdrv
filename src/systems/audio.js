@@ -1015,7 +1015,7 @@ export function createAudio(game) {
     coax: { buf: 'gunRifle', n: 2, g: 0.7, range: 240, gap: 0.06, last: -9 }, // tank (task 32)
     nosegun: { buf: 'gunCannon', n: 2, g: 0.75, range: 280, gap: 0.04, last: -9 },
   };
-  const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9, casing: -9 };
+  const lastC = { impact: -9, hit: -9, down: -9, whiz: -9, reload: -9, melee: -9, casing: -9, mark: -9, kill: -9, land: -9, part: -9 };
   // Distance dulls a sound: air absorbs the highs.
   const distLp = distanceLowpass;
   const lowPriority = () => voices.count >= MAX_VOICES - 2;
@@ -1101,9 +1101,42 @@ export function createAudio(game) {
       }, distLp(sp.d, 80));
     }
   }
+  // The player's own hit (REVAMP 6.7 sound hooks): a dry tick, not
+  // positioned; a kill adds the falling two-note cue 40 ms after it.
+  let markAt = -9;
+  function hitMarker(e) {
+    if (!e.byPlayer || e.kind === 'fire' || e.kind === 'blast' || !combatGate('mark', 0.05)) return;
+    markAt = ctx.currentTime;
+    voices.play(bus.ui || bus.effects, 0.42, 0, (v, t) => v.add('hitTick', t, 1, e.mat === 'metal' ? 0.9 : 1));
+  }
+  function onKill(e) {
+    if (!ready || !e || !e.byPlayer || !combatGate('kill', 0.06)) return;
+    const now = ctx.currentTime;
+    const at = Math.max(0, markAt + 0.04 - now);
+    voices.play(bus.ui || bus.effects, 0.5, 0, (v, t) => v.add('killCue', t + at, 1, 1));
+  }
+  // A body hits the ground: the fall thud where it lands.
+  function onBodyLand(e) {
+    if (!ready || !e || lowPriority() || !combatGate('land', 0.05)) return;
+    spatial(fin(e.x), fin(e.z), 60);
+    if (sp.gain < 0.01) return;
+    voices.play(bus.effects, sp.gain * 0.7, sp.pan, (v, t) => v.add(`thud${Math.floor(rng.next() * 3)}`, t, 1, 1.05 + rng.next() * 0.15));
+  }
+  // A thrown part lands (combatfx sends at most 4 per blast): a metal clatter.
+  function onPartLand(e) {
+    if (!ready || !e || lowPriority() || !combatGate('part', 0.04)) return;
+    spatial(fin(e.x), fin(e.z), 80);
+    if (sp.gain < 0.01) return;
+    const heavy = e.part === 'wheel' || e.part === 'door' || e.part === 'bonnet';
+    voices.play(bus.effects, sp.gain * (heavy ? 0.65 : 0.45), sp.pan, (v, t) => {
+      v.add(`impactMetal${Math.floor(rng.next() * 3)}`, t, 1, heavy ? 0.6 + rng.next() * 0.1 : 0.9 + rng.next() * 0.2);
+      if (heavy) v.add(`clank${Math.floor(rng.next() * 2)}`, t + 0.01, 0.6, 0.7);
+    }, distLp(sp.d, 90));
+  }
   function onHit(e) {
     if (!ready || !e || !e.target) return;
     const k = e.kind;
+    hitMarker(e);
     if (k !== 'bullet' && k !== 'melee') return;
     if (lowPriority() && !ownShot(e.source)) return;
     if (!combatGate('hit', 0.035)) return;
@@ -1124,6 +1157,7 @@ export function createAudio(game) {
   }
   function onDown(e) {
     if (!ready || !e || !e.target || (e.target.spec && e.target.hp === undefined)) return;
+    if (e.target.rag) return; // a tumbling body thuds when it lands (bodyLand)
     if (lowPriority() || !combatGate('down', 0.08)) return;
     spatial(fin(e.target.x), fin(e.target.z), 60);
     voices.play(bus.effects, sp.gain * 0.6, sp.pan, (v, t) => v.add(`thud${Math.floor(rng.next() * 3)}`, t + 0.05, 1, 1.1));
@@ -1143,7 +1177,7 @@ export function createAudio(game) {
     const near = Math.min(1, 25 / Math.max(5, d));
     const g = Math.pow(1 - d / range, 1.2) * (0.3 + 0.7 * near) * clamp(0.55 + 0.3 * k, 0.5, 1.2);
     if (g < 0.01) return;
-    const delay = travelDelay(d);
+    const delay = travelDelay(d, 0.5); // REVAMP 6.7: at most 0.5 s late
     const pan = sp.pan * (d < 8 ? d / 8 : 1);
     const lp = distLp(d, 160);
     if (e.puff) {
@@ -1155,15 +1189,18 @@ export function createAudio(game) {
     const pick = () => Math.floor(rng.next() * 2);
     voices.play(bus.effects, Math.min(1.3, g), pan, (v, t) => {
       const t0 = t + delay;
+      // Three layers: crack at 0 ms, thump at 0 ms, the rumble tail from 60 ms.
       if (crackG > 0.02) v.add(`blastCrack${pick()}`, t0, 0.9 * crackG, rate * 1.1);
-      v.add(`blastBody${pick()}`, t0 + 0.003, 1, rate);
-      v.add('blastTail', t0 + 0.03, 0.5 + 0.2 * k + 0.4 * (1 - near), rate * 0.95);
+      v.add('blastThump', t0, 0.9, clamp(1.1 - 0.12 * k, 0.8, 1.1));
+      v.add(`blastBody${pick()}`, t0 + 0.003, 0.85, rate);
+      v.add('blastTail', t0 + 0.06, 0.5 + 0.2 * k + 0.4 * (1 - near), rate * 0.95);
       if (k > 1.3) v.add(`blastBody${pick()}`, t0 + 0.06, 0.5, rate * 0.7);
       if (d < 90) v.add(`debris${pick()}`, t0 + 0.2 + 0.1 * rng.next(), 0.55 * (1 - d / 90), 0.9 + 0.2 * rng.next());
     }, lp);
     // music and the ambience step back for a moment
     const now = ctx.currentTime;
-    const dk = clamp(g * 0.9, 0, 0.75);
+    // Music ducks 6 dB for 0.8 s when the blast is within 60 m.
+    const dk = Math.max(d < 60 ? 0.5 : 0, clamp(g * 0.9, 0, 0.75));
     if (musicDuck) {
       musicDuck.gain.cancelScheduledValues(now);
       musicDuck.gain.setTargetAtTime(1 - dk, now + delay, 0.03);
@@ -1173,6 +1210,74 @@ export function createAudio(game) {
       boomDuck.gain.cancelScheduledValues(now);
       boomDuck.gain.setTargetAtTime(1 - dk * 0.6, now + delay, 0.03);
       boomDuck.gain.setTargetAtTime(1, now + delay + 0.6, 1);
+    }
+  }
+  // ---- burning hulls (hullBurn {id, on, x, z}): a fire crackle loop on the
+  // nearest two; the rest are not heard ----
+  const HULLS = 6;
+  const hullOn = [];
+  for (let i = 0; i < HULLS; i++) hullOn.push({ id: -2, x: 0, z: 0, on: false });
+  let fireLoops = null;
+  function onHullBurn(e) {
+    if (!e) return;
+    let free = null;
+    for (let i = 0; i < HULLS; i++) {
+      const h = hullOn[i];
+      if (h.on && h.id === e.id) {
+        if (!e.on) h.on = false;
+        return;
+      }
+      if (!h.on && !free) free = h;
+    }
+    if (!e.on || !free) return;
+    free.on = true;
+    free.id = e.id;
+    free.x = fin(e.x);
+    free.z = fin(e.z);
+  }
+  function buildFireLoops() {
+    if (!buf('fireCrackle')) return null;
+    const mk = () => {
+      const pan = panNode(bus.effects);
+      const g = gainNode(0, pan || bus.effects);
+      const s = loopSrc('fireCrackle', g, 0.9 + rng.next() * 0.2);
+      return { pan, g, s };
+    };
+    return [mk(), mk()];
+  }
+  function updateFire(now) {
+    let any = false;
+    for (let i = 0; i < HULLS; i++) if (hullOn[i].on) any = true;
+    if (!any && !fireLoops) return;
+    if (!fireLoops) fireLoops = buildFireLoops();
+    if (!fireLoops) return;
+    // The two nearest burning hulls get the two loops.
+    let a = -1, b = -1, da = Infinity, db = Infinity;
+    const p = game.player;
+    for (let i = 0; i < HULLS; i++) {
+      const h = hullOn[i];
+      if (!h.on) continue;
+      const d = Math.hypot(h.x - fin(p.x), h.z - fin(p.z));
+      if (d < da) {
+        b = a;
+        db = da;
+        a = i;
+        da = d;
+      } else if (d < db) {
+        b = i;
+        db = d;
+      }
+    }
+    for (let k = 0; k < 2; k++) {
+      const L = fireLoops[k];
+      const i = k === 0 ? a : b;
+      if (i < 0) {
+        set(L.g.gain, 0, now, 0.3);
+        continue;
+      }
+      spatial(hullOn[i].x, hullOn[i].z, 70);
+      set(L.g.gain, sp.gain * 0.5, now, 0.2);
+      if (L.pan) set(L.pan.pan, sp.pan, now, 0.1);
     }
   }
   // ---- arms (docs/ARMS.md section 7) ----
@@ -1578,6 +1683,10 @@ export function createAudio(game) {
         ev.on('splash', guard(onSplash)),
         ev.on('shot', guard(onShot)),
         ev.on('hit', guard(onHit)),
+        ev.on('kill', guard(onKill)),
+        ev.on('bodyLand', guard(onBodyLand)),
+        ev.on('partLand', guard(onPartLand)),
+        ev.on('hullBurn', guard(onHullBurn)),
         ev.on('down', guard(onDown)),
         ev.on('explosion', guard(onExplosion)),
         ev.on('burning', guard(onBurning)),
@@ -1633,6 +1742,7 @@ export function createAudio(game) {
       updateAmbience(now);
       updateSteps(udt);
       updateMusic(now);
+      updateFire(now);
       voices.tick(now);
       const ms = nowMs() - r0;
       perf.renderMs += ms;

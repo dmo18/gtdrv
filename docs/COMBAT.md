@@ -1,9 +1,12 @@
 # Combat interface (actors, weapons, damage)
 
 Violent but not graphic: hits show sparks, a flash and a small red blood
-burst; a person who is killed falls, bleeds a pool onto the ground, lies
-still and fades. Blood is allowed; dismemberment and sexual content never.
-Destroyed vehicles explode, break into debris chunks and vanish. Logic lives in src/systems/combat.js
+burst; a person who is killed falls away from the hit, bleeds a pool onto
+the ground, lies still for 30 s and fades. Blood is allowed; dismemberment
+and sexual content never. Destroyed vehicles explode in ten layers, throw
+14 to 18 parts (a door, a wheel, the bonnet and a bumper among them) and
+leave a burnt hull that smokes for 60 s and a scorch that stays 120 s
+(docs/REVAMP.md 6.7, the combat feel contract). Logic lives in src/systems/combat.js
 and src/core/weapons.js (pure, node-testable); drawing in
 src/render/combatfx.js; buttons in src/ui/touch.js. Fixed 1/60 s steps,
 `createRng` only, no allocation per frame (pools, shared payloads).
@@ -23,7 +26,8 @@ States: hit while ok: `hp -= amount`, `hitT`. For everyone except the
 player a bullet, a blast or a car at closing speed > 4 m/s is lethal in
 one hit (hp set to 0, `down`, kx, kz from the push); a wrench kills on
 its 2nd hit. Dead means dead: `down` goes to `out` after 1.6 s, the body
-lies 3 s, then `fade` rises over 1 s. There is no get-up for anyone but
+lies `BODY_LIE_T` = 30 s, then `fade` rises over 1 s. At most `BODY_MAX` =
+12 bodies lie at once: one more makes the oldest start its fade at once. There is no get-up for anyone but
 the player. Down and out actors ignore further hits and do not move by
 themselves. The player cannot die (`RULES.invulnerable`) and has
 unlimited ammo; with the rule off the player keeps hp, `getup` and
@@ -38,8 +42,17 @@ ram 1, fire 1), sets `wrecked` at 0. Combat never edits step files.
 Events (one shared payload object per name, read it, do not keep it):
 - `shot` {shooter, weapon, x,y,z, dx,dy,dz, hx,hy,hz, hitKind:
   'actor'|'craft'|'wall'|'ground'|'none'}: muzzle flash, tracer, sound.
-- `hit` {target, source, amount, kind, x,y,z}: sparks, flash, thud.
+- `hit` {target, source, amount, kind, x,y,z, mat: 'flesh'|'metal',
+  byPlayer}: sparks, flash, thud; the player's own hits tick.
 - `down` {target, source, kind}; `out` {target, source}.
+- `kill` {target, x, z, cause: 'bullet'|'blast'|'vehicle'|'melee', byPlayer,
+  dx, dz}: every death but the player's (dx, dz the fall direction): the
+  kill cue, the crosshair flash and the kill freeze.
+- `bodyLand` {target, x, z}: a falling body first touches the ground (thud).
+- `hullBurn` {craft, id, on, x, z}: a hull's flames start (blast) and die
+  (12 s later, or when it goes): the crackle loop.
+- `partLand` {x, z, part, speed} (from combatfx): a thrown part's first
+  ground hit, at most 4 per blast: the metal clatter.
 - `explosion` {x,y,z, radius, source, depth}: fireball, shake, boom.
 - `burning` {craft, on}: smoke and flames loop on the craft.
 - `reload` {actor, weapon}; `weaponSwitch` {actor, weapon}; `empty`.
@@ -99,18 +112,31 @@ when killed. Actor cap is 40 (36 + the 4 bodies).
   `tPitch`) and lands level; the craft that just blew up pops 2 to 3 m and
   a wreck can flip over (half or full turn, `tRollEnd`) and stays flipped
   until removed. `craft.y` carries the height, so hit tests follow;
-- people the blast kills get `ky` (3.5 to 12 m/s up), `spinV` and tumble
+- people the blast kills are thrown away from the centre (3 to 6 m/s up), get `spinV` and tumble
   as a ragdoll (see "Ragdolls" below), then lie where they land;
 - props: combatfx throws up to 5 small chunks from `city.furniture`
   (bins, benches, hydrants) within 1.2 r (the static street meshes stay).
-Blast size by craft (`craftBlast`): car 8 (heavy car 9), tank 12 x1.5,
-fighter 11 x1.3, other plane 10 x1.3, heli 10 x1.2. `explosion` carries
+Blast size by craft (`craftBlast`, REVAMP 6.7): damage radius car 10 m
+(heavy car 11) x1, heli 12 x1.2, plane 12 (fighter 13) x1.3, tank 14 x1.5
+(the second number is the visual scale). Craft shove `craftPush`: 12 m/s
+at the centre for a car up to 14 for a tank. `explosion` carries
 `radius`, `size`, `scale` and `puff` for audio and effects.
 
-## Ragdolls
+## Ragdolls and the fall direction
+Every killing hit has one unit ground vector d (REVAMP 6.7): a gunshot the
+way the shot travelled (`setFall` at the hitscan sites), a blast from its
+centre to the victim (a seeded direction within 0.2 m), a vehicle its
+velocity. The body is thrown along d at bullet 1.5 m/s (shotgun 4), vehicle
+0.6 x the closing speed up to 14 (thrown up 1.2 + 0.32 per m/s, cap 8),
+blast 6 + 10 (1 - d/r) with 3 to 6 m/s up, and ends lying along d
+(`directRagdoll`): of the four lying poses whose feet-to-head line points
+along d it takes the one nearest the way the body faced, so a hit from the
+front lays it on its back, from behind on its face, from the side on that
+side (`ragYaw`, `ragPitch`, `ragRoll`). test/ragdoll.test.js checks 16
+directions for each cause (bullet, shotgun, blast, vehicle).
 `src/core/ragdoll.js` (pure; drawing in `src/render/ragdoll.js`, called by
-`layDown`). Knocked down by `blast` or `ram` (never the player, never
-bullets or melee): the actor gets a slot from a pool of `RAGDOLL_MAX` = 12;
+`layDown`). Every death but the player's (a `fire` death keeps the plain
+fall): the actor gets a slot from a pool of `RAGDOLL_MAX` = 12;
 when all are busy the old fall pose is used. One rigid body (centre at the
 hips, 0.9 m) with velocity, yaw, pitch (+PI/2 on the back) and roll,
 gravity and a ground clamp at the body's lowest point, one small bounce,
@@ -132,10 +158,15 @@ explode after 6 s or at 0. Explosion: blast r 8, damage as above,
 pushes craft (impulse 12 m/s at centre), sets `wrecked`, dark tint.
 Chain: a blast can ignite or explode other craft, depth capped at 2
 and at most 3 explosions per 0.5 s (extra ones are queued 0.3 s).
-Wrecks: `explosion` carries the destroyed `craft` (else null). 3 s
-(`WRECK_T`) after the blast the hull is removed through
-`game.removeVehicle` (so `game.vehicles`, minimap, traffic and parked
-spawners stay consistent). If the player is still aboard they are
+Wrecks: `explosion` carries the destroyed `craft` (else null). The burnt
+hull stays `WRECK_LIE_T` = 60 s (solid, still in `game.vehicles`, listed in
+`combat.hulls`), with flames for the first `WRECK_FLAME_T` = 12 s and smoke
+the whole time (combatfx), then sinks into the ground over `WRECK_FADE_T` =
+2 s (`wreckFade`) and is removed through `game.removeVehicle` (so
+`game.vehicles`, minimap, traffic and parked spawners stay consistent).
+At most `WRECK_MAX` = 6 hulls stand at once: a seventh makes the oldest
+start its fade at once. Traffic and the far sweeps may still clear a hull
+earlier once the player is far away. If the player is still aboard they are
 ejected first, so a removed wreck never leaves them stuck. A wreck that
 cannot explode (chain depth cap, tank crush) is removed on the same
 timer. Buildings are not destructible. Blasts also throw people in
@@ -148,10 +179,16 @@ range outward and kill them.
 - Decals: one instanced mesh, ring buffers of 16 pools and 24 spatters
   (oldest slot is reused). Droplets use the shared particle pools,
   capped by `quality`.
-- Wreck debris: one pooled instanced mesh, 48 chunks at most (ring).
-  Each wreck throws 6 to 10 boxes (dark metal, vehicle colour, 2 to 3
-  tyres for cars) that fly out, tumble, bounce once, shrink and vanish
-  within 3.6 s. A flat scorch decal remains.
+- Decal pools last as long as their body (31 s).
+- Wreck parts (`src/render/carparts.js`, pure): a pool of 96 drawn as three
+  instanced meshes (boxes, doors with a window band, wheels with a rim).
+  A car throws 14 to 18, always a door, a wheel, the bonnet and a bumper
+  (a second door and wheel when the pool has room; other craft throw
+  panels and chunks), at 6 to 16 m/s, 35 to 75 degrees up, spinning;
+  one bounce keeping 0.3 of the speed (sparks, dust and `partLand`), then
+  they lie flat 20 s and shrink away over 1 s. Seeded from the vehicle id.
+  The scorch decal stays 120 s and fades over 5 s; under a craft blast it
+  is 9 m across x the visual scale.
 
 ## Touch controls (on foot)
 Left stick walks (unchanged). Right-side drag turns the camera; the
@@ -221,30 +258,56 @@ node over 60 m from hostiles and police, hp full, heat 0, nothing lost.
 During a mission this opens the retry card (MISSIONS.md).
 Health regenerates at 10/s after 5 s without damage.
 
-## Explosion look (combatfx.js)
-Per blast, from the two shared particle pools (no new draw call): a one
-step white flash plus a warm second sprite and a flat ground glow (fake
-light, no real light); a layered fireball (hot core, orange body that
-cools to red-brown, red billows that fade to black: colour over life via
-`tintP`); a fast bright shock ring and a dust ring with a dust skirt;
-sparks and glowing embers with gravity; a smoke column that keeps feeding
-for 2.4 s plus 0.08 s per metre of radius and lives 6 to 10 s per puff,
-growing and thinning; a scorch decal (about 100 s, then 25 s fade, 24
-slots). Camera shake `(1 - d/(45 + 5 r))^2 x (12 + 2.6 r)` through
-`chase.kick`, off when `settings.reduceMotion` or the OS asks for reduced
-motion (the flash also halves). Particle counts scale with `game.quality`.
+## Explosion look (combatfx.js, numbers in src/render/blastplan.js)
+Per blast, from the two shared particle pools (no new draw call), at the
+visual scale vs (the craft's scale, else radius / 10 m): (1) a frame-0
+white-yellow flash 6 m across and the warm light it throws (0xffc870): a
+flat glow 60 m across on the street and a soft upright one that tints the
+walls behind, gone by 0.35 s (pooled sprites, no real light); (2) the
+fireball: three additive billboards from 2 m to 7 m radius by 0.25 s,
+white to yellow to orange to dark red, gone by 0.7 s, a hot core and red
+billows that cool to black rolling through it; (3) the smoke roll: 8 to 12
+dark puffs from 0.08 s rising 3 m/s and thrown out so smoke is seen 12 m
+from the centre by 0.5 s (`smokeReach`), each living 2.5 s, then the
+column that keeps feeding; (4) a ground pressure ring to 16 m in 0.3 s and
+a slower dusty one; (5) a dust skirt of 10 ground puffs at 8 m/s coloured
+by `city.lotTypeAt` (sand, dirt or grey); (6) 24 sparks living 0.4 to
+0.9 s and slow embers; big and huge blasts add a second shockwave and thrown
+black billows. Burnt hulls (`combat.hulls`) flame for 12 s with firelight
+on the road and smoke the whole 60 s. Camera shake: chasecam trauma 1 at the
+centre falling in a straight line to 0 at 60 m x vs (`shakeAt`), off when
+`settings.reduceMotion` or the OS asks for reduced motion (the flash also
+halves). Particle counts scale with `game.quality`.
+
+## Kill freeze and cues (cinematic.js, core/loop.js)
+A kill by the player within 60 m stops the simulation for 3 drawn frames,
+a vehicle the player destroys for 4 (`game.hitStop(n)` -> `loop.hold`: the
+loop runs no steps and adds no time for those frames). At most once per
+0.25 s of game time, never past 4 frames, off under Reduce motion; the
+slow motion starts after it. The crosshair flashes a red and white burst
+on a kill (bigger for a vehicle). The player's hits tick (`hitTick`, 30 ms
+at 1.8 kHz) and a kill adds the falling two-note cue (`killCue`, 660 to
+440 Hz in 90 ms) 40 ms after the tick, both not positioned.
 Missiles leave a white-to-grey trail that lingers 2.4 s with a hot nozzle
 and sparks.
 
 ## Caps (phone)
-Actors 40 (peds 22, crew 8, officers 4, bodies 4, player); projectiles 24;
-live explosions 4; burning craft 4; tumbling ragdolls 12; scorch decals 24 (one instanced
+Actors 40 (peds 22, crew 8, officers 4, bodies 4, player); lying bodies
+12; standing hulls 6; projectiles 24; live explosions 4; burning craft 4;
+tumbling ragdolls 12; thrown parts 96; scorch decals 24 (one instanced
 mesh); tracers 32 and sparks in the existing effect pools. combatfx
-adds at most 4 draw calls. No per-shot allocation. Target step time
+adds at most 7 draw calls (two particle pools, decals, blood, three part
+meshes). A heavy fight (six burning hulls, 96 parts, a dozen dead) draws
+391 calls in scripts/blast-shots.mjs w6-perf. No per-shot allocation. Target step time
 under 2 ms in a 20-actor fight on the phone.
 
 ## Sound and effect names
-Audio listens to `shot` (by weapon id), `hit` (kind), `down`,
-`explosion`, `burning`, `reload`, `empty`, `weaponSwitch`,
-`playerDown`. Effects listen to `shot`, `hit`, `explosion`, `burning`,
+Audio listens to `shot` (by weapon id), `hit` (kind; the player's own hit
+ticks), `kill` (the kill cue), `down` and `bodyLand` (the body thud where
+it lands), `explosion` (three layers: `blastCrack` at 0 ms, `blastThump`, a
+55 Hz drop with harmonics at 110, 165 and 220 Hz, at 0 ms, the `blastTail`
+rumble from 60 ms; delayed by distance / 340 s, at most 0.5 s; music ducks
+at least 6 dB for 0.8 s within 60 m), `partLand` (a metal clatter),
+`hullBurn` (a `fireCrackle` loop on the nearest two burning hulls),
+`burning`, `reload`, `empty`, `weaponSwitch`, `playerDown`. Effects listen to `shot`, `hit`, `explosion`, `burning`,
 `down`, `out`. All sounds are generated in code.

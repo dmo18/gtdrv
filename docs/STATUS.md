@@ -21,6 +21,30 @@ the final review and fix stage; nothing is in progress that blocks play.
   in the dome only (no separate mesh).
 - Shots: docs/preview/w7-*.png (scripts/w7-shots.mjs).
 
+## W6 Combat feel (2026-11-22)
+Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
+- Destruction stays: a burnt hull lies 60 s (at most 6; a seventh makes the oldest sink away early), flames 12 s
+  with firelight on the road, smokes the whole time, then sinks into the ground over 2 s. Bodies lie 30 s (at most
+  12), their blood pools as long. The scorch stays 120 s (9 m across under a car).
+- The blast in ten layers (src/render/blastplan.js holds the numbers): frame-0 flash, warm light on the street and
+  walls for 0.35 s (pooled sprites, no real light), a three-billboard fireball 2 m to 7 m by 0.25 s cooling to dark
+  red, a smoke roll seen 12 m out by 0.5 s, a 16 m pressure ring, a dust skirt coloured by the ground, 24 sparks,
+  the smoke column. Blast radius by craft: car 10 m, heavy car 11, heli 12, plane 12 (fighter 13), tank 14; visual
+  scale 1 to 1.5. Shake 1 at the centre to 0 at 60 m.
+- Parts (src/render/carparts.js): 14 to 18 per car from a pool of 96, always a door, a wheel, the bonnet and a bumper,
+  one bounce with sparks and a clatter, lying 20 s.
+- Falls: every killing hit throws the body along its fall direction (shot, blast or car) and lays it along it: on
+  the back from the front, on the face from behind, on the side from the side; 16 directions per cause tested.
+- Kill freeze (3 frames, 4 for a vehicle; core/loop.js `hold`), a crosshair kill flash, the player's hit tick and
+  kill cue, a three-layer blast sound (crack, 55 Hz thump with harmonics, tail from 60 ms; delay at most 0.5 s;
+  music ducks 6 dB within 60 m), body-fall thuds where bodies land, part clatter, a crackle loop on the nearest two
+  burning hulls.
+- Heavy fight (6 hulls, 96 parts, a dozen dead; `node scripts/blast-shots.mjs w6-perf`): 391 draw calls, step mean
+  1.5 ms on the loaded test machine.
+- Shots: docs/preview/w6-*.png (`node scripts/blast-shots.mjs w6`).
+- Not done: the blast light does not use the lamp light map (nightlights.js is W7's: a blast uniform there would light
+  walls properly); the car body parts are W6's own shapes, not carbody.js meshes.
+
 ## Features now in the game
 - Driving: city with traffic and pedestrians, nine road vehicles, tank.
   Arcade handling (tight steering, the default) and Realistic handling.

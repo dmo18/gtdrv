@@ -1,7 +1,7 @@
 // End to end checks for killing cops and for bombs and missiles that must
 // visibly hit and destroy targets, in headless Chromium at phone size.
 // Uses the debug fixtures (g.debug.spawnCar) and steps the game by hand.
-// usage: node scripts/combat-e2e.mjs [cops|missiles|bombs]  (default: all)
+// usage: node scripts/combat-e2e.mjs [cops|missiles|bombs|feel]  (default: all)
 import { createRequire } from 'node:module';
 import { buildGame, serve } from './build.mjs';
 
@@ -348,6 +348,54 @@ if (only === 'all' || only === 'bombs') {
 }
 
 console.log(bad ? `${bad} page errors` : 'no page errors');
+if (only === 'all' || only === 'feel') {
+  // W6 (REVAMP 6.7): a car blast leaves a hull that still stands 30 s later,
+  // throws 14 or more parts, and a kill by the player freezes the world.
+  const r = await page.evaluate(() => {
+    const g = window.__rw;
+    const run = window.__run;
+    const p = g.player;
+    if (p.vehicle) {
+      p.vehicle.driver = null;
+      p.vehicle = null;
+      g.setPlayerMode('foot');
+    }
+    const w = p.walker;
+    const sp = g.city.spawn;
+    const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
+    const car = g.debug.spawnCar('sedan', sp.x + fx * 30, sp.z + fz * 30, sp.heading);
+    car.vx = car.vz = car.speed = 0;
+    const cfx = g.systems.find((s) => s.name === 'combatfx');
+    const before = cfx.counts().debris;
+    g.combat.damage(car, 1e5, w, 'blast');
+    run(60);
+    const parts = cfx.counts().debris - before;
+    run(60 * 29);
+    const at30 = { removed: !!car.removed, hull: g.combat.hulls.includes(car), fade: car.wreckFade };
+    // A kill by the player: the kill event and a 3 frame freeze.
+    const kills = [];
+    const off = g.events.on('kill', (e) => kills.push({ byPlayer: e.byPlayer, cause: e.cause }));
+    const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
+    let held = 0, freezes = 0;
+    const c0 = g.hitStopper.count;
+    if (a) {
+      a.x = a.px = w.x + 5;
+      a.z = a.pz = w.z;
+      g.time += 1; // past the 0.25 s gate
+      g.combat.damage(a, 100, w, 'bullet');
+      held = g.loop.held; // the loop is stopped here, so the vehicle's 4 may still be pending
+      freezes = g.hitStopper.count - c0;
+    }
+    off();
+    return { parts, at30, kills, held, freezes, vehicle: g.hitStopper.lastVehicle, rag: !!(a && (a.rag || a.ragDone)) };
+  });
+  console.log('feel', JSON.stringify(r));
+  check(r.parts >= 14, `a car blast throws ${r.parts} parts (14 to 18, plus props)`);
+  check(!r.at30.removed && r.at30.hull && r.at30.fade === 0, 'the burnt hull still stands 30 s after the blast');
+  check(r.kills.length === 1 && r.kills[0].byPlayer, 'a player kill sends the kill event');
+  check(r.freezes === 1 && !r.vehicle && r.held >= 3, `a player kill freezes the world (3 frames; loop holds ${r.held})`);
+  check(r.rag, 'the body falls as a directed ragdoll');
+}
 check(bad === 0, 'no page or console errors');
 await browser.close();
 server.close();

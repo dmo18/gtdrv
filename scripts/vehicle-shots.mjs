@@ -6,7 +6,7 @@
 // --game renders inside the real game instead (its sky, light, tone
 // mapping and street). Shot names there: g:<id>:<view>[:<hour>[:<state>]]
 // with view front | side | rear | top, state hurt | burnt | brake, and
-// g:street:<hour> (ten cars 20 to 50 m ahead of the chase camera).
+// g:street:<hour>[:tele] (ten cars 20 to 50 m ahead of the chase camera).
 // Example: node scripts/vehicle-shots.mjs --game --size=915x412 g:sedan:front:11
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
@@ -38,6 +38,12 @@ if (process.argv.includes('--game')) {
 // --compare=before.png,after.png,out.png stacks two pictures with labels.
 if (opt('compare')) {
   await compare(...opt('compare').split(','));
+  process.exit(0);
+}
+// --sheet=out.png,a.png,b.png,... lays pictures out two by two.
+if (opt('sheet')) {
+  const [dest, ...files] = opt('sheet').split(',');
+  await sheet(dest, files);
   process.exit(0);
 }
 await build({
@@ -114,7 +120,7 @@ async function gameShots() {
       const [, id, view, hour = '11', state = ''] = parts;
       // Set the scene up with the loop running (sky, light and lamps follow
       // the hour), then freeze it and frame the shot.
-      await page.evaluate(({ id, view, hour, state }) => {
+      await page.evaluate(({ id, hour, state }) => {
         const g = window.__rw;
         if (!g.loop.running) g.loop.start();
         g.daynight.setHour(+hour);
@@ -155,7 +161,7 @@ async function gameShots() {
             v.driver = { dead: false, debug: true };
           }
         }
-      }, { id, view, hour, state });
+      }, { id, hour, state });
       await page.waitForTimeout(1600);
       const r = await page.evaluate(({ id, view, state }) => {
         const g = window.__rw;
@@ -176,7 +182,8 @@ async function gameShots() {
           g.kinds.car.updateMesh(v.mesh, v, 1, g.time);
         }
         if (id === 'street') {
-          cam.fov = 55;
+          // state 'tele': a long lens, so the 20 to 50 m cars fill the frame.
+          cam.fov = state === 'tele' ? 26 : 55;
           cam.position.set(b.x - fx * 6, 2.4, b.z - fz * 6);
           cam.lookAt(b.x + fx * 30, 0.8, b.z + fz * 30);
         } else {
@@ -220,6 +227,22 @@ async function compare(a, b, dest) {
     await page.setContent(`<body style="margin:0">${cell(await url(a), 'before')}${cell(await url(b), 'after')}</body>`);
     await page.screenshot({ path: resolve(dest) });
     console.log('compare ->', resolve(dest));
+  } finally {
+    await browser.close();
+  }
+}
+
+async function sheet(dest, files) {
+  const url = async (f) => 'data:image/png;base64,' + (await readFile(resolve(f))).toString('base64');
+  const rows = Math.ceil(files.length / 2);
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: CW * 2, height: CH * rows }, deviceScaleFactor: 1 });
+    let html = '<body style="margin:0;display:flex;flex-wrap:wrap;width:' + CW * 2 + 'px;background:#000">';
+    for (const f of files) html += `<img src="${await url(f)}" style="width:${CW}px;height:${CH}px;display:block">`;
+    await page.setContent(html + '</body>');
+    await page.screenshot({ path: resolve(dest) });
+    console.log('sheet ->', resolve(dest));
   } finally {
     await browser.close();
   }

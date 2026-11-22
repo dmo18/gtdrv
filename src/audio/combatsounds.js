@@ -145,6 +145,57 @@ export const COMBAT_SHOTS = {
     return fadeEdges(normalize(removeDC(out), 0.85), 16, 3000);
   },
 
+  // The thump under a blast (REVAMP 6.7): a 55 Hz drop with its harmonics
+  // at 110, 165 and 220 Hz so a phone speaker still carries it, 250 ms.
+  blastThump() {
+    const out = z(len(0.3));
+    thump(out, 80, 55, 0.03, 1, 0.07);
+    thump(out, 160, 110, 0.03, 0.7, 0.06);
+    thump(out, 240, 165, 0.03, 0.45, 0.05);
+    thump(out, 320, 220, 0.03, 0.3, 0.04);
+    warm(out, 1.6, 0.2);
+    return fadeEdges(normalize(removeDC(out), 0.95), 8, 900);
+  },
+  // Fire on a burnt hull: a low roar with crackles and pops (a loop).
+  fireCrackle(rng) {
+    const n = len(2.4);
+    const out = z(n);
+    const roar = white(n, rng);
+    lp1(roar, 380, { loop: true, passes: 2 });
+    const m = smoothRandom(n, 6, rng);
+    for (let i = 0; i < n; i++) out[i] = roar[i] * 2.2 * (0.6 + 0.4 * m[i]);
+    const cr = z(n);
+    for (let k = 0; k < 90; k++) {
+      const at = Math.floor(rng.next() * (n - len(0.02)));
+      addBurst(cr, at, 0.0008 + rng.next() * 0.002, 0.3 + rng.next() * 0.7, rng);
+    }
+    filter(cr, out, biquad('hp', 1800, 0.7), { add: true, gain: 0.8, loop: true });
+    filter(cr, out, biquad('bp', 700, 1.1), { add: true, gain: 0.4, loop: true });
+    return normalize(removeDC(out), 0.8);
+  },
+  // The player's hit marker: a dry 30 ms tick at 1.8 kHz, not positioned.
+  hitTick() {
+    const out = z(len(0.05));
+    for (let i = 0; i < out.length; i++) {
+      const t = i / R.sr;
+      const e = t < 0.0015 ? t / 0.0015 : Math.exp(-(t - 0.0015) / 0.009);
+      out[i] = (Math.sin(TAU * 1800 * t) + 0.3 * Math.sin(TAU * 3600 * t)) * e * (t < 0.03 ? 1 : Math.max(0, 1 - (t - 0.03) / 0.01));
+    }
+    return normalize(out, 0.7);
+  },
+  // The kill cue: two notes falling 660 to 440 Hz in 90 ms.
+  killCue() {
+    const out = z(len(0.16));
+    for (let i = 0; i < out.length; i++) {
+      const t = i / R.sr;
+      const f = t < 0.045 ? 660 : 440;
+      const u = t < 0.045 ? t : t - 0.045;
+      const e = Math.min(1, u / 0.003) * (t < 0.045 ? 1 : Math.exp(-u / 0.05));
+      out[i] = (Math.sin(TAU * f * t) + 0.35 * Math.sin(TAU * f * 2 * t) + 0.15 * Math.sin(TAU * f * 3 * t)) * e;
+    }
+    return fadeEdges(normalize(out, 0.7), 8, 400);
+  },
+
   // ---- impacts by surface ----
   impactConcrete(rng) {
     const out = z(len(0.3));

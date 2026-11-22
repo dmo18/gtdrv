@@ -157,6 +157,14 @@ const STYLES = {
 STYLES.hatch = STYLES.compact;
 STYLES.coupe = STYLES.sports;
 
+// Kit hook for other vehicle builders (service vehicles): register a body
+// style (same fields as STYLES above) and optionally its nose and tail
+// graphics (same fields as FACES below) under a spec id.
+export function addCarStyle(id, style, face = null) {
+  STYLES[id] = style;
+  if (face) FACES[id] = face;
+}
+
 export function styleFor(spec) {
   return STYLES[spec.id] || STYLES[spec.body] || STYLES.sedan;
 }
@@ -688,7 +696,7 @@ const FACES = {
   },
   sports: { head: { q: [0.48, 0.97], f: [0.62, 0.8], e: 2.6, slant: 0.1, taper: 0.4, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: null, intake: { q: [-0.62, 0.62], f: [0.12, 0.38], e: 4, lift: 0.004 }, tail: { q: [0.4, 0.98], f: [0.62, 0.8], e: 4, slant: 0.05, bulge: 0.006, lift: 0.006, rev: 0.5, bar: true }, plateF: 0.2 },
   muscle: { head: { q: [0.52, 0.94], f: [0.5, 0.82], e: 6, lift: 0.006, bulge: 0.008, ind: 2 }, grille: { q: [-0.5, 0.5], f: [0.4, 0.82], e: 6, lift: 0.004, bezel: CHROME }, intake: { q: [-0.5, 0.5], f: [0.08, 0.26], e: 6, lift: 0.003 }, tail: { q: [0.3, 0.97], f: [0.56, 0.84], e: 6, bulge: 0.006, lift: 0.006, rev: 0.4, bar: true } },
-  pickup: { head: { q: [0.56, 0.96], f: [0.55, 0.88], e: 5, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: { q: [-0.54, 0.54], f: [0.36, 0.86], e: 7, lift: 0.005, bezel: CHROME }, intake: { q: [-0.6, 0.6], f: [0.08, 0.24], e: 6, lift: 0.003 }, tail: { q: [0.76, 0.99], f: [0.55, 0.92], e: 6, bulge: 0.004, lift: 0.006, rev: 0.84, bar: false }, plateR: 0.3 },
+  pickup: { head: { q: [0.56, 0.96], f: [0.55, 0.88], e: 5, bulge: 0.01, lift: 0.006, ind: 0.9 }, grille: { q: [-0.54, 0.54], f: [0.36, 0.86], e: 7, lift: 0.005, bezel: CHROME }, intake: { q: [-0.6, 0.6], f: [0.08, 0.24], e: 6, lift: 0.003 }, tail: { q: [0.74, 0.95], f: [0.55, 0.92], e: 6, bulge: 0.004, lift: 0.006, rev: 0.83, bar: false }, plateR: 0.3 },
   van: { head: { q: [0.5, 0.96], f: [0.62, 0.92], e: 3, slant: 0.04, taper: 0.2, bulge: 0.012, lift: 0.006, ind: 0.88, drl: 'L' }, grille: { q: [-0.42, 0.42], f: [0.42, 0.7], e: 5, lift: 0.004, slats: 2, slatHex: 0x2a2c30 }, intake: { q: [-0.6, 0.6], f: [0.08, 0.3], e: 6, lift: 0.003 }, tail: { q: [0.8, 0.95], f: [0.45, 0.92], e: 5, bulge: 0.004, lift: 0.006, rev: 0.86, bar: false }, plateR: 0.3 },
   truck: { head: { q: [0.6, 0.94], f: [0.1, 0.25], e: 5, bulge: 0.01, lift: 0.008, ind: 0.88 }, grille: { q: [-0.5, 0.5], f: [0.32, 0.7], e: 8, lift: 0.006, bezel: CHROME }, intake: null, tail: null, plateF: 0.06 },
 };
@@ -1093,8 +1101,6 @@ export function buildCar(spec, near = true, lite = false) {
   });
   out.u = 0;
   out.v = 0;
-  const T = globalThis.__rwT;
-  if (T) T.lower = acc.triangles;
 
   // Greenhouse.
   const gx = ghStations(sh, gs, lod);
@@ -1119,7 +1125,6 @@ export function buildCar(spec, near = true, lite = false) {
     if (jj >= sideLo && jj <= sideHi && inSpan(x, g.b)) return pick(TRIM, CLS.TRIM);
     return out;
   });
-  if (T) T.gh = acc.triangles;
   if (nearM) {
     emitGrid(glassAcc, G, (i, r, c) => (isGlass(c[0], bandOf(r, GJ)) ? tint : null));
     if (S.belt) {
@@ -1132,16 +1137,12 @@ export function buildCar(spec, near = true, lite = false) {
     }
   }
 
-  if (T) T.cabin = acc.triangles;
   if (lod !== LOD_FAR) {
     archLiners(acc, sh, nearM ? 8 : 4);
     if (nearM) archLips(acc, sh);
-    if (T) T.arch = acc.triangles;
     underside(acc, sh, xs);
     fascia(acc, headAcc, tailAcc, sh, spec, lod);
-    if (T) T.fascia = acc.triangles;
     details(acc, headAcc, tailAcc, sh, gs, spec, lod);
-    if (T) T.details = acc.triangles;
   } else {
     farDetails(acc, sh, spec);
   }

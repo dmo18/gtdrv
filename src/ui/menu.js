@@ -1,4 +1,5 @@
 import { formatDistance, formatMiles } from '../core/units.js';
+import { createPhoneCheck } from './phonecheck.js';
 // The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
 // Settings, Help), Settings in four groups, destructive actions on their own
 // confirm screens, and a registry for screens other systems add.
@@ -220,6 +221,7 @@ export function createMenu(root, game, economy) {
   let group = 'controls';
   let opened = false;
   let armed = null; // key of the confirm row waiting for its second tap
+  let phone = null; // the Phone check (created on first use)
   const parents = new Map(); // screen id -> the screen Back returns to
   const screens = new Map(); // registered screens: id -> { id, title, render }
 
@@ -478,6 +480,17 @@ export function createMenu(root, game, economy) {
         min: 0, max: 23.5, step: 0.5, dflt: game.clock || 9, toUi: (v) => v, fromUi: (v) => v,
         text: hourText, disabled: s.liveTime, aria: 'Time of day',
       }));
+      // Phone check (docs/PLAN_V1.md 4.2): the game drives itself for a minute, then plays eight test sounds.
+      const row = h('div', 'rw-menu-setting');
+      row.appendChild(h('span', '', 'Phone check'));
+      const pb = button('Start', 'rw-menu-go', () => {
+        if (!phone) phone = createPhoneCheck(game, root);
+        close();
+        if (!phone.start() && game.hud && game.hud.toast) game.hud.toast(phone.error() || 'The phone check cannot start here', 3, 'info');
+      }, 'Phone check: a one minute drive and eight test sounds. Start');
+      pb.dataset.role = 'phonecheck';
+      row.appendChild(pb);
+      body.appendChild(row);
     }
   }
 

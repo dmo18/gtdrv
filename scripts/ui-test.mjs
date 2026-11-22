@@ -168,18 +168,22 @@ const GRID = {
   A: {
     V: 915, H: 412,
     minimap: [8, 8, 84, 84], speed: [100, 8, 88, 44], health: [100, 56, 88, 12], stars: [383, 8, 150, 24],
-    strip: [290, 56, 335, 80], score: [691, 8, 160, 28], pause: [859, 8, 48, 48], prompt: [308, 376, 300, 28],
+    stack: [290, 8, 335, 92], objcell: [541, 8, 84, 24], cool: [383, 33, 150, 4], m1: [290, 40, 335, 28], m2: [290, 72, 335, 28],
+    boost: [843, 116, 56, 56], boostbar: [100, 56, 88, 6], siren: [184, 292, 56, 56], extra: [675, 272, 56, 56],
+    score: [691, 8, 160, 28], pause: [859, 8, 48, 48], prompt: [308, 376, 300, 28],
     gas: [835, 316, 72, 88], brake: [751, 316, 72, 88], exit: [843, 248, 56, 56], hand: [759, 248, 56, 56],
     fire: [671, 340, 64, 64], lock: [675, 272, 56, 56], more: [843, 180, 56, 56], ammo: [691, 60, 160, 40],
-    fanX: [779, 715, 651], fanY: [180, 116], slot: [16, 240, 160, 160],
+    fanX: [779, 715, 651], fanY: [180, 116], fanS: 56, slot: [16, 240, 160, 160],
   },
   B: {
     V: 780, H: 360,
     minimap: [8, 8, 76, 76], speed: [92, 8, 80, 40], health: [92, 52, 80, 12], stars: [315, 8, 150, 24],
-    strip: [240, 56, 300, 72], score: [564, 8, 152, 26], pause: [724, 8, 48, 48], prompt: [240, 324, 300, 28],
+    stack: [240, 8, 300, 92], objcell: [473, 8, 67, 24], cool: [315, 33, 150, 4], m1: [240, 40, 300, 28], m2: [240, 72, 300, 28],
+    boost: [716, 88, 56, 56], boostbar: [92, 52, 80, 6], siren: [164, 246, 56, 56], extra: [564, 224, 56, 56],
+    score: [564, 8, 152, 26], pause: [724, 8, 48, 48], prompt: [240, 324, 300, 28],
     gas: [708, 280, 64, 72], brake: [632, 280, 64, 72], exit: [716, 216, 56, 56], hand: [636, 216, 56, 56],
     fire: [560, 288, 64, 64], lock: [564, 224, 56, 56], more: [716, 152, 56, 56], ammo: [564, 56, 152, 24],
-    fanX: [652, 588, 524], fanY: [152, 88], slot: [16, 204, 140, 140],
+    fanX: [660, 604, 548], fanY: [156, 100], fanS: 48, slot: [16, 204, 140, 140],
   },
 };
 const lum = ([r, g, b]) => {
@@ -208,10 +212,17 @@ async function liveLayout(check) {
     await pg.evaluate(() => { window.__rw.loop.stop && window.__rw.loop.stop(); });
     const problems = [];
     let states = 0, elements = 0;
-    const MODES = [['foot', 'foot', null], ['car', 'car', null], ['boat', 'boat', null], ['plane-armed', 'plane', true],
-      ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
-    const setMode = (kind, armed, name) => pg.evaluate(([k, a]) => {
+    // [name, craft, armed]. 'car-garage' and 'foot-talk' have a GARAGE or TALK offer showing (docs/REVAMP.md 6.12 HG-2).
+    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-garage', 'car', null], ['boat', 'boat', null],
+      ['plane-armed', 'plane', true], ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
+    const setMode = (kind, armed, name) => pg.evaluate(([k, a, nm]) => {
       const g = window.__rw;
+      // a test GARAGE button, the kind garages.js and adventures.js register (unslotted primary)
+      if (!window.__offerBtn) {
+        window.__offerBtn = g.touch.registerAction({ id: 'testgarage', label: 'Use garage', text: 'GARAGE', group: 'primary', modes: ['foot', 'car'],
+          icon: '<path d="M3 11l9-7 9 7v9H3z"/>', visible: () => !!window.__offer });
+      }
+      window.__offer = nm === 'car-garage' || nm === 'foot-talk';
       if (k === 'foot') { g.player.vehicle = null; g.setPlayerMode('foot'); } else {
         const has = (v) => !!(v.spec && v.spec.mounts && v.spec.mounts.length);
         const v = g.vehicles.find((x) => x.kind === k && (a === null || has(x) === a)) || g.vehicles.find((x) => x.kind === k);
@@ -220,19 +231,32 @@ async function liveLayout(check) {
       }
       g.touch.update(1 / 60);
       return true;
-    }, [kind, armed]).then((ok) => { if (!ok) problems.push(`no ${name} craft in the world`); return ok; });
-    // Force the transient HUD pieces on so they are measured: stars, health, prompt, combo, title, a toast.
-    const force = () => pg.evaluate(() => {
+    }, [kind, armed, name]).then((ok) => { if (!ok) problems.push(`no ${name} craft in the world`); return ok; });
+    // Force the transient HUD pieces on so they are measured: stars with the escape bar, health, prompt, combo,
+    // the objective cell, a police toast (row 1) and a hint (row 2), the siren and the extra of a service vehicle.
+    const force = (mortal = true) => pg.evaluate((mortal) => {
       const g = window.__rw;
       for (const c of ['.rw-wanted', '.rw-hpmeter', '.rw-prompt']) document.querySelector(c).classList.remove('rw-none');
+      document.querySelector('.rw-wanted').classList.add('rw-cooling');
       document.querySelector('.rw-prompt').textContent = 'ENTER: take the sedan';
       const cb = document.querySelector('.rw-combo');
       cb.style.display = ''; cb.textContent = '+1,200  x3';
-      const ti = document.querySelector('.rw-title');
-      ti.style.animation = 'none'; ti.textContent = 'Little Havana'; ti.classList.add('rw-show');
-      const to = document.querySelector('.rw-toasts');
-      if (!to.children.length) g.hud.toast('Respawned', 3600);
-    });
+      g.hud.setObjective(true, 40, '0.4 mi');
+      if (!document.querySelector('.rw-m1:not([hidden])')) {
+        g.hud.stack.reset();
+        g.hud.stack.setWanted(true);
+        g.hud.toast('Pulled over! Off with a warning.', 3600, 'police');
+        g.hud.toast('Tap EXIT to get out. Walk up to anything and tap ENTER.', 3600, 'hint');
+      }
+      g.touch.setSiren(true, false);
+      g.touch.setExtra({ can: true, text: 'WATER', fill: 0.6 });
+      // the speed readout, the health meter (hard mode) and the boost meter, through the real update
+      const mode = g.player.mode;
+      g.hud.update({ ...g.hudState, mode: mode === 'foot' ? 'foot' : 'car', speedKmh: 60, mortal: mortal, health: 80, maxHealth: 100,
+        boost: ['car', 'boat', 'plane', 'heli'].includes(mode) ? 0.8 : -1 });
+      for (const c of ['.rw-wanted']) document.querySelector(c).classList.remove('rw-none');
+      document.querySelector('.rw-hpmeter').classList.toggle('rw-none', !mortal);
+    }, mortal);
     // Wait until every finite transition and animation has finished.
     const settle = () => pg.evaluate(async () => {
       const running = () => document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity && a.playState === 'running');
@@ -257,6 +281,9 @@ async function liveLayout(check) {
         const display = c.includes('rw-ammo') || c.includes('rw-tiltbar');
         let key = null;
         if (c.includes('rw-pause')) key = 'pause';
+        else if (c.includes('rw-slot-boost') || /\brw-extra\b/.test(c)) key = 'boost'; // BOOST, or GARAGE and TALK in its cell
+        else if (c.includes('rw-slot-siren')) key = 'siren';
+        else if (c.includes('rw-slot-extra')) key = 'extra';
         else if (c.includes('rw-more')) key = 'more';
         else if (/\brw-gas\b/.test(c) || /\brw-fire\b/.test(c)) key = 'gas';
         else if (/\brw-brake\b/.test(c) || c.includes('rw-slot-run')) key = 'brake';
@@ -274,18 +301,21 @@ async function liveLayout(check) {
       add('health', document.querySelector('.rw-hpmeter'), false);
       add('clock', document.querySelector('.rw-clock'), false);
       add('stars', document.querySelector('.rw-wanted'), false);
-      add('strip', document.querySelector('.rw-strip'), false);
+      add('stack', document.querySelector('.rw-stack'), false);
+      add('objcell', document.querySelector('.rw-objcell'), false);
+      add('cool', document.querySelector('.rw-cool'), false);
+      add('m1', document.querySelector('.rw-m1'), false, { kind: document.querySelector('.rw-m1').className });
+      add('m2', document.querySelector('.rw-m2'), false, { kind: document.querySelector('.rw-m2').className });
+      add('boostbar', document.querySelector('.rw-boostbar'), false);
       add('score', document.querySelector('.rw-score'), false);
       add('combo', document.querySelector('.rw-combo'), false);
       add('prompt', document.querySelector('.rw-prompt'), false);
       add('steer', document.querySelector('.rw-wheel'), false);
       add('steer', document.querySelector('.rw-pad'), false);
       add('steer', document.querySelector('.rw-stick'), false);
-      // strip children stay inside the strip
-      const kids = [...document.querySelectorAll('.rw-strip .rw-title, .rw-strip .rw-toast')].filter(vis).map(R);
       // text on pills: colour, background (own), opacity along the chain
       const texts = [];
-      for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-title', '.rw-toast', '.rw-prompt', '.rw-ammo .rw-face']) {
+      for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-m1', '.rw-m2', '.rw-objcell', '.rw-wanted', '.rw-prompt', '.rw-ammo .rw-face']) {
         const e = document.querySelector(sel);
         if (!e || !vis(e)) continue;
         const cs = getComputedStyle(e);
@@ -295,7 +325,7 @@ async function liveLayout(check) {
       }
       const cv = document.getElementById('game').getBoundingClientRect();
       const cs = (e) => { const s = getComputedStyle(e); return { bg: s.backgroundColor, pad: s.padding, img: s.backgroundImage }; };
-      return { out, kids, texts, mode: g.player.mode, canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
+      return { out, texts, mode: g.player.mode, mortal: !document.querySelector('.rw-hpmeter').classList.contains('rw-none'), canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
         page: { html: cs(document.documentElement), body: cs(document.body), ui: cs(document.getElementById('ui')) },
         boot: getComputedStyle(document.getElementById('boot')).display, vw: innerWidth, vh: innerHeight };
     }).then((m) => ({ ...m, grid, L, hand, hud, name }));
@@ -310,19 +340,26 @@ async function liveLayout(check) {
       const el = m.out;
       const kRect = [0.36 * grid.V, 0.40 * grid.H, 0.64 * grid.V, 0.90 * grid.H];
       const expect = (key, e, tol = 2) => {
-        const t = grid[key];
+        let t = grid[key];
         if (!t) return;
+        if (key === 'boostbar') { // 6.12: under the speed; 16 lower with the health meter, under the clock in Full
+          const lo = grid.V === 915;
+          t = [t[0], hud === 'full' ? (lo ? 91 : 85) : (m.mortal === false ? t[1] : (lo ? 72 : 68)), t[2], t[3]];
+        }
         let x = t[0];
-        const left = ['minimap', 'speed', 'health', 'clock'].includes(key);
-        const mirror = hand && ['gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more'].includes(key);
+        const left = ['minimap', 'speed', 'health', 'clock', 'boostbar'].includes(key);
+        const mirror = hand && ['gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more', 'boost', 'extra'].includes(key);
         if (left) x += L;
         if (mirror) x = grid.V - t[0] - t[2] + L;
+        // SIREN sits beside the steering slot: it moves with the left inset and mirrors to the right edge (no inset there)
+        if (key === 'siren') x = hand ? grid.V - t[0] - t[2] : t[0] + L;
         if (Math.abs(e.x - x) > tol || Math.abs(e.y - t[1]) > tol || Math.abs(e.w - t[2]) > tol || Math.abs(e.h - t[3]) > tol) {
           bad(`${key} (${e.name}) is ${e.x.toFixed(1)},${e.y.toFixed(1)},${e.w.toFixed(1)}x${e.h.toFixed(1)}, grid says ${x},${t[1]},${t[2]}x${t[3]}`);
         }
       };
       for (const e of el) {
-        if (['minimap', 'speed', 'health', 'stars', 'strip', 'score', 'pause', 'prompt', 'gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more'].includes(e.key)) {
+        if (['minimap', 'speed', 'health', 'stars', 'stack', 'objcell', 'cool', 'score', 'pause', 'prompt', 'gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more',
+          'boost', 'boostbar', 'siren', 'extra'].includes(e.key)) {
           // The foot FIRE and RUN take the pedal rects (the same size); every other key matches its own rect.
           expect(e.key, e);
         }
@@ -330,9 +367,9 @@ async function liveLayout(check) {
         if (e.key.startsWith('fan:')) {
           const [, c, r] = e.key.split(':').map(Number);
           let x = grid.fanX[c];
-          if (hand) x = grid.V - x - 56 + L;
+          if (hand) x = grid.V - x - grid.fanS + L;
           const y = grid.fanY[r];
-          if (Math.abs(e.x - x) > 2 || Math.abs(e.y - y) > 2 || e.w < 54 || e.w > 58) bad(`fan cell ${c},${r} (${e.label}) is ${e.x.toFixed(1)},${e.y.toFixed(1)}, grid says ${x},${y}`);
+          if (Math.abs(e.x - x) > 2 || Math.abs(e.y - y) > 2 || Math.abs(e.w - grid.fanS) > 2) bad(`fan cell ${c},${r} (${e.label}) is ${e.x.toFixed(1)},${e.y.toFixed(1)}, grid says ${x},${y}`);
         }
         // sizes
         if (e.hit && (e.w < 47.5 || e.h < 47.5)) bad(`hit box ${e.label || e.name} is ${e.w.toFixed(1)}x${e.h.toFixed(1)}, under 48`);
@@ -342,8 +379,8 @@ async function liveLayout(check) {
         if (e.r > grid.V + 0.5 || e.b > grid.H + 0.5 || e.y < -0.5) bad(`${e.label || e.name} leaves the screen`);
         // keep-out: nothing permanent inside the craft's rect
         // (3) left-handed with a left inset, the 5-button weapon arc cannot clear the keep-out rect (MSL, COAX): allowed by name only
-        // and (5) the mirrored fan's third column reaches 15 px into the keep-out rect at 780x360
-        if (hand && L > 0 && (/slot-(msl|coax)/.test(e.name) || (grid.V === 780 && /^fan:2:/.test(e.key)))) continue;
+        // (the 780x360 fan column that used to be allowed here is fixed by 6.12: 48 px cells, third column at x 548)
+        if (hand && L > 0 && /slot-(msl|coax)/.test(e.name)) continue;
         if (e.x < kRect[2] && e.r > kRect[0] && e.y < kRect[3] && e.b > kRect[1]) bad(`${e.label || e.key} (${e.name}) is inside the keep-out rect`);
       }
       // steering widget inside the steering slot (mirrored when left-handed)
@@ -363,7 +400,7 @@ async function liveLayout(check) {
       // allowed here by name only: (1) with a left-handed layout and a left
       // inset the fan reaches 14 px (56 px at 780x360) into the strip box;
       // (2) at 780x360 left-handed the fan's top row is 4 px from the minimap.
-      const items = el.filter((q) => q.key !== 'strip').concat(m.kids.map((k) => ({ ...k, key: 'strip-content', name: 'strip content', hit: false })));
+      const items = el.filter((q) => q.key !== 'stack');
       for (let i = 0; i < items.length; i++) {
         for (let j = i + 1; j < items.length; j++) {
           const a = items[i], b = items[j];
@@ -371,19 +408,39 @@ async function liveLayout(check) {
           if (grid.V === 780 && hand && L > 0 && [a, b].some((q) => q.key === 'prompt') && [a, b].some((q) => q.key === 'fire')) continue;
           if (inter(a, b)) bad(`${a.label || a.key} (${a.name}) overlaps ${b.label || b.key} (${b.name})`);
           else if (a.hit && b.hit && gapOf(a, b) < 7.5) {
-            const pair = [a.key, b.key].sort().join('|');
-            if (grid.V === 780 && hand && /^fan:\d:1\|minimap$/.test(pair) && gapOf(a, b) >= 3.5) continue;
             bad(`gap ${gapOf(a, b).toFixed(1)} between ${a.label || a.key} and ${b.label || b.key}`);
           }
         }
       }
-      // the strip holds its children
-      const st = el.find((q) => q.key === 'strip');
-      for (const k of m.kids) if (st && (k.b > st.b + 0.5 || k.y < st.y - 0.5)) bad('the strip content spills out of the strip');
+      // the stack holds its content; its two message rows are one line of 28 px each and never go past y = 100 + T
+      const st = el.find((q) => q.key === 'stack');
+      for (const k of el.filter((q) => ['stars', 'objcell', 'cool', 'm1', 'm2'].includes(q.key))) {
+        if (st && (k.b > st.b + 0.5 || k.y < st.y - 0.5 || k.x < st.x - 0.5 || k.r > st.r + 0.5)) bad(`${k.key} spills out of the top centre stack`);
+        if ((k.key === 'm1' || k.key === 'm2') && Math.abs(k.h - 28) > 0.5) bad(`${k.key} is ${k.h.toFixed(1)} high, not one 28 px line`);
+        if (k.b > 100.5) bad(`${k.key} ends at ${k.b.toFixed(1)}, past y 100`);
+      }
+      // a message pill is centred in its row
+      for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
+        const row = grid[k.key];
+        if (Math.abs((k.x + k.r) / 2 - (row[0] + row[2] / 2)) > 2) bad(`${k.key} is not centred in its row`);
+      }
+      // HG-2: at most one control in the BOOST cell (BOOST, or GARAGE and TALK); BOOST hides while an offer shows
+      const cell = el.filter((q) => q.key === 'boost');
+      if (cell.length > 1) bad('more than one control in the BOOST cell');
+      if (m.name.endsWith('garage') || m.name.endsWith('talk')) {
+        if (!cell.length || /Boost/.test(cell[0].label || '') || !/garage/i.test(cell[0].label || '')) bad(`the offer does not take the BOOST cell (${cell.map((q) => q.label)})`);
+      } else if (['car', 'boat', 'plane', 'plane-armed', 'heli-armed'].includes(m.name) && !(cell.length === 1 && /Boost/.test(cell[0].label || ''))) bad('BOOST is missing');
+      if (['foot', 'tank'].includes(m.name) && cell.length) bad(`${m.name} has a control in the BOOST cell`);
+      // SIREN in a car only, EXTRA in a car only; boost meter where BOOST shows
+      for (const [key, want] of [['siren', 'car'], ['extra', 'car']]) {
+        const have = el.filter((q) => q.key === key).length;
+        if ((m.name.startsWith(want) && have !== 1) || (!m.name.startsWith(want) && have)) bad(`${key} count ${have} in ${m.name}`);
+      }
       // armed craft: the weapon arc stays in the 352 by 220 box and off EXIT, MORE
       if (m.name.includes('armed') || m.name === 'tank') {
         // the box is mirrored with the layout: V - 352 - R to V, or L to L + 352
-        for (const e of el.filter((q) => q.name.includes('slot'))) {
+        // BOOST, SIREN and EXTRA are slots too but not part of the arc; the arc must not cover BOOST (6.12, checked by the overlap test)
+        for (const e of el.filter((q) => q.name.includes('slot') && !/slot-(boost|siren|extra)/.test(q.name))) {
           const outX = hand ? e.r > L + 352.5 : e.x < grid.V - 352 - 0.5;
           if (outX || e.y < grid.H - 220 - 0.5) bad(`${e.label} leaves the arc box`);
         }
@@ -450,6 +507,133 @@ async function liveLayout(check) {
         }
       }
     }
+    // HG-3 to HG-5 (docs/REVAMP.md 6.12): the top centre stack with every item forced on in the same frame,
+    // a 200 character toast, and the stack against the speed readout with the minimap grown.
+    let hgStates = 0;
+    const hgProblems = [];
+    const stackItems = () => pg.evaluate(() => {
+      const out = [];
+      for (const [key, sel] of [['stars', '.rw-wanted'], ['objcell', '.rw-objcell'], ['cool', '.rw-cool'], ['m1', '.rw-m1'], ['m2', '.rw-m2']]) {
+        const e = document.querySelector(sel);
+        const cs = getComputedStyle(e);
+        const r = e.getBoundingClientRect();
+        let shown = cs.display !== 'none' && r.width > 0 && r.height > 0;
+        for (let p = e.parentElement; shown && p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).display === 'none') shown = false;
+        if (shown) out.push({ key, text: e.textContent, kind: e.className, x: r.left, y: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height,
+          over: e.scrollWidth > e.clientWidth, ell: cs.textOverflow, ws: cs.whiteSpace });
+      }
+      return out;
+    });
+    for (const grid of [GRID.A, GRID.B]) {
+      await pg.setViewportSize({ width: grid.V, height: grid.H });
+      for (const L of [0, 40]) {
+        await pg.evaluate((l) => { document.documentElement.style.setProperty('--rw-test-sl', l + 'px'); window.dispatchEvent(new Event('resize')); }, L);
+        for (const hand of [false, true]) {
+          await pg.evaluate((h) => window.__rw.touch.setLeftHanded(h), hand);
+          await setMode('car', null, 'car');
+          for (const hud of ['minimal', 'full']) {
+            await pg.evaluate((m) => { window.__rw.touch.setHudMode(m); window.__rw.hud.setHudMode(m); window.__rw.touch.update(1 / 60); }, hud);
+            if (hud === 'minimal') {
+              const open = await pg.evaluate(() => window.__rw.touch.isFanOpen());
+              if (!open) {
+                const mp = await pg.evaluate(() => { const r = document.querySelector('.rw-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+                await pg.touchscreen.tap(mp.x, mp.y);
+              }
+            }
+            const tag = `${grid.V}x${grid.H} L${L} ${hand ? 'left' : 'right'}-handed ${hud}${hud === 'minimal' ? ' fan' : ''}`;
+            const bad = (w) => hgProblems.push(`${tag}: ${w}`);
+            hgStates++;
+            // HG-3: everything on in one frame
+            await pg.evaluate(() => {
+              const g = window.__rw;
+              const q = (c) => document.querySelector(c);
+              g.hud.stack.reset();
+              g.hud.setObjective(false, 0, '');
+              q('.rw-wanted').classList.add('rw-none');
+              q('.rw-wanted').classList.remove('rw-cooling');
+              g.hud.update({ ...g.hudState, mode: 'car', speedKmh: 50, stars: 0, wanted: 0, cooling: 0, district: 'Little Havana ' + Math.random(), boost: 0.8, mortal: false });
+              g.hud.setObjective(true, 40, '0.4 mi');
+              g.hud.toast('First Light', 4, 'objective');
+              g.hud.update({ ...g.hudState, mode: 'car', speedKmh: 50, stars: 5, wanted: 5, cooling: 0.5, district: 'Allapattah ' + Math.random(), boost: 0.8, mortal: false });
+              g.hud.toast('Pulled over! Off with a warning.', 1.5, 'police');
+              g.hud.toast('Wrecked  +250', 1.6, 'score');
+              g.hud.toast('Tap EXIT to get out. Walk up to anything and tap ENTER.', 4.5, 'hint');
+              g.hud.toast('Camera: far', 1, 'info');
+            });
+            await settle();
+            let items = await stackItems();
+            const keys = items.map((i) => i.key).sort().join();
+            if (keys !== 'cool,m1,m2,objcell,stars') bad(`HG-3 visible set is ${keys}, want stars, objective cell, escape bar, one message in each row`);
+            const m1 = items.find((i) => i.key === 'm1'), m2 = items.find((i) => i.key === 'm2');
+            if (!m1 || !/rw-k-police/.test(m1.kind)) bad('HG-3 row 1 is not the police toast');
+            if (!m2 || !/rw-k-hint/.test(m2.kind)) bad('HG-3 row 2 is not the hint');
+            const box = { x: grid.stack[0], y: grid.stack[1] + 0, r: grid.stack[0] + grid.stack[2], b: grid.stack[1] + grid.stack[3] };
+            for (const it of items) {
+              if (it.x < box.x - 0.5 || it.r > box.r + 0.5 || it.y < box.y - 0.5 || it.b > box.b + 0.5) bad(`HG-3 ${it.key} ${it.x.toFixed(0)},${it.y.toFixed(0)},${it.r.toFixed(0)},${it.b.toFixed(0)} is outside the stack box`);
+            }
+            for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (inter(items[i], items[j])) bad(`HG-3 ${items[i].key} overlaps ${items[j].key}`);
+            // and against everything else on screen (speed, score, combo, pause, the open fan, the ammo panel, the minimap)
+            const mm = await measure(grid, L, hand, hud, 'car');
+            for (const it of items) for (const o of mm.out) {
+              if (['stack', 'stars', 'objcell', 'cool', 'm1', 'm2'].includes(o.key)) continue;
+              if (inter(it, o)) bad(`HG-3 ${it.key} overlaps ${o.label || o.key}`);
+            }
+            // after the police toast ends the objective line takes row 1; the score and info toasts were dropped or waited
+            await pg.evaluate(() => window.__rw.hud.tick(1.6));
+            await settle();
+            items = await stackItems();
+            const n1 = items.find((i) => i.key === 'm1');
+            if (!n1 || !/rw-k-objective/.test(n1.kind) || n1.text !== 'First Light') bad(`HG-3 after the police toast row 1 is ${n1 ? n1.text : 'empty'}, want the objective line`);
+            // HG-4: a 200 character toast stays one line, inside its row, ending in an ellipsis
+            await pg.evaluate(() => {
+              const g = window.__rw;
+              g.hud.stack.reset();
+              g.hud.toast('Long police message '.repeat(10).slice(0, 200), 5, 'police');
+              g.hud.toast('A very long toast that should never wrap onto a second line '.repeat(4).slice(0, 200), 5, 'info');
+            });
+            await settle();
+            items = await stackItems();
+            for (const k of ['m1', 'm2']) {
+              const it = items.find((i) => i.key === k);
+              const row = grid[k];
+              if (!it) { bad(`HG-4 ${k} is empty`); continue; }
+              if (Math.abs(it.h - 28) > 0.5 || it.x < row[0] - 0.5 || it.r > row[0] + row[2] + 0.5) bad(`HG-4 ${k} is ${it.w.toFixed(0)}x${it.h.toFixed(0)}, not one line inside its row`);
+              if (!it.over || it.ell !== 'ellipsis' || it.ws !== 'nowrap') bad(`HG-4 ${k} does not end in an ellipsis (overflow ${it.over}, ${it.ell}, ${it.ws})`);
+            }
+            // HG-5: the grown minimap pushes the speed readout right; the long lines keep clear of it
+            await pg.evaluate(() => {
+              const c = window.__rw.hud.minimapCanvas;
+              c.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+            });
+            await pg.waitForTimeout(260);
+            await settle();
+            items = await stackItems();
+            const mg = await measure(grid, L, hand, hud, 'car');
+            const sp = mg.out.find((o) => o.key === 'speed');
+            if (!sp) bad('HG-5 no speed readout to check against');
+            else {
+              for (const it of items) if (inter(it, sp)) bad(`HG-5 ${it.key} overlaps the speed readout with the minimap grown`);
+              if (L === 0 && inter({ x: box.x, y: box.y, r: box.r, b: box.b }, sp)) bad('HG-5 the stack box overlaps the speed readout with the minimap grown');
+            }
+            for (const o of mg.out) {
+              if (!['score', 'combo', 'pause', 'ammo', 'minimap'].includes(o.key) && !o.key.startsWith('fan:')) continue;
+              for (const it of items) if (inter(it, o)) bad(`HG-5 ${it.key} overlaps ${o.label || o.key}`);
+            }
+            await pg.evaluate(() => {
+              const c = window.__rw.hud.minimapCanvas;
+              c.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, cancelable: true }));
+              window.__rw.hud.stack.reset();
+              window.__rw.hud.setObjective(false, 0, '');
+              window.__rw.hud.update({ ...window.__rw.hudState, mode: 'car', stars: 0, wanted: 0, cooling: 0, boost: -1, mortal: false });
+            });
+            await pg.waitForTimeout(220);
+          }
+          await pg.evaluate(() => { window.__rw.touch.setHudMode('minimal'); window.__rw.hud.setHudMode('minimal'); });
+        }
+      }
+    }
+    for (const p of hgProblems.slice(0, 40)) console.log('   ', p);
+    check(`top centre stack: ${hgStates} states: HG-3 everything on at once, HG-4 long toast, HG-5 clear of the speed readout, score, fan and ammo panel`, hgProblems.length === 0, `(${hgProblems.length} problems)`);
     // The title screen (docs/REVAMP.md 6.8): name, Start (Loading until ready), Continue only when offered, credit, version.
     for (const [w, h] of [[915, 412], [780, 360]]) {
       const tc = await br.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
@@ -476,7 +660,7 @@ async function liveLayout(check) {
       }
       await tc.close();
     }
-    for (const p of problems.slice(0, 40)) console.log('   ', p);
+    for (const p of problems.slice(0, 400)) console.log('   ', p);
     check(`live layout: ${states} states, ${elements} elements: no overlap, gap, size, keep-out, inset, grid, contrast or cut-out problem`, problems.length === 0, `(${problems.length} problems)`);
     check('live layout: no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
   } finally {
@@ -485,6 +669,11 @@ async function liveLayout(check) {
   }
 }
 
+if (process.env.UI_LIVE_ONLY) { // quick runs while working on the grid: only the built game
+  await liveLayout(check);
+  console.log(failures.length ? `\nFAILED ${failures.length}/${checks}: ${failures.join('; ')}` : `\nPASSED ${checks}/${checks} checks`);
+  process.exit(failures.length ? 1 : 0);
+}
 const chromium = await loadChromium();
 const browser = await chromium.launch();
 try {
@@ -1070,7 +1259,8 @@ try {
         await checkLayout(`minimal ${tag}`);
         const n = await buttonCount();
         counts[m] = Math.max(counts[m] || 0, n);
-        check(`minimal ${tag}: at most 8 buttons at once on foot or in a car (HAND, SWAP, RUN are slots now), 6 elsewhere (${n})`, n <= (m === 'car' || m === 'foot' ? 8 : 6), String(n));
+        // 6.12 adds BOOST to the boat (7); a car with a siren or an extra shows up to 2 more, forced separately by the live layout test
+        check(`minimal ${tag}: at most 8 buttons at once on foot or in a car (HAND, SWAP, RUN are slots now), 7 in a boat, 6 elsewhere (${n})`, n <= (m === 'car' || m === 'foot' ? 8 : m === 'boat' ? 7 : 6), String(n));
         await shot(`min-${fileTag}-idle.png`);
         await tapMore();
         check(`minimal ${tag}: more button opens the fan`, await fanIsOpen());
@@ -1215,8 +1405,8 @@ try {
   // District: the title pill in the strip for 3 s after a change.
   await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 40, health: 80, score: 5, pending: 0, combo: 1, wanted: 0, district: 'Saltmarsh Docks', time: 9, vehicleHealth: 0.7 }));
   await page.waitForTimeout(500);
-  const dOp = () => page.evaluate(() => { const e = document.querySelector('.rw-title'); return getComputedStyle(e).display === 'none' ? 0 : parseFloat(getComputedStyle(e).opacity); });
-  check('district name shows as a pill in the strip after a change', (await dOp()) > 0.5 && (await page.textContent('.rw-title')) === 'Saltmarsh Docks');
+  const dOp = () => page.evaluate(() => { const e = document.querySelector('.rw-m1.rw-title'); return !e || getComputedStyle(e).display === 'none' ? 0 : parseFloat(getComputedStyle(e).opacity); });
+  check('district name shows as a banner pill in message row 1 after a change', (await dOp()) > 0.5 && (await page.textContent('.rw-m1.rw-title')) === 'Saltmarsh Docks');
   await page.waitForTimeout(3200);
   check('district title gone after 3 s, taking no room', (await dOp()) === 0);
 
@@ -1549,20 +1739,21 @@ try {
       .filter((e) => e.offsetParent && getComputedStyle(e).visibility !== 'hidden').map((e) => e.dataset.action).sort().join());
     };
     // [craft, mode, charges, max buttons, wanted actions]. Minimal: 6 at most, except the
-    // armed-aircraft arc (ARMS.md: GUN MSL BOMB LOCK, up to 9) and DETONATE (+1).
+    // armed-aircraft arc (ARMS.md: GUN MSL BOMB LOCK, up to 9) and DETONATE (+1). From 0.5.0 every
+    // plane and heli also has BOOST (docs/REVAMP.md 6.12): one more primary and 'boost' in the list.
     const cases = [
-      ['fighter', 'plane', 0, 9, 'alock,bomb,gun,msl'],
-      ['fighter', 'plane', 2, 10, 'alock,bomb,detonate,gun,msl'],
-      ['police', 'heli', 0, 6, 'gun'],
-      ['heavy', 'heli', 0, 6, 'bomb'],
+      ['fighter', 'plane', 0, 10, 'alock,bomb,boost,gun,msl'],
+      ['fighter', 'plane', 2, 11, 'alock,bomb,boost,detonate,gun,msl'],
+      ['police', 'heli', 0, 7, 'boost,gun'],
+      ['heavy', 'heli', 0, 7, 'bomb,boost'],
       ['tank', 'tank', 0, 6, 'cannon,coax,tlock'],
       ['tank', 'tank', 1, 7, 'cannon,coax,detonate,tlock'],
       ['rtank', 'tank', 0, 6, 'cannon,coax,tlock'],
       ['rtank', 'tank', 2, 7, 'cannon,coax,detonate,tlock'],
-      ['prop', 'plane', 0, 6, ''],
-      ['gannet', 'plane', 0, 9, 'alock,bomb,gun,msl'],
-      ['gannet', 'plane', 2, 10, 'alock,bomb,detonate,gun,msl'],
-      ['lamp', 'heli', 0, 6, 'gun'],
+      ['prop', 'plane', 0, 7, 'boost'],
+      ['gannet', 'plane', 0, 10, 'alock,bomb,boost,gun,msl'],
+      ['gannet', 'plane', 2, 11, 'alock,bomb,boost,detonate,gun,msl'],
+      ['lamp', 'heli', 0, 7, 'boost,gun'],
       [null, 'foot', 0, 7, 'run,swap'],
       [null, 'foot', 3, 8, 'detonate,run,swap'],
     ];

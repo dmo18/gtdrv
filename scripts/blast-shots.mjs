@@ -253,7 +253,7 @@ if (only === 'all' || only.startsWith('w6')) {
       };
       window.__victim = a;
       window.__pinW = () => { w.x = w.px = X0; w.z = w.pz = Z0; };
-      window.__shot.cam = [X0 + 5.2, 1.5, Z0 + 6, X0 + 5.6, 0.7, Z0];
+      window.__shot.cam = [X0 + 3.4, 2.4, Z0 - 4.2, X0 + 4.8, 0.5, Z0];
       window.__shot.run(3, pin);
       pin();
       w.heading = 0;
@@ -275,6 +275,48 @@ if (only === 'all' || only.startsWith('w6')) {
     await page.evaluate(() => window.__shot.run(100, window.__pinW));
     await shot('w6-fall-lying');
   }
+}
+if (only === 'all' || only === 'w6-perf') {
+  // A heavy fight: six cars blown up in a row (six burning hulls, about 100
+  // parts), a dozen people killed round them, the camera on it all.
+  const r = await page.evaluate(() => {
+    const g = window.__rw;
+    g.daynight.setHour(14);
+    const sp = g.city.spawn;
+    const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
+    const w = g.player.walker;
+    const cars = [];
+    for (let i = 0; i < 6; i++) {
+      const c = g.debug.spawnCar('sedan', sp.x + fx * (24 + i * 7) - fz * ((i % 2) * 4 - 2), sp.z + fz * (24 + i * 7) + fx * ((i % 2) * 4 - 2), sp.heading + i);
+      c.vx = c.vz = c.speed = 0;
+      cars.push(c);
+    }
+    const civs = g.actors.filter((a) => a.team === 'civ' && a.life === 'ok').slice(0, 12);
+    civs.forEach((a, i) => {
+      a.x = a.px = sp.x + fx * (26 + i * 3) + fz * 5;
+      a.z = a.pz = sp.z + fz * (26 + i * 3) - fx * 5;
+    });
+    const cx = sp.x + fx * 40, cz = sp.z + fz * 40;
+    window.__shot.cam = [sp.x + fx * 8 - fz * 6, 6, sp.z + fz * 8 + fx * 6, cx, 1.5, cz];
+    const steps = [];
+    let worst = 0;
+    for (let i = 0; i < 360; i++) {
+      if (i % 20 === 0 && i / 20 < cars.length) g.combat.damage(cars[i / 20], 1e5, w, 'blast');
+      if (i === 150) civs.forEach((a) => { if (a.life === 'ok') g.combat.damage(a, 100, w, 'bullet'); });
+      const t0 = performance.now();
+      g.step(1 / 60);
+      const dt = performance.now() - t0;
+      steps.push(dt);
+      if (dt > worst) worst = dt;
+    }
+    window.__shot.run(1);
+    steps.sort((a, b) => a - b);
+    const hulls = g.combat.hulls.length;
+    const bodies = g.actors.filter((a) => a.life === 'out' || a.life === 'down').length;
+    return { mean: +(steps.reduce((a, b) => a + b, 0) / steps.length).toFixed(2), p95: +steps[Math.floor(steps.length * 0.95)].toFixed(2), worst: +worst.toFixed(2), hulls, bodies };
+  });
+  await shot('w6-heavy-fight');
+  console.log('heavy fight step ms', JSON.stringify(r));
 }
 await browser.close();
 server.close();

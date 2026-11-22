@@ -236,7 +236,8 @@ try {
   await grp('game');
   check('game: 4 rows (police, hard, map, new game)', (await rowCount()) === 4);
   await grp('display');
-  check('display: 4 rows', (await rowCount()) === 4);
+  // 5 rows from 0.5.0: the Phone check (docs/PLAN_V1.md 4.2) joins HUD, graphics quality, live day and night and time of day (at most 6)
+  check('display: 5 rows (HUD, quality, live time, time of day, Phone check)', (await rowCount()) === 5 && (await page.locator('[data-role="phonecheck"]').count()) === 1);
   check('time of day greyed while live is on', await ev(() => document.querySelector('[data-setting="timeOfDay"]').disabled === true));
   await grp('controls');
   check('settings: four steering choices', (await page.locator('.rw-menu-body [data-steering]').count()) === 4);

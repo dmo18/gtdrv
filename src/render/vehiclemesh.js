@@ -236,7 +236,8 @@ export function createVehicleMesh(spec, color) {
     rig.add(bar);
   }
 
-  if (spec.glow) group.add(underglow(spec));
+  const glow = spec.glow ? underglow(spec) : null;
+  if (glow) group.add(glow);
 
   group.rotation.order = 'YXZ';
   const L = spec.length;
@@ -245,7 +246,7 @@ export function createVehicleMesh(spec, color) {
     // head and tail are the one lamp mesh (game.js toggles both for LOD).
     head: lamps, tail: lamps, lamps, lampLevels: [lampNear, lampMid],
     wheels: [wheelLod], wheelLevels: [wNear, wMid], wheelMatrix: wNear.instanceMatrix,
-    bar, barRed: bar, barBlue: bar,
+    bar, barRed: bar, barBlue: bar, glowMesh: glow,
     anchors: e.anchors,
     lodFar: false,
     hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,
@@ -358,6 +359,7 @@ function applyDamage(ud, v) {
   }
   ud.far.material = farMaterial(ud.color, ud.wrecked);
   setLevels(ud.wheelLevels, wheelMaterial(ud.wrecked));
+  if (ud.glowMesh) ud.glowMesh.visible = !ud.wrecked;
   void v;
 }
 
@@ -385,7 +387,7 @@ function applyLamps(ud, time) {
     ud.lampMat = m;
     setLevels(ud.lampLevels, m);
   }
-  if (ud.bar) ud.bar.material = ud.sirenPhase === 0 ? LAMP.bar1 : ud.sirenPhase === 1 ? LAMP.bar2 : LAMP.bar0;
+  if (ud.bar) ud.bar.material = ud.wrecked ? LAMP.off : ud.sirenPhase === 0 ? LAMP.bar1 : ud.sirenPhase === 1 ? LAMP.bar2 : LAMP.bar0;
 }
 
 const MAX_ROLL = 0.075, MAX_PITCH = 0.055;

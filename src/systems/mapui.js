@@ -4,16 +4,22 @@ import { createMapRenderer, createMinimap, createFullMap } from '../ui/minimap.j
 
 const ZOOM = { foot: 110, car: 190, boat: 260, plane: 620, heli: 420 };
 const BLIP_COLORS = { car: '#f4efe6', boat: '#7fd3e6', plane: '#ffd166', heli: '#ffd166', tank: '#c9b98a' };
+const LAYER_REACH = 1.5; // minimap: a layer marker shows within this many zoom radii
 
 export function createMapUi(game, uiRoot) {
   const renderer = createMapRenderer(game.city);
   const minimap = createMinimap(game.hud.minimapCanvas, renderer);
   const blips = [];
-  for (let i = 0; i < 48; i++) blips.push({ x: 0, z: 0, type: 'dot', color: '#fff', h: 0 });
+  for (let i = 0; i < 96; i++) blips.push({ x: 0, z: 0, type: 'dot', color: '#fff', h: 0, label: '', r: 0 });
   // Other systems (races, deliveries) add their own markers here:
-  // { x, z, type, color, label? }. The full map draws this same live list.
+  // { x, z, type, color, label? }. The full map draws the same list.
   const markers = [];
-  const state = { x: 0, z: 0, heading: 0, zoomMetres: 190, blips, blipCount: 0, waypoint: null, markers };
+  // Layers (addLayer): { id, markers() } where markers() returns a list of the same shape,
+  // read every frame (explore markers: type 'explore-rumour', 'explore-garage', 'explore-ring' with r).
+  const layers = [];
+  // What the full map draws: the plain markers, then every layer's (rebuilt in place each frame).
+  const all = [];
+  const state = { x: 0, z: 0, heading: 0, zoomMetres: 190, blips, blipCount: 0, waypoint: null, markers: all };
   let zoom = 190;
   let pausedByMap = false;
 
@@ -39,6 +45,18 @@ export function createMapUi(game, uiRoot) {
       markers.push(m);
       return m;
     },
+    // A named set of markers that follows its owner's list (adventures and garages add theirs
+    // here so they show the question mark, ring and garage glyphs). Returns a handle.
+    addLayer(layer) {
+      if (!layer || typeof layer.markers !== 'function') return null;
+      layers.push(layer);
+      return { id: layer.id, remove() { const i = layers.indexOf(layer); if (i >= 0) layers.splice(i, 1); } };
+    },
+    removeLayer(id) {
+      for (let i = layers.length - 1; i >= 0; i--) if (layers[i].id === id) layers.splice(i, 1);
+    },
+    // The markers drawn on both maps, plain ones first.
+    allMarkers: all,
     removeMarker(m) {
       const i = markers.indexOf(m);
       if (i >= 0) markers.splice(i, 1);
@@ -79,6 +97,24 @@ export function createMapUi(game, uiRoot) {
         b.type = v.kind;
         b.color = BLIP_COLORS[v.kind] || '#fff';
         b.h = v.kind === 'tank' ? v.heading + (v.turretYaw || 0) : 0; // tank blip: barrel tick
+        b.label = '';
+        b.r = 0;
+      }
+      all.length = 0;
+      for (let i = 0; i < markers.length; i++) all.push(markers[i]);
+      const reach2 = (state.zoomMetres * LAYER_REACH) ** 2;
+      for (let l = 0; l < layers.length; l++) {
+        const list = layers[l].markers();
+        if (!list) continue;
+        for (let i = 0; i < list.length; i++) {
+          const m = list[i];
+          all.push(m);
+          // the minimap shows the ones near enough, and the tracked ring always
+          const dx = m.x - p.x, dz = m.z - p.z;
+          if (n >= blips.length || (m.type !== 'explore-ring' && dx * dx + dz * dz > reach2)) continue;
+          const b = blips[n++];
+          b.x = m.x; b.z = m.z; b.type = m.type || 'marker'; b.color = m.color || '#e2733a'; b.label = m.label || ''; b.r = m.r || 0;
+        }
       }
       for (let i = 0; i < markers.length && n < blips.length; i++) {
         const m = markers[i];
@@ -87,6 +123,8 @@ export function createMapUi(game, uiRoot) {
         b.z = m.z;
         b.type = m.type || 'marker';
         b.color = m.color || '#e2733a';
+        b.label = m.label || '';
+        b.r = m.r || 0;
       }
       state.blipCount = n;
       minimap.draw(state);
