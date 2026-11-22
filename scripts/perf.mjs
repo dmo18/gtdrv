@@ -53,7 +53,7 @@ const startGaps = await page.evaluate(() => {
   return window.__rwGaps.length;
 });
 await page.waitForTimeout(6000);
-const out = await page.evaluate(([startGaps, breakdown]) => {
+const out = await page.evaluate(([startGaps, breakdown, service]) => {
   const g = window.__rw;
   const gaps = window.__rwGaps.slice(startGaps);
   const sorted = gaps.slice().sort((a, b) => b - a);
@@ -71,6 +71,13 @@ const out = await page.evaluate(([startGaps, breakdown]) => {
   // A fixed street view: the player car parked at the spawn point.
   const v = g.player.vehicle, c = g.city;
   if (v) { v.x = v.px = c.spawn.x; v.z = v.pz = c.spawn.z; v.heading = v.pheading = c.spawn.heading; v.vx = v.vz = 0; v.speed = 0; }
+  // RW_SERVICE=1: two service vehicles in view, lamps on (V1 budget check).
+  if (service && v && g.debug) {
+    const fx = Math.cos(v.heading), fz = Math.sin(v.heading), rx = -fz, rz = fx;
+    const a = g.debug.spawnCar('firetruck', v.x + fx * 16 + rx * 3, v.z + fz * 16 + rz * 3, v.heading + Math.PI);
+    const b = g.debug.spawnCar('ambulance', v.x + fx * 26 - rx * 3, v.z + fz * 26 - rz * 3, v.heading);
+    a.siren = b.siren = true;
+  }
   const view = (hour) => {
     g.daynight.setHour(hour);
     for (let i = 0; i < 30; i++) g.step(1 / 60);
@@ -136,7 +143,7 @@ const out = await page.evaluate(([startGaps, breakdown]) => {
     stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, lotStats: g.cityMesh.userData.stream.lotStats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
     heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
   };
-}, [startGaps, !!process.env.RW_BREAKDOWN]);
+}, [startGaps, !!process.env.RW_BREAKDOWN, !!process.env.RW_SERVICE]);
 console.log(JSON.stringify(out, null, 1));
 await browser.close();
 server.close();

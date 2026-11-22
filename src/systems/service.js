@@ -66,7 +66,6 @@ const fwdSpeed = (v) => v.vx * Math.cos(v.heading) + v.vz * Math.sin(v.heading);
 // { ok, why, heading, road } in `out`. heading null picks the best
 // heading (nose out toward the road, else along it). `cache` (Map) keeps
 // dressed lots between calls. Pure; used by the test and the planner.
-const SOLID = [];
 function featuresOf(city, lot, cache) {
   let f = cache && cache.get(lot.id);
   if (!f) {
@@ -231,7 +230,7 @@ export function planIslandSpots(city, seed = 6011) {
 }
 
 // ---------------------------------------------------------------------
-export function createService(game, { seed = 6110 } = {}) {
+export function createService(game, { seed = 6110, spots: givenSpots = null } = {}) {
   const rng = createRng(seed);
   const city = game.city || null;
   const EV = { kind: '', on: false, x: 0, z: 0 };
@@ -327,7 +326,7 @@ export function createService(game, { seed = 6110 } = {}) {
   }
 
   // --- Places where a load or a towed car is handed in.
-  const spots = (city && city.lots && city.lots.length ? SERVICE_SPOTS : city && city.parkingSpots ? planIslandSpots(city) : SERVICE_SPOTS);
+  const spots = givenSpots || (city && city.lots && city.lots.length ? SERVICE_SPOTS : city && city.parkingSpots ? planIslandSpots(city) : []);
   const yardOf = (kind) => spots.filter((s) => s.kind === kind && s.yard);
   const garbageYards = yardOf('garbage'), towYards = yardOf('towtruck');
   function inYard(list, v) {
@@ -424,7 +423,7 @@ export function createService(game, { seed = 6110 } = {}) {
       return;
     }
     s.tank -= dt;
-    if (s.tank <= 0) {
+    if (s.tank <= 1e-9) {
       s.tank = 0;
       s.dry = true;
       s.spray = false;
@@ -717,23 +716,30 @@ export function createService(game, { seed = 6110 } = {}) {
     return best;
   }
   // Pin the towed car's near end to the hitch; its far axle trails.
-  function placeTowed(v, s, c) {
+  // towLine() works out the new line (hitch, unit u from the far axle to
+  // the hitch) and returns the hitch angle; placeTowed() moves the car.
+  const TL = { hx: 0, hz: 0, ux: 1, uz: 0 };
+  function towLine(v, s, c) {
     const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
-    const hx = v.x - ch * (v.spec.length / 2 + H.hitch), hz = v.z - sh * (v.spec.length / 2 + H.hitch);
-    const cl = c.spec.length, wb = c.spec.wheelBase || cl * 0.6;
-    const dA = cl / 2 + (wb / 2) * 1; // near end to far axle
-    // Far axle now, from the car's current pose.
-    const cc = Math.cos(c.heading) * s.nearSign, cs = Math.sin(c.heading) * s.nearSign; // unit from car centre toward its near end
-    const ax = c.x - cc * (wb / 2), az = c.z - cs * (wb / 2);
-    let ux = hx - ax, uz = hz - az;
+    TL.hx = v.x - ch * (v.spec.length / 2 + H.hitch);
+    TL.hz = v.z - sh * (v.spec.length / 2 + H.hitch);
+    const wb = c.spec.wheelBase || c.spec.length * 0.6;
+    // The far axle where the car is now (centre minus half the wheelbase
+    // toward its far end).
+    const ax = c.x - Math.cos(c.heading) * s.nearSign * (wb / 2), az = c.z - Math.sin(c.heading) * s.nearSign * (wb / 2);
+    let ux = TL.hx - ax, uz = TL.hz - az;
     const ul = Math.hypot(ux, uz) || 1;
-    ux /= ul;
-    uz /= ul;
-    const nx = hx - ux * (cl / 2), nz = hz - uz * (cl / 2);
+    TL.ux = ux / ul;
+    TL.uz = uz / ul;
+    return Math.abs(angleDiff(Math.atan2(TL.uz, TL.ux), v.heading));
+  }
+  function placeTowed(s, c) {
+    const cl = c.spec.length;
+    const nx = TL.hx - TL.ux * (cl / 2), nz = TL.hz - TL.uz * (cl / 2);
     c.px = c.x;
     c.pz = c.z;
     c.pheading = c.heading;
-    const nh = Math.atan2(uz * s.nearSign, ux * s.nearSign);
+    const nh = Math.atan2(TL.uz * s.nearSign, TL.ux * s.nearSign);
     const vx = (nx - c.x) / s.dt, vz = (nz - c.z) / s.dt;
     c.yawRate = angleDiff(nh, c.heading) / s.dt;
     c.x = nx;
@@ -742,13 +748,10 @@ export function createService(game, { seed = 6110 } = {}) {
     c.vx = vx;
     c.vz = vz;
     c.speed = vx * Math.cos(nh) + vz * Math.sin(nh);
-    c.y = c.wrecked ? c.y : H.lift * 0.5;
+    if (!c.wrecked) c.y = H.lift * 0.5;
     c.pitch = 0;
     c.asleep = true;
     c.meshDirty = true;
-    void dA;
-    // Hitch angle: between the truck's heading and the towed line.
-    return Math.abs(angleDiff(Math.atan2(uz, ux), v.heading));
   }
   function release(v, s, why) {
     const c = s.hook;
@@ -833,8 +836,8 @@ export function createService(game, { seed = 6110 } = {}) {
     v.speed = u;
     s.u0 = u;
     s.dt = dt;
-    const ang = placeTowed(v, s, c);
-    if (ang > H.releaseAngle) { release(v, s, 'The hook slipped'); return; }
+    if (towLine(v, s, c) > H.releaseAngle) { release(v, s, 'The hook slipped'); return; }
+    placeTowed(s, c);
     // Stopping 2 s in the tow yard (or a garage) hands the car in.
     if (Math.abs(u) < 0.5 && inTowYard(v)) {
       s.towYardT += dt;
@@ -865,6 +868,17 @@ export function createService(game, { seed = 6110 } = {}) {
   // =====================================================================
   // Parked service vehicles at their homes (6.11 "Where they park").
   const homes = spots.map((s) => ({ s, v: null, back: 0 }));
+  // Ordinary parked cars keep off the service homes (src/systems/parked.js
+  // fills the kerb and lot bays): their bays near a home are taken.
+  const parked = game.systems ? game.systems.find((q) => q && q.name === 'parked') : null;
+  if (parked && parked.spots) {
+    for (const ps of parked.spots) {
+      for (const h of homes) {
+        const r = (VEHICLE_SPECS[h.s.kind] ? VEHICLE_SPECS[h.s.kind].length : 5) / 2 + 3.5;
+        if (Math.abs(ps.x - h.s.x) < r && Math.abs(ps.z - h.s.z) < r) { ps.used = true; break; }
+      }
+    }
+  }
   let parkTimer = 0, first = true;
   function scanHomes() {
     const p = game.player;
@@ -981,7 +995,6 @@ export function createService(game, { seed = 6110 } = {}) {
       for (let i = 0; i < vs.length; i++) {
         const v = vs[i];
         if (!v || v.kind !== 'car' || !v.spec) continue;
-        if (specBeacon(v.spec)) stepBeacon(v, dt);
         const s = v.svc;
         if (!s) continue;
         if (s.cool > 0) s.cool = Math.max(0, s.cool - dt);
@@ -995,6 +1008,11 @@ export function createService(game, { seed = 6110 } = {}) {
       if (pv && pv.kind === 'car' && pv.spec && pv.spec.extra) {
         sys.stepExtra(pv, game.input, dt);
         if (pv.svc && pv.svc.hook) pv.svc.u0 = fwdSpeed(pv);
+      }
+      // Beacons after the extras: a lift or hook started this step counts.
+      for (let i = 0; i < vs.length; i++) {
+        const v = vs[i];
+        if (v && v.kind === 'car' && v.spec && specBeacon(v.spec)) stepBeacon(v, dt);
       }
       // Hard mode: seated in an ambulance the player regains 5 % a second.
       if (pv && pv.spec && pv.spec.extra === 'treat' && !pv.wrecked && mortal()) {

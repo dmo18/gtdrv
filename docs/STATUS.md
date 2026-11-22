@@ -7,6 +7,43 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## V1 Service vehicles (2026-11-22)
+- Fire truck (Brandwell), ambulance (Careline), garbage truck (Haulmark), tow truck (Hookton): specs in
+  src/entities/servicevehicles.js (6.11 table), merged into `VEHICLE_SPECS` (one import and one merge line in
+  vehicle.js, which also sets `siren` on the police spec) and their bands into `BANDS` (handlingbands.js), so the
+  whole handling-bands suite runs on them too. Drivetrain tuned to the bands (ambulance power 195, heavy
+  lockRate 2.55 so a 0.10 s button tap reaches 0.25 of lock). All five keep BOOST; all can be stolen.
+- Siren: police.js `stepOwnSiren` already serves any `hasSiren` spec (police or `emergency`); the `siren` event now
+  carries `kind`. Off on leaving, on a wreck (service.js) and when the player takes an on-call vehicle. Audio plays the
+  siren for any `spec.siren` vehicle (also AI on call): police wail and yelp, fire truck deep wail (the wail lowered),
+  ambulance hi-lo (a square tone, 960 / 770 Hz every 0.5 s); the fire truck horn is the deep air horn.
+- Light bars (src/render/lightbar.js): one mesh per vehicle, shared materials per lit lamp set, phases from
+  `lightbarPhase` (game time, 50 ms steps), steady half brightness under reduced motion. The police car's bar mesh
+  keeps its place (vehiclemesh.js) and gets the new geometry with headlamp wig-wag. Amber beacons of the garbage and
+  tow trucks follow `v.beacon` (lifting, towing, reversing, 2 s after). No point light (the city fakes all lights).
+- Extras (src/systems/service.js), EXTRA button via touch.js `setExtra` (slot `extra`, input `extra`):
+  cannon (hold, 20 s tank, 40 s refill, 25 % restart, 28 m, auto-aim 35 degrees at 90 degrees/s; people knocked down
+  unhurt for 3 s then flee, +1 star for an officer; hulls and burning cars put out after 1.5 s, +150 "Fire out", white
+  steam 4 s; cars pushed 3000 N); treat (tap under 2 m/s: revive a civilian body within 8 m in 2 s, +200 and its blood
+  pool cleared; hard mode heals to full in 2 s and 5 %/s seated; normal mode with nobody to treat refills boost; 5 s
+  cooldown); lift (side loader: kerb bin within 4 m, 3 s cycle, +50, 300 s lock, 20 loads, yard stop +400; crusher
+  takes up to 3 lying wreck parts, +20 each; driving off tips the bin over); hook (tap: car up to 2600 kg or a hull in
+  the rear cone, 1 s attach, one-axle kinematic trailer, mass share 0.6 on acceleration and braking (braking no worse
+  than 0.82), 26.8 m/s cap, slips over 75 degrees, 2 s stop in the tow yard or a garage +300, police car 2 stars).
+- Homes: `SERVICE_SPOTS` (20: fire 4, ambulance 4, garbage 3, tow 3, police 6) checked against the built city by
+  SV-P1; parked by service.js, back 300 s after being taken when 250 m away; parked.js bays near them are kept free.
+  Deviations: the third garbage truck is in a Downtown lot (Bayside Bin Depot), not Wynwood, to meet "one of each
+  within 600 m of the start"; the tow yard is on the Port's works land (no legal yard on the river strip); the medical
+  centre is in Overtown. Island: one of each on the largest car parks.
+- Traffic: seeded share (garbage 1.2 % 05:00 to 15:00, tow 1.0, ambulance 0.8, fire 0.5), at most 2, one of a kind,
+  150 m apart, inside the core; one in four ambulance or fire truck spawns on call (siren, 1.3 x lane speed). The
+  yield code accepted an AI siren vehicle unchanged, so on-call ships. A hooked traffic car's driver bails out.
+- Small edits outside V1 files: combat.js (a doused hull or car does not flame or re-ignite), combatfx.js (no flames
+  and steam when doused; blood cleared on `revived`), traffic.js, police.js, audio.js, game.js (one system line),
+  scripts/perf.mjs (`RW_SERVICE=1` puts two service vehicles in the street view).
+- Tests: test/service.test.js SV-H1 to SV-M1 (21 tests; SV-M1 lives here, not in carmesh.test.js).
+- Shots: docs/preview/v1-*.png (`node scripts/service-shots.mjs`).
+
 ## W5 Cars (2026-11-22)
 - Bodies (src/render/carbody.js): new section (tucked sill, character line, crisp shoulder, flat crowned deck), noses
   and tails that round over (`lean`), bonnet creases, shut lines with depth, glass with tumblehome, fender peaks over

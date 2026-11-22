@@ -15,7 +15,7 @@
 // drivetrain (power, gears, firstGear, brake) is tuned to SERVICE_BANDS.
 export const SERVICE_SPECS = {
   ambulance: {
-    id: 'ambulance', label: 'Careline', body: 'van', service: 'ambulance', siren: true, emergency: true, extra: 'treat',
+    id: 'ambulance', label: 'Careline', body: 'truck', service: 'ambulance', siren: true, emergency: true, extra: 'treat',
     length: 6.2, width: 2.2, height: 2.8, wheelBase: 3.7, wheelRadius: 0.38,
     mass: 4200, maxSpeed: 42.5, reverseSpeed: 7, accel: 2.5, brake: 8.4, grip: 0.80, steerMax: 0.46,
     lockRate: 2.8, returnRate: 3.6,
@@ -198,8 +198,39 @@ export const onCallDraw = (kind, r) => (kind === 'ambulance' || kind === 'firetr
 // ---- Parking (SERVICE_SPOTS) ----
 // Hand-made spots on the Miami map, made to the 6.11 rules and checked by
 // test/service.test.js (SV-P1) against the built city: { kind, x, z,
-// heading, name }. kind is a spec id. Filled in below.
-export const SERVICE_SPOTS = [];
+// heading, name }. kind is a spec id; `yard` marks the City Yard and the
+// tow yard (where a load or a towed car is handed in); `kerb` a marked kerb
+// bay (one of city.parkingSpots) rather than a lot. Made with the planner
+// in test/service.test.js's rules (checkSpot in src/systems/service.js):
+// fire houses Downtown and in Little Havana, a Port station; the medical
+// centre in Overtown (the health district north-west of Downtown lies
+// outside the box); the City Yard on Wynwood's industrial land; the tow
+// yard on the Port's industrial land (no legal yard on the river strip);
+// patrol bases Downtown and in Little Havana. The third garbage truck is
+// in a Downtown lot, not Wynwood: the rule "one of each kind within 600 m
+// by road of the start" wins over the home table.
+export const SERVICE_SPOTS = [
+  { kind: 'firetruck', x: -1438.8, z: 952.8, heading: -0.024, name: 'Harbour Fire House' },
+  { kind: 'firetruck', x: -1426.3, z: 952.8, heading: -0.024, name: 'Harbour Fire House' },
+  { kind: 'ambulance', x: -1416.3, z: 952.8, heading: -0.024, name: 'Harbour Fire House' },
+  { kind: 'firetruck', x: -2261.3, z: 727.8, heading: 1.546, name: 'Calle Fire House' },
+  { kind: 'ambulance', x: -2261.3, z: 717.8, heading: 1.546, name: 'Calle Fire House' },
+  { kind: 'firetruck', x: 2203.8, z: 944.8, heading: 0.84, name: 'Port Fire Station' },
+  { kind: 'ambulance', x: -2636.3, z: -1087.3, heading: -0.024, name: 'Tideline Medical Centre' },
+  { kind: 'ambulance', x: -2683.3, z: -1092.3, heading: 1.558, name: 'Tideline Medical Centre' },
+  { kind: 'garbage', x: -2216.3, z: -2144.8, heading: -1.6, name: 'City Yard', yard: true },
+  { kind: 'garbage', x: -2288.8, z: -2142.3, heading: 3.112, name: 'City Yard', yard: true },
+  { kind: 'garbage', x: -1053.8, z: 302.8, heading: 1.536, name: 'Bayside Bin Depot' },
+  { kind: 'towtruck', x: 1306.3, z: 600.3, heading: 0.416, name: 'Sunline Towing', yard: true },
+  { kind: 'towtruck', x: 1261.3, z: 580.3, heading: 0.416, name: 'Sunline Towing', yard: true },
+  { kind: 'towtruck', x: -1009.87, z: 1248.81, heading: -1.3511, name: 'Sunline Towing kerb bay', kerb: true },
+  { kind: 'police', x: -1488.8, z: 985.3, heading: 0.067, name: 'Central Patrol Base' },
+  { kind: 'police', x: -1488.8, z: 980.3, heading: 0.067, name: 'Central Patrol Base' },
+  { kind: 'police', x: -2321.3, z: 582.8, heading: -1.605, name: 'Ocho Patrol Base' },
+  { kind: 'police', x: -2316.3, z: 582.8, heading: -1.605, name: 'Ocho Patrol Base' },
+  { kind: 'police', x: -952.18, z: -128.88, heading: 1.4846, name: 'Biscayne patrol bay', kerb: true },
+  { kind: 'police', x: -1112.17, z: 1656.9, heading: 1.7987, name: 'Brickell patrol bay', kerb: true },
+];
 export const SPOT_RULES = {
   counts: { firetruck: 4, ambulance: 4, garbage: 3, towtruck: 3, police: 6 },
   lotTypes: ['carpark', 'works', 'plaza'], roadNear: 12, way: 4, wayWide: 6, startNear: 600, titleClear: 60,
