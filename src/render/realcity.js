@@ -14,10 +14,14 @@
 //   small stuff of a near tile (paint, decals, contact shadows, street
 //   props, signs) is hidden: the middle level.
 //
-// The far mesh hides the tiles that are shown near in its vertex shader
-// (a tiny mask texture, one texel per tile), so the two never overlap.
+// The far mesh leaves the tiles that are shown near out of its index
+// buffers (compactFar), so the two never overlap; past FAR_DETAIL a far
+// tile also drops its small buildings, parapets and roof plant. Lots
+// (docs/REVAMP.md 6.2): their ground and dressing are part of a near
+// tile (lotmesh.js); far off the land takes the lots' colours.
 // Collision, street lamps and traffic-light bulbs are set up once for
-// the whole map, whatever is drawn.
+// the whole map, whatever is drawn; the lots' solid features get their
+// collision shapes when their tile is first built.
 import * as THREE from 'three';
 import { ChunkedBuilder, MeshBuilder } from './meshbuilder.js';
 import { createTextures } from './textures.js';
@@ -130,8 +134,7 @@ const NOOP = () => undefined;
 const NULL_MB = new Proxy({}, { get: () => NOOP });
 const NULL_B = { at: () => NULL_MB };
 
-// Material for the far blocks: vertex colours, near tiles masked out in
-// the vertex shader, windows (darker glass by day, some lit at night)
+// Material for the far blocks: vertex colours, windows (darker glass by day, some lit at night)
 // from the world position in the fragment shader. emissiveIntensity is
 // driven by the day/night system like the facade materials.
 // aWin: 0 no windows, 1 a tower or block grid (3.1 by 3.4 m), 2 small
