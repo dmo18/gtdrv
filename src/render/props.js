@@ -448,7 +448,7 @@ export function lotStamps(C) {
       } else {
         trees.at(x, z).add(T.trees[(k * T.trees.length) | 0], x, y - 0.04, z, k * TAU * 7, h, h, h, s, s, s);
       }
-      C.ao.at(x, z).aoDisc(x, z, h * 0.36, y + 0.012, 0.55, 8);
+      C.ao.at(x, z).aoDisc(x, z, h * 0.36, y + 0.012, 0.55, 6);
     },
     palm(x, z, y, h, v) {
       const s = 0.85 + hash2(x + 3, z) * 0.3;
@@ -459,7 +459,7 @@ export function lotStamps(C) {
       } else {
         trees.at(x, z).add(T.palms[(v * 3) | 0], x, y - 0.04, z, v * TAU * 7, h * 1.15, h, h * 1.15, s, s, s);
       }
-      C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.012, 0.66, 8);
+      C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.012, 0.66, 6);
     },
     lamp(x, z, y, rot, h = 7) {
       trees.at(x, z).add(T.lamp, x, y - 0.02, z, rot, 1, h / 7, 1);
@@ -473,8 +473,10 @@ export function lotStamps(C) {
     bin(x, z, y, rot, v) {
       C.plain.at(x, z).add(T.bin, x, y, z, rot, 1, 1, 1, v < 0.5 ? 1 : 1.6, v < 0.5 ? 1 : 1.2, 1);
     },
+    // A plain post (the street bollard has twice the triangles; lots
+    // have many more of them).
     bollard(x, z, y) {
-      C.plain.at(x, z).add(T.bollard, x, y, z, 0);
+      C.plain.at(x, z).cyl(x, z, y, y + 0.9, 0.11, 0.1, 5, 0x2a2c30, true, 0.7, 1, 0x4a4c50);
     },
     planter(x, z, y, rot, v) {
       const fl = v < 0.35;

@@ -269,7 +269,7 @@ export function compactFar(mesh, near, detail) {
 const FAR_PARAPET = 0.8;
 // Small buildings (lower than this) are far detail: off past FAR_DETAIL.
 export const FAR_SMALL_H = 9;
-export const FAR_DETAIL = 900; // m from the camera to a tile's edge
+export const FAR_DETAIL = 750; // m from the camera to a tile's edge
 // walls, plain: the always-drawn level; detail: parapets and roof plant.
 // The caller passes detail-level builders as walls and plain for a
 // small building.

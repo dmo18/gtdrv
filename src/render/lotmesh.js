@@ -172,9 +172,6 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const r = lot.type === 'works' || lot.type === 'site' || f.v % 3 === 2 ? R.mesh : R.fence;
         const hgt = f.h || (r === R.mesh ? 2 : 1.1);
         if (r) panels(C.detail.at(x, z), r, x - ca * hl, z - sa * hl, x + ca * hl, z + sa * hl, y, hgt, r === R.mesh ? 0xc8ccd0 : [0xffffff, 0xe8e0d0, 0xb89a72][f.v % 3]);
-        // Posts at the ends.
-        S.obox(x - ca * hl, z - sa * hl, 0.06, 0.06, y, y + hgt + 0.05, h, 0x6a6e72);
-        S.obox(x + ca * hl, z + sa * hl, 0.06, 0.06, y, y + hgt + 0.05, h, 0x6a6e72);
         break;
       }
       case 'hedge': {
@@ -227,7 +224,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
           if (listed.has(key) || u > 0.55) continue;
           const ch = h + Math.PI / 2 + (u < 0.2 ? Math.PI : 0) + (u - 0.27) * 0.08;
           parkedCar(C.solid.at(bx, bz), bx, bz, y, ch, CARS[(u * 97 | 0) % CARS.length]);
-          C.ao.at(bx, bz).aoDisc(bx, bz, 2.4, y + 0.012, 0.6, 8);
+          C.ao.at(bx, bz).aoDisc(bx, bz, 2.4, y + 0.012, 0.6, 6);
           if (C.collision && C.solids) C.solids.push(C.collision.addCircle(bx - cx * 1.2, bz - cz * 1.2, 1.0, 1.4, 'car'), C.collision.addCircle(bx + cx * 1.2, bz + cz * 1.2, 1.0, 1.4, 'car'));
         }
         break;
@@ -240,7 +237,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         break;
       case 'shrub': {
         const r = f.r || f.w / 2 || 0.7, hgt = f.h || 1.1;
-        C.solid.at(x, z).blob(x, y + hgt * 0.45, z, r, hgt * 0.55, r, shadeHex(0x4a7e3a, 0.85 + (f.v % 5) * 0.06), 6, 3, 0.55, 1.1);
+        C.solid.at(x, z).blob(x, y + hgt * 0.45, z, r, hgt * 0.55, r, shadeHex(0x4a7e3a, 0.85 + (f.v % 5) * 0.06), 5, 3, 0.55, 1.1);
         break;
       }
       case 'bin': stamps.bin(x, z, y, h, (f.v % 8) / 8); break;
@@ -256,7 +253,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
           const col = CONTAINERS[(f.v + t * 3) % CONTAINERS.length];
           C.solid.at(x, z).obox(x, z, hl || 3, hw || 1.22, y + t * 2.6, y + (t + 1) * 2.6 - 0.04, h, col, shadeHex(col, 1.1), t ? 0.85 : 0.6, 1);
         }
-        C.ao.at(x, z).aoDisc(x, z, Math.max(hl, hw) + 1.5, y + 0.012, 0.6, 8);
+        C.ao.at(x, z).aoDisc(x, z, Math.max(hl, hw) + 1.5, y + 0.012, 0.6, 6);
         break;
       }
       case 'pallet':
@@ -290,7 +287,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
       }
       case 'rock': {
         const r = f.r || 0.9;
-        C.solid.at(x, z).blob(x, y + r * 0.3, z, r, r * 0.6, r * 0.85, shadeHex(0x8a8680, 0.85 + (f.v % 5) * 0.06), 6, 3, 0.6, 1.05);
+        C.solid.at(x, z).blob(x, y + r * 0.3, z, r, r * 0.6, r * 0.85, shadeHex(0x8a8680, 0.85 + (f.v % 5) * 0.06), 5, 3, 0.6, 1.05);
         break;
       }
       case 'pile': {
