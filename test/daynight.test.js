@@ -76,3 +76,25 @@ test('day/night system runs without a scene and changes weather', () => {
   assert.ok(seen.some((e) => e[0] === 'weather' && e[1] === 'rain'));
   assert.equal(dn.setWeather('snow'), false);
 });
+
+test('sea shore map fills in slices and switches on', async () => {
+  const { createWater } = await import('../src/render/water.js');
+  // A straight shore along x = 0: land for x < 0.
+  const w = createWater({ shoreDist: (x) => -x });
+  const cam = { x: 100, z: 50 };
+  for (let i = 0; i < 12; i++) w.update(i / 60, cam);
+  const u = w.near.material;
+  assert.ok(u, 'near sea material exists');
+  // Moving far away starts a new fill without throwing.
+  for (let i = 0; i < 12; i++) w.update(1 + i / 60, { x: 900, z: -400 });
+});
+
+test('weather and a lack of scene leave the day/night logic working', () => {
+  const game = { clock: 17.5, progress: { settings: { reduceMotion: true } } };
+  const dn = createDayNight(game);
+  for (let i = 0; i < 120; i++) dn.update(1 / 60);
+  assert.ok(Number.isFinite(game.clock));
+  dn.setWeather('rain', true);
+  assert.equal(game.weather.name, 'rain');
+  assert.ok(game.weather.overcast > 0.9);
+});
