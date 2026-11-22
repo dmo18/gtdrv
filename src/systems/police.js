@@ -24,6 +24,7 @@ import {
 } from './crew.js';
 import { WEAPONS, selectWeapon } from '../core/weapons.js';
 import { fogSightScale } from '../core/weather.js';
+import { hasSiren } from '../core/yield.js';
 import { spawnPoliceHeli, setOrder as setHeliOrder } from './helipilot.js';
 
 // --- Heat rules. ---
@@ -1170,6 +1171,37 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     return footTarget;
   }
 
+  // The player's own siren and lights: a stolen police car (spec.police), later
+  // any emergency vehicle (spec.emergency). The SIREN button (input 'siren')
+  // toggles v.siren; the flag drives the lights, the audio loop and the traffic
+  // and pedestrians that get out of the way (src/core/yield.js). Off by default,
+  // and off again when the player leaves the car.
+  const sirenEv = { craft: null, on: false };
+  let ownSirenCar = null;
+  function stepOwnSiren() {
+    const pv = game.player.vehicle;
+    const can = !!(pv && pv.kind === 'car' && !pv.wrecked && hasSiren(pv.spec));
+    if (ownSirenCar && ownSirenCar !== pv) {
+      const old = ownSirenCar;
+      ownSirenCar = null;
+      if (old.siren) {
+        old.siren = false;
+        sirenEv.craft = old;
+        sirenEv.on = false;
+        if (ev && ev.emit) ev.emit('siren', sirenEv);
+      }
+    }
+    const input = game.input;
+    if (can && input && input.consume && input.consume('siren')) {
+      pv.siren = !pv.siren;
+      ownSirenCar = pv.siren ? pv : null;
+      sirenEv.craft = pv;
+      sirenEv.on = pv.siren;
+      if (ev && ev.emit) ev.emit('siren', sirenEv);
+    }
+    if (game.touch && game.touch.setSiren) game.touch.setSiren(can, can && !!pv.siren);
+  }
+
   function setSiren(on) {
     if (on !== sirenOn) {
       sirenOn = on;
@@ -1195,6 +1227,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     stars: 0,
     fixedUpdate(dt) {
       const p = game.player;
+      stepOwnSiren();
       const settings = game.progress && game.progress.settings;
       const enabled = !settings || settings.police !== false;
       enabledNow = enabled;
@@ -1479,6 +1512,9 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         const v = cars[i];
         if (v.mesh) setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: !!v.siren, time: game.time });
       }
+      // The player's own siren (game.js draws the player's car with it off first).
+      const own = game.player.vehicle;
+      if (own && own.siren && own.kind === 'car' && own.mesh) setVehicleLights(own.mesh, { brake: own.brake > 0.1 || own.handbrake, siren: true, time: game.time });
       if (!game.scene) return;
       for (let i = 0; i < officers.length + bodies.length; i++) {
         const o = i < officers.length ? officers[i] : bodies[i - officers.length];

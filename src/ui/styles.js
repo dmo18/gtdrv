@@ -192,6 +192,10 @@ const CSS = `
 .rw-slot { width: var(--ew); height: var(--ew); }
 /* HAND (car, boat), SWAP (foot): above BRAKE. RUN (foot): the BRAKE rect. */
 .rw-slot-hand { --x: 100px; --y: 108px; width: var(--ew); height: var(--ew); }
+/* BOOST: the cell above MORE (915x412: 843, 116; 780x360: 716, 88) */
+.rw-slot-boost { --x: var(--mx); --y: calc(var(--my) + 64px); width: var(--ew); height: var(--ew); }
+.rw-slot-boost .rw-face { border-color: rgba(255, 170, 60, 0.85); }
+.rw-slot-boost.rw-down .rw-face { background: rgba(255, 140, 30, 0.85); box-shadow: 0 0 12px rgba(255, 150, 40, 0.8); }
 .rw-slot-run { --x: calc(8px + var(--pw) + 12px); --y: 8px; width: var(--pw); height: var(--ph); border-radius: 22px; }
 .rw-slot-run .rw-face { gap: 6px; }
 .rw-a-detonate .rw-face { border-color: rgba(255, 120, 90, 0.95); animation: rw-pulse 0.9s ease-in-out infinite; }
@@ -207,7 +211,7 @@ const CSS = `
 .rw-slot-gun, .rw-slot-cannon { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
 .rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
 .rw-slot-bomb { --x: 100px; --y: 108px; }
-.rw-slot-alock, .rw-slot-tlock { --x: 184px; --y: 84px; }
+.rw-slot-alock, .rw-slot-tlock, .rw-slot-siren { --x: 184px; --y: 84px; }
 .rw-slot-det { --x: 272px; --y: 148px; }
 .rw-slot-gun svg, .rw-slot-cannon svg { width: 28px; height: 28px; }
 .rw-mode-tank .rw-exit { --x: 16px; --y: 108px; }
@@ -245,7 +249,7 @@ const CSS = `
   .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 88px; }
   .rw-slot-hand, .rw-slot-bomb { --x: 88px; --y: 88px; }
   .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 156px; }
-  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock { --x: 160px; --y: 80px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-siren { --x: 160px; --y: 80px; }
   .rw-slot-msl, .rw-slot-coax { --x: calc(160px + var(--ew) + 8px); --y: 80px; }
   .rw-slot-det { --x: 288px; --y: 80px; }
 }
@@ -367,6 +371,25 @@ const CSS = `
   font-size: 9px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: #fff;
   text-shadow: 0 1px 2px #000;
 }
+/* speed lines while boosting: streaks that fade in toward the screen edges */
+.rw-speedlines {
+  position: absolute; inset: 0; opacity: 0; transition: opacity 0.2s linear;
+  background: repeating-conic-gradient(from 0deg at 50% 54%, rgba(255, 255, 255, 0) 0deg 2.2deg, rgba(255, 255, 255, 0.55) 2.5deg 2.9deg, rgba(255, 255, 255, 0) 3.2deg 6.3deg);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 54%, transparent 52%, #000 92%);
+  mask-image: radial-gradient(ellipse at 50% 54%, transparent 52%, #000 92%);
+}
+@media (prefers-reduced-motion: reduce) { .rw-speedlines { display: none; } }
+/* boost meter: under the speed (health and clock slots push it down) */
+.rw-boostbar {
+  position: absolute; left: calc(var(--rw-sl) + 16px + var(--mapw)); top: calc(var(--rw-st) + 56px);
+  width: 88px; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(0, 0, 0, 0.6);
+}
+.rw-boostbar.rw-hp { top: calc(var(--rw-st) + 72px); }
+.rw-full .rw-boostbar { top: calc(var(--rw-st) + 91px); }
+.rw-boostbar.rw-none { display: none; }
+.rw-boostfill { position: absolute; inset: 0; transform-origin: left; background: #ffa63c; transition: transform 0.1s linear; }
+.rw-boostbar.rw-on .rw-boostfill { background: #fff0b0; }
+.rw-boostbar.rw-spent .rw-boostfill { background: #e2503a; }
 /* clock: Full only, under the health slot */
 .rw-clock {
   display: none; position: absolute; left: calc(var(--rw-sl) + 16px + var(--mapw)); top: calc(var(--rw-st) + 72px);
@@ -518,6 +541,9 @@ const CSS = `
   .rw-speedbox { height: 40px; padding-top: 2px; }
   .rw-speed { font-size: 28px; line-height: 32px; height: 32px; }
   .rw-hpmeter { top: calc(var(--rw-st) + 52px); }
+  .rw-boostbar { width: 80px; top: calc(var(--rw-st) + 52px); }
+  .rw-boostbar.rw-hp { top: calc(var(--rw-st) + 68px); }
+  .rw-full .rw-boostbar { top: calc(var(--rw-st) + 85px); }
   .rw-clock { top: calc(var(--rw-st) + 68px); }
   .rw-tr { width: 152px; }
   .rw-money { height: 26px; line-height: 26px; }

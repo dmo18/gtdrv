@@ -603,3 +603,115 @@ test('buttons: hold reaches full lock at the wheels in 0.25 to 0.40 s, a tap pea
     assert.ok(inBand(peak, [0.25, 0.4]), `${id} 0.10 s tap peaks at ${peak.toFixed(3)}`);
   }
 });
+
+// ---- Boost on (src/entities/boost.js): the BOOST button adds engine force and
+// a higher redline; grip, steering and brakes must stay as above. ----
+const BOOST_CTL = { boost: true };
+// One step with the meter held full so a long test never runs dry.
+const stepBoosted = (v, c) => { v.boostMeter = 1; v.boostLock = false; stepVehicle(v, c, DT, W); };
+// A car cruising at u with BOOST held (throttle only, so the boost gate stays open).
+function movingBoosted(id, u) {
+  const v = createVehicle(id, 0, 0, 0);
+  v.vx = u;
+  v.speed = u;
+  const c = ctl({ ...BOOST_CTL });
+  for (let i = 0; i < 90; i++) { holdThrottle(v, c, u); stepBoosted(v, c); }
+  return { v, c };
+}
+function holdThrottle(v, c, u) {
+  c.throttle = Math.max(0, Math.min(1, (u - v.speed) * 0.8 + 0.15));
+}
+function stopFromBoosted(id, level, c) {
+  const v = createVehicle(id, 0, 0, 0);
+  v.vx = 26.82;
+  v.speed = 26.82;
+  v.boostLevel = level; // the redline is still raised: the worst case for the brake
+  v.boostMeter = 0.4;
+  for (let i = 0; i < 1200; i++) {
+    stepVehicle(v, c, DT, W);
+    if (v.speed <= 1e-6 && i > 5) break;
+  }
+  return { dist: Math.hypot(v.x, v.z), side: Math.abs(v.z), turn: Math.abs(v.heading) };
+}
+
+test('boost: 60 to 0 stop with boost released (or the button still held) stays in band and matches the plain stop', () => {
+  for (const mode of MODES) {
+    inMode(mode, () => {
+      for (const id of IDS) {
+        const plain = stopFrom(id, 26.82).dist;
+        for (const [name, c] of [['released', ctl({ brake: 1 })], ['held', ctl({ brake: 1, boost: true })]]) {
+          const m = stopFromBoosted(id, 1, c);
+          assert.ok(inBand(m.dist, BANDS[id].stop), `${mode} ${id} boost ${name}: stop ${m.dist.toFixed(2)} m, band ${BANDS[id].stop}`);
+          assert.ok(Math.abs(m.dist / plain - 1) <= 0.01, `${mode} ${id} boost ${name}: ${m.dist.toFixed(2)} m vs plain ${plain.toFixed(2)} m`);
+          assert.ok(m.turn <= B2.deg * DEG && m.side <= B2.side, `${mode} ${id} boost ${name}: turn ${(m.turn / DEG).toFixed(2)} deg, side ${m.side.toFixed(2)} m`);
+        }
+      }
+    });
+  }
+});
+
+test('boost: steady lateral grip on full lock is unchanged with boost held', () => {
+  for (const id of ACCURACY_CARS) {
+    const u = Math.min(20, VEHICLE_SPECS[id].maxSpeed * 0.6);
+    const share = (boosted) => {
+      const { v, c } = boosted ? movingBoosted(id, u) : moving(id, u);
+      c.steer = 1;
+      let s = 0, n = 0;
+      for (let i = 0; i < 60 * 4; i++) {
+        if (boosted) { holdThrottle(v, c, u); stepBoosted(v, c); } else { hold(v, c, u); stepVehicle(v, c, DT, W); }
+        if (i > 60 * 2.5) { s += v.yawRate * v.speed; n++; }
+      }
+      return s / n / G / v.spec.grip;
+    };
+    const k0 = share(false), k1 = share(true);
+    assert.ok(inBand(k1, LAT_G_FACTOR.arcade), `${id} boosted lateral grip ${k1.toFixed(3)} x grip`);
+    assert.ok(Math.abs(k1 / k0 - 1) <= 0.03, `${id} lateral grip ${k1.toFixed(3)} boosted vs ${k0.toFixed(3)} plain`);
+  }
+});
+
+test('boost: A1 linear steering and the A5 lane change stay accurate with boost held', () => {
+  for (const id of ACCURACY_CARS) {
+    const curv = (s) => {
+      const { v, c } = movingBoosted(id, 10);
+      c.steer = s;
+      let sum = 0, n = 0;
+      for (let i = 0; i < 96; i++) {
+        holdThrottle(v, c, 10);
+        stepBoosted(v, c);
+        if (i >= 60) { sum += v.yawRate / v.speed; n++; }
+      }
+      return sum / n;
+    };
+    const full = curv(1);
+    for (const s of [0.25, 0.5, 0.75]) {
+      const k = curv(s);
+      assert.ok(Math.abs(k / (s * full) - 1) <= A1_LINEAR, `${id} boosted steer ${s}: ${(k / full).toFixed(3)} of full`);
+    }
+    const u = id === 'truck' ? A5.truckSpeed : A5.speed;
+    const z = (x) => (x <= 0 ? 0 : x >= A5.road ? A5.side : A5.side * (0.5 - 0.5 * Math.cos(Math.PI * x / A5.road)));
+    const v = createVehicle(id, -40, 0, 0);
+    v.vx = u;
+    const c = ctl({ ...BOOST_CTL });
+    let tEnd = -1, t = 0;
+    while (t < 20) {
+      holdThrottle(v, c, u);
+      c.steer = pathSteer(v, z);
+      stepBoosted(v, c);
+      t += DT;
+      if (tEnd < 0 && v.x >= A5.road) tEnd = t;
+      if (tEnd >= 0 && t >= tEnd + A5.after) break;
+    }
+    assert.ok(Math.abs(v.z - A5.side) <= A5.endErr, `${id} boosted lane change ends ${v.z.toFixed(2)} m over`);
+    assert.ok(Math.abs(v.heading) <= A5.endDeg * DEG, `${id} boosted lane change heading ${(v.heading / DEG).toFixed(2)} deg`);
+  }
+});
+
+test('boost: hands off at speed with boost held runs straight (A4)', () => {
+  for (const id of ACCURACY_CARS) {
+    const u = Math.min(30, VEHICLE_SPECS[id].maxSpeed * 0.7);
+    const { v, c } = movingBoosted(id, u);
+    const z0 = v.z;
+    for (let i = 0; i < 300; i++) { holdThrottle(v, c, u); stepBoosted(v, c); }
+    assert.ok(Math.abs(v.z - z0) < A4_DRIFT, `${id} boosted drift ${v.z - z0}`);
+  }
+});

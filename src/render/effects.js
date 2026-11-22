@@ -594,7 +594,7 @@ export function createEffects(game) {
     if (!s) {
       s = {
         pvx: v.vx || 0, pvz: v.vz || 0, pvy: v.vy || 0, ph: v.heading || 0, pp: v.pitch || 0,
-        hop: 0, hopV: 0, touch: !!v.touchdown, acc: 0, ring: 0, smoke: 0, puff: 0, spray: 0,
+        hop: 0, hopV: 0, touch: !!v.touchdown, acc: 0, ring: 0, smoke: 0, puff: 0, spray: 0, flame: 0,
         marks: [{ on: false, x: 0, z: 0, lx: 0, lz: 0, rx: 0, rz: 0 }, { on: false, x: 0, z: 0, lx: 0, lz: 0, rx: 0, rz: 0 }],
         g: 1,
       };
@@ -622,6 +622,17 @@ export function createEffects(game) {
   function smoke(x, y, z, vx, vy, vz, life, s0, s1, a, r, g, b, rise = 0.3, drag = 1.6) {
     const i = emitP(A, x, y, z, vx, vy, vz, life, s0, s1, a, r, g, b, 0, -rise, drag);
     if (i >= 0) A.floor[i] = y - 0.3;
+    return i;
+  }
+  // One tailpipe flame particle blowing backward (car and boat boost).
+  function flame(x, y, z, fwdx, fwdz, spd, size) {
+    const back = -(5 + rnd() * 4) + spd * 0.05;
+    const i = emitP(B, x, y, z, fwdx * back + rs() * 0.25, 0.1 + rs() * 0.15, fwdz * back + rs() * 0.25,
+      0.14 + rnd() * 0.1, size * (0.9 + rnd() * 0.4), 0.06, 0.95, 1, 0.62 + rnd() * 0.15, 0.2, 3, 0, 1.2);
+    if (i >= 0) {
+      B.fadeIn[i] = 0.02;
+      tintP(B, i, 0.9, 0.18, 0.04);
+    }
     return i;
   }
   function spray(x, y, z, vx, vy, vz, life, s0, s1, a) {
@@ -804,6 +815,19 @@ export function createEffects(game) {
           0.9 + rnd() * 0.6, 0.18, launching ? 1.1 : 0.6, launching ? 0.3 : 0.12, 0.48, 0.48, 0.5, 0.25, 1.8);
       }
     }
+    // BOOST: a short flame (additive, so it glows at night) from each tailpipe.
+    if (v.boostOn && !v.wrecked) {
+      s.flame += dt * 70 * qq;
+      while (s.flame > 1) {
+        s.flame -= 1;
+        for (let ei = 0; ei < 2; ei++) {
+          const e = ei === 0 ? an.exhaust : an.exhaust2;
+          if (!e) continue;
+          const p = toWorld(v, e[0] - 0.1, e[2]);
+          flame(p.x, e[1], p.z, fwdx, fwdz, spd, 0.5);
+        }
+      }
+    }
     // Damage smoke and fire from the bonnet.
     const hf = Math.max(0, (v.health || 0) / (spec.health || 1));
     if (hf < 0.35 || v.wrecked) {
@@ -858,6 +882,17 @@ export function createEffects(game) {
         const back = spd * 0.6 - 2 - rnd() * 4;
         spray(p.x, wy + 0.1, p.z, fwdx * back + rs() * 1.4, up, fwdz * back + rs() * 1.4,
           0.7 + rnd() * 0.6, 0.45, 2.4, 0.38);
+      }
+    }
+    // BOOST surge: an orange jet of flame at the stern (outboard or jet drive).
+    if (v.boostOn && !v.wrecked) {
+      s.flame += dt * 60 * qq;
+      while (s.flame > 1) {
+        s.flame -= 1;
+        for (let k = 0; k < (L > 8 ? 2 : 1); k++) {
+          const p = toWorld(v, -L * 0.5 - 0.15, (L > 8 ? (k === 0 ? 1 : -1) * Wd * 0.2 : 0));
+          flame(p.x, wy + spec.height * 0.3, p.z, fwdx, fwdz, spd, 0.6 + L * 0.03);
+        }
       }
     }
     // Landing after a hop.

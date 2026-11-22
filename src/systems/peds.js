@@ -8,6 +8,7 @@
 // recycles and draws them.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
 import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from '../render/personmesh.js';
+import { asideNeed, collectSirens, ASIDE_WALK, ASIDE_HOLD } from '../core/yield.js';
 import { initActor, resetActor, addActor, removeActor, layDown } from './combat.js';
 
 const INSET = 2; // walking line, metres inside the block edge
@@ -22,6 +23,7 @@ const MOVING = 3; // m/s: faster craft are dodged, slower ones sidestepped
 // Scratch results (no allocation per step).
 const PT = { x: 0, z: 0 };
 const TH = { found: false, dx: 0, dz: 0, ox: 0, oz: 0, thr: 0 };
+const AS = { active: false, need: 0, dx: 0, dz: 0 };
 
 // ---------------------------------------------------------------------
 // Loop geometry
@@ -87,6 +89,7 @@ export function createPed(rng) {
     fleeT: 0, fdx: 0, fdz: 0, fleeSpeed: FLEE_SPEED,
     stuckT: 0,
     panicT: 0, // running away from gunfire (seconds left)
+    asideT: 0, atx: 0, atz: 0, // stepping off the road for a siren vehicle (src/core/yield.js)
   };
   return initActor(ped, 'civ');
 }
@@ -280,6 +283,25 @@ export function stepPed(ped, dt, ctx) {
     if (TH.found) startFlee(ped, ctx);
   }
 
+  // A siren vehicle coming up the road: step to the kerb side and wait.
+  // This is not a scare: no panic, no heat, nobody runs into traffic.
+  if (ped.asideT > 0) ped.asideT -= dt;
+  const sirens = ctx.sirens;
+  if (sirens && sirens.length && ped.panicT <= 0 && ped.state !== 'fleeing') {
+    for (let i = 0; i < sirens.length; i++) {
+      if (!asideNeed(ped, sirens[i], AS)) continue;
+      const was = ped.asideT > 0;
+      ped.asideT = ASIDE_HOLD;
+      if (AS.need > 0) {
+        ped.atx = ped.x + AS.dx * (AS.need + 0.3);
+        ped.atz = ped.z + AS.dz * (AS.need + 0.3);
+      } else if (!was) {
+        ped.atx = ped.x;
+        ped.atz = ped.z;
+      }
+    }
+  }
+
   // --- Wanted velocity. ---
   let wvx = 0, wvz = 0, accel = 8;
   const st = ped.state;
@@ -355,6 +377,17 @@ export function stepPed(ped, dt, ctx) {
         else ped.s += ped.dir * 3;
       }
     } else ped.stuckT = 0;
+  }
+
+  if (ped.asideT > 0 && st !== 'fleeing') {
+    const ex = ped.atx - ped.x, ez = ped.atz - ped.z;
+    const d = Math.sqrt(ex * ex + ez * ez);
+    accel = 12;
+    wvx = wvz = 0;
+    if (d > 0.1) {
+      wvx = (ex / d) * ASIDE_WALK;
+      wvz = (ez / d) * ASIDE_WALK;
+    }
   }
 
   // --- Move. ---
@@ -453,7 +486,7 @@ const SEA = -150; // this far out at sea nobody is simulated
 export function createPeds(game, { max = 22 } = {}) {
   const city = game.city;
   const slots = []; // { ped, mesh }
-  const ctx = { city, collision: game.collision, vehicles: game.vehicles, player: game.player };
+  const ctx = { city, collision: game.collision, vehicles: game.vehicles, player: game.player, sirens: [] };
   const blocks = city.blocks;
   const onBlock = new Int16Array(blocks.length); // active peds per block
   const cand = new Int32Array(blocks.length);
@@ -705,6 +738,7 @@ export function createPeds(game, { max = 22 } = {}) {
       }
       ctx.vehicles = game.vehicles;
       ctx.player = p;
+      collectSirens(game.vehicles, ctx.sirens);
       for (let i = 0; i < slots.length; i++) {
         const ped = slots[i].ped;
         if (!ped.active) continue;

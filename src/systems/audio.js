@@ -953,6 +953,18 @@ export function createAudio(game) {
     const cb = posOf(b);
     crashAt((fin(ca.x) + fin(cb.x)) / 2, (fin(ca.z) + fin(cb.z)) / 2, fin(strength));
   }
+  // BOOST (game event { craft, on, vehicle }): a whoosh and the turbo spooling
+  // up on the way in, the blow-off valve dumping on the way out.
+  function onBoost(e) {
+    if (!e || !game.player || e.vehicle !== game.player.vehicle || !ctx || !voices || !bus.engine) return;
+    if (e.on) {
+      voices.raw('whoosh', bus.engine, 0.35, 1.1);
+      if (e.craft === 'car') pv.boost = 1;
+    } else if (e.craft === 'car') {
+      voices.raw('blowoff', bus.engine, 0.4, 0.9 + 0.2 * rng.next());
+    }
+  }
+
   function onEnter(v) {
     if (!ready) return;
     const now = ctx.currentTime;
@@ -1557,6 +1569,7 @@ export function createAudio(game) {
         ev.on('vehicleImpact', guard(onImpact)),
         ev.on('vehicleCrash', guard(onCrash)),
         ev.on('enter', guard(onEnter)),
+        ev.on('boost', guard(onBoost)),
         ev.on('exit', guard(onExit)),
         ev.on('ui', guard(() => uiShot('click', 0.5))),
         ev.on('reward', guard(() => uiShot('chime', 0.6))),

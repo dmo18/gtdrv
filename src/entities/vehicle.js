@@ -13,6 +13,7 @@
 //   `suspension` 0..1 extra wheel travel after an impact (decays).
 // - `slip` 0..1 tyre squeal / skid amount, `abs` true while ABS works.
 import { clamp, angleDiff } from '../core/rng.js';
+import { stepBoost, CAR_BOOST } from './boost.js';
 import { wetGrip, wetUnderSteer, wetBrake, wetTopSpeed, windPush, lightnessOfMass } from '../core/weather.js';
 
 const WIND = { x: 0, z: 0 };
@@ -137,6 +138,7 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     vx: 0, vz: 0, yawRate: 0, speed: 0,
     steer: 0, steerAngle: 0,
     throttle: 0, brake: 0, handbrake: false,
+    boostMeter: 1, boostLevel: 0, boostLock: false, boostOn: false,
     health: spec.health,
     color,
     px: x, pz: z, pheading: heading, ppitch: 0, proll: 0,
@@ -416,17 +418,23 @@ export function stepVehicle(v, controls, dt, world) {
   v.impact = 0;
   if (!(dt > 0)) return;
 
-  let steerIn = 0, throttle = 0, brake = 0, handbrake = false;
+  let steerIn = 0, throttle = 0, brake = 0, handbrake = false, wantBoost = false;
   if (controls) {
     steerIn = clamp(+controls.steer || 0, -1, 1);
     throttle = clamp(+controls.throttle || 0, 0, 1);
     brake = clamp(+controls.brake || 0, 0, 1);
     handbrake = !!controls.handbrake;
+    wantBoost = !!controls.boost;
   }
   if (v.wrecked) throttle = 0;
   v.throttle = throttle;
   v.brake = brake;
   v.handbrake = handbrake;
+  // Boost (docs: src/entities/boost.js): more engine force and a higher
+  // redline while the meter lasts. Grip, steering and brakes are untouched.
+  stepBoost(v, wantBoost && throttle > 0.02 && brake < 0.02 && !handbrake && v.gear >= 1 && !v.wrecked, dt);
+  const bLevel = v.boostLevel;
+  const topK = 1 + CAR_BOOST.top * bLevel;
 
   const wx = world && world.weather;
   const rain = wx ? wx.rain || 0 : 0;
@@ -461,8 +469,8 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.shiftT > 0) v.shiftT = Math.max(0, v.shiftT - dt);
   if (v.gear >= 1) {
     // Far over the redline (spawned moving, towed): pick a gear at once.
-    while (v.gear < d.N && avf0 > d.vRed[v.gear] * 1.04) v.gear++;
-    const rw = avf0 / d.vRed[v.gear];
+    while (v.gear < d.N && avf0 > d.vRed[v.gear] * topK * 1.04) v.gear++;
+    const rw = avf0 / (d.vRed[v.gear] * topK);
     const rUp = throttle > 0.02 ? 0.62 + 0.33 * throttle : 0.97; // no upshifts when coasting
     const rDown = brake > 0.02 ? 0.36 : 0.28 + 0.27 * throttle;
     if (v.shiftT === 0) {
@@ -478,7 +486,7 @@ export function stepVehicle(v, controls, dt, world) {
     }
   }
   const gear = v.gear;
-  const vRed = d.vRed[gear];
+  const vRed = d.vRed[gear] * topK;
   const rWheel = avf0 / vRed;
 
   // ---- Engine: torque at the current revs, clutch slip when pulling away.
@@ -490,7 +498,7 @@ export function stepVehicle(v, controls, dt, world) {
   let driveF = 0;
   if (pedal > 0.02 && !handbrake && !v.wrecked) {
     const limiter = clamp((1 - rWheel) / 0.035, 0, 1);
-    driveF = pedal * torque(Math.min(rEng, 1)) * d.P / (RP * vRed) * limiter;
+    driveF = pedal * torque(Math.min(rEng, 1)) * d.P * (1 + (CAR_BOOST.force - 1) * bLevel) / (RP * vRed) * limiter;
     if (reversing) driveF *= -0.8;
     if (v.shiftT > 0) driveF *= 0.2; // torque dip while the clutch is out
   }
@@ -680,7 +688,7 @@ export function stepVehicle(v, controls, dt, world) {
   sh = Math.sin(v.heading);
   let vf = v.vx * ch + v.vz * sh;
   const vl = -v.vx * sh + v.vz * ch;
-  const vfc = clamp(vf, -s.reverseSpeed, s.maxSpeed * wetTopSpeed(rain));
+  const vfc = clamp(vf, -s.reverseSpeed, s.maxSpeed * topK * wetTopSpeed(rain));
   // Come to a clean rest when nothing drives the car.
   const driving = driveF !== 0;
   if (!driving && Math.abs(vfc) < 0.12 && Math.abs(vl) < 0.12 && (Math.abs(v.yawRate) < 0.08 || Math.abs(vf) < 0.02)) {

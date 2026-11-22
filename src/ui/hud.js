@@ -26,6 +26,8 @@ export function createHud(root) {
   if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
 
   const hud = el('div', 'rw-hud', root);
+  // Speed lines while boosting: thin streaks round the edges (opacity follows s.boostFx; off with reduced motion).
+  const lines = el('div', 'rw-speedlines', hud);
   const timers = new Set();
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
@@ -108,6 +110,14 @@ export function createHud(root) {
   speedEl.appendChild(speedNum);
   el('small', 'rw-unit', speedEl).textContent = 'mph';
   const vehBar = bar('rw-vehbar', speedBox);
+  // Boost meter (src/entities/boost.js): a thin bar under the speed readout,
+  // in a craft that can boost only. It moves down past the health slot and the clock.
+  const boostEl = el('div', 'rw-boostbar rw-none', hud);
+  boostEl.setAttribute('role', 'meter');
+  boostEl.setAttribute('aria-label', 'Boost');
+  boostEl.setAttribute('aria-valuemin', '0');
+  boostEl.setAttribute('aria-valuemax', '100');
+  const boostFill = el('div', 'rw-boostfill', boostEl);
   const promptEl = el('div', 'rw-prompt rw-pill rw-none', hud);
 
   let fullMode = false;
@@ -117,6 +127,7 @@ export function createHud(root) {
     mode: undefined, speed: undefined,
     score: undefined, pending: undefined, combo: undefined, wanted: undefined, cool: undefined, district: undefined, clock: undefined,
     veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
+    fx: undefined, boost: undefined, boostOn: undefined, boostLock: undefined,
   };
 
   function setBar(b, pct) {
@@ -183,6 +194,7 @@ export function createHud(root) {
     if (meterOn !== last.meterOn) {
       last.meterOn = meterOn;
       meter.classList.toggle('rw-none', !meterOn);
+      boostEl.classList.toggle('rw-hp', meterOn);
     }
     if (meterOn) {
       const pct = meterPercent(s.health, s.maxHealth || 100, s.vehicleHealth);
@@ -197,6 +209,21 @@ export function createHud(root) {
         meter.setAttribute('aria-valuenow', String(pct));
       }
     }
+    // s.boost: the meter 0..1, or below 0 / missing when the craft cannot boost.
+    const bp = s.boost >= 0 ? Math.round(Math.min(1, s.boost) * 100) : -1;
+    if (bp !== last.boost) {
+      last.boost = bp;
+      boostEl.classList.toggle('rw-none', bp < 0);
+      if (bp >= 0) {
+        boostFill.style.transform = 'scaleX(' + (bp / 100).toFixed(2) + ')';
+        boostEl.setAttribute('aria-valuenow', String(bp));
+      }
+    }
+    const fx = s.boostFx > 0 ? Math.round(Math.min(1, s.boostFx) * 20) : 0;
+    if (fx !== last.fx) { last.fx = fx; lines.style.opacity = fx === 0 ? '' : (fx * 0.03).toFixed(2); }
+    const bon = s.boostOn === true, block = s.boostLock === true;
+    if (bon !== last.boostOn) { last.boostOn = bon; boostEl.classList.toggle('rw-on', bon); }
+    if (block !== last.boostLock) { last.boostLock = block; boostEl.classList.toggle('rw-spent', block); }
     const veh = s.vehicleHealth === null ? -1 : Math.round(s.vehicleHealth * 100);
     if (veh !== last.veh) {
       last.veh = veh;

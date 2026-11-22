@@ -449,6 +449,10 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       v.pheading = v.heading;
       const controls = v === p.vehicle ? input : v.controls || null;
       game.kinds[v.kind].step(v, controls, dt, game.world);
+      if (v.boostOn !== undefined && v.boostOn !== !!v.boostSeen) {
+        v.boostSeen = v.boostOn;
+        events.emit('boost', { craft: v.kind, on: v.boostOn, vehicle: v });
+      }
       if (v.impact > 0) events.emit('vehicleImpact', v, v.impact);
       // A parked car that has settled goes back to sleep.
       if ((v.kind === 'car' || v.kind === 'tank') && !v.driver && !v.controls && Math.abs(v.speed) < 0.02 && Math.abs(v.yawRate) < 0.02) {
@@ -590,6 +594,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       camTarget.roll = v.kind === 'car' ? 0 : v.roll;
       camTarget.speed = v.speed;
       camTarget.height = 1.2;
+      camTarget.boost = game.progress.settings.reduceMotion === true ? 0 : v.boostLevel || 0; // FOV widening and speed lines
       if (v.kind === 'tank' && chase.tankAim) {
         // Behind the turret's wanted aim, not the hull (docs/ARMS.md).
         camTarget.heading = chase.tankAim.yaw;
@@ -618,6 +623,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
       camTarget.roll = 0;
       camTarget.speed = w.speed;
       camTarget.height = 1.5;
+      camTarget.boost = 0;
       if (p.near !== promptFor) {
         promptFor = p.near;
         hud.setPrompt(p.near ? `Tap ENTER: ${p.near.driver && p.near.driver !== 'player' ? 'take ' : ''}${p.near.spec.label}` : null);
@@ -647,6 +653,10 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     h.wanted = p.wanted;
     h.stars = game.police ? game.police.stars : p.wanted;
     h.cooling = game.police ? game.police.heat.cooldown : 0;
+    h.boost = p.vehicle && p.vehicle.kind !== 'tank' && p.vehicle.boostMeter >= 0 ? p.vehicle.boostMeter : -1;
+    h.boostFx = camTarget.boost;
+    h.boostOn = !!(p.vehicle && p.vehicle.boostOn);
+    h.boostLock = !!(p.vehicle && p.vehicle.boostLock);
     h.vehicleHealth = p.vehicle ? Math.max(0, p.vehicle.health / p.vehicle.spec.health) : null;
     // Name on the HUD; the key goes with it for the first-visit flags.
     hudPlace(city, p.x, p.z, placeNow);

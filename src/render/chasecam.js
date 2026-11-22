@@ -93,6 +93,7 @@ export const LEAN = {
   pitchMaxDeg: 1.5, pitchPerG: 1.6, // degrees of pitch per g of braking, capped
   ease: 0.15, // s, smoothing of the roll and pitch themselves
 };
+const BOOST_FOV = 9; // degrees of extra field of view at full boost
 const RAD = Math.PI / 180;
 function prefersReducedMotion() {
   try {
@@ -325,8 +326,12 @@ export function createChaseCamera(camera) {
     leanPitch += (wantPitch - leanPitch) * ke;
   }
 
-  function updateFov(spd, dt, snap) {
-    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick;
+  // BOOST widens the view by up to BOOST_FOV degrees (not with reduced motion).
+  let boostFov = 0;
+  function updateFov(spd, dt, snap, boost = 0) {
+    const wantB = leanOn ? BOOST_FOV * clamp(boost, 0, 1) : 0;
+    boostFov = snap ? wantB : boostFov + (wantB - boostFov) * Math.min(1, 4 * dt);
+    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick + boostFov;
     const next = snap ? want : curFov + (want - curFov) * Math.min(1, 3 * dt);
     curFov = next;
     // The aim view blends its own FOV in with the same 0.2 s ease.
@@ -416,7 +421,7 @@ export function createChaseCamera(camera) {
       camRoll += (clamp((target.roll || 0) * mode.rollShare, -0.35, 0.35) - camRoll) * ks;
       updateFeel(target, dt);
       place(target, dt, collision, false);
-      updateFov(spd, dt, false);
+      updateFov(spd, dt, false, target.boost);
     },
     snap(target) {
       camHeading = target.heading;
@@ -435,7 +440,7 @@ export function createChaseCamera(camera) {
       aim.on = false;
       aim.k = 0;
       place(target, 0, null, true);
-      updateFov(Math.abs(target.speed || 0), 0, true);
+      updateFov(Math.abs(target.speed || 0), 0, true, target.boost);
     },
     setMode(m) {
       modeKey = MODES[m] ? m : 'car';

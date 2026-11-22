@@ -3,6 +3,7 @@
 // heading 0 faces +x, forward is (cos h, sin h) in (x, z), y is the height
 // of the ground-contact point, pitch is nose up, roll is right side down.
 import { clamp, angleDiff } from '../core/rng.js';
+import { stepBoost, PLANE_BOOST, HELI_BOOST } from './boost.js';
 
 const G = 9.81;
 const TAU = Math.PI * 2;
@@ -124,7 +125,8 @@ export function createAircraft(specId, x, z, heading = 0, rng = null) {
     touchdownSpeed: 0,
     crashed: false,
     turningBack: false,
-    afterburner: 0, // 0..1, fighter boost (sound, glow)
+    afterburner: 0, // 0..1, fighter afterburner (sound, glow), driven by the BOOST button
+    boostMeter: 1, boostLevel: 0, boostLock: false, boostOn: false,
     // Police craft: siren and light bar, spotlight wanted (spotOn) and drawn (spot).
     siren: false,
     spotOn: false,
@@ -391,17 +393,30 @@ function stepPlane(a, controls, dt, world) {
   a.throttle = throttle;
   a.brake = brake;
   a.engineOn = controls != null;
-  if (s.afterburner && (a.onGround || !controls)) a.afterburner = approach(a.afterburner, controls && throttle > 0.9 ? 1 : 0, 2.5 * dt);
+  // BOOST button (the player's input carries a boolean `boost`): the
+  // afterburner on jets that have one, a short thrust surge on the rest.
+  // AI pilots send no such field, so they keep the old rule: afterburner
+  // at full throttle, no surge.
+  const own = controls != null && typeof controls.boost === 'boolean';
+  stepBoost(a, own && controls.boost && !a.wrecked, dt);
+  const abTarget = own ? (a.boostOn ? 1 : 0) : controls && throttle > 0.9 ? 1 : 0;
+  if (s.afterburner && (a.onGround || !controls)) a.afterburner = approach(a.afterburner, abTarget, 2.5 * dt);
   const parked = controls == null && a.onGround;
   if (parked) a.turningBack = false;
   else steerIn = edgeSteer(a, steerIn, world);
   a.steer = approach(a.steer, steerIn, (steerIn === 0 ? 6 : 4) * dt);
 
   if (a.onGround) planeGround(a, s, controls != null, pitchIn, throttle, brake, dt, world);
-  else planeAir(a, s, pitchIn, throttle, brake, dt, world);
+  else planeAir(a, s, pitchIn, throttle, brake, dt, world, abTarget);
 
   const spin = a.engineOn && !a.wrecked ? 14 + 40 * throttle : Math.min(a.airspeed * 0.25, 10);
   a.propSpin = (a.propSpin + spin * dt) % TAU;
+}
+
+// Thrust multiplier: the jet's afterburner share, or the short surge the
+// other planes get while BOOST is held.
+function thrustK(a, s) {
+  return 1 + (s.afterburner ? s.afterburner * a.afterburner : PLANE_BOOST.force * a.boostLevel);
 }
 
 function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
@@ -420,7 +435,7 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   if (throttle > 0.02) {
     if (vf > -0.5) {
       const r = clamp(vf / s.maxSpeed, 0, 1);
-      vf += s.thrust * throttle * (1 + (s.afterburner || 0) * a.afterburner) * (1 - r * r) * dt;
+      vf += s.thrust * throttle * thrustK(a, s) * (1 - r * r) * dt;
     } else {
       vf = approach(vf, 0, s.groundBrake * throttle * dt);
     }
@@ -495,7 +510,7 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   }
 }
 
-function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
+function planeAir(a, s, pitchIn, throttle, brake, dt, world, abTarget) {
   const vs = s.stallSpeed;
   let v = a.airspeed;
 
@@ -507,7 +522,7 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
     throttle = s.cruise;
     a.throttle = throttle;
   }
-  if (s.afterburner) a.afterburner = approach(a.afterburner, throttle > 0.9 ? 1 : 0, 2.5 * dt);
+  if (s.afterburner) a.afterburner = approach(a.afterburner, abTarget, 2.5 * dt);
   const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs), -1.1, 1.1);
   a.heading = angleDiff(a.heading + turn * dt, 0);
 
@@ -533,7 +548,8 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world) {
 
   // Speed: thrust, drag, and the trade with climbing or diving.
   const r = v / s.maxSpeed;
-  let acc = s.thrust * throttle * (1 + (s.afterburner || 0) * a.afterburner) - s.thrust * r * r - G * Math.sin(a.pitch);
+  // A boosted craft pulls full thrust (the jet's afterburner needs it).
+  let acc = s.thrust * (a.boostLevel > throttle ? a.boostLevel : throttle) * thrustK(a, s) - s.thrust * r * r - G * Math.sin(a.pitch);
   acc -= Math.abs(Math.sin(a.roll)) * 0.6;
   // The air brake cannot drag the plane into a stall.
   if (brake > 0.02) acc -= 9 * brake * clamp((v - 1.1 * vs) / (0.3 * vs), 0, 1);
@@ -608,6 +624,9 @@ function stepHeli(a, controls, dt, world) {
   }
   a.throttle = throttle;
   a.brake = brake;
+  // BOOST: a short forward speed surge (player only, and only while flying forward).
+  stepBoost(a, controls != null && controls.boost === true && pitchIn > 0.1 && !a.onGround && !a.wrecked, dt);
+  const surge = a.boostLevel;
   const aboard = a.driver != null;
   a.engineOn = aboard;
   a.rotorSpeed = approach(a.rotorSpeed, aboard ? 1 : 0, (aboard ? s.spoolUp : s.spoolDown) * dt);
@@ -649,8 +668,8 @@ function stepHeli(a, controls, dt, world) {
   let wantVf;
   if (lift) {
     a.heading = angleDiff(a.heading + a.steer * s.yawRate * dt, 0);
-    wantVf = pitchIn * s.maxSpeed * (pitchIn < 0 ? 0.45 : 1);
-    vf = approach(vf, wantVf, s.accel * dt);
+    wantVf = pitchIn * s.maxSpeed * (pitchIn < 0 ? 0.45 : 1 + HELI_BOOST.top * surge);
+    vf = approach(vf, wantVf, s.accel * (1 + (HELI_BOOST.force - 1) * surge) * dt);
     vl = approach(vl, 0, s.accel * 0.7 * dt);
   } else {
     const k = Math.max(0, 1 - 0.4 * dt);

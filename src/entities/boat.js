@@ -6,6 +6,7 @@
 // vector (-sin h, cos h).
 import { clamp, angleDiff } from '../core/rng.js';
 import { windPush } from '../core/weather.js';
+import { stepBoost, BOAT_BOOST } from './boost.js';
 
 const WIND = { x: 0, z: 0 };
 
@@ -93,6 +94,7 @@ export function createBoat(specId, x, z, heading = 0, rng = null) {
     driver: null,
     radius: Math.hypot(spec.length / 2, spec.width / 2),
     color,
+    boostMeter: 1, boostLevel: 0, boostLock: false, boostOn: false,
     wake: 0, planing: 0,
     surf: NaN, hop: 0, hopV: 0, hopCool: 0,
   };
@@ -143,16 +145,22 @@ export function stepBoat(b, controls, dt, world) {
   if (!(dt > 0)) return;
   const time = world && Number.isFinite(world.time) ? world.time : 0;
 
-  let steerIn = 0, throttle = 0, brake = 0;
+  let steerIn = 0, throttle = 0, brake = 0, wantBoost = false;
   if (controls) {
     steerIn = clamp(+controls.steer || 0, -1, 1);
     throttle = clamp(+controls.throttle || 0, 0, 1);
     brake = clamp(+controls.brake || 0, 0, 1);
+    wantBoost = !!controls.boost;
   }
   if (b.wrecked) {
     throttle = 0;
     brake = 0;
   }
+  // Planing surge: more thrust and a higher cap while the meter lasts.
+  stepBoost(b, wantBoost && throttle > 0.02 && !b.wrecked, dt);
+  const surge = b.boostLevel;
+  const cap = s.maxSpeed * (1 + BOAT_BOOST.top * surge);
+  const thrust = s.accel * (1 + (BOAT_BOOST.force - 1) * surge);
   b.throttle = throttle;
   b.brake = brake;
 
@@ -164,8 +172,8 @@ export function stepBoat(b, controls, dt, world) {
   // going forward and then backs it up.
   if (throttle > 0.02) {
     if (vf >= 0) {
-      const r = clamp(vf / s.maxSpeed, 0, 1);
-      vf += s.accel * throttle * (1 - r * r) * dt;
+      const r = clamp(vf / cap, 0, 1);
+      vf += thrust * throttle * (1 - r * r) * dt;
     } else {
       vf += s.accel * throttle * dt;
     }
@@ -183,6 +191,7 @@ export function stepBoat(b, controls, dt, world) {
   // idle so it coasts to a stop instead of creeping forever.
   if (power > 0.02) {
     vf -= vf * s.drag * dt;
+    if (vf > cap) vf = approach(vf, cap, 3 * dt); // the surge fades: settle back to the cap
   } else {
     vf = approach(vf, 0, (s.coastDrag + 2 * s.drag * Math.abs(vf)) * dt);
   }
@@ -194,7 +203,7 @@ export function stepBoat(b, controls, dt, world) {
   const spdF = clamp(aspd / (s.maxSpeed * 0.35), 0, 1);
   const auth = clamp(spdF * (0.3 + 0.7 * power) + 0.3 * power, 0, 1);
   // Fast boats lose a little authority at the very top end.
-  const hiSpd = 1 - 0.25 * clamp((aspd / s.maxSpeed - 0.6) / 0.4, 0, 1);
+  const hiSpd = 1 - 0.25 * clamp((aspd / cap - 0.6) / 0.4, 0, 1);
   const dir = vf < -0.3 ? -1 : 1;
   const yawTarget = b.steer * s.turnRate * auth * hiSpd * dir;
   b.yawRate += (yawTarget - b.yawRate) * Math.min(1, s.yawResp * dt);
@@ -211,7 +220,7 @@ export function stepBoat(b, controls, dt, world) {
   const keep = Math.exp(-s.sideGrip * (0.6 + 0.4 * power) * dt);
   const lost = vl * (1 - keep);
   vl -= lost;
-  if (vf > 0.5) vf = Math.min(s.maxSpeed, vf + Math.abs(lost) * 0.25);
+  if (vf > 0.5) vf = Math.min(Math.max(cap, vf), vf + Math.abs(lost) * 0.25);
   if (Math.abs(vl) > 1) vf = approach(vf, 0, Math.abs(vl) * 0.05 * dt);
   if (aspd < 0.02 && power <= 0.02) b.yawRate *= Math.exp(-3 * dt);
 

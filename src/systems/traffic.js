@@ -9,10 +9,11 @@
 // edge it is on (A -> B), a curve through the next junction (B -> C) and
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
-import { lanePoint, lanesPerDirection, signalState } from '../world/citygen.js';
+import { lanePoint, lanesPerDirection, laneOffset, signalState } from '../world/citygen.js';
 import { createVehicle, steerLock } from '../entities/vehicle.js';
 import { exitPosition } from '../entities/onfoot.js';
 import { clamp } from '../core/rng.js';
+import { createYield, stepYield, kerbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
 
 const K = 12; // interior samples of the junction path
 const NPTS = K + 4; // A, B, K samples, C, D
@@ -68,6 +69,7 @@ export function createDriver(city, rng) {
     modeTime: 0, tries: 0, aroundVeh: null, offset: 0, override: 0,
     junctions: 0, targetSpeed: 0, inJunction: false,
     stuck: false, dead: false,
+    yld: createYield(), yShift: 0, // giving way to a siren (src/core/yield.js)
   };
 }
 
@@ -581,6 +583,15 @@ export function driveStep(dr, v, dt, ctx = {}) {
   }
   if (mustStop) vt = Math.min(vt, distLine <= 0.3 ? 0 : Math.sqrt(2 * STOP_DECEL * (distLine - 0.3)));
 
+  // A siren vehicle behind or coming: pull over and wait (src/core/yield.js).
+  // Never stopped inside a junction, nor when about to enter one at speed.
+  const yl = dr.yld;
+  stepYield(yl, v, ctx.sirens, dt, dr.id);
+  const yFree = dr.mode === 0 && !dr.inJunction;
+  const yOn = yl.on && yFree;
+  const yStop = yFree && !(sp > 1 && s < dr.cum[IB] && dr.cum[IB] - s - halfL < 14);
+  if (yOn) dr.yShift = kerbShift(e0.width || 9, laneOffset(e0, dr.l0), v.spec.width / 2, !!e0.avenue && dr.l0 === 0);
+
   // Car (or anything) ahead on the path.
   let obsLimited = false;
   if (dr.obsGap < Infinity) {
@@ -593,6 +604,14 @@ export function driveStep(dr, v, dt, ctx = {}) {
     }
   }
   if (dr.override > 0) vt = Math.max(Math.min(vt, 1.5), Math.min(1.5, laneSpeedOf(e0)));
+
+  // Pulling over: slow to a walk, stop once at the kerb; then wait out the delay.
+  const yHold = !yl.on && yl.hold > 0 && yStop;
+  if ((yOn && yStop) || yHold) {
+    vt = yHold || dr.lat > dr.yShift - 0.35 ? 0 : Math.min(vt, PULL_SPEED);
+    dr.blockedTime = 0;
+    dr.waitTime = 0;
+  }
 
   // Blocked: wait, back up a little, then try to steer around.
   // Waiting in a queue behind another working driver does not count.
@@ -628,6 +647,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   }
   // Wide vehicles keep a little left of the lane centre.
   let offTarget = -Math.max(0, v.spec.width / 2 - 0.95) + clamp(dr.nudge, -0.6, 0.6);
+  if (yOn) offTarget = Math.max(offTarget, dr.yShift);
   if (dr.mode === 2 || (dr.mode === 1 && dr.tries > 0)) offTarget = -3.5;
   if (dr.mode === 2) {
     vt = Math.min(vt, 3);
@@ -641,7 +661,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
       dr.aroundVeh = null;
     }
   }
-  const rate = dr.mode === 0 ? 1.5 : 3;
+  const rate = dr.mode === 0 && !yOn ? 1.5 : 3;
   dr.offset += clamp(offTarget - dr.offset, -rate * dt, rate * dt);
   if (dr.mode === 0 && dr.offset === 0 && dr.blockedTime === 0) dr.aroundVeh = null;
 
@@ -714,7 +734,8 @@ export function createTraffic(game, { max = 14 } = {}) {
   const cars = [];
   const wrecks = []; // cars their drivers left: cleared once out of view
   const near = [];
-  const ctx = { time: 0, vehicles: game.vehicles };
+  const sirens = [];
+  const ctx = { time: 0, vehicles: game.vehicles, sirens };
   let nearTimer = 0, spawnTimer = 0;
 
   const cap = () => {
@@ -903,6 +924,7 @@ export function createTraffic(game, { max = 14 } = {}) {
       const p = game.player;
       ctx.time = game.time;
       ctx.vehicles = game.vehicles;
+      collectSirens(game.vehicles, sirens);
       const idle = city.shoreDist(p.x, p.z) < -120 || (p.y || 0) > 150;
       for (let i = wrecks.length - 1; i >= 0; i--) {
         const v = wrecks[i];

@@ -44,6 +44,7 @@ const TILT_WAIT_MS = TILT_WAIT * 1000; // no orientation events by then: no sens
 
 // Hand-drawn 24x24 line icons.
 const ICONS = {
+  boost: '<path d="M13 3L5 13h6l-1 8 8-11h-6z"/>',
   handbrake: '<path d="M5 19l9-11"/><circle cx="16" cy="6" r="2.5"/><path d="M4 21h9"/>',
   horn: '<path d="M4 9h4l6-4v14l-6-4H4z"/><path d="M17 9c1.6 1.6 1.6 4.4 0 6"/>',
   exit: '<path d="M10 4H5v16h5"/><path d="M9 12h11M16 8l4 4-4 4"/>',
@@ -120,7 +121,7 @@ export function createTouchControls(root, input, opts = {}) {
 
   const src = input.addSource({
     steer: 0, throttle: 0, brake: 0, handbrake: false,
-    moveX: 0, moveY: 0, sprint: false, pitch: 0,
+    moveX: 0, moveY: 0, sprint: false, pitch: 0, boost: false,
   });
   const layer = el('div', 'rw-touch rw-mode-car rw-steer-wheel', root);
   const MODES = ['foot', 'car', 'boat', 'plane', 'heli', 'tank'];
@@ -568,6 +569,11 @@ export function createTouchControls(root, input, opts = {}) {
     // The fan is 3 columns by 2 rows (docs/REVAMP.md 6.5); slot actions
     // (HAND, SWAP, RUN, the weapon arc) have fixed rectangles of their own.
     for (const a of actions) {
+      // BOOST owns the first cell above MORE: unslotted extras (GARAGE, TALK)
+      // start one cell higher while it shows.
+      if (a.slot === 'boost' && a.vis && a.modes.includes(mode)) e = 1;
+    }
+    for (const a of actions) {
       if (!a.vis || !a.modes.includes(mode) || a.slot) continue;
       if (a.sec) {
         const r = n % FAN_ROWS, c = (n / FAN_ROWS) | 0;
@@ -768,6 +774,16 @@ export function createTouchControls(root, input, opts = {}) {
   // Handbrake is a primary button: always on screen in a car.
   addAction({ id: 'handbrake', group: 'primary', slot: 'hand', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
     press() { src.handbrake = true; }, release() { src.handbrake = false; } });
+  // BOOST (turbo, planing surge, afterburner, heli surge): hold. Its own slot
+  // above MORE (docs/REVAMP.md 6.5, the first cell of the extra column).
+  addAction({ id: 'boost', group: 'primary', slot: 'boost', label: 'Boost', icon: 'boost', text: 'BOOST', modes: ['car', 'boat', 'plane', 'heli'],
+    press() { src.boost = true; }, release() { src.boost = false; }, buzz: false });
+  // SIREN (a stolen police car, later any emergency vehicle): toggles the siren
+  // and lights. Its own slot on the LOCK rect, which a car never uses
+  // (docs/REVAMP.md 6.5). src/systems/police.js calls setSiren().
+  let sirenCan = false, sirenLit = false;
+  const sirenAct = addAction({ id: 'carsiren', group: 'primary', slot: 'siren', label: 'Siren and lights', icon: 'siren', text: 'SIREN',
+    modes: ['car'], input: 'siren', visible: () => sirenCan });
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
   addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
@@ -788,7 +804,7 @@ export function createTouchControls(root, input, opts = {}) {
   // ----- global guards -----
   function releaseAll() {
     for (const c of cleanups) c();
-    src.steer = 0; src.throttle = 0; src.brake = 0; src.handbrake = false;
+    src.steer = 0; src.throttle = 0; src.brake = 0; src.handbrake = false; src.boost = false;
     src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
     raw = 0;
     btn.left = false; btn.right = false;
@@ -928,6 +944,17 @@ export function createTouchControls(root, input, opts = {}) {
       if (locked !== shown.locked) {
         shown.locked = locked;
         lockBtn.classList.toggle('rw-on', locked);
+      }
+    },
+    // The player's car can sound a siren (can) and whether it is on (on).
+    setSiren(can, on) {
+      can = !!can;
+      on = !!on;
+      if (can !== sirenCan) { sirenCan = can; refreshActions(); }
+      if (on !== sirenLit) {
+        sirenLit = on;
+        sirenAct.el.classList.toggle('rw-on', on);
+        sirenAct.el.setAttribute('aria-pressed', String(on));
       }
     },
     setLeftHanded(v) {
