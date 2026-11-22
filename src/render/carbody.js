@@ -83,9 +83,9 @@ const STYLES = {
   },
   // Low mid-engine wedge: the cabin sits forward, wide hips, a wing.
   sports: {
-    pF: 4.5, pR: 6, flare: 0.06, q: 3.0, lean: [0.06, 0.04, 0.05, 0.1],
-    top: [[-0.5, 0.54], [-0.49, 0.6], [-0.46, 0.63], [-0.4, 0.64], [-0.3, 0.63], [-0.15, 0.6], [0.1, 0.5], [0.25, 0.46], [0.38, 0.42], [0.46, 0.38], [0.49, 0.34], [0.5, 0.3]],
-    belt: [[-0.5, 0.5], [-0.49, 0.57], [-0.46, 0.6], [-0.4, 0.61], [-0.25, 0.6], [-0.1, 0.57], [0.1, 0.48], [0.3, 0.43], [0.45, 0.36], [0.49, 0.32], [0.5, 0.28]],
+    pF: 4.5, pR: 6, flare: 0.06, q: 3.0, lean: [0.06, 0.04, 0.05, 0.1], valley: true,
+    top: [[-0.5, 0.54], [-0.49, 0.6], [-0.46, 0.63], [-0.4, 0.64], [-0.3, 0.63], [-0.15, 0.6], [0.1, 0.52], [0.25, 0.48], [0.38, 0.45], [0.46, 0.42], [0.49, 0.38], [0.5, 0.34]],
+    belt: [[-0.5, 0.5], [-0.49, 0.57], [-0.46, 0.6], [-0.4, 0.61], [-0.25, 0.6], [-0.1, 0.57], [0.1, 0.5], [0.3, 0.45], [0.45, 0.4], [0.49, 0.36], [0.5, 0.32]],
     bottom: [[-0.5, 0.2], [-0.46, 0.1], [0.44, 0.1], [0.5, 0.12]],
     gh: { xC: -0.33, xR0: -0.13, xR1: -0.02, xA: 0.2, roof: 1, base: 0.82, tumble: 0.55, crown: 0.03, side: [-0.27, 0.15], b: null, rear: true },
     seams: [0.15, -0.19], hood: 0.22, boot: -0.37, exhaust: { n: 2, z: 0.2 }, wing: true, skirt: true,
@@ -111,7 +111,7 @@ const STYLES = {
   // The secret car: a teardrop canopy far forward, a long tapering tail
   // with two fins.
   ghostwake: {
-    pF: 3.8, pR: 3.4, flare: 0.07, q: 2.8, lean: [0.05, 0.03, 0.06, 0.05],
+    pF: 3.8, pR: 3.4, flare: 0.07, q: 2.8, lean: [0.05, 0.03, 0.06, 0.05], valley: true,
     top: [[-0.5, 0.42], [-0.47, 0.5], [-0.4, 0.55], [-0.25, 0.58], [-0.1, 0.56], [0.1, 0.48], [0.3, 0.42], [0.45, 0.36], [0.5, 0.3]],
     belt: [[-0.5, 0.38], [-0.47, 0.46], [-0.4, 0.52], [-0.25, 0.55], [-0.1, 0.52], [0.1, 0.45], [0.3, 0.4], [0.45, 0.34], [0.5, 0.28]],
     bottom: [[-0.5, 0.18], [-0.45, 0.1], [0.44, 0.1], [0.5, 0.12]],
@@ -226,7 +226,10 @@ function shape(spec) {
   const ycBase = beltC ? (x) => beltC(x / L) * H
     : (x) => topC(x / L) * H - drop * Math.min(1, 0.4 + 0.6 * Math.min(1, planW(x) / (hw * 0.5)));
   const yc = (x) => Math.max(ycBase(x), need(x));
-  const top = beltC ? (x) => Math.max(topC(x / L) * H, yc(x) + 0.012) : (x) => Math.max(topC(x / L) * H, yc(x) - 0.1);
+  // S.valley: the bonnet may sit below the fender peaks (a dip between
+  // raised wheel arches) instead of being lifted with them.
+  const top = beltC ? (S.valley ? (x) => Math.max(topC(x / L) * H, ycBase(x) + 0.012, yc(x) - 0.2) : (x) => Math.max(topC(x / L) * H, yc(x) + 0.012))
+    : (x) => Math.max(topC(x / L) * H, yc(x) - 0.1);
   const bottom = (x) => {
     let y = botC(x / L) * H;
     for (const wx of wheels) {
@@ -392,7 +395,9 @@ function ghShape(sh) {
   const crown = g.crown * sh.H;
   const roofY = g.roof * sh.H - crown;
   const baseW = (x) => sh.planW(x) * sh.shoulder * g.base;
-  const baseY = (x) => surfY(sh, x, baseW(x)) - 0.03;
+  // On a valley bonnet the deck dips toward the middle: the glass starts
+  // at the lower of the two so no gap opens under the windscreen.
+  const baseY = (x) => Math.min(surfY(sh, x, baseW(x)), sh.top(x)) - 0.03;
   const yA = baseY(xA), yC = baseY(xC);
   const roofC = curve([
     [xC, yC], [xC + (xR0 - xC) * 0.5, yC + (roofY - yC) * 0.62], [xR0, roofY - 0.012],
@@ -662,7 +667,7 @@ const FACES = {
     plateF: 0.24, plateR: 0.45,
   },
   compact: {
-    head: { q: [0.42, 0.97], f: [0.6, 0.9], e: 3, slant: 0.12, taper: 0.5, bulge: 0.01, lift: 0.006, ind: 0.9, drl: 'L' },
+    head: { q: [0.44, 0.97], f: [0.6, 0.88], e: 3.4, slant: 0.06, taper: 0.25, bulge: 0.01, lift: 0.006, ind: 0.9 },
     grille: { q: [-0.4, 0.4], f: [0.46, 0.64], e: 6, lift: 0.004, slats: 2, slatHex: 0x2a2c30 },
     intake: { q: [-0.64, 0.64], f: [0.08, 0.32], e: 6, lift: 0.003 },
     tail: { q: [0.5, 0.985], f: [0.62, 0.9], e: 3.5, taper: 0.2, bulge: 0.008, lift: 0.006, rev: 0.66, bar: false },

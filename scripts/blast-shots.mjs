@@ -81,7 +81,7 @@ await page.evaluate(() => {
 
 
 const shot = async (name) => {
-  await page.screenshot({ path: `docs/preview/${name}.png` });
+  await page.screenshot({ path: `docs/preview/${name}.png`, timeout: 180000 });
   console.log(name, JSON.stringify(await page.evaluate(() => window.__shot.info())));
 };
 
@@ -241,6 +241,8 @@ if (only === 'all' || only.startsWith('w6')) {
       const sp = g.city.spawn;
       w.x = w.px = sp.x;
       w.z = w.pz = sp.z;
+      w.vx = w.vz = 0;
+      if (w.speed !== undefined) w.speed = 0;
       const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
       const pin = () => {
         a.x = a.px = w.x + 4;
@@ -260,7 +262,7 @@ if (only === 'all' || only.startsWith('w6')) {
       window.__trace = [[a.x - w.x, a.z - w.z, a.life, hp0, a.hp, w.x, a.rag && a.rag.vx]];
       for (let i = 0; i < 12; i++) {
         window.__shot.run(1);
-        window.__trace.push([+(a.x - w.x).toFixed(2), +(a.z - w.z).toFixed(2), a.life]);
+        window.__trace.push([+(a.x - w.x).toFixed(2), +(w.x).toFixed(2), +(a.x).toFixed(2), a.life]);
       }
     });
     await shot('w6-fall-hit');
