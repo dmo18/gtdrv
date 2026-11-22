@@ -503,6 +503,21 @@ export function createMenu(root, game, economy) {
     body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));
     body.appendChild(toggleRow('Police chases', 'police'));
     body.appendChild(toggleRow('Hard: you can die', 'mortal'));
+    // Map: Miami (the default) or the classic island. Switching restarts.
+    const mapRow = h('div', 'rw-menu-setting');
+    mapRow.appendChild(h('span', '', 'Map'));
+    const mapBtn = h('button', 'rw-menu-btn', '');
+    const curMap = (() => { try { return localStorage.getItem('rustwater.map') || 'miami'; } catch { return 'miami'; } })();
+    mapBtn.textContent = curMap === 'island' ? 'Classic island (restart)' : 'Miami (restart)';
+    mapBtn.setAttribute('aria-label', 'Map: switch between Miami and the classic island, restarts the game');
+    mapBtn.addEventListener('click', () => {
+      const next = curMap === 'island' ? 'miami' : 'island';
+      try { localStorage.setItem('rustwater.map', next); } catch { /* storage blocked: the choice lasts this visit */ }
+      commit();
+      location.reload();
+    });
+    mapRow.appendChild(mapBtn);
+    body.appendChild(mapRow);
 
     const hudRow = h('div', 'rw-menu-setting');
     hudRow.appendChild(h('span', '', 'HUD'));

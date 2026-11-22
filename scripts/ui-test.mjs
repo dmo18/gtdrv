@@ -489,7 +489,7 @@ try {
   check('pending combo text', (await page.textContent('.rw-combo')).replace(/\s+/g, ' ') === '+450 x2.5');
   check('3 wanted badges lit', (await page.locator('.rw-badge.rw-on').count()) === 3);
   check('wanted row visible', await page.locator('.rw-wanted').isVisible());
-  check('speed text', (await page.textContent('.rw-speed')).startsWith('87'));
+  check('speed text (87.4 km/h shown as 54 mph)', (await page.textContent('.rw-speed')).startsWith('54'));
   check('clock text', (await page.textContent('.rw-clock')) === '13:30');
   check('minimap canvas 176', await page.evaluate(() => rw.hud.minimapCanvas.width === 176));
   await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 0, health: 80, armor: 40, score: 1, pending: 0, combo: 1, wanted: 0,

@@ -287,7 +287,7 @@ const CSS = `
 .rw-dbfire .rw-fire-mag { right: 14%; top: 12%; }
 .rw-lock.rw-on .rw-face { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
 /* ammo counter: HUD Full only (Minimal reads the count off FIRE) */
-.rw-btn.rw-ammo { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 88px); width: 112px; height: 56px; border-radius: 16px; }
+.rw-btn.rw-ammo { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 96px); width: 112px; height: 56px; border-radius: 16px; }
 .rw-ammo .rw-face {
   flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; flex-wrap: wrap;
   align-content: center; row-gap: 2px;

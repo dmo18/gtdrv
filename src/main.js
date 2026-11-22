@@ -1,6 +1,6 @@
 import { createGame } from './game.js';
 import { registerServiceWorker } from './pwa.js';
-import { mapFromSearch } from './world/maps.js';
+import { mapFromSearch, MAP_CHOICE_KEY } from './world/maps.js';
 
 const boot = document.getElementById('boot');
 const msg = document.getElementById('bootmsg');
@@ -18,8 +18,16 @@ function start(game) {
 // The real-map city (the default), loaded as its own chunk (the map data
 // is bundled, never fetched from elsewhere). ?map=island: the procedural
 // island (null: createGame generates it).
+function storedMap() {
+  try {
+    return localStorage.getItem(MAP_CHOICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 async function loadCity() {
-  if (mapFromSearch(location.search) !== 'miami') return null;
+  if (mapFromSearch(location.search, storedMap()) !== 'miami') return null;
   const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);
   return createMiamiCity(data);
 }

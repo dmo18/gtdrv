@@ -10,14 +10,19 @@ export const MAP_IDS = ['island', 'miami'];
 
 export const DEFAULT_MAP = 'miami';
 
-export function mapFromSearch(search = '') {
-  let v;
+// The URL parameter wins (tests and links); otherwise the map the player
+// picked in Settings (stored as its own key, see main.js); otherwise Miami.
+export const MAP_CHOICE_KEY = 'rustwater.map';
+
+export function mapFromSearch(search = '', stored = null) {
+  let v = null;
   try {
     v = new URLSearchParams(search).get('map');
   } catch {
-    return DEFAULT_MAP;
+    // unreadable search string: fall through to the stored choice
   }
-  return v === 'island' || v === 'miami' ? v : DEFAULT_MAP;
+  if (MAP_IDS.includes(v)) return v;
+  return MAP_IDS.includes(stored) ? stored : DEFAULT_MAP;
 }
 
 // What the HUD shows for a point: `out.key` is the district key the
