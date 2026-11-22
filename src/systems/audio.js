@@ -1846,6 +1846,8 @@ export function createAudio(game) {
         buses: bus,
         reverb: ret,
         master,
+        comp,
+        limiter,
         sirenOn,
         siren: siren ? siren.out : null,
         rpm: pv.sim.rpm,
