@@ -22,9 +22,9 @@ export const COL = {
   kerb: 0xc6c3bc,
   plaza: 0xc2bdb2,
   yard: 0x85878a,
-  grass: 0x86b060,
-  parkGrass: 0x8cc064,
-  lawn: 0x94c26a,
+  grass: 0x7ea85a,
+  parkGrass: 0x82b45c,
+  lawn: 0x8ab864,
   sand: 0xf2e2b6,
   water: 0x2a7c9e,
 };
@@ -122,6 +122,27 @@ export function makeMaterials(T) {
         #endif`);
   };
   M.wet = wet;
+  // Grass and open land: slow patches of lusher and drier, yellower
+  // grass over tens of metres, so a park or a verge is never one flat
+  // colour field (the texture only varies within its 10 m repeat).
+  for (const m of [M.grassMat, M.landMat, M.landRimMat]) {
+    m.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vRwG;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwG = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vRwG;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+	{
+		float rwA = sin( vRwG.x * 0.043 + sin( vRwG.y * 0.031 ) * 2.0 ) * sin( vRwG.y * 0.037 - vRwG.x * 0.011 );
+		float rwB = sin( vRwG.x * 0.13 + vRwG.y * 0.09 ) * sin( vRwG.y * 0.15 - 1.3 );
+		float rwDry = smoothstep( 0.2, 0.9, rwA * 0.7 + rwB * 0.3 );
+		diffuseColor.rgb *= 0.9 + 0.12 * rwB;
+		diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.12, 1.02, 0.72 ), rwDry * 0.55 );
+	}`);
+    };
+    m.customProgramCacheKey = () => 'rw-grass';
+  }
   // Ambient occlusion lite on every facade: darker where walls meet the
   // ground, a faint lift toward the top of tall buildings, so blocks do
   // not read as flat cut-outs. Worked out per pixel from the world

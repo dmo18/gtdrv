@@ -316,7 +316,12 @@ function createAtlas(size) {
         y += rowH;
         rowH = 0;
       }
-      if (y + h > size) throw new Error('atlas full: ' + name);
+      if (y + h > size) {
+        // Out of room: leave this picture out rather than stop the game.
+        // Its users check for the missing entry (props.js, buildings.js).
+        console.warn('atlas full, skipped: ' + name);
+        return;
+      }
       for (const ctx of [g, ge]) {
         ctx.save();
         ctx.translate(x, y);
@@ -1333,7 +1338,7 @@ function makeDetails(rng, streetNames) {
     g.strokeRect(1.5, 1.5, w - 3, h - 3);
   });
   // Glass balcony front: frosted panels, posts and a handrail.
-  A.add('rail', 128, 32, (g, ge, w, h) => {
+  A.add('rail', 64, 16, (g, ge, w, h) => {
     const gr = g.createLinearGradient(0, 0, w, h);
     gr.addColorStop(0, 'rgb(214,232,240)');
     gr.addColorStop(0.45, 'rgb(170,196,210)');
@@ -1346,7 +1351,7 @@ function makeDetails(rng, streetNames) {
     for (let x = 0; x < w; x += 32) g.fillRect(x, 0, 2.5, h);
   });
   // Roof railing: posts and two rails, see-through.
-  A.add('railing', 128, 32, (g, ge, w, h) => {
+  A.add('railing', 64, 16, (g, ge, w, h) => {
     g.clearRect(0, 0, w, h);
     g.fillStyle = 'rgb(150,156,162)';
     g.fillRect(0, 0, w, 3.5);
@@ -1377,32 +1382,16 @@ function makeDetails(rng, streetNames) {
   // Foliage for round canopies: overlapping leaf dabs, light on top of
   // dark, grey so the vertex colour sets the green. Its own number
   // stream (the shared one is left alone).
-  A.add('leaves', 128, 64, (g, ge, w, h) => {
+  A.add('leaves', 64, 32, (g, ge, w, h) => {
     let q = 12345;
     const rnd = () => ((q = (Math.imul(q, 1103515245) + 12345) >>> 0) / 4294967296);
     g.fillStyle = grey(120);
     g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 300; i++) {
       const x = rnd() * w, y = rnd() * h, v = 90 + rnd() * 165 * (0.55 + 0.45 * (1 - y / h));
       g.fillStyle = grey(v);
       g.beginPath();
-      g.ellipse(x, y, 1.5 + rnd() * 2.6, 1 + rnd() * 1.6, rnd() * TAU, 0, TAU);
-      g.fill();
-    }
-  });
-  // Leafy card: clumps of leaves with a ragged edge, see-through
-  // between them (breaks up the outline of a round canopy).
-  A.add('leafcard', 128, 128, (g, ge, w, h) => {
-    let q = 777;
-    const rnd = () => ((q = (Math.imul(q, 1103515245) + 12345) >>> 0) / 4294967296);
-    g.clearRect(0, 0, w, h);
-    for (let i = 0; i < 1400; i++) {
-      const a = rnd() * TAU, d = Math.sqrt(rnd()) * 0.5;
-      const x = w / 2 + Math.cos(a) * d * w, y = h / 2 + Math.sin(a) * d * h * 0.92;
-      const v = 80 + rnd() * 150 * (0.5 + 0.5 * (1 - y / h));
-      g.fillStyle = grey(v);
-      g.beginPath();
-      g.ellipse(x, y, 1.6 + rnd() * 2.4, 1 + rnd() * 1.4, rnd() * TAU, 0, TAU);
+      g.ellipse(x, y, 1 + rnd() * 1.6, 0.7 + rnd() * 1, rnd() * TAU, 0, TAU);
       g.fill();
     }
   });

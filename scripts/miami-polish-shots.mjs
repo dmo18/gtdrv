@@ -22,7 +22,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', (m) => { if (m.type() === 'error' || /atlas full/.test(m.text())) errors.push(m.text()); });
 await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
 await page.addStyleTag({ content: '.rw-title { display: none !important; }' }).catch(() => {});
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 180000 });

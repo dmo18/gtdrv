@@ -210,8 +210,8 @@ function makeMiamiTemplates(rng, R) {
   const T = { canopies: [], foliage: [], palmTrunks: [], palmCrowns: [] };
   const jit = () => rng.next() - 0.5;
   for (let v = 0; v < 6; v++) {
-    // Rounded canopy: a big central mass and a ring of overlapping
-    // clusters in several greens, on a short trunk with two limbs.
+    // Rounded canopy of many overlapping clumps in several greens (the
+    // foliage picture on them), on a short trunk with two limbs.
     const t = new MeshBuilder(), f = new MeshBuilder(true);
     const bark = hexShade(0x5e4632, rng.range(0.85, 1.15));
     const g = LEAF[v];
@@ -220,24 +220,18 @@ function makeMiamiTemplates(rng, R) {
     for (const a of [rng.range(0, TAU), rng.range(0, TAU)]) {
       t.cyl(Math.cos(a) * 0.05, Math.sin(a) * 0.05, th, th + 0.18, 0.022, 0.012, 4, bark, false, 0.8, 1);
     }
-    leafy(f, R.leaves, 0, th + 0.32, 0, 0.26, 0.21, 0.26, g, 7, 4, jit);
-    // Two crossed leafy cards break up the round outline.
-    if (R.leafcard) {
-      const r = R.leafcard, cy = th + 0.33, hw = 0.34, hh = 0.27;
-      for (const a of [0.4, 0.4 + Math.PI / 2]) {
-        const cx = Math.cos(a) * hw, cz = Math.sin(a) * hw;
-        f.quadUv(-cx, cy - hh, -cz, cx, cy - hh, cz, cx, cy + hh, cz, -cx, cy + hh, -cz, hexShade(g, 0.95), -Math.sin(a), 0.4, Math.cos(a), r.u0, r.v0, r.u1, r.v0, r.u1, r.v1, r.u0, r.v1);
-      }
-    }
-    const n = 5 + (v % 3);
-    const spread = rng.range(0.17, 0.24);
+    // A hidden core, then a dome of smaller clumps round it: reads as
+    // foliage, not as one ball.
+    leafy(f, R.leaves, 0, th + 0.3, 0, 0.2, 0.15, 0.2, hexShade(g, 0.7), 6, 3, jit);
+    const n = 11 + (v % 3);
+    const rad = rng.range(0.19, 0.24);
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * TAU + rng.range(-0.3, 0.3);
-      const d = spread * rng.range(0.75, 1.05);
-      const r = rng.range(0.13, 0.19);
-      leafy(f, R.leaves, Math.cos(a) * d, th + rng.range(0.2, 0.42), Math.sin(a) * d, r, r * 0.78, r, hexShade(LEAF[(v + i + 1) % LEAF.length], rng.range(0.82, 1.12)), 6, 3, jit);
+      const a = i * 2.39996 + v;
+      const up = (i + 0.5) / n;
+      const ring = Math.sqrt(1 - up * up * 0.75);
+      const r = rng.range(0.085, 0.12) * (1.1 - up * 0.3);
+      leafy(f, R.leaves, Math.cos(a) * rad * ring, th + 0.22 + up * 0.24, Math.sin(a) * rad * ring, r, r * 0.8, r, hexShade(LEAF[(v + i) % LEAF.length], rng.range(0.82, 1.14) * (0.88 + up * 0.22)), 6, 3, jit);
     }
-    leafy(f, R.leaves, rng.range(-0.05, 0.05), th + 0.52, rng.range(-0.05, 0.05), 0.15, 0.1, 0.15, hexShade(g, 1.12), 5, 3, jit);
     T.canopies.push(t);
     T.foliage.push(f);
   }
@@ -406,6 +400,25 @@ export function addProps(C, own = null, side = true) {
           if (side) collision.addCircle(x, z, 0.3, h, 'tree');
           if (mine(x, z)) palm(x, z, h, 0);
         }
+      }
+    }
+  }
+
+  // ---- Miami: palms along the seawalls of the palm neighbourhoods ----
+  if (MT && city.mainShore) {
+    const B = city.bounds, st = 15;
+    for (let z = B.z0 + 7; z < B.z1; z += st) {
+      for (let x = B.x0 + 7; x < B.x1; x += st) {
+        const sd = city.mainShore(x, z);
+        if (sd < 4 || sd >= 4 + st * 0.7) continue;
+        const jx = x + (hash(x, z) - 0.5) * 6, jz = z + (hash(z, x) - 0.5) * 6;
+        const s2 = city.mainShore(jx, jz);
+        if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
+        if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
+        if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || blocked(jx, jz)) continue;
+        const h = 7.5 + hash(jx, jz + 5) * 4.5;
+        if (side) collision.addCircle(jx, jz, 0.3, h, 'tree');
+        if (mine(jx, jz)) palm(jx, jz, h, 0);
       }
     }
   }
