@@ -45,17 +45,26 @@ function thump(out, f0, f1, tc, amp, tau, at = 0) {
 // A gun report. o: crackMs, crack, body f/decay, low f0/f1, tail decay.
 function report(rng, o) {
   const out = z(len(o.dur));
-  addNWave(out, 0, o.crackMs, o.crack);
-  band(out, rng, 0, Math.max(0.002, o.crackMs * 0.003), o.crack * 1.2, 'hp', 1400);
-  band(out, rng, 0, 0.008, o.crack * 0.9, 'bp', 2400, 0.9);
-  band(out, rng, len(0.0006), o.bodyDecay, o.body * 1.5, 'bp', o.bodyF, 0.8, 0.0008);
-  band(out, rng, len(0.0006), o.bodyDecay * 1.6, o.body * 0.5, 'lp', o.bodyF * 0.6, 0.7, 0.001);
-  thump(out, o.f0, o.f1, 0.012, o.low * 0.4, o.lowTau * 0.8);
-  band(out, rng, len(0.008), o.tail, o.tailAmp, 'lp', o.tailF, 0.7, 0.006);
+  // A1 balance: the crack used to set the peak alone (a 0.5 ms tick 23 dB
+  // above everything else), so after normalising the body and thump were
+  // too quiet to carry and the shot read as a click. The crack is now
+  // softer and a little longer, the body and the low thump longer and
+  // louder, so the report is a crack *and* a boom.
+  const ck = o.crack * 0.55;
+  addNWave(out, 0, o.crackMs * 1.4, ck);
+  band(out, rng, 0, Math.max(0.003, o.crackMs * 0.004), ck * 1.1, 'hp', 1400);
+  band(out, rng, 0, 0.01, ck * 0.9, 'bp', 2400, 0.9);
+  band(out, rng, len(0.0006), o.bodyDecay * 1.6, o.body * 1.7, 'bp', o.bodyF, 0.8, 0.0008);
+  band(out, rng, len(0.0006), o.bodyDecay * 2.4, o.body * 0.8, 'lp', o.bodyF * 0.6, 0.7, 0.001);
+  thump(out, o.f0, o.f1, 0.014, o.low * 1.1, o.lowTau * 1.4);
+  thump(out, o.f0 * 2, o.f1 * 2, 0.014, o.low * 0.45, o.lowTau);
+  band(out, rng, len(0.008), o.tail * 1.5, o.tailAmp * 1.6, 'lp', o.tailF, 0.7, 0.006);
   for (const [t, f, d, a] of o.mech || []) addMode(out, len(t), f, d, a, R.sr, rng.next() * TAU);
-  harmonize(out, 130, 0.35, { hi: 1100 });
-  warm(out, o.drive || 1.6, 0.2);
-  return fadeEdges(normalize(removeDC(out), 0.95), 2, 400);
+  harmonize(out, 130, 0.3, { hi: 1100 });
+  warm(out, (o.drive || 1.6) * 0.7, 0.2);
+  // no hard noise edges above 7 kHz (they read as fizz on a phone)
+  lp1(out, 7000, { loop: false, passes: 2 });
+  return fadeEdges(normalize(removeDC(out), 0.85), 2, 400);
 }
 
 export const COMBAT_SHOTS = {
@@ -102,8 +111,9 @@ export const COMBAT_SHOTS = {
     band(out, rng, 0, 0.012, 1, 'hp', 900);
     band(out, rng, 0, 0.04, 0.7, 'bp', 1600, 0.7);
     band(out, rng, 0, 0.06, 0.6, 'bp', 500, 0.8);
-    warm(out, 2.2, 0.3);
-    return fadeEdges(normalize(removeDC(out), 0.95), 2, 800);
+    warm(out, 1.3, 0.3); // was 2.2: saturated noise is crackle
+    lp1(out, 7500, { loop: false, passes: 2 });
+    return fadeEdges(normalize(removeDC(out), 0.85), 2, 800);
   },
   blastBody(rng) {
     const n = len(2.2);
@@ -113,9 +123,9 @@ export const COMBAT_SHOTS = {
     const b = envelope(white(n, rng), 0.006, 0.32);
     const lo = svf(b, z(n), (u) => 180 + 3200 * Math.exp(-u * 7), 0.8, 'lp');
     for (let i = 0; i < n; i++) out[i] += lo[i] * 1.8;
-    harmonize(out, 110, 0.9, { hi: 1000 });
-    warm(out, 2.4, 0.35);
-    return fadeEdges(normalize(removeDC(out), 0.95), 4, 3000);
+    harmonize(out, 110, 0.7, { hi: 1000 });
+    warm(out, 1.3, 0.35); // was 2.4: a fireball, not a fuzz box
+    return fadeEdges(normalize(removeDC(out), 0.85), 4, 3000);
   },
   blastTail(rng) {
     const n = len(4.5);
@@ -153,8 +163,8 @@ export const COMBAT_SHOTS = {
     thump(out, 160, 110, 0.03, 0.7, 0.06);
     thump(out, 240, 165, 0.03, 0.45, 0.05);
     thump(out, 320, 220, 0.03, 0.3, 0.04);
-    warm(out, 1.6, 0.2);
-    return fadeEdges(normalize(removeDC(out), 0.95), 8, 900);
+    warm(out, 1.3, 0.2);
+    return fadeEdges(normalize(removeDC(out), 0.85), 8, 900);
   },
   // Fire on a burnt hull: a low roar with crackles and pops (a loop).
   fireCrackle(rng) {

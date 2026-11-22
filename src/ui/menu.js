@@ -1,5 +1,6 @@
 import { formatDistance, formatMiles } from '../core/units.js';
-import { createPhoneCheck } from './phonecheck.js';
+import { createPhoneCheck, SOUNDS, SOUND_NOTES, DRIVE_SECONDS, SOUND_SECONDS } from './phonecheck.js';
+import { fillAbout, MAP_CREDIT } from './title.js';
 // The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
 // Settings, Help), Settings in four groups, destructive actions on their own
 // confirm screens, and a registry for screens other systems add.
@@ -11,7 +12,7 @@ import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
 
 const STYLE_ID = 'rw-menu-style';
-const CREDIT = 'Map data (c) OpenStreetMap contributors, ODbL';
+const CREDIT = MAP_CREDIT;
 
 const CSS = `
 .rw-menu {
@@ -120,6 +121,15 @@ const CSS = `
   .rw-menu-askbox { padding: 8px 14px 10px; }
   .rw-menu-askbox h2 { font-size: 18px; }
 }
+.rw-about-h { margin: 10px 0 4px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rw-accent); font-weight: 700; }
+.rw-menu-body .rw-about-p { margin: 0 0 6px; }
+.rw-about-dim { color: var(--rw-dim); }
+.rw-about-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; color: #ffd08a; font-weight: 700; }
+.rw-menu-sounds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-flow: column; grid-template-rows: repeat(4, auto); gap: 4px 12px; margin: 4px 0 6px; padding: 0; list-style: none; }
+.rw-menu-sounds li { margin: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; }
+.rw-menu-sounds .rw-menu-num { flex: 0 0 36px; height: 36px; border-radius: 18px; background: var(--rw-accent); color: #1b120d; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.rw-menu-sounds b { display: block; font-size: 15px; }
+.rw-menu-sounds span.rw-menu-note { display: block; font-size: 12px; color: var(--rw-dim); }
 @media (prefers-reduced-motion: no-preference) {
   .rw-menu.rw-menu-open { animation: rw-menu-in 0.15s ease-out; }
 }
@@ -252,6 +262,12 @@ export function createMenu(root, game, economy) {
     }
   }
   const commit = () => { applySettings(); game.events.emit('progress'); };
+  // The Phone check starts from Settings, Display and from the Sound test screen.
+  function startPhoneCheck() {
+    if (!phone) phone = createPhoneCheck(game, root);
+    close();
+    if (!phone.start() && game.hud && game.hud.toast) game.hud.toast(phone.error() || 'The phone check cannot start here', 3, 'info');
+  }
 
   // ---------- the api given to registered screens ----------
   // A row with the confirm rule (docs/REVAMP.md 6.4): the first tap swaps the
@@ -469,6 +485,9 @@ export function createMenu(root, game, economy) {
     } else if (group === 'game') {
       body.appendChild(toggleRow('Police chases', 'police', true));
       body.appendChild(toggleRow('Hard: you can die', 'mortal'));
+      // Blood (red spatters and pools): on unless switched off. Read by render/combatfx.js.
+      if (typeof s.blood !== 'boolean') delete s.blood;
+      body.appendChild(toggleRow('Blood', 'blood', true));
       body.appendChild(goRow('Map', currentMap() === 'island' ? 'Classic island' : 'Miami', 'map', 'mapchoice'));
       body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {
@@ -483,15 +502,38 @@ export function createMenu(root, game, economy) {
       // Phone check (docs/PLAN_V1.md 4.2): the game drives itself for a minute, then plays eight test sounds.
       const row = h('div', 'rw-menu-setting');
       row.appendChild(h('span', '', 'Phone check'));
-      const pb = button('Start', 'rw-menu-go', () => {
-        if (!phone) phone = createPhoneCheck(game, root);
-        close();
-        if (!phone.start() && game.hud && game.hud.toast) game.hud.toast(phone.error() || 'The phone check cannot start here', 3, 'info');
-      }, 'Phone check: a one minute drive and eight test sounds. Start');
+      const pb = button('Start', 'rw-menu-go', startPhoneCheck, 'Phone check: a one minute drive and eight test sounds. Start');
       pb.dataset.role = 'phonecheck';
       row.appendChild(pb);
       body.appendChild(row);
+      body.appendChild(goRow('Sound test', 'Open', 'soundtest', 'soundtest'));
     }
+  }
+
+  // ---------- Sound test: the eight numbered sounds of the Phone check ----------
+  function renderSoundTest() {
+    body.appendChild(h('p', 'rw-menu-dim', 'The Phone check drives a test car for ' + DRIVE_SECONDS + ' seconds, then plays these ' + SOUNDS.length + ' sounds in order, ' + SOUND_SECONDS + ' seconds each. Tap the number of any that sounds bad.'));
+    const list = h('ol', 'rw-menu-sounds');
+    list.dataset.role = 'sound-list';
+    SOUNDS.forEach((name, i) => {
+      const li = h('li');
+      li.dataset.sound = String(i + 1);
+      const text = h('div');
+      text.append(h('b', '', name), h('span', 'rw-menu-note', SOUND_NOTES[i] || ''));
+      li.append(h('span', 'rw-menu-num', String(i + 1)), text);
+      list.appendChild(li);
+    });
+    body.appendChild(list);
+    const go1 = button('Start the Phone check', 'rw-menu-primary', startPhoneCheck, 'Start the Phone check');
+    go1.dataset.role = 'phonecheck-start';
+    body.appendChild(go1);
+  }
+
+  // ---------- About: version, credits, map licence, names, privacy ----------
+  function renderAbout() {
+    const box = h('div');
+    fillAbout(document, box, { version: version || 'dev' });
+    body.appendChild(box);
   }
 
   // ---------- New game and Map choice (their own screens) ----------
@@ -501,7 +543,7 @@ export function createMenu(root, game, economy) {
       if (ses && ses.newGame) ses.newGame();
       else if (game.newSession) game.newSession();
       close();
-    }, { id: 'newgame', role: 'newgame', text: 'New game: back to the start street in the starter car. Score, garages and adventures are kept.' }));
+    }, { id: 'newgame', role: 'newgame', text: 'New game: back to the start street in your favourite car (the sedan if none is set). Parked cars are cleared. Score, medals and found garages are kept.' }));
     body.appendChild(confirmRow('Erase all progress', 'Yes, erase everything', () => {
       economy.reset();
       render();
@@ -551,6 +593,9 @@ export function createMenu(root, game, economy) {
       ['Scores', ['Stunts, wrecks and takedowns of the rival crew earn points. Keep scoring within 4 seconds to build a combo. A hard crash or going down loses the points you have not banked yet.',
         (game.city && game.city.texts && game.city.texts.fleet) || 'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
     ];
+    const aboutRow = goRow('About Rustwater', 'Open', 'about', 'about');
+    aboutRow.firstChild.style.minWidth = '0';
+    body.appendChild(aboutRow);
     for (const [t, items] of sections) {
       body.appendChild(h('div', 'rw-menu-group', t));
       const ul = h('ul');
@@ -572,6 +617,8 @@ export function createMenu(root, game, economy) {
     stats: { title: 'Stats', render: renderStats },
     settings: { title: 'Settings', render: renderSettings },
     help: { title: 'Help', render: renderHelp },
+    about: { title: 'About', render: renderAbout },
+    soundtest: { title: 'Sound test', render: renderSoundTest },
     newgame: { title: 'New game', render: renderNewGame },
     mapchoice: { title: 'Map', render: renderMapChoice },
   };
@@ -582,7 +629,7 @@ export function createMenu(root, game, economy) {
     const top = body.scrollTop;
     body.textContent = '';
     const sc = screenOf(active) || BUILTIN.resume;
-    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' ? 'settings' : 'resume'));
+    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' || active === 'soundtest' ? 'settings' : (active === 'about' ? 'help' : 'resume')));
     for (const [id] of TABS) {
       tabButtons[id].setAttribute('aria-selected', String(id === railId));
       tabButtons[id].tabIndex = id === railId ? 0 : -1;

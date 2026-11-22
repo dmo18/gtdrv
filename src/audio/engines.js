@@ -7,7 +7,11 @@
 // repeats without a seam. Every character is rendered at a few rpm
 // points, each with an on-load and an off-load layer.
 
-import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS, warm, harmonize } from './dsp.js';
+import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS, warm, harmonize, biquad, filter } from './dsp.js';
+
+// Highest frequency kept in an engine loop (Hz): the rasp sits at 1.5 to
+// 3.2 kHz; above about 4 kHz there is only fizz on a phone speaker.
+export const ENGINE_TOP = 3900;
 
 // Normalised rpm points (fraction of redline) shared by all characters:
 // idle (replaced by each character's own), low, mid, high, redline.
@@ -235,7 +239,8 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = LOOP_S) {
     }
     const rn = white(N, rng);
     for (let i = 0; i < N; i++) rn[i] *= gate[i];
-    const rg = 3.2 * e.rasp[1] * (on ? 1 : 0.3) * (0.15 + 0.9 * rpmNorm);
+    // (gated noise reads as crackle on a phone when it is loud: kept low)
+    const rg = 1.7 * e.rasp[1] * (on ? 1 : 0.3) * (0.15 + 0.9 * rpmNorm);
     parts.push({ x: rn, bands: [['bp', e.rasp[0], 0.9, rg], ['bp', e.rasp[0] * 0.55, 1.2, rg * 0.6]] });
   }
   let bub = null;
@@ -276,8 +281,16 @@ export function engineSpec(ch, rpmNorm, load, rng, sr = R.sr, target = LOOP_S) {
     removeDC(out);
     // the exhaust pipe overdriven: harmonics that keep the firing note
     // audible on a small speaker, then the missing-fundamental helper
-    warm(out, (e.drive || 1.5) * (on ? 1 : 0.6), 0.3);
-    harmonize(out, Math.min(160, Math.max(70, firingHz * 1.2)), on ? 0.45 : 0.3, { loop: true, sr, hi: 1200 });
+    // Gentle on purpose: the saturation runs at the engine buffer rate
+    // with no oversampling, so a hard drive folds its harmonics back as
+    // inharmonic fizz (A1: heard as "harsh and crackly" on the phone).
+    warm(out, (e.drive || 1.5) * (on ? 0.6 : 0.4), 0.3);
+    harmonize(out, Math.min(160, Math.max(70, firingHz * 1.2)), on ? 0.3 : 0.2, { loop: true, sr, hi: 1100 });
+    // then a 4-pole low-pass: no buzz edges left near the buffer's
+    // Nyquist, which the browser's resampler would mirror upwards
+    const lc = biquad('lp', Math.min(ENGINE_TOP, sr * 0.33), 0.7, sr);
+    filter(out, out, lc, { loop: true, sr });
+    filter(out, out, lc, { loop: true, sr });
     return removeDC(out);
   };
   return { sr, n: N, loop: true, parts, post: [['lp', on ? e.lpOn : e.lpOff, 0.6]], finish };

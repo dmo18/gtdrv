@@ -24,6 +24,7 @@ import { createRadioPlayer, scheduleBar } from '../audio/radioplayer.js';
 import { canListen, sanitizeStation } from '../core/radio.js';
 import { dopplerFactor, distanceLowpass, travelDelay } from '../audio/spatial.js';
 import { createTankRig } from '../audio/tankrig.js'; // tank (task 32)
+import { safetyCurve, bassCurve, BASS_HELPER } from '../audio/master.js';
 
 const HEARING = 70; // metres for crash sounds
 const OTHER_RANGE = 70; // metres for other craft engines
@@ -522,8 +523,10 @@ export function createAudio(game) {
     if (fx.gravel.s) set(fx.gravel.s.playbackRate, 0.8 + 0.4 * sf, now);
     const slip = isCar ? fin(c.slip) : 0;
     const sq = clamp((slip - 0.22) / 0.6, 0, 1) * clamp(Math.max(speed, th * 8) / 5, 0, 1) * (off ? 0.15 : 1);
-    set(fx.squeal.g.gain, 0.45 * sq, now, 0.04);
-    if (fx.squeal.s) set(fx.squeal.s.playbackRate, 0.93 + 0.05 * sf + 0.05 * (rng.next() - 0.5), now, 0.08);
+    set(fx.squeal.g.gain, 0.42 * sq, now, 0.06);
+    // pitch follows the slip (harder slide, higher, rawer note); smooth,
+    // no per-update random jitter (that was a zipper-like warble)
+    if (fx.squeal.s) set(fx.squeal.s.playbackRate, 0.86 + 0.2 * sq + 0.04 * sf, now, 0.12);
     set(fx.wet.g.gain, isCar ? 0.5 * rain * clamp(speed / 22, 0, 1) : 0, now, 0.2);
     let rush = 0;
     if (isCar) rush = 0.3 * Math.pow(clamp(speed / 45, 0, 1.3), 2);
@@ -730,6 +733,8 @@ export function createAudio(game) {
   let sirenOn = false;
   let sirenNear = false; // a police car with its siren is within earshot
   let policeSiren = false, craftSiren = false; // police chase / a police craft's SIREN
+  let sirenTest = false;
+  const SIREN_TEST_CAR = { x: 0, z: 0, vx: 0, vz: 0, spec: { id: 'police' }, siren: true };
   function buildSiren() {
     const pan = panNode(bus.effects);
     const out = gainNode(0, pan || bus.effects);
@@ -777,12 +782,22 @@ export function createAudio(game) {
     let g = 0; // silent unless a siren is running nearby
     let dop = 1;
     sirenNear = false;
+    // The phone check (src/ui/phonecheck.js) has no police car: testSiren
+    // plays the police siren as if one were parked 20 m away.
+    if (!best && sirenTest) {
+      best = SIREN_TEST_CAR;
+      best.x = fin(game.player.x) - 20;
+      best.z = fin(game.player.z) + 4;
+      best.vx = playerVel(best).vx; // keeps pace: no doppler
+      best.vz = pvel.vz;
+    }
     if (best) {
       spatial(best.x, best.z, 320);
       sirenNear = sp.d < 150;
       dop = doppler(best.vx, best.vz);
       // the siren buffer is dense (RMS about -5 dBFS): keep it under the mix
-      g = 0.4 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
+      // (the buffer is now a clean near-sine at about -10 dBFS RMS)
+      g = 0.6 * Math.pow(Math.max(0, 1 - sp.d / 320), 1.4) * Math.min(1, 25 / Math.max(1, sp.d));
       const occ = occluded(sp.d) ? 0.45 : 1;
       set(siren.lp.frequency, (1500 + 6000 * Math.max(0, 1 - sp.d / 200)) * occ, now, 0.1);
       if (siren.pan) set(siren.pan.pan, sp.pan, now, 0.1);
@@ -976,7 +991,9 @@ export function createAudio(game) {
   function onBoost(e) {
     if (!e || !game.player || e.vehicle !== game.player.vehicle || !ctx || !voices || !bus.engine) return;
     if (e.on) {
-      voices.raw('whoosh', bus.engine, 0.35, 1.1);
+      // a rising filtered-noise sweep on the effects bus: it was the plain
+      // whoosh at 0.35 under the engine bus and could not be heard
+      voices.raw(buf('boostWhoosh') ? 'boostWhoosh' : 'whoosh', bus.effects, 0.8, 1);
       if (e.craft === 'car') pv.boost = 1;
     } else if (e.craft === 'car') {
       voices.raw('blowoff', bus.engine, 0.4, 0.9 + 0.2 * rng.next());
@@ -1442,26 +1459,6 @@ export function createAudio(game) {
   }
 
   // ---- context life cycle ----
-  function safetyCurve() {
-    const n = 4096;
-    const c = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 2 - 1;
-      const a = Math.abs(x);
-      const y = a <= 0.8 ? a : 0.8 + 0.19 * Math.tanh((a - 0.8) / 0.19);
-      c[i] = x < 0 ? -y : y;
-    }
-    return c;
-  }
-  function bassCurve() {
-    const n = 2048;
-    const c = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 2 - 1;
-      c[i] = Math.tanh(3 * x) * 0.5 + Math.abs(Math.tanh(2.4 * x)) * 0.6;
-    }
-    return c;
-  }
   function onGesture() {
     if (!ctx || disposed || ctx.state === 'running' || game.paused || hidden) return;
     const p = ctx.resume();
@@ -1592,7 +1589,10 @@ export function createAudio(game) {
       // allows; the context runs at the device's own rate (often 48 kHz
       // on Android), which every buffer here is resampled to as it plays.
       try {
-        ctx = new Ctor({ latencyHint: 'interactive' });
+        // 'balanced', not 'interactive': Android Chrome then gives the
+        // audio thread a larger buffer, so a busy frame does not underrun
+        // it (underruns are heard as crackle on every sound)
+        ctx = new Ctor({ latencyHint: 'balanced' });
       } catch {
         ctx = new Ctor();
       }
@@ -1607,13 +1607,15 @@ export function createAudio(game) {
       comp.attack.value = 0.006;
       comp.release.value = 0.4;
       limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -3;
-      limiter.knee.value = 0;
+      limiter.threshold.value = -4;
+      limiter.knee.value = 2;
       limiter.ratio.value = 20;
       limiter.attack.value = 0.001;
-      limiter.release.value = 0.15;
+      limiter.release.value = 0.12;
       shaper = ctx.createWaveShaper();
       shaper.curve = safetyCurve();
+      // oversampled, so the rounding of rare peaks does not alias
+      shaper.oversample = '4x';
       // the compressors add automatic make-up gain; trim it back
       const trim = gainNode(0.75, limiter);
       master.connect(comp);
@@ -1626,11 +1628,14 @@ export function createAudio(game) {
       bassIn = biq('lowpass', 140, 0.7, null);
       const bassSh = ctx.createWaveShaper();
       bassSh.curve = bassCurve();
+      bassSh.oversample = '2x';
+      const bassIn2 = biq('lowpass', 140, 0.7, null);
       const bassHp = biq('highpass', 170, 0.7, null);
       const bassLp = biq('lowpass', 750, 0.7, null);
-      const bassG = gainNode(0.32, comp);
+      const bassG = gainNode(BASS_HELPER, comp);
       master.connect(bassIn);
-      bassIn.connect(bassSh);
+      bassIn.connect(bassIn2);
+      bassIn2.connect(bassSh);
       bassSh.connect(bassHp);
       bassHp.connect(bassLp);
       bassLp.connect(bassG);
@@ -1816,6 +1821,10 @@ export function createAudio(game) {
     unlock,
     render,
     setStation,
+    // Phone check: play the police siren as if a car were 20 m away.
+    testSiren(on) {
+      sirenTest = !!on;
+    },
     get station() {
       return wantStation;
     },

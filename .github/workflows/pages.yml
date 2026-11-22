@@ -23,6 +23,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Refuse to publish a version that is already live. [wip] commits and
+      # branches never publish, so they are not checked.
+      - name: Version must differ from release/last.json
+        if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push' && !contains(github.event.head_commit.message, '[wip]')
+        run: |
+          new=$(node -p "require('./package.json').version")
+          old=$(node -p "require('./release/last.json').version")
+          if [ "$new" = "$old" ]; then
+            echo "::error::version $new equals release/last.json; run npm run bump"
+            exit 1
+          fi
       - run: npm run lint
       - run: npm test
       - run: npm run build
@@ -43,3 +54,19 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+  tag:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag the published version
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null 2>&1; then
+            echo "tag v$v already exists"
+          else
+            git tag "v$v" "$GITHUB_SHA"
+            git push origin "v$v"
+          fi

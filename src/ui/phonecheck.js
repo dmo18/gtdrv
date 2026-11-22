@@ -14,6 +14,17 @@ import { nextStation } from '../core/radio.js';
 export const DRIVE_SECONDS = 60;
 export const SOUND_SECONDS = 3.2; // each of the eight sounds
 export const SOUNDS = ['Engine', 'Tyre squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'];
+// What to listen for in each of the eight sounds (shown by Settings, Display, Sound test).
+export const SOUND_NOTES = [
+  'Your car revving up',
+  'Tyres sliding in a turn',
+  'A few shots',
+  'A big explosion ahead',
+  'A police siren',
+  'The music track',
+  'The car radio, switched on and back',
+  'The boost whoosh',
+];
 const LONG_FRAME_MS = 33;
 
 // ---------------------------------------------------------------------------

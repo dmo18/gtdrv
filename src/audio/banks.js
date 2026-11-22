@@ -74,10 +74,13 @@ const LOOPS = {
   squeal(rng) {
     const n = len(1.6);
     const m = smoothRandom(n, 21, rng);
-    return spec(n, [{ x: white(n, rng), bands: [['bp', 1185, 36, 6], ['bp', 1793, 30, 4.4], ['bp', 2716, 24, 1.5]] }], (out) => {
-      for (let i = 0; i < n; i++) out[i] *= 0.7 + 0.18 * Math.sin((TAU * 5 * i) / n) + 0.12 * m[i];
-      soft(normalize(out, 1), 1.4);
-      return normalize(removeDC(out), 0.8);
+    // Filtered band noise around 1.2 and 1.8 kHz (the rubber's stick-slip
+    // note), wide enough to read as a tyre, not a whistle; no saturation.
+    // The audio system moves its pitch with the slip.
+    return spec(n, [{ x: white(n, rng), bands: [['bp', 1185, 11, 3], ['bp', 1793, 9, 2.2], ['bp', 2716, 6, 0.6], ['bp', 700, 2, 0.25]] }], (out) => {
+      for (let i = 0; i < n; i++) out[i] *= 0.72 + 0.16 * Math.sin((TAU * 5 * i) / n) + 0.12 * m[i];
+      lp1(out, 4200, { loop: true, passes: 2 });
+      return normalize(removeDC(out), 0.7);
     });
   },
   gravel(rng) {
@@ -344,15 +347,18 @@ function siren(T, fOf) {
   for (let i = 0; i < n; i++) total += fOf(i / n) / R.sr;
   const k = Math.round(total) / total;
   const raw = z(n);
-  const tb = buzzTable(5, 0.3);
+  // A1: a near-sine with a soft triangle-like top (2nd and 3rd harmonics
+  // well down), no overdrive. The old buzz wave was soft-clipped into an
+  // almost square tone at -5 dBFS RMS: the harshest thing in the mix.
+  const tb = harmTable([1, 0.12, 0.1, 0.03, 0.02]);
   let ph = 0;
   for (let i = 0; i < n; i++) {
     raw[i] = look(tb, ph);
     ph += (fOf(i / n) * k) / R.sr;
   }
-  return spec(n, [{ x: raw, bands: [['bp', 1500, 0.7, 1.6], ['gain', 0, 0, 0.35]] }], (out) => {
-    soft(normalize(out, 1), 1.8);
-    return normalize(removeDC(out), 0.8);
+  return spec(n, [{ x: raw, bands: [['bp', 1300, 0.6, 0.9], ['gain', 0, 0, 0.6]] }], (out) => {
+    lp1(out, 3500, { loop: true, passes: 2 });
+    return normalize(removeDC(out), 0.7);
   });
 }
 
@@ -520,6 +526,22 @@ const SHOTS = {
       out[i] = (out[i] * 1.2 + low[i] * 0.8) * e;
     }
     return fadeEdges(normalize(out, 0.8), 200, 2000);
+  },
+  // Boost: a whoosh of noise whose low-pass opens from about 300 Hz to
+  // 4 kHz over 0.7 s while a band-pass rises with it, then falls away.
+  boostWhoosh(rng) {
+    const n = len(1.4);
+    const src = white(n, rng);
+    const lo = svf(src, z(n), (u) => 300 + 3700 * Math.pow(Math.min(1, u / 0.5), 1.5), 0.9, 'lp');
+    const bp = svf(src, z(n), (u) => 500 + 2300 * Math.min(1, u / 0.5), 2.2, 'bp');
+    const out = z(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / R.sr;
+      const e = Math.min(1, t / 0.12) * (t < 0.6 ? 1 : Math.exp(-(t - 0.6) / 0.22));
+      out[i] = (lo[i] * 0.8 + bp[i] * 0.9) * e;
+    }
+    lp1(out, 6000, { loop: false });
+    return fadeEdges(normalize(removeDC(out), 0.8), 64, 2000);
   },
   gull(rng) {
     const n = len(1.2);

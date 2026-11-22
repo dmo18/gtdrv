@@ -218,20 +218,28 @@ export function warm(buf, drive = 2, asym = 0.25) {
 // mostly lost there. This adds its harmonics (the ear hears the missing
 // fundamental): the low band is clipped hard, the result band-limited
 // to fc*1.6 .. hi and mixed back at `amount` of the low band's peak.
-export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false, sr = R.sr, drive = 4 } = {}) {
+export function harmonize(buf, fc = 120, amount = 0.6, { hi = 900, loop = false, sr = R.sr, drive = 2 } = {}) {
   const n = buf.length;
   const low = new Float32Array(n);
-  filter(buf, low, biquad('lp', fc, 0.7, sr), { loop, sr });
+  // two low-pass stages: only the true lows reach the curve, so mids do
+  // not intermodulate into a fizzy grit
+  const lc = biquad('lp', fc, 0.7, sr);
+  filter(buf, low, lc, { loop, sr });
+  filter(low, low, lc, { loop, sr });
   const p = peak(low);
   if (p < 1e-9) return buf;
   const k = drive / p;
   for (let i = 0; i < n; i++) {
     const x = low[i] * k;
-    // rectified plus clipped: strong 2nd and 3rd harmonics
-    low[i] = Math.tanh(x) * 0.6 + Math.abs(Math.tanh(x * 0.8)) * 0.8;
+    // a soft clip (3rd harmonic) plus a smooth rectifier (2nd harmonic).
+    // The old |tanh| had a corner at every zero crossing, which sprayed
+    // harmonics far up the spectrum (heard as crackle); this one is round.
+    low[i] = Math.tanh(x) * 0.6 + (Math.sqrt(x * x + 0.09) - 0.3) * 0.5;
   }
   filter(low, low, biquad('hp', fc * 1.6, 0.7, sr), { loop, sr });
-  filter(low, low, biquad('lp', hi, 0.7, sr), { loop, sr });
+  const hc = biquad('lp', hi, 0.7, sr);
+  filter(low, low, hc, { loop, sr });
+  filter(low, low, hc, { loop, sr });
   const q = peak(low) || 1;
   const g = (amount * p) / q;
   for (let i = 0; i < n; i++) buf[i] += low[i] * g;

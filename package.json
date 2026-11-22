@@ -12,7 +12,10 @@
     "lint": "eslint .",
     "smoke": "node scripts/smoke.mjs",
     "release:check": "node scripts/release-check.mjs",
-    "release:record": "node scripts/release-check.mjs --record"
+    "release:record": "node scripts/release-check.mjs --record",
+    "bump": "node scripts/bump-version.mjs",
+    "gate": "node scripts/gate.mjs",
+    "review-shots": "node scripts/review-shots.mjs"
   },
   "dependencies": {
     "three": "0.187.0"

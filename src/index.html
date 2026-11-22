@@ -36,6 +36,7 @@
   #play[disabled]::after { content: "Loading"; }
   #continue { color: #fff; background: rgba(0, 0, 0, 0.6); border: 2px solid #e2733a; order: 1; }
   #continue[hidden] { display: none; }
+  #boot .rw-aboutbtn { position: absolute; right: calc(24px + var(--sr)); top: calc(16px + var(--st)); min-width: 96px; height: 48px; font: inherit; font-size: 16px; font-weight: 700; color: #fff; background: rgba(0,0,0,0.6); border: 2px solid #e2733a; border-radius: 999px; cursor: pointer; touch-action: manipulation; }
   #bootcredit, #bootver { position: absolute; bottom: calc(8px + var(--sb)); margin: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; line-height: 14px; color: #fff; background: rgba(0, 0, 0, 0.6); letter-spacing: 0.02em; }
   #bootcredit { left: calc(8px + var(--sl)); }
   #bootver { right: calc(8px + var(--sr)); letter-spacing: 0.06em; }
@@ -48,6 +49,7 @@
 <div id="ui"></div>
 <div id="boot">
   <h1>RUSTWATER</h1>
+  <button id="aboutbtn" class="rw-aboutbtn" type="button">About</button>
   <p id="bootmsg">Loading the island&hellip;</p>
   <div id="bootbtns">
     <button id="continue" type="button" hidden>Continue</button>
