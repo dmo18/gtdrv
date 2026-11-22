@@ -182,6 +182,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // --- Player starts in a car on the street. ---
   const car = createVehicle('sedan', city.spawn.x, city.spawn.z, city.spawn.heading, rng);
   car.driver = 'player';
+  car.starter = true; // the untouched first car: Start (session.startFresh) removes it
   game.addVehicle(car);
   game.player.vehicle = car;
 

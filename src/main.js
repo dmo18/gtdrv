@@ -1,13 +1,15 @@
 import { createGame } from './game.js';
 import { registerServiceWorker } from './pwa.js';
+import { createTitle } from './ui/title.js';
 import { mapFromSearch, MAP_CHOICE_KEY } from './world/maps.js';
 
-const boot = document.getElementById('boot');
 const msg = document.getElementById('bootmsg');
-const play = document.getElementById('play');
+const title = createTitle(document);
 
 function start(game) {
-  boot.style.display = 'none';
+  title.hide();
+  // Play begins: from here the place is autosaved again.
+  game.session.hold(false);
   game.resize();
   game.loop.start();
   // First visit only: let the player pick how they want to steer.
@@ -38,6 +40,26 @@ async function loadCity() {
   }
 }
 
+// A black overlay for the short fade into a continued game (0.3 s each way,
+// CSS transition; the wait is a real-time UI delay, never game logic).
+function fadeVeil() {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;z-index:60;pointer-events:none;transition:opacity .3s linear';
+  document.body.appendChild(el);
+  return {
+    to(v) {
+      return new Promise((resolve) => {
+        el.getBoundingClientRect();
+        el.style.opacity = String(v);
+        setTimeout(resolve, 320);
+      });
+    },
+    remove() {
+      el.remove();
+    },
+  };
+}
+
 async function startUp() {
   const city = await loadCity();
   const game = createGame({
@@ -48,8 +70,12 @@ async function startUp() {
   window.__rw = game;
   game.draw(1, 0);
   msg.textContent = (city && city.texts && city.texts.boot) || 'An island of rust, salt and bad ideas.';
-  play.disabled = false;
-  play.addEventListener('click', async () => {
+  // While the title shows, the saved place is kept as it is.
+  const autostart = new URLSearchParams(location.search).has('autostart');
+  if (!autostart) game.session.hold(true);
+  title.setReady(true);
+  title.setCanContinue(game.session.canContinue());
+  title.onStart(async () => {
     game.audio.unlock();
     // Best effort: go full screen and lock sideways. Not every browser allows it.
     try {
@@ -58,9 +84,32 @@ async function startUp() {
     } catch {
       /* fine without */
     }
+    game.session.startFresh();
     start(game);
   });
-  if (new URLSearchParams(location.search).has('autostart')) start(game);
+  title.onContinue(async () => {
+    game.audio.unlock();
+    try {
+      await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+      await screen.orientation?.lock?.('landscape');
+    } catch {
+      /* fine without */
+    }
+    const veil = fadeVeil();
+    await veil.to(1);
+    let ok;
+    try {
+      ok = game.session.continueSaved();
+    } catch {
+      ok = false;
+    }
+    if (!ok) game.session.startFresh();
+    start(game);
+    if (!ok && game.hud && game.hud.toast) game.hud.toast('Could not restore your place', 3);
+    await veil.to(0);
+    veil.remove();
+  });
+  if (autostart) start(game);
 }
 startUp().catch((err) => {
   console.error(err);
@@ -72,7 +121,7 @@ startUp().catch((err) => {
 // Offline support. A new version is applied right away only while the
 // title screen is showing; otherwise it waits until the next launch.
 registerServiceWorker((apply) => {
-  if (boot.style.display !== 'none') apply();
+  if (title.isShown()) apply();
 });
 
 // Called by the Android wrapper when the system Back button is pressed.
@@ -80,7 +129,7 @@ registerServiceWorker((apply) => {
 // should go to the background (title screen, or game already paused).
 window.__rwBack = () => {
   const game = window.__rw;
-  if (!game || boot.style.display !== 'none') return 'leave';
+  if (!game || title.isShown()) return 'leave';
   if (!game.paused) {
     game.paused = true;
     game.events.emit('pause', true);

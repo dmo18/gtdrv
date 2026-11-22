@@ -9,11 +9,21 @@
 //   game.saveSession()      snapshot and write to storage
 //   game.restoreSession()   put the player back (returns true if it did)
 //   game.newSession()       forget place and car (scores and settings stay)
+// Title screen (docs/REVAMP.md 6.8), on game.session:
+//   canContinue()    a saved place exists and is valid for this map
+//   continueSaved()  restore it (true if it worked, never throws)
+//   startFresh()     the first view: the designed start spot, player in the
+//                    favourite or starter car; the car held before is left
+//                    behind; place and garage are kept
+//   newGame()        game.newSession()
+//   hold(on)         while on (the title is showing) nothing is autosaved,
+//                    so the saved place survives until play begins
 import { saveProgress } from '../core/save.js';
 import {
   buildSession, garageAdd, garageRemove, savable, craftRecord, kindOfSpec, specOf,
   sanitizeGarage, selectMapSession, GARAGE_MAX, SAFE_ALT,
 } from '../core/garage.js';
+import { placeValid, startSpot } from '../core/startplace.js';
 import { createVehicle } from '../entities/vehicle.js';
 import { createBoat } from '../entities/boat.js';
 import { createAircraft } from '../entities/aircraft.js';
@@ -64,8 +74,9 @@ export function createSession(game, storage) {
     return s;
   }
 
+  let held = false;
   function save() {
-    if (restoring) return false;
+    if (restoring || held) return false;
     snapshot();
     return saveProgress(storage, game.progress);
   }
@@ -276,6 +287,87 @@ export function createSession(game, storage) {
     return true;
   }
 
+  // --- Title screen -------------------------------------------------------
+  function canContinue() {
+    try {
+      return placeValid(game.progress.session, mapId, city);
+    } catch {
+      return false;
+    }
+  }
+
+  function continueSaved() {
+    held = false;
+    if (!canContinue()) return false;
+    try {
+      return restore() === true;
+    } catch {
+      restoring = false;
+      return false;
+    }
+  }
+
+  // The car being driven is left where it is (parked, in the garage list if
+  // it can be saved), exactly as leaving a car does; the untouched starter
+  // car is simply removed.
+  function leaveCar() {
+    const p = game.player, v = p.vehicle;
+    if (!v) return;
+    v.driver = null;
+    p.vehicle = null;
+    if (!v.starter && v.kind === 'car' && savable(v)) {
+      garageAdd(garage, craftRecord(v));
+      const e = garage[0];
+      if (e && e.spec === v.spec.id) {
+        e.vehicle = v;
+        v.garageEntry = e;
+      }
+      while (garage.length > GARAGE_MAX) garage.pop();
+    } else {
+      game.removeVehicle(v);
+    }
+  }
+
+  function startFresh() {
+    held = false;
+    const p = game.player;
+    const at = startSpot(city, POSE);
+    restoring = true;
+    try {
+      leaveCar();
+      // The favourite car (docs/REVAMP.md 6.6), when the garage screen offers one.
+      const fav = game.favouriteCar ? game.favouriteCar() : null;
+      const favSpec = fav && specOf(fav.spec) && kindOfSpec(fav.spec) === 'car' ? fav : null;
+      const car = createVehicle(favSpec ? favSpec.spec : 'sedan', at.x, at.z, at.heading, game.rng);
+      if (favSpec) {
+        if (typeof favSpec.color === 'number') car.color = favSpec.color;
+      } else {
+        car.starter = true;
+      }
+      game.addVehicle(car);
+      const w = p.walker;
+      w.x = w.px = car.x;
+      w.z = w.pz = car.z;
+      game.enterVehicle(car);
+      p.x = car.x;
+      p.z = car.z;
+      p.heading = car.heading;
+      p.wanted = 0;
+      if (game.police && game.police.heat) resetHeat(game.police.heat, 3);
+      // A time the player fixed in Settings applies when play begins.
+      const st = game.progress.settings;
+      if (st && st.liveTime === false && isFinite(st.timeOfDay)) {
+        if (game.daynight && game.daynight.setHour) game.daynight.setHour(st.timeOfDay);
+        else game.clock = st.timeOfDay;
+      }
+    } finally {
+      restoring = false;
+    }
+    if (game.snapCam) game.snapCam();
+    save();
+    return true;
+  }
+
   // --- Hooks ----------------------------------------------------------------
   game.events.on('enter', (v) => {
     if (restoring) return;
@@ -322,6 +414,13 @@ export function createSession(game, storage) {
   return {
     name: 'session',
     garage,
+    canContinue,
+    continueSaved,
+    startFresh,
+    newGame: newSession,
+    hold(on) {
+      held = !!on;
+    },
     fixedUpdate(dt) {
       timer -= dt;
       if (timer <= 0) {

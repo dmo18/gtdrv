@@ -178,7 +178,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const hgt = f.h || 1.3;
         const col = shadeHex(HEDGE, 0.9 + (f.v % 4) * 0.06);
         S.obox(x, z, hl, Math.max(0.3, hw), y, y + hgt, h, col, shadeHex(col, 1.12), 0.6, 1.05);
-        C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.6, y + 0.012, 0.7);
+        if (Math.abs(sa) < 0.02 || Math.abs(ca) < 0.02) C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.6, y + 0.012, 0.7);
         break;
       }
       case 'wall': {

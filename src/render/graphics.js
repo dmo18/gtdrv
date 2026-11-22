@@ -178,15 +178,40 @@ export function createGraphics(game) {
     }
     sc.right = 0; // force a refresh of the bias
   }
+  // Vehicles cast shadows only near the camera (CAST_R, with a few
+  // metres of hysteresis): a car is the dearest thing in the shadow map
+  // pass, and past that distance its shadow is a few pixels (the contact
+  // shadow under it stays).
+  const CAST_R = 48;
   function markCasters() {
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {
       const m = vs[i].mesh;
-      if (!m || m.userData.rwShadow) continue;
-      m.userData.rwShadow = true;
+      if (!m || m.userData.rwCasters) continue;
+      // vehiclemesh.js marks its own casters (rwShadow true); anything
+      // else casts from every solid part.
+      const preset = m.userData.rwShadow === true;
+      const list = (m.userData.rwCasters = []);
       m.traverse((o) => {
-        if (o.isMesh && o.material && !o.material.transparent) o.castShadow = true;
+        if (o.isMesh && o.material && !o.material.transparent && (!preset || o.castShadow)) list.push(o);
       });
+      m.userData.rwShadow = true;
+      m.userData.rwCast = -1;
+    }
+  }
+  function updateCasters() {
+    const vs = game.vehicles, cx = camera.position.x, cz = camera.position.z;
+    const own = game.player && game.player.vehicle;
+    for (let i = 0; i < vs.length; i++) {
+      const v = vs[i], m = v.mesh;
+      if (!m || !m.userData.rwCasters) continue;
+      const dx = v.x - cx, dz = v.z - cz, d2 = dx * dx + dz * dz;
+      const r = m.userData.rwCast === 1 ? CAST_R + 6 : CAST_R;
+      const on = v === own || d2 < r * r ? 1 : 0;
+      if (on === m.userData.rwCast) continue;
+      m.userData.rwCast = on;
+      const list = m.userData.rwCasters;
+      for (let k = 0; k < list.length; k++) list[k].castShadow = on === 1;
     }
   }
 
@@ -415,6 +440,7 @@ export function createGraphics(game) {
         game.resize();
       }
       if ((frame & 31) === 0) markCasters();
+      if ((frame & 7) === 0) updateCasters();
       if ((frame & 7) === 0) updateSignals();
       frame++;
       if (sky && sky.version !== skyVersion) {

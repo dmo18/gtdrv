@@ -126,7 +126,7 @@ class QuarterBuilder {
     return b;
   }
 }
-const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao']);
+const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao', 'lotSolid']);
 
 // Builders that draw nothing (the one-off pass that only wants the side
 // effects: collision circles, lamp and glow lists).
@@ -331,7 +331,7 @@ const TILE_KEYS = [
   ['paint', true, 2], ['decal', true, 1], ['ao', false, 1], ['plain', false, 1], ['detail', true, 1], ['glow', false, 1],
   ['glass', true, 1], ['brick', true, 1], ['office', true, 1], ['stucco', true, 1], ['siding', true, 1], ['corrugated', true, 1],
   ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1], ['havana', true, 1], ['treeDetail', true, 1],
-  ['sand', true, 6],
+  ['sand', true, 6], ['lotSolid', false, 1],
 ];
 // key: material, draw options, hidden at the middle level
 function tileMeshPlan(M) {
@@ -345,13 +345,19 @@ function tileMeshPlan(M) {
     ['office', M.office, { ...solid, name: 'facade-office' }], ['stucco', M.stucco, { ...solid, name: 'facade-stucco' }],
     ['siding', M.siding, { ...solid, name: 'facade-siding' }], ['corrugated', M.corrugated, { ...solid, name: 'facade-corrugated' }],
     ['roofing', M.roofing, { ...solid, name: 'facade-roofing' }], ['shopfront', M.shopfront, { ...solid, name: 'facade-shopfront' }],
-    ['props', M.plainMat, { ...solid, name: 'props' }, true], ['propsDetail', M.detailMat, { ...solid, name: 'props-detail' }, true],
+    // Street props cast no shadow: small, many, and gone past 170 m
+    // anyway (contact shadows under the bigger ones).
+    ['props', M.plainMat, { receive: true, name: 'props' }, true], ['propsDetail', M.detailMat, { receive: true, name: 'props-detail' }, true],
     ['havana', M.havana, { ...solid, name: 'facade-havana' }],
     // Trees and palms stay drawn at the middle level (no pop-in): trunks
     // and canopies go in 'plain', palm fronds here.
     ['treeDetail', M.detailMat, { ...solid, name: 'trees-detail' }],
     // Lot ground in sand and dirt (beaches, building sites).
     ['sand', M.lotSandMat, ground],
+    // Lot hedges, walls, parked cars, stacks: drawn at the middle level,
+    // no cast shadow (contact shadows under them instead): the shadow
+    // map pass is the dearest part of a dense street.
+    ['lotSolid', M.plainMat, { receive: true, name: 'lot-solid' }],
   ];
 }
 
@@ -654,7 +660,7 @@ export function buildRealCity(city, collision, opts = {}) {
     else setSolids(t.solids, true);
     const LC = {
       city, R, DR, groundY, collision: firstSolids ? collision : null, solids: firstSolids ? t.solids : null, lotStats,
-      props: B.props, solid: B.plain, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
+      props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
       plain: B.props, trees: B.plain, treesDetail: B.treeDetail,
     };
     const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.idx.length; return n; };

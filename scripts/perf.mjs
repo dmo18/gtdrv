@@ -53,7 +53,7 @@ const startGaps = await page.evaluate(() => {
   return window.__rwGaps.length;
 });
 await page.waitForTimeout(6000);
-const out = await page.evaluate((startGaps) => {
+const out = await page.evaluate(([startGaps, breakdown]) => {
   const g = window.__rw;
   const gaps = window.__rwGaps.slice(startGaps);
   const sorted = gaps.slice().sort((a, b) => b - a);
@@ -96,6 +96,31 @@ const out = await page.evaluate((startGaps) => {
     return { farTris: Math.round(farTris), calls: gr.calls || info.render.calls, triangles: gr.triangles || info.render.triangles, drawCpuMs: +(cpu / 20).toFixed(2), frameMs: +((performance.now() - t) / 20).toFixed(2), newPrograms: (info.programs ? info.programs.length : 0) - p0 };
   };
   const day = view(13);
+  // Triangles by mesh name in the day view, main pass and shadow pass
+  // (RW_BREAKDOWN=1 in the environment).
+  if (breakdown) {
+    const cat = {};
+    const count = (o, pass) => {
+      const geo = o.geometry;
+      let n = geo.index ? Math.min(geo.index.count, geo.drawRange.count) : Math.min(geo.attributes.position.count, geo.drawRange.count);
+      n /= 3;
+      if (o.isInstancedMesh) n *= o.count;
+      let p = o.parent, top = '';
+      while (p) { if (p.name) top = p.name; p = p.parent; }
+      const k = pass + ' ' + (o.name || o.material.name || o.material.type) + ' in ' + top;
+      cat[k] = cat[k] || [0, 0];
+      cat[k][0]++;
+      cat[k][1] += n;
+    };
+    g.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      o.onBeforeRender = function () { count(this, 'main'); };
+      o.onBeforeShadow = function () { count(this, 'shadow'); };
+    });
+    g.draw(1, 1 / 60);
+    day.breakdown = Object.entries(cat).sort((a, b) => b[1][1] - a[1][1]).slice(0, 16).map(([k, v]) => `${k}: ${v[0]} calls, ${Math.round(v[1])} tris`);
+    g.scene.traverse((o) => { if (o.isMesh) { delete o.onBeforeRender; delete o.onBeforeShadow; } });
+  }
   const night = view(23);
   const kinds = {};
   for (const x of g.vehicles) kinds[x.kind] = (kinds[x.kind] || 0) + 1;
@@ -111,7 +136,7 @@ const out = await page.evaluate((startGaps) => {
     stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, lotStats: g.cityMesh.userData.stream.lotStats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
     heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
   };
-}, startGaps);
+}, [startGaps, !!process.env.RW_BREAKDOWN]);
 console.log(JSON.stringify(out, null, 1));
 await browser.close();
 server.close();
