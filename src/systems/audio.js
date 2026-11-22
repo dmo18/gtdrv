@@ -755,6 +755,10 @@ export function createAudio(game) {
       const v = vs[i];
       // Only a police vehicle with its siren actually running can be heard.
       if (!v || !(v.police || (v.spec && v.spec.police)) || v.wrecked || !v.siren) continue;
+      // A police helicopter's light bar flashes but it has no siren (only
+      // the player's own, on SIREN): an AI heli overhead used to wail and
+      // duck the music for as long as it hunted.
+      if ((v.kind === 'heli' || v.kind === 'plane') && v.driver !== 'player') continue;
       const dx = fin(v.x) - fin(game.player.x);
       const dz = fin(v.z) - fin(game.player.z);
       const d = dx * dx + dz * dz - (v.siren ? 1e6 : 0);

@@ -616,6 +616,9 @@ function buildPatrolHeli(k, gk, color) {
   return {
     discs: [{ o: [-0.2, 3.2, 0], d: [0, 1, 0], r: 4.8 }], rotor: true,
     lightbar: [-2.9, 2.18, 0], spot: [2.37, 0.34, -0.3],
+    // Night glows: nav lights (red left, green right), a red beacon on the
+    // belly and a white one on the tail fin (blinking).
+    beacons: [[-5.0, 1.95, -1.02, RED_L, 0], [-5.0, 1.95, 1.02, GREEN_L, 0], [-0.4, 0.6, 0, RED_L, 1], [-7.4, 3.4, 0, WHITE_L, 2]],
   };
 }
 
@@ -684,7 +687,7 @@ function beamMaterial() {
 }
 // Beam half-angle (tangent): a narrow searchlight. The ground pool
 // (nightlights.js, spotUniforms) uses the same cone.
-export const BEAM_TAN = 0.06;
+export const BEAM_TAN = 0.045;
 
 // Small soft glows: light bar flashes and the searchlight lens. A fixed
 // size on screen (about 14 px on a 412 px tall view for the bar), so they
@@ -853,7 +856,19 @@ export function createAircraftMesh(spec, color) {
   group.add(lod);
 
   const lay = entry.layout;
-  let glow = null, lightbar = null, beam = null, bar = null, lensGlow = null;
+  let glow = null, lightbar = null, beam = null, bar = null, lensGlow = null, beacons = null;
+  if (lay.beacons) {
+    beacons = new THREE.Group();
+    for (const b of lay.beacons) {
+      const sp = glowSprite(b[3], b[4] ? 0.04 : 0.03);
+      sp.position.set(b[0], b[1], b[2]);
+      sp.userData.blink = b[4];
+      sp.material.opacity = 0.9;
+      beacons.add(sp);
+    }
+    beacons.visible = false;
+    group.add(beacons);
+  }
   if (lay.nozzle || lay.lightbar || lay.spot) {
     const xg = extraGeometry();
     if (lay.nozzle) {
@@ -876,7 +891,7 @@ export function createAircraftMesh(spec, color) {
       lightbar.position.set(lay.lightbar[0], lay.lightbar[1], lay.lightbar[2]);
       lightbar.add(new THREE.Mesh(xg.lightbar, EXTRA_MAT.lamp));
       const lr = new THREE.Mesh(xg.lensR, EXTRA_MAT.lamp), lb = new THREE.Mesh(xg.lensB, EXTRA_MAT.lamp);
-      const gr = glowSprite(0xff2a1e, 0.04), gb = glowSprite(0x3a72ff, 0.04);
+      const gr = glowSprite(0xff2a1e, 0.045), gb = glowSprite(0x3a72ff, 0.045);
       gr.position.set(0, 0.16, -0.36);
       gb.position.set(0, 0.16, 0.36);
       lr.visible = lb.visible = false;
@@ -902,7 +917,7 @@ export function createAircraftMesh(spec, color) {
   // the nose axis (the usual aircraft order).
   group.rotation.order = 'YZX';
   group.userData = {
-    spec, body, glass, disc, lod, skin, glow, lightbar, bar, beam, lensGlow, layout: lay, tris: entry.tris,
+    spec, body, glass, disc, lod, skin, glow, lightbar, bar, beam, lensGlow, beacons, layout: lay, tris: entry.tris,
     // World searchlight cone while lit (for the ground pool): apex, unit
     // direction, length, strength 0..1.
     spotW: beam ? { on: false, x: 0, y: 0, z: 0, dx: 0, dy: -1, dz: 0, len: 0, k: 0 } : null,
@@ -963,8 +978,21 @@ export function updateAircraftMesh(mesh, a, alpha = 1, time = 0) {
   // street lamps' reach, so lift its response to the dim night light
   // (white body and blue band still read; by day it is unchanged).
   if (spec.police) {
-    const n = a.wrecked ? 1 : 1 + 0.7 * (1 - daylight);
+    const n = a.wrecked ? 1 : 1 + 1.1 * (1 - daylight);
     if (ud.skin.color.r !== n) ud.skin.color.setScalar(n);
+  }
+  // Nav lights and beacons glow from dusk to dawn while the craft is
+  // crewed; the beacons blink (belly red, tail white, out of step).
+  if (ud.beacons) {
+    const on = daylight < 0.6 && !a.wrecked && (a.engineOn || !!a.driver);
+    ud.beacons.visible = on;
+    if (on) {
+      const ch = ud.beacons.children;
+      for (let i = 0; i < ch.length; i++) {
+        const b = ch[i].userData.blink;
+        if (b) ch[i].visible = ((t + (b === 2 ? 0.5 : 0)) % 1.1) < 0.12;
+      }
+    }
   }
   if (ud.lightbar) {
     const on = !!a.siren && !a.wrecked;

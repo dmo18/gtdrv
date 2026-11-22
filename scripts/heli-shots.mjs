@@ -61,6 +61,10 @@ const CHASE = `
   frames(30);
   const p = heliAt(60, 7, 20);
   frames(150);
+  // Side on, as it is on its orbit (the hover faces the target).
+  p.craft.heading = p.craft.pheading = g.camHeading + 1.9;
+  frames(1);
+  p.craft.heading = p.craft.pheading = g.camHeading + 1.9;
   const a = p.craft, P = a.mesh.position.clone().project(g.camera);
   return { d: Math.hypot(a.x - g.player.x, a.z - g.player.z).toFixed(1), y: a.y.toFixed(1), ndc: [P.x.toFixed(2), P.y.toFixed(2)], spot: a.spot, lod: a.mesh.userData.lod.getCurrentLevel(), calls: g.graphics.calls };
 `;
@@ -86,10 +90,14 @@ await shot('street-day', 14, STREET);
 const FAR = `
   g.chase.cycleView();
   frames(30);
-  const p = heliAt(100, 9, 26);
+  const p = heliAt(95, 0, 26);
   frames(150);
+  p.craft.heading = p.craft.pheading = g.camHeading + 1.9;
+  frames(1);
+  p.craft.heading = p.craft.pheading = g.camHeading + 1.9;
   const a = p.craft;
-  return { d: Math.hypot(a.x - g.player.x, a.z - g.player.z).toFixed(1), lod: a.mesh.userData.lod.getCurrentLevel(), view: g.chase.viewName ? g.chase.viewName() : null };
+  const P = a.mesh.position.clone().project(g.camera);
+  return { d: Math.hypot(a.x - g.player.x, a.z - g.player.z).toFixed(1), y: a.y.toFixed(1), ndc: [P.x.toFixed(2), P.y.toFixed(2)], lod: a.mesh.userData.lod.getCurrentLevel() };
 `;
 await shot('far-day', 14, FAR);
 await shot('far-night', 22.5, FAR);
@@ -101,7 +109,7 @@ const LANDED = `
   const x = w.x + Math.cos(h) * 9, z = w.z + Math.sin(h) * 9;
   const p = heliAt(9, 0, 12);
   g.helipilot.setOrder(p, 'land', { x, z });
-  for (let i = 0; i < 60 * 12 && p.state !== 'landed'; i++) frames(1);
+  for (let i = 0; i < 60 * 14 && p.state !== 'landed'; i++) g.step(1 / 60);
   g.helipilot.setOrder(p, 'leave');
   p.state = 'landed';
   w.x = x - Math.cos(h) * 5.5; w.z = z - Math.sin(h) * 5.5;
@@ -112,13 +120,16 @@ await shot('landed-day', 14, LANDED);
 // Shot down: a hit wrecks it, it falls spinning with smoke.
 const WRECK = `
   frames(30);
-  const p = heliAt(70, -10, 40);
+  const p = heliAt(55, 4, 30);
   frames(90);
   g.combat.damage ? g.combat.damage(p.craft, 10000, g.player.vehicle, 'blast') : null;
   const a = p.craft;
   if (!a.wrecked) { a.health = 0; a.wrecked = true; }
-  frames(55);
-  return { state: p.state, y: a.y.toFixed(1), wrecked: a.wrecked };
+  frames(60);
+  // Every frame drawn for the last half second (smoke and fire fill in).
+  for (let i = 0; i < 30; i++) { g.step(1 / 60); g.draw(1, 1 / 60); }
+  const P = a.mesh.position.clone().project(g.camera);
+  return { state: p.state, y: a.y.toFixed(1), wrecked: a.wrecked, ndc: [P.x.toFixed(2), P.y.toFixed(2)] };
 `;
 await shot('wreck-day', 14, WRECK);
 await shot('wreck-night', 22.5, WRECK);

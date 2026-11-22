@@ -398,3 +398,69 @@ None critical or high.
   and a Miami save on Miami (`progress.mapSessions`).
 - Details, numbers and deviations: docs/MAP.md, "Milestone 3: done".
   Screenshots: docs/preview/miami-m3-*.png.
+
+## 2026-11-22: Police helicopter fixes (owner report: "messes with everything", horrible lights, cannot see it or interact)
+- Causes found (scripts/heli-perf.mjs and a Miami flight run in node):
+  - The AI flew into towers: its roof look-ahead sampled 3 points 20+ m
+    apart along the wanted path only, so a narrow tower or the way it was
+    actually drifting was missed. Over Miami, 4 of 8 three-minute hunts
+    ended in a crash (one at 129 m up, 12.7 m/s into a wall, in under
+    6 s of game time); the burning wreck then fell into the street.
+  - Aircraft were turned back 2.6 km from the origin (the island's size):
+    on the 9 by 8 km Miami map a heli sent after a player in the outer
+    districts flew in circles 1.6 to 2 km away for minutes. Planes too.
+  - It hovered nearly overhead: 35..50 m above the highest roof within
+    40 m at 55..70 m out gave a mean elevation of 41..74 deg (50 deg in
+    the browser hunt, 168 of 600 steps steeper than 60 deg). It was on
+    screen in 0 of 60 sampled frames of a chase.
+  - The beam: an additive, double-sided, capped cone of flat colour,
+    13% as wide as long, aimed at the player, so the chase camera sat
+    inside it and the whole screen was washed every frame, plus a white
+    disc on the ground. Night frame with the heli on screen: +23%
+    (1795 to 2207 ms in software GL), now +8.5% (1043 to 1132 ms). Draw
+    calls +2 by day, +5 at night; no extra lights.
+  - It wailed: an AI heli's siren counted as the nearest siren, so the
+    siren loop played from the sky and ducked the music for the whole hunt.
+  - Navy livery: a dark shape on a dark city and night sky.
+  - Pistol and SMG range (45 / 35 m) could never reach it; killing the
+    pilot did nothing.
+  - Traffic was not affected (same stopped count, 95, and 0 impacts over
+    600 steps with and without the heli; traffic ignores craft above 2.5 m).
+- Fixes:
+  - helipilot.js: look-ahead every 7 m along both the wanted path and the
+    actual drift (3 m out first); stand-off 76..106 m, 16..24 m over the
+    roofs near the target, further out over tall roofs (never more than
+    34 deg up); a moving target gets the heli on station ahead of it and
+    to one side (in view of the chase camera), a slow one a slow circle.
+    Over Miami: 0 crashes in 8 runs, mean elevation 17..35 deg. Leaving
+    when heat drops is unchanged. New `ditch` state: pilot shot dead, it
+    settles in one piece and is left empty (ENTER takes it, it flies).
+  - aircraft.js: on a map with a land box craft turn back 600 m past the
+    box, not 2.6 km from the origin.
+  - aircraftmesh.js: white livery with a blue band, blue tail and fin;
+    brighter response at night; nav lights and blinking beacons as small
+    glows at night; light bar with dark lenses, lit lenses and a small
+    fixed-size glow per side, red and blue never together, soft edges
+    (no one-frame pops); the beam is now a soft volume (light from how
+    close each view ray passes the beam axis, brightest at the lamp, none
+    near the camera or at the ground), narrow (4.5% of its length), open
+    ended; a small lens glow at the lamp.
+  - nightlights.js / graphics.js: the searchlight pool goes into the same
+    lamp-light shader as the street lamps (one cone test per pixel, no
+    light): a narrow bright pool on the street and on any wall in the cone,
+    dim by day.
+  - aim.js / combat.js: hand guns reach craft in the air out to 130 m
+    (`AIR_REACH`; anything else past the gun's range is still a miss);
+    LOCK and assist follow.
+  - audio.js: AI aircraft never sound a siren (the light bar still flashes).
+  - effects.js: a shot-down craft emits flames on the way down until its
+    blast (not visible yet in the screenshots; the smoke trail is).
+- Tests: helipilot (open-street orbit ahead of a moving target, pistol at
+  90+ m, pilot dies, it lands whole, ENTER finds it, it flies; carjack on
+  the ground, not in the air), craftmesh (light bar flashes, beam cone and
+  pool data). Screenshots: docs/preview/heli-*.png
+  (`node scripts/heli-shots.mjs`), numbers: `node scripts/heli-perf.mjs`.
+- Not done: walkers stay at street level, so a heli on a roof pad cannot
+  be reached on foot; the beam's shader compiles when the first heli
+  appears (one program, not warmed at start); the falling wreck is dark
+  and hard to see at night.

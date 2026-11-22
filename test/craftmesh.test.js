@@ -7,7 +7,7 @@ import { airfoilHalf, chordShares, superPoint, monotone, detailPixels, blurPixel
 import { AIRCRAFT_SPECS, createAircraft } from '../src/entities/aircraft.js';
 import { BOAT_SPECS, createBoat } from '../src/entities/boat.js';
 import { TANK_SPECS, createTank } from '../src/entities/tank.js';
-import { createAircraftMesh, updateAircraftMesh, aircraftStats, lightbarPhase } from '../src/render/aircraftmesh.js';
+import { createAircraftMesh, updateAircraftMesh, aircraftStats, lightbarPhase, lightbarLevels } from '../src/render/aircraftmesh.js';
 import { createBoatMesh, updateBoatMesh, boatStats } from '../src/render/boatmesh.js';
 import { createTankMesh, updateTankMesh, tankStats } from '../src/render/tankmesh.js';
 import { RIG } from '../src/render/hullkit.js';
@@ -155,9 +155,34 @@ test('fighter: stores vanish with the magazine, afterburner glow, gear and surfa
   const p = createAircraft('patrolheli', 0, 0, 0);
   const pm = createAircraftMesh(p.spec, p.color);
   assert.ok(pm.userData.lightbar && pm.userData.beam);
+  updateAircraftMesh(pm, p, 1, 0.1);
+  assert.equal(pm.userData.lightbar.visible, false, 'dark with the siren off');
   p.siren = true;
-  updateAircraftMesh(pm, p, 1, 0);
-  assert.equal(pm.userData.lightbar.visible, lightbarPhase(0) % 2 === 0);
+  const bar = pm.userData.bar;
+  updateAircraftMesh(pm, p, 1, 0.1);
+  assert.ok(pm.userData.lightbar.visible && bar.lr.visible && !bar.lb.visible && bar.gr.visible && !bar.gb.visible, 'red flash');
+  updateAircraftMesh(pm, p, 1, 0.5);
+  assert.ok(!bar.lr.visible && bar.lb.visible && bar.gb.visible && !bar.gr.visible, 'blue flash');
+  // The two sides never light together, and levels move smoothly.
+  let prev = lightbarLevels(0), jump = 0;
+  for (let t = 0; t < 4; t += 1 / 60) {
+    const f = lightbarLevels(t, { r: 0, b: 0 });
+    assert.ok(!(f.r > 0 && f.b > 0));
+    jump = Math.max(jump, Math.abs(f.r - prev.r), Math.abs(f.b - prev.b));
+    prev = f;
+  }
+  assert.ok(jump < 0.45, `step ${jump}`);
+  assert.equal(lightbarPhase(0), 0);
+  // The beam: a soft open cone, aimed at the target, its world cone kept for the ground pool.
+  p.spot = 1;
+  p.spotAim = true;
+  p.x = 0; p.y = 30; p.z = 0;
+  p.spotX = 40; p.spotY = 0; p.spotZ = 0;
+  updateAircraftMesh(pm, p, 1, 1);
+  const sw = pm.userData.spotW;
+  assert.ok(pm.userData.beam.visible && sw.on && sw.k === 1);
+  assert.ok(sw.dy < -0.5 && sw.dx > 0.6 && Math.abs(sw.len - 50) < 3, JSON.stringify(sw));
+  assert.ok(pm.userData.beam.material.uniforms.uK.value > 0);
 });
 
 test('boats build within budget, spray shows only under way', () => {

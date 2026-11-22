@@ -199,21 +199,26 @@ icon. Audio: rig `tracks`, `shot` cannon boom, `crush`.
   player, who respawns with nothing lost).
 - `patrolheli` "Lampwatch" (heli): length 10.2, rotor 9.6, height 3.2,
   health 360, maxSpeed 46, climbRate 10, accel 10, yawRate 1.6, blades 4,
-  mounts ['chingun'], `police: true`, colors navy 0x1d2f52 with white and an
-  orange band. `craft.siren` (bool) and `craft.spot` (0..1 beam on,
+  mounts ['chingun'], `police: true`, colors white 0xeef1f4 with a blue
+  band, blue tail band and fin (was navy; it vanished against the city). `craft.siren` (bool) and `craft.spot` (0..1 beam on,
   automatic at night or while hunting) are fields; SIREN toggles siren.
   Flown by the player like any heli; seen stealing one = heat +1.
 - `heavyheli` Oxbarrow gains mounts ['drop'] (4 bombs). Other aircraft
   stay unarmed.
 Police heli AI (src/systems/helipilot.js, pure; flies through the real
 `stepAircraft` by writing controls): states `arrive` (spawn 350 m out at
-80 m, out of view), `orbit` (circle the target at 55..70 m radius, 35..50 m
-above the highest roof within 40 m, nose and beam on target), `strafe`
+80 m, out of view), `orbit` (76..106 m from the target, 16..24 m above the
+highest roof within 40 m, further out over tall roofs so it is never more
+than 34 deg above the target's horizon; a target moving faster than 4 m/s
+gets the heli on station ahead of it and to one side, in view of a chase
+camera; a slower one a slow 9 m/s circle; beam on target), `strafe`
 (heat 4+, every 8..12 s a straight pass with 1.2 s bursts), `evade`
-(health under 40%: back off to 120 m), `leave` (heat 0 or lost: climb,
+(health under 40%: back off to 150 m), `ditch` (pilot shot dead: settles
+in one piece, then sits empty for anyone to take), `leave` (heat 0 or lost: climb,
 fly away, despawn out of view), `crash` (health 0: spin with smoke 3 s,
-explode on ground or sea contact). Roof avoidance: sample `heightAt` at
-3 points ahead and climb to max + 15 m. Gunner: hit chance 0.25 x (1 -
+explode on ground or sea contact). Roof avoidance: sample `heightAt` every
+7 m along the wanted path and along the actual drift (3 m out first, 5 m
+to each side), stop going forward and climb to max + 15 m. Gunner: hit chance 0.25 x (1 -
 d/120) x 1/(1 + playerSpeed/10) x aimRamp; never in its first 3 s or at a
 downed player. It "calls in" while it sees the player: police get the
 position and the heat cooldown does not run. Fallback if real-physics
@@ -236,7 +241,9 @@ strafing heli) firing at a time, three attack slots as COMBAT.md.
   while a heli sees the player; helis follow. Ground units still drop out.
 - Heli sight: 160 m with a clear `trace` line. Escape a heli: break line of
   sight in tall streets, outrun it (fighter, fast car), shoot it down
-  (2 Gull Lobber rockets, about 6 s of Buzzbox, 1 Gullseeker), or swap
+  (2 Gull Lobber rockets, about 6 s of Buzzbox, 1 Gullseeker; hand guns
+  reach craft in the air out to 130 m, `AIR_REACH` in core/aim.js), shoot
+  the pilot (cabin hits: it comes down whole and can be taken), or swap
   craft unseen: 4 s unseen in a different craft than last seen makes the
   cooldown run twice as fast.
 - Tank (heat 5): drives with police `chaseStep` controls (steer = turn

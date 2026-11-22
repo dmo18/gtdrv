@@ -187,7 +187,8 @@ const LAMP_FRAG = `
 			float rr = length( sd - uSpotB.xyz * s );
 			float R = 0.25 + s * uSpotB.w;
 			float q = rr / R;
-			float c = exp( - q * q * 3.0 ) * ( 1.0 - smoothstep( 0.8, 1.2, q ) );
+			// The cone widens with distance: the same light over more ground.
+			float c = exp( - q * q * 3.0 ) * ( 1.0 - smoothstep( 0.8, 1.2, q ) ) / ( 1.0 + s * s / 4000.0 );
 			rwL += vec3( 1.0, 0.95, 0.86 ) * ( c * uSpotA.w );
 		}
 	}
@@ -208,7 +209,7 @@ export function setSpotLight(U, crafts, day, tan) {
     const v = crafts[i];
     const sw = v.mesh && v.mesh.userData && v.mesh.userData.spotW;
     if (!sw || !sw.on || !v.mesh.visible) continue;
-    A.set(sw.x, sw.y, sw.z, sw.k * (4.5 - 3.6 * day));
+    A.set(sw.x, sw.y, sw.z, sw.k * (6.5 - 5.2 * day));
     B.set(sw.dx, sw.dy, sw.dz, tan);
     return true;
   }

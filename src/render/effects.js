@@ -969,6 +969,13 @@ export function createEffects(game) {
         const grey = v.wrecked ? 0.08 : 0.45;
         smoke(p.x, (v.mesh ? v.mesh.position.y : y) + 1.6, p.z, -fwdx * spd * 0.1 + rs() * 0.3, 1 + rnd(), -fwdz * spd * 0.1 + rs() * 0.3, 2.2, 0.5, 3, 0.5, grey, grey, grey, 1.1, 0.9);
       }
+      // A shot-down craft burns on the way down (until its blast).
+      if (v.wrecked && !v.scorched && !v.onWater && rnd() < 0.8 * qq) {
+        const p = toWorld(v, rs() * 0.8, rs() * 0.5);
+        const j = emitP(B, p.x, (v.mesh ? v.mesh.position.y : y) + 2.5 + rnd() * 0.6, p.z, rs() * 0.4 + (v.vx || 0) * 0.3, 1.2 + rnd(), rs() * 0.4 + (v.vz || 0) * 0.3,
+          0.4 + rnd() * 0.3, 0.8 + rnd() * 0.5, 0.2, 1, 1, 0.45 + rnd() * 0.2, 0.12, 3, -1.5, 0.5);
+        if (j >= 0) B.fadeIn[j] = 0.1;
+      }
     }
   }
 
