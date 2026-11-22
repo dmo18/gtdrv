@@ -1,29 +1,84 @@
 # Spec: Rustwater (working title)
 
-An original open-world vehicle playground: drive, boat and fly
-around an island. Not based on any
-existing game: own name, city, characters, art and missions.
+An original open-world vehicle playground: drive, boat and fly around a
+city on the water. Not based on any existing game: own name, characters,
+art and missions.
+
+Status of this file: it describes the game the revamp is building
+(docs/REVAMP.md). Lines marked (0.4.0) or (0.5.0) are approved targets
+that ship with that version; everything else is in the game today. The
+design contracts with field names and numbers are in docs/REVAMP.md
+section 6; where this file and that section differ, that section wins.
 
 - Player: one person, on a Galaxy S24 Ultra, in Chrome, landscape, touch.
-- Runs as a web page. No install, no account, no network after load.
-- Must-haves: a 3D island city to roam, many cars, boats and aircraft
-  to hop between, traffic and pedestrians, races and stunt challenges
-  on road, sea and air, weapons and shootouts, a short story with a
-  rival crew, police chases, and high scores. No money, shop or
-  unlocks: everything is available from the start.
-- Art: stylised low-poly shapes built in code (no downloaded art).
+- Runs as a web page (and as an installed app). No account, no network
+  after load.
+- Maps: the default map is Miami, built from real street data
+  (OpenStreetMap, ODbL; the credit "Map data (c) OpenStreetMap
+  contributors" must stay visible in the menu and on the title screen).
+  Street and neighbourhood names are real. Landmarks and venues have
+  invented names wherever a real venue brand would appear; no real brand
+  names anywhere. The whole 9.0 by 7.8 km data box is playable. A core of
+  5.15 by 4.6 km (Downtown, Brickell, Wynwood, Edgewater, the near bay
+  islands) holds the hand-placed content; the rest is dressed by the same
+  rules (0.4.0). The classic invented island is kept as a second map,
+  chosen in Settings, with no new work.
+- Must-haves: a 3D city to roam, many cars, boats and aircraft to hop
+  between, traffic and pedestrians, races and stunt challenges on road,
+  sea and air, weapons and shootouts, a short story with a rival crew,
+  police chases, and high scores.
+- No money and no shop. Every vehicle in the world can be taken and
+  driven from the start. Exploring is rewarded (0.4.0): garages across
+  the map store, swap and repaint cars for free, and adventures (short
+  discovery quests) pay score and unlock new garages, three reward cars
+  and three extra routes.
+- Every open piece of land is a lot with a type (yard, car park, plaza,
+  grass, works yard, beach, park, water edge, building site) and is
+  dressed for it; no bare paving plains (0.4.0).
+- Art: stylised shapes built in code (no downloaded art).
 - Sound: generated in code (engine, sirens, impacts). No licensed music.
 - Tone: loud, violent sandbox fun. Action violence is allowed: weapons
-  and explosions kill people outright (they fall, lie still and fade),
-  blood is shown (red bursts and pools on the ground that fade), and
-  destroyed vehicles explode, break into flying debris and vanish.
+  and explosions kill people outright, blood is shown (red bursts and
+  pools on the ground), and destroyed vehicles explode and break into
+  flying parts. A person who is hit falls away from the shot or blast and
+  the body stays 30 s; a burnt wreck stays and smokes for 60 s, at most 6
+  at once (0.5.0; today bodies and wrecks fade within a few seconds).
   Never dismemberment or sexual content.
+- Driving: two modes, Arcade (default) and Sim. Both steer and brake
+  accurately and share the same acceleration, top speed, braking and
+  steering speed; Sim has less grip and no stability or traction help
+  (0.4.0). Four steering styles: wheel, buttons, tilt, slider.
 - Carjacking: ENTER on a craft with someone at the controls (under 3 m/s)
   drags the driver out and throws them to the ground; the player drives
-  off. Quitting the game saves the place, craft and a garage of up to 8
-  left-behind cars; Play continues from there (Settings has New game).
+  off.
+- Starting: the title screen shows a designed street view in Downtown
+  with a Start button; Continue resumes the saved place (0.4.0; today
+  Play continues from the saved place). Quitting saves the place, the
+  craft and up to 8 cars left behind. Settings has New game on its own
+  screen with a confirm.
+- The player cannot die by default; "Hard: you can die" is a setting.
 - Target: smooth play (aim 60 frames per second, never under 30) on the
   phone; all controls usable with two thumbs.
+
+## Garages and adventures (0.4.0)
+Contract: docs/REVAMP.md section 6.6. In short:
+- Twelve garages on the Miami map, one known from the start (Downtown),
+  three revealed only by adventures. A garage shows on the map once the
+  player has been within 400 m of it. At a garage: store the car, take
+  out any car in the collection (up to 24, shared by all garages),
+  repaint, mark one favourite (the car you start in), release a car.
+  Everything is free.
+- Sixteen adventures: lookouts, clue trails, hidden spots and tours.
+  They are found by exploring (a "?" on the map within 300 m), from
+  notice boards, from people who talk, and from the "word at the
+  garage". Rewards are score (1,000 or 1,500, and 5,000 for all), the
+  three hidden garages, three reward cars (Sunchaser, Tidewinder, Night
+  Heron) and three extra routes.
+- Places come from the city layout and fixed seeds, so they are the same
+  on every device. Progress is saved under its own storage key
+  (`rustwater.explore.v1`), sanitised field by field.
+- The six secrets, the stunt ramps and the 14 courses are unchanged; an
+  adventure step may point at a secret or ask for a medal on a ramp.
 
 ## Hard mode, respawn and health meter
 - Volume (Settings tab): `master` (0..1), `musicVol`, `sfxVol`,
@@ -62,16 +117,17 @@ existing game: own name, city, characters, art and missions.
   and aside for about 1.5 s, eased; moving the camera cancels it.
 
 ## Hidden secrets and the Ghostwake
-- Six secrets are hidden on the island (list and rules in
+- Six secrets are hidden on each map (list and rules in
   `src/world/secrets.js`, found from the city layout with a fixed seed so
-  they are in the same places on every device): a half-sunk shipping
+  they are in the same places on every device; on Miami their places are
+  set in `src/world/miami-spots.js`). On the island they are: a half-sunk shipping
   container off the docks, a rooftop lounge, a sea cave, a rusted
   lighthouse on a headland, a graffiti alley and a playground with a
   one-off ride. None is in the sea or on the airfield islet.
 - Finding one: walk, drive, sail or fly within 12 m (the rooftop also needs
   height, about 3.5 m under the roof or more). Once per secret: a toast, 750
   points banked, saved in `progress.secrets.found`.
-- Pause menu, Records: "Secrets found n / 6" and the names found. The map
+- Pause menu, Stats: "Secrets found n / 6" and the names found. The map
   shows one faint dot, offset by about 55 m, only after the first find.
 - Finding all six unlocks Ghostwake (toast, 2500 bonus points, saved) and
   marks a lock-up garage on the map. A roller door opens when you come near
@@ -88,7 +144,7 @@ turn the radio off (the default): a RADIO button in the "more" fan and a
 station, a dance-pop station (118 to 124 BPM), a slow jazz-like station and a
 talk station. The talk station has no speech: it plays a jingle, short
 vowel-blip texture and songs, and shows the DJ's words (40 funny lines about
-the island, plus ads every third song) as captions in a small strip under the
+the city, plus ads every third song) as captions in a small strip under the
 minimap while it plays. Changing station crossfades over 0.6 s; music steps
 back under explosions and sirens.
 
