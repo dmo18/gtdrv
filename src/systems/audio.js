@@ -1617,7 +1617,9 @@ export function createAudio(game) {
       // oversampled, so the rounding of rare peaks does not alias
       shaper.oversample = '4x';
       // the compressors add automatic make-up gain; trim it back
-      const trim = gainNode(0.75, limiter);
+      // (A1: 0.75 -> 1: the whole mix sat at -22 to -27 dBFS RMS, quiet on
+      // a phone; the limiter at -4 dBFS still holds every peak)
+      const trim = gainNode(1, limiter);
       master.connect(comp);
       comp.connect(trim);
       limiter.connect(shaper);

@@ -422,6 +422,54 @@ music samples are left out. Regenerate with
 | wind | loop | 2.50 | -1.9 | -16.1 | 14.2 | -18.6 | 318 | 29 | 42 | 22 | 6 | 1 | - |
 
 
+## A1 phone check fix (0.6.0): "harsh and crackly and just wrong"
+
+The owner marked 7 of 8 phone-check sounds bad on a Galaxy S24 Ultra
+(only Radio passed). Rendered offline through the real graph in headless
+Chromium (OfflineAudioContext, suspended every 1/60 s), the causes were:
+
+- **Siren slot was silent**: the test car is not a police car and the
+  audio only sounds a siren on a vehicle with `siren` set. Now
+  `audio.testSiren(on)` plays it as if a police car were 20 m away.
+- **Boost whoosh was inaudible**: the plain whoosh at 0.35 on the engine
+  bus, about the level of the city bed. Now `boostWhoosh` (noise through
+  a low-pass opening 300 Hz to 4 kHz and a rising band-pass) at 0.8 on
+  the effects bus.
+- **Music was masked**: the car kept driving under it. From the gunshot
+  slot on, the phone check now rolls the car to a stop; music bus 0.2 ->
+  0.28. The composer's bass "fifth" (+7 semitones) left the mode on some
+  chords (a tritone under the pad); it now uses the chord's own fifth.
+- **Saturation everywhere, crackle-prone**: `harmonize` used a hard
+  clip plus |tanh| rectifier (a corner at every zero crossing); the
+  master bass helper did the same live at 0.32. Engines were overdriven
+  (drive up to 2.6) at their 12 kHz rate with no oversampling and then
+  left unfiltered to Nyquist, with loud pulse-gated noise rasp. Now: a
+  smooth rectifier and 4-pole filtering in `harmonize`, the helper curve
+  smooth (src/audio/master.js) and mixed at 0.2, engine drive about 0.6x,
+  rasp about 0.5x and a 4-pole low-pass at 3.9 kHz on every engine loop;
+  blast and gun saturation 1.3 instead of 2.2 to 2.4.
+- **Siren was a soft-clipped square** (-5 dBFS RMS buffer): now a
+  near-sine (2nd/3rd harmonics at -18 and -20 dB) through a gentle band.
+- **Tyre squeal** was three Q 24..36 band-passes soft-clipped into a
+  dense block whose pitch jittered randomly every update; now wider bands,
+  no saturation, pitch follows the slip smoothly.
+- **Gunshot was a click**: the 0.5 ms crack alone set the peak (crest
+  22.8 dB). Crack softer and longer, body and thump longer and louder,
+  an octave thump added, top above 7 kHz rolled off.
+- Master: latencyHint 'balanced' (bigger audio buffer on Android, fewer
+  underrun crackles), safety curve linear to 0.7 and capped at 0.89
+  (-1 dBFS), 4x oversampled; limiter -4 dBFS; trim 0.75 -> 1.
+
+Measured (isolated, master 0.8, peak / RMS dBFS at the output, before ->
+after): Engine -9.3/-22.2 -> -6.7/-19.4; Tyre squeal -7.0/-19.8 ->
+-5.3/-17.2; Gunshot -6.4/-30.0 (loudest 400 ms -25.7) -> -2.9/-27.3 (-22.0);
+Blast -2.8/-23.6 -> -1.6/-22.9; Siren silent -> -6.0/-17.1; Music
+-12.4/-28.0 -> -7.7/-23.5; Radio -14.3/-28.7 -> -11.0/-24.6; Boost
+inaudible (-29.5 = bed) -> -3.5/-21.2 (loudest 400 ms -14.7). No sample
+clipped in any render, before or after. Unit tests: test/audio.test.js
+("phone-check sounds", "master curves", "music composer stays in key").
+Still not heard by anyone: the next phone check is the judge.
+
 ## Still weak, honestly
 
 - Not heard. The phone bass helper and the overdrive could sound fizzy
