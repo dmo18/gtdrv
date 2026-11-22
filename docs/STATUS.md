@@ -7,6 +7,26 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## W5 Cars (2026-11-22)
+- Bodies (src/render/carbody.js): new section (tucked sill, character line, crisp shoulder, flat crowned deck), noses
+  and tails that round over (`lean`), bonnet creases, shut lines with depth, glass with tumblehome, fender peaks over
+  a lower bonnet on the sports cars (`valley`). Thirteen bodies, ten road outlines plus the three reward cars
+  (Sunchaser speedster, Tidewinder off-road wagon, Night Heron fastback) on their own silhouettes.
+- Glass is tinted and see-through with a cabin behind it (seats, dash, steering wheel, headliner); crazed when badly
+  hurt, blown out when burnt. A contact shadow (dark under the sills and tyres, fading out) rides in the glass draw,
+  pressed onto the ground; the sun shadow is unchanged.
+- Paint (src/render/vehiclemats.js): a hotter clear coat and a cheap street reflection (a skyline with windows, lit
+  at night, and the road) mixed into the sky reflection; no probes. Burnt lamps go dark.
+- Draw calls: 4 per car near and mid (body, glass with shadow, head and tail lamps in one mesh with crumple morph
+  targets, the four wheels instanced), 5 with a light bar; far 1. Near 7,068 to 8,950 triangles, mid 1,092 to 1,470.
+  Ten cars in view: 42 car draws (was 72), +45.6k triangles (was +135k). Street view (scripts/perf.mjs, day):
+  346 calls 592k triangles before, 315 calls 468k after.
+- Kit for service vehicles: `addCarStyle`, `buildWheel`, `wheelStyle` (carbody.js), `lampMaterial`,
+  `carGlassMaterial`, `paintMaterial` (vehiclemats.js), `lightBarGeometry`, `roofMount` (vehiclemesh.js).
+- Shots: docs/preview/w5-*.png (`node scripts/vehicle-shots.mjs --game g:<id>:<view>:<hour>[:hurt|burnt]`).
+- Not done: real crumpled geometry (the crumple is still a shader dent at the ends); the contact shadow also sits
+  under the effects blob shadow (effects.js), which could be lightened.
+
 ## W7 Sky, light and water (2026-11-22)
 - Sky dome (src/systems/daynight.js): two procedural cloud layers (low deck, thin high veil) drift with the wind and
   take the sun colour at dusk, go dark blue and pick up the city glow at night, grey out with overcast and rain and

@@ -160,21 +160,21 @@ export function createCheckRun(game, opts = {}) {
   };
 
   // The point `d` metres ahead of the car along its heading, nudged to the route side.
-  const ahead = (d) => {
+  const ahead = (d, side = 0) => {
     const c = run.car;
-    return { x: c.x + Math.cos(c.heading) * d, z: c.z + Math.sin(c.heading) * d, h: c.heading };
+    return { x: c.x + Math.cos(c.heading) * d - Math.sin(c.heading) * side, z: c.z + Math.sin(c.heading) * d + Math.cos(c.heading) * side, h: c.heading };
   };
 
   function fixtureFight() {
     // A parked crew car on the road ahead, shot at with the car's own gun for a few seconds.
-    const a = ahead(26);
-    const v = safe(() => game.debug.spawnOccupied('sedan', a.x, a.z, a.h + Math.PI / 2, 'crew'));
+    const a = ahead(30, 7); // beside the road, not in the way
+    const v = safe(() => game.debug.spawnOccupied('sedan', a.x, a.z, a.h, 'crew'));
     if (v) { fixtureCars.push(v); run.fixtures++; }
     firing = 4;
     if (game.input) game.input.press('fire');
   }
   function fixtureBlast() {
-    const a = ahead(34);
+    const a = ahead(40, 6);
     if (game.combat && game.combat.explode) { safe(() => game.combat.explode(a.x, 0.5, a.z, 9)); run.fixtures++; }
     else emit('explosion', { x: a.x, z: a.z, radius: 9, size: 'big' });
   }
@@ -367,7 +367,7 @@ export function createPhoneCheck(game, root, opts = {}) {
     if (!b) return;
     if (run.phase === 'drive') b.text.textContent = `Phone check: driving by itself, ${Math.max(0, Math.ceil(opts.driveSeconds ?? DRIVE_SECONDS) - Math.floor(run.t))} s left`;
     else if (run.phase === 'sounds') {
-      b.text.textContent = `Sound ${Math.min(run.sound + 1, SOUNDS.length)} of 8: ${SOUNDS[Math.max(0, Math.min(run.sound, SOUNDS.length - 1))]}. Tap a number that sounds bad`;
+      b.text.textContent = `Sound ${Math.min(run.sound + 1, SOUNDS.length)} of 8: ${SOUNDS[Math.max(0, Math.min(run.sound, SOUNDS.length - 1))]}. Tap bad ones`;
       if (!b.sounds) b.sounds = soundButtons(b.bar, run);
     }
   }
