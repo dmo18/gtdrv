@@ -31,7 +31,7 @@ import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
-import { lotGround, lotJob, lotsByTile } from './lotmesh.js';
+import { lotGround, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
 
 export const TILE = 300; // m, a near-detail tile
@@ -42,7 +42,9 @@ const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // Longest piece of tile work between two yields (ms): a slice ends at
 // the first break point past this, so slices stay well under 5 ms, with
 // room left for a minor garbage collection landing in one.
-export const SLICE_MS = 1.5;
+// Work per slice (ms). With a young-generation collection landing in a
+// slice (2 to 3.5 ms on the test machine) a slice still stays under 5 ms.
+export const SLICE_MS = 1.2;
 const PROP_PIECE = 16;
 
 // Near-tile mesh arrays come from the builders' pool (views of pooled
@@ -704,8 +706,10 @@ export function buildRealCity(city, collision, opts = {}) {
       realLand(city, B, i0, i1, j, Math.min(j1, j + 5));
       if (over()) { yield 'land'; ts = now(); }
     }
-    for (let j = lj0; j < lj1; j += 10) {
-      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 10));
+    for (let j = lj0; j < lj1; j += 6) {
+      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 6));
+      if (over()) { yield 'lotGround'; ts = now(); }
+      lotEdges(city, B, li0, li1, j, Math.min(lj1, j + 6));
       if (over()) { yield 'lotGround'; ts = now(); }
     }
     for (let a = 0; a < t.nodes.length; a += 8) {

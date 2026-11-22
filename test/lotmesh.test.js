@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { ChunkedBuilder, MeshBuilder } from '../src/render/meshbuilder.js';
-import { lotGround, drawLotFeatures, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
+import { lotGround, lotEdges, drawLotFeatures, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
 import { realLand } from '../src/render/citymesh.js';
 import { compactFar, farBuilding } from '../src/render/realcity.js';
 import { createCollisionWorld, addLotSolids, fillLotCollision } from '../src/world/collision.js';
@@ -66,6 +66,30 @@ test('lot ground covers exactly the lot cells, in the material of each type', ()
   // Lots of one type differ a little in tone (lot seed); types differ.
   const kinds = new Set(ground.map((q) => q[2]));
   assert.ok(kinds.size >= 5, [...kinds].join(' '));
+});
+
+test('lot edges: kerbed lawns and bordered plazas, inside their own lots only', () => {
+  const city = makeLotsFixture();
+  const G = city.lotGrid;
+  const B = builders();
+  const strips = lotEdges(city, B, 0, G.w, 0, G.h);
+  const all = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  assert.ok(strips > 0, 'some edges');
+  assert.equal(all.length, strips, 'one quad a strip');
+  const kinds = new Set();
+  for (const [x, z, key] of all) {
+    const lot = city.lotAt(x, z);
+    assert.ok(lot, `edge at ${x.toFixed(1)}, ${z.toFixed(1)} is in a lot`);
+    assert.ok(['yard', 'park', 'plaza'].includes(lot.type), `${lot.type} gets no edge`);
+    kinds.add(`${lot.type === 'plaza' ? 'plaza' : 'lawn'} ${key}`);
+  }
+  // Lawns: a concrete edging (pavement) and a rough grass band (grass).
+  for (const k of ['lawn pavement', 'lawn grass', 'plaza pavement']) assert.ok(kinds.has(k), `${k} (${[...kinds].join(', ')})`);
+  // Same answer cut into row bands, as a streamed tile builds it.
+  const B2 = builders();
+  let n = 0;
+  for (let j = 0; j < G.h; j += 7) n += lotEdges(city, B2, 0, G.w, j, Math.min(G.h, j + 7));
+  assert.ok(n >= strips && n <= strips + G.w * 4, `${n} strips in bands, ${strips} whole`);
 });
 
 test('land under full lot cells is left out; the rest of the land stays', () => {

@@ -119,7 +119,8 @@ export function createGraphics(game) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   sun.castShadow = true;
-  sun.shadow.radius = 1.6;
+  sun.shadow.radius = 2.4;
+  const SHADOW_MAX = 0.82;
   scene.add(sun.target);
   const sc = sun.shadow.camera;
   let extent = 72, mapSize = 0;
@@ -131,7 +132,9 @@ export function createGraphics(game) {
     // castShadow stays on: switching it would recompile every lit
     // material (a long hitch at each sunrise and sunset). While the light
     // swings over, the map is simply not redrawn and fades to nothing.
-    sun.shadow.intensity = inten > 0.03 ? Math.min(1, inten) : 0;
+    // Never fully black: the sky still lights the shade (softer shadows,
+    // docs/PLAN_V1.md W2b).
+    sun.shadow.intensity = inten > 0.03 ? Math.min(SHADOW_MAX, inten) : 0;
     // Shedding its last step, the shadow map is redrawn every other frame.
     renderer.shadowMap.autoUpdate = inten > 0.03 && !(shedApplied >= 2 && (frame & 1));
     if (inten <= 0.03) return;
@@ -171,7 +174,7 @@ export function createGraphics(game) {
     sun.shadow.mapSize.set(size, size);
     // Softer edges near the camera: the PCF taps spread over more texels
     // on the big map (2048 over 144 m: about 16 cm of blur).
-    sun.shadow.radius = size >= 2048 ? 2.3 : 1.6;
+    sun.shadow.radius = size >= 2048 ? 3.4 : 2.4;
     if (sun.shadow.map) {
       sun.shadow.map.dispose();
       sun.shadow.map = null;
@@ -250,10 +253,34 @@ export function createGraphics(game) {
     renderer.toneMapping = tm;
     scene.environment = rt.texture;
     game.envMap = rt.texture;
+    // The sea takes the sky map as its own, so its reflection strength
+    // can differ from the rest of the scene (see seaTone).
+    for (let i = 0; i < seaMats.length; i++) seaMats[i].envMap = rt.texture;
     if (envRT) envRT.dispose();
     envRT = rt;
   }
   scene.environmentIntensity = 0.5;
+
+  // ---- sea tone (docs/PLAN_V1.md W2b) ----
+  // Under a high sun the bright, pale sky mirrored at a glancing angle
+  // turned the whole bay milky. By day the sea reflects less of the sky
+  // and its own colour is a deeper, clearer blue-green; toward dusk and at
+  // night both return to the water's own settings (sunset glints stay).
+  const seaMats = [];
+  for (const name of ['sea-near', 'sea-far']) {
+    const o = scene.getObjectByName(name);
+    if (o && o.material && o.material.color) seaMats.push(o.material);
+  }
+  const seaBase = seaMats.map((m) => m.color.clone());
+  const SEA_DAY = new THREE.Color().setRGB(0.32, 0.6, 0.78);
+  function seaTone(sky) {
+    const day = sky ? Math.max(0, 1 - sky.night) * Math.min(1, Math.max(0, (sky.sunDir ? sky.sunDir.y : 1) * 2.2)) : 1;
+    for (let i = 0; i < seaMats.length; i++) {
+      const m = seaMats[i], b = seaBase[i];
+      m.color.setRGB(b.r * (1 + (SEA_DAY.r - 1) * day), b.g * (1 + (SEA_DAY.g - 1) * day), b.b * (1 + (SEA_DAY.b - 1) * day));
+      m.envMapIntensity = scene.environmentIntensity * (1 - 0.45 * day);
+    }
+  }
 
   // ---- bloom: lamps, lit windows and the sun bleed a little ----
   const bloom = { on: false, ok: true, fb: null, a: null, b: null, c: null };
@@ -449,6 +476,7 @@ export function createGraphics(game) {
         // Brighter eyes at night, as a camera would open up.
         renderer.toneMappingExposure = 1.1 + 0.05 * sky.night;
         scene.environmentIntensity = 0.42 + 0.48 * sky.night;
+        seaTone(sky);
       }
       updateShadow(sky);
       if (lampU) {

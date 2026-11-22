@@ -1769,22 +1769,64 @@ export function createMiamiCity(data, opts = {}) {
   if (S.startView) {
     const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
     const TREE_STEP = 7, SPOT_STEP = 6.5;
+    // The two framed views stay clear of trunks and posts (docs/PLAN_V1.md
+    // W2b): the title shot (a cone of FRAME_DEG round the view line within
+    // FRAME_R m, along the whole dolly) and the near pavement in front of
+    // the chase camera at the start (NEAR_R m, the width of the view).
+    const cam = S.startView.camera;
+    const FRAME_DEG = 9.5, FRAME_R = 42, NEAR_R = 16.5, NEAR_DEG = 55, CHASE_BACK = 7.5;
+    const tanF = Math.tan((FRAME_DEG * Math.PI) / 180), cosN = Math.cos((NEAR_DEG * Math.PI) / 180);
+    const framed = (x, z, r) => {
+      for (let d = 0; d <= cam.dolly + 1e-9; d += cam.dolly / 4 || 1) {
+        // Camera and look point as in render/titlecam.js titlePose.
+        const cx = spawn.x + fx * (d - cam.back) - fz * cam.side, cz = spawn.z + fz * (d - cam.back) + fx * cam.side;
+        const lx = spawn.x + fx * (d + cam.lookAhead) - cx, lz = spawn.z + fz * (d + cam.lookAhead) - cz;
+        const ll = Math.hypot(lx, lz);
+        const along = ((x - cx) * lx + (z - cz) * lz) / ll, lat = Math.abs((x - cx) * lz - (z - cz) * lx) / ll;
+        if (along > 0 && along < FRAME_R + r && lat - r < along * tanF) return true;
+        // Nothing tall right in front of the title camera either.
+        if (along > 0 && along < NEAR_R && along > lat * 0.8) return true;
+        if (!cam.dolly) break;
+      }
+      const qx = x - (spawn.x - fx * CHASE_BACK), qz = z - (spawn.z - fz * CHASE_BACK), q = Math.hypot(qx, qz);
+      return q < NEAR_R && (qx * fx + qz * fz) > q * cosN;
+    };
+    const TALL = new Set(['streettree', 'palmtree', 'lamp', 'shelter', 'streetsign', 'namesign', 'stopsign', 'umbrella']);
+    const keep = (list) => {
+      let n = 0;
+      for (const f of list) if (!(TALL.has(f.type) && framed(f.x, f.z, 0.5))) list[n++] = f;
+      list.length = n;
+    };
+    keep(props);
+    keep(furniture);
     for (const e of edges) {
       if (e.name !== S.spawn.street || e.bridge || e.causeway) continue;
       const a = nodes[e.a], b = nodes[e.b];
       const half = e.width / 2;
       const rx = -e.uz, rzv = e.ux;
+      let prevSlot = null;
       for (let d = a.hx + 4; d <= e.length - b.hx - 4; d += 1) {
         const px = a.x + e.ux * d, pz = a.z + e.uz * d;
         const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
         const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
         if (along < -20 || along > 110 || Math.abs(lat) > 12) continue;
-        const k = Math.round(along + 20);
+        // One tree slot each TREE_STEP m of `along` (the first metre step
+        // into a new slot), so no slot is skipped or doubled by rounding.
+        const slot = Math.floor((along + 20) / TREE_STEP);
+        const newSlot = slot !== prevSlot;
+        prevSlot = slot;
+        const k = slot * TREE_STEP;
         for (const side of [-1, 1]) {
-          if (k % TREE_STEP === 0) {
-            const x = px + rx * side * (half + 1.15), z = pz + rzv * side * (half + 1.15);
-            if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !furniture.some((f) => Math.hypot(f.x - x, f.z - z) < 4)) {
-              furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+          if (newSlot) {
+            // On the kerb line, or set back into the plaza where the kerb
+            // line is in a framed view.
+            for (const off of [1.15, 4.8]) {
+              const x = px + rx * side * (half + off), z = pz + rzv * side * (half + off);
+              if (framed(x, z, off > 2 ? 1.5 : 0.5)) continue;
+              if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !furniture.some((f) => Math.hypot(f.x - x, f.z - z) < 4)) {
+                furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+              }
+              break;
             }
           }
           if (Math.round(along * 2) % Math.round(SPOT_STEP * 2) === 0 && along > 10 && along < 90) {

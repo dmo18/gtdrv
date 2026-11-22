@@ -388,7 +388,7 @@ test('core: no road node more than 60 m from a building or a solid or tall lot f
 test('start view: the designed street (6.8): 40 buildings in 150 m, 12 trees and 6 parked cars in the camera cone', () => {
   const sv = MIAMI_SPOTS.startView;
   assert.deepEqual(sv.spawn, MIAMI_SPOTS.spawn);
-  assert.deepEqual(sv.camera, { back: 22, side: 6, height: 7, lookAhead: 40, lookHeight: 6, fov: 55, dolly: 12, dollySpeed: 0.5 });
+  assert.deepEqual(sv.camera, { back: 22, side: 0.5, height: 7, lookAhead: 40, lookHeight: 6, fov: 55, dolly: 12, dollySpeed: 0.5 });
   assert.equal(sv.time, 17.5);
   assert.equal(sv.weather, 'clear');
   assert.equal(sv.traffic, 6);

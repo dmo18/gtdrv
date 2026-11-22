@@ -1385,10 +1385,12 @@ function makeDetails(rng, streetNames) {
   A.add('leaves', 64, 32, (g, ge, w, h) => {
     let q = 12345;
     const rnd = () => ((q = (Math.imul(q, 1103515245) + 12345) >>> 0) / 4294967296);
-    g.fillStyle = grey(120);
+    // Light overall (the vertex colour carries the green and the shade):
+    // the leaf dabs only break the surface up.
+    g.fillStyle = grey(178);
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < 300; i++) {
-      const x = rnd() * w, y = rnd() * h, v = 90 + rnd() * 165 * (0.55 + 0.45 * (1 - y / h));
+      const x = rnd() * w, y = rnd() * h, v = 135 + rnd() * 120 * (0.6 + 0.4 * (1 - y / h));
       g.fillStyle = grey(v);
       g.beginPath();
       g.ellipse(x, y, 1 + rnd() * 1.6, 0.7 + rnd() * 1, rnd() * TAU, 0, TAU);

@@ -31,13 +31,13 @@ export const LOT_Y = -0.035;
 // (a second colour mixed in per 10 m cell: dirt in a works yard).
 // verge and airfield keep the land they stand on.
 export const LOT_GROUND = {
-  yard: { key: 'grass', col: 0x86ac5c, spread: 0.1 },
+  yard: { key: 'grass', col: 0x84a85c, spread: 0.18 },
   carpark: { key: 'asphalt', col: 0x5d6064, spread: 0.08 },
   plaza: { key: 'pavement', col: 0xcac3b5, spread: 0.06 },
   grass: { key: 'land', col: 0x93ad62, spread: 0.12 },
   works: { key: 'ground', col: 0xa29d92, spread: 0.08, patch: 0x8c7a62 },
   beach: { key: 'sand', col: 0xf0e0b4, spread: 0.04 },
-  park: { key: 'grass', col: 0x7cb256, spread: 0.08 },
+  park: { key: 'grass', col: 0x7aa856, spread: 0.12 },
   wateredge: { key: 'pavement', col: 0xb0ada4, spread: 0.05 },
   site: { key: 'sand', col: 0x9e8460, spread: 0.08, patch: 0x7e6a50 },
 };
@@ -106,13 +106,153 @@ export function lotGround(city, B, i0, i1, j0, j1) {
       let col = lot ? lotTone(lot, g) : g.col;
       if (g.patch) col = mixHex(col, g.patch, Math.max(0, cellHash(i >> 1, j >> 1) * 1.6 - 0.6));
       const xa = x0 + i * cell, xb = x0 + e * cell;
-      B[g.key].at((xa + xb) / 2, (za + zb) / 2).flat(xa, za, xb, zb, LOT_Y, col);
+      const bld = B[g.key].at((xa + xb) / 2, (za + zb) / 2);
+      if (g.key === 'pavement' && lot) {
+        // Paving of its own per plaza: stone tone, slab size and lay.
+        const pv = PAVING[(lot.seed >>> 4) % PAVING.length];
+        col = shadeHex(PAVE_TONES[(lot.seed >>> 12) % PAVE_TONES.length], 1 - g.spread / 2 + g.spread * (((lot.seed >>> 8) & 255) / 255));
+        if (lot.type === 'wateredge') col = mixHex(col, g.col, 0.5);
+        bld.flat(xa, za, xb, zb, LOT_Y, col);
+        pavedUv(bld, xa, za, xb, zb, pv);
+      } else {
+        bld.flat(xa, za, xb, zb, LOT_Y, col);
+      }
       quads++;
       i = e;
     }
   }
   return quads;
 }
+
+// Plaza paving (by lot seed): slab picture scale (1: the 1.2 m slabs of
+// the pavement texture) and turn (a diagonal lay), and stone tones.
+const PAVING = [
+  { s: 1, c: 1, n: 0 }, { s: 0.5, c: 1, n: 0 }, { s: 0.5, c: 0.7071, n: 0.7071 }, { s: 1.5, c: 1, n: 0 },
+  { s: 0.75, c: 0.7071, n: 0.7071 }, { s: 0.35, c: 1, n: 0 },
+];
+const PAVE_TONES = [0xcac3b5, 0xd8c3a8, 0xbebcb6, 0xddd3bc, 0xcdb79c, 0xc4c8c6, 0xe0d6c6];
+// Texture coordinates of the last flat quad (x0, z1), (x1, z1), (x1, z0),
+// (x0, z0) for the paving pv: turned and scaled in world space, so
+// neighbouring quads of one lot still line up.
+function pavedUv(bld, x0, z0, x1, z1, pv) {
+  if (!bld.lastQuadUv || !bld.uvScale) return;
+  const k = 1 / (bld.uvScale * pv.s), c = pv.c * k, n = pv.n * k;
+  bld.lastQuadUv(x0 * c - z1 * n, x0 * n + z1 * c, x1 * c - z1 * n, x1 * n + z1 * c, x1 * c - z0 * n, x1 * n + z0 * c, x0 * c - z0 * n, x0 * n + z0 * c);
+}
+
+// Edges of the lot ground (docs/PLAN_V1.md W2b), over the same cell range
+// as lotGround: a concrete edging strip and a band of darker, rougher
+// grass inside every lawn (yard, park) where it meets anything that is not
+// lawn, a border course of darker stone round every plaza and, on most
+// plazas, courses of it across the paving in 15 m squares. Runs of
+// cells along one side merge into one strip. Returns the strips drawn.
+const EDGE_Y = LOT_Y + 0.008, KERB = 0.25, VERGE = 0.6, BORDER = 0.55, INLAY = 0.45;
+const KERB_COL = 0xd4d0c6, VERGE_COL = 0x6f7a3e;
+export function lotEdges(city, B, i0, i1, j0, j1) {
+  const G = city.lotGrid;
+  if (!G || !city.lots) return 0;
+  const { x0, z0, cell, w, h, id, type } = G;
+  const lots = city.lots;
+  let strips = 0;
+  // Which edge cell k shows toward neighbour cell n (-1 off the grid):
+  // 1 lawn edge, 2 plaza border, 0 none.
+  const edgeOf = (k, n) => {
+    const g = GROUND_BY_T[type[k]];
+    if (!g) return 0;
+    if (g.key === 'grass') {
+      const o = n < 0 ? null : GROUND_BY_T[type[n]];
+      return o && o.key === 'grass' ? 0 : 1;
+    }
+    if (type[k] === T_PLAZA) {
+      if (n < 0 || id[n] !== id[k]) return 2;
+      // Inside the plaza: a contrasting stone course on every third cell
+      // line (15 m squares), on most plazas, from the north or west side.
+      return inlayAt && (lots[id[k]].seed >>> 20) % 10 < 7 ? 3 : 0;
+    }
+    return 0;
+  };
+  let inlayAt = false;
+  // side: 0 north (-z), 1 south (+z), 2 west (-x), 3 east (+x).
+  const strip = (kind, lid, side, a0, a1, line) => {
+    const lot = lots[lid];
+    for (let layer = 0; layer < (kind === 1 ? 2 : 1); layer++) {
+      const d0 = kind === 1 ? (layer ? KERB : 0) : kind === 3 ? -INLAY / 2 : 0, d1 = kind === 1 ? (layer ? KERB + VERGE : KERB) : kind === 3 ? INLAY / 2 : BORDER;
+      let col;
+      let bld;
+      if (kind === 1 && layer === 1) {
+        col = lot ? mixHex(lotTone(lot, LOT_GROUND[lot.type] || LOT_GROUND.yard), VERGE_COL, 0.5) : VERGE_COL;
+        bld = B.grass;
+      } else if (kind === 1) {
+        col = KERB_COL;
+        bld = B.pavement;
+      } else {
+        col = shadeHex(lot ? PAVE_TONES[((lot.seed >>> 12) + 3) % PAVE_TONES.length] : 0xb8b0a0, 0.8);
+        bld = B.pavement;
+      }
+      let xa, xb, za, zb;
+      if (side < 2) {
+        xa = a0; xb = a1;
+        za = side === 0 ? line + d0 : line - d1;
+        zb = side === 0 ? line + d1 : line - d0;
+      } else {
+        za = a0; zb = a1;
+        xa = side === 2 ? line + d0 : line - d1;
+        xb = side === 2 ? line + d1 : line - d0;
+      }
+      const b = bld.at((xa + xb) / 2, (za + zb) / 2);
+      b.flat(xa, za, xb, zb, EDGE_Y + layer * 0.002, col);
+      if (kind >= 2) pavedUv(b, xa, za, xb, zb, BORDER_LAY);
+      strips++;
+    }
+  };
+  // North and south sides: runs along each row.
+  for (const side of [0, 1]) {
+    for (let j = j0; j < j1; j++) {
+      const nj = side === 0 ? j - 1 : j + 1;
+      const line = z0 + (side === 0 ? j : j + 1) * cell;
+      let run = -1, runKind = 0, runId = -1;
+      for (let i = i0; i <= i1; i++) {
+        let kind = 0, lid = -1;
+        if (i < i1) {
+          const k = j * w + i;
+          inlayAt = side === 0 && j % 3 === 0;
+          kind = edgeOf(k, nj >= 0 && nj < h ? nj * w + i : -1);
+          lid = id[k];
+        }
+        if (run >= 0 && (kind !== runKind || lid !== runId)) {
+          strip(runKind, runId, side, x0 + run * cell, x0 + i * cell, line);
+          run = -1;
+        }
+        if (kind && run < 0) { run = i; runKind = kind; runId = lid; }
+      }
+    }
+  }
+  // West and east sides: runs down each column.
+  for (const side of [2, 3]) {
+    for (let i = i0; i < i1; i++) {
+      const ni = side === 2 ? i - 1 : i + 1;
+      const line = x0 + (side === 2 ? i : i + 1) * cell;
+      let run = -1, runKind = 0, runId = -1;
+      for (let j = j0; j <= j1; j++) {
+        let kind = 0, lid = -1;
+        if (j < j1) {
+          const k = j * w + i;
+          inlayAt = side === 2 && i % 3 === 0;
+          kind = edgeOf(k, ni >= 0 && ni < w ? j * w + ni : -1);
+          lid = id[k];
+        }
+        if (run >= 0 && (kind !== runKind || lid !== runId)) {
+          strip(runKind, runId, side, z0 + run * cell, z0 + j * cell, line);
+          run = -1;
+        }
+        if (kind && run < 0) { run = j; runKind = kind; runId = lid; }
+      }
+    }
+  }
+  return strips;
+}
+const T_PLAZA = LOT_TYPES.indexOf('plaza') + 1;
+const BORDER_LAY = { s: 0.4, c: 0, n: 1 };
 
 // ---- dressing ----
 

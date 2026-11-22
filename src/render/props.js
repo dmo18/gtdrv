@@ -152,7 +152,9 @@ function makeTemplates(rng) {
 }
 
 // ---- Miami templates (own random stream: the island is unchanged) --------
-const LEAF = [0x3f7a34, 0x4d8a3a, 0x2f6a34, 0x5c9a40, 0x3a7448, 0x6a9c3c, 0x48823c];
+// Sunlit subtropical greens: light enough that a canopy reads as leaves
+// in the sun, not as a dark lump (docs/PLAN_V1.md W2b).
+const LEAF = [0x5f9a44, 0x6fa84a, 0x548f42, 0x7cb04c, 0x5a9452, 0x88b44c, 0x66a046];
 
 // One palm frond as a folded strip with the leaflet picture (atlas
 // rect r): from (x, y, z) out along heading a, rising at `elev`
@@ -196,13 +198,29 @@ function frond(B, r, x, y, z, a, elev, len, droop, color) {
 // A canopy cluster with the foliage picture wrapped round it.
 function leafy(B, r, cx, cy, cz, rx, ry, rz, color, segs, rings, jit) {
   const n0 = B.count;
-  B.blob(cx, cy, cz, rx, ry, rz, color, segs, rings, 0.5, 1.1, jit);
+  B.blob(cx, cy, cz, rx, ry, rz, color, segs, rings, 0.68, 1.12, jit);
   const uv = B.uv, du = (r.u1 - r.u0) / segs, dv = (r.v1 - r.v0) / rings;
   for (let j = 0, k = n0 * 2; j <= rings; j++) {
     for (let i = 0; i <= segs; i++, k += 2) {
       uv[k] = r.u0 + du * i;
       uv[k + 1] = r.v1 - dv * j;
     }
+  }
+}
+
+// One round canopy: every foliage normal leans toward the direction from
+// the canopy's centre (cx, cy, cz; ry its half height), so the clumps
+// light as one soft ball instead of a heap of facets, and the side away
+// from the sun falls off gently. `k`: how far (0..1).
+function roundCanopy(B, n0, cx, cy, cz, k) {
+  const P = B.P, N = B.N;
+  for (let v = n0, o = n0 * 3; v < B.count; v++, o += 3) {
+    let dx = P[o] - cx, dy = P[o + 1] - cy, dz = P[o + 2] - cz;
+    const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    dx /= l; dy /= l; dz /= l;
+    const nx = N[o] * (1 - k) + dx * k, ny = N[o + 1] * (1 - k) + dy * k, nz = N[o + 2] * (1 - k) + dz * k;
+    const m = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    N[o] = nx / m; N[o + 1] = ny / m; N[o + 2] = nz / m;
   }
 }
 
@@ -230,8 +248,9 @@ function makeMiamiTemplates(rng, R) {
       const up = (i + 0.5) / n;
       const ring = Math.sqrt(1 - up * up * 0.75);
       const r = rng.range(0.1, 0.135) * (1.1 - up * 0.3);
-      leafy(f, R.leaves, Math.cos(a) * rad * ring, th + 0.22 + up * 0.24, Math.sin(a) * rad * ring, r, r * 0.8, r, hexShade(LEAF[(v + i) % LEAF.length], rng.range(0.82, 1.14) * (0.88 + up * 0.22)), 6, 3, jit);
+      leafy(f, R.leaves, Math.cos(a) * rad * ring, th + 0.22 + up * 0.24, Math.sin(a) * rad * ring, r, r * 0.8, r, hexShade(LEAF[(v + i) % LEAF.length], rng.range(0.9, 1.12) * (0.9 + up * 0.18)), 6, 4, jit);
     }
+    roundCanopy(f, 0, 0, th + 0.34, 0, 0.7);
     T.canopies.push(t);
     T.foliage.push(f);
   }
@@ -289,12 +308,13 @@ function makeLotTemplates(rng, R) {
     const g = LEAF[(v * 2) % LEAF.length];
     const th = rng.range(0.3, 0.4);
     t.cyl(0, 0, 0, th + 0.12, 0.05, 0.032, 5, bark, false, 0.65, 1);
-    leafy(f, R.leaves, 0, th + 0.36, 0, 0.21, 0.22, 0.21, hexShade(g, 0.95), 6, 3, jit);
+    leafy(f, R.leaves, 0, th + 0.36, 0, 0.22, 0.22, 0.22, hexShade(g, 0.95), 7, 4, jit);
     for (let i = 0; i < 3; i++) {
       const a = i * 2.09 + v;
       const r = rng.range(0.13, 0.16);
-      leafy(f, R.leaves, Math.cos(a) * 0.13, th + 0.3 + (i % 2) * 0.16, Math.sin(a) * 0.13, r, r * 1.05, r, hexShade(LEAF[(v + i * 3) % LEAF.length], rng.range(0.95, 1.2)), 5, 3, jit);
+      leafy(f, R.leaves, Math.cos(a) * 0.14, th + 0.3 + (i % 2) * 0.15, Math.sin(a) * 0.14, r, r * 0.95, r, hexShade(LEAF[(v + i * 3) % LEAF.length], rng.range(0.95, 1.15)), 5, 3, jit);
     }
+    roundCanopy(f, 0, 0, th + 0.36, 0, 0.75);
     T.canopies.push(t);
     T.foliage.push(f);
   }

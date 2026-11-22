@@ -776,7 +776,17 @@ Rules beyond the contract (each is the same everywhere in the box):
    boundary, drive and tree). The core averages 75 features a hectare.
 4. The start street (core hand content): street trees every 7 m on both
    kerbs and kerb spots marked `start: true` along Southeast 1st Street
-   ahead of the title camera.
+   ahead of the title camera. The framed views stay clear (W2b): no tall
+   prop (tree, lamp, sign, shelter) within 42 m of the title camera's
+   view line inside 9.5 degrees, along the whole dolly, nor within
+   16.5 m in front of the title camera or the start chase camera; a kerb
+   tree in that cone moves 4.8 m back into the plaza instead.
+   `test/firstview.test.js` checks the 8 degree, 40 m cone. The title
+   camera sits 0.5 m south of the spawn line (over the lane), not 6 m.
+5. Lot ground edges (render/lotmesh.js `lotEdges`): lawns (yard, park)
+   get a concrete edging and a rough grass band where they meet anything
+   but lawn; plazas a darker stone border and, on most, stone courses in
+   15 m squares; each plaza its own stone tone, slab size and lay.
 
 Numbers (`test/world-density.test.js` prints them): 27,058 lots (6,715 in
 the core, 7.3 km2 of lot land); core shares yard 16 %, carpark 18 %, plaza
@@ -785,7 +795,7 @@ site 0.2 %, verge 0.7 %, airfield 2.7 %; bare paving 0.7 % in the core,
 0.6 % outside. Core road nodes: 10th percentile 15 buildings within 150 m
 (median 33); no node on land more than 60 m from a building or a solid
 or tall feature (bridge nodes excepted). Start view: 69 buildings within
-150 m, 14 trees and 9 parked spots in the camera cone within 80 m. Build
+150 m, 16 trees and 8 parked spots in the camera cone within 80 m. Build
 in node: about 1.9 to 2.2 s wall on a loaded 4-core machine (1.2 to 2.0
 s before), about 0.3 s more CPU. `dressLot` about 0.02 ms a lot warm.
 The lot grid keeps 16 MB (Int32 ids and Uint8 types). No new data file.

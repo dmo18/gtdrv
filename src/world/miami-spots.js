@@ -73,7 +73,7 @@ export const MIAMI_SPOTS = {
   // Southeast 1st Street, towers ahead lit by the low sun behind it.
   startView: {
     spawn: SPAWN,
-    camera: { back: 22, side: 6, height: 7, lookAhead: 40, lookHeight: 6, fov: 55, dolly: 12, dollySpeed: 0.5 },
+    camera: { back: 22, side: 0.5, height: 7, lookAhead: 40, lookHeight: 6, fov: 55, dolly: 12, dollySpeed: 0.5 },
     time: 17.5,
     weather: 'clear',
     traffic: 6,

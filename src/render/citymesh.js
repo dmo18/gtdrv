@@ -17,6 +17,8 @@ export const COL = {
   junction: 0x56595e,
   runway: 0x4a4c50,
   apron: 0x8c8e90,
+  apronPatch: 0xa29f96,
+  joint: 0x4c4c4a,
   line: 0xf0eee4,
   yellow: 0xe8b23a,
   sidewalk: 0xb4b1aa,
@@ -137,9 +139,12 @@ export function makeMaterials(T) {
 	{
 		float rwA = sin( vRwG.x * 0.043 + sin( vRwG.y * 0.031 ) * 2.0 ) * sin( vRwG.y * 0.037 - vRwG.x * 0.011 );
 		float rwB = sin( vRwG.x * 0.13 + vRwG.y * 0.09 ) * sin( vRwG.y * 0.15 - 1.3 );
-		float rwDry = smoothstep( 0.2, 0.9, rwA * 0.7 + rwB * 0.3 );
-		diffuseColor.rgb *= 0.9 + 0.12 * rwB;
-		diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.12, 1.02, 0.72 ), rwDry * 0.55 );
+		float rwC = sin( vRwG.x * 0.71 + sin( vRwG.y * 0.53 ) * 1.6 ) * sin( vRwG.y * 0.67 + sin( vRwG.x * 0.47 ) * 1.3 );
+		float rwDry = smoothstep( 0.15, 0.85, rwA * 0.7 + rwB * 0.3 );
+		float rwLush = smoothstep( 0.25, 0.85, - rwA * 0.75 + rwC * 0.25 );
+		diffuseColor.rgb *= ( 0.86 + 0.18 * rwB ) * ( 1.0 + 0.08 * rwC );
+		diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.14, 1.02, 0.66 ), rwDry * 0.65 );
+		diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.74, 0.87, 0.8 ), rwLush * 0.7 );
 	}`);
     };
     m.customProgramCacheKey = () => 'rw-grass';
@@ -227,10 +232,33 @@ export function addSurfaces(city, B, DR, own = null) {
         for (const oz of [-4.2, 4.2]) d.flatRect(x0, cz + oz - 3.2, x0 + 40, cz + oz + 3.2, DY, 0xffffff, DR.rubber, 1);
       }
     } else {
-      // Concrete apron with a painted taxi line.
+      // Concrete apron in poured panels (docs/PLAN_V1.md W2b): each
+      // panel its own tone, a few patched or oil-darkened, sealed joints
+      // between them, and a painted taxi line.
       const pv = B.pavement.at(cx, cz);
-      for (let x = r.x0; x < r.x1 - 1; x += 86) pv.flat(x, r.z0, Math.min(r.x1, x + 86), r.z1, 0, COL.apron);
-      B.paint.at(cx, cz).flat(r.x0 + 20, r.z0 + 14.9, r.x1 - 20, r.z0 + 15.2, LY, COL.yellow);
+      const P = 15, m = B.paint.at(cx, cz);
+      for (let x = r.x0; x < r.x1 - 1; x += P) {
+        const xe = Math.min(r.x1, x + P);
+        for (let z = r.z0; z < r.z1 - 1; z += P) {
+          const ze = Math.min(r.z1, z + P);
+          const hsh = edgeHash(Math.round(x * 7.3) * 9176 + Math.round(z * 3.1));
+          const tone = hsh < 0.08 ? 0.84 : hsh > 0.93 ? 1.07 : 0.95 + 0.07 * hsh;
+          const col = hsh < 0.04 ? COL.apronPatch : COL.apron;
+          pv.flatShade(x, z, xe, ze, 0, col, tone, tone * 0.985, tone, tone * 1.01);
+          // The slab picture at 7.5 m a slab: two by two per panel.
+          if (pv.lastQuadUv) pv.lastQuadUv(x / 30, ze / 30, xe / 30, ze / 30, xe / 30, z / 30, x / 30, z / 30);
+        }
+        if (x > r.x0) m.flat(x - 0.06, r.z0, x + 0.06, r.z1, LY, COL.joint);
+      }
+      for (let z = r.z0 + P; z < r.z1 - 1; z += P) m.flat(r.x0, z - 0.06, r.x1, z + 0.06, LY, COL.joint);
+      m.flat(r.x0 + 20, r.z0 + 14.9, r.x1 - 20, r.z0 + 15.2, LY, COL.yellow);
+      // Oil and tyre stains where aircraft stand and turn.
+      const d = B.decal.at(cx, cz);
+      for (let x = r.x0 + 24; x < r.x1 - 24; x += 37) {
+        const hsh = edgeHash(Math.round(x) * 31 + Math.round(r.z0));
+        const z = r.z0 + 30 + hsh * (r.z1 - r.z0 - 60);
+        d.flatRect(x - 3, z - 3, x + 3, z + 3, DY, 0xffffff, hsh < 0.5 ? DR.stain1 : DR.stain2, (hsh * 8) | 0, 0.9);
+      }
     }
   }
   for (const h of city.helipads || []) {
@@ -609,7 +637,7 @@ export function buildCityMesh(city, collision) {
 // a seawall along every shore, and roads as quads along each edge.
 // ---------------------------------------------------------------------
 export const LAND_Y = -0.06;
-export const PAVE = 0xb2aea4, PARK = 0x8cc064;
+export const PAVE = 0xb2aea4, PARK = 0x82ae5e;
 
 export function orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, color, sa = 1, sb = sa, sc = sa, sd = sa) {
   bld.quad(ax, y, az, bx, y, bz, cx, y, cz, dx, y, dz, color, 0, 1, 0, 0, 0, 1, 1, sa, sb, sc, sd);
@@ -751,6 +779,9 @@ export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = tru
 // their middle.
 export const ROAD_PIECE = 90;
 
+// The junction disc's corners, reused (no garbage while tiles stream).
+const DISC = new Array(20).fill(0);
+
 // Roads: discs at nodes cover joins and bends; quads along each edge.
 // own(x, z): only nodes, pieces and per-edge paint whose point it
 // accepts (a streamed tile); null for all.
@@ -760,10 +791,11 @@ export function realRoads(city, B, nodes, edges, own = null) {
     let r = 2;
     for (const eid of n.edges) r = Math.max(r, city.edges[eid].width / 2);
     const bld = B.asphalt.at(n.x, n.z);
-    const pts = [];
+    const pts = DISC;
     for (let k = 0; k < 10; k++) {
       const a = (k / 10) * TAU;
-      pts.push(n.x + Math.cos(a) * r, n.z + Math.sin(a) * r);
+      pts[2 * k] = n.x + Math.cos(a) * r;
+      pts[2 * k + 1] = n.z + Math.sin(a) * r;
     }
     flatPoly(bld, pts, -0.012, COL.junction);
   }

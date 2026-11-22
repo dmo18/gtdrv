@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createMiamiCity, MIAMI_SPOTS } from '../src/world/miami.js';
+import { dressLot } from '../src/world/lots.js';
 import { createRng } from '../src/core/rng.js';
 import { createTraffic } from '../src/systems/traffic.js';
 import { createParkedCars } from '../src/systems/parked.js';
@@ -170,4 +171,57 @@ test('title camera blends to the chase camera in 1.2 s', () => {
   }
   assert.ok(done && t >= BLEND_S - 0.05 && t <= BLEND_S + 0.05, `blend took ${t.toFixed(2)} s`);
   assert.equal(tc.active, false);
+});
+
+// docs/PLAN_V1.md W2b (K4): nothing stands in the middle of the title
+// frame. No prop (street furniture, lamp, tree, signal, lot dressing other
+// than flat ground marks) within 40 m of the title camera inside a cone of
+// 8 degrees round its view line, at any point of the dolly; and no trunk or
+// post on the near pavement in front of the chase camera at the start
+// (within 12 m, inside the 49 degree half width of the 915 by 412 view).
+test('title and start frames: no prop in the 8 degree cone within 40 m; no post right in front of the start camera', () => {
+  const sp = sv.spawn;
+  const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
+  const items = [];
+  for (const f of city.furniture) items.push([`furniture ${f.type}`, f.x, f.z]);
+  for (const p of city.props) items.push([`prop ${p.type}`, p.x, p.z]);
+  for (const s of city.signals) items.push(['signal', s.x, s.z]);
+  const FLAT = new Set(['drive', 'bay', 'path', 'towel']);
+  for (const l of city.lots) {
+    if (Math.hypot((l.x0 + l.x1) / 2 - sp.x, (l.z0 + l.z1) / 2 - sp.z) > 160) continue;
+    for (const f of dressLot(city, l, [])) {
+      if (FLAT.has(f.kind)) continue;
+      const hl = (f.l || 0) / 2, ca = Math.cos(f.heading || 0), sa = Math.sin(f.heading || 0);
+      items.push([`lot ${l.type} ${f.kind}`, f.x, f.z]);
+      if (hl > 0) items.push([`lot ${l.type} ${f.kind} end`, f.x + ca * hl, f.z + sa * hl], [`lot ${l.type} ${f.kind} end`, f.x - ca * hl, f.z - sa * hl]);
+    }
+  }
+  assert.ok(items.length > 100, `${items.length} props round the start`);
+  const tan8 = Math.tan((8 * Math.PI) / 180);
+  const hits = [];
+  const pose = {};
+  const period = (2 * sv.camera.dolly) / sv.camera.dollySpeed;
+  for (let k = 0; k <= 8; k++) {
+    titlePose(sv, (period / 2) * (k / 8), false, pose);
+    // Taken flat (the bearing only, whatever the height): stricter than the
+    // real cone, which a low bollard under the view line would miss.
+    const ax = pose.lx - pose.x, az = pose.lz - pose.z, al = Math.hypot(ax, az);
+    for (const [name, x, z] of items) {
+      const dx = x - pose.x, dz = z - pose.z;
+      const along = (dx * ax + dz * az) / al, lat = Math.abs(dx * az - dz * ax) / al;
+      if (along > 0 && Math.hypot(dx, dz) <= 40 && lat < along * tan8) hits.push(`${name} at ${along.toFixed(1)} m, ${lat.toFixed(1)} m off the line (dolly ${k}/8)`);
+    }
+  }
+  assert.deepEqual(hits, [], 'title frame centre is clear');
+  // Start frame: the chase camera 7.5 m behind the spawn.
+  const cx = sp.x - fx * 7.5, cz = sp.z - fz * 7.5;
+  const cos49 = Math.cos((49 * Math.PI) / 180);
+  const near = [];
+  const TALL = /tree|palm|lamp|signal|sign|shelter|umbrella/;
+  for (const [name, x, z] of items) {
+    if (!TALL.test(name)) continue;
+    const dx = x - cx, dz = z - cz, d = Math.hypot(dx, dz);
+    if (d < 12 && dx * fx + dz * fz > d * cos49) near.push(`${name} ${d.toFixed(1)} m`);
+  }
+  assert.deepEqual(near, [], 'no trunk or post right in front of the start camera');
 });
