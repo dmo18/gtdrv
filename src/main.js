@@ -28,8 +28,14 @@ function storedMap() {
 
 async function loadCity() {
   if (mapFromSearch(location.search, storedMap()) !== 'miami') return null;
-  const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);
-  return createMiamiCity(data);
+  try {
+    const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);
+    return createMiamiCity(data);
+  } catch (err) {
+    // A device that cannot build the real map still gets the game: the island.
+    console.error('Miami map failed, using the classic island', err);
+    return null;
+  }
 }
 
 async function startUp() {
@@ -58,7 +64,9 @@ async function startUp() {
 }
 startUp().catch((err) => {
   console.error(err);
-  msg.textContent = 'Sorry, the game could not start on this device.';
+  // Say what failed, so it can be reported (name and message only).
+  const why = err && (err.name || err.message) ? ' (' + String(err.name || '') + ': ' + String(err.message || '').slice(0, 120) + ')' : '';
+  msg.textContent = 'Sorry, the game could not start on this device.' + why;
 });
 
 // Offline support. A new version is applied right away only while the

@@ -775,6 +775,20 @@ export function realRoads(city, B, nodes, edges, own = null) {
     } else {
       for (let d = s0 + 4; d < s1 - 6; d += 9) line(d, d + 3, -0.08, 0.08, COL.line);
     }
+    if (city.map === 'miami' && s1 - s0 > 14 && !e.causeway) {
+      // Edge lines along the kerbs.
+      line(s0 + 1, s1 - 1, half - 0.62, half - 0.48, COL.line);
+      line(s0 + 1, s1 - 1, -half + 0.48, -half + 0.62, COL.line);
+      // Zebra crossing and a stop line at each end that meets a junction.
+      const ends = [[a, s0 + 0.8, 1, -1], [b, s1 - 0.8, -1, 1]];
+      for (const [n, d, dir, lane] of ends) {
+        if (!n.edges || n.edges.length < 3) continue;
+        for (let o = -half + 0.9; o < half - 0.9; o += 1.1) line(Math.min(d, d + dir * 3), Math.max(d, d + dir * 3), o, o + 0.55, COL.line);
+        const ds = d + dir * 3.9;
+        const o0 = e.oneway ? -half + 0.6 : lane < 0 ? -half + 0.6 : 0.25, o1 = e.oneway ? half - 0.6 : lane < 0 ? -0.25 : half - 0.6;
+        line(Math.min(ds, ds + dir * 0.45), Math.max(ds, ds + dir * 0.45), o0, o1, COL.line);
+      }
+    }
     // Bridges and the causeway over water: concrete deck sides.
     if (e.bridge || e.causeway) {
       const wb = B.pavement.at((a.x + b.x) / 2, (a.z + b.z) / 2);

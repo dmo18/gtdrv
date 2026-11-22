@@ -24,6 +24,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
+await page.addStyleTag({ content: '.rw-title { display: none !important; }' }).catch(() => {});
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 180000 });
 await page.evaluate(() => {
   const g = window.__rw;
@@ -120,7 +121,8 @@ await hour(16);
     return [x, z];
   });
   await step(5, 5);
-  await shot('waterfront', [[p[0] - 6, 5, p[1] + 30], [p[0] + 400, -10, p[1] + 260]]);
+  // From the park edge, south along the shore toward Brickell Key.
+  await shot('waterfront', [[p[0] - 14, 3.2, p[1] - 40], [p[0] + 90, 4, p[1] + 320]]);
 }
 
 // 5. A palm-lined street: Brickell Avenue.

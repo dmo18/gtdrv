@@ -45,6 +45,22 @@ float rwFade(vec2 p) {
 `;
 }
 
+// Sea colour with depth and light: looking steeply down you see into
+// the water (deeper, greener); toward a glancing view it turns paler and
+// bluer before the sky reflection (the environment map) takes over;
+// slow large patches of lighter and darker water. Runs after the normal
+// is known; vRwP is the world position on the sea.
+const SEA_TONE = `
+          {
+            vec3 rwV = normalize(vViewPosition);
+            float rwNdv = clamp(dot(normal, rwV), 0.0, 1.0);
+            vec3 rwDeep = diffuseColor.rgb * vec3(0.55, 0.78, 0.8);
+            vec3 rwPale = diffuseColor.rgb * vec3(1.05, 1.12, 1.12);
+            diffuseColor.rgb = mix(rwPale, rwDeep, smoothstep(0.15, 0.85, rwNdv));
+            float rwBig = sin(vRwP.x * 0.0041 + 1.3) * sin(vRwP.y * 0.0053 - 0.7) + 0.5 * sin((vRwP.x + vRwP.y) * 0.0097);
+            diffuseColor.rgb *= 1.0 + 0.08 * rwBig;
+          }`;
+
 function makeNearMaterial(color, uniforms) {
   // PBR so the sea mirrors the sky (scene.environment) with a Fresnel
   // edge and a sun glint; a few small ripples perturb the normal near
@@ -103,16 +119,29 @@ varying vec2 vRwP;
             g += vec2(-0.95, -0.2) * cos(dot(q, vec2(-0.95, -0.2)) * 6.1 + t * 4.1) * 0.018;
             vec3 rwOff = (viewMatrix * vec4(-g.x, 0.0, -g.y, 0.0)).xyz;
             normal = normalize(normal + rwOff * rwK);
-          }`);
+          }
+          ${SEA_TONE}`);
     } catch {
       // Leave the stock Lambert shader: a flat coloured plane.
     }
   };
-  mat.customProgramCacheKey = () => 'rustwater-sea-v2';
+  mat.customProgramCacheKey = () => 'rustwater-sea-v3';
   return mat;
 }
 
-export function createWater({ size = 9000, color = 0x2a7c9e } = {}) {
+// The far sea: a plain plane with the same tone (no waves).
+function makeFarMaterial(color) {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0, envMapIntensity: 1.1 });
+  mat.onBeforeCompile = (shader) => {
+    if (!shader.fragmentShader.includes('#include <normal_fragment_maps>')) return;
+    shader.vertexShader = 'varying vec2 vRwP;\n' + shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vRwP = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    shader.fragmentShader = 'varying vec2 vRwP;\n' + shader.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + SEA_TONE);
+  };
+  mat.customProgramCacheKey = () => 'rustwater-sea-far';
+  return mat;
+}
+
+export function createWater({ size = 9000, color = 0x1f8aa0 } = {}) {
   const col = new THREE.Color().setHex(color, THREE.SRGBColorSpace);
   const group = new THREE.Group();
   group.name = 'sea';
@@ -121,7 +150,7 @@ export function createWater({ size = 9000, color = 0x2a7c9e } = {}) {
   farGeo.rotateX(-Math.PI / 2);
   // Slightly darker than the near patch average so the hand-off is soft.
   const farCol = col.clone().multiplyScalar(0.92);
-  const far = new THREE.Mesh(farGeo, new THREE.MeshStandardMaterial({ color: farCol, roughness: 0.2, metalness: 0, envMapIntensity: 1.1 }));
+  const far = new THREE.Mesh(farGeo, makeFarMaterial(farCol));
   far.position.y = FAR_Y;
   far.name = 'sea-far';
   far.renderOrder = -2;
