@@ -9,12 +9,21 @@ test('error log: each distinct (place, message) is logged once, repeats are coun
   assert.equal(log.report('draw', new TypeError('a')), true);
   assert.equal(log.report('draw', new TypeError('a')), false);
   assert.equal(log.report('step', new TypeError('a')), true, 'another place is another entry');
-  assert.equal(log.report('draw', new Error('b')), true);
-  assert.equal(log.report('x', 'plain string'), true);
-  assert.deepEqual(logged, ['draw: a', 'step: a', 'draw: b', 'x: undefined']);
+  // Past `max` distinct entries, new messages are only counted: memory and the console stay bounded.
+  assert.equal(log.report('draw', new Error('b')), false);
+  assert.equal(log.report('x', 'plain string'), false);
+  assert.deepEqual(logged, ['draw: a', 'step: a']);
   assert.equal(log.count, 5);
   assert.equal(log.list.length, 2, 'only the first `max` kept');
   assert.equal(log.list[0].n, 2);
+});
+
+test('error log: a message that changes every frame cannot grow memory without limit', () => {
+  const log = createErrorLog({ max: 4, log: () => {} });
+  for (let i = 0; i < 1000; i++) log.report('draw', new Error('x=' + i));
+  assert.equal(log.count, 1000);
+  assert.equal(log.list.length, 4);
+  assert.ok(log.report('draw', new Error('y'.repeat(5000))) === false, 'long messages are cut and still bounded');
 });
 
 // Drives the loop with a fake animation frame clock, 60 frames a second.

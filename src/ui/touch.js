@@ -101,7 +101,7 @@ const WHEEL_SVG = '<svg viewBox="0 0 150 150" aria-hidden="true">'
   + '</svg>';
 
 function svg(name) {
-  const body = ICONS[name] || name || '';
+  const body = Object.prototype.hasOwnProperty.call(ICONS, name) ? ICONS[name] : ''; // never write an unknown name as markup
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 }
 

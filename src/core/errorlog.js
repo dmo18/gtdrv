@@ -17,13 +17,15 @@ export function createErrorLog({ max = 32, log = null } = {}) {
     list: [],
     report(where, err) {
       out.count++;
-      const message = err && err.message !== undefined ? String(err.message) : String(err);
+      const message = (err && err.message !== undefined ? String(err.message) : String(err)).slice(0, 200);
       const key = where + '\u0000' + message;
       const seen = byKey.get(key);
       if (seen) {
         seen.n++;
         return false;
       }
+      // Past the cap, only count: a message that changes every frame must not grow memory or flood the console.
+      if (byKey.size >= max) return false;
       const e = { where, message, stack: err && err.stack ? String(err.stack) : '', n: 1 };
       byKey.set(key, e);
       if (out.list.length < max) out.list.push(e);
