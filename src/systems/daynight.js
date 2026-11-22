@@ -137,7 +137,24 @@ uniform float uMoon;
 uniform float uGlow;
 uniform float uAway;
 uniform vec3 uCity;
+uniform vec4 uCloud; // x coverage, y thickness, z fog share, w night
+uniform vec4 uDrift; // low layer xy, high layer zw (sky-plane offsets)
 varying vec3 vDir;
+float rwHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float rwNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(rwHash(i), rwHash(i + vec2(1.0, 0.0)), f.x), mix(rwHash(i + vec2(0.0, 1.0)), rwHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float rwFbm(vec2 p) {
+  float a = 0.5, s = 0.0;
+  for (int i = 0; i < 4; i++) { s += a * rwNoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+  return s;
+}
 void main() {
   vec3 d = normalize(vDir);
   float y = d.y;
@@ -149,14 +166,44 @@ void main() {
   vec3 col = mix(hor, uZenith, pow(up, 0.55));
   col = mix(mix(uFog, hor, 0.35), col, smoothstep(-0.02, 0.1, y));
   // Warm glow around the sun, wider near the horizon.
-  col += uSunCol * uGlow * (pow(s, 8.0) * 0.35 + pow(s, 64.0) * 0.5) * smoothstep(-0.1, 0.05, y);
+  col += uSunCol * uGlow * (pow(s, 6.0) * 0.3 + pow(s, 48.0) * 0.45 + pow(s, 400.0) * 0.6) * smoothstep(-0.1, 0.05, y);
   // A low sun also lights a band along the whole horizon on its side.
   col += uSunCol * uGlow * uAway * pow(face, 3.0) * exp(-max(y, 0.0) * 9.0) * 0.3 * smoothstep(-0.05, 0.02, y);
-  col = mix(col, vec3(1.0, 0.98, 0.9) * 1.4, uSun * smoothstep(0.99955, 0.9997, s));
+  col = mix(col, vec3(1.0, 0.97, 0.86) * 1.6, uSun * smoothstep(0.9995, 0.99975, s));
   // The city's own light scattered low in the night haze.
   col += uCity * (exp(-max(y, 0.0) * 9.0) + 0.25 * exp(-max(y, 0.0) * 2.5)) * smoothstep(-0.06, 0.01, y);
+  // Horizon haze: the sky meets the fog colour in a soft band, so the far
+  // towers (which the scene fog turns the same colour) sink into it.
+  col = mix(col, uFog, exp(-max(y, 0.0) * 11.0) * 0.55 * smoothstep(-0.04, 0.0, y));
+  // Cloud layers: a low, thick deck and a thin high veil, each a noise
+  // field on a sky plane (perspective squeezes it toward the horizon).
+  // Thick parts are greyer underneath; thin edges catch the sun colour.
+  if (y > 0.015 && uCloud.x > 0.01) {
+    vec2 pl = d.xz / (y + 0.09);
+    float night = uCloud.w;
+    float face = dot(normalize(d.xz + vec2(1e-4)), normalize(uSunDir.xz + vec2(1e-4))) * 0.5 + 0.5;
+    float low = rwFbm(pl * 0.55 + uDrift.xy);
+    float dl = smoothstep(0.62 - 0.3 * uCloud.x, 0.9 - 0.3 * uCloud.x, low);
+    float high = rwFbm(pl * vec2(0.9, 2.2) * 0.4 + uDrift.zw + 40.0);
+    float dh = smoothstep(0.55 - 0.22 * uCloud.x, 0.95 - 0.2 * uCloud.x, high) * 0.55;
+    float edge = smoothstep(0.0, 0.5, dl) * (1.0 - smoothstep(0.5, 1.0, dl));
+    // Day: white lit by the sun; dusk: takes the sun colour on the sun's
+    // side; night: dark blue lit from below by the city.
+    vec3 dayLit = mix(vec3(1.0, 1.0, 1.02), uSunCol * 1.15 + uHorizon * 0.35, clamp(uAway * (0.35 + 0.65 * face), 0.0, 1.0));
+    vec3 dayDark = mix(uZenith * 1.25 + vec3(0.18, 0.2, 0.25), uHorizon * 0.8, uAway * 0.6);
+    vec3 cl = mix(dayLit, dayDark, 0.55 * dl * (0.4 + 0.6 * uCloud.y));
+    cl += uSunCol * edge * pow(s, 4.0) * 0.9 * uGlow;
+    vec3 nightLit = uZenith * 2.2 + uHorizon * 0.6 + uCity * 9.0 * exp(-y * 2.6) * (0.5 + 0.5 * dl);
+    cl = mix(cl, nightLit, night);
+    vec3 clH = mix(dayLit, nightLit, night);
+    float a1 = dl * smoothstep(0.015, 0.22, y) * (1.0 - uCloud.z);
+    float a2 = dh * smoothstep(0.03, 0.3, y) * (1.0 - uCloud.z);
+    col = mix(col, clH, a2 * (1.0 - a1));
+    col = mix(col, cl, a1 * (0.9 + 0.1 * uCloud.y));
+  }
   float m = dot(d, uMoonDir);
-  col += vec3(0.75, 0.8, 0.9) * uMoon * (smoothstep(0.99965, 0.9998, m) + pow(max(m, 0.0), 300.0) * 0.12);
+  // Moon: a disc with a soft halo and faint mottling.
+  col += vec3(0.75, 0.8, 0.9) * uMoon * (smoothstep(0.99955, 0.9998, m) * (0.9 + 0.1 * rwNoise(d.xz * 400.0)) + pow(max(m, 0.0), 220.0) * 0.1 + pow(max(m, 0.0), 24.0) * 0.03);
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -310,6 +357,9 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// The near puffs are only a sparse third layer under the sky-dome clouds.
+const PUFFS = 8;
+
 // ---- builders ---------------------------------------------------------------
 function makeCloudGeometry(rng) {
   const parts = [];
@@ -450,6 +500,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
         uGlow: { value: 1 },
         uAway: { value: 0 },
         uCity: { value: new THREE.Color(0, 0, 0) },
+        uCloud: { value: new THREE.Vector4(0.4, 0.3, 0, 0) },
+        uDrift: { value: new THREE.Vector4() },
       },
       vertexShader: DOME_VS,
       fragmentShader: DOME_FS,
@@ -488,7 +540,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     vis.stars = stars;
 
     // Clouds: one instanced mesh of merged puffs, drifting.
-    const NC = 26;
+    const NC = PUFFS;
     const cloudMat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false, fog: false, emissive: new THREE.Color(0x000000) });
     const clouds = new THREE.InstancedMesh(makeCloudGeometry(rng), cloudMat, NC);
     clouds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -838,7 +890,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // Clouds: lit by the scene lights; a little self-glow so nights are
     // not black blobs, greyer and denser when overcast.
     const cm = V.clouds.material;
-    cm.opacity = (0.82 + 0.14 * ov) * (1 - 0.85 * fg);
+    cm.opacity = (0.5 + 0.3 * ov) * (1 - 0.85 * fg);
+    U.uCloud.value.set(clamp(0.3 + 0.7 * ov + 0.15 * rn, 0, 1), clamp(0.25 + 0.75 * ov, 0, 1), clamp(fg * 0.8, 0, 0.9), night);
     setLin(cm.emissive, S.sky).multiplyScalar(0.2 + 0.25 * night);
     cm.emissive.add(setLin(V.c1, S.horizon).multiplyScalar(0.18 * (1 - night)));
     cm.color.setScalar(1 - 0.35 * ov - 0.15 * rn);
@@ -1084,7 +1137,16 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
         applyWeatherBlend(smooth(wT));
       }
       W.windDir += clamp(((windDirTarget - W.windDir + Math.PI * 3) % TAU) - Math.PI, -1, 1) * dt * 0.01;
-      cloudDrift += dt * (W.wind * 1.2 + 1.5);
+      const drift = dt * (W.wind * 1.2 + 1.5);
+      cloudDrift += drift;
+      if (V) {
+        const reduced = !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion);
+        const k = (reduced ? 0.15 : 1) * 0.0009;
+        const dr = V.domeU.uDrift.value, wx = Math.cos(W.windDir), wz = Math.sin(W.windDir);
+        dr.x += wx * drift * k; dr.y += wz * drift * k;
+        dr.z += wx * drift * k * 0.45; dr.w += wz * drift * k * 0.45;
+        if (Math.abs(dr.x) + Math.abs(dr.y) > 500) dr.set(0, 0, 0, 0);
+      }
       if (cloudDrift > 1e6) cloudDrift = 0;
     },
     render(alpha, dt) {

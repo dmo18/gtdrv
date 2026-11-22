@@ -160,7 +160,10 @@ export function createAdventures(game, storage) {
   }
 
   // ---- meshes (browser only) ----------------------------------------------------
-  const meshes = on && game.scene ? createExploreMeshes(game.scene, { garages, adventures: advs }) : null;
+  const meshes = on && game.scene ? createExploreMeshes(game.scene, {
+    garages, adventures: advs,
+    makeCar: game.kinds && game.kinds.car ? (spec, color) => game.kinds.car.createMesh(spec, color) : null,
+  }) : null;
 
   // ---- talkers: the two nearest within 200 m, hidden while wanted ---------------------
   const talkers = advs.filter((a) => a.giver.type === 'talker');

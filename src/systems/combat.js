@@ -41,7 +41,11 @@ export const HIT_FLASH = 0.15;
 export const KNOCK_DECAY = 6; // m/s^2
 export const ACTOR_HEIGHT = 1.8;
 export const MUZZLE_Y = 1.4;
-export const DOWN_T = 1.6, GETUP_T = 0.6, OUT_LIE_T = 3, FADE_T = 1;
+// Bodies stay (REVAMP 6.7, decision D5): a dead person lies BODY_LIE_T s,
+// then fades over FADE_T s. At most BODY_MAX lie at once: one more makes
+// the oldest start its fade at once. (Was 3 s: nothing you killed stayed.)
+export const BODY_LIE_T = 30, BODY_MAX = 12;
+export const DOWN_T = 1.6, GETUP_T = 0.6, OUT_LIE_T = BODY_LIE_T, FADE_T = 1;
 export const PLAYER_DOWN_T = 2.5, PLAYER_FADE_T = 1;
 export const REGEN_DELAY = 5, REGEN_RATE = 10;
 export const RAM_MIN = 4; // m/s closing speed that knocks a person down
@@ -67,7 +71,14 @@ export const RATE_WINDOW = 0.5, RATE_MAX = 3, QUEUE_DELAY = 0.3, CHAIN_DELAY = 0
 export const LIVE_T = 1.2; // seconds an explosion counts as "live"
 export const RESPAWN_CLEAR = 60;
 export const GRAVITY = 9.81;
-export const WRECK_T = 3; // s from the blast until the wreck hull is removed
+// Burnt hulls stay (REVAMP 6.7 layer 9): a wreck lies WRECK_LIE_T s after
+// its blast (flames for WRECK_FLAME_T s, smoke the whole time), then sinks
+// and fades over WRECK_FADE_T s and is removed. At most WRECK_MAX hulls: a
+// seventh makes the oldest start its fade at once. (Was 3 s in all.)
+export const WRECK_LIE_T = 60, WRECK_FADE_T = 2, WRECK_FLAME_T = 12, WRECK_MAX = 6;
+export const WRECK_T = WRECK_LIE_T + WRECK_FADE_T; // s from the blast until the hull is removed
+// Scorch under a craft blast: 9 m across at scale 1 (layer 8); combatfx keeps it 120 s.
+export const SCORCH_CRAFT_D = 9;
 export const CAPS = { actors: 40, projectiles: 24, explosions: 4, burning: 4, decals: 24, queue: 8 };
 // docs/ARMS.md: live projectiles by type, stickies, throwing, mounts.
 export const TYPE_CAPS = { missile: 4, bomb: 6, shell: 4, thrown: 6 };
@@ -123,6 +134,7 @@ const EV = {
   siren: { craft: null, on: false },
   bounce: { x: 0, y: 0, z: 0, v: 0, weapon: null },
   burning: { craft: null, on: false },
+  hullBurn: { craft: null, id: -1, on: false, x: 0, z: 0 },
   reload: { actor: null, weapon: null },
   weaponSwitch: { actor: null, weapon: null },
   empty: { actor: null, weapon: null },
@@ -744,7 +756,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     emit(game, 'explosion');
     e.craft = null;
     if (craft) craft.wreckT = 0;
-    if (y < 3 && isLand(game, x, z)) addDecal(x, z, r * 0.45);
+    if (y < 3 && isLand(game, x, z)) addDecal(x, z, craft ? (SCORCH_CRAFT_D / 2.5) * scale : r * 0.45); // drawn 2.5 r across
     const prev = curDepth;
     curDepth = depth;
     if (craft) {
@@ -1742,29 +1754,106 @@ export function createCombat(game, { seed = 23023 } = {}) {
     }
   }
 
-  // --- Wrecks: after the blast the hull vanishes (debris is drawn by combatfx) ---
+  // --- Wrecks: burnt hulls stay WRECK_LIE_T s (at most WRECK_MAX), then
+  // sink and fade over WRECK_FADE_T s and go (debris is drawn by combatfx) ---
   function queuedFor(c) {
     for (let i = 0; i < queue.length; i++) if (queue[i].active && queue[i].craft === c) return true;
     return false;
   }
+  const hulls = []; // wrecks lying or fading now (combatfx smokes them); refilled each step
+  function hullFlame(c, on) {
+    if (!!c.hullFlame === on) return;
+    c.hullFlame = on;
+    const e = EV.hullBurn;
+    e.craft = c;
+    e.id = c.id === undefined ? -1 : c.id;
+    e.on = on;
+    e.x = c.x;
+    e.z = c.z;
+    emit(game, 'hullBurn');
+    e.craft = null;
+  }
   function stepWrecks(dt) {
     const vs = game.vehicles;
+    hulls.length = 0;
     if (!vs) return;
     const p = game.player;
+    let standing = 0;
+    for (let i = 0; i < vs.length; i++) {
+      const c = vs[i];
+      if (!c || !c.wrecked || c.removed || c.wreckT === undefined) continue;
+      c.wreckT += dt;
+      if (c.wreckT < WRECK_LIE_T) standing++;
+    }
+    // Too many hulls: the oldest standing ones start their fade now.
+    while (standing > WRECK_MAX) {
+      let old = null;
+      for (let i = 0; i < vs.length; i++) {
+        const c = vs[i];
+        if (!c || !c.wrecked || c.removed || c.wreckT === undefined || c.wreckT >= WRECK_LIE_T) continue;
+        if (!old || c.wreckT > old.wreckT) old = c;
+      }
+      if (!old) break;
+      old.wreckT = WRECK_LIE_T;
+      standing--;
+    }
     for (let i = vs.length - 1; i >= 0; i--) {
       const c = vs[i];
       if (!c || !c.wrecked || c.removed) continue;
       if (c.wreckT === undefined) continue; // the blast has not happened yet
-      c.wreckT += dt;
-      if (c.wreckT < WRECK_T || queuedFor(c)) continue;
+      hullFlame(c, c.wreckT < WRECK_FLAME_T);
+      const fade = c.wreckT <= WRECK_LIE_T ? 0 : Math.min(1, (c.wreckT - WRECK_LIE_T) / WRECK_FADE_T);
+      if (fade > 0 && !(p && p.vehicle === c) && !c.tossing) {
+        // Sink into the ground as it fades (cheaper than see-through paint).
+        const h = (c.spec && c.spec.height) || 1.5;
+        c.y = -fade * h * 1.1;
+        c.asleep = false;
+        c.meshDirty = true;
+      }
+      c.wreckFade = fade;
+      if (c.wreckT < WRECK_T || queuedFor(c)) {
+        hulls.push(c);
+        continue;
+      }
       // Never leave the player inside a hull that is about to go.
       if (p && p.vehicle === c) ejectPlayer(c);
-      if (p && p.vehicle === c) continue;
+      if (p && p.vehicle === c) {
+        hulls.push(c);
+        continue;
+      }
+      hullFlame(c, false);
       if (game.removeVehicle) game.removeVehicle(c);
       else {
         vs.splice(i, 1);
         c.removed = true;
       }
+    }
+  }
+  // Hulls removed by someone else (traffic, sweeps) while still burning.
+  function onVehicleRemoved(v) {
+    if (v && v.hullFlame) hullFlame(v, false);
+  }
+  if (game.events && game.events.on) game.events.on('vehicleRemoved', onVehicleRemoved);
+
+  // Bodies: at most BODY_MAX lie at once; the oldest starts its fade early.
+  function capBodies() {
+    const actors = game.actors;
+    let n = 0;
+    for (let i = 0; i < actors.length; i++) {
+      const a = actors[i];
+      if (a.life === 'out' && a.team !== 'player' && a.lifeT < OUT_LIE_T) n++;
+    }
+    while (n > BODY_MAX) {
+      let old = null;
+      for (let i = 0; i < actors.length; i++) {
+        const a = actors[i];
+        if (a.life !== 'out' || a.team === 'player' || a.lifeT >= OUT_LIE_T) continue;
+        if (!old || a.lifeT > old.lifeT) old = a;
+      }
+      if (!old) break;
+      old.lifeT = OUT_LIE_T;
+      old.fade = Math.max(old.fade || 0, 1e-3); // fading from now on
+      n--;
     }
   }
 
@@ -2198,6 +2287,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     rng,
     projectiles,
     decals,
+    hulls,
     queue,
     stickies,
     preview,
@@ -2254,6 +2344,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       stepRagdolls(ragdolls, dt, ragFix);
       const actors = game.actors;
       for (let i = 0; i < actors.length; i++) stepActor(actors[i], dt);
+      capBodies();
       const p = game.player;
       if (p && p.walker && typeof p.walker.hp === 'number') p.health = p.walker.hp;
     },

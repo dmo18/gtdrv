@@ -10,6 +10,11 @@ import { WAVES, waveHeight } from '../entities/boat.js';
 const NEAR_SIZE = 400;
 const NEAR_CELLS = 64;
 const CELL = NEAR_SIZE / NEAR_CELLS;
+const SHORE_N = 128; // texels per side of the shore map
+const SHORE_CELL = 4; // metres per texel
+const SHORE_SPAN = SHORE_N * SHORE_CELL;
+const SHORE_NEG = 16; // the map holds distances from -16 m (land) ...
+const SHORE_RANGE = 64; // ... to +48 m (sea)
 const FAR_Y = -0.3; // just under the deepest trough (waves are +-0.24)
 
 function glslFloat(v) {
@@ -61,6 +66,25 @@ const SEA_TONE = `
             diffuseColor.rgb *= 1.0 + 0.08 * rwBig;
           }`;
 
+// Shore: a small scrolling distance map (see createShoreMap) gives the
+// distance from the shoreline to every point of the sea near the camera.
+// Shallow water turns lighter and greener, a bright lapping foam line
+// runs along the seawall and the beach.
+const SHORE_TONE = `
+          {
+            vec2 rwSu = (vRwP - uShoreOrg) / ${glslFloat(SHORE_SPAN)};
+            float rwIn = step(0.02, rwSu.x) * step(rwSu.x, 0.98) * step(0.02, rwSu.y) * step(rwSu.y, 0.98) * uShoreOn;
+            float rwSd = texture2D(uShore, rwSu).r * ${glslFloat(SHORE_RANGE)} - ${glslFloat(SHORE_NEG)};
+            float rwShallow = (1.0 - smoothstep(1.0, 38.0, rwSd)) * rwIn;
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.42, 0.4), rwShallow * 0.5);
+            float rwN = 0.5 + 0.5 * sin(vRwP.x * 0.8 + uTime * 0.5) * sin(vRwP.y * 1.1 - uTime * 0.3);
+            float rwLap = 0.5 + 0.5 * sin(rwSd * 1.5 - uTime * 1.4 + rwN * 2.0);
+            float rwFoamL = smoothstep(3.6, 0.0, rwSd) * (0.35 + 0.65 * rwLap) * (0.6 + 0.6 * rwN)
+              + smoothstep(1.0, 0.1, rwSd) * 0.6;
+            rwFoamL *= rwIn * step(-0.6, rwSd);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.97, 0.97), clamp(rwFoamL, 0.0, 0.9));
+          }`;
+
 function makeNearMaterial(color, uniforms) {
   // PBR so the sea mirrors the sky (scene.environment) with a Fresnel
   // edge and a sun glint; a few small ripples perturb the normal near
@@ -74,6 +98,9 @@ function makeNearMaterial(color, uniforms) {
           !fs.includes('#include <color_fragment>') || !fs.includes('#include <normal_fragment_maps>')) return;
       shader.uniforms.uTime = uniforms.uTime;
       shader.uniforms.uCentre = uniforms.uCentre;
+      shader.uniforms.uShore = uniforms.uShore;
+      shader.uniforms.uShoreOrg = uniforms.uShoreOrg;
+      shader.uniforms.uShoreOn = uniforms.uShoreOn;
       shader.vertexShader = waveGlsl() + vs
         .replace('#include <beginnormal_vertex>', `
           vec2 rwXZ = (modelMatrix * vec4(position, 1.0)).xz;
@@ -92,6 +119,9 @@ function makeNearMaterial(color, uniforms) {
       shader.uniforms.uTime = uniforms.uTime;
       shader.fragmentShader = `
 uniform float uTime;
+uniform sampler2D uShore;
+uniform vec2 uShoreOrg;
+uniform float uShoreOn;
 varying float vRwH;
 varying vec2 vRwP;
 ` + fs.replace('#include <color_fragment>', `
@@ -120,12 +150,13 @@ varying vec2 vRwP;
             vec3 rwOff = (viewMatrix * vec4(-g.x, 0.0, -g.y, 0.0)).xyz;
             normal = normalize(normal + rwOff * rwK);
           }
-          ${SEA_TONE}`);
+          ${SEA_TONE}
+          ${SHORE_TONE}`);
     } catch {
       // Leave the stock Lambert shader: a flat coloured plane.
     }
   };
-  mat.customProgramCacheKey = () => 'rustwater-sea-v3';
+  mat.customProgramCacheKey = () => 'rustwater-sea-v4';
   return mat;
 }
 
@@ -141,7 +172,64 @@ function makeFarMaterial(color) {
   return mat;
 }
 
-export function createWater({ size = 9000, color = 0x1f8aa0 } = {}) {
+// A scrolling window (SHORE_SPAN metres) of distance-to-shore round the
+// camera, in two textures: one is shown while the other is filled a few
+// rows a frame, then they swap. Nothing is allocated after creation.
+function createShoreMap(uniforms) {
+  const tex = [0, 1].map(() => {
+    const t = new THREE.DataTexture(new Uint8Array(SHORE_N * SHORE_N), SHORE_N, SHORE_N, THREE.RedFormat, THREE.UnsignedByteType);
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearFilter;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    return t;
+  });
+  let shown = 0;
+  let fn = null;
+  let ox = 0, oz = 0; // origin of the shown map
+  let tx = 0, tz = 0, row = -1; // target origin and next row (-1 = idle)
+  let have = false;
+  uniforms.uShore.value = tex[0];
+  function begin(x, z) {
+    tx = Math.round((x - SHORE_SPAN / 2) / 16) * 16;
+    tz = Math.round((z - SHORE_SPAN / 2) / 16) * 16;
+    row = 0;
+  }
+  function update(camX, camZ, shoreDist) {
+    if (shoreDist !== fn) {
+      fn = shoreDist;
+      have = false;
+      uniforms.uShoreOn.value = 0;
+      row = -1;
+    }
+    if (!fn) return;
+    if (row < 0 && (!have || Math.abs(camX - (ox + SHORE_SPAN / 2)) > 90 || Math.abs(camZ - (oz + SHORE_SPAN / 2)) > 90)) begin(camX, camZ);
+    if (row < 0) return;
+    const back = tex[1 - shown];
+    const data = back.image.data;
+    const end = Math.min(SHORE_N, row + (have ? 16 : 64));
+    for (; row < end; row++) {
+      const z = tz + (row + 0.5) * SHORE_CELL;
+      for (let i = 0; i < SHORE_N; i++) {
+        const d = -fn(tx + (i + 0.5) * SHORE_CELL, z);
+        const v = (d + SHORE_NEG) / SHORE_RANGE;
+        data[row * SHORE_N + i] = (v < 0 ? 0 : v > 1 ? 255 : v * 255) | 0;
+      }
+    }
+    if (row >= SHORE_N) {
+      back.needsUpdate = true;
+      shown = 1 - shown;
+      ox = tx; oz = tz; have = true; row = -1;
+      uniforms.uShore.value = back;
+      uniforms.uShoreOrg.value.set(ox, oz);
+      uniforms.uShoreOn.value = 1;
+    }
+  }
+  return { update };
+}
+
+export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } = {}) {
   const col = new THREE.Color().setHex(color, THREE.SRGBColorSpace);
   const group = new THREE.Group();
   group.name = 'sea';
@@ -156,7 +244,11 @@ export function createWater({ size = 9000, color = 0x1f8aa0 } = {}) {
   far.renderOrder = -2;
   group.add(far);
 
-  const uniforms = { uTime: { value: 0 }, uCentre: { value: new THREE.Vector2() } };
+  const uniforms = {
+    uTime: { value: 0 }, uCentre: { value: new THREE.Vector2() },
+    uShore: { value: null }, uShoreOrg: { value: new THREE.Vector2() }, uShoreOn: { value: 0 },
+  };
+  const shore = createShoreMap(uniforms);
   const nearGeo = new THREE.PlaneGeometry(NEAR_SIZE, NEAR_SIZE, NEAR_CELLS, NEAR_CELLS);
   nearGeo.rotateX(-Math.PI / 2);
   if (nearGeo.attributes.uv) nearGeo.deleteAttribute('uv');
@@ -176,6 +268,13 @@ export function createWater({ size = 9000, color = 0x1f8aa0 } = {}) {
     near.position.set(sx, 0, sz);
     uniforms.uCentre.value.set(sx, sz);
     // The far plane only needs coarse following.
+    // The city's shore function: given, or found on the running game.
+    let sd = shoreDist;
+    if (!sd) {
+      const g = typeof globalThis !== 'undefined' ? globalThis.__rw : null;
+      if (g && g.city && typeof g.city.shoreDist === 'function') sd = g.city.shoreDist;
+    }
+    shore.update(cameraPos.x, cameraPos.z, sd);
     const fs = 500;
     far.position.set(Math.round(cameraPos.x / fs) * fs, FAR_Y, Math.round(cameraPos.z / fs) * fs);
   }
@@ -262,7 +361,7 @@ export function createWakeTrail(scene, max = 160) {
         colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0;
       } else {
         const k = 1 - t;
-        const c = 0.15 * str[i] * k * k;
+        const c = 0.3 * str[i] * k * k;
         colors[i * 3] = c * 0.92;
         colors[i * 3 + 1] = c;
         colors[i * 3 + 2] = c;

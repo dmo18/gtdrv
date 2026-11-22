@@ -94,3 +94,12 @@ triangles; `scripts/craft-shots.mjs` renders close-ups to docs/preview.
 ## Weather
 `stepVehicle` and `stepBoat` read `world.weather` (rain, wind, windDir) when
 present; with no weather or clear weather physics is identical to dry.
+
+## Siren and lights (cars)
+
+A car whose spec has `police` or `emergency` gets a SIREN button (touch input
+`siren`, on the LOCK rect of docs/REVAMP.md 6.5). Tapping it toggles `v.siren`:
+the light bar flashes and the siren loop plays. It starts off and goes off when
+the player leaves the car. While it is on and the car moves over 4 m/s, AI cars
+ahead pull over and stop (src/core/yield.js) and pedestrians on the road step
+to the kerb; both carry on shortly after the car has passed.

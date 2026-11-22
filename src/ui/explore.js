@@ -106,15 +106,15 @@ export function registerExploreScreens(game) {
       b.appendChild(sub);
       list.appendChild(b);
     };
-    if (arrived) card('arrived', arrived.spec.id, arrived.color, false, false, 'Driven in');
-    cars.forEach((c, i) => card(i, c.spec, c.color, c.fav, c.reward, c.reward ? '' : 'Stored'));
+    if (arrived) card('arrived', arrived.spec.id, arrived.color, arrived.fav === true, false, 'Driven in');
+    cars.forEach((c, i) => card(i, c.spec, c.color, c.fav, c.reward, c.reward ? (G.isOut(c.spec) ? 'Out on the road' : '') : 'Stored'));
     if (!arrived && !cars.length) list.appendChild(h('p', 'rw-ex-empty', 'No cars here yet. Drive a car in and tap Store.'));
     wrap.appendChild(list);
 
     // Right: the selected car and its actions, or the swatch grid.
     const side = h('div', 'rw-ex-side');
     const isArr = sel === 'arrived';
-    const car = isArr ? (arrived ? { spec: arrived.spec.id, color: arrived.color, fav: false, reward: false } : null) : cars[sel];
+    const car = isArr ? (arrived ? { spec: arrived.spec.id, color: arrived.color, fav: arrived.fav === true, reward: false } : null) : cars[sel];
     if (car && painting) {
       const head = h('div', 'rw-ex-head');
       const bk = button('Back', '', () => { painting = false; api.rerender(); }, 'Back to the car');
@@ -159,6 +159,10 @@ export function registerExploreScreens(game) {
           if (r.ok) { sel = null; api.close(); } else api.rerender();
         }, 'Take out the ' + labelOf(car.spec));
         tk.dataset.role = 'takeout';
+        if (car.reward && G.isOut(car.spec)) {
+          tk.disabled = true;
+          tk.textContent = 'Out on the road';
+        }
         acts.appendChild(tk);
       }
       const rp = button('Repaint', '', () => { painting = true; api.rerender(); }, 'Repaint');

@@ -98,7 +98,7 @@ export const VEHICLE_SPECS = {
     health: 900, colors: [0xf2c21b],
   },
   police: {
-    id: 'police', label: 'Selwick Patrol', body: 'sedan',
+    id: 'police', label: 'Selwick Patrol', body: 'sedan', police: true, // siren and lights (src/core/yield.js: hasSiren)
     length: 4.8, width: 1.9, height: 1.45, wheelBase: 2.85, wheelRadius: 0.34,
     mass: 1700, maxSpeed: 60.4, reverseSpeed: 10, accel: 4.5, brake: 9.6, grip: 1.05, steerMax: 0.49,
     lockRate: 3.6, returnRate: 4.5,

@@ -19,12 +19,14 @@ const MAX_ALPHA = 420;
 const MAX_ADD = 300;
 const SCORCH = 24; // matches CAPS.decals in combat.js
 const HOLES = 40;
+export const SCORCH_LIFE = 120, SCORCH_FADE = 5; // REVAMP 6.7 layer 8: the scorch stays
 const DECALS = SCORCH + HOLES;
 // Blood: two ring buffers (pools under the dead, small spatters from hits).
 export const BLOOD_POOLS = 16;
 export const BLOOD_SPLATS = 24;
 const BLOOD = BLOOD_POOLS + BLOOD_SPLATS;
-const POOL_LIFE = 20, POOL_GROW = 1.6, POOL_FADE = 5;
+// A pool lasts as long as its body (combat BODY_LIE_T 30 s + the 1 s fade).
+export const POOL_LIFE = 31, POOL_GROW = 1.6, POOL_FADE = 1.5;
 const SPLAT_LIFE = 12, SPLAT_FADE = 4;
 // Wreck debris: one pooled instanced mesh.
 export const DEBRIS_MAX = 48;
@@ -243,7 +245,6 @@ export function createCombatFx(game) {
   const seenT = new Float32Array(SCORCH).fill(-1e9);
   const sBirth = new Float32Array(SCORCH).fill(-1);
   const sSize = new Float32Array(SCORCH), sOp = new Float32Array(SCORCH), sYaw = new Float32Array(SCORCH);
-  const SCORCH_LIFE = 100, SCORCH_FADE = 25;
   let holeHead = 0;
   let decalCount = 0;
   function putDecal(slot, x, y, z, yaw, pitch, size, op) {
@@ -283,7 +284,7 @@ export function createCombatFx(game) {
       sYaw[i] = rnd() * 6.28;
       putDecal(i, d.x[i], 0.03, d.z[i], sYaw[i], -Math.PI / 2, sSize[i], sOp[i]);
     }
-    // Scorch stays about 100 s, then fades over 25 s (checked twice a second).
+    // Scorch stays SCORCH_LIFE s, then fades over SCORCH_FADE s (checked twice a second).
     if (tick % 30 !== 0) return;
     for (let i = 0; i < SCORCH; i++) {
       if (sBirth[i] < 0) continue;
@@ -865,6 +866,48 @@ export function createCombatFx(game) {
     }
   }
 
+  // ---- burnt hulls (combat.hulls): flames for the first 12 s, smoke the
+  // whole 60 s, thinning as the hull cools and sinks away ----
+  const HULL_FLAME_T = 12;
+  function stepHulls(dt, qq) {
+    const list = game.combat && game.combat.hulls;
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.removed || !near(c.x, c.z)) continue;
+      const t = c.wreckT || 0;
+      const fade = c.wreckFade || 0;
+      const sp = c.spec || {};
+      const len = (sp.length || 4) * 0.5, wid = (sp.width || 1.8) * 0.5, h = sp.height || 1.4;
+      const ch = Math.cos(c.heading || 0), sh = Math.sin(c.heading || 0);
+      const top = (c.y || 0) + h * 0.75;
+      const hot = t < HULL_FLAME_T ? 1 - t / HULL_FLAME_T : 0;
+      if (hot > 0) {
+        // Flames licking out of the cabin and engine bay, a warm glow under them.
+        c.fxFlame = (c.fxFlame || 0) + dt * (6 + 22 * hot) * qq;
+        while (c.fxFlame >= 1) {
+          c.fxFlame -= 1;
+          const lx = rs() * len * 0.75, lz = rs() * wid * 0.6;
+          const px = c.x + ch * lx - sh * lz, pz = c.z + sh * lx + ch * lz;
+          const j = add(px, top - h * 0.2, pz, rs() * 0.3, 1.6 + rnd() * 2.2 * (0.5 + hot), rs() * 0.3, 0.45 + rnd() * 0.35, 1.1 + hot * 1.2, 0.5, 1, 1, 0.55 + rnd() * 0.25, 0.12, PUFF, -0.6, 1.2);
+          tintP(G, j, 0.6, 0.12, 0.03);
+          if (rnd() < 0.12) add(px, top, pz, rs() * 1.5, 2.5 + rnd() * 3, rs() * 1.5, 0.6 + rnd() * 0.6, 0.1, 0.04, 2.2, 1, 0.7, 0.25, STREAK + 8, 4, 0.5);
+        }
+        if ((tick & 7) === 0) add(c.x, top, c.z, 0, 0, 0, 0.3, 3 + 3 * hot, 4 + 3 * hot, 0.35 * hot + 0.1, 1, 0.55, 0.2, GLOW);
+      }
+      // Smoke: thick and black while it burns, then a thinner grey wisp.
+      const rate = (1.2 + 7 * hot + 1.6) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
+      c.fxSmoke = (c.fxSmoke || 0) + dt * rate;
+      while (c.fxSmoke >= 1) {
+        c.fxSmoke -= 1;
+        const g = hot > 0 ? 0.06 + rnd() * 0.06 : 0.2 + rnd() * 0.12;
+        const life = hot > 0 ? 4 + rnd() * 2.5 : 3.5 + rnd() * 2;
+        const j = alpha(c.x + rs() * len * 0.5, top, c.z + rs() * wid * 0.6, rs() * 0.4 + 0.25, 1.6 + rnd() * 1.4 + hot * 1.5, rs() * 0.4, life, 0.9 + hot, 3.2 + hot * 2.6, 0.5 + 0.25 * hot, g, g, g * 1.05, PUFF, -0.08, 0.45, 0.12);
+        if (j >= 0) S.rotV[j] = rs() * 0.3;
+      }
+    }
+  }
+
   // ---- projectiles in flight (rocket trail, fizz sparks) ----
   function stepProjectiles(qq) {
     const list = game.combat && game.combat.projectiles;
@@ -1023,6 +1066,7 @@ export function createCombatFx(game) {
         G.cap = Math.floor(MAX_ADD * qq);
       }
       stepBurn(dt, qq);
+      stepHulls(dt, qq);
       stepColumns(dt, qq);
       stepProjectiles(qq);
       stepArms();

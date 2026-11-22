@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 
 // Surface classes stored in the `aCls` vertex attribute.
-export const CLS = { PAINT: 0, LIVERY: 1, TRIM: 2, CHROME: 3, GLASS: 4, RUBBER: 5, ALLOY: 6, PLATE: 7, GLOW: 8 };
+export const CLS = { PAINT: 0, LIVERY: 1, TRIM: 2, CHROME: 3, GLASS: 4, RUBBER: 5, ALLOY: 6, PLATE: 7, GLOW: 8, SHADOW: 9, CABIN: 10 };
 
 // Lamp level shared by every patched material (0 day .. 1 night): far
 // LOD models light their baked lamp quads (class GLOW) with it.
@@ -23,6 +23,9 @@ attribute float aCls;
 varying float vCls;
 varying vec3 vObj;
 varying vec3 vObjN;
+#ifdef RW_STREET
+varying vec3 vRwW;
+#endif
 #ifdef RW_DAMAGE
 uniform vec4 uCrush;
 #endif
@@ -43,6 +46,9 @@ vCls = aCls;
 #endif
 vObj = transformed;
 vObjN = objectNormal;
+#ifdef RW_STREET
+vRwW = (modelMatrix * vec4(transformed, 1.0)).xyz;
+#endif
 `;
 
 const FRAG_HEAD = /* glsl */`
@@ -50,6 +56,9 @@ varying float vCls;
 varying vec3 vObj;
 varying vec3 vObjN;
 uniform float uLamp;
+#ifdef RW_STREET
+varying vec3 vRwW;
+#endif
 #ifdef RW_DAMAGE
 uniform vec4 uDmg;
 uniform vec4 uHit0;
@@ -70,6 +79,31 @@ float rwNoise(vec3 p) {
     mix(mix(rwHash(i + vec3(0.0, 0.0, 1.0)), rwHash(i + vec3(1.0, 0.0, 1.0)), f.x), mix(rwHash(i + vec3(0.0, 1.0, 1.0)), rwHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
     f.z);
 }
+#ifdef RW_STREET
+// A cheap stand-in for the street in reflections: a skyline of blocks
+// with windows around the horizon (lit at night) over the sky the
+// environment map gives. r: world reflection direction; w: world
+// position (the blocks slide past as the car moves). m: coverage.
+vec3 rwStreet(vec3 r, vec3 w, float night, out float m) {
+  m = 0.0;
+  float h = r.y;
+  if (h < -0.04 || h > 0.36) return vec3(0.0);
+  float u = atan(r.z, r.x) * 3.2 + w.x * 0.09 + w.z * 0.07;
+  float cell = floor(u);
+  float hs = fract(sin(cell * 91.7) * 4375.85);
+  float top = 0.05 + 0.27 * hs * hs;
+  float fu = fract(u);
+  m = smoothstep(top + 0.006, top - 0.006, h) * smoothstep(0.0, 0.03, fu) * smoothstep(1.0, 0.94, fu);
+  vec3 fac = mix(vec3(0.42, 0.38, 0.33), vec3(0.26, 0.3, 0.35), fract(hs * 7.3));
+  float wu = u * 7.0, wh = h * 70.0;
+  float aa = clamp(1.6 - 0.9 * max(fwidth(wu), fwidth(wh)), 0.0, 1.0);
+  float win = mix(0.3, step(0.42, fract(wu)) * step(0.35, fract(wh)), aa);
+  vec3 day = mix(fac, vec3(0.11, 0.15, 0.2), win * 0.75);
+  float lit = step(0.6, fract(sin(dot(floor(vec2(wu, wh)), vec2(12.9898, 78.233))) * 43758.55));
+  vec3 nite = mix(vec3(0.006, 0.007, 0.01), vec3(0.95, 0.6, 0.3) * 0.55, win * mix(0.4, lit, aa));
+  return mix(day, nite, night);
+}
+#endif
 `;
 
 // Runs after metalnessmap_fragment: sets colour, roughness, metalness and
@@ -95,8 +129,10 @@ if (rwC < 0.5) {
   roughnessFactor = 0.3; metalnessFactor = 0.85;
 } else if (rwC < 7.5) {
   roughnessFactor = 0.5; metalnessFactor = 0.0;
-} else {
+} else if (rwC < 8.5) {
   roughnessFactor = 0.4; metalnessFactor = 0.0;
+} else {
+  roughnessFactor = 0.85; metalnessFactor = 0.0;
 }
 #ifdef RW_DAMAGE
 {
@@ -160,12 +196,38 @@ material.clearcoat *= rwCC;
 #endif
 `;
 
-const FRAG_EMIT = /* glsl */`
-#include <emissivemap_fragment>
-if (rwC > 7.5) totalEmissiveRadiance += vColor.rgb * (0.15 + 1.6 * uLamp);
+// Street reflection on paint and glass: the skyline is mixed into the
+// sharp clearcoat reflection and, softer, into the base layer.
+const FRAG_REFL = /* glsl */`
+#include <lights_fragment_maps>
+#ifdef RW_STREET
+{
+  float rwM;
+  #ifdef USE_ENVMAP
+  float rwEi = envMapIntensity;
+  #else
+  float rwEi = 1.0;
+  #endif
+  vec3 rwR = inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix);
+  vec3 rwS = rwStreet(rwR, vRwW, uLamp, rwM) * rwEi;
+  float rwSharp = 1.0 - smoothstep(0.2, 0.7, roughnessFactor);
+  radiance = mix(radiance, rwS, rwM * rwSharp * (rwC < 1.5 || (rwC > 3.5 && rwC < 4.5) ? 0.8 : 0.4));
+  #ifdef USE_CLEARCOAT
+  vec3 rwRc = inverseTransformDirection(reflect(-geometryViewDir, geometryClearcoatNormal), viewMatrix);
+  float rwMc;
+  vec3 rwSc = rwStreet(rwRc, vRwW, uLamp, rwMc) * rwEi;
+  clearcoatRadiance = mix(clearcoatRadiance, rwSc, rwMc);
+  #endif
+}
+#endif
 `;
 
-function patch(mat, damage) {
+const FRAG_EMIT = /* glsl */`
+#include <emissivemap_fragment>
+if (rwC > 7.5 && rwC < 8.5) totalEmissiveRadiance += vColor.rgb * (0.15 + 1.6 * uLamp);
+`;
+
+function patch(mat, damage, street = false) {
   const u = mat.userData.rw;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uLamp = shared.uLamp;
@@ -176,16 +238,17 @@ function patch(mat, damage) {
       shader.uniforms.uBox = u.uBox;
       shader.uniforms.uCrush = u.uCrush;
     }
-    const def = damage ? '#define RW_DAMAGE\n' : '';
+    const def = (damage ? '#define RW_DAMAGE\n' : '') + (street ? '#define RW_STREET\n' : '');
     shader.vertexShader = def + VERT_HEAD + shader.vertexShader.replace('#include <begin_vertex>', VERT_BODY);
     shader.fragmentShader = def + FRAG_HEAD + shader.fragmentShader
       .replace('#include <color_fragment>', '')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + FRAG_BODY)
       .replace('#include <normal_fragment_maps>', FRAG_FLAKE)
       .replace('#include <lights_physical_fragment>', FRAG_CC)
+      .replace('#include <lights_fragment_maps>', FRAG_REFL)
       .replace('#include <emissivemap_fragment>', FRAG_EMIT);
   };
-  const key = 'rwveh' + (damage ? 'D' : '') + (mat.isMeshPhysicalMaterial ? 'P' : 'S');
+  const key = 'rwveh' + (damage ? 'D' : '') + (street ? 'R' : '') + (mat.isMeshPhysicalMaterial ? 'P' : 'S');
   mat.customProgramCacheKey = () => key;
 }
 
@@ -244,7 +307,7 @@ function makePaint(hex, damage, physical) {
     ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: 1, clearcoatRoughness: 0.06 })
     : new THREE.MeshStandardMaterial(opts);
   mat.userData.rw = damage ? damageUniforms() : {};
-  patch(mat, damage);
+  patch(mat, damage, true);
   return track(mat);
 }
 
@@ -292,7 +355,7 @@ export function farMaterial(hex, sooty = false) {
     m = new THREE.MeshStandardMaterial({ color: hex, vertexColors: true, metalness: p.metalness * 0.6, roughness: 0.42 });
     m.userData.rw = damageUniforms();
     if (sooty) m.userData.rw.uDmg.value.set(0.6, 1, 0.5, 3);
-    patch(m, true);
+    patch(m, true, true);
     track(m);
     farCache.set(key, m);
   }
@@ -340,17 +403,20 @@ export function craftMaterial(kind = 'gloss') {
 }
 
 // ---- lamps ------------------------------------------------------------------
-// Lamp meshes use a lit, glossy material (lenses reflect the sky by day)
-// whose emissive map is a tiny 8x1 strip: the geometry's u coordinate picks
-// a cell (0 left lens, 1 right lens, 2 DRL / sign / extra, 3 indicator;
-// cells 4..7 are dark and hold the number plates), so one mesh shows several
-// lamp colours and swapping the material switches state for one car only.
-// The colour map is a small atlas: lens base colours in its left half and
-// an invented number plate in its right half.
+// One lamp mesh per car holds the head and the tail lamps. Its lit,
+// glossy material (lenses reflect the sky by day) has an emissive map that
+// is a tiny 16x1 strip: the geometry's u coordinate picks a cell. Cells
+// 0..7 are the front half (0 left lens, 1 right lens, 2 DRL / sign /
+// extra, 3 indicator, 4 housing, 5..7 plate), cells 8..15 the rear half
+// (8 red left, 9 reverse, 10 indicator, 11 red right, 12 housing, 13..15
+// plate). Swapping the material switches the lamp state of one car only.
+// The colour map is a matching atlas: lens base colours and an invented
+// number plate per half. The police light bar keeps its own 8-cell strip.
 function strip(cells) {
-  const data = new Uint8Array(32);
-  for (let i = 0; i < 8; i++) data[i * 4 + 3] = 255;
-  const t = new THREE.DataTexture(data, 8, 1, THREE.RGBAFormat);
+  const n = cells.length <= 4 ? 8 : 16;
+  const data = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) data[i * 4 + 3] = 255;
+  const t = new THREE.DataTexture(data, n, 1, THREE.RGBAFormat);
   t.magFilter = THREE.NearestFilter;
   t.minFilter = THREE.NearestFilter;
   setStrip(t, cells);
@@ -358,11 +424,13 @@ function strip(cells) {
 }
 function setStrip(tex, cells) {
   const d = tex.image.data;
-  for (let i = 0; i < 4; i++) {
+  const half = tex.image.width / 2;
+  for (let i = 0; i < cells.length; i++) {
     tmp.setHex(cells[i]);
-    d[i * 4] = Math.round(tmp.r * 255);
-    d[i * 4 + 1] = Math.round(tmp.g * 255);
-    d[i * 4 + 2] = Math.round(tmp.b * 255);
+    const o = (i < 4 ? i : half + i - 4) * 4;
+    d[o] = Math.round(tmp.r * 255);
+    d[o + 1] = Math.round(tmp.g * 255);
+    d[o + 2] = Math.round(tmp.b * 255);
   }
   tex.needsUpdate = true;
 }
@@ -373,9 +441,9 @@ const GLYPHS = {
   4: [2, 6, 10, 18, 31, 2, 2], 8: [14, 17, 17, 14, 17, 17, 14], 2: [14, 17, 1, 2, 4, 8, 31], 1: [4, 12, 4, 4, 4, 4, 14],
 };
 export const PLATE_TEXT = 'RW-4821';
-// RGBA pixels of the lamp atlas (128 x 32), one 16 px column per strip
-// cell: lens cells 0..3, housing cell 4, then the plate in cells 5..7
-// (x 80..127, rows 8..23). Pure, so tests can read it.
+// RGBA pixels of one half of the lamp atlas (128 x 32), one 16 px column
+// per strip cell: lens cells 0..3, housing cell 4, then the plate in
+// cells 5..7 (x 80..127, rows 8..23). Pure, so tests can read it.
 export function lampAtlasPixels(base) {
   const Wd = 128, Hd = 32;
   const d = new Uint8Array(Wd * Hd * 4);
@@ -405,20 +473,30 @@ export function lampAtlasPixels(base) {
   }
   return d;
 }
-function atlas(base) {
-  const t = new THREE.DataTexture(lampAtlasPixels(base), 128, 32, THREE.RGBAFormat);
+function atlasTex(pixels, w) {
+  const t = new THREE.DataTexture(pixels, w, 32, THREE.RGBAFormat);
   t.magFilter = THREE.LinearFilter;
   t.minFilter = THREE.LinearFilter;
   t.colorSpace = THREE.SRGBColorSpace;
   t.needsUpdate = true;
   return t;
 }
+const HEAD_BASE = [0xdfe4ea, 0xdfe4ea, 0xeef0f2, 0xd8a050, 0x1c2026];
+const TAIL_BASE = [0x8a161a, 0xd8dadc, 0xc08a3a, 0x8a161a, 0x2a0507];
+const BAR_BASE = [0x8a1a1e, 0x1a2a8a, 0xe8e8e8, 0x1a1b1e, 0x1a1b1e];
+// Front half and rear half side by side (256 x 32).
+export function lampPairPixels() {
+  const a = lampAtlasPixels(HEAD_BASE), b = lampAtlasPixels(TAIL_BASE);
+  const d = new Uint8Array(256 * 32 * 4);
+  for (let y = 0; y < 32; y++) {
+    d.set(a.subarray(y * 512, y * 512 + 512), y * 1024);
+    d.set(b.subarray(y * 512, y * 512 + 512), y * 1024 + 512);
+  }
+  return d;
+}
 const ATLAS = {};
 function atlasFor(kind) {
-  if (!ATLAS[kind]) {
-    ATLAS[kind] = atlas(kind === 'tail' ? [0x8a161a, 0xd8dadc, 0xc08a3a, 0x8a161a, 0x2a0507]
-      : kind === 'bar' ? [0x8a1a1e, 0x1a2a8a, 0xe8e8e8, 0x1a1b1e, 0x1a1b1e] : [0xdfe4ea, 0xdfe4ea, 0xeef0f2, 0xd8a050, 0x262b32]);
-  }
+  if (!ATLAS[kind]) ATLAS[kind] = kind === 'bar' ? atlasTex(lampAtlasPixels(BAR_BASE), 128) : atlasTex(lampPairPixels(), 256);
   return ATLAS[kind];
 }
 
@@ -426,31 +504,35 @@ function atlasFor(kind) {
 // read without conversion, so colours here are as authored.
 const HEAD_DAY = [0x24282c, 0x24282c, 0xd8e4f0, 0x5a3408];
 const HEAD_NIGHT = [0xffffff, 0xffffff, 0xffffff, 0x8a4a0a];
-const LAMP = {};
-function lampMat(name, cells, kind) {
+const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x8a0c0e, TAIL_BRAKE = 0xff2a22;
+const REV_OFF = 0x000000, REV_ON = 0xffffff, IND_OFF = 0x000000, IND_ON = 0xffa424;
+const LAMP = { pair: [] };
+function lampMat(cells, kind) {
   const tex = strip(cells);
   const m = new THREE.MeshStandardMaterial({ map: atlasFor(kind), emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 2.4, metalness: 0.35, roughness: 0.14 });
   m.userData.envScale = 1.4;
-  LAMP[name] = m;
   return track(m);
 }
-// Head: cells L lens, R lens, sign/extra, indicator.
-lampMat('head', HEAD_DAY, 'head');
-lampMat('headFlickL', [0x101214, HEAD_DAY[1], HEAD_DAY[2], HEAD_DAY[3]], 'head');
-lampMat('headOff', [0x000000, 0x000000, 0x000000, 0x000000], 'head');
-// Tail: cells red, reverse, indicator, red (inner). One material per
-// combination of brake / reverse / hazard.
-const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x8a0c0e, TAIL_BRAKE = 0xff2a22;
-const REV_OFF = 0x000000, REV_ON = 0xffffff, IND_OFF = 0x000000, IND_ON = 0xffa424;
-for (let s = 0; s < 8; s++) {
-  const brake = s & 1, rev = s & 2, haz = s & 4;
-  lampMat('tail' + s, [brake ? TAIL_BRAKE : TAIL_DIM_DAY, rev ? REV_ON : REV_OFF, haz ? IND_ON : IND_OFF, brake ? TAIL_BRAKE : TAIL_DIM_DAY], 'tail');
+// Strip cells of a lamp state: head 0 normal / 1 left lamp out, tail bits
+// 1 brake, 2 reverse, 4 hazard.
+function pairCells(h, t, night) {
+  const hc = night ? HEAD_NIGHT : HEAD_DAY;
+  const dim = night ? TAIL_DIM_NIGHT : TAIL_DIM_DAY;
+  const brake = t & 1, rev = t & 2, haz = t & 4;
+  return [h ? 0x101214 : hc[0], hc[1], hc[2], haz ? IND_ON : hc[3],
+    brake ? TAIL_BRAKE : dim, rev ? REV_ON : REV_OFF, haz ? IND_ON : IND_OFF, brake ? TAIL_BRAKE : dim];
 }
-lampMat('tailOff', [0x000000, 0x000000, 0x000000, 0x000000], 'tail');
+for (let h = 0; h < 2; h++) for (let t = 0; t < 8; t++) LAMP.pair[h * 8 + t] = lampMat(pairCells(h, t, false), 'pair');
+LAMP.off = lampMat([0, 0, 0, 0, 0, 0, 0, 0], 'pair');
 // Light bar: cells red, blue, white, base.
-lampMat('bar0', [0x120203, 0x020412, 0x000000, 0x000000], 'bar');
-lampMat('bar1', [0xff2a20, 0x020412, 0xffffff, 0x000000], 'bar');
-lampMat('bar2', [0x120203, 0x2a5cff, 0xffffff, 0x000000], 'bar');
+LAMP.bar0 = lampMat([0x120203, 0x020412, 0x000000, 0x000000], 'bar');
+LAMP.bar1 = lampMat([0xff2a20, 0x020412, 0xffffff, 0x000000], 'bar');
+LAMP.bar2 = lampMat([0x120203, 0x2a5cff, 0xffffff, 0x000000], 'bar');
+
+// Lamp material for a state (shared by every car in that state).
+export function lampMaterial(headOut, tailBits, off = false) {
+  return off ? LAMP.off : LAMP.pair[(headOut ? 8 : 0) + (tailBits & 7)];
+}
 
 let lampNight = -1;
 // Night level 0..1 brightens head and tail lamps for every car.
@@ -462,17 +544,87 @@ export function setLampNight(n) {
     return;
   }
   lampNight = n;
-  const h = on ? HEAD_NIGHT : HEAD_DAY;
-  setStrip(LAMP.head.emissiveMap, h);
-  setStrip(LAMP.headFlickL.emissiveMap, [0x101214, h[1], h[2], h[3]]);
-  const dim = on ? TAIL_DIM_NIGHT : TAIL_DIM_DAY;
-  for (let s = 0; s < 8; s++) {
-    const brake = s & 1, rev = s & 2, haz = s & 4;
-    setStrip(LAMP['tail' + s].emissiveMap, [brake ? TAIL_BRAKE : dim, rev ? REV_ON : REV_OFF, haz ? IND_ON : IND_OFF, brake ? TAIL_BRAKE : dim]);
-  }
+  for (let h = 0; h < 2; h++) for (let t = 0; t < 8; t++) setStrip(LAMP.pair[h * 8 + t].emissiveMap, pairCells(h, t, on));
 }
 export function isLampNight() {
   return lampNight > 0.35;
+}
+
+// ---- glass and contact shadow ------------------------------------------------
+// Tinted see-through glass (one transparent draw per car) that also holds
+// the car's contact shadow: vertices of class SHADOW are pressed flat onto
+// the ground under the car whatever the body's lean, and draw as black
+// with their u coordinate as opacity. Premultiplied alpha keeps the sky
+// and street reflections bright on the glass while the cabin shows through.
+const GLASS_VERT = /* glsl */`
+#include <project_vertex>
+vRwA = uv.x;
+if (aCls > 8.5) {
+  vec4 rwG = modelMatrix * vec4(transformed, 1.0);
+  rwG.y = modelMatrix[3].y + 0.02;
+  mvPosition = viewMatrix * rwG;
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+const GLASS_FRAG = /* glsl */`
+#include <metalnessmap_fragment>
+float rwC = floor(vCls + 0.5);
+roughnessFactor = 0.05;
+metalnessFactor = 0.0;
+#ifdef RW_CRACK
+float rwK = 0.0;
+{
+  float m = smoothstep(0.32, 0.5, rwNoise(vObj * 2.3));
+  float c1 = 1.0 - smoothstep(0.0, 0.05, abs(rwNoise(vObj * 11.0) - 0.5));
+  float c2 = 1.0 - smoothstep(0.0, 0.06, abs(rwNoise(vObj * 29.0 + 3.1) - 0.5));
+  rwK = m * max(c1, c2 * 0.85);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.5, 0.52, 0.54), max(rwK, m * 0.35));
+  roughnessFactor = mix(0.05, 0.6, m);
+}
+#endif
+`;
+const GLASS_OUT = /* glsl */`
+float rwNV = saturate(dot(normal, normalize(vViewPosition)));
+float rwAl = mix(0.58, 0.96, pow(1.0 - rwNV, 3.0));
+#ifdef RW_CRACK
+rwAl = max(rwAl, 0.55 + 0.4 * rwK);
+#endif
+gl_FragColor = vec4(totalDiffuse * rwAl + totalSpecular, rwAl);
+if (rwC > 8.5) gl_FragColor = vec4(0.0, 0.0, 0.0, vRwA);
+#ifdef RW_GONE
+if (rwC < 8.5) discard;
+#endif
+`;
+const GLASS_FOG = /* glsl */`
+#include <fog_fragment>
+#ifdef USE_FOG
+gl_FragColor.rgb -= fogFactor * fogColor * (1.0 - gl_FragColor.a);
+#endif
+`;
+const glassCache = {};
+// state: 'clean', 'crack' (crazed, cloudy) or 'gone' (blown out: only the
+// contact shadow draws).
+export function carGlassMaterial(state = 'clean') {
+  let m = glassCache[state];
+  if (m) return m;
+  m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.05, metalness: 0, transparent: true, depthWrite: false, premultipliedAlpha: true });
+  const def = '#define RW_STREET\n' + (state === 'crack' ? '#define RW_CRACK\n' : state === 'gone' ? '#define RW_GONE\n' : '');
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uLamp = shared.uLamp;
+    shader.vertexShader = def + VERT_HEAD + 'varying float vRwA;\n' + shader.vertexShader
+      .replace('#include <begin_vertex>', VERT_BODY)
+      .replace('#include <project_vertex>', GLASS_VERT);
+    shader.fragmentShader = def + FRAG_HEAD + 'varying float vRwA;\n' + shader.fragmentShader
+      .replace('#include <metalnessmap_fragment>', GLASS_FRAG)
+      .replace('#include <lights_fragment_maps>', FRAG_REFL)
+      .replace('#include <opaque_fragment>', GLASS_OUT)
+      .replace('#include <fog_fragment>', GLASS_FOG)
+      .replace('#include <premultiplied_alpha_fragment>', '');
+  };
+  m.customProgramCacheKey = () => 'rwglass' + state;
+  m.userData.envScale = 1.3;
+  glassCache[state] = track(m);
+  return m;
 }
 
 export { LAMP };

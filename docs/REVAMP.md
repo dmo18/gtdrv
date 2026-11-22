@@ -963,6 +963,7 @@ wheel while held, the open "more" fan, toasts in their own strip above it.
 | HAND | 759, 248, 56, 56 | 636, 216, 56, 56 | above BRAKE, a full 12 px (8 at 780) clear of it; car and boat only |
 | FIRE | 671, 340, 64, 64 | 560, 288, 64, 64 | only when a weapon can fire |
 | LOCK | 675, 272, 56, 56 | 564, 224, 56, 56 | above FIRE, only when there is something to lock |
+| SIREN | 675, 272, 56, 56 | 564, 224, 56, 56 | the LOCK rect, car only, only in a police or emergency car |
 | MORE | 843, 180, 56, 56 | 716, 152, 56, 56 | above EXIT |
 | Fan (open) | 3 columns by 2 rows of 56 with 8 gaps, left of MORE: columns at x 779, 715, 651; rows at y 180, 116 | columns at x 652, 588, 524; rows at y 152, 88 | at most 6 fan items per mode; folds as today |
 
@@ -1429,3 +1430,315 @@ there in M3 goes through W10.
 4. Arcade is the default mode. If the owner prefers Sim as the default, it is one constant.
 5. "Whole box playable" keeps Miami Beach, Fisher Island and Virginia Key at generator quality
    only (no hand work). If they look thin on the phone, W10 budget is the place to fix them.
+
+### 6.11 Service vehicles (V1, version 0.5.0)
+
+Owner decisions used: the four service vehicles are the fire truck, the ambulance, the garbage
+truck and the tow truck (a bus comes after 1.0); the police car gets the same light bar and
+siren treatment. All names and liveries are invented. None is armed. All five can be stolen
+and driven like any car, all five use BOOST as every car does (the band tests run with boost
+off), and all keep "cannot die" as the default.
+
+New file src/entities/servicevehicles.js (V1) exports `SERVICE_SPECS` (merged into
+`VEHICLE_SPECS`), `SERVICE_BANDS` (merged into the band test), `LIGHTBARS`, `SIRENS`, `EXTRAS`
+and `SERVICE_SPOTS`. Spec flags: `spec.service` (one of `'fire'`, `'ambulance'`, `'garbage'`,
+`'tow'`), `spec.siren` (true for police, ambulance, fire; this is B2's flag), `spec.beacon`
+(true for garbage and tow: amber lamps, no siren, traffic does not yield), `spec.extra` (the
+id of the extra, or absent).
+
+Size, mass and start values (the bands below are the law, as in 6.3):
+
+| id | label | length, width, height (m) | wheelBase | mass (kg) | power | grip | steerMax | lockRate | returnRate | maxSpeed (m/s) | brake | drive |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| police | Selwick Patrol | 4.8, 1.9, 1.45 | 2.85 | 1700 | 140 | 1.05 | 0.49 | 3.6 | 4.5 | 60.4 | 9.6 | awd (unchanged) |
+| ambulance | Careline | 6.2, 2.2, 2.8 | 3.7 | 4200 | 150 | 0.80 | 0.46 | 2.8 | 3.6 | 42.5 | 8.4 | rwd |
+| firetruck | Brandwell | 9.0, 2.5, 3.3 | 5.0 | 14000 | 300 | 0.68 | 0.42 | 2.5 | 3.4 | 30.0 | 6.9 | rwd |
+| garbage | Haulmark | 8.2, 2.5, 3.5 | 4.6 | 12000 | 220 | 0.66 | 0.43 | 2.5 | 3.4 | 29.5 | 6.6 | rwd |
+| towtruck | Hookton | 6.8, 2.3, 2.6 | 4.0 | 5200 | 180 | 0.76 | 0.45 | 2.7 | 3.5 | 38.0 | 7.9 | rwd |
+
+Health: ambulance 1600, towtruck 1800, garbage 2400, firetruck 2600. Wheel radius 0.38
+(ambulance), 0.45 (towtruck), 0.52 (firetruck, garbage). The three heavy ones blast as "heavy
+car" in 6.7 (radius 11 m, visual scale 1.1).
+
+Handling bands (same meaning and units as `BANDS` in 6.3; these are deliberate exceptions to
+the single car line, modelled on the truck row):
+
+```
+export const SERVICE_BANDS = {
+  ambulance: { r0: [7.0, 8.5],   t60: [10, 12], top: [90, 100], stop: [40, 46] },
+  towtruck:  { r0: [7.5, 9.0],   t60: [13, 16], top: [80, 90],  stop: [42, 50] },
+  firetruck: { r0: [10.5, 12.5], t60: [20, 26], top: [62, 72],  stop: [48, 58] },
+  garbage:   { r0: [9.5, 11.5],  t60: [24, 30], top: [61, 70],  stop: [50, 60] },
+};
+// police keeps its 6.3 row: r0 5.0 to 6.5, t60 6 to 7, top 130 to 140, stop 33 to 40.
+```
+
+- Lateral g on full lock: `LAT_G_FACTOR` times `spec.grip`, so Arcade gives ambulance 0.80 to
+  0.90 g, towtruck 0.76 to 0.85, firetruck 0.68 to 0.76, garbage 0.66 to 0.74; Sim 0.88 to 1.00
+  of grip. The fire truck and garbage truck top out under 36 m/s, so their second lateral test
+  speed is 0.8 times `maxSpeed` (6.3 rule); the ambulance and tow truck use 30 m/s.
+- Lock and return: `1 / lockRate` is 0.36 to 0.40 s for the heavy three and the tow truck, 0.36
+  s for the ambulance, inside `LOCK_TIME`; `1 / returnRate` is 0.28 to 0.29 s, inside
+  `RETURN_TIME`; at 30 m/s lock time stays under `LOCK_TIME_FAST_MAX` (0.55 s).
+- Accuracy tests A1 to A5 and B1 to B4 of 6.3 apply; the lane change A5 runs at 15 m/s for the
+  firetruck and garbage truck (the truck rule) and at 20 m/s for the ambulance and tow truck.
+- A tall body must not roll over on flat ground: a full lock turn at 0.8 times `maxSpeed`
+  keeps all wheels' load above zero in Arcade.
+
+Siren and light bar. Sound is played by W6 from B2's event `siren { on, id }` plus a new field
+`kind`; lamps are drawn by src/render/lightbar.js (V1). All phase lengths are multiples of 50
+ms (3 fixed steps) and are counted from game time, never wall clock. Colours: red 0xff2a2a,
+blue 0x2a5cff, white 0xffffff, amber 0xffa200. A bar uses the shared lamp materials (lit and
+unlit per colour), swapped per phase: no new material per vehicle, at most 2 draw calls per
+bar. Only the player's vehicle may also carry one pooled point light (range 14 m, colour of
+the lit lamp) at night; every other bar is emissive only. Under `prefers-reduced-motion` the
+bar holds a steady "all lit at half brightness" state.
+
+| id | siren (`SIRENS`) | light bar (`LIGHTBARS`) |
+|---|---|---|
+| police | `wail`: one tone sweeping 600 to 1300 Hz and back, 3200 ms per cycle. While HORN is held with the siren on: `yelp`, the same sweep in 300 ms. | Roof bar in two halves, left red, right blue. Cycle 800 ms in 8 phases of 100 ms: L, off, L, off, R, off, R, off. Headlamps alternate left and right every 400 ms (wig-wag) while the siren is on. |
+| ambulance | `hilo`: 960 Hz for 500 ms, then 770 Hz for 500 ms, repeating. | Four red corner lamps on the box roof and one white lamp over the cab. Cycle 900 ms in 6 phases of 150 ms: front reds, off, front reds, rear reds plus white, off, rear reds plus white. |
+| firetruck | `deepwail`: 400 to 1000 Hz and back, 5000 ms per cycle. HORN is an air horn: 150 Hz and 190 Hz together for as long as it is held. | Cab bar in two red halves alternating every 250 ms (cycle 500 ms); two red lamps on each body side lit in the opposite phase; one white lamp at the cab centre lit for 50 ms at the start of each 250 ms phase. |
+| garbage | none. Reverse beeper: 1000 Hz, 400 ms on, 400 ms off, while in reverse. | Two amber beacons on the cab roof alternating every 400 ms. On while the bin lift runs, while reversing, and for 2 s after either. |
+| towtruck | none. Reverse beeper as above. | Amber roof bar in 4 segments, a chase left to right at 150 ms per segment (cycle 600 ms). On while a car is hooked, while reversing, and for 2 s after. |
+
+The SIREN button (6.12) shows only when `spec.siren` is true. It toggles `v.sirenOn`; lamps and
+sound follow the same flag, and B2's yield rule applies. The siren stops when the player
+leaves the vehicle or it is wrecked. AI service vehicles keep it off except "on call" (below).
+
+EXTRA button (one per vehicle, rect in 6.12, shown only in car mode when `spec.extra` is
+set). Rules for all extras: fixed steps, seeded through `createRng`, no allocation per step,
+nothing works when the vehicle is wrecked, AI drivers never use an extra, every extra emits
+`extra { kind, on, x, z }` for sound (W6). The button face carries a 4 px fill bar along its
+bottom edge for the extra's charge or progress, so no new HUD rectangle is needed.
+
+| vehicle | `spec.extra` | input | numbers | how it changes the world |
+|---|---|---|---|---|
+| firetruck | `cannon` | hold | Roof nozzle. Water tank 20 s of spray; refills in 40 s while not spraying; after running dry it needs 25 % of a tank to start again. Works at any speed. Range 28 m. The jet points along the truck's heading and turns by itself at 90 degrees per second toward the nearest target inside 35 degrees either side and 28 m: a burning hull first, then a burning vehicle, then a person. A target is "in the jet" when within 0.9 m of the jet line (2.0 m for a hull or vehicle). | Person in the jet: knocked down, no damage, no blood, never a kill; pushed at 5 m/s along the jet direction (the 6.7 fall rule with `d` = jet direction), stays down 3 s, then gets up and flees. Burning hull: after 1.5 s in the jet (summed, not in a row) its flames stop, `hullBurn { id, on: false }` fires, the smoke turns to white steam for 4 s and then stays thin; the hull itself still lasts its 60 s. Score "Fire out" +150 per hull. A vehicle that is burning before its blast (if combat.js has that state) is put out the same way and its blast is cancelled. Any other vehicle in the jet is pushed with 3000 N along the jet. Heat: none for people, +1 star when an officer is knocked down. Drawn with at most 40 pooled particles and one ground splash, at most 2 draw calls. |
+| ambulance | `treat` | tap | Needs speed under 2 m/s. Range 8 m from the vehicle centre. Takes 2.0 s (progress on the fill bar; moving off above 2 m/s cancels it). Cooldown 5 s after a finished treatment. | Any mode: the nearest body lying within range (6.7 bodies) is revived: the body and its blood pool are removed and a person stands up at that place and walks away. Score "Revived" +200. Hard mode (`settings.mortal`) also: the player's health goes to full over the same 2.0 s, and while seated in an ambulance the player regains 5 % of full health per second. With no body in range and nothing to heal the tap gives a short "Nobody to treat" toast and no cooldown. |
+| garbage | `lift` | tap | Needs speed under 1.5 m/s. Range 4.0 m from the vehicle centre to a kerb bin (a lot feature of kind `bin`, or a street bin prop). One cycle is 3.0 s: raise 1.0 s, tip 1.0 s, set down 1.0 s. Driving above 1.5 m/s during a cycle aborts it and the bin is dropped on its side. No cooldown; one cycle at a time. | The bin is marked emptied for 300 s (it cannot be lifted again in that time). Score "Bin emptied" +50. The hopper counts loads 0 to 20; at 20 the lift refuses ("Full") until the truck stops inside a garbage yard spot for 2 s, which empties it and gives +400. With no bin in range the tap runs the crusher instead: up to 3 wreck parts (6.7 layer 7) lying within 4.0 m are pulled in and removed, +20 each, 1.0 s. During a cycle service.js draws one pooled bin mesh on the arm; the lot's own bin instance is hidden through a W2 call if one exists (`hideFeature`), otherwise it simply stays in place. |
+| towtruck | `hook` | tap to hook, tap to release | Hook needs truck speed under 1.5 m/s and a target whose centre is within 3.5 m of the truck's rear point and within 30 degrees of the truck's axis. Targets: one car of mass 2600 kg or less moving under 1 m/s, or a burnt hull. Not a tank, truck, service vehicle, boat or aircraft. Attaching takes 1.0 s. Release at any speed. 1.0 s between any two taps. | The car's near end is lifted 0.35 m and pinned to the hitch 0.8 m behind the truck; it follows as a one-axle trailer (its far axle trails the hitch; pure kinematics, no new physics body). A driver in a hooked traffic car gets out and flees (the carjack eject). While towing: the truck accelerates and brakes as if its mass were its own plus 0.6 times the towed mass, with top speed capped at 26.8 m/s; t60 may rise by at most 35 % and stop by at most 25 %. Auto release: hitch angle over 75 degrees, the towed car destroyed, the truck wrecked, the player leaving. A released car keeps its speed and heading. Stopping for 2 s inside a tow yard spot with a car or hull hooked removes it and gives "Towed in" +300. Hooking a police car gives 2 stars. |
+
+Where they park at the start. `SERVICE_SPOTS` in servicevehicles.js is a hand-made list of
+`{ kind, x, z, heading, name }`; parked.js reads it through one coordinator line. Coordinates
+cannot be checked in this brief, so the list is made to these rules and test SV-P1 checks it
+against the city data:
+
+- Counts on Miami: 4 fire trucks, 4 ambulances, 3 garbage trucks, 3 tow trucks, 6 police cars.
+  On the classic island: one of each, placed by rule (seeded) on the largest parking lots.
+- Every spot is on a lot (parking, civic, industrial or yard type) or a marked kerb bay; never
+  on a carriageway, in a building footprint, in water, on a garage footprint (`city.garages`)
+  or on a beach. A clear box of the vehicle's length plus 2 m by its width plus 1.5 m; the
+  heading follows the bay or faces the lot's drive.
+- The spot is within 12 m of a drivable road node and the way out is at least 4 m wide (6 m
+  for the fire truck and the garbage truck).
+- One vehicle of each kind is within 600 m by road of `MIAMI_SPOTS.startView`; none is inside
+  the title shot (not within 60 m of it, and not in its view cone).
+- Two vehicles of the same kind are at least 400 m apart, except the two that share a station.
+- Homes, by kind. Fire: two fire houses, each a lot on a real street with a drive across the
+  pavement (one in Downtown, one in Little Havana or Wynwood), two trucks nose-out at the first
+  and one at the second, plus one at the Port. Ambulance: two at a hospital forecourt in the
+  health district north-west of Downtown, one at each fire house. Garbage: two in a city yard
+  on industrial land (Allapattah or the river industrial strip), one in a Wynwood back lot.
+  Tow: two in a tow yard on industrial land (this lot is also the "tow yard spot"), one on a
+  kerb bay in Brickell. Police: two at each of two station lots (Downtown and Little Havana),
+  two on kerb bays on Biscayne Boulevard and in Brickell. If a named district is outside the
+  playable box the nearest district inside it is used.
+- Venue names are invented (owner decision): for example "Harbour Fire House", "Calle Fire
+  House", "Tideline Medical Centre", "City Yard", "Sunline Towing". No real hospital, station
+  number, company or city department name; streets and districts stay real. A name is checked
+  against the map's real venue names before use (the D1 list in miami-spots.js).
+- A parked service vehicle that is driven away or wrecked comes back at its spot 300 s later,
+  when the spot is more than 250 m from the player.
+
+In traffic. A seeded share of ordinary traffic spawns inside the core: garbage truck 1.2 %
+(only between 05:00 and 15:00 game time), tow truck 1.0 %, ambulance 0.8 %, fire truck 0.5 %.
+At most 2 service vehicles alive in traffic at once, at most one of each kind, never spawned
+within 150 m of another. Police cars keep the patrol rules of police.js; V1 adds none. One in
+four ambulance or fire truck spawns is "on call": siren and lamps on, 1.3 times the lane
+speed, and traffic yields to it through B2's rule; this part ships only if B2's yield accepts
+an AI vehicle without change, otherwise it is dropped and listed in 2.7. The spawn share is
+one constant table read by traffic.js through the coordinator.
+
+Tests (test/service.test.js unless noted; ids are used in the V1 brief and in reviews):
+
+| id | asserts |
+|---|---|
+| SV-H1 | each of the four specs measures inside its `SERVICE_BANDS` row (r0, t60, top, stop) in both modes, boost off; police still inside its 6.3 row |
+| SV-H2 | lateral g at both test speeds inside `LAT_G_FACTOR` times grip; lock and return times inside `LOCK_TIME`, `RETURN_TIME`, `LOCK_TIME_FAST_MAX` |
+| SV-H3 | A1 to A5 and B1 to B4 pass for all four (A5 at the speeds above); no wheel unloads in the full lock turn at 0.8 times top speed |
+| SV-S1 | `spec.siren` true for police, ambulance, firetruck and false for the other two; the siren input toggles `v.sirenOn`; it is false after exit and after a wreck; the event carries `kind` |
+| SV-L1 | `lightbarPhase(id, t)` returns the lamp set of the table for every phase start, repeats with the stated cycle, and every phase length is a multiple of 50 ms; reduced motion returns the steady state |
+| SV-L2 | beacons of the garbage and tow truck are on exactly while lifting, towing or reversing and for 2 s after |
+| SV-C1 | cannon: the tank empties in 20 s of hold, refills in 40 s, and will not restart under 25 % after running dry |
+| SV-C2 | cannon: a person 20 m ahead is down within 0.5 s, moved along the jet, alive, with no blood entry, and standing again after 3 s; a person at 30 m is untouched |
+| SV-C3 | cannon: a burning hull 15 m ahead stops burning after 1.5 s of summed jet time, emits `hullBurn` off once, adds 150 to the score, and still fades at its 60 s |
+| SV-C4 | cannon: the jet turns to a target 30 degrees off the nose at no more than 90 degrees per second and ignores one at 40 degrees |
+| SV-A1 | treat: a body 6 m away is revived after 2.0 s at rest (body count down by one, a person at that place, +200); at 9 m nothing happens; moving off cancels; the 5 s cooldown holds |
+| SV-A2 | treat in hard mode: health reaches full in 2.0 s and rises 5 % per second while seated; with `settings.mortal` false health is untouched |
+| SV-G1 | lift: a bin 3 m away is emptied in a 3.0 s cycle (+50, load count up by one) and cannot be lifted again for 300 s; a bin at 5 m is ignored; driving off aborts and leaves the bin tipped |
+| SV-G2 | lift: with no bin, up to 3 parts within 4 m are removed (+20 each); the load cap of 20 refuses a lift until the yard stop empties it (+400) |
+| SV-T1 | hook: a 1450 kg car in the rear cone is attached after 1.0 s and follows the truck through a 90 degree corner staying within 1.2 m of the truck's path; a 7500 kg truck and a moving car are refused |
+| SV-T2 | hook: towing keeps t60 within 135 % and stop within 125 % of the solo values and caps speed at 26.8 m/s; a hitch angle over 75 degrees releases; release keeps the car's velocity |
+| SV-T3 | hook: a burnt hull can be towed; a 2 s stop in the tow yard spot removes it and adds 300; the hull count drops by one |
+| SV-X1 | every extra: does nothing when the vehicle is wrecked or driven by AI; the same seed and inputs give the same world hash after 600 steps; no extra is offered in a vehicle without `spec.extra` |
+| SV-P1 | every `SERVICE_SPOTS` entry obeys the parking rules against the built city (lot or bay, clear box, road within 12 m, spacing, one of each within 600 m of the start, counts as stated); names are not in the real venue list |
+| SV-P2 | traffic share: over 20,000 seeded spawns the four shares are within a quarter of their stated value, never more than 2 alive, never two of a kind, garbage trucks only between 05:00 and 15:00 |
+| SV-M1 (test/carmesh.test.js) | each service mesh is inside its triangle band: near 7,000 to 11,000 (firetruck and garbage up to 12,000), mid under 1,800, far under 400; the light bar adds at most 2 draw calls |
+
+Shots (scripts/service-shots.mjs): each of the five by day (front three-quarter, 8 m) and at
+night with lamps in a lit phase; the cannon spraying a burning hull; the bin at the top of
+the lift; a car on the hook in a corner; an ambulance beside a body before and after.
+
+### 6.12 HUD grid additions (B1, V1, U1; version 0.5.0)
+
+Same conventions as 6.5: `x, y, w, h` in CSS px, right-handed, all insets 0. With L = 40,
+left-anchored items move right by 40 and nothing else moves. This section adds to the 6.5
+table and, where it says so, replaces a row.
+
+Buttons and the meter:
+
+| item | 915x412 | 780x360 | modes | notes |
+|---|---|---|---|---|
+| BOOST | 843, 116, 56, 56 | 716, 88, 56, 56 | car, boat, plane, heli | Primary, hold. The cell above MORE, as B1 built it. Not in foot or tank mode. |
+| Boost meter | 100, 56, 88, 6 | 92, 52, 80, 6 | where BOOST shows | Display only, under the speed. With the health meter showing (hard mode): 100, 72, 88, 6 and 92, 68, 80, 6. In Full mode, under the clock: 100, 91, 88, 6 and 92, 85, 80, 6. It follows the speed readout when the minimap grows. Amber fill, pale while boosting, red after running dry. |
+| SIREN | 184, 292, 56, 56 | 164, 246, 56, 56 | car, only when `spec.siren` | Primary, tap to toggle, lit while on (`aria-pressed`). 8 px beside the steering slot on the side toward the screen centre, centred on the slot's height. It moves by L and mirrors with the steering slot. In a police helicopter, plane or tank the siren stays a fan item as today. |
+| EXTRA | 675, 272, 56, 56 | 564, 224, 56, 56 | car, only when `spec.extra` | Primary. The LOCK rect of 6.5. Caption per vehicle: WATER (hold), TREAT (tap), LIFT (tap), HOOK and DROP (tap). A 4 px fill bar along the bottom of the face shows tank, progress or cooldown. Dim (40 % opacity, still 56 px) when it cannot act now. |
+
+Why these places. The right cluster may not grow a fourth column: a cell left of LOCK (x 611
+at 915, 500 at 780) is clear right-handed, but left-handed with a 40 px inset it lands at x
+288 to 344 (264 to 320), inside the keep-out rect. So the hold button (EXTRA) takes the one
+free cell of the cluster and the tap button (SIREN) goes beside the wheel, where the left
+thumb reaches it while the right stays on GAS. With L = 40 SIREN ends at x 280 (260 at 780),
+left of the keep-out rect (329, 281); mirrored it starts at x 675 (560). It is 28 px or more
+above the prompt strip at both sizes and clear of the grown minimap.
+
+Collisions found in the 6.5 table and their fixes (U1 applies them and updates ui-test):
+
+1. SIREN on LOCK. B1 placed SIREN on the LOCK rect, and 6.5 allows LOCK in a car. Fix: SIREN
+   moves to the rect above; EXTRA owns the LOCK rect in car mode; LOCK is a foot-only button
+   (as touch.js already gates it) and the "Car and boat: everything above" line of 6.5 no
+   longer includes LOCK. If a drive-by lock is ever added it must find its own cell.
+2. GARAGE over pause. GARAGE and TALK are unslotted primaries; with BOOST showing they are
+   pushed one cell up to 843, 52 (716, 24) and overlap the pause button. Fix: they take the
+   BOOST cell (843, 116 and 716, 88). In a craft the offer is made only under 3 m/s, and BOOST
+   is hidden while the offer shows. No control may ever use the cell above BOOST.
+3. Fan against the keep-out rect at 780x360. Left-handed with L = 40 the third fan column
+   lands at x 240 to 296, inside the keep-out rect (from 281); in Full mode that is permanent.
+   The same column (x 524 to 580, y 88 to 144) also overlaps the top centre strip (to x 540).
+   Fix, 780x360 only: fan cells are 48 by 48 with 8 px gaps, columns at x 660, 604, 548, rows
+   at y 156 and 100. Mirrored with L = 40 the third column is then x 224 to 272. This replaces
+   the 780 half of the Fan row in 6.5. At 915x412 the fan is unchanged.
+4. Fan against the top centre strip, left-handed with L = 40 (both sizes): the old strip ran
+   down to y 136 and the mirrored fan's upper row starts at y 116 (100). Fixed by the stack
+   below, which ends at y 100.
+5. The weapon arc of plane and heli must not cover BOOST either (6.5 named only EXIT and
+   MORE); at 780x360 the arc box starts at y 140 and BOOST ends at y 144.
+
+Top centre stack (U1). It replaces the "Stars" and "District and toasts strip" rows of 6.5.
+The stack box is `290, 8, 335, 92` at 915x412 and `240, 8, 300, 92` at 780x360, centred on
+the viewport; it moves down by T only.
+
+THE ONE-LINE RULE: every item in the stack is one line of text in one pill of fixed height.
+Nothing wraps, long text ends in an ellipsis, each row shows at most one item at a time, and
+the stack is never taller than 92 px (it never passes y = 100 + T). Rows never move: an empty
+row stays empty, items below it do not slide up.
+
+| row | 915x412 | 780x360 | holds |
+|---|---|---|---|
+| Status, stars cell | 383, 8, 150, 24 | 315, 8, 150, 24 | wanted stars (5 badges; the fifth is used from 0.6.0), only while wanted |
+| Status, objective cell | 541, 8, 84, 24 | 473, 8, 67, 24 | objective arrow (rotates toward the target) and distance ("850 m", "1.2 km"); only while an objective is tracked; shown beside the stars, never instead of them |
+| Escape bar | 383, 33, 150, 4 | 315, 33, 150, 4 | the cooldown bar under the stars, only while the police have lost sight |
+| Message row 1 | 290, 40, 335, 28 | 240, 40, 300, 28 | police toast, else objective text, else district banner |
+| Message row 2 | 290, 72, 335, 28 | 240, 72, 300, 28 | tutorial hint, else score toast or any other toast |
+
+A message pill is as wide as its text, centred in its row, at most the row width. Text: 14
+px, weight 700 (district banner 15 px, upper case, letter spacing 0.08 em), white on
+`rgba(0, 0, 0, 0.6)`, radius 6, a 4 px accent bar on the left: red for police, amber for
+score, blue for hints, none for the banner and objective text.
+
+Priority and suppression:
+
+- Row 1, highest first: police toast ("Pulled over", "You lost them", a new star), 2 to 3 s;
+  objective text (a new or changed objective, the clue line), 4 s; district banner, 3 s. A
+  higher item replaces a lower one at once. A lower item that arrives while a higher one shows
+  waits up to 3 s and is dropped if the row is still taken (a district banner is never shown
+  late). While wanted, the district banner is not shown at all.
+- Row 2: a tutorial hint (4.5 s) beats toasts. While a hint shows, score toasts are dropped
+  (the score number still counts up) and other toasts wait, at most one waiting, the newest.
+  Without a hint, a new toast replaces the showing toast once that has been up 0.6 s; before
+  that it waits. Hints are not started while wanted or within 3 s of a police toast; the
+  tutorial keeps them in its own queue.
+- `hud.toast(text, seconds, kind)` gets a third argument: `'police'`, `'objective'`,
+  `'district'`, `'hint'`, `'score'` or `'info'` (default). The kind picks the row and the
+  priority. No caller positions its own text in the top centre any more: objective.js and
+  tutorial.js lose their own elements there.
+- Under `prefers-reduced-motion` items appear and vanish without the slide.
+- The old district "big title" (32 px high, 18 px text) is gone; the banner is a row 1 pill.
+
+Acceptance (U1, scripts/ui-test.mjs on the built game, 915x412 and 780x360, L = 0 and 40,
+right and left handed, Minimal and Full, fan open and closed):
+- HG-1: BOOST, the boost meter, SIREN (in a police car) and EXTRA (in a fire truck) sit within
+  2 px of the rects above; no overlap, gaps of 8 px or more between hit boxes, nothing in the
+  keep-out rect, every hit box 56 px or more (fan cells 48 or more).
+- HG-2: GARAGE offered in a car at rest takes the BOOST cell and BOOST is hidden; nothing ever
+  overlaps pause.
+- HG-3: with objective, district banner, 5 stars with the escape bar, a police toast, a score
+  toast and a tutorial hint all forced on in the same frame, the visible set is exactly: stars,
+  objective cell, escape bar, police toast (row 1), hint (row 2); every visible rect is inside
+  the stack box; zero overlaps; after the police toast ends the objective text takes row 1.
+- HG-4: a 200 character toast stays one line, inside its row, ending in an ellipsis.
+- HG-5: the stack box never overlaps the speed readout (minimap small or grown), the score,
+  the open fan or the Full mode ammo panel.
+
+### 6.13 Car go or no-go bar (W5 slice 1, the sedan)
+
+The first new car, the sedan, is built to this bar and judged before any other car is
+started. Every later car and the V1 service bodies are built with the same kit to the same
+bar. The shape is original: no real maker's grille, badge, lamp signature or model name.
+
+Measurable criteria (test/carmesh.test.js, scripts/vehicle-perf.mjs and
+scripts/vehicle-shots.mjs; all must pass, there is no partial credit):
+
+| id | criterion |
+|---|---|
+| CG-1 triangles | Near model 6,000 to 9,000 triangles with wheels and interior; mid model (from 40 m) 900 to 1,500; far model (from 120 m) 120 to 300. The interior is at most 600 of the near count, each wheel 250 to 450. |
+| CG-2 draw calls | One sedan at near detail is at most 4 draw calls (paint, glass, dark trim with tyres and interior, lamps); ten in view add at most 40. No material or shader program is made per car: colour is a per-instance or per-mesh value on shared materials. No texture larger than 512 px; the reflection map is shared by all cars. |
+| CG-3 build cost | Building the near mesh takes under 25 ms and a colour or damage change under 4 ms in headless Chromium at 4 times CPU slowdown; no allocation per frame once built. |
+| CG-4 silhouette at 50 m | The side-on mask of the car at 50 m (phone field of view, 915x412), reduced to a 32 by 16 bit grid, differs from the 0.4.0 sedan and from the current compact, van and pickup in at least 12 % of the bits (62 of 512). The side outline shows three steps: bonnet, cabin, boot; the cabin is shorter than the body by at least 18 % of the length at each end; both wheel arches cut the lower edge. |
+| CG-5 proportions | Length, width, height and wheelbase within 3 % of the spec; wheels sit within 3 cm of the arch centres; arch gap 4 to 8 cm; ground clearance 14 to 20 cm; the collision box is unchanged. |
+| CG-6 reflection | Paint: roughness 0.25 to 0.45 with a clear highlight, reflection strength 0.6 or more. In shot G1 the mean brightness of the bonnet and roof is at least 15 % above the door, and the door shows a sky to ground split (a brighter upper half) of at least 8 %. In shot G8 at least one street lamp highlight is on the body. |
+| CG-7 glass and interior | Glass is tinted and see-through (opacity 0.35 to 0.55), with its own highlight. Behind it: two front seats with head rests, a rear bench, a steering wheel on the left, a dash top. The driver figure is seen when the car is occupied. In shot G6 at least 5 % of the side window pixels differ from the flat glass colour by more than 24 of 255. |
+| CG-8 wheels | Tyre and rim are different colours; the rim has 5 or more spokes as geometry or relief and a centre set back 3 cm or more; 16 or more segments round at near detail (10 at mid). Wheels spin with speed and the fronts turn with the steering in the chase view. |
+| CG-9 panel detail | Seams for 4 doors, bonnet and boot read as dark lines at 10 m (grooves or lines 1.5 cm or wider); door handles, two mirrors, a grille, bumpers, head and tail lamps with a lens distinct from its housing, a number plate with an invented plate. Head, tail, brake, reverse and indicator lamps each light alone. |
+| CG-10 damage at 20 m | Four states: clean, light (a dented or scratched panel and one cracked lamp), heavy (bonnet raised 8 cm or more, a bumper hanging, broken glass, smoke), burnt hull. In shot G11 the changed pixels inside the car mask against the clean car (difference over 24 of 255) are at least 4 % for light, 10 % for heavy and 40 % for the hull. Dirt level 1 changes at least 3 %. |
+| CG-11 contact | A soft contact shadow under the car in every lit shot: the ground within 0.3 m of the sills is at least 20 % darker than the ground 2 m away. |
+| CG-12 frame cost | The street view with ten new sedans stays inside the 0.4.0 draw call and triangle limits of perf.mjs, and the simulation step is unchanged. |
+
+Screenshots the reviewer judges (scripts/vehicle-shots.mjs writes them as `go-<name>.png` at
+915x412, device pixel ratio 2, Normal quality, the car in a mid blue unless stated; "day" is
+12:00, "dusk" 18:30, "night" 22:00). Each has one pass phrase; the reviewer writes "pass",
+"weak" or "fail" beside it.
+
+| shot | camera and scene | pass phrase |
+|---|---|---|
+| G1 front-34-day | 6 m from the car, 1.5 m high, 35 degrees off the nose, day, on the start street | "I see a designed car, not a box: curved bonnet and roof, a grille, lamps with lenses, and the sky on the paint." |
+| G2 rear-34-day | 6 m, 1.5 m high, 35 degrees off the tail, day | "The back is as finished as the front: boot line, tail lamps, bumper, plate." |
+| G3 side-day | 8 m, 1.0 m high, square to the side, day | "Three clear volumes, four door seams, wheels filling their arches." |
+| G4 top-chase-day | the game's chase camera at rest and at 20 m/s in a turn, day | "This is the view I play in and the car looks good in it; the wheels turn and the body leans." |
+| G5 wheel-close | 2 m from the front wheel, 0.5 m high, day | "A tyre and a rim with spokes and depth, round, not a disc." |
+| G6 interior | 2.5 m from the driver's window, 1.3 m high, day, driver seated | "I can see seats, a wheel and a driver through tinted glass." |
+| G7 front-34-dusk | as G1 at dusk, low sun behind the camera | "Warm light rolls over the body; the edges catch it." |
+| G8 front-34-night | as G1 at night under a street lamp, head lamps on | "Lamps glow, the lamp post shows as a highlight, the car is not a black blob." |
+| G9 colours | five sedans in white, black, red, silver and mid blue, 10 m, day | "Every colour reads as paint; white is not blown out and black still shows its lines." |
+| G10 line-up-50m | the new sedan beside the old sedan, compact, van and pickup, side on at 50 m, day | "I can pick the new sedan by its outline alone." |
+| G11 damage-20m | clean, light, heavy and hull side by side at 20 m, three-quarter, day | "I can tell at a glance which is which." |
+| G12 street-day | ten new sedans in traffic on the start street with people on the pavement, day | "The cars are the right size for the doors, lanes and people, and the street looks like one game." |
+| G13 before-after | the 0.4.0 sedan and the new one, same camera as G1, side by side | "The new one is clearly a generation better." |
+
+Verdict. GO: CG-1 to CG-12 all pass, no shot is "fail", at most two are "weak", and G1, G4
+and G10 are "pass". NO-GO: anything else. After a no-go W5 gets one repair slice (at most 60k)
+against the named failures and is judged once more; a second no-go stops the car workstream,
+goes to the owner with the shots, and V1 builds on the old bodies until it is settled. After
+a GO the sedan's numbers become the reference: each later car must match CG-1 to CG-3, CG-5
+to CG-9 and CG-11, and the full set of nine must pass CG-4 pairwise.

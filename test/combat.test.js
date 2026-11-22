@@ -15,6 +15,7 @@ import {
 import {
   createCombat, damage, initActor, addActor, trace, createTraceResult, cylinderT,
   CAPS, HP, DOWN_T, OUT_LIE_T, FADE_T, PLAYER_DOWN_T, PLAYER_FADE_T, WRECK_T,
+  WRECK_LIE_T, WRECK_FADE_T, WRECK_MAX, WRECK_FLAME_T, BODY_LIE_T, BODY_MAX,
 } from '../src/systems/combat.js';
 
 const DT = 1 / 60;
@@ -615,7 +616,8 @@ test('people die outright: one bullet, one blast or one ram, and they never get 
     assert.ok(damage(game, crew, 1, null, kind) > 0);
     assert.equal(crew.hp, 0, `${kind} kills a full-health person`);
     assert.equal(crew.life, 'down');
-    steps(game, 60 * 12);
+    // Was 12 s (bodies faded after 3 s); bodies now lie BODY_LIE_T = 30 s.
+    steps(game, Math.round((DOWN_T + OUT_LIE_T + FADE_T) * 60) + 30);
     assert.equal(crew.life, 'out', `${kind}: lies there, no get-up`);
     assert.equal(crew.fade, 1, 'then fades');
     assert.equal(crew.hp, 0);
@@ -637,7 +639,9 @@ test('the player cannot be killed while RULES.invulnerable is on', () => {
   }
 });
 
-test('a destroyed car explodes, then the wreck is removed about 3 s later', () => {
+// Slice 1 of W6 (REVAMP 6.7 layer 9): the hull now lies WRECK_LIE_T = 60 s and
+// fades WRECK_FADE_T = 2 s (WRECK_T is the sum); it was 3 s in all.
+test('a destroyed car explodes, its hull lies 60 s, then sinks away and is removed', () => {
   const game = makeGame();
   const car = createVehicle('sedan', 30, 0, 0, null);
   game.vehicles.push(car);
@@ -647,9 +651,14 @@ test('a destroyed car explodes, then the wreck is removed about 3 s later', () =
   assert.ok(car.wrecked);
   assert.equal(ex.length, 1);
   assert.equal(ex[0].craft, car, 'the blast names the craft so debris can fly');
-  steps(game, Math.round((WRECK_T - 0.5) * 60));
-  assert.ok(!car.removed && game.vehicles.includes(car), 'still there before the delay');
-  steps(game, 60);
+  steps(game, 30 * 60);
+  assert.ok(!car.removed && game.vehicles.includes(car), 'the hull is still there 30 s after the blast');
+  assert.equal(car.wreckFade, 0, 'and not fading yet');
+  assert.ok(game.combat.hulls.includes(car));
+  steps(game, Math.round((WRECK_LIE_T - 30 + WRECK_FADE_T * 0.5) * 60));
+  assert.ok(car.wreckFade > 0.3 && car.wreckFade < 0.7 && car.y < -0.2, `sinking as it fades (${car.wreckFade}, y ${car.y})`);
+  assert.ok(!car.removed);
+  steps(game, Math.round(WRECK_FADE_T * 60));
   assert.ok(car.removed, 'removed');
   assert.ok(!game.vehicles.includes(car), 'gone from game.vehicles');
 });
@@ -679,7 +688,7 @@ test('the player is ejected from a destroyed car and never left stuck in a remov
   game.combat.damage(car, 1e5, null, 'blast');
   steps(game, 2);
   assert.equal(game.player.vehicle, null, 'ejected at the blast');
-  steps(game, 60 * 5);
+  steps(game, Math.round((WRECK_T + 1) * 60));
   assert.ok(car.removed);
   const w = game.player.walker;
   assert.ok(Number.isFinite(w.x) && Number.isFinite(w.z));
@@ -713,5 +722,93 @@ test('explosions kill and throw people in range, and chain blasts stay capped', 
   damage(game, cars[0], 1e5, null, 'blast');
   steps(game, 60 * 10);
   assert.ok(ex.length >= 2 && ex.length <= cars.length + 1, `${ex.length} blasts`);
+  // Hulls stay now, but never more than WRECK_MAX standing (not fading) at once.
+  const standing = cars.filter((c) => c.wrecked && !c.removed && c.wreckT !== undefined && c.wreckT < WRECK_LIE_T).length;
+  assert.ok(standing <= WRECK_MAX, `${standing} standing hulls`);
+  steps(game, Math.round((WRECK_T + 1) * 60));
   assert.ok(cars.every((c) => c.removed || !c.wrecked), cars.map((c) => [c.wrecked, c.removed, c.wreckT, c.exploded, c.health].join()).join(' | '));
+});
+
+test('hull cap: never more than 6 standing hulls; a seventh makes the oldest fade at once', () => {
+  const game = makeGame();
+  const removed = [];
+  game.removeVehicle = (v) => {
+    removed.push(v);
+    game.vehicles.splice(game.vehicles.indexOf(v), 1);
+    v.removed = true;
+  };
+  const flames = record(game, 'hullBurn');
+  const made = [];
+  let worst = 0;
+  for (let i = 0; i < 10; i++) {
+    const c = createVehicle('sedan', -200 + i * 40, 150, 0, null);
+    game.vehicles.push(c);
+    made.push(c);
+    damage(game, c, 1e5, null, 'blast');
+    for (let k = 0; k < 90; k++) {
+      steps(game, 1);
+      const n = game.vehicles.filter((v) => v.wrecked && v.wreckT !== undefined && v.wreckT < WRECK_LIE_T).length;
+      worst = Math.max(worst, n);
+    }
+  }
+  assert.ok(worst <= WRECK_MAX, `at most ${WRECK_MAX} standing hulls (saw ${worst})`);
+  assert.equal(worst, WRECK_MAX, 'the cap is reached');
+  assert.ok(removed[0] === made[0], 'the oldest went first');
+  assert.ok(!made[9].removed && made[9].wreckFade === 0, 'the newest stands');
+  // Flames on, then off after WRECK_FLAME_T s.
+  assert.ok(flames.some((e) => e.on && e.id === made[0].id));
+  steps(game, Math.round(WRECK_FLAME_T * 60) + 2);
+  assert.equal(made[9].hullFlame, false, 'flames die down after 12 s');
+});
+
+test('body cap: bodies lie 30 s, never more than 12 at once, the oldest fades early', () => {
+  assert.equal(BODY_LIE_T, 30);
+  assert.equal(OUT_LIE_T, BODY_LIE_T);
+  const game = makeGame();
+  const bodies = [];
+  let worst = 0;
+  for (let i = 0; i < 16; i++) {
+    const a = civ(game, i * 3, 40);
+    bodies.push(a);
+    damage(game, a, 100, null, 'bullet');
+    for (let k = 0; k < 60; k++) {
+      steps(game, 1);
+      const n = game.actors.filter((x) => x.life === 'out' && x.fade === 0 && x.team !== 'player').length;
+      worst = Math.max(worst, n);
+    }
+  }
+  assert.ok(worst <= BODY_MAX, `at most ${BODY_MAX} lying bodies (saw ${worst})`);
+  assert.equal(worst, BODY_MAX);
+  assert.ok(bodies[0].fade > 0, 'the oldest started fading early');
+  assert.equal(bodies[15].fade, 0, 'the newest still lies');
+  // A lone body lies the full 30 s.
+  const g2 = makeGame();
+  const b = civ(g2, 0, 0);
+  damage(g2, b, 100, null, 'bullet');
+  steps(g2, Math.round((DOWN_T + 29) * 60));
+  assert.equal(b.life, 'out');
+  assert.equal(b.fade, 0, 'still there 29 s after it went down');
+  steps(g2, Math.round((BODY_LIE_T - 29 + FADE_T) * 60) + 4);
+  assert.equal(b.fade, 1);
+});
+
+test('determinism: the same seed gives the same fight', () => {
+  const run = () => {
+    const game = makeGame({ seed: 77 });
+    const out = [];
+    const people = [];
+    for (let i = 0; i < 6; i++) people.push(civ(game, 4 + i * 2, (i % 3) - 1));
+    const a = shooter(game, -10, 0, 'smg', 'crew');
+    const car = createVehicle('sedan', 12, 3, 0, null);
+    game.vehicles.push(car);
+    for (let k = 0; k < 240; k++) {
+      if (k % 3 === 0) game.combat.fire(a, 1, 0, 0);
+      if (k === 60) damage(game, car, 1e5, null, 'blast');
+      steps(game, 1);
+    }
+    for (const p of people) out.push(p.life, p.x.toFixed(4), p.z.toFixed(4), (p.y || 0).toFixed(4), p.ragYaw.toFixed(4));
+    out.push(car.x.toFixed(4), car.z.toFixed(4), car.y.toFixed(4), car.tRoll.toFixed(4));
+    return out.join('|');
+  };
+  assert.equal(run(), run());
 });

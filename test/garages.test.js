@@ -18,7 +18,9 @@ import { createScore } from '../src/systems/score.js';
 import { createAdventures } from '../src/systems/adventures.js';
 import { createGarages, favouriteCar } from '../src/systems/garages.js';
 import { createVehicle } from '../src/entities/vehicle.js';
-import { EXPLORE_KEY } from '../src/core/explore.js';
+import { EXPLORE_KEY, defaultExplore, deriveExplore, saveExplore, storeCar } from '../src/core/explore.js';
+import { createExploreMeshes } from '../src/render/exploremesh.js';
+import { createVehicleMesh } from '../src/render/vehiclemesh.js';
 
 const DT = 1 / 60;
 const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
@@ -212,4 +214,180 @@ test('system: a locked garage cannot be used before its adventure', () => {
   assert.equal(game.garages.doorOpen(k), 0, 'the door stays shut');
   assert.equal(game.garages.open(k), false);
   assert.ok(!game.explore.state.garages.seen.includes('g-roads'));
+});
+
+// ---- K7, K8 and the cars inside the shed (docs/PLAN_V1.md G1) -------------------------------
+function rewardStore() {
+  const st = memory();
+  const ex = defaultExplore();
+  for (const id of ['a-sunchaser', 'a-tidewinder', 'a-nightheron']) { ex.adventures.seen.push(id); ex.adventures.done.push(id); }
+  deriveExplore(ex);
+  saveExplore(st, ex);
+  return st;
+}
+function boot(st) {
+  const game = fakeGame();
+  game.garage = [];
+  game.adventures = createAdventures(game, st);
+  game.garages = createGarages(game);
+  return game;
+}
+const idx = (game, spec) => game.explore.state.garages.cars.findIndex((c) => c.spec === spec);
+function visit(game, k) {
+  const g = garages[k];
+  at(game, g.door.x + Math.cos(g.heading) * 2, g.door.z + Math.sin(g.heading) * 2, 12);
+  game.garages.open(k);
+  return g;
+}
+
+test('K8: a reward car taken out of one garage is out in the others until stored or wrecked', () => {
+  const st = rewardStore();
+  const game = boot(st);
+  visit(game, 1);
+  const r = game.garages.takeOut(idx(game, 'sunchaser'));
+  assert.equal(r.ok, true);
+  const out = r.vehicle;
+  // Walk to a second garage: the same car shows as out and cannot be taken.
+  game.garages.close();
+  visit(game, 2);
+  assert.equal(game.garages.isOut('sunchaser'), true);
+  const n = game.vehicles.length;
+  assert.deepEqual(game.garages.takeOut(idx(game, 'sunchaser')), { ok: false, reason: 'out' });
+  assert.equal(game.vehicles.filter((v) => v.spec.id === 'sunchaser').length, 1, 'one copy in the world');
+  assert.equal(game.vehicles.length, n);
+  // Other reward cars still come out.
+  assert.equal(game.explore.state.garages.cars.filter((c) => c.reward).length, 3);
+  // Wrecked: gone for good, available again.
+  out.wrecked = true;
+  assert.equal(game.garages.isOut('sunchaser'), false);
+  const r2 = game.garages.takeOut(idx(game, 'sunchaser'));
+  assert.equal(r2.ok, true);
+  assert.notEqual(r2.vehicle, out);
+});
+
+test('K8: storing the reward car makes it available again; a reload keeps it out', () => {
+  const st = rewardStore();
+  let game = boot(st);
+  visit(game, 1);
+  const car = game.garages.takeOut(idx(game, 'tidewinder')).vehicle;
+  // Reload: the car is still on the road (the session brings it back).
+  game = boot(st);
+  assert.deepEqual(game.explore.state.garages.out, ['tidewinder']);
+  const back = createVehicle('tidewinder', 10, 10, 0, game.rng);
+  game.addVehicle(back);
+  visit(game, 2);
+  assert.equal(game.garages.isOut('tidewinder'), true);
+  assert.deepEqual(game.garages.takeOut(idx(game, 'tidewinder')), { ok: false, reason: 'out' });
+  // Driven into the garage and stored: it can come out again.
+  game.enterVehicle(back);
+  assert.equal(game.garages.store().ok, true);
+  assert.equal(game.garages.isOut('tidewinder'), false);
+  assert.equal(game.garages.takeOut(idx(game, 'tidewinder')).ok, true);
+  assert.ok(car);
+});
+
+test('K8: a reward car left in the left-behind cars still counts as out; with no copy anywhere it is free', () => {
+  const st = rewardStore();
+  const game = boot(st);
+  visit(game, 1);
+  const car = game.garages.takeOut(idx(game, 'nightheron')).vehicle;
+  game.garages.close();
+  game.removeVehicle(car);
+  game.garage.push({ spec: 'nightheron', color: car.color, health: 1, x: 5, z: 5, heading: 0, vehicle: null });
+  assert.equal(game.garages.isOut('nightheron'), true, 'parked far away, kept in the session list');
+  game.garage.length = 0;
+  assert.equal(game.garages.isOut('nightheron'), false, 'lost: back in the garages');
+});
+
+test('K8: driving a reward car that was never marked out marks it out', () => {
+  const st = rewardStore();
+  const game = boot(st);
+  const v = createVehicle('sunchaser', 0, 0, 0, game.rng);
+  game.addVehicle(v);
+  game.enterVehicle(v);
+  game.events.emit('enter', v);
+  assert.deepEqual(game.explore.state.garages.out, ['sunchaser']);
+});
+
+test('K7: the favourite car keeps its star after a reload and the live car is starred again', () => {
+  const st = memory();
+  let game = boot(st);
+  const g = garages[1];
+  const car = createVehicle('muscle', g.door.x, g.door.z, 0, game.rng);
+  game.addVehicle(car);
+  game.enterVehicle(car);
+  visit(game, 1);
+  assert.equal(game.garages.store().ok, true);
+  game.garages.favourite(0);
+  const out = game.garages.takeOut(0).vehicle;
+  assert.equal(out.fav, true);
+  // Cold start: new game object, same storage; the session restored an unstarred copy.
+  game = boot(st);
+  assert.equal(favouriteCar(game).spec, 'muscle', 'the title Start still uses it');
+  const again = createVehicle('muscle', 0, 0, 0, game.rng);
+  again.color = out.color;
+  game.addVehicle(again);
+  assert.ok(!again.fav);
+  at(game, 0, 0, 40);
+  assert.equal(again.fav, true, 'the star is back on the live car');
+  // Wrecked: the star is gone with it.
+  again.wrecked = true;
+  at(game, 0, 0, 40);
+  assert.equal(game.explore.state.garages.road, null);
+  assert.equal(favouriteCar(game), null);
+});
+
+test('shed: stored cars are drawn inside the open garage, only the nearest, up to four', () => {
+  const st = memory();
+  const ex = defaultExplore();
+  for (const s of ['sedan', 'muscle', 'sedan', 'muscle', 'sedan']) storeCar(ex, { spec: s, color: PAINT_COLORS[1], health: 1 });
+  saveExplore(st, ex);
+  const game = boot(st);
+  const calls = [];
+  game.garages.setMeshes({ setDoor() {}, setStored: (i, cars, n) => calls.push([i, cars.map((c) => c.spec).slice(0, n)]) });
+  const render = () => game.garages.render();
+  at(game, garages[1].door.x + 300, garages[1].door.z, 4);
+  render();
+  assert.deepEqual(calls, [], 'door shut and nobody near: nothing drawn');
+  const g = garages[1];
+  at(game, g.door.x + Math.cos(g.heading) * 10, g.door.z + Math.sin(g.heading) * 10, 30);
+  render();
+  assert.deepEqual(calls, [[1, ['sedan', 'muscle', 'sedan', 'muscle']]]);
+  render();
+  assert.equal(calls.length, 1, 'not rebuilt every frame');
+  storeCar(game.explore.state, { spec: 'sedan', color: PAINT_COLORS[2], health: 1 });
+  game.garages.fixedUpdate(DT);
+  render();
+  assert.equal(calls.length, 1, 'a fifth car is not drawn: same four');
+  game.explore.state.garages.cars.shift();
+  render();
+  assert.equal(calls.length, 2, 'rebuilt when the list changes');
+  at(game, g.door.x + 300, g.door.z, 120);
+  render();
+  assert.deepEqual(calls[calls.length - 1], [-1, []], 'door closed: cleared');
+  // The reward car out on the road is not shown inside.
+  assert.equal(game.garages.storedShown(), 0);
+});
+
+test('shed: the meshes put the cars inside the shed, facing the door, and clear them', () => {
+  const added = [];
+  const scene = { add: (o) => added.push(o) };
+  const gs = [garages[1]];
+  const m = createExploreMeshes(scene, { garages: gs, adventures: [], makeCar: (spec, color) => createVehicleMesh(spec, color) });
+  assert.equal(m.bay.visible, false);
+  m.setStored(0, [{ spec: 'sedan', color: PAINT_COLORS[0] }, { spec: 'muscle', color: PAINT_COLORS[4] }], 2);
+  assert.equal(m.bay.visible, true);
+  assert.equal(m.bay.children.length, 2);
+  const g = gs[0];
+  const ux = Math.cos(g.heading), uz = Math.sin(g.heading);
+  for (const c of m.bay.children) {
+    const dx = c.position.x - g.door.x, dz = c.position.z - g.door.z;
+    const along = dx * ux + dz * uz, across = -dx * uz + dz * ux;
+    assert.ok(along < -3 && along > -SHED_D + 1, 'inside the shed depth: ' + along);
+    assert.ok(Math.abs(across) < SHED_W / 2 - 1.5, 'inside the width: ' + across);
+  }
+  assert.notEqual(m.bay.children[0].position.z * 1e3 + m.bay.children[0].position.x, m.bay.children[1].position.z * 1e3 + m.bay.children[1].position.x);
+  m.setStored(-1, [], 0);
+  assert.equal(m.bay.children.length, 0);
+  assert.equal(m.bay.visible, false);
 });

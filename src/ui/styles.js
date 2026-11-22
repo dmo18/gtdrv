@@ -188,7 +188,7 @@ const CSS = `
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
 /* extra primaries other systems register without a slot: a column above MORE */
-.rw-extra { --x: var(--mx); --y: calc(var(--my) + 64px + var(--k, 0) * 64px); width: var(--ew); height: var(--ew); }
+.rw-extra { --x: calc(var(--mx) + var(--kx, 0) * 64px); --y: calc(var(--my) + 64px + var(--k, 0) * 64px); width: var(--ew); height: var(--ew); }
 .rw-slot { width: var(--ew); height: var(--ew); }
 /* HAND (car, boat), SWAP (foot): above BRAKE. RUN (foot): the BRAKE rect. */
 .rw-slot-hand { --x: 100px; --y: 108px; width: var(--ew); height: var(--ew); }

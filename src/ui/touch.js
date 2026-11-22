@@ -466,6 +466,7 @@ export function createTouchControls(root, input, opts = {}) {
   const actions = [];
   let fanOpen = false, fanTimer = 0, fanHeld = 0, hudFull = false;
   let fanDirty = true;
+  let extraShift = 0;
   const more = pri(makeButton('rw-more', 'More controls', 'more', '', () => {
     setFan(!fanOpen);
     armFan();
@@ -568,11 +569,13 @@ export function createTouchControls(root, input, opts = {}) {
     let n = 0, e = 0;
     // The fan is 3 columns by 2 rows (docs/REVAMP.md 6.5); slot actions
     // (HAND, SWAP, RUN, the weapon arc) have fixed rectangles of their own.
+    // BOOST owns the first cell above MORE: unslotted extras (GARAGE, TALK)
+    // slide one cell toward the screen centre (--kx) while it shows.
+    let kx = 0;
     for (const a of actions) {
-      // BOOST owns the first cell above MORE: unslotted extras (GARAGE, TALK)
-      // start one cell higher while it shows.
-      if (a.slot === 'boost' && a.vis && a.modes.includes(mode)) e = 1;
+      if (a.slot === 'boost' && a.vis && a.modes.includes(mode)) kx = 1;
     }
+    if (kx !== extraShift) { extraShift = kx; layer.style.setProperty('--kx', kx); }
     for (const a of actions) {
       if (!a.vis || !a.modes.includes(mode) || a.slot) continue;
       if (a.sec) {

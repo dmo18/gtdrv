@@ -313,7 +313,11 @@ if (only === 'all' || only === 'bombs') {
     }
     window.__fly(f, tx, tz, 500, 70, 70);
     const booms = [];
-    const off = g.events.on('explosion', (e) => booms.push({ x: e.x, z: e.z, r: e.radius, size: e.size }));
+    // Only blasts at the target count: wrecks now stay 60 s, so the police heli
+    // shot down above can still crash and blow up far away during this run.
+    const off = g.events.on('explosion', (e) => {
+      if (Math.hypot(e.x - tx, e.z - tz) < 80) booms.push({ x: e.x, z: e.z, r: e.radius, size: e.size });
+    });
     let dropped = false;
     let after = 0;
     for (let i = 0; i < 1500; i++) {

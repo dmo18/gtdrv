@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCombatFx, BLOOD_POOLS, BLOOD_SPLATS, DEBRIS_MAX } from '../src/render/combatfx.js';
+import { createCombatFx, BLOOD_POOLS, BLOOD_SPLATS, DEBRIS_MAX, POOL_LIFE } from '../src/render/combatfx.js';
 import { createEvents } from '../src/core/events.js';
 
 // With no scene (node) the effect system must still take every combat
@@ -45,17 +45,18 @@ function fxGame() {
   return { events, game, fx, run };
 }
 
-test('blood: a hit spatters, a death leaves a pool that fades after about 20 s', () => {
+// W6 slice 1: a pool lasts as long as its body (POOL_LIFE 31 s; it was 20 s).
+test('blood: a hit spatters, a death leaves a pool that lasts as long as the body', () => {
   const { events, fx, run } = fxGame();
   const t = { x: 4, z: 1, y: 0, hp: 0, team: 'civ' };
   events.emit('hit', { target: t, source: null, amount: 25, kind: 'bullet', x: 4, y: 1.1, z: 1 });
   assert.equal(fx.counts().blood, 1, 'one spatter on a hit');
   events.emit('down', { target: t, source: null, kind: 'bullet' });
   assert.ok(fx.counts().blood >= 3, 'pool plus spatters on death');
-  run(10);
-  assert.ok(fx.counts().blood >= 1, 'still there at 10 s');
-  run(12);
-  assert.equal(fx.counts().blood, 0, 'gone after about 20 s');
+  run(28);
+  assert.ok(fx.counts().blood >= 1, 'the pool is still there at 28 s');
+  run(POOL_LIFE - 28 + 0.5);
+  assert.equal(fx.counts().blood, 0, 'gone with the body');
 });
 
 test('blood decals are a hard-capped ring buffer', () => {

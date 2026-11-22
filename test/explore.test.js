@@ -300,3 +300,94 @@ test('adventure steps: seq in order, tour in any order, once each, needs first',
   assert.equal(completeStep(ex, mile, 1), 'step');
   assert.equal(track(ex, 'a-first-light'), false, 'only a seen adventure can be tracked');
 });
+
+// ---- K7 and K8 (docs/PLAN_V1.md G1) ---------------------------------------------------
+function withRewards() {
+  const ex = defaultExplore();
+  for (const id of Object.keys(REWARD_CARS)) {
+    ex.adventures.seen.push(id);
+    ex.adventures.done.push(id);
+  }
+  return deriveExplore(ex);
+}
+
+test('K7: the star of a favourite taken out survives save and load and a cold start', () => {
+  const ex = defaultExplore();
+  storeCar(ex, car('muscle'));
+  storeCar(ex, car('sedan'));
+  toggleFavourite(ex, 0);
+  const r = takeOut(ex, 0);
+  assert.equal(r.car.fav, true);
+  assert.equal(ex.garages.cars.length, 1, 'the favourite left the list');
+  assert.deepEqual(favourite(ex), { spec: 'muscle', color: VEHICLE_SPECS.muscle.colors[0], health: 1, reward: false });
+  const st = memory();
+  assert.equal(saveExplore(st, ex), true);
+  const back = loadExplore(st).state;
+  assert.equal(favourite(back).spec, 'muscle', 'the star is read back');
+  assert.deepEqual(back.garages.road, { spec: 'muscle', color: VEHICLE_SPECS.muscle.colors[0] });
+  // Stored again: the star moves into the list and the road record goes.
+  const live = { spec: VEHICLE_SPECS.muscle, color: back.garages.road.color, health: VEHICLE_SPECS.muscle.health, fav: true };
+  assert.equal(storeCar(back, live).ok, true);
+  assert.equal(back.garages.road, null);
+  assert.equal(back.garages.cars.filter((c) => c.fav).length, 1);
+  // Another star replaces it.
+  const ex2 = loadExplore(st).state;
+  toggleFavourite(ex2, storeCar(ex2, car('sedan')).index);
+  assert.equal(ex2.garages.road, null);
+  assert.equal(favourite(ex2).spec, 'sedan');
+});
+
+test('K7: the road star is sanitised: junk, reward cars, boats and bad colours are dropped', () => {
+  const ok = (road) => sanitizeExplore({ version: 1, garages: { road } }).garages.road;
+  assert.deepEqual(ok({ spec: 'sedan', color: 0xff0000 }), { spec: 'sedan', color: VEHICLE_SPECS.sedan.colors[0] });
+  assert.deepEqual(ok({ spec: 'sedan', color: PAINT_COLORS[3] }), { spec: 'sedan', color: PAINT_COLORS[3] });
+  for (const bad of [null, 'x', 5, [], { spec: 'speedboat', color: 0 }, { spec: 'jet' }, { spec: 'ghostwake' }, { spec: 'sunchaser', color: 0xff5a1f }, { spec: '__proto__' }]) {
+    assert.equal(ok(bad), null, JSON.stringify(bad));
+  }
+  assert.deepEqual(sanitizeExplore({ version: 1 }).garages.road, null);
+  assert.deepEqual(sanitizeExplore({ version: 1 }).garages.out, []);
+  // A star in the list wins over a road record.
+  const both = withRewards();
+  storeCar(both, car('sedan', { fav: true }));
+  both.garages.road = { spec: 'muscle', color: PAINT_COLORS[0] };
+  assert.equal(deriveExplore(both).garages.road, null);
+});
+
+test('K8: a reward car taken out cannot be taken out again until stored', () => {
+  const ex = withRewards();
+  const i = ex.garages.cars.findIndex((c) => c.spec === 'sunchaser');
+  const r = takeOut(ex, i);
+  assert.equal(r.ok, true);
+  assert.deepEqual(ex.garages.out, ['sunchaser']);
+  assert.ok(ex.garages.cars[i], 'its record stays in the collection');
+  assert.deepEqual(takeOut(ex, i), { ok: false, reason: 'out' }, 'a second copy is refused');
+  // Driving the very same car into a garage while it is not marked out: refused too.
+  const ex2 = withRewards();
+  const j = ex2.garages.cars.findIndex((c) => c.spec === 'tidewinder');
+  assert.deepEqual(takeOut(ex2, j, { spec: 'tidewinder', color: 0, health: 1 }), { ok: false, reason: 'out' });
+  assert.deepEqual(ex2.garages.out, []);
+  // Other reward cars and normal cars are not affected.
+  const k = ex.garages.cars.findIndex((c) => c.spec === 'nightheron');
+  assert.equal(takeOut(ex, k).ok, true);
+  // Stored again (driven back in): available once more.
+  assert.equal(storeCar(ex, { spec: 'sunchaser', color: VEHICLE_SPECS.sunchaser.colors[0], health: 1 }).ok, true);
+  assert.deepEqual(ex.garages.out, ['nightheron']);
+  assert.equal(takeOut(ex, i).ok, true);
+});
+
+test('K8: out reward cars survive a reload; a car that is out is not the favourite start car', () => {
+  const ex = withRewards();
+  const i = ex.garages.cars.findIndex((c) => c.spec === 'sunchaser');
+  toggleFavourite(ex, i);
+  assert.equal(favourite(ex).spec, 'sunchaser');
+  takeOut(ex, i);
+  assert.equal(favourite(ex), null, 'the one copy is on the road: Start does not make another');
+  const st = memory();
+  saveExplore(st, ex);
+  const back = loadExplore(st).state;
+  assert.deepEqual(back.garages.out, ['sunchaser']);
+  assert.deepEqual(takeOut(back, back.garages.cars.findIndex((c) => c.spec === 'sunchaser')), { ok: false, reason: 'out' });
+  // Junk and an adventure not done cannot mark a car out.
+  const junk = sanitizeExplore({ version: 1, garages: { out: ['sunchaser', 'sedan', 7, '__proto__'] } });
+  assert.deepEqual(junk.garages.out, [], 'no adventure done, no reward car');
+});

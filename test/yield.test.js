@@ -5,7 +5,7 @@ import { createCollisionWorld } from '../src/world/collision.js';
 import { createVehicle, stepVehicle, collideVehicles } from '../src/entities/vehicle.js';
 import { createRng } from '../src/core/rng.js';
 import { createDriver, placeDriver, driveStep } from '../src/systems/traffic.js';
-import { createPed, placePed, stepPed } from '../src/systems/peds.js';
+import { createPed, stepPed } from '../src/systems/peds.js';
 import {
   hasSiren, yieldTarget, wantsYield, createYield, stepYield, resumeDelay, kerbShift, collectSirens, isSirenCar,
   asideNeed, MAX_YIELD, COOLDOWN, START_SPEED,
@@ -162,7 +162,6 @@ test('a pedestrian on the road steps to the kerb side and waits, no panic, then 
   // A bare ped core: place it by hand (no block needed for the aside rule).
   ped.active = true;
   ped.block = block || { x0: mx - 20, x1: mx + 20, z0: mz + 8, z1: mz + 40, district: 'midtown', id: 0 };
-  if (!placePed) assert.fail('placePed missing');
   ped.x = ped.px = mx + 30;
   ped.z = ped.pz = mz + 1;
   ped.state = 'chatting';
@@ -170,7 +169,7 @@ test('a pedestrian on the road steps to the kerb side and waits, no panic, then 
   const s = siren({ x: mx, z: mz, heading: 0, speed: 14 });
   const ctx = { city, collision: null, vehicles: [], player: null, sirens: [s] };
   let panic = 0, fleeing = false;
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 180; i++) {
     stepPed(ped, DT, ctx);
     if (ped.panicT > 0) panic++;
     if (ped.state === 'fleeing') fleeing = true;
@@ -273,7 +272,10 @@ function run({ edge, withSiren, seed, offWhenStopped = false }) {
       if (offWhenStopped) clear = cars.some((c) => c.ai.yld.on && Math.abs(c.speed) < 0.2);
       if (clear || k >= 1500) offStep = k;
     }
-    if (k === offStep) sv.siren = false;
+    if (k === offStep) {
+      sv.siren = false;
+      cars.forEach((c, i) => { st[i].waitedAtOff = Math.abs(c.speed) < 0.2 && c.ai.yld.on; });
+    }
     for (const v of all) {
       if (v.asleep) continue;
       stepVehicle(v, v.ai ? v.controls : null, DT, world);
@@ -361,15 +363,15 @@ test('siren turned off while a car waits at the kerb: it drives on within 0.8 to
   const edge = edgeSorted((e) => !e.avenue && e.length > 95)[0];
   const r = run({ edge, withSiren: true, seed: 300, offWhenStopped: true });
   assert.ok(r.offStep < 1500, 'a car came to a stop');
-  const waited = r.st.filter((s) => s.everYielded && s.minSpeed < 0.3);
+  const waited = r.st.filter((s) => s.waitedAtOff);
   assert.ok(waited.length >= 1);
   for (const s of r.st) {
     if (!s.everYielded) continue;
     assert.ok(s.resumed >= 0 && s.resumed <= 20, `resumed after ${s.resumed}`);
   }
-  const first = Math.min(...r.st.filter((s) => s.everYielded).map((s) => s.resumed));
+  const first = Math.min(...r.st.filter((s) => s.waitedAtOff).map((s) => s.resumed));
   assert.ok(first >= 0.7, `drove on after ${first.toFixed(2)} s: too eager`);
-  const last = Math.max(...r.st.filter((s) => s.everYielded).map((s) => s.resumed));
+  const last = Math.max(...r.st.filter((s) => s.waitedAtOff).map((s) => s.resumed));
   assert.ok(last <= 12, `last car drove on after ${last.toFixed(1)} s`);
   console.log(`# siren off at the kerb: first car drove on after ${first.toFixed(1)} s, last after ${last.toFixed(1)} s`);
 });

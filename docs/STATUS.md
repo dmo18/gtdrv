@@ -28,6 +28,16 @@ the final review and fix stage; nothing is in progress that blocks play.
 - Calmer UI: a Minimal HUD (default) or Full HUD, one expanding "more"
   button, idle-shrinking controls, small minimap, full map with waypoint.
 - Camera views per craft: chase, far chase, bumper or cockpit.
+- BOOST (hold): one button above MORE for cars (turbo), boats (planing
+  surge), the Gannetfang (afterburner) and other planes and helicopters (short
+  thrust or speed surge); not on the tank or on foot. One meter: about 6 s of
+  boost, about 12 s to refill, and a 20 percent restart level after it runs
+  dry (`src/entities/boost.js`). Cars get 1.6 times engine force and up to 25
+  percent more top speed; grip, steering and brakes are untouched (tests in
+  `test/handling-bands.test.js` and `test/boost.test.js`). Flame at the tailpipes
+  (cars, boats), wider field of view and speed lines (off with Reduce motion),
+  a thin meter bar under the speed readout, a `boost` game event and a whoosh
+  and blow-off. Keyboard: N or Shift. Traffic, police and AI jets do not boost.
 - Saves score, medals, best times and settings in the browser.
 - Hard mode (Settings, "Hard: you can die", off by default): the player can
   be killed and respawns after the fade; a health meter under the minimap
@@ -529,3 +539,29 @@ None critical or high.
 - Not yet: the map draws explore markers as plain dots (no "?" glyph or
   ring circle until mapui offers a layer with those shapes); the garage
   shows no parked cars inside.
+
+## Sirens: traffic and pedestrians give way
+
+- The player's SIREN: in a car with `spec.police` (the Selwick Patrol spec now
+  carries the flag) or `spec.emergency` (read by `hasSiren`, no spec has it yet)
+  a SIREN button toggles `v.siren` (default off): light bar flashes, the audio
+  loop plays (it still needs `v.police` or `spec.police`). It sits on the LOCK
+  rect (675, 272 / 564, 224), which a car never uses; the touch action is
+  `carsiren` (input `siren`, `touch.setSiren(can, on)` called by police.js).
+  Leaving the car switches it off.
+- Traffic: `src/core/yield.js` (`yieldTarget`, `stepYield`, `kerbShift`). Any
+  vehicle with `siren` on and moving over 4 m/s (the player's, an AI police
+  car) makes AI cars up to 60 m ahead in the same or the neighbouring lane
+  (oncoming ones within 40 m) pull to the right kerb at up to 6 m/s, stop,
+  and drive off 0.8 to 1.8 s after it has passed or the siren goes off. Not
+  inside a junction or about to enter one; never held longer than 25 s, then
+  an 8 s cooldown. Hook in `driveStep` only; parked cars are never touched.
+- Pedestrians: within 25 m ahead of a siren car over 5 m/s, anybody closer than
+  5.2 m to its line walks to the kerb side and waits 1.2 s after it passes. No
+  panic, no heat.
+- Tests: test/yield.test.js (16). Street run: 4 cars pulled over, no impact,
+  2 came to a full stop; avenue run: 6 cars, 3 full stops; siren off while a car
+  waits: it drives on after 2.7 s; longest hold 4.7 s; no deadlock, no NaN, no
+  car in water or a building, no parked car woken.
+- Not yet: no indicator blink (the meshes have no per-side signal); the audio
+  siren ignores emergency specs without `police`.

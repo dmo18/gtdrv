@@ -32,7 +32,7 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export function defaultExplore() {
   return {
     version: EXPLORE_VERSION,
-    garages: { found: [], seen: [], cars: [], last: null },
+    garages: { found: [], seen: [], cars: [], last: null, out: [], road: null },
     adventures: { seen: [], done: [], step: {}, tracked: null },
     cells: '',
   };
@@ -155,6 +155,19 @@ function cleanCar(raw) {
   return c;
 }
 
+// The favourite taken out of a garage: it leaves the list, so the star is
+// kept as { spec, color } until the car is stored again (or another star is
+// set). Reward cars never come here (their record stays in the list).
+function cleanRoad(raw) {
+  if (!isObj(raw)) return null;
+  const c = cleanCar({ spec: raw.spec, color: raw.color, health: 1 });
+  if (!c || c.reward) return null;
+  return { spec: c.spec, color: c.color };
+}
+
+// Reward car out on the road: one copy only (docs/PLAN_V1.md K8).
+export const isRewardOut = (ex, spec) => ex.garages.out.includes(spec);
+
 // Rebuild the derived parts from `done`: locked garages, reward cars,
 // steps, tracking. Changes `ex` in place and returns it.
 export function deriveExplore(ex) {
@@ -196,6 +209,10 @@ export function deriveExplore(ex) {
     else c.fav = false;
   }
   G.cars = cars;
+  // Reward cars out on the road: only ones that are in the collection.
+  G.out = G.out.filter((spec, i) => G.out.indexOf(spec) === i && cars.some((c) => c.reward && c.spec === spec));
+  // One star: a favourite in the list means none out on the road.
+  if (fav) G.road = null;
   // Steps only for seen and not done, clamped to the step count.
   const step = {};
   for (const id of A.seen) {
@@ -235,6 +252,8 @@ export function readExplore(raw) {
         if (c) G.cars.push(c);
       }
     }
+    G.out = has(g, 'out') && Array.isArray(g.out) ? g.out.slice(0, MAX_SCAN).filter((v) => isRewardSpec(v)) : [];
+    G.road = has(g, 'road') ? cleanRoad(g.road) : null;
     G.last = has(g, 'last') && typeof g.last === 'string' && GARAGE_IDS.includes(g.last) ? g.last : null;
     A.seen = idList(has(a, 'seen') ? a.seen : null, ADVENTURE_IDS);
     A.done = idList(has(a, 'done') ? a.done : null, ADVENTURE_IDS);
@@ -334,12 +353,16 @@ export function storeCar(ex, src) {
     const i = ex.garages.cars.findIndex((c) => c.spec === rec.spec);
     if (i >= 0) {
       ex.garages.cars[i].color = rec.color;
+      ex.garages.out = ex.garages.out.filter((o) => o !== rec.spec);
       return { ok: true, index: i };
     }
     return { ok: false, reason: 'not-a-car' };
   }
   if (ex.garages.cars.length >= GARAGE_CARS_MAX) return { ok: false, reason: 'full' };
-  if (rec.fav) for (const c of ex.garages.cars) c.fav = false;
+  if (rec.fav) {
+    for (const c of ex.garages.cars) c.fav = false;
+    ex.garages.road = null;
+  }
   ex.garages.cars.push(rec);
   return { ok: true, index: ex.garages.cars.length - 1 };
 }
@@ -351,18 +374,25 @@ export function takeOut(ex, index, arriving = null) {
   const cars = ex.garages.cars;
   if (!Number.isInteger(index) || index < 0 || index >= cars.length) return { ok: false, reason: 'no-car' };
   const pick = cars[index];
+  const arr = arriving ? carRecord(arriving) : null;
+  // A reward car has one copy: out on the road already, or the very car
+  // being driven in, it cannot be taken out again.
+  if (pick.reward && (ex.garages.out.includes(pick.spec) || (arr && arr.spec === pick.spec))) return { ok: false, reason: 'out' };
   let left = false;
   let stored = false;
-  const arr = arriving ? carRecord(arriving) : null;
   // The picked car leaves the list (reward cars stay: they are always in
-  // the collection, the one on the road is the same car).
+  // the collection, the one on the road is the same car, marked out).
   if (!pick.reward) cars.splice(index, 1);
+  else ex.garages.out.push(pick.spec);
   if (arr) {
     const r = storeCar(ex, arriving);
     if (r.ok) stored = true;
     else left = true;
   }
-  return { ok: true, car: { spec: pick.spec, color: pick.color, health: 1, fav: pick.fav, reward: pick.reward }, stored, left };
+  // One star only: an arriving favourite stored just now keeps it.
+  const fav = pick.fav && !(stored && arr.fav);
+  if (!pick.reward && fav) ex.garages.road = { spec: pick.spec, color: pick.color };
+  return { ok: true, car: { spec: pick.spec, color: pick.color, health: 1, fav, reward: pick.reward }, stored, left };
 }
 
 export function repaint(ex, index, color) {
@@ -381,6 +411,7 @@ export function toggleFavourite(ex, index) {
   const on = !c.fav;
   for (const o of cars) o.fav = false;
   c.fav = on;
+  if (on) ex.garages.road = null;
   return { ok: true, fav: on };
 }
 
@@ -393,8 +424,11 @@ export function release(ex, index) {
 }
 
 export function favourite(ex) {
-  for (const c of ex.garages.cars) if (c.fav) return { spec: c.spec, color: c.color, health: 1, reward: c.reward };
-  return null;
+  for (const c of ex.garages.cars) {
+    if (c.fav && !(c.reward && ex.garages.out.includes(c.spec))) return { spec: c.spec, color: c.color, health: 1, reward: c.reward };
+  }
+  const r = ex.garages.road;
+  return r ? { spec: r.spec, color: r.color, health: 1, reward: false } : null;
 }
 
 // ---- garages and adventures -------------------------------------------------

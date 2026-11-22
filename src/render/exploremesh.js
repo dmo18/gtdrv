@@ -9,6 +9,7 @@ import { MeshBuilder } from './meshbuilder.js';
 import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from './personmesh.js';
 import { SHED_W, SHED_D, SHED_H } from '../world/garages.js';
 import { ADV_TALKERS_MAX } from '../world/adventures.js';
+import { specOf } from '../core/garage.js';
 
 let stdMat = null, glowMat = null;
 function mats() {
@@ -20,6 +21,9 @@ function mats() {
 }
 
 const DOOR_TOP = 3.6;
+// Where stored cars stand inside a shed: [x along the door axis (negative =
+// inside), z across, extra heading]. Shed interior is 9.2 m wide, 13.6 deep.
+const STORE_SLOTS = [[-5.2, -2.2, 0.08], [-5.2, 2.2, -0.06], [-10.2, -2.2, -0.04], [-10.2, 2.2, 0.05]];
 // Wall and trim colours, one of a few per garage (by its index).
 const SKINS = [
   [0x8e8a80, 0x6f6c66, 0xc2452d], [0x7b8794, 0x5d6772, 0xe0a526], [0x9b8f7a, 0x77705f, 0x2c7a7b],
@@ -93,7 +97,9 @@ function buildPad(s, k, g) {
 }
 
 // Returns { root, setDoor(index, open 0..1), update(dt, talkers, time) }.
-export function createExploreMeshes(scene, { garages = [], adventures = [] }) {
+// `makeCar(spec, color)` builds one car mesh (the public create function of
+// the car kind); without it no stored cars are drawn.
+export function createExploreMeshes(scene, { garages = [], adventures = [], makeCar = null }) {
   const M = mats();
   const root = new THREE.Group();
   root.name = 'explore';
@@ -135,8 +141,44 @@ export function createExploreMeshes(scene, { garages = [], adventures = [] }) {
     people.push(mesh);
   }
   scene.add(root);
+  // Stored cars inside the open garage: at most STORE_MAX, in two rows
+  // facing the door. Built when the list or the garage changes, never per frame.
+  const bay = new THREE.Group();
+  bay.name = 'garage-cars';
+  bay.visible = false;
+  root.add(bay);
+  const bayMeshes = [];
+  const clearBay = () => {
+    for (const m of bayMeshes) bay.remove(m);
+    bayMeshes.length = 0;
+    bay.visible = false;
+  };
   return {
     root,
+    bay,
+    // Garage `i` (or -1 for none) shows `n` of `cars` ({ spec, color }).
+    setStored(i, cars, n) {
+      clearBay();
+      const g = garages[i];
+      if (!g || !makeCar || n <= 0) return;
+      const ux = Math.cos(g.heading), uz = Math.sin(g.heading);
+      const px = -uz, pz = ux;
+      const count = Math.min(n, STORE_SLOTS.length);
+      // Two cars sit side by side in the front row; more go behind them.
+      for (let k = 0; k < count; k++) {
+        const spec = specOf(cars[k].spec);
+        if (!spec) continue;
+        const slot = STORE_SLOTS[k];
+        const m = makeCar(spec, cars[k].color);
+        if (!m) continue;
+        const lx = slot[0], lz = slot[1];
+        m.position.set(g.door.x + ux * lx + px * lz, 0, g.door.z + uz * lx + pz * lz);
+        m.rotation.set(0, -(g.heading + slot[2]), 0);
+        bay.add(m);
+        bayMeshes.push(m);
+      }
+      bay.visible = bayMeshes.length > 0;
+    },
     setDoor(i, open) {
       const d = doors[i];
       if (d) d.scale.y = Math.max(0.04, 1 - open * 0.96);
