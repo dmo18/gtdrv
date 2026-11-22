@@ -334,7 +334,7 @@ const CSS = `
 
 /* ---------- HUD (docs/REVAMP.md 6.5) ---------- */
 /* Every HUD text sits on its own dark pill: white on rgba(0,0,0,0.6) is at least 4.8 to 1 over any sky. */
-.rw-hud { z-index: 21; pointer-events: none; --map: 84px; --map-big: 170px; --mapw: var(--map); }
+.rw-hud { z-index: 21; pointer-events: none; --map: 84px; --map-big: 170px; --mapw: var(--map); --spw: 88px; }
 .rw-hud.rw-mapbig { --mapw: var(--map-big); }
 .rw-hud .rw-tl { position: absolute; left: calc(var(--rw-sl) + 8px); top: calc(var(--rw-st) + 8px); width: var(--mapw); transition: width 0.16s ease; }
 .rw-minimap {
@@ -465,7 +465,7 @@ const CSS = `
 @keyframes rw-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rw-msg.rw-in { animation: none; } }
 /* with the minimap grown the speed readout reaches further right: keep long lines clear of it */
-.rw-mapbig .rw-msg { max-width: calc(100vw - 2 * (var(--rw-sl) + 24px + var(--mapw) + 88px)); }
+.rw-mapbig .rw-msg { max-width: calc(100vw - 2 * (var(--rw-sl) + 24px + var(--mapw) + var(--spw))); }
 
 /* prompt strip: centred, under the keep-out rect */
 .rw-prompt {
@@ -552,7 +552,7 @@ const CSS = `
 .rw-cfade-text.rw-on { opacity: 1; }
 
 @media (max-height: 380px) {
-  .rw-hud { --map: 76px; --map-big: 140px; }
+  .rw-hud { --map: 76px; --map-big: 140px; --spw: 80px; }
   .rw-speedbox, .rw-hpmeter, .rw-clock { width: 80px; }
   .rw-speedbox { height: 40px; padding-top: 2px; }
   .rw-speed { font-size: 28px; line-height: 32px; height: 32px; }
