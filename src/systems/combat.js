@@ -1829,7 +1829,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       }
       if (c.wrecked || c.removed || !(c.combatHit || sys.burnAll)) continue;
       const max = (c.spec && c.spec.health) || 1000;
-      if (c.health < max * BURN_BELOW && burningCount < CAPS.burning && (c.chainDepth || 0) <= MAX_DEPTH) {
+      if (c.health < max * BURN_BELOW && burningCount < CAPS.burning && (c.chainDepth || 0) <= MAX_DEPTH && !c.doused) {
         c.burning = true;
         c.burnT = 0;
         if (c.kind === 'car') c.onFire = true;
@@ -1889,7 +1889,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const c = vs[i];
       if (!c || !c.wrecked || c.removed) continue;
       if (c.wreckT === undefined) continue; // the blast has not happened yet
-      hullFlame(c, c.wreckT < WRECK_FLAME_T);
+      hullFlame(c, c.wreckT < WRECK_FLAME_T && !c.doused); // doused: put out by a fire truck (src/systems/service.js)
       const fade = c.wreckT <= WRECK_LIE_T ? 0 : Math.min(1, (c.wreckT - WRECK_LIE_T) / WRECK_FADE_T);
       if (fade > 0 && !(p && p.vehicle === c) && !c.tossing) {
         // Sink into the ground as it fades (cheaper than see-through paint).

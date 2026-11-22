@@ -386,6 +386,22 @@ export function createCombatFx(game) {
       bloodMesh.visible = true;
     }
   }
+  // A body revived by an ambulance (src/systems/service.js): its pool and
+  // spatters within 2.5 m go at once.
+  function onRevived(e) {
+    if (!e) return;
+    for (let i = 0; i < BLOOD; i++) {
+      if (bt[i] < -1e8 || Math.hypot(bx[i] - e.x, bz[i] - e.z) > 2.5) continue;
+      bt[i] = -1e9;
+      if (bloodMesh) {
+        _m.makeScale(0, 0, 0);
+        bloodMesh.setMatrixAt(i, _m);
+        bloodOp.array[i] = 0;
+        bloodOp.needsUpdate = true;
+        bloodMesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
   function stepBlood() {
     let dirty = false;
     for (let i = 0; i < BLOOD; i++) {
@@ -970,7 +986,7 @@ export function createCombatFx(game) {
 
   // ---- burnt hulls (combat.hulls): flames for the first 12 s, smoke the
   // whole 60 s, thinning as the hull cools and sinks away ----
-  const HULL_FLAME_T = 12;
+  const HULL_FLAME_T = 12, STEAM_T = 4;
   function stepHulls(dt, qq) {
     const list = game.combat && game.combat.hulls;
     if (!list) return;
@@ -983,7 +999,10 @@ export function createCombatFx(game) {
       const len = (sp.length || 4) * 0.5, wid = (sp.width || 1.8) * 0.5, h = sp.height || 1.4;
       const ch = Math.cos(c.heading || 0), sh = Math.sin(c.heading || 0);
       const top = (c.y || 0) + h * 0.75;
-      const hot = t < HULL_FLAME_T ? 1 - t / HULL_FLAME_T : 0;
+      const hot = t < HULL_FLAME_T && !c.doused ? 1 - t / HULL_FLAME_T : 0;
+      // Put out by a fire truck (src/systems/service.js): white steam for
+      // STEAM_T s, then the thin grey column.
+      const steam = c.doused && t - (c.dousedWreck || 0) < STEAM_T ? 1 - (t - (c.dousedWreck || 0)) / STEAM_T : 0;
       if (hot > 0) {
         // Flames licking out of the cabin and engine bay, a warm glow under them.
         c.fxFlame = (c.fxFlame || 0) + dt * (6 + 22 * hot) * qq;
@@ -1001,11 +1020,11 @@ export function createCombatFx(game) {
       }
       // Smoke: thick and black while it burns, then a grey column that
       // thins as the hull cools and sinks away.
-      const rate = (2.6 + 6 * hot) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
+      const rate = (c.doused ? 1.2 + 7 * steam : 2.6 + 6 * hot) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
       c.fxSmoke = (c.fxSmoke || 0) + dt * rate;
       while (c.fxSmoke >= 1) {
         c.fxSmoke -= 1;
-        const g = hot > 0 ? 0.06 + rnd() * 0.06 : 0.16 + rnd() * 0.12;
+        const g = steam > 0 ? 0.85 + rnd() * 0.12 : hot > 0 ? 0.06 + rnd() * 0.06 : 0.16 + rnd() * 0.12;
         const life = hot > 0 ? 4.5 + rnd() * 2.5 : 5 + rnd() * 2.5;
         const j = alpha(c.x + rs() * len * 0.5, top, c.z + rs() * wid * 0.6, rs() * 0.4 + 0.3, 1.5 + rnd() * 1.2 + hot * 1.6, rs() * 0.4, life, 1.4 + hot, 5.5 + hot * 3, 0.55 + 0.25 * hot, g, g, g * 1.05, PUFF, -0.06, 0.4, 0.1);
         if (j >= 0) S.rotV[j] = rs() * 0.3;
@@ -1134,6 +1153,7 @@ export function createCombatFx(game) {
     on('burning', onBurning);
     on('sticky', onSticky);
     on('splash', onSplash);
+    on('revived', onRevived);
   }
 
   // Thrown cars: tumble and lift the mesh (the sim keeps `tRoll`, `tPitch`

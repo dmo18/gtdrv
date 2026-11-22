@@ -537,6 +537,7 @@ export function createTouchControls(root, input, opts = {}) {
     b.classList.toggle('rw-off', !a.vis);
     actions.push(a);
     fanDirty = true;
+    refreshActions(); // BOOST yields its cell at once to a new offer
     return {
       id: a.id,
       el: b,
@@ -546,6 +547,7 @@ export function createTouchControls(root, input, opts = {}) {
         actions.splice(i, 1);
         b.remove();
         fanDirty = true;
+        refreshActions();
       },
     };
   }

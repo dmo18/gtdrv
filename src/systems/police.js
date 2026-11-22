@@ -1176,7 +1176,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   // toggles v.siren; the flag drives the lights, the audio loop and the traffic
   // and pedestrians that get out of the way (src/core/yield.js). Off by default,
   // and off again when the player leaves the car.
-  const sirenEv = { craft: null, on: false };
+  const sirenEv = { craft: null, on: false, kind: '' };
   let ownSirenCar = null;
   function stepOwnSiren() {
     const pv = game.player.vehicle;
@@ -1188,15 +1188,18 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         old.siren = false;
         sirenEv.craft = old;
         sirenEv.on = false;
+        sirenEv.kind = old.spec ? old.spec.id : '';
         if (ev && ev.emit) ev.emit('siren', sirenEv);
       }
     }
     const input = game.input;
     if (can && input && input.consume && input.consume('siren')) {
       pv.siren = !pv.siren;
+      pv.onCall = false;
       ownSirenCar = pv.siren ? pv : null;
       sirenEv.craft = pv;
       sirenEv.on = pv.siren;
+      sirenEv.kind = pv.spec.id; // which siren sounds (docs/REVAMP.md 6.11 SIRENS)
       if (ev && ev.emit) ev.emit('siren', sirenEv);
     }
     if (game.touch && game.touch.setSiren) game.touch.setSiren(can, can && !!pv.siren);

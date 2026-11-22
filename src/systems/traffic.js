@@ -12,8 +12,9 @@
 import { lanePoint, lanesPerDirection, laneOffset, signalState } from '../world/citygen.js';
 import { createVehicle, steerLock } from '../entities/vehicle.js';
 import { exitPosition } from '../entities/onfoot.js';
-import { clamp } from '../core/rng.js';
+import { clamp, createRng } from '../core/rng.js';
 import { createYield, stepYield, kerbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
+import { pickTrafficService, onCallDraw, TRAFFIC_RULES } from '../entities/servicevehicles.js';
 
 const K = 12; // interior samples of the junction path
 const NPTS = K + 4; // A, B, K samples, C, D
@@ -737,6 +738,10 @@ export function createTraffic(game, { max = 14 } = {}) {
   const sirens = [];
   const ctx = { time: 0, vehicles: game.vehicles, sirens };
   let nearTimer = 0, spawnTimer = 0;
+  // Service vehicles in traffic (docs/REVAMP.md 6.11): their own seeded
+  // draw per spawn, so the ordinary mix keeps its random sequence.
+  const svcRng = createRng(61101);
+  const svcAlive = [];
 
   const cap = () => {
     const q = game.quality;
@@ -747,6 +752,7 @@ export function createTraffic(game, { max = 14 } = {}) {
     v.ai = null;
     v.traffic = false;
     v.controls = null;
+    if (v.onCall) { v.siren = false; v.onCall = false; }
   }
 
   // The driver gets out and runs as a pedestrian (task 27): pulled out
@@ -834,9 +840,19 @@ export function createTraffic(game, { max = 14 } = {}) {
     const e = city.edges[be];
     lanePoint(city, e, bf, bd, bl, LP);
     const kinds = MIX[city.districtOf(LP.x, LP.z)] || MIX.midtown;
-    const v = createVehicle(rng.pick(kinds), LP.x, LP.z, LP.heading, rng);
+    svcAlive.length = 0;
+    for (let i = 0; i < cars.length; i++) if (cars[i].spec.service && !cars[i].removed) svcAlive.push(cars[i]);
+    const svc = pickTrafficService(svcRng, game.clock, svcAlive, LP.x, LP.z, city.inCore ? city.inCore(LP.x, LP.z) : true);
+    const v = createVehicle(svc || rng.pick(kinds), LP.x, LP.z, LP.heading, rng);
     const dr = createDriver(city, rng);
     placeDriver(dr, v, be, bf, bd, bl);
+    // One in four ambulance or fire truck spawns is on call: siren and
+    // lamps on, faster, and traffic gives way (src/core/yield.js).
+    if (svc && onCallDraw(svc, svcRng.next())) {
+      v.siren = true;
+      v.onCall = true;
+      dr.speedFactor *= TRAFFIC_RULES.onCallSpeed;
+    }
     const v0 = Math.min(laneSpeedOf(e) * dr.speedFactor, v.spec.maxSpeed * 0.8);
     v.vx = Math.cos(v.heading) * v0;
     v.vz = Math.sin(v.heading) * v0;
@@ -953,8 +969,8 @@ export function createTraffic(game, { max = 14 } = {}) {
         }
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         const dr = v.ai;
-        // Shot at, burning or wrecked: stop, get out and run.
-        if (v.combatHit || v.burning || v.wrecked) {
+        // Shot at, burning, wrecked or on a tow hook: stop, get out and run.
+        if (v.combatHit || v.burning || v.wrecked || v.towed) {
           dr.dead = true;
           driveStep(dr, v, dt, ctx); // handbrake on
           if (Math.abs(v.speed) < 2.5 || v.wrecked) {

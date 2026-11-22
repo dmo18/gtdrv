@@ -4,6 +4,8 @@
 // measurements use `stepVehicle` at 1/60 s on dry ground with no wind,
 // starting from rest or from a settled speed.
 
+import { SERVICE_BANDS } from './servicevehicles.js'; // V1: the four service vehicles (6.11)
+
 export const MODES = ['arcade', 'sim']; // settings.handling, default 'arcade'
 export const LAT_G_FACTOR = { arcade: [1.00, 1.12], sim: [0.88, 1.00] }; // times spec.grip
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
@@ -28,6 +30,7 @@ export const BANDS = { // [min, max]
   sunchaser: { r0: [5.0, 6.5], t60: [4.6, 5.6], top: [135, 150], stop: [34, 42] },
   tidewinder: { r0: [6.0, 7.5], t60: [8, 10], top: [102, 115], stop: [36, 44] },
   nightheron: { r0: [5.0, 6.5], t60: [5.5, 7], top: [122, 135], stop: [34, 42] },
+  ...SERVICE_BANDS,
 };
 // r0: radius (m) of the path of the car's centre at 2 m/s on full lock.
 // t60: s from rest to 26.82 m/s. top: mph, reached within 90 s. stop: m from 26.82 m/s to rest.

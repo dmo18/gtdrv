@@ -594,7 +594,7 @@ export function createAudio(game) {
     if (want && !horn) {
       const id = c.spec && c.spec.id;
       const h = hashId(id);
-      const deep = c.kind === 'boat' || id === 'truck' || id === 'van';
+      const deep = c.kind === 'boat' || id === 'truck' || id === 'van' || !!(c.spec && c.spec.service); // the fire truck's air horn: hornB is 155 and 196 Hz
       const rate = c.kind === 'boat' ? 0.78 : deep ? 0.96 + (h % 5) * 0.03 : 0.9 + (h % 7) * 0.035;
       const g = gainNode(0, bus.effects);
       const s = loopSrc(deep ? 'hornB' : 'hornA', g, rate);
@@ -738,23 +738,30 @@ export function createAudio(game) {
     const gy = gainNode(0, lp);
     const sw = loopSrc('sirenWail', gw, 1);
     const sy = loopSrc('sirenYelp', gy, 1);
-    siren = { pan, out, lp, gw, gy, sw, sy, phase: 0 };
+    // The ambulance's two-tone hi-lo (docs/REVAMP.md 6.11 SIRENS): a square
+    // tone stepped between 960 and 770 Hz every 0.5 s of game time.
+    const gh = gainNode(0, lp);
+    let hilo = null;
+    if (ctx.createOscillator) {
+      hilo = ctx.createOscillator();
+      hilo.type = 'square';
+      hilo.frequency.value = 960;
+      hilo.connect(gh);
+      hilo.start();
+    }
+    siren = { pan, out, lp, gw, gy, gh, sw, sy, hilo, phase: 0 };
   }
   function updateSiren(now, dt) {
     if (!siren) return;
-    if (!sirenOn) {
-      sirenNear = false;
-      set(siren.out.gain, 0, now, 0.06);
-      return;
-    }
-    // nearest police car, preferring one with its siren on
+    // nearest siren vehicle (police, and since V1 any spec.siren vehicle:
+    // ambulance, fire truck, also AI ones on call), preferring one with its siren on
     const vs = game.vehicles || [];
     let best = null;
     let bd = Infinity;
     for (let i = 0; i < vs.length; i++) {
       const v = vs[i];
       // Only a police vehicle with its siren actually running can be heard.
-      if (!v || !(v.police || (v.spec && v.spec.police)) || v.wrecked || !v.siren) continue;
+      if (!v || !(v.police || (v.spec && (v.spec.police || v.spec.siren))) || v.wrecked || !v.siren) continue;
       // A police helicopter's light bar flashes but it has no siren (only
       // the player's own, on SIREN): an AI heli overhead used to wail and
       // duck the music for as long as it hunted.
@@ -782,12 +789,23 @@ export function createAudio(game) {
     } else if (siren.pan) {
       set(siren.pan.pan, 0, now, 0.1);
     }
-    // original pattern: long wail, then a burst of yelp
+    // original pattern: long wail, then a burst of yelp (police); the fire
+    // truck's deep wail is the wail slowed and lowered; the ambulance hi-lo
+    if (!best) {
+      sirenNear = false;
+      set(siren.out.gain, 0, now, 0.06);
+      return;
+    }
+    const kind = best.spec ? best.spec.id : 'police';
     siren.phase = (siren.phase + dt) % 11;
-    const yelp = siren.phase > 7.2 ? 1 : 0;
-    set(siren.gw.gain, 1 - yelp, now, 0.08);
+    const hilo = kind === 'ambulance' && siren.hilo ? 1 : 0;
+    const deep = kind === 'firetruck';
+    const yelp = hilo || deep ? 0 : siren.phase > 7.2 ? 1 : 0;
+    set(siren.gw.gain, hilo ? 0 : 1 - yelp, now, 0.08);
     set(siren.gy.gain, yelp, now, 0.08);
-    if (siren.sw) set(siren.sw.playbackRate, dop, now, 0.1);
+    set(siren.gh.gain, hilo * 0.5, now, 0.02);
+    if (hilo) set(siren.hilo.frequency, (Math.floor((game.time || 0) / 0.5) % 2 ? 770 : 960) * dop, now, 0.005);
+    if (siren.sw) set(siren.sw.playbackRate, dop * (deep ? 0.68 : 1), now, 0.1);
     if (siren.sy) set(siren.sy.playbackRate, dop, now, 0.1);
     set(siren.out.gain, g, now, 0.1);
   }

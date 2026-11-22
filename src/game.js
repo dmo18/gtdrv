@@ -60,6 +60,8 @@ import { createHeliPilots } from './systems/helipilot.js';
 import { createJetFx } from './render/jetfx.js';
 // Carjacking (core/carjack.js) and the saved place, craft and garage.
 import { createCarjack } from './systems/carjack.js';
+// Service vehicles: extras, beacons, homes and their look (docs/REVAMP.md 6.11).
+import { createService } from './systems/service.js';
 import { createSession } from './systems/session.js';
 import { createSecrets } from './systems/secrets.js';
 // Garages, adventures and exploring on the Miami map (docs/REVAMP.md 6.6).
@@ -364,6 +366,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   game.combat = game.addSystem(createCombat(game));
   game.crew = game.addSystem(createCrew(game));
   game.carjack = game.addSystem(createCarjack(game)); // after traffic, police and crew: it holds the car still
+  game.service = game.addSystem(createService(game)); // after combat: water-downed people, hulls put out, the tow
   game.armor = game.addSystem(createArmor(game, uiRoot));
   game.helipilot = game.addSystem(createHeliPilots(game));
   game.missions = game.addSystem(createMissions(game, uiRoot));

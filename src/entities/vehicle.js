@@ -14,6 +14,7 @@
 // - `slip` 0..1 tyre squeal / skid amount, `abs` true while ABS works.
 import { clamp, angleDiff } from '../core/rng.js';
 import { stepBoost, CAR_BOOST } from './boost.js';
+import { SERVICE_SPECS } from './servicevehicles.js'; // V1 service vehicles, merged below the reward cars
 import { wetGrip, wetUnderSteer, wetBrake, wetTopSpeed, windPush, lightnessOfMass } from '../core/weather.js';
 
 const WIND = { x: 0, z: 0 };
@@ -123,6 +124,7 @@ function rewardCar(base, id, label, power, o) {
 VEHICLE_SPECS.sunchaser = rewardCar('muscle', 'sunchaser', 'Sunchaser', 1.08, { maxSpeed: 64.0, grip: 1.05, brake: 10.0, colors: [0xff5a1f] });
 VEHICLE_SPECS.tidewinder = rewardCar('pickup', 'tidewinder', 'Tidewinder', 1.15, { maxSpeed: 49.0, grip: 0.92, brake: 9.6, firstGear: 20, health: 1400, colors: [0x1f8a8a] });
 VEHICLE_SPECS.nightheron = rewardCar('sedan', 'nightheron', 'Night Heron', 1.4, { maxSpeed: 58.0, grip: 1.05, brake: 9.6, colors: [0x1a1a2e] });
+Object.assign(VEHICLE_SPECS, SERVICE_SPECS, { police: Object.assign(VEHICLE_SPECS.police, { siren: true }) });
 
 let nextId = 1;
 
