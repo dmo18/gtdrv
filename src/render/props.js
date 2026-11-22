@@ -291,6 +291,18 @@ export function addProps(C, own = null, side = true) {
         sign(D, x, z - 0.05, -Math.PI / 2, 1.0, y + 2.8, y + 3.05, R['plate' + (16 + f.nz)]);
         break;
       }
+      case 'streetsign': {
+        // A real-map corner sign: one plate along each road (f.ra, f.rb
+        // its directions), names f.a and f.b from the plate atlas.
+        P.box(x - 0.045, z - 0.045, x + 0.045, z + 0.045, y, y + 3.4, 0x6a7076);
+        const plates = [[f.a, f.ra, y + 3.1], [f.b, f.rb, y + 2.78]];
+        for (const [k, r, py] of plates) {
+          const fx = -Math.sin(r) * 0.05, fz = Math.cos(r) * 0.05;
+          sign(D, x + fx, z + fz, r + Math.PI / 2, 1.05, py, py + 0.26, R['plate' + k]);
+          sign(D, x - fx, z - fz, r - Math.PI / 2, 1.05, py, py + 0.26, R['plate' + k]);
+        }
+        break;
+      }
       case 'umbrella': {
         const col = UMBRELLA[(v * UMBRELLA.length) | 0];
         const yy = -0.1;

@@ -165,7 +165,9 @@ export function buildRealCity(city, collision) {
   const group = new THREE.Group();
   group.name = 'city';
   const S = city.size;
-  const names = city.streetNames ? [...city.streetNames.x.slice(0, 16), ...city.streetNames.z.slice(0, 16)] : [];
+  // Sign plates: the short forms of the street names (city.streetNames.plates).
+  const sn = city.streetNames;
+  const names = sn ? sn.plates || [...sn.x.slice(0, 16), ...sn.z.slice(0, 16)] : [];
   const T = createTextures(city.seed + 7, names);
   const M = makeMaterials(T);
   const DR = T.decals.rects, R = T.details.rects;
@@ -368,20 +370,20 @@ export function buildRealCity(city, collision) {
     const i0 = di(t.x0, G.x0), i1 = di(t.x1, G.x0), j0 = dj(t.z0, G.z0), j1 = dj(t.z1, G.z0);
     for (let j = j0; j < j1; j += 10) {
       realLand(city, B, i0, i1, j, Math.min(j1, j + 10));
-      yield;
+      yield 'land';
     }
     realRoads(city, B, t.nodes, t.edges, own);
-    yield;
+    yield 'roads';
     for (const b of t.blocks) addBlock(B, b, DR);
     addSurfaces(city, B, DR, own);
-    yield;
+    yield 'blocks';
     for (let n = 0; n < t.buildings.length; n++) {
       addBuilding(C, t.buildings[n]);
-      if (n % 16 === 15) yield;
+      if (n % 16 === 15) yield 'buildings';
     }
-    yield;
+    yield 'buildings';
     addProps({ ...C, plain: B.props, detail: B.propsDetail }, own, false);
-    yield;
+    yield 'props';
     const g = new THREE.Group();
     g.name = 'tile';
     const small = [], meshes = [];
@@ -396,7 +398,7 @@ export function buildRealCity(city, collision) {
         }
       }
       B[key] = null;
-      yield;
+      yield 'mesh';
     }
     t.group = g;
     t.small = small;
@@ -424,7 +426,7 @@ export function buildRealCity(city, collision) {
 
   // ---- The streamer: called every drawn frame with the camera. ----
   let job = null, jobTile = null;
-  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0 };
+  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {} };
   function dist(t, x, z, hy) {
     const dx = x < t.x0 ? t.x0 - x : x > t.x1 ? x - t.x1 : 0;
     const dz = z < t.z0 ? t.z0 - z : z > t.z1 ? z - t.z1 : 0;
@@ -477,7 +479,9 @@ export function buildRealCity(city, collision) {
       }
       const s0 = now();
       const r = job.next();
-      stats.worstSliceMs = Math.max(stats.worstSliceMs, now() - s0);
+      const ds = now() - s0;
+      if (ds > stats.worstSliceMs) stats.worstSliceMs = ds;
+      if (r.value && !(stats.worst[r.value] >= ds)) stats.worst[r.value] = Math.round(ds * 10) / 10;
       if (r.done) {
         stats.built++;
         const t = jobTile;

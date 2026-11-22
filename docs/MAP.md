@@ -46,10 +46,11 @@ shapes, 58 coastline lines, 607 parks, 82 labels. Checked by `test/mapdata.test.
 
 ## Integration plan
 
-Status: milestones 1 (core crop) and 2 (places and activities) are in
-the game behind `?map=miami`; see "Milestone 1: done" and "Milestone 2:
-done" at the end. The rest of this section is the plan as
-written before it, from a read of
+Status: milestones 1 (core crop), 2 (places and activities) and 3
+(whole box and performance) are in the game, and Miami is the default
+map (`?map=island` for the procedural island); see "Milestone 1: done",
+"Milestone 2: done" and "Milestone 3: done" at the end. The rest of
+this section is the plan as written before it, from a read of
 `src/world/citygen.js` and every consumer of its return value
 (src/systems, src/render, src/ui, src/world, src/entities, src/game.js,
 test/). The data format is described above; this section is about
@@ -581,3 +582,146 @@ Deviations from the plan:
    is render only and left for later); the Records "Areas explored" count
    is still the number of district keys seen, not of named places.
 
+
+### Milestone 3: done (2026-11-22)
+
+Miami is the default map: the page with no parameters builds the whole
+data box (about 9.0 km by 7.8 km) and `?map=island` opens the procedural
+island. Old saves keep working (see "Saves" below).
+
+What changed:
+
+- `src/world/miami.js`: no crop by default. `fullBox(data)` is the data
+  bounds less 40 m: roads and buildings stop there and land is cut at the
+  bounds, so a street that runs off the edge of the data ends with 40 m
+  of land round it. A wall along the bounds closes the coast regions
+  before they vote land or water (without it the coastline ways that stop
+  just past the box let the mainland flood as sea). `opts.crop`
+  (`MIAMI_CROP`) is kept as a test option. Street name signs (step 10):
+  the 32 names that meet most often at signal junctions go on the sign
+  plates (`streetNames.plates`, in the usual short forms: "SE 1st St",
+  "Biscayne Blvd"), and every signal junction where two of them cross
+  gets a `streetsign` on a corner clear of both roads (66 signs).
+- `src/world/miami-spots.js`: HUD names and districts for the new areas
+  (Allapattah, Civic Center, Little Havana west, Shenandoah, Bay
+  Heights, The Roads, Brickell south, Brickell Hammock, Wynwood north,
+  Midtown, Design District, Miami Beach, Fisher Island, Virginia Key),
+  each from a name in the data.
+- `src/render/realcity.js` (new): the real-map renderer, in two levels
+  plus a middle step:
+  - far: built at start for the whole map, one mesh (one draw call) per
+    1.2 km block: land on a 20 m grid, roads as plain strips, runway,
+    aprons and piers, every building as a box. A shader adds windows to
+    the office, glass, brick and stucco boxes (darker glass by day, some
+    lit at night, faded to their average past about 1 km so they do not
+    shimmer). Tiles that are drawn near are hidden in the far mesh's
+    vertex shader through a one-texel-per-tile mask texture.
+  - near: full detail (citymesh's ground and roads, buildings.js,
+    props.js) per 300 m tile, merged per material per tile, built in the
+    render loop a slice at a time (3 ms a frame, 10 ms while the tile
+    under the camera is not ready) for tiles within 520 m, shown within
+    340 m (40 m of hysteresis), thrown away past 860 m.
+  - middle: past 170 m a near tile hides its paint, decals, contact
+    shadows, glows, shop signs and street props (on their own meshes for
+    that).
+  Collision, the lamp list (night light map and lamp points) and the
+  glow list are made once for the whole map without drawing anything.
+  Traffic-light bulbs: one instanced mesh holding only the bulbs of the
+  near tiles (refilled when the near set changes; `graphics.js` resets
+  its colour cache by `signals.version`).
+- `src/render/citymesh.js`: the ground pieces are shared functions
+  (`realLand` over a cell range and stride, `realRoads` with an owner
+  test, `addBlock`, `addSurfaces`); road tones come from the edge id. The
+  island's mesh is built exactly as before.
+- `src/render/props.js`: `addProps(C, own, side)` draws only the items
+  `own` accepts and adds collision only when `side` is set (the island
+  calls it as before); random numbers are used up in the same order
+  whatever is drawn. New `streetsign` furniture: a post and one plate
+  along each road.
+- `src/render/nightlights.js`: the baked lamp light map is 2048 px when
+  the lamps span more than 4 km (the island keeps 1024).
+- `src/systems/traffic.js`, `src/systems/police.js`: the neighbour scans
+  (`refreshNear`, `attachNearest`, police `attach`) use the city's edge
+  grid (`edgesAround`, ids in ascending order, so the result is the one a
+  full scan gives) when the city has one; the island still scans every
+  edge. `onRoad`, `shoreDist`, `districtOf` and `placeOf` were already
+  grid or raster lookups (milestone 1).
+- Default map: `src/world/maps.js` (`DEFAULT_MAP = 'miami'`,
+  `mapFromSearch` returns 'island' only for `?map=island`),
+  `src/main.js`.
+- Saves: a session has `map` (no field: an older save, made on the
+  island). `progress.mapSessions` keeps the session of each map not being
+  played; `selectMapSession` (core/garage.js) swaps them when a map
+  starts, so an island save is never moved to Miami and comes back on
+  `?map=island`, and the other way round. `game.js` now restores the
+  session on every map. No save version change.
+- `scripts/perf.mjs` takes an optional query (`map=island`), builds the
+  near tiles before measuring and reports the city, mesh and streaming
+  numbers. `scripts/smoke.mjs` loads the default page (Miami, 300 steps,
+  build time budget 8 s), then `?map=island` for the island checks;
+  `scripts/smoke-extra.mjs` reloads the default page for its Miami part.
+  `scripts/miami-m3-shots.mjs` writes `docs/preview/miami-m3-*.png`.
+
+Numbers (this machine, Chromium with the SwiftShader software renderer,
+915 x 412, pixel ratio 1; `scripts/perf.mjs`, the spawn street view):
+
+| | before (core crop, `?map=miami`) | after (whole box, default page) |
+|---|---|---|
+| draw calls, day / night | 312 / 320 | 221 / 223 |
+| triangles, day / night | 436k / 450k | 311k / 333k |
+| step (perf.mjs, 300 steps) | 0.82 ms | 0.91 ms |
+| step (600 steps, per system timing) | 0.90 ms | 0.66 ms |
+| draw CPU, day / night | 8.1 / 7.6 ms | 5.5 / 5.7 ms |
+| city build in Chromium | 0.53 s | 1.5 to 1.6 s |
+| city mesh | 0.89 s | 0.65 to 0.69 s (far blocks plus the tiles round the spawn) |
+| JS heap after start | 157 MB | 167 to 177 MB |
+| game created / first loop frame drawn | not measured / not measured | 3.0 s / 4.7 s (island: 1.1 s / 2.9 s) |
+
+The task's starting figure of about 450 calls and 645k triangles was not
+reproduced by perf.mjs here (312 and 436k at the same view). A first try
+that built the whole box in full detail eagerly needed 1.7 GB of JS heap
+and 15 s to the first frame, which is why the near level streams.
+In node the whole box builds in about 1.3 to 1.5 s wall (1.9 s CPU),
+with the courses, secrets and ramps. Tiles take 3 to 5 ms each on this
+machine; in a 2 km drive at 35 m/s the tile under the camera was always
+ready (worst streamer frame 4.2 ms, worst single slice 8.5 ms, the mesh
+upload of a big tile; 14 ms for the first `addProps` call at start).
+The island is unchanged: 253 / 264 calls before and after (its triangle
+count fell from 422k to 406k because of the new person level of detail,
+not this work). Every first frame after the loop starts takes several
+seconds on both maps on this software renderer (shader compiles); that
+is not map specific.
+
+Tests: `test/miami.test.js` (the whole box with courses, secrets and
+ramps in under 3 s and its extent; places outside the old crop have
+land, streets and buildings; the core crop option; helper budget of 1e5
+calls of `shoreDist`, `onRoad`, `districtOf` and `placeOf` over the whole
+box; the edge grid finds every edge a full scan finds, in id order, and
+is faster; street signs; traffic, parked cars and peds at the spawn and
+for 1200 steps each in Miami Beach and west Little Havana; Miami is the
+default and `?map=island` reaches the island); `test/garage.test.js` (map
+ids on sessions, both directions through save and load and through the
+session system); the island tests are unchanged. Smoke: the default page
+is Miami, 300 steps, no page errors, no outside requests, build time
+logged and checked; the island checks run on `?map=island`.
+
+Deviations from the plan:
+
+1. Two levels of detail and a middle step instead of three separately
+   built levels: near (full) and far (one box per building, one draw
+   call per 1.2 km block), with the middle level being a near tile that
+   hides its small meshes. The near level is streamed: building it all
+   at start is not possible on a phone (see the numbers).
+2. Instancing: the street furniture stays merged per tile and per
+   material (instancing per tile would add draw calls); only the
+   traffic-light bulbs are instanced (one call, near tiles only). Street
+   name signs are merged plates in the tile's prop mesh.
+3. The box is not widened east (no South Beach sand or Atlantic shore):
+   Miami Beach in the box is the bay side (Alton Road, West Avenue) and
+   is a `residential` district. The courses, secrets and ramps are those
+   of milestone 2; nothing was moved into the new areas.
+4. Name signs only where two of the 32 plate names meet at a signal
+   junction (the sign texture atlas holds 32 plates).
+5. The other developer screenshot scripts that assumed the island on the
+   default page (`scripts/*-shots.mjs` except the Miami ones) were not
+   changed: add `&map=island` to their URL to get the island.

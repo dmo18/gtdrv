@@ -17,7 +17,12 @@
 //
 // `secrets` (hidden spots found, world/secrets.js) was added without a new
 // version: saves that lack it load with none found.
-import { sanitizeSession } from './garage.js';
+//
+// Maps (docs/MAP.md, milestone 3): `session.map` names the map a session
+// was made on (no field: the island, where every older save was made);
+// `mapSessions` keeps the sessions of the other maps, keyed by map id.
+// Both were added without a new version.
+import { sanitizeSession, sanitizeMapSessions } from './garage.js';
 import { STATION_IDS } from './radio.js';
 import { SECRET_IDS, emptySecrets, secretsDone } from '../world/secrets.js';
 
@@ -53,6 +58,7 @@ export function defaultProgress() {
     bestTimes: {},
     stats: { distance: 0, flights: 0, races: 0 },
     session: null, // last place, craft and garage (null = new game)
+    mapSessions: {}, // the same for maps not being played: { mapId: session }
     secrets: emptySecrets(), // { found: [ids], ghostwake: bool }
     settings: {
       master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true,
@@ -129,6 +135,7 @@ export function sanitizeProgress(raw) {
       p.score.total = Math.floor(clampNum(raw.money, MAX_MONEY)) * 10;
     }
     if (own(raw, 'session')) p.session = sanitizeSession(raw.session);
+    if (own(raw, 'mapSessions')) p.mapSessions = sanitizeMapSessions(raw.mapSessions);
     if (own(raw, 'secrets')) p.secrets = sanitizeSecrets(raw.secrets);
     p.medals = readMap(raw.medals, (v) => (MEDALS.includes(v) ? v : undefined));
     p.bestTimes = readMap(raw.bestTimes, (v) => (

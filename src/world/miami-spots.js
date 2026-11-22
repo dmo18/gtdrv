@@ -7,9 +7,10 @@
 
 // Milestone 1 core crop: Downtown, Brickell, Overtown, Edgewater,
 // Wynwood south, Watson, Star, Palm and Hibiscus Islands and the west
-// half of PortMiami. Land past
-// the crop is cut off LAND_MARGIN metres outside it (a straight seawall);
-// roads end at the crop edge itself.
+// half of PortMiami. Since milestone 3 the game builds the whole data
+// box; the crop is only a test option (createMiamiCity opts.crop). Land
+// past the crop is cut off LAND_MARGIN metres outside it (a straight
+// seawall); roads end at the crop edge itself.
 export const MIAMI_CROP = { x0: -2600, z0: -2600, x1: 2450, z1: 1800 };
 export const LAND_MARGIN = 150;
 
@@ -87,7 +88,13 @@ export const MIAMI_SPOTS = {
   // District table: later rects win. Keys are the procedural district
   // keys (DISTRICTS in citygen.js) so traffic mixes, peds and audio work.
   districts: [
-    { key: 'midtown', x0: -4000, z0: -4000, x1: 4000, z1: 4000 },
+    { key: 'midtown', x0: -5000, z0: -5000, x1: 5000, z1: 5000 },
+    // Past the old core crop (milestone 3: the whole box).
+    { key: 'industrial', x0: -4600, z0: -3950, x1: -2700, z1: -1700 },
+    { key: 'residential', x0: -4600, z0: 400, x1: -2700, z1: 3950 },
+    { key: 'residential', x0: -2700, z0: 1900, x1: -600, z1: 3950 },
+    { key: 'residential', x0: 2700, z0: -3950, x1: 4600, z1: 2700 },
+    { key: 'park', x0: 1500, z0: 2700, x1: 4600, z1: 3950 },
     { key: 'residential', x0: -2700, z0: 250, x1: -1650, z1: 2000 },
     { key: 'industrial', x0: -2700, z0: -2700, x1: -1400, z1: -1900 },
     { key: 'downtown', x0: -1650, z0: -250, x1: -480, z1: 1300 },
@@ -150,6 +157,22 @@ export const MIAMI_SPOTS = {
   // water name) the name is taken from; a test checks it is in the data.
   // A rect is x0, z0, x1, z1; a `line` is a capsule ax, az, bx, bz, r.
   places: [
+    // Past the old core crop (milestone 3); the entries after these win
+    // where they overlap.
+    { name: 'Allapattah', src: 'Allapattah', x0: -4600, z0: -3950, x1: -2700, z1: -1700 },
+    { name: 'Civic Center', src: 'Civic Center Library Kiosk', x0: -4600, z0: -1700, x1: -2700, z1: 400 },
+    { name: 'Little Havana', src: 'Life House, Little Havana', x0: -4600, z0: 400, x1: -2700, z1: 1900 },
+    { name: 'Shenandoah', src: 'Shenandoah', x0: -4600, z0: 1900, x1: -2900, z1: 2800 },
+    { name: 'Bay Heights', src: 'Bay Heights', x0: -4600, z0: 2800, x1: -2900, z1: 3950 },
+    { name: 'The Roads', src: 'The Roads', x0: -2900, z0: 1900, x1: -1950, z1: 3000 },
+    { name: 'Brickell', src: 'Brickell', x0: -1950, z0: 1900, x1: -600, z1: 3000 },
+    { name: 'Brickell Hammock', src: 'Brickell Hammock', x0: -2900, z0: 3000, x1: -600, z1: 3950 },
+    { name: 'Wynwood', src: 'Wynwood Walls', x0: -2700, z0: -3950, x1: -1700, z1: -2700 },
+    { name: 'Midtown', src: 'Midtown', x0: -1700, z0: -3450, x1: -480, z1: -2700 },
+    { name: 'Design District', src: 'Design District', x0: -1700, z0: -3950, x1: -480, z1: -3450 },
+    { name: 'Miami Beach', src: 'Miami Beach', x0: 2700, z0: -3950, x1: 4600, z1: 1700 },
+    { name: 'Fisher Island', src: 'Fisher Island', x0: 3300, z0: 1700, x1: 4600, z1: 2700 },
+    { name: 'Virginia Key', src: 'Virginia Key Beach North Point Park', x0: 1500, z0: 2700, x1: 4600, z1: 3950 },
     { name: 'Overtown', src: 'Overtown Transit Village North', x0: -2700, z0: -1700, x1: -1450, z1: 400 },
     { name: 'Wynwood', src: 'Wynwood Walls', x0: -2700, z0: -2700, x1: -1450, z1: -1700 },
     { name: 'Edgewater', src: 'Edgewater', x0: -1450, z0: -2700, x1: -480, z1: -1100 },
@@ -169,7 +192,7 @@ export const MIAMI_SPOTS = {
   ],
   // On the water: Biscayne Bay, except along the river.
   waterPlaces: [
-    { name: 'Biscayne Bay', src: '900 Biscayne Bay', x0: -4000, z0: -4000, x1: 4000, z1: 4000 },
+    { name: 'Biscayne Bay', src: '900 Biscayne Bay', x0: -5000, z0: -5000, x1: 5000, z1: 5000 },
     { name: 'Miami River', src: 'Miami River', x0: -2700, z0: 100, x1: -1980, z1: 720 },
     { name: 'Miami River', src: 'Miami River', x0: -2100, z0: 600, x1: -1500, z1: 1150 },
     { name: 'Miami River', src: 'Miami River', x0: -1550, z0: 950, x1: -640, z1: 1170 },

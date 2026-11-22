@@ -14,6 +14,10 @@ export const MAP_LIMIT = 6000;
 export const MAX_ALT = 1500;
 export const MODES = ['start', 'foot', 'car', 'boat', 'plane', 'heli', 'tank'];
 export const SAFE_ALT = 120; // altitude an airborne craft comes back at
+// Maps a session can belong to (world/maps.js MAP_IDS). A session saved
+// before maps had ids has none: it was made on the island.
+export const SESSION_MAPS = ['island', 'miami'];
+export const OLD_SESSION_MAP = 'island';
 const MIN_HEALTH = 0.05;
 const MAX_SCAN = 64;
 const TAU = Math.PI * 2;
@@ -91,9 +95,11 @@ export function sanitizeGarage(raw) {
 }
 
 // The whole session. Returns null for anything that is not an object.
+// Positions only mean something on the map named by `map`.
 export function sanitizeSession(raw) {
   if (!isObj(raw)) return null;
-  const s = { mode: 'start', x: 0, z: 0, heading: 0, craft: null, garage: sanitizeGarage(has(raw, 'garage') ? raw.garage : null) };
+  const map = has(raw, 'map') && SESSION_MAPS.includes(raw.map) ? raw.map : OLD_SESSION_MAP;
+  const s = { map, mode: 'start', x: 0, z: 0, heading: 0, craft: null, garage: sanitizeGarage(has(raw, 'garage') ? raw.garage : null) };
   const mode = has(raw, 'mode') && typeof raw.mode === 'string' && MODES.includes(raw.mode) ? raw.mode : 'start';
   if (mode === 'start' || !isNum(raw.x) || !isNum(raw.z)) return s;
   const x = round2(coord(raw.x)), z = round2(coord(raw.z));
@@ -142,8 +148,9 @@ export function savable(v) {
 // Build a session from plain facts: player position, mode, the craft
 // being driven (or null) and the garage entries (objects with spec,
 // color, health, x, z, heading). Returns a sanitised session.
-export function buildSession(player, craft, garage) {
-  const raw = { mode: 'start', garage };
+// map: the id of the map it was made on.
+export function buildSession(player, craft, garage, map = OLD_SESSION_MAP) {
+  const raw = { map, mode: 'start', garage };
   if (craft && savable(craft)) {
     const r = craftRecord(craft);
     r.y = craft.y || 0;
@@ -183,4 +190,33 @@ export function garageRemove(list, entry) {
   const i = list.indexOf(entry);
   if (i >= 0) list.splice(i, 1);
   return list;
+}
+
+// Sessions of the maps not being played (progress.mapSessions): an
+// object keyed by map id, each a session of that map. Anything else is
+// dropped.
+export function sanitizeMapSessions(raw) {
+  const out = {};
+  if (!isObj(raw)) return out;
+  for (const id of SESSION_MAPS) {
+    if (!has(raw, id)) continue;
+    const s = sanitizeSession(raw[id]);
+    if (s && s.map === id) out[id] = s;
+  }
+  return out;
+}
+
+// Puts the session of map `id` in progress.session: the one there (from
+// another map) is parked in progress.mapSessions under its own map and
+// the one parked for `id` (or none) comes out. So a save made on one map
+// is never moved to another, and playing one map keeps the other's.
+export function selectMapSession(progress, id) {
+  const cur = progress.session;
+  if (cur && cur.map === id) return cur;
+  const parked = isObj(progress.mapSessions) ? progress.mapSessions : (progress.mapSessions = {});
+  const mine = has(parked, id) ? parked[id] : null;
+  if (cur) parked[cur.map] = cur;
+  delete parked[id];
+  progress.session = mine && mine.map === id ? mine : null;
+  return progress.session;
 }

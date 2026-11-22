@@ -43,6 +43,19 @@ const PALETTES = {
 const GLASS_TINTS = [0x7fa6cc, 0x6fae9f, 0xb89264, 0x9fb2c4, 0x5f7f9c, 0x86b8c8, 0xa8a090];
 const DKEYS = ['midtown', 'downtown', 'residential', 'docks', 'industrial', 'beach', 'airfield', 'park'];
 
+// A street name as a sign plate shows it (the usual short forms).
+const SHORT = [
+  [/\bNortheast\b/g, 'NE'], [/\bNorthwest\b/g, 'NW'], [/\bSoutheast\b/g, 'SE'], [/\bSouthwest\b/g, 'SW'],
+  [/\bNorth\b/g, 'N'], [/\bSouth\b/g, 'S'], [/\bEast\b/g, 'E'], [/\bWest\b/g, 'W'],
+  [/\bStreet\b/g, 'St'], [/\bAvenue\b/g, 'Ave'], [/\bBoulevard\b/g, 'Blvd'], [/\bDrive\b/g, 'Dr'], [/\bCourt\b/g, 'Ct'],
+  [/\bTerrace\b/g, 'Ter'], [/\bPlace\b/g, 'Pl'], [/\bRoad\b/g, 'Rd'], [/\bCauseway\b/g, 'Cswy'], [/\bParkway\b/g, 'Pkwy'],
+];
+export function plateText(name) {
+  let t = name;
+  for (const [re, short] of SHORT) t = t.replace(re, short);
+  return t;
+}
+
 // Polyline field p: delta-encoded decimetres. Returns metres [x0, z0, x1, z1, ...].
 export function decodePolyline(p) {
   const out = new Float64Array(p.length);
@@ -1517,12 +1530,53 @@ export function createMiamiCity(data, opts = {}) {
     landmarks.runwayLights.push({ x: runway.x0 - 1.5, z, color: 0x40ff70 }, { x: runway.x1 + 1.5, z, color: 0xff4030 });
   }
 
-  // Street names for the sign textures: the 32 most common.
-  const nameCount = new Map();
-  for (const e of edges) if (e.name) nameCount.set(e.name, (nameCount.get(e.name) || 0) + e.length);
-  const topNames = [...nameCount.entries()].sort((p, q) => q[1] - p[1]).slice(0, 32).map(([n]) => n);
+  // Street name signs (the sign textures hold 32 names): the names that
+  // meet most often at signal junctions (ties: the longer road), then a
+  // sign on a corner of every signal junction where two of them cross.
+  const nameLen = new Map(), nameHits = new Map();
+  for (const e of edges) if (e.name && !e.causeway) nameLen.set(e.name, (nameLen.get(e.name) || 0) + e.length);
+  const namesAt = (n) => {
+    const out = [];
+    for (const eid of n.edges) {
+      const nm = edges[eid].name;
+      if (nm && nameLen.has(nm) && !out.includes(nm)) out.push(nm);
+    }
+    return out;
+  };
+  for (const n of nodes) {
+    if (!n.signal) continue;
+    const ns = namesAt(n);
+    if (ns.length >= 2) for (const nm of ns) nameHits.set(nm, (nameHits.get(nm) || 0) + 1);
+  }
+  const topNames = [...nameLen.keys()]
+    .sort((p, q) => (nameHits.get(q) || 0) - (nameHits.get(p) || 0) || nameLen.get(q) - nameLen.get(p) || (p < q ? -1 : 1))
+    .slice(0, 32);
   while (topNames.length < 32) topNames.push('Biscayne Bay');
-  const streetNames = { x: topNames.slice(0, 16), z: topNames.slice(16, 32) };
+  const streetNames = { x: topNames.slice(0, 16), z: topNames.slice(16, 32), plates: topNames.map(plateText) };
+  {
+    const plateOf = new Map(topNames.map((nm, k) => [nm, k]));
+    for (const n of nodes) {
+      if (!n.signal || n.i < 0) continue;
+      // The two signed roads: the first edge of each of two names.
+      let ea = null, eb = null;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        if (!plateOf.has(e.name)) continue;
+        if (!ea) ea = e;
+        else if (e.name !== ea.name && !eb) eb = e;
+      }
+      if (!ea || !eb) continue;
+      // Directions away from the junction along each road.
+      const dir = (e) => (e.a === n.id ? 1 : -1);
+      const ax = ea.ux * dir(ea), az = ea.uz * dir(ea), bx = eb.ux * dir(eb), bz = eb.uz * dir(eb);
+      // The corner between them, clear of both carriageways.
+      const x = n.x + ax * (eb.width / 2 + 1.6) + bx * (ea.width / 2 + 1.6);
+      const z = n.z + az * (eb.width / 2 + 1.6) + bz * (ea.width / 2 + 1.6);
+      if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
+      // Each plate runs along its own road.
+      furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
+    }
+  }
 
   // Land drawn as horizontal runs of `cell` size (renderer and minimap).
   function landRuns(cell = 8) {

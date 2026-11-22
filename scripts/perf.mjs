@@ -1,6 +1,7 @@
 // Developer helper: reports draw calls, triangles, shader programs and
 // step/draw cost in a fixed daytime street view, a night view and the
 // worst frame of the first seconds of play (first-time costs).
+// usage: node scripts/perf.mjs [query]   (e.g. map=island)
 import { createRequire } from 'node:module';
 import { buildGame, serve } from './build.mjs';
 
@@ -26,7 +27,10 @@ await page.addInitScript(() => {
   };
   requestAnimationFrame(tick);
 });
-await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
+// Optional extra query, e.g. `node scripts/perf.mjs map=island` (the
+// default page is the Miami map).
+const extra = process.argv[2] ? '&' + process.argv[2] : '';
+await page.goto(`http://127.0.0.1:${server.address().port}/?autostart${extra}`);
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 30000 });
 // Worst single-call JS cost of each system and of the final draw (which
 // includes any shader compiles) while the game runs for a few seconds.
@@ -71,6 +75,10 @@ const out = await page.evaluate((startGaps) => {
     g.daynight.setHour(hour);
     for (let i = 0; i < 30; i++) g.step(1 / 60);
     g.draw(1, 1 / 60);
+    // A streamed map: every near tile at the view built first.
+    const st = g.cityMesh.userData.stream;
+    if (st) st.flush(g.camera);
+    g.draw(1, 1 / 60);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     const p0 = info.programs ? info.programs.length : 0;
     let cpu = 0;
@@ -95,6 +103,9 @@ const out = await page.evaluate((startGaps) => {
     programs: info.programs ? info.programs.length : 0, programsAtStart,
     firstFrames: { count: gaps.length, worstMs: sorted.slice(0, 5).map((x) => +x.toFixed(0)), over50ms: gaps.filter((x) => x > 50).length },
     geometries: info.memory.geometries, textures: info.memory.textures, vehicles: kinds,
+    map: g.city.map || 'island', cityMs: g.city.buildMs || null, meshMs: Math.round(g.cityMesh.userData.buildMs),
+    stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
+    heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
   };
 }, startGaps);
 console.log(JSON.stringify(out, null, 1));

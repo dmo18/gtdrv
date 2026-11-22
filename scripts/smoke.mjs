@@ -33,14 +33,19 @@ const check = (ok, label) => {
 };
 
 try {
+  // The default page (no parameters): the Miami map.
+  const t0 = Date.now();
   await page.goto(`http://127.0.0.1:${port}/?autostart`);
-  await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 90000 });
+  const loadMs = Date.now() - t0;
   await page.waitForTimeout(1500);
-  const before = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, cars: window.__rw.vehicles.length }));
+  const before = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, cars: window.__rw.vehicles.length, map: window.__rw.city.map, cityMs: window.__rw.city.buildMs, meshMs: Math.round(window.__rw.cityMesh.userData.buildMs) }));
+  check(before.map === 'miami', `the default page is the Miami map (${before.map}; loaded in ${loadMs} ms: city ${before.cityMs} ms, mesh ${before.meshMs} ms)`);
+  check(before.cityMs + before.meshMs < 8000, `Miami build time within budget (${before.cityMs + before.meshMs} ms of 8000)`);
   await page.keyboard.down('ArrowUp');
   await page.waitForTimeout(200);
   await page.evaluate(() => {
-    for (let i = 0; i < 240; i++) window.__rw.step(1 / 60);
+    for (let i = 0; i < 300; i++) window.__rw.step(1 / 60);
   });
   await page.waitForTimeout(300);
   const mid = await page.evaluate(() => ({ x: window.__rw.player.x, z: window.__rw.player.z, speed: window.__rw.player.vehicle?.speed ?? 0, t: window.__rw.time }));
@@ -55,6 +60,17 @@ try {
   check(errors.length === 0, `no page errors (${errors.length})`);
   for (const e of errors.slice(0, 10)) console.log('   ', e);
   if (process.argv.includes('--extra')) {
+    // The extra checks start on the procedural island (?map=island).
+    await page.goto(`http://127.0.0.1:${port}/?autostart&map=island`);
+    await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 60000 });
+    await page.waitForTimeout(1500);
+    check(await page.evaluate(() => !window.__rw.city.map), '?map=island opens the procedural island');
+    await page.keyboard.down('ArrowUp');
+    await page.waitForTimeout(200);
+    await page.evaluate(() => {
+      for (let i = 0; i < 240; i++) window.__rw.step(1 / 60);
+    });
+    await page.keyboard.up('ArrowUp');
     const mod = await import('./smoke-extra.mjs');
     failed = (await mod.default(page, check)) === false || failed;
   }

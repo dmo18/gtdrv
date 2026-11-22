@@ -1071,12 +1071,12 @@ export default async function extra(page, check) {
   check(hard.hurt < 100 && hard.healed > 99 && hard.text === 'HP 100', `RESPAWN on foot restores health (${hard.hurt} -> ${hard.healed}, ${hard.text})`);
   check(hard.meterHidden, 'the health meter hides again with hard mode off');
 
-  // ---- The Miami map (docs/MAP.md milestone 1): the same page reloads
-  // with ?map=miami (every island check is done by now), drives for 300
-  // steps with zero page errors. ----
+  // ---- The Miami map (docs/MAP.md milestones 1 to 3): the same page
+  // reloads with no map parameter (Miami is the default; every island
+  // check is done by now), drives for 300 steps with zero page errors. ----
   {
     const url = new URL(page.url());
-    url.search = '?autostart&map=miami';
+    url.search = '?autostart';
     const mp = page;
     const errs = [];
     mp.on('pageerror', (e) => errs.push(String(e)));
@@ -1116,7 +1116,7 @@ export default async function extra(page, check) {
       await mp.keyboard.up('ArrowUp');
       await mp.screenshot({ path: 'shots/miami.png' });
     }
-    check(ok && m && m.map === 'miami', `?map=miami starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
+    check(ok && m && m.map === 'miami', `the default page starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
     check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);
 
     // Milestone 2: on Miami, start one land race, one boat course and one

@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createMiamiCity, MIAMI_CROP, MIAMI_SPOTS } from '../src/world/miami.js';
+import { createMiamiCity, fullBox, MIAMI_CROP, MIAMI_SPOTS } from '../src/world/miami.js';
+import { edgesAround } from '../src/systems/traffic.js';
 import { mapFromSearch, DEFAULT_MAP } from '../src/world/maps.js';
 import { lanePoint, laneOffset, lanesPerDirection, DISTRICTS } from '../src/world/citygen.js';
 import { createCollisionWorld, fillCollision } from '../src/world/collision.js';
@@ -43,13 +44,35 @@ const nearestNode = (x, z) => city.nodes.reduce((b, n) => (Math.hypot(n.x - x, n
 const inBox = (b, x, z, m = 0) => x > b.x0 - m && x < b.x1 + m && z > b.z0 - m && z < b.z1 + m;
 const inAnyBuilding = (x, z, m = 0) => city.inBuilding(x, z, m);
 
-test(`builds in under 1.5 s (wall ${buildWall.toFixed(0)} ms, cpu ${buildCpu.toFixed(0)} ms)`, () => {
+test(`the whole box builds in under 3 s with courses, secrets and ramps (wall ${buildWall.toFixed(0)} ms, cpu ${buildCpu.toFixed(0)} ms)`, () => {
   // Wall time on a quiet machine; CPU time when other jobs share it.
-  assert.ok(Math.min(buildWall, buildCpu) < 1500, `wall ${buildWall.toFixed(0)} ms, cpu ${buildCpu.toFixed(0)} ms`);
-  assert.ok(city.nodes.length > 1000 && city.edges.length > 1200, `${city.nodes.length} nodes, ${city.edges.length} edges`);
-  assert.ok(city.buildings.length > 3000, `${city.buildings.length} buildings`);
-  assert.ok(city.blocks.length > 100, `${city.blocks.length} blocks`);
+  // docs/MAP.md risk 3: the city plus courses, secrets and stunts in 3 s.
+  assert.ok(Math.min(buildWall, buildCpu) < 3000, `wall ${buildWall.toFixed(0)} ms, cpu ${buildCpu.toFixed(0)} ms`);
+  assert.ok(city.courses.length > 10 && city.secretSpots.length === 6 && city.rampSpots.length >= 4);
+  // The whole data box, not the old core crop (milestone 3).
+  const b = data.bounds;
+  assert.deepEqual(city.crop, fullBox(data));
+  assert.ok(city.crop.x0 < b.minX + 50 && city.crop.x1 > b.maxX - 50 && city.crop.z0 < b.minZ + 50 && city.crop.z1 > b.maxZ - 50, JSON.stringify(city.crop));
+  assert.ok(city.nodes.length > 4000 && city.edges.length > 5500, `${city.nodes.length} nodes, ${city.edges.length} edges`);
+  assert.ok(city.buildings.length > 25000, `${city.buildings.length} buildings`);
+  assert.ok(city.blocks.length > 600, `${city.blocks.length} blocks`);
+  // Places outside the old crop are there: Miami Beach, Coconut Grove side, Allapattah.
+  for (const [x, z, what] of [[4100, -500, 'Miami Beach (Alton Road)'], [-3700, -1000, 'Civic Center'], [-2500, 3000, 'The Roads'], [-4000, -3000, 'Allapattah']]) {
+    assert.ok(city.shoreDist(x, z) > 0, what + ' on land');
+    assert.ok(city.edgesNear(x, z, 120, []).length > 0, what + ' has streets');
+    assert.ok(city.buildingsNear(x - 150, z - 150, x + 150, z + 150, []).length > 10, what + ' has buildings');
+  }
   assert.match(city.attribution, /OpenStreetMap contributors, ODbL/);
+});
+
+test('the core crop is still there as a test option', () => {
+  const t = performance.now();
+  const core = createMiamiCity(data, { crop: MIAMI_CROP });
+  assert.ok(performance.now() - t < 3000);
+  assert.deepEqual(core.crop, MIAMI_CROP);
+  assert.ok(core.nodes.length > 1000 && core.nodes.length < city.nodes.length * 0.6, `${core.nodes.length} of ${city.nodes.length}`);
+  for (const n of core.nodes) assert.ok(n.i < 0 || (n.x >= MIAMI_CROP.x0 - 1 && n.x <= MIAMI_CROP.x1 + 1 && n.z >= MIAMI_CROP.z0 - 1 && n.z <= MIAMI_CROP.z1 + 1) || n.x > 0, `node ${n.id}`);
+  assert.equal(core.shoreDist(-4000, -3000) < 0, true, 'nothing past the crop is land');
 });
 
 test('same object shape as the procedural city', () => {
@@ -246,9 +269,9 @@ test('buildings: no box on a road strip, inside the crop, on land; collision wor
   }
 });
 
-test('traffic, parked cars and peds run 600 steps: no errors, no NaN, nobody in the water or a building', () => {
-  const s = city.spawn;
-  const game = makeFightGame({ city, collision, px: s.x + 3, pz: s.z + 3 });
+// Traffic, parked cars and peds round a point for `steps` steps.
+function runLife(px, pz, steps = 600) {
+  const game = makeFightGame({ city, collision, px, pz });
   game.quality = 1;
   game.player.mode = 'foot';
   const traffic = createTraffic(game, { max: 10 });
@@ -258,7 +281,7 @@ test('traffic, parked cars and peds run 600 steps: no errors, no NaN, nobody in 
   const systems = [parked, peds, traffic];
   const world = game.world;
   let maxCars = 0, maxPeds = 0;
-  step(game, systems, 600, () => {
+  step(game, systems, steps, () => {
     for (const v of game.vehicles) {
       if (v.asleep) continue;
       v.px = v.x;
@@ -285,18 +308,82 @@ test('traffic, parked cars and peds run 600 steps: no errors, no NaN, nobody in 
   assert.ok(game.vehicles.some((v) => v.parked), 'parked cars placed');
   // Traffic actually drives: some car has passed a junction.
   assert.ok(traffic.cars.some((v) => v.ai.junctions > 0), 'traffic passed junctions');
+}
+
+test('traffic, parked cars and peds run 600 steps: no errors, no NaN, nobody in the water or a building', () => {
+  runLife(city.spawn.x + 3, city.spawn.z + 3);
 });
 
-test('helpers are cheap: 1e5 calls of shoreDist, onRoad and districtOf', () => {
+test('the whole box: traffic, parked cars and peds also run 1200 steps in Miami Beach and Little Havana (outside the old crop)', () => {
+  const t = performance.now();
+  runLife(4105, -480, 1200); // Alton Road, Miami Beach
+  runLife(-3900, 1250, 1200); // Little Havana, west of the old crop
+  // Each run is cheap: the per-step scans use the edge grid.
+  assert.ok(performance.now() - t < 20000);
+});
+
+test('helpers are cheap on the whole box: 1e5 calls of shoreDist, onRoad, districtOf and placeOf', () => {
+  // Spread over the whole box (risk 4: these run every step).
+  const W = city.crop.x1 - city.crop.x0, H = city.crop.z1 - city.crop.z0;
   const t = performance.now();
   let acc = 0;
   for (let i = 0; i < 1e5; i++) {
-    const x = -2500 + (i * 37.1) % 4800, z = -2500 + (i * 53.7) % 4200;
-    acc += city.shoreDist(x, z) + (city.onRoad(x, z) ? 1 : 0) + city.districtOf(x, z).length;
+    const x = city.crop.x0 + (i * 37.1) % W, z = city.crop.z0 + (i * 53.7) % H;
+    acc += city.shoreDist(x, z) + (city.onRoad(x, z) ? 1 : 0) + city.districtOf(x, z).length + city.placeOf(x, z).length;
   }
   const ms = performance.now() - t;
   assert.ok(Number.isFinite(acc));
   assert.ok(ms < 400, `${ms.toFixed(0)} ms`);
+});
+
+test('edge grid: the traffic and police neighbour scans see the same edges as a full scan, much faster', () => {
+  const out = [];
+  let tGrid = 0, tFull = 0;
+  for (let i = 0; i < 300; i++) {
+    const x = city.crop.x0 + (i * 137.3) % (city.crop.x1 - city.crop.x0), z = city.crop.z0 + (i * 91.7) % (city.crop.z1 - city.crop.z0);
+    let t = performance.now();
+    const ids = edgesAround(city, x, z, 220, out);
+    tGrid += performance.now() - t;
+    t = performance.now();
+    const full = [];
+    for (const e of city.edges) {
+      const a = city.nodes[e.a], b = city.nodes[e.b];
+      const L2 = (b.x - a.x) ** 2 + (b.z - a.z) ** 2;
+      const u = Math.max(0, Math.min(1, ((x - a.x) * (b.x - a.x) + (z - a.z) * (b.z - a.z)) / L2));
+      if (Math.hypot(a.x + (b.x - a.x) * u - x, a.z + (b.z - a.z) * u - z) < 220) full.push(e.id);
+    }
+    tFull += performance.now() - t;
+    if (!full.length) continue;
+    // Every edge within 220 m is in the grid's list, in id order.
+    assert.ok(ids, `nothing found at ${x.toFixed(0)}, ${z.toFixed(0)}`);
+    const set = new Set(ids);
+    for (const id of full) assert.ok(set.has(id), `edge ${id} missed at ${x.toFixed(0)}, ${z.toFixed(0)}`);
+    for (let k = 1; k < ids.length; k++) assert.ok(ids[k] > ids[k - 1]);
+  }
+  assert.ok(tGrid < tFull, `grid ${tGrid.toFixed(1)} ms, full ${tFull.toFixed(1)} ms`);
+  // Far out at sea the search widens until it finds a road.
+  assert.ok(edgesAround(city, -200, 900, 60, out).length > 0);
+  // The island has no grid: callers scan every edge.
+  assert.equal(edgesAround({ edges: [] }, 0, 0, 60), null);
+});
+
+test('street name signs: real names from the data at signal junctions, clear of roads and buildings', () => {
+  const signs = city.furniture.filter((f) => f.type === 'streetsign');
+  assert.ok(signs.length >= 40, `${signs.length} signs`);
+  const plates = city.streetNames.plates;
+  assert.equal(plates.length, 32);
+  const names = new Set(data.roads.map((r) => r.name).filter(Boolean));
+  const top = [...city.streetNames.x, ...city.streetNames.z];
+  for (const nm of top) assert.ok(names.has(nm), `${nm} is a road in the data`);
+  for (const f of signs) {
+    assert.ok(f.a >= 0 && f.a < 32 && f.b >= 0 && f.b < 32 && f.a !== f.b);
+    assert.ok(!city.onRoad(f.x, f.z) && !city.inBuilding(f.x, f.z, 0.5) && city.shoreDist(f.x, f.z) > 1, `sign at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`);
+    // Each plate's road meets at the junction beside the sign.
+    const near = city.edgesNear(f.x, f.z, 20, []).map((id) => city.edges[id].name);
+    assert.ok(near.includes(top[f.a]) && near.includes(top[f.b]), `${top[f.a]} / ${top[f.b]}`);
+    for (const r of [f.ra, f.rb]) assert.ok(Number.isFinite(r));
+  }
+  assert.equal(plates[top.indexOf('Biscayne Boulevard')], 'Biscayne Blvd');
 });
 
 test('map choice: Miami is the default, ?map=island still reaches the island', () => {

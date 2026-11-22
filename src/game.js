@@ -668,9 +668,9 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     }
   });
 
-  // Pick up where the player left off (a no-op on a new game). Saved
-  // places are from the island map, so another map starts fresh.
-  if (!city.map) game.restoreSession();
+  // Pick up where the player left off on this map (a no-op on a new
+  // game; a session saved on another map stays with that map).
+  game.restoreSession();
 
   game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1 });
   game.resize = resize;

@@ -381,3 +381,20 @@ None critical or high.
 - Screenshots: docs/preview/people-*.png (close day and night, street
   day and night, police, crowd, poses, face, pair), made with
   `node scripts/vehicle-shots.mjs people-close-day ... --size=915x412`.
+
+## 2026-11-22: Miami map, milestone 3 (whole box, default map)
+- Miami is now the default map and covers the whole data box (about
+  9.0 by 7.8 km: Downtown to Allapattah, Little Havana, The Roads,
+  Midtown, the bay islands, Miami Beach bay side, Fisher Island, Virginia
+  Key). `?map=island` opens the procedural island.
+- New renderer for the real map (`src/render/realcity.js`): far boxes for
+  the whole map (one draw call per 1.2 km block, lit windows at night),
+  full detail streamed in 300 m tiles round the camera, small stuff
+  hidden past 170 m. Spawn street view: 221 draw calls and 311k
+  triangles by day (was 312 and 436k on the old core crop).
+- Traffic and police neighbour scans use the edge grid; street name
+  signs with real names at the major junctions.
+- Saves: sessions carry their map; an island save stays on the island
+  and a Miami save on Miami (`progress.mapSessions`).
+- Details, numbers and deviations: docs/MAP.md, "Milestone 3: done".
+  Screenshots: docs/preview/miami-m3-*.png.

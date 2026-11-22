@@ -1,7 +1,7 @@
 // Screenshots of the whole-box Miami map (docs/MAP.md milestone 3) at
 // 915 x 412 on the default page: a downtown street by day and at night,
-// a view over the bay to the towers, the airfield, and a high view that
-// shows the far level of detail.
+// a corner street sign, a view over the bay to the towers, the airfield,
+// and a high view that shows the far level of detail.
 // usage: node scripts/miami-m3-shots.mjs [outDir]
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
@@ -88,6 +88,19 @@ await shot('miami-m3-downtown-day');
 await hour(22);
 await step(30);
 await shot('miami-m3-downtown-night');
+
+// A corner street sign (real names from the data) near the start.
+const sign = await page.evaluate(() => {
+  const g = window.__rw, s = g.city.spawn;
+  return g.city.furniture.filter((f) => f.type === 'streetsign').sort((a, b) => Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z))[0];
+});
+await hour(14);
+await step(5, 5);
+{
+  // From the corner opposite, between the two plates' roads.
+  const ex = sign.x - (Math.cos(sign.ra) + Math.cos(sign.rb)) * 5, ez = sign.z - (Math.sin(sign.ra) + Math.sin(sign.rb)) * 5;
+  await shot('miami-m3-street-sign', [[ex, 2.6, ez], [sign.x, 2.9, sign.z]]);
+}
 
 // 3. Over the bay off Bayfront Park, west to the Downtown towers.
 await hour(16.5);

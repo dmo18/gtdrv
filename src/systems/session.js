@@ -12,7 +12,7 @@
 import { saveProgress } from '../core/save.js';
 import {
   buildSession, garageAdd, garageRemove, savable, craftRecord, kindOfSpec, specOf,
-  sanitizeGarage, GARAGE_MAX, SAFE_ALT,
+  sanitizeGarage, selectMapSession, GARAGE_MAX, SAFE_ALT,
 } from '../core/garage.js';
 import { createVehicle } from '../entities/vehicle.js';
 import { createBoat } from '../entities/boat.js';
@@ -26,6 +26,10 @@ const NEAR_FLEET = 40; // m: reuse a berthed craft of the same kind this close
 
 export function createSession(game, storage) {
   const city = game.city, collision = game.collision;
+  // Sessions belong to a map: this map's comes out of the save, another
+  // map's is kept aside (never moved here).
+  const mapId = city.map || 'island';
+  selectMapSession(game.progress, mapId);
   const garage = [];
   game.garage = garage;
   let timer = AUTOSAVE_EVERY;
@@ -55,7 +59,7 @@ export function createSession(game, storage) {
     }
     const craft = p.vehicle && savable(p.vehicle) ? p.vehicle : null;
     const wrecked = !!(p.vehicle && !craft);
-    const s = buildSession(wrecked ? null : p, craft, garage);
+    const s = buildSession(wrecked ? null : p, craft, garage, mapId);
     game.progress.session = s;
     return s;
   }

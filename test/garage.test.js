@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GARAGE_MAX, MAP_LIMIT, kindOfSpec, sanitizeSession, sanitizeGarage, sanitizeCraft,
-  buildSession, garageAdd, garageRemove, savable, craftRecord, wrapAngle,
+  buildSession, garageAdd, garageRemove, savable, craftRecord, wrapAngle, selectMapSession, SESSION_MAPS,
 } from '../src/core/garage.js';
+import { createSession } from '../src/systems/session.js';
 import { createVehicle } from '../src/entities/vehicle.js';
 import { createBoat } from '../src/entities/boat.js';
 import { createAircraft } from '../src/entities/aircraft.js';
@@ -29,7 +30,8 @@ test('spec kinds are known across all craft families', () => {
 test('garbage sessions are rejected or reduced to a safe start', () => {
   for (const bad of [null, undefined, 5, 'x', [], true, NaN]) assert.equal(sanitizeSession(bad), null);
   const s = sanitizeSession({});
-  assert.deepEqual(s, { mode: 'start', x: 0, z: 0, heading: 0, craft: null, garage: [] });
+  // No map field: an older save, made on the island.
+  assert.deepEqual(s, { map: 'island', mode: 'start', x: 0, z: 0, heading: 0, craft: null, garage: [] });
   // Position fields that are not finite numbers fall back to a start.
   for (const x of [NaN, Infinity, '12', null, {}, [5], -Infinity]) {
     const r = sanitizeSession({ mode: 'foot', x, z: 5 });
@@ -249,4 +251,79 @@ test('map limit is 6 km: Miami positions survive a save, the bound stays strict'
     assert.equal(sanitizeSession({ mode: 'foot', x: bad, z: 1 }).mode, 'start', String(bad));
     assert.deepEqual(sanitizeGarage([rec('sedan', bad, 1)]), [], String(bad));
   }
+});
+
+test('sessions carry their map: an island save stays on the island, a Miami save on Miami', () => {
+  // An older save (no map field) is the island's.
+  const old = sanitizeProgress({ version: 3, session: { mode: 'foot', x: 120, z: -40, heading: 1 } });
+  assert.equal(old.session.map, 'island');
+  // Opened on Miami: the island place is put aside, not moved to Miami.
+  assert.equal(selectMapSession(old, 'miami'), null);
+  assert.equal(old.session, null);
+  assert.equal(old.mapSessions.island.x, 120);
+  // A Miami session is made and saved; the island one survives the round trip.
+  old.session = buildSession({ mode: 'foot', x: 3900, z: -500, heading: 0.2 }, null, [rec('sedan', 3950, -480)], 'miami');
+  const s = memory();
+  assert.equal(saveProgress(s, old), true);
+  const back = loadProgress(s);
+  assert.equal(back.session.map, 'miami');
+  assert.equal(back.session.x, 3900);
+  assert.equal(back.mapSessions.island.map, 'island');
+  // Back on the island: its own place again, Miami's put aside.
+  const isl = selectMapSession(back, 'island');
+  assert.equal(isl.map, 'island');
+  assert.equal(isl.x, 120);
+  assert.equal(back.mapSessions.miami.x, 3900);
+  assert.equal(back.mapSessions.island, undefined);
+  // And to Miami once more.
+  assert.equal(selectMapSession(back, 'miami').x, 3900);
+  assert.equal(back.mapSessions.island.x, 120);
+  // Same map: nothing moves.
+  assert.equal(selectMapSession(back, 'miami').x, 3900);
+  // Garbage in mapSessions is dropped; a session filed under the wrong map is too.
+  const g = sanitizeProgress({ version: 3, mapSessions: { miami: { map: 'island', mode: 'foot', x: 1, z: 1 }, island: 5, mars: {}, __proto__: { p: 1 } } });
+  assert.deepEqual(g.mapSessions, {});
+  assert.deepEqual(sanitizeProgress({ version: 3, mapSessions: [1, 2] }).mapSessions, {});
+  assert.equal(sanitizeSession({ map: 'atlantis', mode: 'foot', x: 1, z: 1 }).map, 'island');
+  assert.ok(SESSION_MAPS.includes('miami') && SESSION_MAPS.includes('island'));
+});
+
+test('the session system picks the session of the map being played, both ways', () => {
+  const fakeGame = (map, progress) => {
+    const handlers = {};
+    return {
+      city: { map, nodes: [], spawn: { x: 0, z: 0, heading: 0 } }, collision: null, progress,
+      events: { on: (k, f) => (handlers[k] = f), emit: () => {} },
+      player: { mode: 'foot', x: map === 'miami' ? 3900 : 120, z: map === 'miami' ? -500 : -40, heading: 0, vehicle: null },
+    };
+  };
+  const store = memory();
+  // Played on the island first (the old default), saved.
+  let p = loadProgress(store);
+  let g = fakeGame(undefined, p);
+  createSession(g, store);
+  assert.equal(g.saveSession(), true);
+  assert.equal(loadProgress(store).session.map, 'island');
+  // Now Miami (the default): starts fresh, the island save is kept aside.
+  p = loadProgress(store);
+  g = fakeGame('miami', p);
+  createSession(g, store);
+  assert.equal(p.session, null);
+  assert.equal(p.mapSessions.island.x, 120);
+  assert.equal(g.saveSession(), true);
+  let back = loadProgress(store);
+  assert.equal(back.session.map, 'miami');
+  assert.equal(back.session.x, 3900);
+  assert.equal(back.mapSessions.island.x, 120);
+  // Back to ?map=island: the island place, Miami's kept.
+  p = loadProgress(store);
+  g = fakeGame(undefined, p);
+  createSession(g, store);
+  assert.equal(p.session.map, 'island');
+  assert.equal(p.session.x, 120);
+  assert.equal(p.mapSessions.miami.x, 3900);
+  g.saveSession();
+  back = loadProgress(store);
+  assert.equal(back.session.map, 'island');
+  assert.equal(back.mapSessions.miami.x, 3900);
 });
