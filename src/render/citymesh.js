@@ -9,6 +9,7 @@ import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
+import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
 export const COL = {
@@ -656,16 +657,24 @@ export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = tru
   };
   const cx = (i) => x0 + (i * s + 0.5) * cell, cz = (j) => z0 + (j * s + 0.5) * cell;
   const parkAt = (x, z) => { const d = city.districtOf(x, z); return d === 'park' || d === 'airfield'; };
+  // Lots (docs/REVAMP.md 6.2): near, a cell whose four corners are all
+  // lot ground is left to lotmesh.js (no land drawn under it); far, the
+  // land takes the colour of the lot under each coarse cell.
+  const LG = city.lots && city.lotGrid ? city.lotGrid.type : null;
+  const lotOwns = (i, j) => {
+    const k = j * w + i;
+    return DRAWN_T[LG[k]] && DRAWN_T[LG[k + 1]] && DRAWN_T[LG[k + w]] && DRAWN_T[LG[k + w + 1]];
+  };
   const WALL = 0x9a968c;
   const P = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
   for (let j = j0; j < j1; j++) {
     const za = cz(j), zb = cz(j + 1);
-    let run = -1, runPark = false;
+    let run = -1, runPark = false, runCol = 0;
     const flush = (iEnd) => {
       if (run < 0) return;
       const xa = cx(run), xb = cx(iEnd);
       const bld = runPark ? B.land : B.ground;
-      bld.at((xa + xb) / 2, za).flat(xa, za, xb, zb, y, runPark ? PARK : PAVE);
+      bld.at((xa + xb) / 2, za).flat(xa, za, xb, zb, y, runCol);
       run = -1;
     };
     for (let i = i0; i < i1; i++) {
@@ -673,9 +682,11 @@ export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = tru
       const sum = a + b + c + d;
       const xa = cx(i), xb = cx(i + 1);
       if (sum === 4) {
+        if (LG && s === 1 && i + 1 < w && j + 1 < h && lotOwns(i, j)) { flush(i); continue; }
         const pk = parkAt(xa, za);
-        if (run >= 0 && (pk !== runPark || i - run >= 24)) flush(i);
-        if (run < 0) { run = i; runPark = pk; }
+        const col = LG && s > 1 ? FAR_LOT_COL[LG[j * s * w + i * s]] || (pk ? PARK : PAVE) : pk ? PARK : PAVE;
+        if (run >= 0 && (pk !== runPark || col !== runCol || i - run >= 24)) flush(i);
+        if (run < 0) { run = i; runPark = pk; runCol = col; }
         continue;
       }
       flush(i);

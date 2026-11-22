@@ -14,6 +14,14 @@
 export const MIAMI_CROP = { x0: -2600, z0: -2600, x1: 2450, z1: 1800 };
 export const LAND_MARGIN = 150;
 
+// The core (docs/REVAMP.md 6.1): a quality tier, not a wall. The whole box
+// is playable and dressed by the same rules; the core holds the hand
+// content and is where the density tests run (test/world-density.test.js).
+export const MIAMI_CORE = { x0: -2700, z0: -2700, x1: 2450, z1: 1900 };
+
+// Player start (6.8): Southeast 1st Street in Downtown, facing east.
+const SPAWN = { street: 'Southeast 1st Street', x: -1100, z: 780, heading: 0 };
+
 // Course spec (world/courses.js buildSpecCourses): ids are the island's,
 // so medals and best times keep their slots; names and routes are Miami's.
 export const MIAMI_COURSES = {
@@ -59,7 +67,28 @@ export const MIAMI_COURSES = {
 
 export const MIAMI_SPOTS = {
   // Player start: Southeast 1st Street in Downtown, facing east.
-  spawn: { street: 'Southeast 1st Street', x: -1100, z: 780, heading: 0 },
+  spawn: SPAWN,
+
+  // The designed first view (6.8): the title camera behind the spawn on
+  // Southeast 1st Street, towers ahead lit by the low sun behind it.
+  startView: {
+    spawn: SPAWN,
+    camera: { back: 22, side: 6, height: 7, lookAhead: 40, lookHeight: 6, fov: 55, dolly: 12, dollySpeed: 0.5 },
+    time: 17.5,
+    weather: 'clear',
+    traffic: 6,
+    parked: 6,
+  },
+
+  // Sand (lot type `beach`, 6.2 and 6.3): rects on real open or sandy
+  // shores. The lot builder makes the land within 30 m of the water in a
+  // rect a beach. `src` is the data name the shore is checked against.
+  beaches: [
+    // The open north shore of Watson Island, facing the Venetian Causeway.
+    { name: 'Watson Island North Beach', src: 'Watson Island', x0: 60, z0: -900, x1: 900, z1: -760 },
+    // The sandy causeway shore by the Rickenbacker Causeway (south edge of the box).
+    { name: 'Rickenbacker Causeway Beach', src: 'Rickenbacker Causeway', x0: 0, z0: 3540, x1: 1000, z1: 3891 },
+  ],
 
   // Gullwing Airfield on an invented islet in open water in north
   // Biscayne Bay. The causeway leaves the east end of Northeast 26th
@@ -102,10 +131,36 @@ export const MIAMI_SPOTS = {
     { key: 'downtown', x0: -700, z0: 1250, x1: -300, z1: 1600 },
     { key: 'docks', x0: -480, z0: -150, x1: 1600, z1: 1000 },
     { key: 'residential', x0: -480, z0: -1450, x1: 1600, z1: -950 },
-    { key: 'park', x0: 0, z0: -950, x1: 1100, z1: -150 },
+    // Watson Island: the park polygons in the data stay parks; the rest
+    // (in reality the attraction, museum, marina and hotel parcels) is
+    // built land.
+    { key: 'midtown', x0: 0, z0: -950, x1: 1100, z1: -150 },
     { key: 'park', x0: -820, z0: 380, x1: -480, z1: 1000 },
     { key: 'park', x0: -900, z0: -820, x1: -480, z1: -520 },
     { key: 'park', x0: -720, z0: -1330, x1: -480, z1: -1060 },
+  ],
+
+  // Landmarks with invented names and their own shapes (docs/REVAMP.md
+  // section 2 and 6.1): each is drawn by the renderer as `shape` instead
+  // of plain boxes, and is tall or open enough to be seen from 600 m.
+  // `fit` 'site': it takes over the real footprints within `r` m of the
+  // point (the boxes stay for collision and are marked `landmark`);
+  // 'open': it stands on free ground found within 150 m of the point, as
+  // one box of l by w m (x by z) and h m. Names are invented (D1); `on`
+  // says what real place the site is, for the reader only.
+  landmarks: [
+    { id: 'tidewater-arena', name: 'Tidewater Arena', shape: 'arena', fit: 'site', x: -749, z: -204, r: 75, h: 34, on: 'the bayfront arena' },
+    { id: 'riverfront-hall', name: 'Riverfront Hall', shape: 'drum', fit: 'site', x: -1146, z: 984, r: 40, h: 64, on: 'the convention hall on the river mouth' },
+    { id: 'opal-opera', name: 'Opal Opera House', shape: 'shell', fit: 'site', x: -802, z: -1053, r: 70, h: 34, on: 'the performing arts centre' },
+    { id: 'wavecrest-terminal', name: 'Wavecrest Terminal', shape: 'wave', fit: 'site', x: 960, z: 348, r: 60, h: 30, on: 'a PortMiami cruise terminal' },
+    { id: 'twin-spires', name: 'Brickell Twin Spires', shape: 'twin', fit: 'site', x: -1216, z: 1458, r: 45, h: 170, on: 'the Brickell towers by the Metromover' },
+    { id: 'bayfront-sail', name: 'Bayfront Sail', shape: 'sail', fit: 'open', x: -700, z: 650, l: 30, w: 18, h: 30, on: 'Bayfront Park, by the amphitheatre' },
+    { id: 'harbour-wheel', name: 'Harbour Wheel', shape: 'wheel', fit: 'open', x: -660, z: 200, l: 16, w: 16, h: 62, on: 'the bayfront north of Bayfront Park' },
+    { id: 'key-point-light', name: 'Key Point Light', shape: 'lighthouse', fit: 'open', x: -360, z: 1480, l: 9, w: 9, h: 34, on: 'the east shore of Brickell Key' },
+    { id: 'watson-aviary', name: 'Watson Aviary', shape: 'dome', fit: 'open', x: 560, z: -470, l: 40, w: 40, h: 30, on: 'the attraction parcels of Watson Island' },
+    { id: 'omni-needle', name: 'Omni Needle', shape: 'needle', fit: 'open', x: -980, z: -1250, l: 10, w: 10, h: 135, on: 'Edgewater, by the old Omni site' },
+    { id: 'wynwood-tank', name: 'Wynwood Water Tank', shape: 'watertower', fit: 'open', x: -2150, z: -2050, l: 14, w: 14, h: 44, on: 'a Wynwood warehouse block' },
+    { id: 'overtown-arch', name: 'Overtown Rail Arch', shape: 'arch', fit: 'open', x: -1560, z: -420, l: 40, w: 8, h: 58, on: 'beside the rail line in Overtown' },
   ],
 
   // Short hand-made links where the flattened data leaves a real
@@ -221,16 +276,20 @@ export const MIAMI_SPOTS = {
 // find them (not game places). `src` is the name in the map data (a label,
 // building or park), `name` is what the map prints. Metres, same frame as
 // the data. Virginia Key lies south of the data box, so it is not listed.
+// Where the real name is a venue brand (decision D1) the map prints the
+// invented name of the landmark that stands there (MIAMI_SPOTS.landmarks)
+// or a plain description; `src` keeps the data name it was found by. The
+// city adds its other invented landmarks after these (city.mapLandmarks).
 export const MIAMI_LANDMARKS = [
-  { name: 'Kaseya Center', src: 'Kaseya Center', x: -749, z: -203.9 },
+  { name: 'Tidewater Arena', src: 'Kaseya Center', x: -749, z: -203.9, landmark: 'tidewater-arena' },
   { name: 'Freedom Tower', src: 'Freedom Tower', x: -1060.9, z: -55.2 },
   { name: 'Bayfront Park', src: 'Bayfront Park', x: -733.5, z: 762.1 },
-  { name: 'Adrienne Arsht Center', src: 'Adrienne Arsht Center', x: -802.2, z: -1052.9 },
-  { name: 'Miami Central Station', src: 'Miami Central', x: -1574.4, z: 261.1 },
+  { name: 'Opal Opera House', src: 'Adrienne Arsht Center', x: -802.2, z: -1052.9, landmark: 'opal-opera' },
+  { name: 'Downtown Rail Hub', src: 'Miami Central', x: -1574.4, z: 261.1 },
   { name: 'Government Center', src: 'Government Center', x: -1612.6, z: 437.8 },
   { name: 'Museum Park', src: 'Museum Park', x: -797.7, z: -658.1 },
-  { name: 'Brickell City Centre', src: 'Brickell City Centre', x: -1215.7, z: 1458.1 },
-  { name: 'Miami Design District', src: 'Miami Design District', x: -1131.4, z: -3629.8 },
+  { name: 'Brickell Twin Spires', src: 'Brickell City Centre', x: -1215.7, z: 1458.1, landmark: 'twin-spires' },
+  { name: 'Design District', src: 'Miami Design District', x: -1131.4, z: -3629.8 },
   { name: 'Little Havana', src: 'Latin Quarter', x: -3977.3, z: 1266.4 },
   { name: 'Vizcaya', src: 'Vizcaya', x: -3178.6, z: 3367.9 },
   { name: 'Port of Miami', src: 'Cruise Terminal D', x: 960, z: 347.7 },
@@ -242,7 +301,7 @@ export const MIAMI_LANDMARKS = [
   { name: 'Torch of Friendship', src: 'Torch of Friendship', x: -636.5, z: 584.7 },
   { name: 'Brickell Key', src: 'Brickell Key', x: -502.1, z: 1406.7 },
   { name: 'Venetian Islands', src: 'Venetian Islands', x: 1692, z: -1339.1 },
-  { name: 'Gusman Center', src: 'Olympia Theater at Gusman Center', x: -1049, z: 655.6 },
-  { name: 'Knight Center', src: 'James L. Knight Center Theater', x: -1145.8, z: 984.2 },
+  { name: 'Flagler Street Theatre', src: 'Olympia Theater at Gusman Center', x: -1049, z: 655.6 },
+  { name: 'Riverfront Hall', src: 'James L. Knight Center Theater', x: -1145.8, z: 984.2, landmark: 'riverfront-hall' },
   { name: 'Lummus Park', src: 'Lummus Park', x: -2312, z: 405.4 },
 ];

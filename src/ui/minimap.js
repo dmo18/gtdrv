@@ -9,6 +9,7 @@ const COL = {
   sand: '#d9c391',
   land: '#6f7b5c',
   block: '#7d8869',
+  paved: '#8a8a86', // placeholder ground for a real map until city.lots exists
   park: '#4f8a4a',
   road: '#3b3a3c',
   avenue: '#4a484a',
@@ -18,6 +19,11 @@ const COL = {
   accent: '#e2733a',
   text: '#f6efe6',
   panel: 'rgba(24, 18, 15, 0.82)',
+};
+// Minimap colour of each lot type (docs/REVAMP.md 6.2 table).
+export const LOT_COLOURS = {
+  yard: '#7d8f62', carpark: '#6a6d72', plaza: '#b8b0a2', grass: '#86965f', works: '#8a8378',
+  beach: '#d9c9a0', park: '#6f8f55', wateredge: '#9a9a94', site: '#a08a66', verge: '#8f8f8a',
 };
 export const PLAYER_COLOR = '#5fe0ff';
 
@@ -102,10 +108,21 @@ export function createMapRenderer(city) {
       for (const r of extra) { g.beginPath(); rect(r, 0); g.fill(); }
     }
 
-    // Blocks.
+    // Blocks. On the real map the ground is mostly paving, not grass, so the
+    // block colour is a neutral grey until the lots (below) paint over it.
     for (const b of city.blocks) {
-      g.fillStyle = b.district === 'park' ? COL.park : COL.block;
+      g.fillStyle = b.district === 'park' ? COL.park : (city.map ? COL.paved : COL.block);
       g.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0);
+    }
+    // Lots (docs/REVAMP.md 6.2, W1): each lot in the colour of its type. With
+    // no lots (the island, or W1 not landed) the block colours above stay.
+    if (Array.isArray(city.lots)) {
+      for (const lot of city.lots) {
+        const c = LOT_COLOURS[lot.type];
+        if (!c) continue;
+        g.fillStyle = c;
+        g.fillRect(lot.x0, lot.z0, lot.x1 - lot.x0, lot.z1 - lot.z0);
+      }
     }
 
     // Roads: avenues on top of streets, with intersection squares.

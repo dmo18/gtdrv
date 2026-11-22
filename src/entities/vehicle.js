@@ -23,29 +23,35 @@ const G = 9.81;
 // Handling and drivetrain fields:
 //   drive 'fwd'|'rwd'|'awd', gears (forward gear count), power (kW),
 //   firstGear (m/s at the redline in 1st), cgFront (share of weight on the
-//   front axle), grip (peak tyre friction), brake (pedal decel request,
-//   m/s^2; the tyres limit it), steerMax (wheel lock at walking pace, rad),
-//   accel (rough launch acceleration, m/s^2, informative).
+//   front axle), grip (peak tyre friction, the lateral grip in g is about
+//   `lateralGrip(spec)`), brake (pedal decel request, m/s^2; the tyres
+//   limit it), steerMax (true front wheel angle at walking pace, rad, the
+//   same in both modes), lockRate / returnRate (full locks per second
+//   away from / back toward the centre), accel (rough launch acceleration,
+//   m/s^2, informative). Tuned to the bands of src/entities/handlingbands.js.
 export const VEHICLE_SPECS = {
   compact: {
     id: 'compact', label: 'Bramlet', body: 'hatch',
     length: 3.8, width: 1.7, height: 1.45, wheelBase: 2.4, wheelRadius: 0.3,
-    mass: 1000, maxSpeed: 36, reverseSpeed: 8, accel: 4, brake: 13, grip: 0.95, steerMax: 0.62,
-    drive: 'fwd', gears: 5, power: 56, firstGear: 13, cgFront: 0.62,
+    mass: 1100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.8, grip: 0.92, steerMax: 0.43,
+    lockRate: 3.3, returnRate: 4.2,
+    drive: 'fwd', gears: 5, power: 58, firstGear: 13, cgFront: 0.62,
     health: 700, colors: [0xc8402e, 0x3a7bd5, 0xe8e2d0, 0x6bbf59, 0xf0a030],
   },
   sedan: {
     id: 'sedan', label: 'Selwick', body: 'sedan',
     length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
-    mass: 1400, maxSpeed: 42, reverseSpeed: 9, accel: 4.5, brake: 14, grip: 1.0, steerMax: 0.6,
-    drive: 'fwd', gears: 5, power: 88, firstGear: 14, cgFront: 0.6,
+    mass: 1450, maxSpeed: 51.4, reverseSpeed: 9, accel: 3.5, brake: 10.1, grip: 0.95, steerMax: 0.48,
+    lockRate: 3.3, returnRate: 4.2,
+    drive: 'fwd', gears: 5, power: 92, firstGear: 14, cgFront: 0.6,
     health: 900, colors: [0x2f3b4c, 0x8a8f96, 0xd9d9d9, 0x5a1f24, 0x1f4a3a, 0x202020],
   },
   sports: {
     id: 'sports', label: 'Vexari R', body: 'coupe',
     length: 4.4, width: 1.95, height: 1.2, wheelBase: 2.6, wheelRadius: 0.34,
-    mass: 1300, maxSpeed: 62, reverseSpeed: 10, accel: 7.5, brake: 17, grip: 1.25, steerMax: 0.58,
-    drive: 'rwd', gears: 6, power: 190, firstGear: 18, cgFront: 0.45,
+    mass: 1400, maxSpeed: 70, reverseSpeed: 10, accel: 7, brake: 11.3, grip: 1.18, steerMax: 0.45,
+    lockRate: 3.8, returnRate: 5.0,
+    drive: 'rwd', gears: 6, power: 220, firstGear: 18, cgFront: 0.45,
     health: 750, colors: [0xd81e2a, 0xf2d21b, 0x1e6fd8, 0xf5f5f5, 0x111111, 0xff7a1a],
   },
   // The secret car (world/secrets.js): a sports-car chassis, 10 percent
@@ -53,53 +59,69 @@ export const VEHICLE_SPECS = {
   ghostwake: {
     id: 'ghostwake', label: 'Ghostwake', body: 'coupe', glow: 0x3ff0dc, pedSafe: true,
     length: 4.4, width: 1.95, height: 1.2, wheelBase: 2.6, wheelRadius: 0.34,
-    mass: 1250, maxSpeed: 68.2, reverseSpeed: 10, accel: 8, brake: 18, grip: 1.3, steerMax: 0.58,
-    drive: 'rwd', gears: 6, power: 215, firstGear: 19.5, cgFront: 0.45,
+    mass: 1350, maxSpeed: 77, reverseSpeed: 10, accel: 7.5, brake: 11.0, grip: 1.22, steerMax: 0.45,
+    lockRate: 3.8, returnRate: 5.0,
+    drive: 'rwd', gears: 6, power: 260, firstGear: 19.5, cgFront: 0.45,
     health: 850, colors: [0x0f9e92],
   },
   muscle: {
     id: 'muscle', label: 'Thundrel', body: 'coupe',
     length: 4.8, width: 1.95, height: 1.35, wheelBase: 2.85, wheelRadius: 0.36,
-    mass: 1600, maxSpeed: 54, reverseSpeed: 9, accel: 6.5, brake: 14, grip: 1.0, steerMax: 0.58,
-    drive: 'rwd', gears: 5, power: 290, firstGear: 18, cgFront: 0.55,
+    mass: 1700, maxSpeed: 61.5, reverseSpeed: 9, accel: 5, brake: 10.6, grip: 1.0, steerMax: 0.48,
+    lockRate: 3.3, returnRate: 4.2,
+    drive: 'rwd', gears: 5, power: 215, firstGear: 21, cgFront: 0.55,
     health: 1000, colors: [0x14213d, 0xa31621, 0x2d6a4f, 0xe9c46a, 0x101010],
   },
   pickup: {
     id: 'pickup', label: 'Dunskar', body: 'pickup',
     length: 5.3, width: 2.0, height: 1.85, wheelBase: 3.2, wheelRadius: 0.42,
-    mass: 2000, maxSpeed: 38, reverseSpeed: 8, accel: 4, brake: 12, grip: 0.9, steerMax: 0.56,
-    drive: 'awd', gears: 5, power: 112, firstGear: 13, cgFront: 0.57,
+    mass: 2100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.0, grip: 0.85, steerMax: 0.47,
+    lockRate: 3.0, returnRate: 3.8,
+    drive: 'awd', gears: 5, power: 112, firstGear: 16, cgFront: 0.57,
     health: 1100, colors: [0x7a4b2a, 0x3d5a40, 0xb8b8b0, 0x1c3f75, 0x8c1c13],
   },
   van: {
     id: 'van', label: 'Portaby', body: 'van',
     length: 5.0, width: 2.0, height: 2.2, wheelBase: 3.0, wheelRadius: 0.36,
-    mass: 2200, maxSpeed: 33, reverseSpeed: 7, accel: 3, brake: 11, grip: 0.85, steerMax: 0.56,
-    drive: 'fwd', gears: 4, power: 98, firstGear: 12, cgFront: 0.58,
+    mass: 2200, maxSpeed: 40.2, reverseSpeed: 7, accel: 2.4, brake: 8.7, grip: 0.82, steerMax: 0.45,
+    lockRate: 2.8, returnRate: 3.6,
+    drive: 'fwd', gears: 4, power: 100, firstGear: 12, cgFront: 0.58,
     health: 1100, colors: [0xf0f0ea, 0x5b6770, 0x2a5d8a, 0xc9a227],
   },
   taxi: {
     id: 'taxi', label: 'Selwick Cab', body: 'sedan',
     length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
-    mass: 1450, maxSpeed: 42, reverseSpeed: 9, accel: 4.5, brake: 14, grip: 1.0, steerMax: 0.6,
-    drive: 'fwd', gears: 5, power: 88, firstGear: 14, cgFront: 0.6,
+    mass: 1500, maxSpeed: 51.4, reverseSpeed: 9, accel: 3.5, brake: 10.1, grip: 0.95, steerMax: 0.48,
+    lockRate: 3.3, returnRate: 4.2,
+    drive: 'fwd', gears: 5, power: 92, firstGear: 14, cgFront: 0.6,
     health: 900, colors: [0xf2c21b],
   },
   police: {
     id: 'police', label: 'Selwick Patrol', body: 'sedan',
     length: 4.8, width: 1.9, height: 1.45, wheelBase: 2.85, wheelRadius: 0.34,
-    mass: 1600, maxSpeed: 52, reverseSpeed: 10, accel: 6, brake: 16, grip: 1.1, steerMax: 0.6,
-    drive: 'awd', gears: 6, power: 140, firstGear: 16, cgFront: 0.56,
+    mass: 1700, maxSpeed: 60.4, reverseSpeed: 10, accel: 4.5, brake: 9.6, grip: 1.05, steerMax: 0.49,
+    lockRate: 3.6, returnRate: 4.5,
+    drive: 'awd', gears: 6, power: 140, firstGear: 21, cgFront: 0.56,
     health: 1200, colors: [0x1b2433],
   },
   truck: {
     id: 'truck', label: 'Bulkora', body: 'truck',
     length: 7.5, width: 2.4, height: 3.3, wheelBase: 4.4, wheelRadius: 0.5,
-    mass: 6000, maxSpeed: 28, reverseSpeed: 6, accel: 2, brake: 9, grip: 0.75, steerMax: 0.5,
-    drive: 'rwd', gears: 6, power: 150, firstGear: 6.5, cgFront: 0.5,
+    mass: 7500, maxSpeed: 31.3, reverseSpeed: 6, accel: 1.3, brake: 7.4, grip: 0.70, steerMax: 0.42,
+    lockRate: 2.6, returnRate: 3.4,
+    drive: 'rwd', gears: 6, power: 190, firstGear: 6.5, cgFront: 0.5,
     health: 2000, colors: [0xe8e8e8, 0x2b4c7e, 0x9b2226, 0x386641],
   },
 };
+// The three reward cars of docs/REVAMP.md 6.6 (the Ghostwake pattern: an
+// existing chassis and body, their own id, label and one colour).
+function rewardCar(base, id, label, power, o) {
+  const b = VEHICLE_SPECS[base];
+  return Object.assign({}, b, { id, label, power: Math.round(b.power * power), reward: true }, o);
+}
+VEHICLE_SPECS.sunchaser = rewardCar('muscle', 'sunchaser', 'Sunchaser', 1.08, { maxSpeed: 64.0, grip: 1.05, brake: 10.0, colors: [0xff5a1f] });
+VEHICLE_SPECS.tidewinder = rewardCar('pickup', 'tidewinder', 'Tidewinder', 1.15, { maxSpeed: 49.0, grip: 0.92, brake: 9.6, firstGear: 20, health: 1400, colors: [0x1f8a8a] });
+VEHICLE_SPECS.nightheron = rewardCar('sedan', 'nightheron', 'Night Heron', 1.4, { maxSpeed: 58.0, grip: 1.05, brake: 9.6, colors: [0x1a1a2e] });
 
 let nextId = 1;
 
@@ -119,7 +141,7 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     color,
     px: x, pz: z, pheading: heading, ppitch: 0, proll: 0,
     roll: 0, pitch: 0, rollV: 0, pitchV: 0, suspension: 0,
-    gear: 1, rpm: IDLE, shiftT: 0, sinceShift: 0, spin: 0,
+    gear: 1, rpm: IDLE, shiftT: 0, sinceShift: 0, spin: 0, revHold: 0,
     accelX: 0, accelY: 0, brakeP: 0, abs: false,
     wheelSpin: 0,
     slip: 0,
@@ -170,41 +192,44 @@ const KIN_V = 4; // below this the car blends into a no-slip kinematic model
 const ROLL_RES = 0.013; // rolling resistance coefficient
 const ABS_K = 0.95; // ABS keeps braking at this share of the tyre limit
 const HB_K = 0.8; // locked rear tyres slide at this share of grip
+const LONG_K = 1.08; // tyres grip a little more in a straight line than sideways
+const COMB = 0.85; // friction ellipse weight of the longitudinal force
+const PEDAL_S = 1.0; // brake pedal S-curve strength (see brakePedal)
+const BRAKE_BUILD = 9; // brake pressure rise, full pedal per second
+const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
+const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse
+const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
+const REAR_K = 1.08; // rear tyres a little grippier than the front: the car settles at the limit (both modes)
+// Rear slip (share of its peak) when the front is at its peak in a steady turn.
+const XR_REAR = 1 - Math.sqrt(1 - 1 / REAR_K);
+const TC_X = 1.0; // traction control starts at the rear peak slip
+const ASK_V1 = 10, ASK_V2 = 20; // m/s: Sim's full-input ask ramps in between
 
-// Two handling modes, module-wide (every car at once):
-// - 'arcade' (default): tight and forgiving, about 2.5..2.8 g of lateral
-//   grip (latBase + latK * spec.grip), a tyre curve that hardly sags past
-//   the peak, more lock at speed (capped by the lateral acceleration it
-//   asks for rather than a heavy speed taper), quicker steering, a
-//   yaw-rate assist toward the bicycle-model yaw rate, less speed scrubbed
-//   off through the steered wheels, and a firmer stability assist that
-//   watches the rear axle (also during handbrake slides, short of a
-//   spin-out). Longitudinal grip (traction, braking, ABS), weight
-//   transfer, gears, power oversteer and handbrake slides remain.
-// - 'sim': realistic grip (lateral friction = spec.grip), the tyre force
-//   sags past the peak, full input asks for about 0.85 of grip and the
-//   lock tapers with speed; only a light yaw damper. The original model.
-// Fields: latBase/latK lateral friction; fall tyre sag past the peak;
-// latTarget share of lateral grip full lock asks for; mechV and lockK
-// mechanical lock lockK * steerMax / (1 + u / mechV); rearLat rear axle
-// lateral grip factor (> 1: settles at the limit); comb/combR friction
-// ellipse weight of the longitudinal force, front/rear; scrub share of
-// the steered-wheel drag kept; steerRate/steerRateV input rate
-// rate / (1 + u / rateV); yawK/yawFirm yaw assist gains (under/over
-// rotating); betaK slide-correction gain; cutMin least drive kept in a
-// slide; rearSlide measure the slide at the rear axle instead of the
-// body; hbBeta/hbYaw handbrake slide caps (0 = none); squealR/squealF
-// tyre squeal onset (multiples of the peak slip).
+// Two handling modes, module-wide (every car at once), docs/REVAMP.md 6.3.
+// Both modes have the same straight line (power, gears, brakes with ABS),
+// the same steering timing (lockRate, returnRate, steerMax) and the same
+// input; they differ only in these rows:
+//   latK     lateral grip = latK * spec.grip
+//   fall     tyre force sag past the peak slip
+//   ask      share of lateral grip that full steering input asks for
+//   assist   stability assist (yaw and slide correction) on
+//   yawK / yawFirm  yaw assist gains (under / over rotating); sim keeps a
+//            light damper only
+//   betaK    slide correction gain
+//   tc       traction control: drive cut in a slide, at least cutMin kept
+//   hbCap    handbrake slide capped at hbBeta (rad) and yaw at hbYaw, and
+//            it recovers by itself; off = free slide while held
+//   transfer share of the longitudinal weight transfer the lateral grip
+//            (the balance) sees; braking and traction always see all of it
+//   squeal   tyre squeal onset in multiples of the peak slip
 const HANDLING = {
   arcade: {
-    latBase: 2.4, latK: 0.3, fall: 0.06, latTarget: 1, mechV: 80, lockK: 1.12, rearLat: 1.12,
-    comb: 0.5, combR: 0.85, scrub: 0.35, steerRate: 14, steerRateV: 40, yawK: 10, yawFirm: 4,
-    betaK: 150, cutMin: 0.3, rearSlide: true, hbBeta: 0.6, hbYaw: 2.2, squealR: 1.3, squealF: 1.5,
+    latK: 1.06, fall: 0.05, ask: 1.0, assist: true, yawK: 10, yawFirm: 4, betaK: 150,
+    tc: true, cutMin: 0.3, hbCap: true, hbBeta: 0.6, hbYaw: 2.2, transfer: 0.5, squeal: 1.3,
   },
   sim: {
-    latBase: 0, latK: 1, fall: 0.22, latTarget: 0.85, mechV: 20, lockK: 1, rearLat: 1,
-    comb: 0.85, combR: 0.85, scrub: 1, steerRate: 7, steerRateV: 15, yawK: 1.5, yawFirm: 4,
-    betaK: 30, cutMin: 0.25, rearSlide: false, hbBeta: 0, hbYaw: 0, squealR: 0.9, squealF: 1.1,
+    latK: 0.98, fall: 0.2, ask: 1.1, assist: false, yawK: 1.2, yawFirm: 1.2, betaK: 0,
+    tc: false, cutMin: 1, hbCap: false, hbBeta: 0, hbYaw: 0, transfer: 1, squeal: 0.9,
   },
 };
 let handlingMode = 'arcade';
@@ -226,7 +251,7 @@ export function getHandlingMode() {
 
 // Lateral tyre friction of a spec in the current mode.
 export function lateralGrip(spec) {
-  return H.latBase + H.latK * spec.grip;
+  return H.latK * spec.grip;
 }
 
 // Normalised engine torque, peak around 60% of the redline.
@@ -243,6 +268,25 @@ function tyre(x) {
   if (ax < 1) y = ax * (2 - ax);
   else y = 1 - FALL * (1 - Math.exp(-(ax - 1) * 1.4));
   return x < 0 ? -y : y;
+}
+
+// Brake pedal to share of the full brake: a gentle S that is exact at 0,
+// half and full (half pedal is half the stop, test B1) and a little
+// firmer in the first half of the travel, where drivers and the AI trim
+// their speed. Strictly rising.
+export function brakePedal(p) {
+  const x = p < 0 ? 0 : p > 1 ? 1 : p;
+  return x + PEDAL_S * x * (1 - x) * (1 - 2 * x);
+}
+
+// The tyre curve of the current mode (tests and tools).
+export function tyreCurve(x) {
+  return tyre(x);
+}
+
+// A copy of a mode's handling row (tests and tools).
+export function handlingParams(mode) {
+  return Object.assign({}, HANDLING[mode === 'sim' ? 'sim' : 'arcade']);
 }
 
 // Per-spec derived constants, computed once.
@@ -267,7 +311,9 @@ function derive(s) {
     iz: s.mass * (s.length * s.length + s.width * s.width) / 12 * 0.9,
     h: s.height * 0.36,
     P: (s.power || 100) * 1000,
-    kd: 0.32 * s.width * s.height, // aero drag N per (m/s)^2
+    kd: DRAG_K * s.width * s.height, // aero drag N per (m/s)^2
+    lockRate: s.lockRate > 0 ? s.lockRate : 3.3,
+    returnRate: s.returnRate > 0 ? s.returnRate : 4.2,
     apF: heavy ? 0.15 : 0.13, // peak slip angles (rad); softer front = understeer
     apR: heavy ? 0.13 : 0.115,
     shiftTime: heavy ? 0.45 : drive === 'rwd' && s.power > 200 ? 0.16 : 0.22,
@@ -277,17 +323,83 @@ function derive(s) {
   return d;
 }
 
-// Maximum front wheel angle at speed u: near walking pace the mechanical
-// lock (which eases off a little with speed), above that whatever asks for
-// about latTarget of lateral grip in a steady turn, so full input never
-// simply spins the car. 'sim' tapers the mechanical lock as
-// steerMax / (1 + u / 20), the same curve the traffic and police planners
-// use to turn a wanted wheel angle into `steer`.
+// Steering lock at speed u, as the geometric wheel angle whose kinematic
+// curvature tan(angle) / L is the steady path curvature full input gives:
+// at walking pace the true lock `steerMax` (the same in both modes), above
+// that the angle that asks for `ask` of the lateral grip, so full input
+// never simply spins the car. `steer` (-1..1, from the player or an AI
+// planner) is a share of it: a planner that wants a path curvature k sends
+// atan(k * wheelBase) / steerLock(spec, u) and gets about k (test A1). The
+// real wheel angle adds the tyres' slip angles (steerAngle).
 export function steerLock(spec, u) {
+  return steerGeo(spec, u, 1);
+}
+
+// The share of lateral grip full input asks for at speed au: the mode's
+// `ask` from ASK_V2 up, 1.00 at ASK_V1 and below (town speeds steer
+// linearly in both modes; Sim's extra lock that scrubs and runs wide is a
+// thing of real speed).
+function askAt(au) {
+  if (H.ask === 1) return 1;
+  const k = au <= ASK_V1 ? 0 : au >= ASK_V2 ? 1 : (au - ASK_V1) / (ASK_V2 - ASK_V1);
+  return 1 + (H.ask - 1) * k;
+}
+
+// Front wheel angle for a steer share s (-1..1) at speed u. At walking
+// pace s * steerMax. Above that the angle is built so the steady path
+// curvature is the share s of the full-lock curvature (accuracy test A1):
+// the geometric angle s * L * kappa plus the slip angles the tyres need
+// for that share of grip on the curve tyreCurve (front at s * ask of its
+// peak, rear at the share its extra REAR_K grip leaves).
+export function steerAngle(spec, u, s) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
-  const want = d.L * H.latTarget * lateralGrip(spec) * G / Math.max(au * au, 1) + (d.apF - d.apR) * 0.6;
-  return Math.min(H.lockK * spec.steerMax / (1 + au / H.mechV), want);
+  const as = s < 0 ? -s : s > 1 ? 1 : s;
+  const ask = askAt(au);
+  const geo = d.L * ask * lateralGrip(spec) * G / Math.max(au * au, 1);
+  const full = geo + d.apF * ask - d.apR * XR_REAR;
+  if (full >= spec.steerMax) return s * spec.steerMax;
+  const yF = as * ask;
+  const xF = yF < 1 ? 1 - Math.sqrt(1 - yF) : yF;
+  const yR = Math.min(1, as * Math.min(1, ask) / REAR_K);
+  const xR = 1 - Math.sqrt(1 - yR);
+  const ang = as * geo + d.apF * xF - d.apR * xR;
+  return s < 0 ? -ang : ang;
+}
+
+// Path curvature (1/m) that full input gives at speed u in a steady turn:
+// steer s gives about s times it (test A1). For planners and drivers that
+// want a curvature rather than a wheel angle.
+export function fullLockCurvature(spec, u) {
+  return Math.tan(steerGeo(spec, u, 1)) / derive(spec).L;
+}
+
+// The geometric part of that angle (what the stability assist steers the
+// yaw rate toward, and what steerLock reports).
+function steerGeo(spec, u, s) {
+  const d = derive(spec);
+  const au = u < 0 ? -u : u;
+  const ask = askAt(au);
+  const geo = d.L * ask * lateralGrip(spec) * G / Math.max(au * au, 1);
+  const full = geo + d.apF * ask - d.apR * XR_REAR;
+  return full >= spec.steerMax ? s * spec.steerMax : s * geo;
+}
+
+// Move the steering value toward its target: away from the centre at
+// `lockRate` full locks per second, toward it at `returnRate`, and through
+// the centre at the return rate first when the target is on the other side.
+export function steerToward(cur, target, lockRate, returnRate, dt) {
+  if (cur === target || !(dt > 0)) return cur;
+  const away = cur === 0 ? true : cur > 0 ? target > cur : target < cur;
+  if (away) return approach(cur, target, lockRate * dt);
+  // Toward the centre: stop at the target if it is on the same side.
+  const stop = target * cur > 0 ? target : 0;
+  const need = cur > stop ? cur - stop : stop - cur;
+  const step = returnRate * dt;
+  if (step <= need) return cur > stop ? cur - step : cur + step;
+  if (stop === target) return target;
+  // Crossed the centre: spend the rest of the step at the lock rate.
+  return approach(0, target, lockRate * (step - need) / returnRate);
 }
 
 const MAX_SUBSTEP_MOVE = 0.3; // metres per collision sub-step
@@ -304,9 +416,8 @@ export function stepVehicle(v, controls, dt, world) {
   v.impact = 0;
   if (!(dt > 0)) return;
 
-  let steerIn = 0, throttle = 0, brake = 0, handbrake = false, proportional = false;
+  let steerIn = 0, throttle = 0, brake = 0, handbrake = false;
   if (controls) {
-    proportional = controls.steerMode === 'proportional';
     steerIn = clamp(+controls.steer || 0, -1, 1);
     throttle = clamp(+controls.throttle || 0, 0, 1);
     brake = clamp(+controls.brake || 0, 0, 1);
@@ -320,28 +431,25 @@ export function stepVehicle(v, controls, dt, world) {
   const wx = world && world.weather;
   const rain = wx ? wx.rain || 0 : 0;
   const wet = wetGrip(rain);
-  const m = s.mass, mg = m * G, mu = s.grip * wet, muLat = lateralGrip(s) * wet, fLat = wetUnderSteer(rain);
+  const m = s.mass, mg = m * G, mu = s.grip * LONG_K * wet, muLat = lateralGrip(s) * wet, fLat = wetUnderSteer(rain);
   let ch = Math.cos(v.heading), sh = Math.sin(v.heading);
   const vf0 = v.vx * ch + v.vz * sh;
   const avf0 = Math.abs(vf0);
 
-  // ---- Steering: rate-limited, quicker at low speed, lock shrinks with speed.
-  const back = steerIn === 0 || steerIn * v.steer < 0;
-  const rate = (back ? 1.6 : 1) * H.steerRate / (1 + avf0 / H.steerRateV);
-  v.steer = approach(v.steer, steerIn, rate * dt);
-  // Two input mappings, same limit: 'proportional' (the player) scales the
-  // speed-dependent lock, so the whole input range stays useful at speed;
-  // the default treats steer as a fraction of the mechanical lock curve
-  // steerMax / (1 + u / 20), which the traffic and police planners use to
-  // turn a wanted wheel angle into `steer`, clipped to the same lock.
-  const lock = steerLock(s, vf0);
-  const delta = proportional ? v.steer * lock
-    : clamp(v.steer * s.steerMax / (1 + avf0 / 20), -lock, lock);
+  // ---- Steering: one rate limit (the car's lockRate / returnRate), the
+  // same for the player and the AI. steer is a share of the lock.
+  v.steer = steerToward(v.steer, steerIn, d.lockRate, d.returnRate, dt);
+  const delta = steerAngle(s, vf0, v.steer);
+  const deltaGeo = steerGeo(s, vf0, v.steer);
   v.steerAngle = delta;
   const cd = Math.cos(delta), sd = Math.sin(delta);
 
-  // ---- Gearbox (automatic). Reverse engages from near standstill.
-  const wantReverse = brake > 0.02 && throttle <= 0.02 && vf0 < 0.8 && !v.wrecked;
+  // ---- Gearbox (automatic). Reverse engages from near standstill; after
+  // a stop under brake the car first holds still for REV_HOLD seconds.
+  if (brake > 0.02 && vf0 > 0.8) v.revHold = REV_HOLD;
+  else if (brake <= 0.02) v.revHold = 0;
+  else if (v.revHold > 0 && avf0 < 0.12) v.revHold = Math.max(0, v.revHold - dt);
+  const wantReverse = brake > 0.02 && throttle <= 0.02 && vf0 < 0.8 && !v.wrecked && !(v.revHold > 0);
   if (v.gear === 0) {
     if (throttle > 0.02 && vf0 > -0.5) { v.gear = 1; v.shiftT = d.shiftTime; v.sinceShift = 0; }
   } else if (wantReverse && vf0 < 0.3) {
@@ -388,18 +496,22 @@ export function stepVehicle(v, controls, dt, world) {
   }
   // Engine braking at the driven wheels when off the pedal.
   let engBrake = 0;
-  if (pedal <= 0.02 && rWheel > 0.18 && !handbrake) engBrake = m * (0.45 + 1.1 * Math.min(rWheel, 1.1));
+  // The automatic's converter lets go once the brake is on, so the pedal
+  // alone sets the deceleration (half pedal is half the stop).
+  if (pedal <= 0.02 && brake <= 0.02 && rWheel > 0.18 && !handbrake) engBrake = m * (0.45 + 1.1 * Math.min(rWheel, 1.1));
   if (v.wrecked) engBrake += m * 2;
   // Rolling to a halt with nothing driving: drivetrain drag at crawl speed.
   const coast = pedal <= 0.02 && avf0 < 4 ? m * 0.9 : 0;
 
-  // Throttle while rolling backwards in a forward gear acts as a brake.
+  // Throttle while rolling backwards in a forward gear acts as a brake;
+  // so does the held brake while the car waits before reverse.
   let brakeReq = 0;
-  if (!reversing && brake > 0.02 && vf0 > 0.8) brakeReq = brake;
+  if (!reversing && brake > 0.02 && (vf0 > 0.8 || v.revHold > 0)) brakeReq = brake;
   if (throttle > 0.02 && vf0 < -0.5) brakeReq = Math.max(brakeReq, throttle);
   if (v.wrecked && brake > 0.02) brakeReq = Math.max(brakeReq, brake);
-  // Hydraulic build-up: the pedal pressure rises over ~0.12 s.
-  v.brakeP = approach(v.brakeP, brakeReq, 9 * dt);
+  // Hydraulic build-up: the pedal pressure rises over ~0.11 s, the same
+  // linear pedal in both modes (half pedal is half the deceleration).
+  v.brakeP = approach(v.brakeP, brakePedal(brakeReq), BRAKE_BUILD * dt);
   const brakeF = v.brakeP * m * s.brake * wetBrake(rain);
 
   // ---- Tyre dynamics in sub-steps.
@@ -415,49 +527,62 @@ export function stepVehicle(v, controls, dt, world) {
     const r = v.yawRate;
     const avf = vf < 0 ? -vf : vf;
     // Loads with longitudinal weight transfer (from last sub-step's accel).
+    // Brakes and traction see all of it; the lateral balance sees the
+    // mode's share (Arcade half, Sim full).
     const dFz = m * v.accelX * d.h / L;
     const fzF = clamp(mg * d.cgF - dFz, 0.2 * mg, 0.85 * mg);
     const fzR = mg - fzF;
+    const fzLF = clamp(mg * d.cgF - dFz * H.transfer, 0.2 * mg, 0.85 * mg);
+    const fzLR = mg - fzLF;
     const capF = mu * fzF, capR = mu * fzR; // longitudinal limits
-    const capLF = muLat * fLat * fzF, capLR = muLat * H.rearLat * fzR; // lateral limits
+    const capLF = muLat * fLat * fzLF, capLR = muLat * REAR_K * fzLR; // lateral limits
 
-    // Stability assist (sim: off while the handbrake is held).
+    // Stability assist (Arcade), or a light yaw damper (Sim).
     const beta = Math.atan2(vl, Math.max(avf, V0));
     let assistMz = 0;
     let driveScale = 1;
     if (!handbrake && avf > 4 && !v.wrecked) {
-      let yawRef = vf * Math.tan(delta) / L;
+      let yawRef = vf * Math.tan(deltaGeo) / L;
       const yLim = muLat * G / Math.max(avf, 1);
       yawRef = clamp(yawRef, -yLim, yLim);
-      // Sim measures the slide by the body slip angle; arcade by the rear
-      // axle's slip past its peak, so the big body slip of a tight turn
-      // at low speed is not mistaken for a slide.
-      const sl = H.rearSlide ? Math.atan2(vl - b * r, Math.max(avf, V0)) : beta;
-      const over = Math.abs(sl) - d.betaAllow - (H.rearSlide ? d.apR : 0);
-      if (over > 0) {
-        assistMz += d.iz * H.betaK * (sl > 0 ? over : -over);
-        driveScale = clamp(1 - over * 5, H.cutMin, 1);
+      if (H.assist) {
+        // The slide is measured at the rear axle past its peak, so the big
+        // body slip of a tight turn at low speed is not mistaken for one.
+        const sl = Math.atan2(vl - b * r, Math.max(avf, V0));
+        const over = Math.abs(sl) - d.betaAllow - d.apR;
+        if (over > 0) {
+          assistMz += d.iz * H.betaK * (sl > 0 ? over : -over);
+          if (H.tc) driveScale = clamp(1 - over * 5, H.cutMin, 1);
+        }
+        // Traction control: ease the drive off as the driven rear tyres
+        // reach their peak slip, so power does not break them loose.
+        const xr = (sl < 0 ? -sl : sl) / d.apR;
+        if (H.tc && d.frontDrive < 1 && xr > TC_X) driveScale = Math.min(driveScale, clamp(1 - (xr - TC_X) * 4, H.cutMin, 1));
       }
       const eY = r - yawRef;
       // Damp yaw toward the steering's intent; firmer when over-rotating.
       const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK;
       assistMz -= d.iz * firm * eY;
-    } else if (handbrake && H.hbBeta > 0 && avf > 2 && !v.wrecked) {
+    } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {
       // Arcade handbrake: a big slide, but held short of a spin-out.
-      const over = Math.abs(beta) - H.hbBeta;
-      if (over > 0) assistMz += d.iz * H.betaK * (beta > 0 ? over : -over);
+      // Starts a little short of the cap so the slide does not overshoot it.
+      const over = Math.abs(beta) - H.hbBeta * 0.9;
+      if (over > 0) assistMz += d.iz * H.betaK * 3 * (beta > 0 ? over : -over);
       const rOver = Math.abs(r) - H.hbYaw;
       if (rOver > 0) assistMz -= d.iz * 12 * (r > 0 ? rOver : -rOver);
     }
 
     // Longitudinal forces per axle (along each wheel), friction limited.
+    // The brake force is shared by axle load (brake force distribution),
+    // so ABS holds both axles near their limit together.
     const df = driveF * driveScale;
     const sgn = vf > 0 ? 1 : vf < 0 ? -1 : 0;
-    const fade = Math.min(1, avf / 0.6);
-    const resist = (brakeF * fade);
+    const fade = Math.min(1, avf / BRAKE_FADE_V);
+    const resist = brakeF * fade;
+    const shareF = fzF / mg;
     const dF = df * d.frontDrive, dR = handbrake ? 0 : df - dF;
-    let fxF = dF - sgn * (resist * 0.62 + engBrake * d.frontDrive * fade);
-    let fxR = handbrake ? 0 : dR - sgn * (resist * 0.38 + engBrake * (1 - d.frontDrive) * fade);
+    let fxF = dF - sgn * (resist * shareF + engBrake * d.frontDrive * fade);
+    let fxR = handbrake ? 0 : dR - sgn * (resist * (1 - shareF) + engBrake * (1 - d.frontDrive) * fade);
     const roll = (ROLL_RES * mg + coast) * Math.min(1, avf / 0.5) * sgn;
     // Traction limit for driving wheels, ABS for braking ones.
     const tracF = dF !== 0 && fxF * dF > 0, tracR = dR !== 0 && fxR * dR > 0;
@@ -480,11 +605,10 @@ export function stepVehicle(v, controls, dt, world) {
     const vperp = -vf * sd + vlf * cd;
     const alphaF = Math.atan(vperp / Math.max(Math.abs(vpar), V0));
     const uF = fxF / capF;
-    const latF = capLF * Math.sqrt(Math.max(0.05, 1 - H.comb * uF * uF));
+    const latF = capLF * Math.sqrt(Math.max(0.05, 1 - COMB * uF * uF));
     const xF = alphaF / d.apF;
     const fyF = -latF * tyre(xF);
-    // Arcade tyres scrub less speed off through the steered wheel angle.
-    const ffx = fxF * cd - fyF * sd * H.scrub;
+    const ffx = fxF * cd - fyF * sd;
     const ffy = fxF * sd + fyF * cd;
     slideF = Math.max(slideF, Math.abs(xF));
 
@@ -493,7 +617,7 @@ export function stepVehicle(v, controls, dt, world) {
     let frx, fry;
     if (handbrake) {
       const sp = Math.hypot(vf, vlr);
-      const mag = HB_K * capR * Math.min(1, sp / 0.5);
+      const mag = HB_K * muLat * fzR * Math.min(1, sp / 0.5);
       if (sp > 1e-6) {
         frx = -vf / sp * mag;
         fry = -vlr / sp * mag;
@@ -505,7 +629,7 @@ export function stepVehicle(v, controls, dt, world) {
     } else {
       const alphaR = Math.atan(vlr / Math.max(avf, V0));
       const uR = fxR / capR;
-      const latR = capLR * Math.sqrt(Math.max(0.05, 1 - H.combR * uR * uR));
+      const latR = capLR * Math.sqrt(Math.max(0.05, 1 - COMB * uR * uR));
       const xR = alphaR / d.apR;
       fry = -latR * tyre(xR);
       frx = fxR;
@@ -595,8 +719,8 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.suspension < 1e-4) v.suspension = 0;
 
   v.wheelSpin = (v.wheelSpin + (vf + Math.sign(driveF) * v.spin * 8) * dt / s.wheelRadius) % (Math.PI * 2);
-  // Squeal starts past the tyre peak (later in arcade, whose tyres saturate softly).
-  const slideAmt = Math.max(clamp((slideR - H.squealR) / 1.2, 0, 1), clamp((slideF - H.squealF) / 2, 0, 1));
+  // Squeal starts past the tyre peak (later in Arcade, whose tyres saturate softly).
+  const slideAmt = Math.max(clamp((slideR - H.squeal) / 1.2, 0, 1), clamp((slideF - H.squeal) / 2, 0, 1));
   const hbAmt = handbrake && Math.abs(vf) > 3 ? clamp(0.4 + hbSlide / 25, 0, 1) : 0;
   v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
 

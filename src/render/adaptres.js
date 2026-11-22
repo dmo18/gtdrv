@@ -14,12 +14,18 @@
 //   seconds. Long calm spells halve the wait again. Frames well under
 //   budget (a 120 Hz screen with room to spare) climb faster.
 // - After every change it lets a few frames settle before judging again.
+// - The floor is 1.0 (one physical pixel per CSS pixel; below that the
+//   picture goes soft and stair-stepped, docs/REVAMP.md section 2). When
+//   the floor is reached and frames are still over budget for `shedAfter`
+//   seconds, `shed` goes up by one (at most 2): the caller then drops
+//   detail instead (graphics.js: smaller shadow map, lower draw tier).
+//   It comes down one step after `shedCalm` seconds well under budget.
 // All times are sums of the dt values given, never wall-clock reads.
 
 export const BUDGET = 1 / 60;
 
 export const DEFAULTS = {
-  min: 0.6, // lowest pixel ratio it will go to
+  min: 1, // lowest pixel ratio it will go to (edge smoothing needs 1)
   max: 2, // highest (the device and quality cap, see maxRatioFor)
   start: 1.5, // first guess, clamped to [min, max]
   budget: BUDGET,
@@ -34,13 +40,16 @@ export const DEFAULTS = {
   calm: 30, // seconds without a drop that halve the probe wait
   smooth: 0.05, // weight of each new sample in the average
   roomAt: 0.8, // under budget * roomAt (a fast screen with room): bigger, quicker steps up
+  shedAfter: 2, // seconds over budget at the floor before shedding detail
+  shedCalm: 12, // seconds under budget * roomAt before taking one step back
+  shedMax: 2,
 };
 
 export function createAdaptiveRes(opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const st = {
     scale: 0, avg: o.budget, sinceChange: 0, sinceUp: 1e9, sinceDrop: 0,
-    wait: o.upWait, samples: 0, changes: 0,
+    wait: o.upWait, samples: 0, changes: 0, shed: 0, overFloor: 0, calmFloor: 0,
   };
   const q = (x) => Math.round(x * 20) / 20; // keep to steps of 0.05
   const clampS = (x) => Math.min(o.max, Math.max(Math.min(o.min, o.max), x));
@@ -63,6 +72,8 @@ export function createAdaptiveRes(opts = {}) {
     get average() { return st.avg; },
     get probeWait() { return st.wait; },
     get changes() { return st.changes; },
+    // Detail to shed (0 none, 1, 2): set while the floor cannot hold.
+    get shed() { return st.shed; },
     // New upper bound (device or quality setting changed).
     setMax(max) {
       o.max = Math.max(0.25, max);
@@ -85,7 +96,39 @@ export function createAdaptiveRes(opts = {}) {
         st.sinceDrop = 0;
       }
       if (st.sinceChange < o.settle || st.samples < 12) return st.scale;
-      if (st.avg > o.budget * o.downAt && st.scale > Math.min(o.min, o.max)) {
+      const floor = Math.min(o.min, o.max);
+      if (st.scale <= floor) {
+        // At the floor: shed detail when it cannot hold, give it back
+        // after a long calm spell.
+        if (st.avg > o.budget * o.downAt) {
+          st.overFloor += dt;
+          st.calmFloor = 0;
+          if (st.overFloor >= o.shedAfter && st.shed < o.shedMax) {
+            st.shed++;
+            st.overFloor = 0;
+            st.sinceChange = 0;
+            st.avg = o.budget;
+            st.samples = 0;
+            st.changes++;
+            return st.scale;
+          }
+        } else {
+          st.overFloor = 0;
+          st.calmFloor = st.avg < o.budget * o.roomAt ? st.calmFloor + dt : 0;
+          if (st.shed > 0 && st.calmFloor >= o.shedCalm) {
+            st.shed--;
+            st.calmFloor = 0;
+            st.sinceChange = 0;
+            st.avg = o.budget;
+            st.samples = 0;
+            st.changes++;
+            return st.scale;
+          }
+        }
+        // Resolution goes up again only with all detail back.
+        if (st.shed > 0) return st.scale;
+      }
+      if (st.avg > o.budget * o.downAt && st.scale > floor) {
         const far = st.avg > o.budget * 1.5;
         if (st.sinceUp < o.probeFail) st.wait = Math.min(o.upWaitMax, st.wait * 2);
         st.sinceDrop = 0;
@@ -111,9 +154,13 @@ export function maxRatioFor(devicePixelRatio, quality = 1) {
   return Math.round(Math.min(dpr, cap) * 20) / 20;
 }
 
-// Multisampling is cheap at low pixel ratios and wasted above 1.5, where
-// the pixels are already small; decided once when the context is made.
+// Multisampling (MSAA) on every device: the drawing pixel ratio runs
+// from the 1.0 floor to at most 2 (maxRatioFor), where 4x MSAA is what
+// smooths the edges, and on the phone's tile-based GPU the extra samples
+// stay in on-chip tile memory (resolved once per frame), so the cost is
+// small next to raising the resolution. Decided once when the context
+// is made; the argument is kept for the caller.
 export function wantsAntialias(devicePixelRatio) {
-  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
-  return Math.min(dpr, 2) <= 1.5;
+  void devicePixelRatio;
+  return true;
 }

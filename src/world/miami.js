@@ -7,12 +7,13 @@
 // Coordinates: x east, z south, metres, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W } from './citygen.js';
-import { MIAMI_CROP, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
+import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
+import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
 
-export { MIAMI_CROP, MIAMI_SPOTS };
+export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
 
 const CELL = 5; // land raster cell (m)
 const CLAMP = 250; // shoreDist is clamped to +-CLAMP m
@@ -22,6 +23,7 @@ const MERGE = 12; // junctions closer than this become one
 const SNAP = 2.2; // a vertex this close to another road joins it
 const CHAIN_TOL = 2.5; // Douglas-Peucker tolerance for bends (m)
 const RIVERS = { 'Miami River': 19 }; // carved half widths (m)
+const BAY_LIST_MAX = 3; // car park bays listed as parking spots, per lot
 
 const DRIVE = new Set([
   'trunk', 'primary', 'secondary', 'tertiary', 'trunk_link', 'primary_link', 'secondary_link',
@@ -1063,6 +1065,7 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 6. Blocks: road-free land regions that are nearly rectangles. ----
   const blocks = [];
+  let parkCells = null; // 1 park or forest, 2 grass (data.parks)
   {
     const road = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, CELL);
     for (const e of edges) {
@@ -1070,11 +1073,17 @@ export function createMiamiCity(data, opts = {}) {
       stampCapsule(road, a.x, a.z, b.x, b.z, e.width / 2, 1);
     }
     for (const n of nodes) stampRect(road, n.x - n.hx, n.z - n.hz, n.x + n.hx, n.z + n.hz, 1);
+    // Park and forest, and grass, polygons (also the lot masks, 8b).
     const parkMask = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, CELL);
-    for (const p of data.parks) {
-      const pts = decodePolyline(p.p);
-      if (pts.length >= 6 && inCrop(pts[0], pts[1])) fillPolygon(parkMask, pts, 1);
+    // Grass first, so a park wins where the two overlap.
+    for (const grassPass of [true, false]) {
+      for (const p of data.parks) {
+        if ((p.kind === 'grass') !== grassPass) continue;
+        const pts = decodePolyline(p.p);
+        if (pts.length >= 6 && inCrop(pts[0], pts[1])) fillPolygon(parkMask, pts, grassPass ? 2 : 1);
+      }
     }
+    parkCells = parkMask.data;
     const lab = labelBuf.fill(-1);
     const queue = queueBuf;
     const FB = new Int32Array(7);
@@ -1128,8 +1137,10 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 7. Buildings: footprints cut into axis-aligned boxes. ----
   const buildings = [];
-  const addBuilding = (x0, z0, x1, z1, h, district, kind = 'building', color = null) => {
-    buildings.push({ x0, z0, x1, z1, h, district, kind, color: color ?? rng.pick(PALETTES[district] ?? PALETTES.midtown) });
+  // osm: the OSM building kind; fp: the footprint the box was cut from
+  // (-1 for made boxes); gen: an infill box (world/lots.js planInfill).
+  const addBuilding = (x0, z0, x1, z1, h, district, kind = 'building', color = null, osm = '', fp = -1, gen = false) => {
+    buildings.push({ x0, z0, x1, z1, h, district, kind, color: color ?? rng.pick(PALETTES[district] ?? PALETTES.midtown), osm, fp, gen, landmark: '' });
   };
   {
     const BC = 2;
@@ -1137,7 +1148,8 @@ export function createMiamiCity(data, opts = {}) {
     const hist = new Int32Array(201);
     const stack = new Int32Array(202);
     const rects = new Int32Array(24);
-    for (const b of data.buildings) {
+    for (let fp = 0; fp < data.buildings.length; fp++) {
+      const b = data.buildings[fp];
       if (SKIP_BUILDING.has(b.kind) || !inCrop(b.p[0] / 10, b.p[1] / 10)) continue;
       const pts = decodePolyline(b.p);
       const n = pts.length / 2;
@@ -1167,11 +1179,11 @@ export function createMiamiCity(data, opts = {}) {
         const bi0 = rects[4 * k], bj0 = rects[4 * k + 1], bi1 = rects[4 * k + 2], bj1 = rects[4 * k + 3];
         const bx0 = bi0 === 0 ? x0 : x0 + bi0 * BC, bz0 = bj0 === 0 ? z0 : z0 + bj0 * BC;
         const bx1 = bi1 === cw - 1 ? x1 : x0 + (bi1 + 1) * BC, bz1 = bj1 === ch - 1 ? z1 : z0 + (bj1 + 1) * BC;
-        placeBox(bx0, bz0, bx1, bz1, h, kindTag);
+        placeBox(bx0, bz0, bx1, bz1, h, kindTag, fp);
       }
     }
   }
-  function placeBox(x0, z0, x1, z1, h, tag) {
+  function placeBox(x0, z0, x1, z1, h, tag, fp) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const blk = blockAt(cx, cz);
     if (blk) {
@@ -1189,7 +1201,7 @@ export function createMiamiCity(data, opts = {}) {
     const district = districtOf((x0 + x1) / 2, (z0 + z1) / 2);
     let kind = HOUSE.has(tag) ? 'house' : SHED.has(tag) ? 'warehouse' : 'building';
     if (kind === 'building' && (district === 'docks' || district === 'industrial') && h <= 20) kind = 'warehouse';
-    addBuilding(x0, z0, x1, z1, h, district === 'park' || district === 'airfield' ? 'midtown' : district, kind);
+    addBuilding(x0, z0, x1, z1, h, district === 'park' || district === 'airfield' ? 'midtown' : district, kind, null, tag, fp);
   }
   lap('buildings');
 
@@ -1263,7 +1275,7 @@ export function createMiamiCity(data, opts = {}) {
     const gz = Math.round((D.z0 + D.z1) / 2);
     depot.gate.z = gz;
     const put = (x0, z0, x1, z1, h, kind, style, color) => {
-      buildings.push({ x0, z0, x1, z1, h, district: 'airfield', kind, color, style, tint: color, vseed: 32032 + buildings.length, block: -1, street: 0, depot: true });
+      buildings.push({ x0, z0, x1, z1, h, district: 'airfield', kind, color, osm: '', fp: -1, gen: false, landmark: '', style, tint: color, vseed: 32032 + buildings.length, block: -1, street: 0, depot: true });
     };
     const wall = (x0, z0, x1, z1) => put(x0, z0, x1, z1, WALL_H, 'container', 'container', WALL);
     wall(D.x0, D.z0 + 30, D.x0 + T, gz - 7);
@@ -1291,6 +1303,134 @@ export function createMiamiCity(data, opts = {}) {
     { x: islet.x0 + 90, z: runway.z1 + 34, heading: -Math.PI / 2, spec: 'fighter' },
     { x: islet.x0 + 448, z: runway.z1 + 40, heading: -Math.PI / 2, spec: 'patrolheli' },
   );
+
+  // ---- 8b. Lot rasters and infill (docs/REVAMP.md 6.2, world/lots.js). ----
+  // free: drawn land clear of every road strip and its pavement and
+  // outside every building box; owner: the building box at a cell. Big
+  // empty pieces of built-up districts get plain infill boxes (`gen`).
+  let lotIn = null;
+  const landmarkSites = [];
+  {
+    const near = new Uint8Array(NC);
+    const R = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: near };
+    for (const e of edges) {
+      const a = nodes[e.a], b = nodes[e.b];
+      stampCapsule(R, a.x, a.z, b.x, b.z, e.width / 2 + SIDEWALK, 1);
+    }
+    for (const n of nodes) stampRect(R, n.x - n.hx - SIDEWALK, n.z - n.hz - SIDEWALK, n.x + n.hx + SIDEWALK, n.z + n.hz + SIDEWALK, 1);
+    const owner = labelBuf.fill(-1); // free since the blocks step
+    const stampOwner = (k) => {
+      const b = buildings[k];
+      // Cells whose centre is strictly inside the box (as inBuilding).
+      const e = 1e-6;
+      const i0 = Math.max(0, Math.ceil((b.x0 - land.x0) / CELL - 0.5 + e)), i1 = Math.min(W - 1, Math.floor((b.x1 - land.x0) / CELL - 0.5 - e));
+      const j0 = Math.max(0, Math.ceil((b.z0 - land.z0) / CELL - 0.5 + e)), j1 = Math.min(H - 1, Math.floor((b.z1 - land.z0) / CELL - 0.5 - e));
+      for (let j = j0; j <= j1; j++) owner.fill(k, j * W + i0, j * W + i1 + 1);
+      // A box too small to cover a cell centre still holds its own cell.
+      const c = cellOf(land, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+      if (c >= 0 && owner[c] < 0) owner[c] = k;
+    };
+    for (let k = 0; k < buildings.length; k++) stampOwner(k);
+    lap('infill.stamp');
+    // Lot masks: `parkCells` from the blocks step (1 park or forest, 2
+    // grass) gets the park district rects too; beaches are rects
+    // (MIAMI_SPOTS.beaches), looked up only near the water.
+    const parkR = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: parkCells };
+    for (const r of S.districts) if (r.key === 'park') stampRect(parkR, r.x0, r.z0, r.x1, r.z1, 1);
+    const beachRects = (S.beaches || []).map((r) => [Math.ceil((r.x0 - land.x0) / CELL - 0.5), Math.floor((r.x1 - land.x0) / CELL - 0.5), Math.ceil((r.z0 - land.z0) / CELL - 0.5), Math.floor((r.z1 - land.z0) / CELL - 0.5)]);
+    const inBeach = (c) => {
+      const i = c % W, j = (c - i) / W;
+      for (const r of beachRects) if (i >= r[0] && i <= r[1] && j >= r[2] && j <= r[3]) return true;
+      return false;
+    };
+    const free = new Uint8Array(NC);
+    const list = new Int32Array(NC);
+    let nList = 0;
+    for (let c = 0; c < NC; c++) {
+      if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; list[nList++] = c; }
+    }
+    const mask = parkCells; // never filled: park and grass (a beach is near the water, which infill keeps off)
+    // Steps of 5 m to the water and to a building, through free land.
+    const water = new Uint8Array(NC);
+    stepDistance(W, H, visual, free, 8, water, null, queueBuf, list, nList, SRC_ZERO);
+    const bdist = new Uint8Array(NC);
+    stepDistance(W, H, owner, free, INFILL_GAP, bdist, null, queueBuf, list, nList, SRC_ID);
+    lap('infill.masks');
+    // Landmarks (MIAMI_SPOTS.landmarks): a real site's boxes are marked,
+    // or a box is stood on free ground near the point.
+    for (const L of S.landmarks || []) {
+      if (!inCrop(L.x, L.z)) continue;
+      const site = { id: L.id, name: L.name, shape: L.shape, x: L.x, z: L.z, l: 0, w: 0, h: L.h, heading: 0, buildings: [] };
+      if (L.fit === 'site') {
+        let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+        for (let k = 0; k < buildings.length; k++) {
+          const b = buildings[k];
+          if (b.depot || Math.hypot((b.x0 + b.x1) / 2 - L.x, (b.z0 + b.z1) / 2 - L.z) > L.r) continue;
+          b.landmark = L.id;
+          site.buildings.push(k);
+          x0 = Math.min(x0, b.x0); z0 = Math.min(z0, b.z0); x1 = Math.max(x1, b.x1); z1 = Math.max(z1, b.z1);
+        }
+        if (!site.buildings.length) continue;
+        site.x = (x0 + x1) / 2; site.z = (z0 + z1) / 2; site.l = x1 - x0; site.w = z1 - z0;
+      } else {
+        // Nearest free spot (every cell under the box plus 3 m free).
+        let spot = null;
+        const hx = L.l / 2 + 3, hz = L.w / 2 + 3;
+        for (let r = 0; r <= 150 && !spot; r += 5) {
+          const n = r ? Math.max(8, Math.round((TAU * r) / 5)) : 1;
+          for (let k = 0; k < n && !spot; k++) {
+            const x = L.x + Math.cos((k / n) * TAU) * r, z = L.z + Math.sin((k / n) * TAU) * r;
+            const i0 = Math.floor((x - hx - land.x0) / CELL), i1 = Math.floor((x + hx - land.x0) / CELL);
+            const j0 = Math.floor((z - hz - land.z0) / CELL), j1 = Math.floor((z + hz - land.z0) / CELL);
+            let ok = i0 >= 0 && j0 >= 0 && i1 < W && j1 < H;
+            for (let j = j0; j <= j1 && ok; j++) for (let i = i0; i <= i1 && ok; i++) if (!free[j * W + i]) ok = false;
+            if (ok) spot = { x: Math.round(x), z: Math.round(z) };
+          }
+        }
+        if (!spot) continue;
+        site.x = spot.x; site.z = spot.z; site.l = L.l; site.w = L.w;
+        const dk = districtOf(spot.x, spot.z);
+        addBuilding(spot.x - L.l / 2, spot.z - L.w / 2, spot.x + L.l / 2, spot.z + L.w / 2, L.h, dk === 'park' || dk === 'airfield' ? 'midtown' : dk, 'building', 0xd8d4cc, 'landmark', -1, false);
+        buildings[buildings.length - 1].landmark = L.id;
+        site.buildings.push(buildings.length - 1);
+        stampOwner(buildings.length - 1);
+        const b = buildings[buildings.length - 1];
+        const ci0 = Math.max(0, Math.floor((b.x0 - land.x0) / CELL)), ci1 = Math.min(W - 1, Math.floor((b.x1 - land.x0) / CELL));
+        const cj0 = Math.max(0, Math.floor((b.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((b.z1 - land.z0) / CELL));
+        for (let j = cj0; j <= cj1; j++) for (let i = ci0; i <= ci1; i++) if (owner[j * W + i] >= 0) free[j * W + i] = 0;
+      }
+      landmarkSites.push(site);
+    }
+    // Hand places keep their open ground.
+    const keep = [];
+    for (const h of S.helipads || []) keep.push({ x: h.x, z: h.z, r: 30 });
+    for (const v of Object.values(S.secrets || {})) if (v.x !== undefined) keep.push({ x: v.x, z: v.z, r: 60 });
+    if (S.cinder) keep.push({ x: S.cinder.x, z: S.cinder.z, r: 60 });
+    for (const p of S.piers) keep.push({ x: p.x, z: p.z, r: 40 });
+    for (const r of S.ramps || []) keep.push({ x: r.x, z: r.z, r: 40 });
+    for (const l of S.landmarks || []) keep.push({ x: l.x, z: l.z, r: (l.r || 20) + 10 });
+    const infill = planInfill({ W, H, x0: land.x0, z0: land.z0, cell: CELL, free, bdist, water, mask, districtOf, seed, keep });
+    for (const f of infill) {
+      const pal = PALETTES[f.district] || PALETTES.midtown;
+      addBuilding(f.x0, f.z0, f.x1, f.z1, f.h, f.district, f.kind, pal[Math.floor(f.color * pal.length)], f.osm, -1, true);
+      stampOwner(buildings.length - 1);
+    }
+    for (const f of infill) {
+      // The new boxes' cells are no longer free.
+      const i0 = Math.max(0, Math.floor((f.x0 - land.x0) / CELL)), i1 = Math.min(W - 1, Math.floor((f.x1 - land.x0) / CELL));
+      const j0 = Math.max(0, Math.floor((f.z0 - land.z0) / CELL)), j1 = Math.min(H - 1, Math.floor((f.z1 - land.z0) / CELL));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (owner[j * W + i] >= 0) free[j * W + i] = 0;
+    }
+    {
+      // Landmark and infill boxes took some cells.
+      let m = 0;
+      for (let k = 0; k < nList; k++) if (free[list[k]]) list[m++] = list[k];
+      nList = m;
+    }
+    lap('infill.plan');
+    lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList };
+  }
+  lap('infill');
 
   // Building index (for spots, props and buildingsNear).
   const buildingIndex = buildIndex(buildings.length, (k) => {
@@ -1440,6 +1580,43 @@ export function createMiamiCity(data, opts = {}) {
       const z = n.z - tz * (n.hx + 0.9) + rzv * (e.width / 2 + 0.9);
       if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
       signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
+    }
+  }
+
+  // ---- 10b. The designed start street (MIAMI_SPOTS.startView, core hand
+  // content): street trees on both kerbs and kerb spaces (`start`, filled
+  // first) along the spawn street ahead of the title camera. No rng.
+  if (S.startView) {
+    const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
+    const TREE_STEP = 7, SPOT_STEP = 6.5;
+    for (const e of edges) {
+      if (e.name !== S.spawn.street || e.bridge || e.causeway) continue;
+      const a = nodes[e.a], b = nodes[e.b];
+      const half = e.width / 2;
+      const rx = -e.uz, rzv = e.ux;
+      for (let d = a.hx + 4; d <= e.length - b.hx - 4; d += 1) {
+        const px = a.x + e.ux * d, pz = a.z + e.uz * d;
+        const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
+        const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
+        if (along < -20 || along > 110 || Math.abs(lat) > 12) continue;
+        const k = Math.round(along + 20);
+        for (const side of [-1, 1]) {
+          if (k % TREE_STEP === 0) {
+            const x = px + rx * side * (half + 1.15), z = pz + rzv * side * (half + 1.15);
+            if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !furniture.some((f) => Math.hypot(f.x - x, f.z - z) < 4)) {
+              furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+            }
+          }
+          if (Math.round(along * 2) % Math.round(SPOT_STEP * 2) === 0 && along > 10 && along < 90) {
+            const off = side * (half - 1.25);
+            const x = px + rx * off, z = pz + rzv * off;
+            if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
+            if (parkingSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5.5)) continue;
+            const heading = side > 0 ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
+            parkingSpots.push({ x, z, heading, lot: false, start: true });
+          }
+        }
+      }
     }
   }
 
@@ -1670,6 +1847,7 @@ export function createMiamiCity(data, opts = {}) {
   lap('extras');
 
   const span = Math.max(Math.abs(cut.x0), Math.abs(cut.x1), Math.abs(cut.z0), Math.abs(cut.z1));
+  const inCore = (x, z) => x >= MIAMI_CORE.x0 && x <= MIAMI_CORE.x1 && z >= MIAMI_CORE.z0 && z <= MIAMI_CORE.z1;
   const city = {
     map: 'miami',
     seed, N: 1, xs: [0], zs: [0], wx: [STREET_W], wz: [STREET_W],
@@ -1677,7 +1855,8 @@ export function createMiamiCity(data, opts = {}) {
     props, parkingSpots, spawn,
     furniture, signals, landmarks, streetNames,
     extraLand, piers, pois, surfaces, aircraftSpots, boatSpots, helipads,
-    mapLandmarks: MIAMI_LANDMARKS,
+    // The real places, then the invented landmarks not already listed.
+    mapLandmarks: MIAMI_LANDMARKS.concat(landmarkSites.filter((t) => !MIAMI_LANDMARKS.some((m) => m.landmark === t.id)).map((t) => ({ name: t.name, src: '', x: t.x, z: t.z, landmark: t.id }))),
     tankSpots, roofPads, depot,
     airfield: { islet, runway, apron, gate },
     // Activities, secrets and stunt ramps: filled in below, from the spots.
@@ -1693,7 +1872,53 @@ export function createMiamiCity(data, opts = {}) {
     mapHalf: span + 100,
     buildMs: 0,
     timings, graphStats,
+    // Lots (docs/REVAMP.md 6.2): filled in below.
+    core: MIAMI_CORE, inCore, lots: [], lotGrid: null, lotAt: () => null, lotTypeAt: () => '',
+    dressLot: (lot, out) => dressLot(city, lot, out),
+    startView: S.startView ? { ...S.startView, spawn: { ...S.startView.spawn, x: spawn.x, z: spawn.z, heading: spawn.heading } } : null,
+    landmarkSites,
   };
+
+  // ---- 11b. Lots: every free land cell typed and dressed (world/lots.js). ----
+  {
+    lotIn.timings = timings;
+    const L = buildLots(city, lotIn);
+    lotIn = null;
+    city.lots = L.lots;
+    city.lotGrid = L.lotGrid;
+    city.lotAt = L.lotAt;
+    city.lotTypeAt = L.lotTypeAt;
+    // Car park bays: some of each car park's bays are parking spots (the
+    // parked-car system spawns a real car in each one near the player, so
+    // at most 3 per lot and never over 60 %), chosen by the lot seed; the
+    // renderer parks static cars in part of the others.
+    const F = [], bays = [];
+    for (const lot of city.lots) {
+      if (lot.type !== 'carpark') continue;
+      dressLot(city, lot, F);
+      bays.length = 0;
+      for (const f of F) if (f.kind === 'bay') eachBay(f, (x, z, h) => bays.push(x, z, h));
+      const n = bays.length / 3, keep = Math.min(BAY_LIST_MAX, Math.floor(n * 0.6));
+      const r = createRng(lot.seed ^ 0x6a09e667);
+      const order = Array.from({ length: n }, (_, k) => k);
+      for (let k = n - 1; k > 0; k--) {
+        const q = r.int(0, k);
+        const t = order[k]; order[k] = order[q]; order[q] = t;
+      }
+      for (let k = 0; k < keep; k++) {
+        const q = order[k] * 3;
+        parkingSpots.push({ x: bays[q], z: bays[q + 1], heading: bays[q + 2], lot: true });
+      }
+    }
+    lap('lots.build');
+    for (const t of tankSpots) {
+      if (t.place !== 'cinder') continue;
+      for (let i = parkingSpots.length - 1; i >= 0; i--) {
+        if (parkingSpots[i].lot && Math.hypot(parkingSpots[i].x - t.x, parkingSpots[i].z - t.z) < 6) parkingSpots.splice(i, 1);
+      }
+    }
+  }
+  lap('lots');
 
   // ---- 12. Places and activities (docs/MAP.md milestone 2). ----
   if (S.ramps) {

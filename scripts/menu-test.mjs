@@ -155,15 +155,16 @@ try {
   check('pause opens menu', await isOpen());
   check('touch hidden while open', (await ev(() => window.rw.log.touchVisible)) === false);
 
-  // Every tab renders.
+  // Every section renders (docs/REVAMP.md 6.4: Resume, Stats, Settings, Help).
   const shots = async (size) => {
-    for (const [name, file] of [['Resume', 'resume'], ['Scores', 'scores'], ['Records', 'records'], ['Settings', 'settings'], ['How to play', 'howto']]) {
+    for (const [name, file] of [['Resume', 'resume'], ['Stats', 'stats'], ['Settings', 'settings'], ['Help', 'help']]) {
       await tab(name);
       const text = await page.locator('.rw-menu-body').innerText();
-      check(`tab ${name} has content`, text.length > 20);
+      check(`tab ${name} has content`, text.length > 20 || name === 'Settings');
       await page.screenshot({ path: path.join(out, `${file}-${size}.png`) });
     }
   };
+  const grp = (g) => page.locator(`.rw-menu-groups [data-group="${g}"]`).tap();
   await ev(() => {
     const g = window.rw.game;
     g.progress.medals.race_harbour = 'gold';
@@ -181,49 +182,63 @@ try {
     sc.best.airtime = 2.4;
     sc.best.drift = 800;
     sc.best.nearMiss = 4;
-    sc.courses.race_harbour = 3500;
-    sc.missions.m1 = { best: 5200, time: 181.5, done: true };
     window.rw.score.add(2000, 'test award', 0, 0, true);
   });
   await shots('915x412');
-  check('no Showroom tab', (await page.getByRole('tab', { name: 'Showroom' }).count()) === 0);
-  check('five tabs', (await page.getByRole('tab').count()) === 5);
-  await tab('Scores');
+  check('four sections, no Scores or Records or Showroom tab', (await page.locator('.rw-menu-rail .rw-menu-tab').count()) === 4
+    && (await page.getByRole('tab', { name: 'Scores' }).count()) === 0 && (await page.getByRole('tab', { name: 'Records' }).count()) === 0);
+  await tab('Stats');
   const sco = await page.locator('.rw-menu-body').innerText();
-  check('scores show nice name', sco.includes('Harbour Dash'), sco);
-  check('scores prettify ids', sco.includes('Air Loop'), sco);
-  check('scores total', sco.includes('2,000'), sco);
-  check('scores best session and combo', sco.includes('4,200') && sco.includes('x3.5'), sco);
-  check('scores best time', sco.includes('1:23.4'), sco);
-  check('scores course high score', sco.includes('3,500 pts'), sco);
-  check('scores mission', sco.includes('5,200'), sco);
-  check('medals as achievements', /achievements/i.test(sco) && sco.includes('1 gold, 1 silver'), sco);
-  check('scores hide flags', !/hint|seen/i.test(sco), sco);
+  check('stats total', sco.includes('2,000'), sco);
+  check('stats best session and combo', sco.includes('4,200') && sco.includes('x3.5'), sco);
+  check('stats distance in miles', sco.includes('7.7 mi'), sco);
+  check('stats medals count and secrets line', /Medals/.test(sco) && /Secrets 0 \/ 6/.test(sco), sco);
+  check('stats hide flags', !/hint|seen_/i.test(sco), sco);
   check('header shows points', (await page.locator('.rw-menu-points').innerText()) === '2,000 pts');
   check('no money or buy anywhere', (await page.locator('.rw-menu button', { hasText: /buy|\$/i }).count()) === 0);
-  await tab('Records');
-  const rec = await page.locator('.rw-menu-body').innerText();
-  check('records distance miles', rec.includes('7.7 mi'), rec);
   check('economy has no buy', await ev(() => window.rw.economy.buy === undefined));
+  await tab('Help');
+  const help = await page.locator('.rw-menu-body').innerText();
+  check('help has the credit line and the version', help.includes('Map data (c) OpenStreetMap contributors, ODbL') && /Rustwater/.test(help), help.slice(-120));
 
-  // Resume button unpauses.
+  // The back button is the same place on every screen; on a top screen it resumes.
+  await tab('Resume');
+  const bk1 = await page.locator('.rw-menu-back').boundingBox();
+  await tab('Stats');
+  const bk2 = await page.locator('.rw-menu-back').boundingBox();
+  check('back button 48 by 48, top left, same place', Math.abs(bk1.width - 48) < 1 && Math.abs(bk1.height - 48) < 1 && bk1.x === bk2.x && bk1.y === bk2.y && bk1.x < 20 && bk1.y < 20, JSON.stringify([bk1, bk2]));
   await tab('Resume');
   await page.locator('[data-role="resume"]').tap();
   check('resume closes', !(await isOpen()));
   check('resume unpauses', (await ev(() => window.rw.game.paused)) === false);
   check('touch back', (await ev(() => window.rw.log.touchVisible)) === true);
+  await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
+  await page.locator('.rw-menu-back').tap();
+  check('the top-left button on a top screen resumes', !(await isOpen()) && (await ev(() => window.rw.game.paused)) === false);
 
   // Scores persist across reload.
   await ev(() => { window.rw.economy.save(); });
   await load();
   let pr = await progress();
-  check('score persists', pr.score.total === 2000 && pr.score.sessionBest === 4200 && pr.score.courses.race_harbour === 3500, JSON.stringify(pr.score));
+  check('score persists', pr.score.total === 2000 && pr.score.sessionBest === 4200, JSON.stringify(pr.score));
   check('live score restored', (await ev(() => window.rw.score.total)) === 2000);
   check('save is version 3 without money', (await stored()).version === 3 && (await stored()).money === undefined && (await stored()).owned === undefined);
 
-  // Settings persist.
+  // Settings: four groups, rows as in the table, applied and saved.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
+  check('settings: four groups', (await page.locator('.rw-menu-groups button').count()) === 4);
+  const rowCount = () => page.locator('.rw-menu-body .rw-menu-setting').count();
+  await grp('controls');
+  check('controls: 5 rows', (await rowCount()) === 5);
+  await grp('sound');
+  check('sound: 6 rows, no music on/off switch', (await rowCount()) === 6 && (await page.locator('[data-setting="music"]').count()) === 0);
+  await grp('game');
+  check('game: 4 rows (police, hard, map, new game)', (await rowCount()) === 4);
+  await grp('display');
+  check('display: 4 rows', (await rowCount()) === 4);
+  check('time of day greyed while live is on', await ev(() => document.querySelector('[data-setting="timeOfDay"]').disabled === true));
+  await grp('controls');
   check('settings: four steering choices', (await page.locator('.rw-menu-body [data-steering]').count()) === 4);
   check('settings: current style marked', (await page.locator('.rw-menu-body [data-steering="buttons"]').getAttribute('aria-checked')) === 'true');
   await page.locator('.rw-menu-body [data-steering="slider"]').tap();
@@ -236,58 +251,52 @@ try {
     s.dispatchEvent(new Event('change', { bubbles: true }));
   });
   check('settings: sensitivity applied', JSON.stringify(await lastSteer()) === '["slider",1.3]', JSON.stringify(await lastSteer()));
-  check('settings: sensitivity shown', (await page.locator('.rw-menu-sens').innerText()) === '130%');
+  check('settings: sensitivity shown', (await page.locator('[data-setting="steerSensitivity"] + .rw-menu-value').innerText()) === '130%');
   // Tilt where the phone cannot: back to the wheel with a message.
   await ev(() => { window.rw.log.noTilt = true; });
   await page.locator('.rw-menu-body [data-steering="tilt"]').tap();
-  let fb = (await progress()).settings.steering;
+  const fb = (await progress()).settings.steering;
   check('settings: tilt unavailable falls back to wheel', fb === 'wheel' && (await ev(() => window.rw.log.toasts.join())).includes('Tilt'), fb);
   check('settings: fallback shown in menu', (await page.locator('.rw-menu-body [data-steering="wheel"]').getAttribute('aria-checked')) === 'true');
   await ev(() => { window.rw.log.noTilt = false; });
   await page.locator('.rw-menu-body [data-steering="tilt"]').tap();
   check('settings: tilt kept where it works', (await progress()).settings.steering === 'tilt');
-  await page.screenshot({ path: path.join(out, 'settings-steering-915x412.png') });
-  // Handling: two choices, arcade by default, realistic applies at once.
-  check('settings: two handling choices', (await page.locator('.rw-menu-body [data-handling]').count()) === 2);
-  check('settings: arcade marked', (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'true');
-  const hText = await page.locator('.rw-menu-body [data-handling="sim"]').innerText();
-  check('settings: realistic labelled', hText.includes('Realistic') && hText.includes('grip'), hText);
-  await page.locator('.rw-menu-body [data-handling="sim"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(out, 'settings-controls-915x412.png') });
+  check('settings: two handling choices, arcade marked', (await page.locator('.rw-menu-body [data-handling]').count()) === 2
+    && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'true');
   await page.locator('.rw-menu-body [data-handling="sim"]').tap();
-  check('settings: handling applied at once', (await ev(() => window.rw.getHandlingMode())) === 'sim' && (await progress()).settings.handling === 'sim');
-  check('settings: realistic marked', (await page.locator('.rw-menu-body [data-handling="sim"]').getAttribute('aria-checked')) === 'true'
+  check('settings: handling applied at once and saved', (await ev(() => window.rw.getHandlingMode())) === 'sim' && (await progress()).settings.handling === 'sim' && (await stored()).settings.handling === 'sim');
+  check('settings: sim marked', (await page.locator('.rw-menu-body [data-handling="sim"]').getAttribute('aria-checked')) === 'true'
     && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'false');
-  check('settings: handling saved', (await stored()).settings.handling === 'sim');
-  await page.screenshot({ path: path.join(out, 'settings-handling-915x412.png') });
-  // HUD: Minimal by default, Full applies at once and is saved.
+  await page.locator('[data-setting="invertPitch"]').tap();
+  await page.locator('[data-setting="leftHanded"]').tap();
+  await grp('game');
+  await page.locator('[data-setting="police"]').tap();
+  await grp('display');
   check('settings: two HUD choices, minimal marked', (await page.locator('.rw-menu-body [data-hud]').count()) === 2
     && (await page.locator('.rw-menu-body [data-hud="minimal"]').getAttribute('aria-checked')) === 'true');
-  await page.locator('.rw-menu-body [data-hud="full"]').scrollIntoViewIfNeeded();
   await page.locator('.rw-menu-body [data-hud="full"]').tap();
   check('settings: HUD full applied at once and saved', (await ev(() => window.rw.log.hudModes.at(-1))) === 'full'
     && (await stored()).settings.hud === 'full' && (await page.locator('.rw-menu-body [data-hud="full"]').getAttribute('aria-checked')) === 'true');
   await page.locator('.rw-menu-body [data-hud="minimal"]').tap();
   check('settings: HUD back to minimal', (await ev(() => window.rw.log.hudModes.at(-1))) === 'minimal' && (await stored()).settings.hud === 'minimal');
-  await page.locator('[data-setting="invertPitch"]').tap();
-  await page.locator('[data-setting="leftHanded"]').tap();
-  await page.locator('[data-setting="police"]').tap();
   await page.locator('[data-quality="1.25"]').tap();
+  await grp('sound');
   await ev(() => {
     const s = document.querySelector('[data-setting="master"]');
     s.value = '35';
     s.dispatchEvent(new Event('input', { bubbles: true }));
     s.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  let st = (await progress()).settings;
-  check('settings applied', st.invertPitch && st.leftHanded && !st.police && st.quality === 1.25 && Math.abs(st.master - 0.35) < 1e-9, JSON.stringify(st));
+  const st0 = (await progress()).settings;
+  check('settings applied', st0.invertPitch && st0.leftHanded && !st0.police && st0.quality === 1.25 && Math.abs(st0.master - 0.35) < 1e-9, JSON.stringify(st0));
   check('left-handed applied to controls', (await ev(() => window.rw.log.lefty)) === true);
   check('quality applied to game', (await ev(() => window.rw.game.quality)) === 1.25 && (await ev(() => window.rw.log.resizes)) > 0);
   check('volume applied', Math.abs((await ev(() => window.rw.log.volume)) - 0.35) < 1e-9);
-  // volume controls: master, music, sound effects, ambience, mute all (percent shown)
-  for (const [key, pct] of [['master', '35%'], ['musicVol', null], ['sfxVol', null], ['ambVol', null]]) {
+  for (const key of ['master', 'musicVol', 'sfxVol', 'ambVol']) {
     check('settings: ' + key + ' slider', (await page.locator(`.rw-menu-body input[data-setting="${key}"]`).count()) === 1);
-    if (pct) check('settings: master percent shown', (await page.locator(`.rw-menu-body input[data-setting="${key}"]`).locator('xpath=preceding-sibling::span[1]').innerText()) === pct);
   }
+  check('settings: master percent shown', (await page.locator('[data-setting="master"] + .rw-menu-value').innerText()) === '35%');
   await ev(() => {
     const s = document.querySelector('[data-setting="sfxVol"]');
     s.value = '40';
@@ -299,36 +308,90 @@ try {
   check('settings: mute all applied, master kept', (await ev(() => window.rw.log.vol.muteAll)) === true && Math.abs((await ev(() => window.rw.log.vol.master)) - 0.35) < 1e-9);
   await page.locator('[data-setting="muteAll"]').tap();
   check('settings: unmute', (await ev(() => window.rw.log.vol.muteAll)) === false);
-  await page.locator('[data-setting="muteAll"]').scrollIntoViewIfNeeded();
-  await page.locator('.rw-menu-body').evaluate((b) => { const a = b.querySelector('[data-setting="ambVol"]'); a.scrollIntoView({ block: 'end' }); });
-  await page.screenshot({ path: path.join(repo, 'docs', 'preview', 'settings-audio.png') });
   check('invert applied', (await ev(() => window.rw.game.input.invertPitch)) === true);
-  await tab('How to play');
-  check('howto matches invert', (await page.locator('.rw-menu-body').innerText()).includes('Pull the stick down to climb'));
+  await page.screenshot({ path: path.join(out, 'settings-sound-915x412.png') });
+  await tab('Help');
+  check('help matches invert', (await page.locator('.rw-menu-body').innerText()).includes('Pull the stick down to climb'));
   await load();
-  st = (await progress()).settings;
+  const st = (await progress()).settings;
   check('settings persist', st.invertPitch && st.leftHanded && !st.police && st.quality === 1.25 && Math.abs(st.master - 0.35) < 1e-9, JSON.stringify(st));
   check('steering settings persist', st.steering === 'tilt' && st.steerSensitivity === 1.3, JSON.stringify(st));
   check('handling persists and is applied', st.handling === 'sim' && (await ev(() => window.rw.getHandlingMode())) === 'sim', JSON.stringify(st));
   check('steering restored to controls', JSON.stringify(await lastSteer()) === '["tilt",1.3]' && (await ev(() => window.rw.log.lefty)) === true);
   check('quality restored to game', (await ev(() => window.rw.game.quality)) === 1.25);
 
-  // Reset needs two steps.
+  // New game and Map choice are their own screens, reached from Settings, Game; every confirm needs two taps.
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
-  await ev(() => { window.refP = window.rw.game.progress; window.refO = window.rw.game.progress.score; });
+  await grp('game');
+  check('game group: the Map row names the current map', (await page.locator('[data-role="map"]').innerText()).includes('Miami'));
+  await page.locator('[data-role="newgame"]').tap();
+  check('New game screen opens', (await page.locator('.rw-menu-title').innerText()) === 'New game' && (await page.locator('.rw-menu-confirmrow').count()) === 2);
+  await page.screenshot({ path: path.join(out, 'newgame-915x412.png') });
+  await page.locator('.rw-menu-back').tap();
+  check('Back returns to Settings, Game', (await page.locator('.rw-menu-groups [data-group="game"]').getAttribute('aria-selected')) === 'true' && (await page.locator('[data-role="newgame"]').count()) === 1);
+  await ev(() => { window.refP = window.rw.game.progress; window.refO = window.rw.game.progress.score; window.rw.newGames = 0; window.rw.game.newSession = () => { window.rw.newGames++; }; });
+  await page.locator('[data-role="newgame"]').tap();
+  const nb = await page.locator('.rw-menu-confirmrow [data-role="reset"]').boundingBox();
   await page.locator('[data-role="reset"]').tap();
-  check('reset first step keeps data', (await progress()).score.total === 2000);
-  await page.screenshot({ path: path.join(out, 'settings-confirm-915x412.png') });
+  check('erase first tap keeps data and arms', (await progress()).score.total === 2000 && (await page.locator('[data-role="reset-confirm"]').count()) === 1);
+  const cb = await page.locator('[data-role="reset-cancel"]').boundingBox();
+  check('Cancel sits where the first button was, the red Yes beside it', Math.abs(cb.x + cb.width / 2 - (nb.x + nb.width / 2)) < nb.width / 2 + 1
+    && (await page.locator('[data-role="reset-confirm"]').boundingBox()).x < cb.x && (await page.locator('[data-role="reset-confirm"]').innerText()) === 'Yes, erase everything');
+  await page.screenshot({ path: path.join(out, 'confirm-armed-915x412.png') });
+  await page.touchscreen.tap(nb.x + nb.width / 2, nb.y + nb.height / 2);
+  check('a double tap on the first button cancels', (await page.locator('[data-role="reset-confirm"]').count()) === 0 && (await progress()).score.total === 2000);
+  await page.locator('[data-role="reset"]').tap();
+  await page.locator('.rw-menu-back').tap();
+  await page.locator('[data-role="newgame"]').tap();
+  check('the armed state ends on leaving the screen', (await page.locator('[data-role="reset-confirm"]').count()) === 0);
+  await page.locator('[data-role="newgame"]').tap();
+  check('new game arms first', (await page.locator('[data-role="newgame-confirm"]').count()) === 1 && (await ev(() => window.rw.newGames)) === 0);
+  await page.locator('[data-role="newgame-confirm"]').tap();
+  check('new game after the second tap: the session restarts, the menu closes, the score stays', (await ev(() => window.rw.newGames)) === 1 && !(await isOpen()) && (await progress()).score.total === 2000);
+  await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
+  await tab('Settings');
+  await grp('game');
+  await page.locator('[data-role="newgame"]').tap();
+  await page.locator('[data-role="reset"]').tap();
   await page.locator('[data-role="reset-confirm"]').tap();
-  pr = await progress();
-  check('reset clears', pr.score.total === 0 && pr.score.sessionBest === 0 && Object.keys(pr.score.courses).length === 0 && pr.settings.quality === 1 && pr.settings.police === true
-    && pr.settings.steering === 'wheel' && pr.settings.steerSensitivity === 1 && pr.settings.handling === 'arcade', JSON.stringify(pr));
-  check('reset re-applies arcade handling', (await ev(() => window.rw.getHandlingMode())) === 'arcade');
-  check('reset re-applies steering', JSON.stringify(await lastSteer()) === '["wheel",1]');
+  const pr0 = await progress();
+  check('reset clears', pr0.score.total === 0 && pr0.score.sessionBest === 0 && Object.keys(pr0.score.courses).length === 0 && pr0.settings.quality === 1 && pr0.settings.police === true
+    && pr0.settings.steering === 'wheel' && pr0.settings.steerSensitivity === 1 && pr0.settings.handling === 'arcade', JSON.stringify(pr0));
+  check('reset re-applies arcade handling and steering', (await ev(() => window.rw.getHandlingMode())) === 'arcade' && JSON.stringify(await lastSteer()) === '["wheel",1]');
   const sv = await stored();
   check('reset saved', sv && sv.version === 3 && sv.score.total === 0);
   check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.score === window.refO));
+  // Map choice: two cards, the other one arms a confirm, Yes switches.
+  await page.locator('.rw-menu-back').tap();
+  await page.locator('[data-role="map"]').tap();
+  check('Map choice: two cards, Miami marked', (await page.locator('.rw-menu-card').count()) === 2 && (await page.locator('.rw-menu-card[data-map="miami"]').getAttribute('data-current')) === 'true');
+  await page.locator('[data-role="map-island"]').tap();
+  check('Map choice: the other map arms, with the warning and the named Yes', (await page.locator('[data-role="map-island-confirm"]').innerText()) === 'Yes, switch to the classic island'
+    && (await page.locator('.rw-menu-card[data-map="island"]').innerText()).includes('Switching restarts the game'));
+  await page.screenshot({ path: path.join(out, 'mapchoice-armed-915x412.png') });
+  await page.locator('[data-role="map-island-cancel"]').tap();
+  check('Map choice: Cancel disarms and nothing changed', (await page.locator('[data-role="map-island-confirm"]').count()) === 0 && (await ev(() => localStorage.getItem('rustwater.map'))) === null);
+  await page.locator('[data-role="map-island"]').tap();
+  await Promise.all([page.waitForNavigation().catch(() => {}), page.locator('[data-role="map-island-confirm"]').tap()]);
+  await page.waitForFunction(() => window.rw);
+  check('Map choice: Yes saves the map and restarts', (await ev(() => localStorage.getItem('rustwater.map'))) === 'island');
+  await ev(() => localStorage.removeItem('rustwater.map'));
+
+  // Registered screens (W11 adds Garage, Garages, Adventures this way).
+  await load();
+  await ev(() => {
+    window.rw.regYes = 0;
+    window.rw.menu.registerScreen({ id: 'demo', title: 'Demo screen', render(body, api) {
+      body.appendChild(api.confirmRow('Release car', 'Yes, release the Selwick', () => { window.rw.regYes++; api.back(); }, { id: 'rel' }));
+    } });
+    window.rw.menu.open('demo');
+  });
+  check('a registered screen opens by id with its title', (await isOpen()) && (await page.locator('.rw-menu-title').innerText()) === 'Demo screen');
+  await page.locator('[data-role="rel"]').tap();
+  check('the registered confirm row asks twice', (await ev(() => window.rw.regYes)) === 0 && (await page.locator('[data-role="rel-confirm"]').count()) === 1);
+  await page.locator('[data-role="rel-confirm"]').tap();
+  check('Yes runs it and api.back() leaves the menu (opened from outside)', (await ev(() => window.rw.regYes)) === 1 && !(await isOpen()));
 
   // An old version 1 save migrates in the browser: nothing lost.
   await page.evaluate(() => { window.name = 'v1'; });
@@ -347,32 +410,55 @@ try {
   check('tamper: medals clean', Object.keys(pr.medals).length === 0);
   check('tamper: no pollution', await ev(() => ({}).polluted === undefined));
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
-  for (const n of ['Scores', 'Records', 'Settings']) await tab(n);
+  for (const n of ['Stats', 'Settings']) await tab(n);
   check('tamper: nothing executed', await ev(() => !document.querySelector('.rw-menu img')));
   await page.waitForTimeout(200);
 
-  // Smaller phone.
-  await page.setViewportSize({ width: 780, height: 360 });
-  await shots('780x360');
-  // Layout: nothing wider than the screen, content scrolls instead of being cut.
+  // Smaller phone: every screen at both sizes, every group; rows 48 px or more; nothing scrolls except Help.
   for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }]) {
     await page.setViewportSize(size);
-    for (const n of ['Resume', 'Scores', 'Records', 'Settings', 'How to play']) {
+    await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
+    const probe = () => ev(() => {
+      const b = document.querySelector('.rw-menu-body');
+      const bad = [];
+      const r = b.getBoundingClientRect();
+      for (const e of document.querySelectorAll('.rw-menu button')) {
+        const q = e.getBoundingClientRect();
+        if (!q.width) continue;
+        if (q.right > innerWidth + 1 || q.left < -1 || q.bottom > innerHeight + 1) bad.push('off:' + e.textContent);
+        if (q.height < 47.5 || q.width < 47.5) bad.push('small:' + e.textContent + ':' + Math.round(q.width) + 'x' + Math.round(q.height));
+      }
+      for (const e of document.querySelectorAll('.rw-menu-body input[type=range]')) if (e.getBoundingClientRect().height < 47.5) bad.push('slider');
+      return { bad, over: document.documentElement.scrollWidth > innerWidth, sx: b.scrollWidth > b.clientWidth + 1, sy: b.scrollHeight - b.clientHeight, bot: r.bottom <= innerHeight + 0.5 };
+    });
+    for (const [n, scrolls] of [['Resume', false], ['Stats', false], ['Help', true]]) {
       await tab(n);
-      const m = await ev(() => {
-        const b = document.querySelector('.rw-menu-body');
-        const bad = [];
-        const r = b.getBoundingClientRect();
-        for (const e of b.querySelectorAll('button')) {
-          const q = e.getBoundingClientRect();
-          if (q.right > r.right + 1 || q.left < r.left - 1) bad.push(e.textContent);
-          if (q.height < 55.5) bad.push('short:' + e.textContent);
-        }
-        return { bad, over: document.documentElement.scrollWidth > innerWidth, sx: b.scrollWidth > b.clientWidth + 1 };
-      });
-      check(`layout ${n} ${size.width}`, !m.bad.length && !m.over && !m.sx, JSON.stringify(m));
+      const m = await probe();
+      check(`layout ${n} ${size.width}: targets 48+, in view, ${scrolls ? 'may scroll' : 'no scroll'}`, !m.bad.length && !m.over && !m.sx && (scrolls || m.sy <= 1), JSON.stringify(m));
     }
+    await tab('Settings');
+    for (const g of ['controls', 'sound', 'game', 'display']) {
+      await grp(g);
+      const m = await probe();
+      check(`layout Settings ${g} ${size.width}: targets 48+, in view, no scroll`, !m.bad.length && !m.over && !m.sx && m.sy <= 1 && m.bot, JSON.stringify(m));
+      await page.screenshot({ path: path.join(out, `settings-${g}-${size.width}x${size.height}.png`) });
+    }
+    await grp('game');
+    for (const role of ['newgame', 'map']) {
+      await page.locator(`[data-role="${role}"]`).tap();
+      const m = await probe();
+      check(`layout ${role} screen ${size.width}: targets 48+, no scroll`, !m.bad.length && !m.over && m.sy <= 1, JSON.stringify(m));
+      await page.screenshot({ path: path.join(out, `${role}-${size.width}x${size.height}.png`) });
+      await page.locator('.rw-menu-back').tap();
+    }
+    await page.locator('[data-role="newgame"]').tap();
+    await page.locator('[data-role="reset"]').tap();
+    const ma = await probe();
+    check(`layout armed confirm ${size.width}: nothing cut off`, !ma.bad.length && ma.sy <= 1, JSON.stringify(ma));
+    await ev(() => { window.rw.menu.close(); });
   }
+  await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
+  await shots('780x360');
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (e) {

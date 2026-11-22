@@ -154,6 +154,337 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${detail}`);
 }
 
+// ---------------------------------------------------------------------------
+// The running game (docs/REVAMP.md 6.5 acceptance). Loads the BUILT game, not
+// the harness page, at 915x412 and 780x360, each with a left inset of 0 and 40,
+// in every craft mode, fan open and closed, HUD Minimal and Full, right and
+// left handed. Reads getBoundingClientRect of every HUD element and checks:
+// overlaps, gaps under 8 between hit boxes, hit boxes under 48, anything in
+// the keep-out rect or an inset strip, rects that differ from the table by
+// more than 2 px, text contrast under 4.5, and the world drawing under the
+// cut-out.
+// ---------------------------------------------------------------------------
+const GRID = {
+  A: {
+    V: 915, H: 412,
+    minimap: [8, 8, 84, 84], speed: [100, 8, 88, 44], health: [100, 56, 88, 12], stars: [383, 8, 150, 24],
+    strip: [290, 56, 335, 80], score: [691, 8, 160, 28], pause: [859, 8, 48, 48], prompt: [308, 376, 300, 28],
+    gas: [835, 316, 72, 88], brake: [751, 316, 72, 88], exit: [843, 248, 56, 56], hand: [759, 248, 56, 56],
+    fire: [671, 340, 64, 64], lock: [675, 272, 56, 56], more: [843, 180, 56, 56], ammo: [691, 60, 160, 40],
+    fanX: [779, 715, 651], fanY: [180, 116], slot: [16, 240, 160, 160],
+  },
+  B: {
+    V: 780, H: 360,
+    minimap: [8, 8, 76, 76], speed: [92, 8, 80, 40], health: [92, 52, 80, 12], stars: [315, 8, 150, 24],
+    strip: [240, 56, 300, 72], score: [564, 8, 152, 26], pause: [724, 8, 48, 48], prompt: [240, 324, 300, 28],
+    gas: [708, 280, 64, 72], brake: [632, 280, 64, 72], exit: [716, 216, 56, 56], hand: [636, 216, 56, 56],
+    fire: [560, 288, 64, 64], lock: [564, 224, 56, 56], more: [716, 152, 56, 56], ammo: [564, 56, 152, 24],
+    fanX: [652, 588, 524], fanY: [152, 88], slot: [16, 204, 140, 140],
+  },
+};
+const lum = ([r, g, b]) => {
+  const f = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+const inter = (a, b) => Math.min(a.r, b.r) - Math.max(a.x, b.x) > 0.5 && Math.min(a.b, b.b) - Math.max(a.y, b.y) > 0.5;
+const gapOf = (a, b) => Math.max(Math.max(a.x, b.x) - Math.min(a.r, b.r), Math.max(a.y, b.y) - Math.min(a.b, b.b));
+
+async function liveLayout(check) {
+  const { buildGame, serve } = await import('./build.mjs');
+  await buildGame();
+  const srv = await serve(0);
+  const base = `http://127.0.0.1:${srv.address().port}/`;
+  const br = await (await loadChromium()).launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  try {
+    const pg = await (await br.newContext({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 })).newPage();
+    const errs = [];
+    pg.on('pageerror', (e) => errs.push(String(e)));
+    pg.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+    await pg.goto(`${base}?autostart`);
+    await pg.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
+    await pg.waitForTimeout(1500);
+    // Stop the simulation clock from moving things (crafts, camera) while we measure.
+    await pg.evaluate(() => { window.__rw.loop.stop && window.__rw.loop.stop(); });
+    const problems = [];
+    let states = 0, elements = 0;
+    const MODES = [['foot', 'foot', null], ['car', 'car', null], ['boat', 'boat', null], ['plane-armed', 'plane', true],
+      ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
+    const setMode = (kind, armed, name) => pg.evaluate(([k, a]) => {
+      const g = window.__rw;
+      if (k === 'foot') { g.player.vehicle = null; g.setPlayerMode('foot'); } else {
+        const has = (v) => !!(v.spec && v.spec.mounts && v.spec.mounts.length);
+        const v = g.vehicles.find((x) => x.kind === k && (a === null || has(x) === a)) || g.vehicles.find((x) => x.kind === k);
+        if (!v) return false;
+        g.enterVehicle(v);
+      }
+      g.touch.update(1 / 60);
+      return true;
+    }, [kind, armed]).then((ok) => { if (!ok) problems.push(`no ${name} craft in the world`); return ok; });
+    // Force the transient HUD pieces on so they are measured: stars, health, prompt, combo, title, a toast.
+    const force = () => pg.evaluate(() => {
+      const g = window.__rw;
+      for (const c of ['.rw-wanted', '.rw-hpmeter', '.rw-prompt']) document.querySelector(c).classList.remove('rw-none');
+      document.querySelector('.rw-prompt').textContent = 'ENTER: take the sedan';
+      const cb = document.querySelector('.rw-combo');
+      cb.style.display = ''; cb.textContent = '+1,200  x3';
+      const ti = document.querySelector('.rw-title');
+      ti.style.animation = 'none'; ti.textContent = 'Little Havana'; ti.classList.add('rw-show');
+      const to = document.querySelector('.rw-toasts');
+      if (!to.children.length) g.hud.toast('Respawned', 3600);
+    });
+    // Wait until every finite transition and animation has finished.
+    const settle = () => pg.evaluate(async () => {
+      const running = () => document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity && a.playState === 'running');
+      for (let i = 0; i < 6 && running().length; i++) await Promise.allSettled(running().map((a) => a.finished));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    const measure = (grid, L, hand, hud, name) => pg.evaluate(() => {
+      const g = window.__rw;
+      const vis = (e) => {
+        const cs = getComputedStyle(e);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+        for (let p = e; p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).display === 'none') return false;
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const R = (e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
+      const out = [];
+      const add = (key, e, hit, extra = {}) => { if (e && vis(e)) out.push({ key, hit, name: e.className.toString().replace(/rw-/g, '').slice(0, 40), ...R(e), ...extra }); };
+      // hit boxes: every touch button (the ammo panel and the tilt bar are displays)
+      for (const e of document.querySelectorAll('.rw-touch .rw-btn')) {
+        const c = e.className;
+        const display = c.includes('rw-ammo') || c.includes('rw-tiltbar');
+        let key = null;
+        if (c.includes('rw-pause')) key = 'pause';
+        else if (c.includes('rw-more')) key = 'more';
+        else if (/\brw-gas\b/.test(c) || /\brw-fire\b/.test(c)) key = 'gas';
+        else if (/\brw-brake\b/.test(c) || c.includes('rw-slot-run')) key = 'brake';
+        else if (c.includes('rw-exit') || c.includes('rw-enter')) key = 'exit';
+        else if (c.includes('rw-slot-hand') || c.includes('rw-slot-bomb')) key = 'hand';
+        else if (c.includes('rw-dbfire') || c.includes('rw-slot-gun') || c.includes('rw-slot-cannon')) key = 'fire';
+        else if (c.includes('rw-lock') || c.includes('rw-chipbtn') || c.includes('rw-slot-alock') || c.includes('rw-slot-tlock')) key = 'lock';
+        else if (c.includes('rw-sec')) key = 'fan:' + (e.style.getPropertyValue('--c') || 0) + ':' + (e.style.getPropertyValue('--r') || 0);
+        else if (c.includes('rw-steerbtn') || c.includes('rw-tiltbar')) key = 'steer';
+        else if (c.includes('rw-ammo')) key = 'ammo';
+        add(key || 'other', e, !display, { label: e.getAttribute('aria-label') });
+      }
+      add('minimap', document.querySelector('.rw-minimap'), true);
+      add('speed', document.querySelector('.rw-speedbox'), false);
+      add('health', document.querySelector('.rw-hpmeter'), false);
+      add('clock', document.querySelector('.rw-clock'), false);
+      add('stars', document.querySelector('.rw-wanted'), false);
+      add('strip', document.querySelector('.rw-strip'), false);
+      add('score', document.querySelector('.rw-score'), false);
+      add('combo', document.querySelector('.rw-combo'), false);
+      add('prompt', document.querySelector('.rw-prompt'), false);
+      add('steer', document.querySelector('.rw-wheel'), false);
+      add('steer', document.querySelector('.rw-pad'), false);
+      add('steer', document.querySelector('.rw-stick'), false);
+      // strip children stay inside the strip
+      const kids = [...document.querySelectorAll('.rw-strip .rw-title, .rw-strip .rw-toast')].filter(vis).map(R);
+      // text on pills: colour, background (own), opacity along the chain
+      const texts = [];
+      for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-title', '.rw-toast', '.rw-prompt', '.rw-ammo .rw-face']) {
+        const e = document.querySelector(sel);
+        if (!e || !vis(e)) continue;
+        const cs = getComputedStyle(e);
+        let op = 1;
+        for (let p = e; p; p = p.parentElement) op *= Number(getComputedStyle(p).opacity);
+        texts.push({ sel, color: cs.color, bg: cs.backgroundColor, op });
+      }
+      const cv = document.getElementById('game').getBoundingClientRect();
+      const cs = (e) => { const s = getComputedStyle(e); return { bg: s.backgroundColor, pad: s.padding, img: s.backgroundImage }; };
+      return { out, kids, texts, mode: g.player.mode, canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
+        page: { html: cs(document.documentElement), body: cs(document.body), ui: cs(document.getElementById('ui')) },
+        boot: getComputedStyle(document.getElementById('boot')).display, vw: innerWidth, vh: innerHeight };
+    }).then((m) => ({ ...m, grid, L, hand, hud, name }));
+
+    const checkState = (m) => {
+      const { grid, L, hand, hud, name } = m;
+      const tag = `${grid.V}x${grid.H} L${L} ${hand ? 'left' : 'right'}-handed ${hud} ${name}${m.fan ? ' fan' : ''}${m.style ? ' ' + m.style : ''}`;
+      const bad = (what) => problems.push(`${tag}: ${what}`);
+      states++;
+      elements += m.out.length;
+      if (m.vw !== grid.V || m.vh !== grid.H) bad(`viewport ${m.vw}x${m.vh}`);
+      const el = m.out;
+      const kRect = [0.36 * grid.V, 0.40 * grid.H, 0.64 * grid.V, 0.90 * grid.H];
+      const expect = (key, e, tol = 2) => {
+        const t = grid[key];
+        if (!t) return;
+        let x = t[0];
+        const left = ['minimap', 'speed', 'health', 'clock'].includes(key);
+        const mirror = hand && ['gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more'].includes(key);
+        if (left) x += L;
+        if (mirror) x = grid.V - t[0] - t[2] + L;
+        if (Math.abs(e.x - x) > tol || Math.abs(e.y - t[1]) > tol || Math.abs(e.w - t[2]) > tol || Math.abs(e.h - t[3]) > tol) {
+          bad(`${key} (${e.name}) is ${e.x.toFixed(1)},${e.y.toFixed(1)},${e.w.toFixed(1)}x${e.h.toFixed(1)}, grid says ${x},${t[1]},${t[2]}x${t[3]}`);
+        }
+      };
+      for (const e of el) {
+        if (['minimap', 'speed', 'health', 'stars', 'strip', 'score', 'pause', 'prompt', 'gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more'].includes(e.key)) {
+          // The foot FIRE and RUN take the pedal rects (the same size); every other key matches its own rect.
+          expect(e.key, e);
+        }
+        if (e.key === 'ammo') expect('ammo', e);
+        if (e.key.startsWith('fan:')) {
+          const [, c, r] = e.key.split(':').map(Number);
+          let x = grid.fanX[c];
+          if (hand) x = grid.V - x - 56 + L;
+          const y = grid.fanY[r];
+          if (Math.abs(e.x - x) > 2 || Math.abs(e.y - y) > 2 || e.w < 54 || e.w > 58) bad(`fan cell ${c},${r} (${e.label}) is ${e.x.toFixed(1)},${e.y.toFixed(1)}, grid says ${x},${y}`);
+        }
+        // sizes
+        if (e.hit && (e.w < 47.5 || e.h < 47.5)) bad(`hit box ${e.label || e.name} is ${e.w.toFixed(1)}x${e.h.toFixed(1)}, under 48`);
+        // insets and the safe edge: right-handed layouts keep 8 px from the safe edge
+        if (e.x < L - 0.5) bad(`${e.label || e.name} starts at ${e.x.toFixed(1)}, inside the left inset ${L}`);
+        if (e.hit && (e.x < L + 7.5 || e.y < 7.5 || e.r > grid.V - 7.5 || e.b > grid.H - 7.5)) bad(`${e.label || e.name} is closer than 8 px to the safe edge`);
+        if (e.r > grid.V + 0.5 || e.b > grid.H + 0.5 || e.y < -0.5) bad(`${e.label || e.name} leaves the screen`);
+        // keep-out: nothing permanent inside the craft's rect
+        // (3) left-handed with a left inset, the 5-button weapon arc cannot clear the keep-out rect (MSL, COAX): allowed by name only
+        // and (5) the mirrored fan's third column reaches 15 px into the keep-out rect at 780x360
+        if (hand && L > 0 && (/slot-(msl|coax)/.test(e.name) || (grid.V === 780 && /^fan:2:/.test(e.key)))) continue;
+        if (e.x < kRect[2] && e.r > kRect[0] && e.y < kRect[3] && e.b > kRect[1]) bad(`${e.label || e.key} (${e.name}) is inside the keep-out rect`);
+      }
+      // steering widget inside the steering slot (mirrored when left-handed)
+      for (const e of el.filter((q) => q.key === 'steer' && !q.hit)) {
+        const s = grid.slot;
+        const sx = hand ? grid.V - s[0] - s[2] : s[0] + L;
+        if (e.x < sx - 3 || e.r > sx + s[2] + 3 || e.y < s[1] - 3 || e.b > s[1] + s[3] + 3) bad(`steering widget ${e.name} ${e.x.toFixed(0)},${e.y.toFixed(0)},${e.w.toFixed(0)}x${e.h.toFixed(0)} is outside the slot ${sx},${s[1]},${s[2]}x${s[3]}`);
+      }
+      for (const e of el.filter((q) => q.key === 'steer' && q.hit)) {
+        const s = grid.slot;
+        const sx = hand ? grid.V - s[0] - s[2] : s[0] + L;
+        if (e.x < sx - 3 || e.r > sx + s[2] + 3 || e.y < s[1] - 3 || e.b > s[1] + s[3] + 3) bad(`steering button ${e.label} is outside the slot`);
+      }
+      // overlaps (everything) and gaps (hit boxes). The strip is a reserved box
+      // (checked against the grid above): what can overlap is its content, the
+      // title and the toasts. docs/REVAMP.md 6.5 conflicts, reported to W0 and
+      // allowed here by name only: (1) with a left-handed layout and a left
+      // inset the fan reaches 14 px (56 px at 780x360) into the strip box;
+      // (2) at 780x360 left-handed the fan's top row is 4 px from the minimap.
+      const items = el.filter((q) => q.key !== 'strip').concat(m.kids.map((k) => ({ ...k, key: 'strip-content', name: 'strip content', hit: false })));
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i], b = items[j];
+          // (4) at 780x360 left-handed with a left inset, the mirrored FIRE-rect button reaches 20 px into the prompt strip
+          if (grid.V === 780 && hand && L > 0 && [a, b].some((q) => q.key === 'prompt') && [a, b].some((q) => q.key === 'fire')) continue;
+          if (inter(a, b)) bad(`${a.label || a.key} (${a.name}) overlaps ${b.label || b.key} (${b.name})`);
+          else if (a.hit && b.hit && gapOf(a, b) < 7.5) {
+            const pair = [a.key, b.key].sort().join('|');
+            if (grid.V === 780 && hand && /^fan:\d:1\|minimap$/.test(pair) && gapOf(a, b) >= 3.5) continue;
+            bad(`gap ${gapOf(a, b).toFixed(1)} between ${a.label || a.key} and ${b.label || b.key}`);
+          }
+        }
+      }
+      // the strip holds its children
+      const st = el.find((q) => q.key === 'strip');
+      for (const k of m.kids) if (st && (k.b > st.b + 0.5 || k.y < st.y - 0.5)) bad('the strip content spills out of the strip');
+      // armed craft: the weapon arc stays in the 352 by 220 box and off EXIT, MORE
+      if (m.name.includes('armed') || m.name === 'tank') {
+        // the box is mirrored with the layout: V - 352 - R to V, or L to L + 352
+        for (const e of el.filter((q) => q.name.includes('slot'))) {
+          const outX = hand ? e.r > L + 352.5 : e.x < grid.V - 352 - 0.5;
+          if (outX || e.y < grid.H - 220 - 0.5) bad(`${e.label} leaves the arc box`);
+        }
+      }
+      // contrast on the pills
+      for (const t of m.texts) {
+        const parse = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+        const fg = parse(t.color).slice(0, 3);
+        const bg = parse(t.bg);
+        const a = (bg.length === 4 ? bg[3] : (bg.length === 3 ? 1 : 0)) * t.op;
+        if (a < 0.55) { bad(`${t.sel} text has no dark pill (alpha ${a.toFixed(2)})`); continue; }
+        const mix = [0, 1, 2].map((i) => bg[i] * a + 255 * (1 - a)); // over a white sky, the worst case for white text
+        const cr = contrast(fg, mix);
+        if (cr < 4.5) bad(`${t.sel} contrast ${cr.toFixed(2)} is under 4.5`);
+      }
+      // the world draws under the cut-out
+      const c = m.canvas;
+      if (c.x !== 0 || c.y !== 0 || Math.abs(c.w - grid.V) > 0.5 || Math.abs(c.h - grid.H) > 0.5) bad('the canvas does not cover the whole viewport');
+      for (const k of ['html', 'body', 'ui']) {
+        const p = m.page[k];
+        if (!/rgba\(0, 0, 0, 0\)|transparent/.test(p.bg) || p.img !== 'none' || !/^0px/.test(p.pad)) bad(`${k} has a background or padding (${p.bg} ${p.pad})`);
+      }
+      if (m.boot !== 'none') bad('the title screen is still showing');
+    };
+
+    for (const grid of [GRID.A, GRID.B]) {
+      await pg.setViewportSize({ width: grid.V, height: grid.H });
+      for (const L of [0, 40]) {
+        await pg.evaluate((l) => { document.documentElement.style.setProperty('--rw-test-sl', l + 'px'); window.dispatchEvent(new Event('resize')); }, L);
+        for (const hand of [false, true]) {
+          await pg.evaluate((h) => window.__rw.touch.setLeftHanded(h), hand);
+          for (const [name, kind, armed] of MODES) {
+            if (!(await setMode(kind, armed, name))) continue;
+            for (const hud of ['minimal', 'full']) {
+              await pg.evaluate((m) => { window.__rw.touch.setHudMode(m); window.__rw.hud.setHudMode(m); window.__rw.touch.update(1 / 60); }, hud);
+              for (const fan of hud === 'full' ? [false] : [false, true]) {
+                const open = await pg.evaluate(() => window.__rw.touch.isFanOpen());
+                if (open !== fan) {
+                  const mp = await pg.evaluate(() => { const r = document.querySelector('.rw-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+                  await pg.touchscreen.tap(mp.x, mp.y);
+                }
+                await force();
+                await pg.waitForTimeout(states === 0 ? 500 : 60);
+                await settle();
+                const m = await measure(grid, L, hand, hud, name);
+                m.fan = fan;
+                checkState(m);
+              }
+            }
+          }
+          // the four steering styles in a car
+          await setMode('car', null, 'car');
+          await pg.evaluate(() => { window.__rw.touch.setHudMode('minimal'); window.__rw.hud.setHudMode('minimal'); });
+          for (const style of ['wheel', 'buttons', 'slider', 'tilt']) {
+            await pg.evaluate((s) => { window.__rw.touch.setSteering(s, 1); window.__rw.touch.update(1 / 60); }, style);
+            await force();
+            await pg.waitForTimeout(60);
+            await settle();
+            const m = await measure(grid, L, hand, 'minimal', 'car');
+            m.style = style;
+            checkState(m);
+          }
+          await pg.evaluate(() => window.__rw.touch.setSteering('wheel', 1));
+        }
+      }
+    }
+    // The title screen (docs/REVAMP.md 6.8): name, Start (Loading until ready), Continue only when offered, credit, version.
+    for (const [w, h] of [[915, 412], [780, 360]]) {
+      const tc = await br.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+      const tp = await tc.newPage();
+      await tp.goto(base);
+      const loading = await tp.evaluate(() => getComputedStyle(document.getElementById('play'), '::after').content + ':' + document.getElementById('play').disabled);
+      await tp.waitForFunction(() => !document.getElementById('play').disabled, null, { timeout: 120000 });
+      for (const L of [0, 40]) {
+        await tp.evaluate((l) => document.documentElement.style.setProperty('--rw-test-sl', l + 'px'), L);
+        const r = await tp.evaluate(() => {
+          const q = (s) => { const e = document.querySelector(s); const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom, hidden: e.hidden, text: e.textContent, after: getComputedStyle(e, '::after').content }; };
+          const c = document.getElementById('continue');
+          const before = c.hidden;
+          c.hidden = false;
+          const out = { h1: q('#boot h1'), play: q('#play'), cont: q('#continue'), credit: q('#bootcredit'), ver: q('#bootver'), before };
+          c.hidden = before;
+          return out;
+        });
+        const tag = `title ${w}x${h} L${L}`;
+        check(`${tag}: Loading while the city builds, then Start (180x56), bottom edge 24 up`, loading.startsWith('"Loading"') && /Start/.test(r.play.after) && r.play.w === 180 && r.play.h === 56 && Math.abs(r.play.b - (h - 24)) < 1.5, JSON.stringify([loading, r.play]));
+        check(`${tag}: Continue (180x56) hidden on a fresh profile, left of Start with 16 between`, r.before === true && r.cont.w === 180 && r.cont.h === 56 && Math.abs(r.play.x - r.cont.r - 16) < 1.5 && r.cont.x < r.play.x, JSON.stringify([r.cont, r.play]));
+        check(`${tag}: name at 24 + inset, 20, 40 high; credit bottom left; version bottom right`, Math.abs(r.h1.x - (24 + L)) < 1.5 && Math.abs(r.h1.y - 20) < 1.5 && Math.abs(r.h1.h - 40) < 1.5
+          && /OpenStreetMap contributors, ODbL/.test(r.credit.text) && r.credit.x >= L + 7.5 && /^v\d+\.\d+\.\d+/.test(r.ver.text) && r.ver.r <= w - 7.5, JSON.stringify([r.h1, r.credit, r.ver]));
+      }
+      await tc.close();
+    }
+    for (const p of problems.slice(0, 40)) console.log('   ', p);
+    check(`live layout: ${states} states, ${elements} elements: no overlap, gap, size, keep-out, inset, grid, contrast or cut-out problem`, problems.length === 0, `(${problems.length} problems)`);
+    check('live layout: no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  } finally {
+    await br.close();
+    srv.close();
+  }
+}
+
 const chromium = await loadChromium();
 const browser = await chromium.launch();
 try {
@@ -214,11 +545,11 @@ try {
   // Static layout: sizes and labels.
   const gas = await center('Gas');
   const brake = await center('Brake / reverse');
-  check('gas pedal ~84x110', Math.abs(gas.w - 84) < 2 && Math.abs(gas.h - 110) < 2, `${gas.w}x${gas.h}`);
+  check('gas pedal 72x88 (docs/REVAMP.md 6.5)', Math.abs(gas.w - 72) < 2 && Math.abs(gas.h - 88) < 2, `${gas.w}x${gas.h}`);
   check('brake pedal left of gas', brake.x < gas.x);
   const small = await page.evaluate(() => [...document.querySelectorAll('.rw-btn')]
     .filter((b) => b.offsetParent).map((b) => Math.min(b.offsetWidth, b.offsetHeight)));
-  check('all visible buttons >= 56px', Math.min(...small) >= 56, `min ${Math.min(...small)}`);
+  check('all visible buttons >= 48px', Math.min(...small) >= 48, `min ${Math.min(...small)}`);
 
   // Wheel helpers: touch the rim at an angle (0 = top, clockwise +) and turn.
   const wheelBox = () => page.evaluate(() => {
@@ -290,7 +621,7 @@ try {
   check('wheel hidden for buttons', !(await wheelBox()).vis);
   const sr = await center('Steer right');
   const sl = await center('Steer left');
-  check('arrow pads large', sr.w >= 88 && sr.h >= 100 && sl.x < sr.x, JSON.stringify([sl, sr]));
+  check('arrow pads 72 square', sr.w >= 72 && sr.h >= 72 && sl.x < sr.x, JSON.stringify([sl, sr]));
   await down(3, sr.x, sr.y);
   check('button: no steer before update', (await read('rw.input.steer')) === 0);
   await tick(6);
@@ -347,7 +678,7 @@ try {
 
   // ---- steering style: tilt ----
   check('tilt accepted when the API exists', (await page.evaluate(() => rw.touch.setSteering('tilt', 1))) === 'tilt');
-  const tb = await center('Tilt steering (tap to re-centre)');
+  const tb = await center('Tilt steering (tap the steering area to re-centre)');
   check('tilt indicator where the wheel was', tb.x < 200 && tb.y > 300, JSON.stringify(tb));
   const tiltNow = async (beta, gamma) => {
     await page.evaluate(([b, g]) => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { beta: b, gamma: g, alpha: 0 })), [beta, gamma]);
@@ -415,7 +746,7 @@ try {
   await openFan();
   const lh = await center('Horn');
   const lmore = await center('More controls');
-  check('lefty: more button and fan on the left, fan grows upward from it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y < lmore.y, JSON.stringify([lh.x, lmore.x]));
+  check('lefty: more button and fan on the left, the fan opens beside and above it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y <= lmore.y + 1, JSON.stringify([lh.x, lmore.x]));
   await tapMore();
   p0 = rimPt(lw, 0);
   await down(1, p0.x, p0.y);
@@ -523,14 +854,12 @@ try {
     return !!e && !!e.offsetParent;
   }));
   check('foot: no attack/weapon/jump buttons', gone.every((v) => !v), JSON.stringify(gone));
-  await openFan();
-  const run = await center('Run');
+  const run = await center('Run'); // a primary on the BRAKE rect now, no fan needed
   const ent = await center('Enter car');
-  check('foot: ENTER still large', ent.w >= 64, `${ent.w}`);
+  check('foot: ENTER is a 56 px primary', ent.w >= 56, `${ent.w}`);
   await down(7, run.x, run.y);
   check('foot: RUN sets sprint', (await read('rw.input.sprint')) === true);
   await up(7);
-  check('fan folds after using RUN', !(await fanIsOpen()));
   check('foot: RUN release clears sprint', (await read('rw.input.sprint')) === false);
   await down(7, ent.x, ent.y);
   check('foot: ENTER held', (await read("rw.input.held('enter')")) === true);
@@ -691,7 +1020,7 @@ try {
     const out = [];
     const add = (e, name) => {
       const r = e.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) out.push({ name, l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, btn: e.classList.contains('rw-btn') });
+      if (r.width > 0 && r.height > 0) out.push({ name, l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, btn: e.classList.contains('rw-btn') && !e.classList.contains('rw-ammo') });
     };
     for (const e of document.querySelectorAll('.rw-touch .rw-btn')) {
       if (e.offsetParent && getComputedStyle(e).visibility !== 'hidden') add(e, e.getAttribute('aria-label'));
@@ -707,7 +1036,7 @@ try {
     const bad = [];
     for (const b of out) {
       if (b.l < -0.5 || b.t < -0.5 || b.r > W + 0.5 || b.b > H + 0.5) bad.push(`${b.name} off-screen`);
-      if (b.btn && Math.min(b.w, b.h) < 56) bad.push(`${b.name} ${b.w}x${b.h} < 56`);
+      if (b.btn && Math.min(b.w, b.h) < 48) bad.push(`${b.name} ${b.w}x${b.h} < 48`);
     }
     for (let i = 0; i < out.length; i++) {
       for (let j = i + 1; j < out.length; j++) {
@@ -716,7 +1045,7 @@ try {
         if (ox > 1 && oy > 1) bad.push(`${a.name} x ${b.name}`);
       }
     }
-    check(`layout ${label}: ${out.length} blocks in view, >=56px, no overlaps`, bad.length === 0, bad.join(', '));
+    check(`layout ${label}: ${out.length} blocks in view, >=48px, no overlaps`, bad.length === 0, bad.join(', '));
   };
   // Visible controls (buttons) right now, not counting folded ones.
   const buttonCount = () => page.evaluate(() => [...document.querySelectorAll('.rw-touch .rw-btn')]
@@ -741,7 +1070,7 @@ try {
         await checkLayout(`minimal ${tag}`);
         const n = await buttonCount();
         counts[m] = Math.max(counts[m] || 0, n);
-        check(`minimal ${tag}: at most 6 buttons at once (7 in a car with the handbrake) (${n})`, n <= (m === 'car' ? 7 : 6), String(n));
+        check(`minimal ${tag}: at most 8 buttons at once on foot or in a car (HAND, SWAP, RUN are slots now), 6 elsewhere (${n})`, n <= (m === 'car' || m === 'foot' ? 8 : 6), String(n));
         await shot(`min-${fileTag}-idle.png`);
         await tapMore();
         check(`minimal ${tag}: more button opens the fan`, await fanIsOpen());
@@ -841,7 +1170,7 @@ try {
   }, label);
   for (const label of ['Gas', 'Brake / reverse', 'Exit car', 'Drive-by fire', 'Pause', 'More controls']) {
     const f = await face(label);
-    check(`idle ${label}: ~85% size, ~70% opacity, hit area >= 56`, Math.abs(f.ratio - 0.85) < 0.02 && Math.abs(f.op - 0.7) < 0.03 && f.hit >= 56, JSON.stringify(f));
+    check(`idle ${label}: ~85% size, ~70% opacity, hit area >= 48`, Math.abs(f.ratio - 0.85) < 0.02 && Math.abs(f.op - 0.7) < 0.03 && f.hit >= 48, JSON.stringify(f));
   }
   const gc = await center('Gas');
   await down(32, gc.x, gc.y);
@@ -883,47 +1212,41 @@ try {
   await up(33);
   await page.waitForTimeout(260);
   check('second tap shrinks it again at once', Math.abs((await mmSize()) - 84) <= 2, String(await mmSize()));
-  // District: small text for 3 s after a change.
+  // District: the title pill in the strip for 3 s after a change.
   await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 40, health: 80, score: 5, pending: 0, combo: 1, wanted: 0, district: 'Saltmarsh Docks', time: 9, vehicleHealth: 0.7 }));
   await page.waitForTimeout(500);
-  const dOp = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.rw-district')).opacity));
-  check('district name shows as small text after a change', (await dOp()) > 0.5);
-  await page.waitForTimeout(3000);
-  check('district text gone after 3 s', (await dOp()) < 0.05);
+  const dOp = () => page.evaluate(() => { const e = document.querySelector('.rw-title'); return getComputedStyle(e).display === 'none' ? 0 : parseFloat(getComputedStyle(e).opacity); });
+  check('district name shows as a pill in the strip after a change', (await dOp()) > 0.5 && (await page.textContent('.rw-title')) === 'Saltmarsh Docks');
+  await page.waitForTimeout(3200);
+  check('district title gone after 3 s, taking no room', (await dOp()) === 0);
 
-  // Score, combo and heat: dim to ~35 percent after 4 s, back on change or when hurt.
+  // Score, combo: always at full strength on their own pill (contrast), never dimmed.
   const trOp = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.rw-tr')).opacity));
   const hudNow = (o) => page.evaluate((x) => rw.hud.update({ mode: 'car', speedKmh: 40, health: 80, score: 5, pending: 0, combo: 1, wanted: 0,
     district: 'Saltmarsh Docks', time: 9, vehicleHealth: 0.7, ...x }), o);
-  await page.waitForTimeout(1400);
-  check('score block dimmed to about 35% when nothing changed', Math.abs((await trOp()) - 0.35) < 0.03, String(await trOp()));
+  await page.waitForTimeout(4600);
+  check('score block never dims (white on a dark pill, contrast 4.5 or better)', (await trOp()) > 0.97);
   await hudNow({ score: 50 });
-  await page.waitForTimeout(500);
-  check('score change brings it back to full', (await trOp()) > 0.97);
-  await page.waitForTimeout(4900);
-  check('dims again after 4 s', (await trOp()) < 0.4);
-  await hudNow({ score: 50, health: 60 });
-  await page.waitForTimeout(500);
-  check('being hurt brings it back to full', (await trOp()) > 0.97);
-  check('speed readout small, bottom-centre, in a craft only', await page.evaluate(() => {
-    const e = document.querySelector('.rw-speed');
+  await page.waitForTimeout(300);
+  check('score change keeps it at full strength', (await trOp()) > 0.97);
+  check('speed readout in a pill beside the mini-map, top left, in a craft only', await page.evaluate(() => {
+    const e = document.querySelector('.rw-speedbox');
     const r = e.getBoundingClientRect();
-    return parseFloat(getComputedStyle(e).fontSize) <= 24 && Math.abs(r.left + r.width / 2 - innerWidth / 2) < 40 && r.top > innerHeight * 0.7;
+    return Math.abs(r.left - 100) < 2 && Math.abs(r.top - 8) < 2 && Math.abs(r.width - 88) < 2 && parseFloat(getComputedStyle(e.querySelector('.rw-speed')).fontSize) === 28;
   }));
-  await page.waitForTimeout(4500);
 
-  // HUD Full: everything shown, nothing dim.
+  // HUD Full: the clock shows and the fan stays open; nothing dim.
   await page.evaluate(() => { rw.touch.setHudMode('full'); rw.hud.setHudMode('full'); });
   await page.waitForTimeout(500);
   check('Full: score block stays at full strength', (await trOp()) > 0.97);
-  check('Full: clock and district text shown', await page.locator('.rw-clock').isVisible() && (await dOp()) > 0.95);
+  check('Full: clock shown', await page.locator('.rw-clock').isVisible());
   check('Full: idle buttons not shrunk or dimmed', await (async () => { const f = await face('Gas'); return f.ratio > 0.99 && f.op > 0.99; })());
   check('Full: all secondary controls visible, more button gone',
     (await page.locator('[aria-label="Handbrake"]').isVisible()) && (await page.locator('[aria-label="Horn"]').isVisible())
     && (await page.locator('[aria-label="Change camera"]').isVisible()) && (await page.locator('[aria-label="Map"]').isVisible())
     && !(await page.locator('[aria-label="More controls"]').isVisible()));
   check('Full: ammo panel shown, no reload chip', await page.locator('.rw-ammo').isVisible() && !(await page.locator('[aria-label="Reload (magazine low)"]').isVisible()));
-  check('Full: mini-map 116 px', Math.abs((await mmSize()) - 116) <= 2, String(await mmSize()));
+  check('Full: mini-map stays 84 px', Math.abs((await mmSize()) - 84) <= 2, String(await mmSize()));
   const hbF = await center('Handbrake');
   await down(34, hbF.x, hbF.y);
   check('Full: handbrake works without opening anything', (await read('rw.input.handbrake')) === true);
@@ -939,11 +1262,11 @@ try {
   check('foot: chip shown when the magazine is low', await page.locator('[aria-label="Reload (magazine low)"]').isVisible());
   const chip = await center('Reload (magazine low)');
   const fireB = await center('Fire');
-  check('chip sits next to FIRE and is >= 56 px', chip.w >= 56 && Math.abs(chip.x - fireB.x) < 140 && chip.x < fireB.x, JSON.stringify([chip, fireB]));
+  check('chip takes the LOCK rect, left of and above FIRE, and is >= 56 px', chip.w >= 56 && Math.abs(chip.x - fireB.x) < 200 && chip.x < fireB.x && chip.y < fireB.y, JSON.stringify([chip, fireB]));
   await down(35, chip.x, chip.y);
   await up(35);
   check('chip tap presses reload', (await read("[rw.input.consume('reload'), rw.input.held('reload')]")).join() === 'true,false');
-  check('foot: Minimal shows <= 6 buttons', (await buttonCount()) <= 6, String(await buttonCount()));
+  check('foot: Minimal shows <= 8 buttons', (await buttonCount()) <= 8, String(await buttonCount()));
   await page.evaluate(() => rw.touch.setCombat({ show: true, weapon: 'smg', name: 'Buzzbox', mag: 0, max: 30, reload: 0.4, locked: false, drive: false }));
   check('foot: chip stays while reloading', await page.locator('[aria-label="Reload (magazine low)"]').isVisible());
 
@@ -1003,7 +1326,7 @@ try {
   // ---- drive-by: steer, gas and fire with three fingers at once ----
   const dbf = await center('Drive-by fire');
   const g3 = await center('Gas');
-  check('drive-by FIRE above the pedals', dbf.y < g3.y - 60 && Math.abs(dbf.x - g3.x) < 30 && dbf.w >= 56, JSON.stringify([dbf, g3]));
+  check('drive-by FIRE on the FIRE rect, left of the pedals, bottom row', dbf.x < g3.x - 120 && Math.abs(dbf.y - g3.y) < 40 && dbf.w >= 56, JSON.stringify([dbf, g3]));
   const wb3 = await wheelBox();
   p0 = rimPt(wb3, 0);
   await down(1, p0.x, p0.y);
@@ -1043,7 +1366,7 @@ try {
   // ---- foot: walk, fire and look at once; taps ----
   await page.evaluate(() => rw.touch.setMode('foot'));
   const ff = await center('Fire');
-  check('foot FIRE big, under the right thumb', ff.w >= 90 && ff.x > 915 - 150 && ff.y > 412 - 150, JSON.stringify(ff));
+  check('foot FIRE takes the GAS rect, under the right thumb', ff.w >= 72 && ff.x > 915 - 150 && ff.y > 412 - 150, JSON.stringify(ff));
   await down(1, 120, 320);
   await drag(1, 120, 320, 121, 270);
   await down(2, ff.x, ff.y);
@@ -1240,8 +1563,8 @@ try {
       ['gannet', 'plane', 0, 9, 'alock,bomb,gun,msl'],
       ['gannet', 'plane', 2, 10, 'alock,bomb,detonate,gun,msl'],
       ['lamp', 'heli', 0, 6, 'gun'],
-      [null, 'foot', 0, 6, ''],
-      [null, 'foot', 3, 7, 'detonate'],
+      [null, 'foot', 0, 7, 'run,swap'],
+      [null, 'foot', 3, 8, 'detonate,run,swap'],
     ];
     const armsCounts = {};
     for (const [vw, vh] of [[915, 412], [780, 360]]) {
@@ -1287,7 +1610,7 @@ try {
     }));
     check('arc buttons >= 56 px and primary', sizes.every(([, w, p]) => w >= 56 && p), JSON.stringify(sizes));
     const gun = await at('gun');
-    check('GUN is the big one (>= 80 px)', gun.w >= 80, String(gun.w));
+    check('GUN is the FIRE rect (64 px)', gun.w >= 64, String(gun.w));
     // Real multi-touch while flying: stick, GUN held, BOMB tapped, MSL held.
     await down(41, 140, 300);
     await drag(41, 140, 300, 190, 260, 5);
@@ -1393,7 +1716,7 @@ try {
         await page.waitForTimeout(150);
         const tag = `rustback ${vw}x${vh}${lefty ? ' lefty' : ''}`;
         const cn = await at('cannon'), cx = await at('coax'), lk = await at('tlock');
-        check(`${tag}: CANNON big (>= 80 px), COAX and LOCK >= 56 px`, cn.w >= 80 && cx.w >= 56 && lk.w >= 56, JSON.stringify([cn.w, cx.w, lk.w]));
+        check(`${tag}: CANNON on the FIRE rect (64 px), COAX and LOCK >= 56 px`, cn.w >= 64 && cx.w >= 56 && lk.w >= 56, JSON.stringify([cn.w, cx.w, lk.w]));
         check(`${tag}: fire buttons on the ${lefty ? 'left' : 'right'} thumb`, lefty ? cn.x < vw / 2 && cx.x < vw / 2 : cn.x > vw / 2 && cx.x > vw / 2);
         const n = await buttonCount();
         check(`${tag}: ${n} buttons <= 6`, n <= 6, String(n));
@@ -1461,6 +1784,8 @@ try {
   await browser.close();
   server.close();
 }
+
+await liveLayout(check);
 
 console.log(failures.length ? `\nFAILED ${failures.length}/${checks}: ${failures.join('; ')}` : `\nPASSED ${checks}/${checks} checks`);
 process.exit(failures.length ? 1 : 0);

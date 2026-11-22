@@ -26,16 +26,103 @@ import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { lotGround, lotJob, lotsByTile, setSolids } from './lotmesh.js';
+import { dressLot } from '../world/lots.js';
 
 export const TILE = 300; // m, a near-detail tile
 export const SUPER = 4; // tiles per far block side
 export const LOD = { near: 340, mid: 170, build: 520, drop: 860, hyst: 40 };
 const FAR_LAND_Y = -0.3, FAR_ROAD_Y = -0.1;
 const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
+// Longest piece of tile work between two yields (ms): a slice ends at
+// the first break point past this, so slices stay well under 5 ms.
+export const SLICE_MS = 2;
+const PROP_PIECE = 16;
 
 function releaseArray() {
   this.array = null;
 }
+
+// A tile builder (one ChunkedBuilder cell, up to three quality tiers)
+// turned into one mesh a slice at a time: the vertex arrays are copied
+// into typed arrays in pieces, so a big tile never costs one long frame.
+// The mesh (or nothing) is left in out[0]. Same result as buildInto.
+const COPY = 120000; // numbers per piece
+function* copyInto(dst, src, at, over, add = 0) {
+  for (let i = 0; i < src.length; i += COPY) {
+    const e = Math.min(src.length, i + COPY);
+    if (add) for (let k = i; k < e; k++) dst[at + k] = src[k] + add;
+    else for (let k = i; k < e; k++) dst[at + k] = src[k];
+    if (over()) yield 'mesh';
+  }
+}
+function* buildSliced(cb, material, o, over, out, sub = 0) {
+  const parts = [cb.map.get(sub * 3), cb.map.get(sub * 3 + 1), cb.map.get(sub * 3 + 2)];
+  let nv = 0, ni = 0;
+  for (const p of parts) if (p) { nv += p.count; ni += p.idx.length; }
+  if (!nv) return;
+  const uv = cb.withUv;
+  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uvs = uv ? new Float32Array(nv * 2) : null;
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  const tiered = !!(parts[1] || parts[2]);
+  const counts = [];
+  let v = 0, k = 0;
+  for (const p of parts) {
+    if (p) {
+      yield* copyInto(pos, p.pos, v * 3, over);
+      yield* copyInto(col, p.col, v * 3, over);
+      yield* copyInto(nor, p.nor, v * 3, over);
+      if (uvs) {
+        if (p.uv) yield* copyInto(uvs, p.uv, v * 2, over);
+      }
+      yield* copyInto(idx, p.idx, k, over, v);
+      v += p.count;
+      k += p.idx.length;
+    }
+    counts.push(k);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  if (uvs) geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  if (over()) yield 'mesh';
+  geo.computeBoundingSphere();
+  const m = new THREE.Mesh(geo, material);
+  m.matrixAutoUpdate = false;
+  if (tiered) {
+    m.userData.tierCounts = counts;
+    geo.setDrawRange(0, counts[1]);
+  }
+  m.renderOrder = o.order || 0;
+  m.castShadow = !!o.cast;
+  m.receiveShadow = !!o.receive;
+  if (o.name) m.name = o.name;
+  out[0] = m;
+}
+
+// A tile builder split in 2 by 2 quarters (150 m): the heavy meshes of a
+// tile (trees, lot dressing, props) so the camera and the shadow map
+// each draw only the quarters they see. Same interface as a one-cell
+// ChunkedBuilder; map keys are quarter * 3 + tier.
+class QuarterBuilder {
+  constructor(t, withUv, uvScale) {
+    this.cx = (t.x0 + t.x1) / 2;
+    this.cz = (t.z0 + t.z1) / 2;
+    this.withUv = withUv;
+    this.uvScale = uvScale;
+    this.subs = 4;
+    this.map = new Map();
+  }
+  at(x, z, q = 0) {
+    const k = ((z < this.cz ? 0 : 2) + (x < this.cx ? 0 : 1)) * 3 + q;
+    let b = this.map.get(k);
+    if (!b) this.map.set(k, (b = new MeshBuilder(this.withUv, this.uvScale)));
+    return b;
+  }
+}
+const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao']);
 
 // Builders that draw nothing (the one-off pass that only wants the side
 // effects: collision circles, lamp and glow lists).
@@ -47,27 +134,23 @@ const NULL_B = { at: () => NULL_MB };
 // the vertex shader, windows (darker glass by day, some lit at night)
 // from the world position in the fragment shader. emissiveIntensity is
 // driven by the day/night system like the facade materials.
-function makeFarMaterial(mask, nx, ny) {
+// aWin: 0 no windows, 1 a tower or block grid (3.1 by 3.4 m), 2 small
+// house and shop windows (4 by 3 m, sparser, fewer lit). The near tiles
+// are left out of the index buffers (FarChunks.compact), not masked.
+function makeFarMaterial() {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, emissive: 0xffd2a0, emissiveIntensity: 0 });
   mat.name = 'far';
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uNear = { value: mask };
-    shader.uniforms.uNearN = { value: new THREE.Vector2(nx, ny) };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-attribute float aTile;
 attribute float aWin;
-uniform sampler2D uNear;
-uniform vec2 uNearN;
 varying vec3 vRwW;
 varying vec3 vRwN;
 varying float vRwWin;`)
       .replace('#include <project_vertex>', `#include <project_vertex>
 	vRwW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
 	vRwN = normal;
-	vRwWin = aWin;
-	vec2 rwT = vec2( mod( aTile, uNearN.x ), floor( aTile / uNearN.x ) );
-	if ( texture2D( uNear, ( rwT + 0.5 ) / uNearN ).r > 0.5 ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );`);
+	vRwWin = aWin;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vRwW;
@@ -77,14 +160,19 @@ varying float vRwWin;`)
 	float rwWin = 0.0, rwLit = 0.0;
 	if ( vRwWin > 0.5 && abs( vRwN.y ) < 0.5 ) {
 		float rwAlong = abs( vRwN.x ) > 0.5 ? vRwW.z : vRwW.x;
-		vec2 rwC = vec2( rwAlong / 3.1, ( vRwW.y - 0.8 ) / 3.4 );
+		bool rwSmall = vRwWin > 1.5;
+		vec2 rwC = rwSmall ? vec2( rwAlong / 4.0, ( vRwW.y - 0.2 ) / 3.0 ) : vec2( rwAlong / 3.1, ( vRwW.y - 0.8 ) / 3.4 );
 		vec2 rwF = fract( rwC );
-		rwWin = step( 0.18, rwF.x ) * step( rwF.x, 0.82 ) * step( 0.28, rwF.y ) * step( rwF.y, 0.86 ) * step( 1.0, rwC.y );
+		rwWin = rwSmall
+			? step( 0.3, rwF.x ) * step( rwF.x, 0.7 ) * step( 0.32, rwF.y ) * step( rwF.y, 0.78 )
+			: step( 0.18, rwF.x ) * step( rwF.x, 0.82 ) * step( 0.28, rwF.y ) * step( rwF.y, 0.86 ) * step( 1.0, rwC.y );
 		float rwH = fract( sin( dot( floor( rwC ) + floor( vRwW.xz * 0.05 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
 		// Far off the pattern turns into its average (no shimmer).
 		float rwFade = smoothstep( 450.0, 1100.0, length( vRwW - cameraPosition ) );
-		rwLit = mix( rwWin * step( 0.6, rwH ), 0.16, rwFade );
-		rwWin = mix( rwWin, 0.45, rwFade );
+		rwLit = mix( rwWin * step( rwSmall ? 0.7 : 0.6, rwH ), 0.16, rwFade );
+		rwWin = mix( rwWin, rwSmall ? 0.2 : 0.45, rwFade );
+		// A darker shop or lobby band at street level.
+		if ( !rwSmall ) diffuseColor.rgb *= mix( 0.78, 1.0, step( 4.0, vRwW.y ) );
 	}
 	diffuseColor.rgb *= 1.0 - 0.3 * rwWin;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -111,16 +199,20 @@ class FarChunks {
     if (!this.verts) return null;
     const N = this.verts;
     const pos = new Float32Array(N * 3), nor = new Float32Array(N * 3), col = new Float32Array(N * 3);
-    const tile = new Float32Array(N), win = new Float32Array(N);
+    const win = new Float32Array(N);
     const idx = N > 65535 ? new Uint32Array(this.idx) : new Uint16Array(this.idx);
+    // Index ranges per tile (parts of one tile are pushed together).
+    const ranges = [];
     let v = 0, k = 0;
     for (const p of this.parts) {
       pos.set(p.pos, v * 3);
       nor.set(p.nor, v * 3);
       col.set(p.col, v * 3);
-      tile.fill(p.tile, v, v + p.n);
       win.fill(p.win, v, v + p.n);
       for (let i = 0; i < p.idx.length; i++) idx[k + i] = p.idx[i] + v;
+      const last = ranges.length ? ranges[ranges.length - 1] : null;
+      if (last && last.tile === p.tile && last.start + last.count === k) last.count += p.idx.length;
+      else ranges.push({ tile: p.tile, start: k, count: p.idx.length });
       v += p.n;
       k += p.idx.length;
     }
@@ -129,15 +221,94 @@ class FarChunks {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.setAttribute('aTile', new THREE.BufferAttribute(tile, 1));
     g.setAttribute('aWin', new THREE.BufferAttribute(win, 1));
-    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    // The drawn index is a copy with the near tiles' ranges left out.
+    g.setIndex(new THREE.BufferAttribute(idx.slice(), 1));
+    g.index.setUsage(THREE.DynamicDrawUsage);
     g.computeBoundingSphere();
     const m = new THREE.Mesh(g, material);
     m.matrixAutoUpdate = false;
     m.name = 'far';
+    m.userData.far = { full: idx, ranges, state: new Uint8Array(ranges.length) };
     return m;
   }
+}
+
+// Rebuilds a far block's drawn index without the tiles shown near
+// (near[k] 1). Returns true when something changed.
+export function compactFar(mesh, near) {
+  const F = mesh.userData.far;
+  let dirty = false;
+  for (let r = 0; r < F.ranges.length; r++) if (F.state[r] !== near[F.ranges[r].tile]) { dirty = true; break; }
+  if (!dirty) return false;
+  const out = mesh.geometry.index.array, full = F.full;
+  let n = 0;
+  for (let r = 0; r < F.ranges.length; r++) {
+    const R = F.ranges[r];
+    F.state[r] = near[R.tile];
+    if (near[R.tile]) continue;
+    out.set(full.subarray(R.start, R.start + R.count), n);
+    n += R.count;
+  }
+  mesh.geometry.setDrawRange(0, n);
+  mesh.geometry.index.needsUpdate = true;
+  mesh.visible = n > 0;
+  return true;
+}
+
+// One building of the far level: walls (with the window pattern when
+// its builder is the window one), and a roof that reads at a distance:
+// a hipped roof on houses, a parapet and roof plant on flat roofs.
+const FAR_PARAPET = 0.8;
+export function farBuilding(walls, plain, b, wall, roof, y0, house) {
+  const { x0, z0, x1, z1, h } = b;
+  const dx = x1 - x0, dz = z1 - z0;
+  if (house) {
+    walls.walls(x0, z0, x1, z1, y0, h, wall, 1, 1, 0.75, 1);
+    const along = dx >= dz, rh = Math.min(3.2, 0.32 * Math.min(dx, dz));
+    const e = 0.35;
+    if (along) {
+      const mz = (z0 + z1) / 2, ia = x0 + dz / 2, ib = x1 - dz / 2;
+      const ra = Math.min(ia, (x0 + x1) / 2), rb = Math.max(ib, (x0 + x1) / 2);
+      plain.quad(x0 - e, h, z1 + e, x1 + e, h, z1 + e, rb, h + rh, mz, ra, h + rh, mz, roof, 0, 0.8, 0.6);
+      plain.quad(x1 + e, h, z0 - e, x0 - e, h, z0 - e, ra, h + rh, mz, rb, h + rh, mz, roof, 0, 0.8, -0.6, 0, 0, 1, 1, 0.82);
+      plain.tri(x1 + e, h, z1 + e, x1 + e, h, z0 - e, rb, h + rh, mz, roof, 0.6, 0.8, 0, 0, 0, 0, 0, 0, 0, 0.9);
+      plain.tri(x0 - e, h, z0 - e, x0 - e, h, z1 + e, ra, h + rh, mz, roof, -0.6, 0.8, 0, 0, 0, 0, 0, 0, 0, 0.9);
+    } else {
+      const mx = (x0 + x1) / 2, ia = z0 + dx / 2, ib = z1 - dx / 2;
+      const ra = Math.min(ia, (z0 + z1) / 2), rb = Math.max(ib, (z0 + z1) / 2);
+      plain.quad(x1 + e, h, z1 + e, x1 + e, h, z0 - e, mx, h + rh, ra, mx, h + rh, rb, roof, 0.6, 0.8, 0);
+      plain.quad(x0 - e, h, z0 - e, x0 - e, h, z1 + e, mx, h + rh, rb, mx, h + rh, ra, roof, -0.6, 0.8, 0, 0, 0, 1, 1, 0.82);
+      plain.tri(x0 - e, h, z1 + e, x1 + e, h, z1 + e, mx, h + rh, rb, roof, 0, 0.8, 0.6, 0, 0, 0, 0, 0, 0, 0.9);
+      plain.tri(x1 + e, h, z0 - e, x0 - e, h, z0 - e, mx, h + rh, ra, roof, 0, 0.8, -0.6, 0, 0, 0, 0, 0, 0, 0.9);
+    }
+    return;
+  }
+  if (h < 9 || dx < 6 || dz < 6) {
+    walls.walls(x0, z0, x1, z1, y0, h, wall, 1, 1, 0.75, 1);
+    plain.flat(x0, z0, x1, z1, h, roof);
+    return;
+  }
+  // Parapet: the walls go on up past the roof, a lighter cap on top.
+  const top = h + FAR_PARAPET, inset = 0.45;
+  walls.walls(x0, z0, x1, z1, y0, h, wall, 1, 1, 0.75, 1);
+  plain.walls(x0, z0, x1, z1, h, top, wall, 1, 1, 1, 1.04);
+  plain.ring(x0, z0, x1, z1, inset, top, shadeHexF(wall, 1.12));
+  plain.innerWalls(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h, top, shadeHexF(roof, 0.8), 0.7, 0.9);
+  plain.flat(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h, roof);
+  // Roof plant on bigger roofs: a lift room or cooling units.
+  if (h >= 20 && dx * dz >= 400) {
+    const u = ((b.vseed | 0) >>> 3) % 7;
+    const w = Math.min(dx, dz) * (0.22 + u * 0.02);
+    const cx = (x0 + x1) / 2 + (u - 3) * dx * 0.04, cz = (z0 + z1) / 2 - (u - 3) * dz * 0.03;
+    plain.box(cx - w, cz - w * 0.7, cx + w, cz + w * 0.7, h, h + 2.6 + (u % 3), 0xb8b6b0, 0x8e8c88, 0.75, 1);
+  }
+}
+function shadeHexF(hex, f) {
+  const r = Math.min(255, ((hex >> 16) & 255) * f) | 0;
+  const g = Math.min(255, ((hex >> 8) & 255) * f) | 0;
+  const c = Math.min(255, (hex & 255) * f) | 0;
+  return (r << 16) | (g << 8) | c;
 }
 
 // One tile's builders, the same set citymesh uses for the whole map,
@@ -147,6 +318,7 @@ const TILE_KEYS = [
   ['paint', true, 2], ['decal', true, 1], ['ao', false, 1], ['plain', false, 1], ['detail', true, 1], ['glow', false, 1],
   ['glass', true, 1], ['brick', true, 1], ['office', true, 1], ['stucco', true, 1], ['siding', true, 1], ['corrugated', true, 1],
   ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1], ['havana', true, 1], ['treeDetail', true, 1],
+  ['sand', true, 6],
 ];
 // key: material, draw options, hidden at the middle level
 function tileMeshPlan(M) {
@@ -165,10 +337,12 @@ function tileMeshPlan(M) {
     // Trees and palms stay drawn at the middle level (no pop-in): trunks
     // and canopies go in 'plain', palm fronds here.
     ['treeDetail', M.detailMat, { ...solid, name: 'trees-detail' }],
+    // Lot ground in sand and dirt (beaches, building sites).
+    ['sand', M.lotSandMat, ground],
   ];
 }
 
-export function buildRealCity(city, collision) {
+export function buildRealCity(city, collision, opts = {}) {
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
   const tStart = now();
   const group = new THREE.Group();
@@ -177,8 +351,12 @@ export function buildRealCity(city, collision) {
   // Sign plates: the short forms of the street names (city.streetNames.plates).
   const sn = city.streetNames;
   const names = sn ? sn.plates || [...sn.x.slice(0, 16), ...sn.z.slice(0, 16)] : [];
-  const T = createTextures(city.seed + 7, names);
+  // opts.textures: a stand-in set (node timing runs have no canvas).
+  const T = opts.textures || createTextures(city.seed + 7, names);
   const M = makeMaterials(T);
+  // Sand and dirt lots sit over the land: no push back (sandMat has one).
+  M.lotSandMat = M.sandMat.clone();
+  M.lotSandMat.polygonOffset = false;
   const DR = T.decals.rects, R = T.details.rects;
   const timings = {};
   let tm = tStart;
@@ -238,27 +416,34 @@ export function buildRealCity(city, collision) {
   for (const k of TILE_KEYS) Cnull[k[0]] = NULL_B;
   // Mast lights on the tall towers (buildings.js adds them as it draws).
   for (const b of city.buildings) if (b.h > 72 && b.style !== 'house' && b.style !== 'container' && b.kind !== 'warehouse') addBuilding(Cnull, b);
-  const { lamps, bulbs: allBulbs } = addProps(Cnull, null, true);
+  const { lamps, bulbs: allBulbs, palms } = addProps(Cnull, null, true);
   for (const b of allBulbs) tiles[tileOf(b.x, b.z)].bulbs.push(b);
+  // Street items by tile, so a tile's prop pass looks only at its own.
+  for (const t of tiles) t.lists = { props: [], furniture: [], signals: [], palms: [] };
+  for (const p of city.props) tiles[tileOf(p.x, p.z)].lists.props.push(p);
+  for (const f of city.furniture || []) tiles[tileOf(f.x, f.z)].lists.furniture.push(f);
+  for (const sg of city.signals || []) tiles[tileOf(sg.x, sg.z)].lists.signals.push(sg);
+  for (let i = 0; i < palms.length; i += 3) tiles[tileOf(palms[i], palms[i + 1])].lists.palms.push(palms[i], palms[i + 1], palms[i + 2]);
   lap('global');
 
   // ---- Far blocks: the whole map, coarse. ----
-  const mask = new THREE.DataTexture(new Uint8Array(NT), NX, NZ, THREE.RedFormat, THREE.UnsignedByteType);
-  mask.magFilter = mask.minFilter = THREE.NearestFilter;
-  mask.generateMipmaps = false;
-  mask.unpackAlignment = 1;
-  mask.needsUpdate = true;
-  const farMat = makeFarMaterial(mask, NX, NZ);
+  // 1 where a tile is shown near (its far copy is left out).
+  const nearMask = new Uint8Array(NT);
+  const farMeshes = [];
+  const farMat = makeFarMaterial();
   M.farMat = farMat;
   const farRoot = new THREE.Group();
   farRoot.name = 'far';
   group.add(farRoot);
-  {
+  // Built at start, and again when the city's lots change (dev scripts).
+  function buildFar() {
+    for (const m of farMeshes) { farRoot.remove(m); m.geometry.dispose(); }
+    farMeshes.length = 0;
     const G = city.landGrid, s = 4;
     const SX = Math.ceil(NX / SUPER), SZ = Math.ceil(NZ / SUPER);
     const supers = [];
     for (let k = 0; k < SX * SZ; k++) supers.push(new FarChunks());
-    const plain = new MeshBuilder(false), win = new MeshBuilder(false);
+    const plain = new MeshBuilder(false), win = new MeshBuilder(false), small = new MeshBuilder(false);
     const one = { at: () => plain };
     const LB = { land: one, ground: one, pavement: one };
     const nI = Math.floor((G.w - 1) / s), nJ = Math.floor((G.h - 1) / s);
@@ -268,6 +453,8 @@ export function buildRealCity(city, collision) {
       plain.count = 0;
       win.pos.length = win.col.length = win.nor.length = win.idx.length = 0;
       win.count = 0;
+      small.pos.length = small.col.length = small.nor.length = small.idx.length = 0;
+      small.count = 0;
       // Land, one coarse cell over each side (the near tiles cover it).
       const i0 = Math.max(0, coarse(t.x0, G.x0) - 1), i1 = Math.min(nI, coarse(t.x1, G.x0) + 1);
       const j0 = Math.max(0, coarse(t.z0, G.z0) - 1), j1 = Math.min(nJ, coarse(t.z1, G.z0) + 1);
@@ -297,17 +484,22 @@ export function buildRealCity(city, collision) {
         const st = L ? L.style : b.style;
         const wall = L ? (st === 'glass' ? shade(L.tint, 0.9) : shade(L.wall, 0.9)) : b.style === 'glass' ? shade(b.tint, 0.95) : b.style === 'container' ? b.color : shade(b.color, 0.92);
         const roof = L ? (st === 'house' || L.tile ? L.roof : shade(L.roof, 0.85)) : b.style === 'house' ? 0x9a6a58 : shade(b.color, 0.78);
-        (WINDOW_STYLES.has(st) ? win : plain).box(b.x0, b.z0, b.x1, b.z1, FAR_LAND_Y, b.h, wall, roof, 0.75, 1);
+        const house = st === 'house';
+        const walls = WINDOW_STYLES.has(st) ? (b.h <= 12 && st !== 'glass' && st !== 'office' ? small : win) : house ? small : plain;
+        farBuilding(walls, plain, b, wall, roof, FAR_LAND_Y, house);
       }
       const sk = Math.floor((t.k % NX) / SUPER) + Math.floor(Math.floor(t.k / NX) / SUPER) * SX;
       supers[sk].push(plain, t.k, 0);
       supers[sk].push(win, t.k, 1);
+      supers[sk].push(small, t.k, 2);
     }
     for (const sc of supers) {
       const m = sc.build(farMat);
-      if (m) farRoot.add(m);
+      if (m) { farRoot.add(m); farMeshes.push(m); }
     }
+    for (const m of farMeshes) compactFar(m, nearMask);
   }
+  buildFar();
   lap('far');
 
   // ---- Traffic-light lamps: one instanced mesh holding the bulbs of the
@@ -369,38 +561,103 @@ export function buildRealCity(city, collision) {
     wet: M.wet, lamps, glows, signals, windsock, tiered, textures: T, buildMs: 0, timings,
   };
 
-  // One tile, built a slice at a time: yields between pieces of work.
+  // Lots by tile (docs/REVAMP.md 6.2), worked out the first time a tile
+  // needs them and again if the city's lot list is replaced.
+  let lotTiles = null, lotSrc = null;
+  const lotStats = { lots: 0, features: 0, tris: {} };
+  function lotsOf(t) {
+    if (!city.lots) return [];
+    if (lotSrc !== city.lots) { lotSrc = city.lots; lotTiles = lotsByTile(city, tileOf, NT); }
+    return lotTiles[t.k];
+  }
+  // dressLot (src/world/lots.js), or another one with the same contract
+  // passed in by the caller (tests, fixtures).
+  const dress = opts.dressLot || dressLot;
+  const dressOf = () => dress;
+
+  // One tile, built a slice at a time: yields between pieces of work,
+  // at the first break point after SLICE_MS of work.
   function* tileJob(t) {
+    let ts = now();
+    const over = () => now() - ts > SLICE_MS;
     const B = {};
-    for (const [key, uv, scale] of TILE_KEYS) B[key] = new ChunkedBuilder(1e7, 1, uv, scale);
+    for (const [key, uv, scale] of TILE_KEYS) B[key] = QUARTERED.has(key) ? new QuarterBuilder(t, uv, scale) : new ChunkedBuilder(1e7, 1, uv, scale);
     const own = (x, z) => tileOf(x, z) === t.k;
     const C = { city, collision: null, ...B, R, DR, glows: [], groundY };
     const G = city.landGrid;
     const di = (v, o) => Math.max(0, Math.min(G.w - 1, Math.ceil((v - o) / G.cell - 0.5)));
     const dj = (v, o) => Math.max(0, Math.min(G.h - 1, Math.ceil((v - o) / G.cell - 0.5)));
     const i0 = di(t.x0, G.x0), i1 = di(t.x1, G.x0), j0 = dj(t.z0, G.z0), j1 = dj(t.z1, G.z0);
+    // Lot cells of this tile (the lot grid shares the land raster).
+    const ci = (v, o, n) => Math.max(0, Math.min(n, Math.round((v - o) / G.cell)));
+    const li0 = ci(t.x0, G.x0, G.w), li1 = ci(t.x1, G.x0, G.w), lj0 = ci(t.z0, G.z0, G.h), lj1 = ci(t.z1, G.z0, G.h);
     for (let j = j0; j < j1; j += 10) {
       realLand(city, B, i0, i1, j, Math.min(j1, j + 10));
-      yield 'land';
+      if (over()) { yield 'land'; ts = now(); }
     }
-    realRoads(city, B, t.nodes, t.edges, own);
-    yield 'roads';
+    for (let j = lj0; j < lj1; j += 20) {
+      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 20));
+      if (over()) { yield 'lotGround'; ts = now(); }
+    }
+    realRoads(city, B, t.nodes, [], own);
+    for (let a = 0; a < t.edges.length; a += 12) {
+      realRoads(city, B, [], t.edges.slice(a, a + 12), own);
+      if (over()) { yield 'roads'; ts = now(); }
+    }
     for (const b of t.blocks) addBlock(B, b, DR);
     addSurfaces(city, B, DR, own);
-    yield 'blocks';
     for (let n = 0; n < t.buildings.length; n++) {
       addBuilding(C, t.buildings[n]);
-      if (n % 16 === 15) yield 'buildings';
+      if (over()) { yield 'buildings'; ts = now(); }
     }
     yield 'buildings';
-    addProps({ ...C, plain: B.props, detail: B.propsDetail, trees: B.plain, treesDetail: B.treeDetail }, own, false);
-    yield 'props';
+    ts = now();
+    // Street props: the one-off pieces first, then the tile's items in
+    // pieces of PROP_PIECE.
+    const PC = { ...C, plain: B.props, detail: B.propsDetail, trees: B.plain, treesDetail: B.treeDetail };
+    const TL = t.lists;
+    addProps(PC, own, false, { props: [], furniture: [], signals: [], palms: [] });
+    if (over()) { yield 'props'; ts = now(); }
+    const nItems = Math.max(TL.props.length, TL.furniture.length, TL.signals.length, TL.palms.length / 3);
+    for (let a = 0; a < nItems; a += PROP_PIECE) {
+      const e = a + PROP_PIECE;
+      addProps(PC, own, false, { props: TL.props.slice(a, e), furniture: TL.furniture.slice(a, e), signals: TL.signals.slice(a, e), palms: TL.palms.slice(a * 3, e * 3), extras: false });
+      if (over()) { yield 'props'; ts = now(); }
+    }
+    // Lot dressing: solids and trees stay drawn at the middle level,
+    // small things (bins, paint, fences, towels) hide with the props.
+    // Collision shapes are made the first time and switched on and off
+    // with the tile after that (dressLot gives the same list each time).
+    const firstSolids = !t.solids;
+    if (firstSolids) t.solids = [];
+    else setSolids(t.solids, true);
+    const LC = {
+      city, R, DR, groundY, collision: firstSolids ? collision : null, solids: firstSolids ? t.solids : null, lotStats,
+      props: B.props, solid: B.plain, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
+      plain: B.props, trees: B.plain, treesDetail: B.treeDetail,
+    };
+    const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.idx.length; return n; };
+    const before = {};
+    for (const [k] of TILE_KEYS) before[k] = idxOf(k);
+    for (const step of lotJob(LC, lotsOf(t), dressOf(), over)) { yield step; ts = now(); }
+    // Triangles the lots added, by builder (perf.mjs reports them).
+    for (const [k] of TILE_KEYS) {
+      const d = (idxOf(k) - before[k]) / 3;
+      if (d) lotStats.tris[k] = (lotStats.tris[k] || 0) + d;
+    }
+    const tileTris = {};
+    for (const [k] of TILE_KEYS) tileTris[k] = idxOf(k) / 3;
+    t.tris = tileTris;
     const g = new THREE.Group();
     g.name = 'tile';
     const small = [], meshes = [];
     for (const [key, mat, opts, isSmall] of plan) {
-      const made = B[key].buildInto(g, mat, opts);
-      for (const m of made) {
+      for (let sub = 0; sub < (B[key].subs || 1); sub++) {
+      const holder = [];
+      for (const step of buildSliced(B[key], mat, opts, over, holder, sub)) { yield step; ts = now(); }
+      const m = holder[0];
+      if (m) {
+        g.add(m);
         // Once on the GPU the vertex arrays are not needed in memory
         // (nothing reads tile geometry back; bounds are already set).
         for (const k in m.geometry.attributes) m.geometry.attributes[k].onUpload(releaseArray);
@@ -412,8 +669,9 @@ export function buildRealCity(city, collision) {
           tiered.push(m);
         }
       }
+      }
       B[key] = null;
-      yield 'mesh';
+      if (over()) { yield 'mesh'; ts = now(); }
     }
     t.group = g;
     t.small = small;
@@ -425,6 +683,7 @@ export function buildRealCity(city, collision) {
 
   function dropTile(t) {
     if (!t.group) return;
+    if (t.solids) setSolids(t.solids, false);
     group.remove(t.group);
     for (const m of t.meshes) {
       m.geometry.dispose();
@@ -434,8 +693,8 @@ export function buildRealCity(city, collision) {
     t.group = t.small = t.meshes = null;
     if (t.shown) {
       t.shown = false;
-      mask.image.data[t.k] = 0;
-      mask.needsUpdate = true;
+      nearMask[t.k] = 0;
+      for (const m of farMeshes) compactFar(m, nearMask);
     }
   }
 
@@ -460,7 +719,7 @@ export function buildRealCity(city, collision) {
         if (show !== t.shown) {
           t.shown = show;
           t.group.visible = show;
-          mask.image.data[k] = show ? 255 : 0;
+          nearMask[k] = show ? 1 : 0;
           changed = true;
         }
         if (show) {
@@ -505,7 +764,7 @@ export function buildRealCity(city, collision) {
         if (d < LOD.near) {
           t.shown = true;
           t.group.visible = true;
-          mask.image.data[t.k] = 255;
+          nearMask[t.k] = 1;
           changed = true;
           t.mid = d > LOD.mid;
           for (const m of t.small) m.visible = !t.mid;
@@ -524,7 +783,7 @@ export function buildRealCity(city, collision) {
     }
     stats.buildMs += now() - t0;
     if (changed) {
-      mask.needsUpdate = true;
+      for (const m of farMeshes) compactFar(m, nearMask);
       refillBulbs();
     }
   }
@@ -532,7 +791,19 @@ export function buildRealCity(city, collision) {
   function flush(camera) {
     update(camera, Infinity);
   }
-  ud.stream = { update, flush, stats, tiles, tileOf, NX, NZ, LOD };
+  // Throws every near tile away (they build again as needed): after the
+  // city's lots were replaced, for the stand-in lots of the dev scripts.
+  function reset() {
+    if (job) { job = null; jobTile = null; }
+    for (const t of tiles) {
+      if (t.group) dropTile(t);
+      if (t.solids) setSolids(t.solids, false);
+      t.solids = null;
+    }
+    lotSrc = null;
+    buildFar();
+  }
+  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD };
 
   // Start: the tiles round the spawn point.
   flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });

@@ -19,7 +19,6 @@ function bar(cls, parent) {
 
 const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
 
-export const FADE_MS = 4000; // score, combo and heat dim after this long unchanged
 export const MAP_SHRINK_MS = 5000; // the expanded minimap shrinks after this long untouched
 
 export function createHud(root) {
@@ -35,7 +34,8 @@ export function createHud(root) {
   };
   const stop = (t) => { if (t) { clearTimeout(t); timers.delete(t); } };
 
-  // top-left: minimap (tap to grow), district name, clock (Full only)
+  // top-left: the minimap (tap to grow). Speed, health and the clock sit 8 px
+  // right of it and follow its width (rw-mapbig on the HUD root).
   const tl = el('div', 'rw-tl', hud);
   const minimapCanvas = el('canvas', 'rw-minimap', tl);
   minimapCanvas.width = 176;
@@ -44,10 +44,9 @@ export function createHud(root) {
   minimapCanvas.setAttribute('role', 'button');
   minimapCanvas.setAttribute('aria-label', 'Mini-map (tap to enlarge)');
   minimapCanvas.setAttribute('aria-expanded', 'false');
-  const districtEl = el('div', 'rw-district', tl);
-  const clockEl = el('div', 'rw-clock', tl);
-  // Hard mode only: health under the minimap (walker hp, or the craft's health aboard).
-  const meter = el('div', 'rw-hpmeter rw-none', tl);
+  const clockEl = el('div', 'rw-clock rw-pill', hud);
+  // Hard mode only: health under the speed (walker hp, or the craft's health aboard).
+  const meter = el('div', 'rw-hpmeter rw-none', hud);
   meter.setAttribute('role', 'meter');
   meter.setAttribute('aria-label', 'Health');
   meter.setAttribute('aria-valuemin', '0');
@@ -62,6 +61,7 @@ export function createHud(root) {
     if (on !== mapBig) {
       mapBig = on;
       tl.classList.toggle('rw-big', on);
+      hud.classList.toggle('rw-mapbig', on);
       minimapCanvas.setAttribute('aria-expanded', String(on));
       minimapCanvas.setAttribute('aria-label', on ? 'Mini-map (tap to shrink)' : 'Mini-map (tap to enlarge)');
     }
@@ -78,46 +78,39 @@ export function createHud(root) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMapBig(!mapBig); }
   });
 
-  // top-centre: toasts
-  const toasts = el('div', 'rw-toasts', hud);
+  // top-centre strip: the district title for 3 s, then toasts stacking downward
+  const strip = el('div', 'rw-strip', hud);
+  const titleEl = el('div', 'rw-title rw-pill', strip);
+  titleEl.addEventListener('animationend', () => titleEl.classList.remove('rw-show'));
+  const toasts = el('div', 'rw-toasts', strip);
 
-  // top-right: score, the points waiting on the combo, and police attention
+  // top-right: score and the points waiting on the combo, left of the pause button
   const tr = el('div', 'rw-tr', hud);
-  let fadeTimer = 0;
-  let fullMode = false;
-  // Back to full strength now, dim again after FADE_MS without a change.
-  function bump() {
-    stop(fadeTimer);
-    fadeTimer = 0;
-    tr.classList.remove('rw-faded');
-    if (!fullMode) fadeTimer = later(() => tr.classList.add('rw-faded'), FADE_MS);
-  }
-  const scoreEl = el('div', 'rw-money rw-score', tr);
-  const comboEl = el('div', 'rw-combo', tr);
+  const scoreEl = el('div', 'rw-money rw-score rw-pill', tr);
+  const comboEl = el('div', 'rw-combo rw-pill', tr);
   comboEl.style.display = 'none';
-  const wantedEl = el('div', 'rw-wanted rw-none', tr);
+
+  // top-centre: police attention (stars, then the escape meter), only while wanted
+  const wantedEl = el('div', 'rw-wanted rw-pill rw-none', hud);
   wantedEl.setAttribute('role', 'img');
   wantedEl.setAttribute('aria-label', 'Police attention: none');
   const BADGES = 5;
   const starRow = el('div', 'rw-stars', wantedEl);
   const badges = [];
   for (let i = 0; i < BADGES; i++) badges.push(el('span', 'rw-badge', starRow));
-  // Escape meter: fills while out of sight (stars start to blink as it nears full).
   const coolBar = el('div', 'rw-cool', wantedEl);
   const coolFill = el('div', 'rw-coolfill', coolBar);
 
-  // bottom-centre: speed (car) and prompt
-  const bottom = el('div', 'rw-bottom', hud);
-  const speedBox = el('div', 'rw-speedbox rw-none', bottom);
+  // speed (a craft only) beside the minimap, and the prompt strip at the bottom
+  const speedBox = el('div', 'rw-speedbox rw-pill rw-none', hud);
   const speedEl = el('div', 'rw-speed', speedBox);
   const speedNum = document.createTextNode('0');
   speedEl.appendChild(speedNum);
   el('small', 'rw-unit', speedEl).textContent = 'mph';
   const vehBar = bar('rw-vehbar', speedBox);
-  const promptEl = el('div', 'rw-prompt rw-none', bottom);
+  const promptEl = el('div', 'rw-prompt rw-pill rw-none', hud);
 
-  const titleEl = el('div', 'rw-title', hud);
-  bump();
+  let fullMode = false;
 
   // cached last values (undefined forces the first write)
   const last = {
@@ -143,10 +136,8 @@ export function createHud(root) {
     }
     const score = s.score > 0 ? Math.floor(s.score) : 0;
     if (score !== last.score) {
-      const first = last.score === undefined;
       last.score = score;
       scoreEl.textContent = score.toLocaleString('en-US');
-      if (!first) bump();
     }
     const pending = s.pending > 0 ? Math.floor(s.pending) : 0;
     const combo = s.combo > 1 ? s.combo : 1;
@@ -155,7 +146,6 @@ export function createHud(root) {
       last.combo = combo;
       comboEl.style.display = pending > 0 ? '' : 'none';
       if (pending > 0) comboEl.textContent = '+' + pending.toLocaleString('en-US') + (combo > 1 ? '  x' + combo : '');
-      bump();
     }
     // Stars 0..5 (s.stars, else the heat level); shown only while wanted.
     const stars = s.stars !== undefined ? s.stars : s.wanted;
@@ -165,30 +155,24 @@ export function createHud(root) {
       wantedEl.classList.toggle('rw-hot', stars >= 3);
       for (let i = 0; i < BADGES; i++) badges[i].classList.toggle('rw-on', i < stars);
       wantedEl.setAttribute('aria-label', 'Police attention: ' + (stars > 0 ? stars + ' of ' + BADGES + ' stars' : 'none'));
-      bump();
     }
     const cool = stars > 0 && s.cooling > 0 ? Math.round(Math.min(1, s.cooling) * 50) : 0;
     if (cool !== last.cool) {
       last.cool = cool;
       coolFill.style.transform = 'scaleX(' + (cool / 50).toFixed(2) + ')';
       wantedEl.classList.toggle('rw-cooling', cool > 0);
-      if (cool > 0) bump(); // keep the meter in view while it fills
     }
     if (s.health !== last.health) {
-      if (last.health !== undefined && s.health < last.health) bump(); // hurt
       last.health = s.health;
     }
     if (s.district !== last.district) {
       last.district = s.district;
-      districtEl.textContent = s.district;
-      districtEl.classList.remove('rw-show');
-      void districtEl.offsetWidth;
-      districtEl.classList.add('rw-show');
       titleEl.textContent = s.district;
       // restart the CSS animation
       titleEl.classList.remove('rw-show');
       void titleEl.offsetWidth;
       titleEl.classList.add('rw-show');
+      trimToasts();
     }
     const minutes = Math.floor(s.time * 60) % 1440;
     if (minutes !== last.clock) {
@@ -221,10 +205,17 @@ export function createHud(root) {
     }
   }
 
+  // The strip holds the title (32 px) and toasts (32 px each) in 72 px: two
+  // toasts, or one while the district title shows.
+  function trimToasts() {
+    const room = titleEl.classList.contains('rw-show') ? 1 : 2;
+    while (toasts.children.length > room) toasts.firstChild.remove();
+  }
+
   function toast(text, seconds = 3) {
-    const t = el('div', 'rw-toast', toasts);
+    const t = el('div', 'rw-toast rw-pill', toasts);
     t.textContent = text;
-    while (toasts.children.length > 2) toasts.firstChild.remove();
+    trimToasts();
     const fade = setTimeout(() => {
       timers.delete(fade);
       t.classList.add('rw-out');
@@ -242,13 +233,12 @@ export function createHud(root) {
     if (v) promptEl.textContent = v;
   }
 
-  // 'minimal' (default) or 'full': Full never fades and shows the clock.
+  // 'minimal' (default) or 'full': Full shows the clock (and the touch layer keeps its fan open).
   function setHudMode(mode) {
     const full = mode === 'full';
     if (full === fullMode) return;
     fullMode = full;
     hud.classList.toggle('rw-full', full);
-    bump();
   }
 
   function dispose() {

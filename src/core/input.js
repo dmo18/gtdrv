@@ -17,8 +17,12 @@
 // Keyboard (desktop testing): F/Enter enter, G fire, T lock, X swap,
 //          R reload, Z fire2, B drop, V detonate, H horn (police siren).
 //
-// `steerMode: 'proportional'` tells stepVehicle that steer is a share of
-// the speed-dependent lock (the player); AI controls leave it out.
+// `steerMode: 'proportional'` is kept for older readers: every steer value
+// (player or AI) is now a share of the car's speed-dependent lock.
+// A source may carry `steerKey` (-1, 0 or 1, the keyboard): poll() ramps
+// its steer like the steering buttons, one fixed 1/60 s step per poll.
+const STEP = 1 / 60; // the fixed simulation step
+
 export function createInput() {
   const sources = [];
   const heldSet = new Set();
@@ -51,6 +55,7 @@ export function createInput() {
       let steer = 0, throttle = 0, brake = 0, moveX = 0, moveY = 0, pitch = 0;
       let handbrake = false, sprint = false;
       for (const s of sources) {
+        if (s.steerKey !== undefined) s.steer = rampSteer(s.steer || 0, s.steerKey, STEP);
         if (Math.abs(s.steer || 0) > Math.abs(steer)) steer = s.steer;
         if ((s.throttle || 0) > throttle) throttle = s.throttle;
         if ((s.brake || 0) > brake) brake = s.brake;
@@ -79,7 +84,7 @@ export function createInput() {
 
 // Keyboard controls, mainly for testing on a computer.
 export function attachKeyboard(input, target = window) {
-  const src = input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false, moveX: 0, moveY: 0, sprint: false, pitch: 0 });
+  const src = input.addSource({ steer: 0, steerKey: 0, throttle: 0, brake: 0, handbrake: false, moveX: 0, moveY: 0, sprint: false, pitch: 0 });
   const down = new Set();
   const buttons = { KeyF: 'enter', Enter: 'enter', KeyE: 'attack', KeyH: 'horn', KeyC: 'camera', KeyM: 'map', Escape: 'pause', KeyQ: 'weapon', KeyJ: 'jump',
     // Combat (F stays 'enter'): G fire, T lock-on, X swap, R reload.
@@ -91,10 +96,12 @@ export function attachKeyboard(input, target = window) {
     const r = down.has('ArrowRight') || down.has('KeyD');
     const u = down.has('ArrowUp') || down.has('KeyW');
     const d = down.has('ArrowDown') || down.has('KeyS');
-    src.steer = (r ? 1 : 0) - (l ? 1 : 0);
+    // Both held: target 0, as with the touch buttons.
+    src.steerKey = (r ? 1 : 0) - (l ? 1 : 0);
+    if (src.steerKey === 0) src.steer = 0;
     src.throttle = u ? 1 : 0;
     src.brake = d ? 1 : 0;
-    src.moveX = src.steer;
+    src.moveX = src.steerKey;
     src.moveY = (u ? 1 : 0) - (d ? 1 : 0);
     src.pitch = (down.has('KeyI') ? 1 : 0) - (down.has('KeyK') ? 1 : 0);
     src.handbrake = down.has('Space');
@@ -128,43 +135,118 @@ export function attachKeyboard(input, target = window) {
 }
 
 // ---------------------------------------------------------------------
-// Touch steering maths, shared by every steering style (pure functions so
-// they run in node tests). Raw input is -1..1 (right positive).
+// Steering maths, shared by every steering style (pure functions so they
+// run in node tests), docs/REVAMP.md 6.3. Raw input is -1..1 (right
+// positive). A style produces a target; the car's lockRate and returnRate
+// (src/entities/vehicle.js) are the only rate limit. The two allowed input
+// filters are the button ramp and the tilt low-pass below.
 export const STEER_STYLES = ['wheel', 'buttons', 'tilt', 'slider'];
-export const WHEEL_LOCK_DEG = 120; // on-screen wheel turned this far = full lock
-export const TILT_LOCK_DEG = 25; // phone tilted this far = full lock
+export const CURVE_LINEAR = 0.85;
+// Travel for full lock at sensitivity 1: wheel degrees, slider CSS px from
+// the bar centre, tilt degrees of phone roll past the dead zone, buttons
+// seconds from centre to a full target.
+export const STEER_TRAVEL = { wheel: 110, slider: 90, tilt: 22, buttons: 0.3 };
+export const WHEEL_CORE_PX = 16; // inside this radius the wheel holds its angle
+export const SLIDER_W = 180; // CSS px, the slider bar width
 export const TILT_DEAD_DEG = 1.5;
-export const BUTTON_RAMP_UP = 0.25; // s from centre to full lock while held
-export const BUTTON_RAMP_DOWN = 0.15; // s from full lock back to centre
+export const TILT_SMOOTH = 0.08; // s, tilt low-pass time constant
+export const TILT_WAIT = 1.0; // s without an orientation event before falling back to the wheel
+// Older names (touch.js until W4 moves it over): full lock at sensitivity 1.
+export const WHEEL_LOCK_DEG = STEER_TRAVEL.wheel;
+export const TILT_LOCK_DEG = TILT_DEAD_DEG + STEER_TRAVEL.tilt;
 
 export const clampSensitivity = (s) => (Number.isFinite(s) ? Math.max(0.5, Math.min(1.5, s)) : 1);
 
-// The one response curve: fine control near the centre, full lock at the
-// end. Lower sensitivity = more curve (finer near centre); higher = less
-// curve and a little extra gain, so full lock comes before the end.
-export function shapeSteer(x, sensitivity = 1) {
-  const sens = clampSensitivity(sensitivity);
-  const a = Math.min(1, Math.abs(+x || 0));
-  if (a === 0) return 0;
-  const e = 1 + 0.6 / sens; // 1.6 at the default, 2.2 at 0.5, 1.4 at 1.5
-  const gain = 1 + Math.max(0, sens - 1) * 0.5; // 1 .. 1.25: full lock is always reachable
-  const y = Math.min(1, gain * Math.pow(a, e));
-  return x < 0 ? -y : y;
+const clamp1 = (x) => (x > 1 ? 1 : x < -1 ? -1 : x);
+
+// Raw input x in -1..1 to the steering target in -1..1: odd, strictly
+// rising, wheelCurve(0) = 0, wheelCurve(1) = 1, wheelCurve(0.5) = 0.44375,
+// slope 0.85 at the centre (a gentle curve, nearly linear).
+export function wheelCurve(x) {
+  const a = clamp1(+x || 0);
+  return CURVE_LINEAR * a + (1 - CURVE_LINEAR) * a * a * a;
 }
 
-// Frame-rate independent ramp toward target (-1, 0 or 1): reaches full
-// lock in `up` seconds and comes back to centre in `down` seconds.
-export function rampSteer(cur, target, dt, up = BUTTON_RAMP_UP, down = BUTTON_RAMP_DOWN) {
+// How much thumb or phone travel is full lock for a style. More
+// sensitivity means less travel; sensitivity never changes the curve.
+export function steerTravel(style, sensitivity = 1) {
+  const t = STEER_TRAVEL[style] || STEER_TRAVEL.wheel;
+  return t / clampSensitivity(+sensitivity);
+}
+
+export function rawFromTravel(style, travel, sensitivity = 1) {
+  return clamp1((+travel || 0) / steerTravel(style, sensitivity));
+}
+
+// Thin alias of wheelCurve until touch.js has moved over (sensitivity is
+// ignored: it changes travel only).
+export function shapeSteer(x) {
+  return wheelCurve(x);
+}
+
+// Buttons: while one is held (target -1 or 1) the value ramps from where it
+// is toward the target over steerTravel('buttons') seconds; on release or
+// with both held (target 0) it is 0 at once. Frame-rate independent.
+export function rampSteer(cur, target, dt, sensitivity = 1) {
+  if (target === 0) return 0;
   if (!(dt > 0)) return cur;
-  const toward = target !== 0 && (cur === 0 || Math.sign(cur) === Math.sign(target));
-  if (toward) {
-    const n = cur + Math.sign(target) * dt / up;
-    if (Math.abs(target - n) < 1e-6) return target; // float dust at the end
-    return target > 0 ? Math.min(target, n) : Math.max(target, n);
-  }
-  const step = dt / down;
-  if (Math.abs(cur) <= step + 1e-6) return 0;
-  return cur > 0 ? cur - step : cur + step;
+  const step = dt / steerTravel('buttons', sensitivity);
+  const t = target > 0 ? 1 : -1;
+  const n = cur + t * step;
+  if (Math.abs(t - n) < 1e-9) return t; // float dust at the end
+  return t > 0 ? Math.min(1, n) : Math.max(-1, n);
+}
+
+// Touch wheel tracking (one per control, no allocation per event). The
+// thumb's angle about the wheel centre is summed from one pointer event to
+// the next, starting at 0 where the thumb lands, so a touch never jumps the
+// wheel. Inside WHEEL_CORE_PX of the centre the sum holds and tracking is
+// kept; the first point outside the core again starts a fresh angle. The
+// sum is clamped to full lock, so winding past it does not need unwinding.
+export function createWheelTracker() {
+  const w = {
+    cx: 0, cy: 0, last: 0, have: false, active: false, deg: 0, sensitivity: 1,
+    // Thumb down at (x, y) on a wheel centred at (cx, cy).
+    down(x, y, cx, cy, sensitivity = 1) {
+      w.cx = cx; w.cy = cy; w.deg = 0; w.have = false; w.active = true;
+      w.sensitivity = clampSensitivity(+sensitivity);
+      w.move(x, y);
+      return w.raw();
+    },
+    move(x, y) {
+      if (!w.active) return 0;
+      const dx = x - w.cx, dy = y - w.cy;
+      if (dx * dx + dy * dy < WHEEL_CORE_PX * WHEEL_CORE_PX) {
+        w.have = false;
+        return w.raw();
+      }
+      // Screen y grows downward, so atan2 grows clockwise: right turn positive.
+      const a = Math.atan2(dy, dx);
+      if (w.have) {
+        const lim = steerTravel('wheel', w.sensitivity);
+        const d = w.deg + angleDelta(a, w.last) * 180 / Math.PI;
+        w.deg = d > lim ? lim : d < -lim ? -lim : d;
+      }
+      w.last = a;
+      w.have = true;
+      return w.raw();
+    },
+    up() {
+      w.active = false;
+      w.have = false;
+      w.deg = 0;
+      return 0;
+    },
+    raw: () => (w.active ? rawFromTravel('wheel', w.deg, w.sensitivity) : 0),
+    target: () => wheelCurve(w.raw()),
+  };
+  return w;
+}
+
+// Slider: absolute, raw from the pointer's distance to the bar centre (the
+// pointer is tracked by id until it lifts, even off the bar).
+export function sliderRaw(pointerX, centreX, sensitivity = 1) {
+  return rawFromTravel('slider', (+pointerX || 0) - (+centreX || 0), sensitivity);
 }
 
 // Shortest signed difference a - b of two angles in radians.
@@ -189,10 +271,25 @@ export function tiltAngle(beta, gamma, screenAngle = 90) {
   return Math.atan2(sx, sy) * 180 / Math.PI;
 }
 
-// Tilt degrees to a raw steer value, with a small dead zone.
-export function tiltToSteer(deg, lock = TILT_LOCK_DEG, dead = TILT_DEAD_DEG) {
+// Tilt degrees (from tiltAngle, right positive) to a raw steer value:
+// a 1.5 degree dead zone, then steerTravel('tilt') degrees to full lock.
+export function tiltToSteer(deg, sensitivity = 1) {
   const a = Math.abs(+deg || 0);
-  if (a <= dead) return 0;
-  const v = Math.min(1, (a - dead) / (lock - dead));
+  if (a <= TILT_DEAD_DEG) return 0;
+  const v = Math.min(1, (a - TILT_DEAD_DEG) / steerTravel('tilt', sensitivity));
   return deg < 0 ? -v : v;
+}
+
+// The one tilt filter: a low-pass with a TILT_SMOOTH time constant.
+export function tiltFilter(cur, target, dt) {
+  if (!(dt > 0)) return cur;
+  return cur + (target - cur) * (1 - Math.exp(-dt / TILT_SMOOTH));
+}
+
+// Tilt fallback: true when the wheel should stand in for this run (no
+// orientation event within TILT_WAIT seconds of choosing tilt, or the
+// permission was refused). The saved setting stays tilt.
+export function tiltFallback(sinceChosen, gotEvent, refused = false) {
+  if (refused) return true;
+  return !gotEvent && sinceChosen >= TILT_WAIT;
 }

@@ -132,7 +132,8 @@ export function createGraphics(game) {
     // material (a long hitch at each sunrise and sunset). While the light
     // swings over, the map is simply not redrawn and fades to nothing.
     sun.shadow.intensity = inten > 0.03 ? Math.min(1, inten) : 0;
-    renderer.shadowMap.autoUpdate = inten > 0.03;
+    // Shedding its last step, the shadow map is redrawn every other frame.
+    renderer.shadowMap.autoUpdate = inten > 0.03 && !(shedApplied >= 2 && (frame & 1));
     if (inten <= 0.03) return;
     if (sky) dir.copy(sky.lightDir);
     else dir.copy(sun.position).normalize();
@@ -168,6 +169,9 @@ export function createGraphics(game) {
     if (size === mapSize) return;
     mapSize = size;
     sun.shadow.mapSize.set(size, size);
+    // Softer edges near the camera: the PCF taps spread over more texels
+    // on the big map (2048 over 144 m: about 16 cm of blur).
+    sun.shadow.radius = size >= 2048 ? 2.3 : 1.6;
     if (sun.shadow.map) {
       sun.shadow.map.dispose();
       sun.shadow.map = null;
@@ -291,7 +295,7 @@ export function createGraphics(game) {
   let lampU = null;
   if (baked) {
     const M = ud.materials;
-    lampU = patchLampLight([M.asphaltMat, M.pavementMat, M.grassMat, M.landMat, M.sandMat, M.paintMat, M.decalMat, M.plainMat, M.woodMat, M.shopfront], baked);
+    lampU = patchLampLight([M.asphaltMat, M.pavementMat, M.grassMat, M.landMat, M.sandMat, ...(M.lotSandMat ? [M.lotSandMat] : []), M.groundMat, M.paintMat, M.decalMat, M.plainMat, M.woodMat, M.shopfront], baked);
     ud.lampLightBaked = true; // the day/night system drops its pool decals
   }
 
@@ -324,9 +328,15 @@ export function createGraphics(game) {
   }
 
   // ---- quality tiers ----
-  let quality = -1;
-  function applyQuality(q) {
-    quality = q;
+  let res = null;
+  let quality = -1, shedApplied = 0;
+  function applyQuality(q0) {
+    quality = q0;
+    // The adaptive controller sheds detail when the 1.0 pixel ratio
+    // floor cannot hold the frame rate: one step drops to the Low tier's
+    // shadow map and draw ranges.
+    shedApplied = res ? res.shed : 0;
+    const q = shedApplied > 0 ? Math.min(q0, 0.75) : q0;
     const tier = q < 1 ? 0 : q > 1 ? 2 : 1;
     ud.tier = tier; // for tiles a streamed map builds later
     for (const m of ud.tiered || []) {
@@ -342,7 +352,7 @@ export function createGraphics(game) {
   // The loop's real frame time moves the pixel ratio between 0.6 and the
   // device cap (2 physical pixels per CSS pixel at most, lower for the
   // Normal and Low quality settings).
-  const res = createAdaptiveRes({ max: maxRatioFor(window.devicePixelRatio || 1, game.quality), start: 1.5 });
+  res = createAdaptiveRes({ max: maxRatioFor(window.devicePixelRatio || 1, game.quality), start: 1.5 });
   let resApplied = res.scale;
 
   // ---- shader warm-up ----
@@ -398,7 +408,7 @@ export function createGraphics(game) {
     bloomEnabled: false,
     render(alpha, dt) {
       const sky = game.daynight && game.daynight.sky;
-      if (game.quality !== quality) applyQuality(game.quality);
+      if (game.quality !== quality || res.shed !== shedApplied) applyQuality(game.quality);
       if (!warmed) warmUp();
       if (sys.adaptive && res.update(dt) !== resApplied && game.resize) {
         resApplied = res.scale;

@@ -7,10 +7,10 @@ const CSS = `
   --rw-dim: rgba(246, 239, 230, 0.62);
   --rw-panel: rgba(24, 18, 15, 0.58);
   --rw-panel-edge: rgba(246, 239, 230, 0.22);
-  --rw-sl: env(safe-area-inset-left, 0px);
-  --rw-sr: env(safe-area-inset-right, 0px);
-  --rw-st: env(safe-area-inset-top, 0px);
-  --rw-sb: env(safe-area-inset-bottom, 0px);
+  --rw-sl: max(env(safe-area-inset-left, 0px), var(--rw-test-sl, 0px));
+  --rw-sr: max(env(safe-area-inset-right, 0px), var(--rw-test-sr, 0px));
+  --rw-st: max(env(safe-area-inset-top, 0px), var(--rw-test-st, 0px));
+  --rw-sb: max(env(safe-area-inset-bottom, 0px), var(--rw-test-sb, 0px));
   position: absolute; inset: 0; overflow: hidden;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: var(--rw-text);
@@ -38,8 +38,9 @@ const CSS = `
 
 /* on-screen steering wheel (touches anywhere in the zone turn it) */
 .rw-wheel {
-  position: absolute; left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 16px);
-  width: 150px; height: 150px; pointer-events: none; opacity: 0.7; transition: opacity 0.12s;
+  position: absolute; left: calc(var(--rw-sl) + 16px + (var(--slot) - var(--wsize)) / 2);
+  bottom: calc(var(--rw-sb) + var(--sgap) + (var(--slot) - var(--wsize)) / 2);
+  width: var(--wsize); height: var(--wsize); pointer-events: none; opacity: 0.7; transition: opacity 0.12s;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
 }
 .rw-wheel.rw-active { opacity: 1; }
@@ -54,9 +55,9 @@ const CSS = `
 .rw-w-top { fill: #ffd0b5; stroke: none; }
 .rw-wheel.rw-active .rw-w-rim { stroke: rgba(46, 33, 26, 0.95); }
 
-/* floating steering slider (car, style 'slider') */
+/* floating steering slider (car, style 'slider'): rests in the steering slot (docs/REVAMP.md 6.5) */
 .rw-pad {
-  position: absolute; left: 0; top: 0; width: 272px; height: 60px; border-radius: 30px;
+  position: absolute; left: 0; top: 0; width: var(--slot); height: 56px; border-radius: 28px;
   background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
   opacity: 0.55; pointer-events: none; transition: opacity 0.12s;
 }
@@ -65,34 +66,34 @@ const CSS = `
   content: ""; position: absolute; top: 50%; width: 0; height: 0; margin-top: -6px;
   border: 6px solid transparent;
 }
-.rw-pad::before { left: 12px; border-right-color: var(--rw-dim); border-left-width: 0; }
-.rw-pad::after { right: 12px; border-left-color: var(--rw-dim); border-right-width: 0; }
-.rw-pad .rw-knob { left: 50%; top: 50%; margin: -24px 0 0 -24px; width: 48px; height: 48px; }
+.rw-pad::before { left: 10px; border-right-color: var(--rw-dim); border-left-width: 0; }
+.rw-pad::after { right: 10px; border-left-color: var(--rw-dim); border-right-width: 0; }
+.rw-pad .rw-knob { left: 50%; top: 50%; margin: -20px 0 0 -20px; width: 40px; height: 40px; }
 
-/* steering arrow pads (style 'buttons') */
-.rw-btn.rw-steerbtn { width: 92px; height: 104px; border-radius: 24px; bottom: calc(var(--rw-sb) + 16px); }
-.rw-btn.rw-steerbtn svg { width: 40px; height: 40px; stroke-width: 2.6; }
-.rw-sleft { left: calc(var(--rw-sl) + 18px); }
-.rw-sright { left: calc(var(--rw-sl) + 124px); }
+/* steering arrow pads (style 'buttons'): two 72 square buttons, 8 apart, bottom of the slot */
+.rw-btn.rw-steerbtn { width: var(--sbtn); height: var(--sbtn); border-radius: 20px; bottom: calc(var(--rw-sb) + var(--sgap)); }
+.rw-btn.rw-steerbtn svg { width: 36px; height: 36px; stroke-width: 2.6; }
+.rw-sleft { left: calc(var(--rw-sl) + 16px); }
+.rw-sright { left: calc(var(--rw-sl) + 16px + var(--sbtn) + 8px); }
 
-/* tilt indicator (style 'tilt'); tap to re-centre */
+/* tilt indicator (style 'tilt'): a 120 by 20 display, not a target; a tap in the zone re-centres */
 .rw-btn.rw-tiltbar {
-  left: calc(var(--rw-sl) + 20px); bottom: calc(var(--rw-sb) + 30px);
-  width: 168px; height: 64px; border-radius: 20px;
+  left: calc(var(--rw-sl) + 16px + (var(--slot) - 120px) / 2); bottom: calc(var(--rw-sb) + var(--sgap));
+  width: 120px; height: 20px; border-radius: 10px; pointer-events: none;
 }
-.rw-tiltbar .rw-face { gap: 7px; }
+.rw-tiltbar .rw-face { flex-direction: row; gap: 6px; border-radius: 10px; }
 .rw-tilt-track {
-  position: relative; display: block; width: 132px; height: 10px; border-radius: 5px;
+  position: relative; display: block; width: 76px; height: 8px; border-radius: 4px;
   background: rgba(0, 0, 0, 0.45); border: 1px solid var(--rw-panel-edge);
 }
-.rw-tilt-track::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--rw-dim); }
+.rw-tilt-track::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--rw-dim); }
 .rw-tilt-dot {
-  position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
+  position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #f3a173, var(--rw-accent) 70%); border: 2px solid rgba(255, 255, 255, 0.6);
 }
-.rw-tilt-label { font-size: 11px; color: var(--rw-dim); }
+.rw-tilt-label { font-size: 10px; color: var(--rw-text); }
 
-/* floating 2-axis stick (foot) */
+/* floating 2-axis stick (foot, plane, heli, tank): rests in the steering slot */
 .rw-stick {
   position: absolute; left: 0; top: 0; width: 128px; height: 128px; border-radius: 50%;
   background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
@@ -133,11 +134,10 @@ const CSS = `
 .rw-pri.rw-down .rw-face, .rw-pri:focus-visible .rw-face { transform: none; opacity: 1; }
 .rw-full .rw-pri .rw-face { transform: none; opacity: 1; }
 
-.rw-pedal { width: 84px; height: 110px; border-radius: 22px; font-size: 13px; }
+.rw-pedal { width: var(--pw); height: var(--ph); border-radius: 22px; font-size: 13px; }
 .rw-pedal .rw-face { gap: 6px; }
-.rw-pedal svg { width: 30px; height: 30px; }
+.rw-pedal svg { width: 28px; height: 28px; }
 .rw-pedal.rw-gas .rw-face { border-color: rgba(226, 115, 58, 0.7); }
-.rw-pedal.rw-tall { height: 122px; }
 
 /* per-mode groups: a gated element shows only in the modes it lists */
 .rw-mode-foot .rw-gated:not(.rw-m-foot),
@@ -155,8 +155,14 @@ const CSS = `
 .rw-stick.rw-flight::before { left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; }
 .rw-stick.rw-flight::after { top: 50%; left: 10px; right: 10px; height: 2px; margin-top: -1px; }
 
-/* placement slots: --x from the thumb side edge, --y from the bottom.
-   Left-handed swaps the side. docs/UI.md draws the whole layout. */
+/* placement (docs/REVAMP.md 6.5): --x from the thumb-side edge, --y from the
+   bottom, both before the safe-area insets. Left-handed swaps the side.
+   Size set A is 915x412; the media query at the end of this block is 780x360. */
+.rw-touch {
+  --dir: 1; --slot: 160px; --sgap: 12px; --sbtn: 72px; --mx: 16px; --my: 176px;
+  --pw: 72px; --ph: 88px; --fw: 64px; --ew: 56px; --wsize: 150px;
+}
+.rw-touch.rw-lefty { --dir: -1; }
 .rw-gas, .rw-brake, .rw-exit, .rw-enter, .rw-fire, .rw-dbfire, .rw-lock, .rw-chipbtn, .rw-more,
 .rw-sec, .rw-extra, .rw-slot {
   right: calc(var(--rw-sr) + var(--x)); bottom: calc(var(--rw-sb) + var(--y));
@@ -166,54 +172,45 @@ const CSS = `
 .rw-lefty .rw-sec, .rw-lefty .rw-extra, .rw-lefty .rw-slot {
   right: auto; left: calc(var(--rw-sl) + var(--x));
 }
-.rw-touch { --dir: 1; }
-.rw-touch.rw-lefty { --dir: -1; }
-.rw-gas { --x: 16px; --y: 14px; }
-.rw-brake { --x: 112px; --y: 14px; }
-.rw-dbfire { --x: 16px; --y: 134px; width: 72px; height: 72px; }
-.rw-exit { --x: 100px; --y: 134px; width: 64px; height: 64px; }
-.rw-mode-plane .rw-exit, .rw-mode-heli .rw-exit { --x: 16px; --y: 150px; }
-.rw-enter { --x: 26px; --y: 132px; width: 72px; height: 72px; }
-.rw-enter svg { width: 32px; height: 32px; }
-.rw-enter span { font-size: 12px; }
-.rw-lock { --x: 142px; --y: 30px; width: 62px; height: 62px; }
-.rw-chipbtn { --x: 142px; --y: 98px; width: 56px; height: 56px; }
+.rw-gas { --x: 8px; --y: 8px; }
+.rw-brake { --x: calc(8px + var(--pw) + 12px); --y: 8px; }
+.rw-exit, .rw-enter { --x: 16px; --y: 108px; width: var(--ew); height: var(--ew); }
+.rw-enter svg { width: 28px; height: 28px; }
+.rw-enter span { font-size: 11px; }
+.rw-dbfire { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
+.rw-lock, .rw-chipbtn { --x: 184px; --y: 84px; width: var(--ew); height: var(--ew); }
 .rw-chipbtn .rw-face { background: rgba(120, 30, 22, 0.7); border-color: rgba(255, 150, 120, 0.85); font-size: 9px; }
 .rw-chipbtn svg { width: 22px; height: 22px; }
 .rw-touch:not(.rw-chip-on) .rw-chipbtn, .rw-full .rw-chipbtn { display: none; }
+.rw-chip-on:not(.rw-full) .rw-lock { display: none; }
 .rw-enter.rw-dim { opacity: 0.32; filter: grayscale(0.8); pointer-events: none; }
-.rw-more { --x: 216px; --y: 30px; width: 56px; height: 56px; }
+.rw-more { --x: var(--mx); --y: var(--my); width: var(--ew); height: var(--ew); }
 .rw-full .rw-more { display: none; }
 .rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
-.rw-extra { --x: 16px; --y: calc(214px + var(--k, 0) * 72px); width: 64px; height: 64px; }
-.rw-extra.rw-a-handbrake { --x: 206px; --y: 14px; width: 56px; height: 56px; }
-/* in a car the more button and its fan sit one step higher, over the HAND button */
-.rw-mode-car .rw-more { --y: 80px; }
-.rw-mode-car .rw-sec { --y: calc(80px + (var(--r, 0) + 1) * 64px); }
+/* extra primaries other systems register without a slot: a column above MORE */
+.rw-extra { --x: var(--mx); --y: calc(var(--my) + 64px + var(--k, 0) * 64px); width: var(--ew); height: var(--ew); }
+.rw-slot { width: var(--ew); height: var(--ew); }
+/* HAND (car, boat), SWAP (foot): above BRAKE. RUN (foot): the BRAKE rect. */
+.rw-slot-hand { --x: 100px; --y: 108px; width: var(--ew); height: var(--ew); }
+.rw-slot-run { --x: calc(8px + var(--pw) + 12px); --y: 8px; width: var(--pw); height: var(--ph); border-radius: 22px; }
+.rw-slot-run .rw-face { gap: 6px; }
 .rw-a-detonate .rw-face { border-color: rgba(255, 120, 90, 0.95); animation: rw-pulse 0.9s ease-in-out infinite; }
 @keyframes rw-pulse { 50% { box-shadow: 0 0 14px rgba(255, 90, 60, 0.9); } }
 
-/* armed craft (docs/ARMS.md): an arc for the right thumb, kept in the
-   bottom 220 px so the HUD corners stay clear at 780x360 and within 352 px
-   of the edge so the bottom-centre speed and prompt stay clear: GUN (big,
-   hold), MSL and BOMB in a row above the pedals, LOCK and DETONATE beside
-   the pedals, the more fan moved up and out while the arc is up. Tank:
-   CANNON under the thumb, COAX and LOCK beside it. */
-.rw-slot { width: 64px; height: 64px; }
+/* armed craft (docs/ARMS.md): the weapon arc sits inside the bottom right
+   352 by 220 box and keeps clear of EXIT, MORE, the pedals and the prompt
+   strip: GUN (FIRE rect), BOMB (HAND rect), LOCK (LOCK rect), MSL left of
+   LOCK, BOOM beside or above MSL. Tank: CANNON (FIRE rect), LOCK (LOCK rect),
+   COAX left of LOCK. */
 .rw-slot span { font-size: 10px; }
 .rw-slot svg { width: 24px; height: 24px; }
-.rw-slot-gun { --x: 92px; --y: 136px; width: 84px; height: 84px; }
-.rw-slot-gun svg { width: 30px; height: 30px; }
-.rw-slot-msl { --x: 188px; --y: 140px; }
-.rw-slot-bomb { --x: 264px; --y: 140px; }
-.rw-slot-alock { --x: 204px; --y: 30px; }
-.rw-slot-det { --x: 284px; --y: 96px; }
-.rw-arc.rw-mode-plane .rw-slot-det, .rw-arc.rw-mode-heli .rw-slot-det { --x: 272px; --y: 30px; }
-.rw-slot-cannon { --x: 26px; --y: 24px; width: 100px; height: 100px; }
-.rw-slot-cannon svg { width: 36px; height: 36px; }
-.rw-slot-coax { --x: 142px; --y: 30px; }
-.rw-slot-tlock { --x: 142px; --y: 106px; }
-.rw-mode-tank .rw-exit { --x: 26px; --y: 140px; width: 72px; height: 72px; }
+.rw-slot-gun, .rw-slot-cannon { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
+.rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
+.rw-slot-bomb { --x: 100px; --y: 108px; }
+.rw-slot-alock, .rw-slot-tlock { --x: 184px; --y: 84px; }
+.rw-slot-det { --x: 272px; --y: 148px; }
+.rw-slot-gun svg, .rw-slot-cannon svg { width: 28px; height: 28px; }
+.rw-mode-tank .rw-exit { --x: 16px; --y: 108px; }
 .rw-slot-gun .rw-face, .rw-slot-cannon .rw-face { border-color: rgba(226, 115, 58, 0.8); }
 .rw-slot.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
 .rw-slot.rw-on .rw-face { background: rgba(226, 46, 31, 0.85); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 70, 50, 0.8); }
@@ -225,17 +222,13 @@ const CSS = `
 }
 .rw-slot.rw-ringon .rw-face::after { opacity: 1; }
 .rw-pip { position: absolute; right: 12%; top: 10%; font: 800 10px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; pointer-events: none; }
-.rw-arc.rw-mode-plane .rw-more, .rw-arc.rw-mode-heli .rw-more, .rw-arc.rw-mode-foot .rw-more { --x: 352px; --y: 96px; }
-.rw-arc.rw-mode-plane .rw-sec, .rw-arc.rw-mode-heli .rw-sec, .rw-arc.rw-mode-foot .rw-sec {
-  --x: calc(352px + var(--c, 0) * 64px); --y: calc(96px + (var(--r, 0) + 1) * 64px);
-}
 
-/* the fan: secondary buttons grow upward out of the more button, one
-   column of four (--r = place in the column, --c = column) */
+/* the fan: up to 6 secondary buttons, 3 columns by 2 rows, growing up and
+   away from MORE (--r row, --c column; 56 squares, 8 apart) */
 .rw-sec {
-  --x: calc(216px + var(--c, 0) * 64px); --y: calc(30px + (var(--r, 0) + 1) * 64px);
-  width: 56px; height: 56px;
-  transform: translate(calc(var(--dir) * var(--c, 0) * 64px), calc((var(--r, 0) + 1) * 64px)) scale(0.3);
+  --x: calc(var(--mx) + 64px + var(--c, 0) * 64px); --y: calc(var(--my) + var(--r, 0) * 64px);
+  width: var(--ew); height: var(--ew);
+  transform: translate(calc(var(--dir) * (var(--c, 0) + 1) * 64px), calc(var(--r, 0) * 64px)) scale(0.3);
   opacity: 0; visibility: hidden;
   transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1), opacity 0.16s ease, visibility 0s linear 0.16s;
 }
@@ -244,6 +237,18 @@ const CSS = `
 }
 .rw-sec span { font-size: 9px; }
 .rw-sec svg { width: 22px; height: 22px; }
+
+/* 780 by 360 and smaller: the second set of rectangles */
+@media (max-height: 380px) {
+  .rw-touch { --slot: 140px; --sgap: 16px; --sbtn: 66px; --mx: 8px; --my: 152px; --pw: 64px; --ph: 72px; --wsize: 136px; }
+  .rw-brake, .rw-slot-run { --x: calc(8px + var(--pw) + 12px); }
+  .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 88px; }
+  .rw-slot-hand, .rw-slot-bomb { --x: 88px; --y: 88px; }
+  .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 156px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock { --x: 160px; --y: 80px; }
+  .rw-slot-msl, .rw-slot-coax { --x: calc(160px + var(--ew) + 8px); --y: 80px; }
+  .rw-slot-det { --x: 288px; --y: 80px; }
+}
 
 /* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
    button by touch.js (kept off FIRE and pause). Never takes touches. */
@@ -274,57 +279,60 @@ const CSS = `
 }
 .rw-ww-cancel .rw-ww-label { color: #ff9c86; }
 
-/* combat: FIRE under the right thumb, LOCK beside it, reload chip above LOCK */
-.rw-btn.rw-fire { --x: 26px; --y: 24px; width: 100px; height: 100px; font-size: 13px; }
+/* combat: FIRE takes the GAS rect on foot, LOCK and the reload chip share the LOCK rect */
+.rw-btn.rw-fire { --x: 8px; --y: 8px; width: var(--pw); height: var(--ph); border-radius: 22px; font-size: 13px; }
 .rw-btn.rw-fire .rw-face, .rw-btn.rw-dbfire .rw-face {
   background: rgba(120, 30, 22, 0.62); border: 3px solid rgba(255, 120, 96, 0.8);
 }
-.rw-btn.rw-fire svg { width: 38px; height: 38px; }
+.rw-btn.rw-fire svg { width: 32px; height: 32px; }
 .rw-btn.rw-dbfire { font-size: 11px; }
-.rw-btn.rw-dbfire svg { width: 28px; height: 28px; }
+.rw-btn.rw-dbfire svg { width: 26px; height: 26px; }
 .rw-btn.rw-fire.rw-down .rw-face, .rw-btn.rw-dbfire.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
 .rw-fire-mag { position: absolute; right: 10%; top: 8%; font: 800 11px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; }
 .rw-dbfire .rw-fire-mag { right: 14%; top: 12%; }
 .rw-lock.rw-on .rw-face { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
-/* ammo counter: HUD Full only (Minimal reads the count off FIRE) */
-.rw-btn.rw-ammo { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 96px); width: 112px; height: 56px; border-radius: 16px; }
+/* ammo panel: HUD Full only, under the score; a display (reload is RELOAD in the fan or the chip) */
+.rw-btn.rw-ammo { right: calc(var(--rw-sr) + 64px); top: calc(var(--rw-st) + 60px); width: 160px; height: 40px; border-radius: 6px; pointer-events: none; }
 .rw-ammo .rw-face {
-  flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; flex-wrap: wrap;
-  align-content: center; row-gap: 2px;
+  flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6); border: 0;
 }
 .rw-touch:not(.rw-full) .rw-ammo { display: none; }
-.rw-ammo-icon svg { width: 24px; height: 24px; display: block; }
+.rw-ammo-icon svg { width: 20px; height: 20px; display: block; }
 .rw-ammo-txt { display: flex; align-items: baseline; gap: 1px; }
-.rw-ammo-n { font-size: 20px; font-weight: 800; color: #ffe2cc; font-variant-numeric: tabular-nums; }
-.rw-ammo-of { font-size: 11px; color: var(--rw-dim); }
-.rw-ammo-name { flex-basis: 100%; font-style: normal; font-size: 9px; color: var(--rw-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
-.rw-ammo-bar { position: absolute; left: 10px; right: 10px; bottom: 5px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.4); display: none; overflow: hidden; }
+.rw-ammo-n { font-size: 18px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+.rw-ammo-of { font-size: 11px; color: #fff; }
+.rw-ammo-name { margin-left: auto; font-style: normal; font-size: 10px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62px; }
+.rw-ammo-bar { position: absolute; left: 8px; right: 8px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); display: none; overflow: hidden; }
 .rw-ammo-bar i { display: block; height: 100%; background: var(--rw-accent); transform-origin: left; transform: scaleX(0); }
 .rw-ammo.rw-reloading .rw-ammo-bar { display: block; }
 .rw-ammo.rw-reloading .rw-ammo-n { color: var(--rw-dim); }
-.rw-ammo.rw-empty .rw-ammo-n { color: #ff8a70; }
+.rw-ammo.rw-empty .rw-ammo-n { color: #ff9c86; }
 .rw-nocombat .rw-cmb, .rw-nodrive .rw-dbfire,
 .rw-nodrive.rw-mode-car .rw-ammo, .rw-nodrive.rw-mode-boat .rw-ammo { display: none; }
 
-.rw-btn.rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 56px; height: 56px; }
+.rw-btn.rw-pause { right: calc(var(--rw-sr) + 8px); top: calc(var(--rw-st) + 8px); width: 48px; height: 48px; }
 
-/* left-handed: steering and stick on the right, pedals and buttons left */
+/* left-handed: steering slot and the button cluster mirror to the other side;
+   minimap, speed, score, stars and pause stay (docs/REVAMP.md 6.5) */
 .rw-lefty .rw-look { left: 0; right: 40%; }
 .rw-lefty .rw-stickzone { left: auto; right: 0; }
-.rw-lefty .rw-wheel, .rw-lefty .rw-tiltbar { left: auto; right: calc(var(--rw-sr) + 20px); }
-.rw-lefty .rw-sright { left: auto; right: calc(var(--rw-sr) + 18px); }
-.rw-lefty .rw-sleft { left: auto; right: calc(var(--rw-sr) + 124px); }
+.rw-lefty .rw-wheel { left: auto; right: calc(var(--rw-sr) + 16px + (var(--slot) - var(--wsize)) / 2); }
+.rw-lefty .rw-tiltbar { left: auto; right: calc(var(--rw-sr) + 16px + (var(--slot) - 120px) / 2); }
+.rw-lefty .rw-sright { left: auto; right: calc(var(--rw-sr) + 16px); }
+.rw-lefty .rw-sleft { left: auto; right: calc(var(--rw-sr) + 16px + var(--sbtn) + 8px); }
 
 @media (prefers-reduced-motion: reduce) {
   .rw-hot .rw-badge.rw-on { animation: none !important; background: #ff3b30; }
-  .rw-face, .rw-sec, .rw-ww, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl, .rw-tr { transition: none !important; }
+  .rw-face, .rw-sec, .rw-ww, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl { transition: none !important; }
   .rw-a-detonate .rw-face { animation: none; }
 }
 
-/* ---------- HUD ---------- */
-.rw-hud { z-index: 21; pointer-events: none; --map: 84px; --map-big: 170px; }
-.rw-hud .rw-tl { position: absolute; left: calc(var(--rw-sl) + 10px); top: calc(var(--rw-st) + 8px); width: var(--map); transition: width 0.16s ease; }
-.rw-hud .rw-tl.rw-big { width: var(--map-big); }
+/* ---------- HUD (docs/REVAMP.md 6.5) ---------- */
+/* Every HUD text sits on its own dark pill: white on rgba(0,0,0,0.6) is at least 4.8 to 1 over any sky. */
+.rw-hud { z-index: 21; pointer-events: none; --map: 84px; --map-big: 170px; --mapw: var(--map); }
+.rw-hud.rw-mapbig { --mapw: var(--map-big); }
+.rw-hud .rw-tl { position: absolute; left: calc(var(--rw-sl) + 8px); top: calc(var(--rw-st) + 8px); width: var(--mapw); transition: width 0.16s ease; }
 .rw-minimap {
   display: block; width: 100%; aspect-ratio: 1; height: auto; border-radius: 50%; cursor: pointer;
   pointer-events: auto; touch-action: none;
@@ -332,19 +340,23 @@ const CSS = `
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 .rw-minimap:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
-/* district: small text beside the map for 3 s after a change (Full: always, below) */
-.rw-district {
-  position: absolute; left: calc(100% + 8px); top: 6px; white-space: nowrap; opacity: 0;
-  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
+.rw-pill {
+  background: rgba(0, 0, 0, 0.6); color: #fff; border-radius: 6px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.rw-district.rw-show { animation: rw-district 3s ease-out; }
-@keyframes rw-district { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-.rw-clock { display: none; font-size: 12px; text-align: center; color: var(--rw-dim); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
-.rw-full .rw-clock { display: block; }
+/* speed: always 8 px right of the minimap (also when it is grown); a craft only */
+.rw-speedbox {
+  position: absolute; left: calc(var(--rw-sl) + 16px + var(--mapw)); top: calc(var(--rw-st) + 8px);
+  width: 88px; height: 44px; padding: 3px 6px 0; text-align: center; overflow: hidden;
+}
+.rw-speedbox.rw-none, .rw-prompt.rw-none { display: none; }
+.rw-speed { font-size: 28px; font-weight: 800; line-height: 34px; height: 34px; }
+.rw-speed small { font-size: 11px; font-weight: 700; margin-left: 3px; letter-spacing: 0.06em; }
+.rw-vehbar { position: absolute; left: 6px; right: 6px; bottom: 4px; width: auto; height: 4px; }
 .rw-hpmeter {
-  position: relative; height: 14px; margin-top: 5px; border-radius: 7px; overflow: hidden;
-  background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.28);
+  position: absolute; left: calc(var(--rw-sl) + 16px + var(--mapw)); top: calc(var(--rw-st) + 56px);
+  width: 88px; height: 12px; border-radius: 6px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.6); border: 1px solid rgba(255, 255, 255, 0.4);
 }
 .rw-hpmeter.rw-none { display: none; }
 .rw-hpfill { position: absolute; inset: 0; transform-origin: left; background: hsl(120, 70%, 48%); transition: transform 0.15s linear; }
@@ -352,47 +364,25 @@ const CSS = `
 @keyframes rw-hplow { 50% { border-color: #e2503a; } }
 .rw-hptext {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font-size: 9px; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: #fff;
+  text-shadow: 0 1px 2px #000;
 }
-.rw-full .rw-district {
-  position: static; opacity: 1; animation: none; margin: 4px 0 0; text-align: left;
-  white-space: nowrap; overflow: visible;
+/* clock: Full only, under the health slot */
+.rw-clock {
+  display: none; position: absolute; left: calc(var(--rw-sl) + 16px + var(--mapw)); top: calc(var(--rw-st) + 72px);
+  width: 88px; height: 16px; font-size: 12px; line-height: 16px; text-align: center;
 }
-.rw-full { --map: 116px; }
+.rw-full .rw-clock { display: block; }
 
-.rw-toasts {
-  position: absolute; left: 50%; top: calc(var(--rw-st) + 10px); transform: translateX(-50%);
-  width: 34%; min-width: 200px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+/* stars: centred, only while wanted; the cooldown bar sits right under */
+.rw-wanted {
+  position: absolute; left: 50%; top: calc(var(--rw-st) + 8px); width: 150px; height: 24px; margin-left: -75px;
+  display: flex; align-items: center; justify-content: center;
 }
-.rw-toast {
-  max-width: 100%; padding: 7px 14px; border-radius: 14px; font-size: 14px; font-weight: 600; text-align: center;
-  background: var(--rw-panel); border: 1px solid var(--rw-panel-edge); border-left: 4px solid var(--rw-accent);
-  animation: rw-toast-in 0.2s ease-out; transition: opacity 0.3s;
-}
-.rw-toast.rw-out { opacity: 0; }
-@keyframes rw-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
-
-.rw-tr {
-  position: absolute; right: calc(var(--rw-sr) + 72px); top: calc(var(--rw-st) + 8px);
-  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
-  padding: 2px 4px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.6);
-  transition: opacity 0.4s ease;
-}
-.rw-tr.rw-faded { opacity: 0.35; }
-.rw-full .rw-tr {
-  padding: 7px 10px; border-radius: 14px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
-  min-width: 128px; gap: 3px;
-}
-.rw-money { font-size: 17px; font-weight: 800; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: #ffe2cc; }
-.rw-combo { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: #ffb48a; }
-.rw-full .rw-money { font-size: 22px; }
-.rw-full .rw-combo { font-size: 14px; }
-.rw-wanted { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .rw-wanted.rw-none { display: none; }
-.rw-stars { display: flex; gap: 2px; }
+.rw-stars { display: flex; gap: 4px; }
 .rw-badge {
-  width: 16px; height: 16px; background: rgba(246, 239, 230, 0.22);
+  width: 16px; height: 16px; background: rgba(246, 239, 230, 0.3);
   clip-path: polygon(50% 0, 62% 35%, 98% 36%, 69% 57%, 80% 92%, 50% 71%, 20% 92%, 31% 57%, 2% 36%, 38% 35%);
 }
 .rw-badge.rw-on { background: #ffd24a; }
@@ -400,52 +390,49 @@ const CSS = `
 .rw-hot .rw-badge.rw-on:nth-child(even) { animation-delay: -0.3s; }
 @keyframes rw-siren { 0% { background: #ff3b30; } 50% { background: #3a7bff; } }
 .rw-cooling .rw-badge.rw-on { opacity: 0.8; }
-.rw-cool { display: none; width: 78px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+.rw-cool { display: none; position: absolute; left: 0; top: 25px; width: 150px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.6); overflow: hidden; }
 .rw-cooling .rw-cool { display: block; }
 .rw-coolfill { height: 100%; width: 100%; background: #6fd18b; transform-origin: left; transform: scaleX(0); }
-.rw-full .rw-badge { width: 18px; height: 18px; }
-.rw-full .rw-cool { width: 98px; height: 5px; }
+
+/* score and combo: right aligned, left of the pause button */
+.rw-tr { position: absolute; right: calc(var(--rw-sr) + 64px); top: calc(var(--rw-st) + 8px); width: 160px; }
+.rw-money { height: 28px; padding: 0 8px; text-align: right; font-size: 17px; font-weight: 800; line-height: 28px; letter-spacing: 0.02em; }
+.rw-combo { height: 18px; padding: 0 8px; text-align: right; font-size: 12px; font-weight: 700; line-height: 18px; }
 .rw-slowmo {
   position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 3;
   background: radial-gradient(ellipse at center, rgba(40, 60, 90, 0) 28%, rgba(16, 24, 44, 0.78) 100%), rgba(110, 120, 140, 0.22);
 }
-.rw-bars { display: flex; flex-direction: column; gap: 4px; width: 128px; }
-.rw-bar { height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
-.rw-fill { height: 100%; width: 100%; border-radius: 5px; background: #6fd18b; }
-.rw-armor .rw-fill { background: #6fb4e8; }
-.rw-bar.rw-low .rw-fill { background: #e2503a; }
+.rw-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
+.rw-fill { height: 100%; width: 100%; border-radius: 2px; background: #6fd18b; }
+.rw-bar.rw-low .rw-fill { background: #ff6a50; }
 .rw-bar.rw-empty { display: none; }
-.rw-weapon { font-size: 13px; font-weight: 700; color: var(--rw-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rw-weapon.rw-none { display: none; }
 
-.rw-bottom {
-  position: absolute; left: 50%; bottom: calc(var(--rw-sb) + 10px); transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; gap: 4px; width: 30%; min-width: 180px;
+/* the strip: district title for 3 s, then toasts stacking downward; it never grows past its box */
+.rw-strip {
+  position: absolute; left: 50%; top: calc(var(--rw-st) + 56px); width: 335px; height: 80px; margin-left: -167.5px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; overflow: hidden;
 }
-.rw-prompt {
-  padding: 6px 14px; border-radius: 14px; font-size: 14px; font-weight: 700; text-align: center;
-  background: var(--rw-panel); border: 1px solid var(--rw-accent-soft);
-}
-.rw-prompt.rw-none, .rw-speedbox.rw-none { display: none; }
-.rw-speedbox { display: flex; flex-direction: column; align-items: center; gap: 3px; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-.rw-speed { font-size: 22px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-.rw-speed small { font-size: 10px; font-weight: 700; color: var(--rw-dim); margin-left: 3px; letter-spacing: 0.06em; }
-.rw-vehbar { width: 64px; height: 5px; }
-.rw-full .rw-speed { font-size: 34px; }
-.rw-full .rw-speed small { font-size: 12px; }
-.rw-full .rw-vehbar { width: 90px; height: 6px; }
-
 .rw-title {
-  position: absolute; left: 0; right: 0; top: 32%; text-align: center; opacity: 0;
-  font-size: 40px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #ffe2cc;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85), 0 0 22px rgba(226, 115, 58, 0.6);
+  display: none; max-width: 100%; height: 32px; padding: 0 14px; flex: 0 0 auto;
+  font-size: 18px; font-weight: 800; line-height: 32px; letter-spacing: 0.12em; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.rw-title.rw-show { animation: rw-title 3.2s ease-out; }
-@keyframes rw-title {
-  0% { opacity: 0; transform: scale(1.15); letter-spacing: 0.3em; }
-  15% { opacity: 1; transform: scale(1); letter-spacing: 0.14em; }
-  70% { opacity: 1; }
-  100% { opacity: 0; }
+.rw-title.rw-show { display: block; animation: rw-title 3s ease-out forwards; }
+@keyframes rw-title { 0% { opacity: 0; } 10% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+.rw-toasts { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; }
+.rw-toast {
+  max-width: 100%; height: 32px; padding: 0 14px; font-size: 14px; font-weight: 600; line-height: 32px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; border-left: 4px solid var(--rw-accent);
+  animation: rw-toast-in 0.2s ease-out; transition: opacity 0.3s;
+}
+.rw-toast.rw-out { opacity: 0; }
+@keyframes rw-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* prompt strip: centred, under the keep-out rect */
+.rw-prompt {
+  position: absolute; left: 50%; bottom: calc(var(--rw-sb) + 8px); width: 300px; height: 28px; margin-left: -150px;
+  font-size: 14px; font-weight: 700; line-height: 28px; text-align: center; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid var(--rw-accent-soft);
 }
 
 /* ---------- combat HUD (combathud.js) ---------- */
@@ -503,7 +490,7 @@ const CSS = `
 }
 .rw-notarget.rw-on { display: block; }
 .rw-chp {
-  left: 50%; bottom: calc(var(--rw-sb) + 3px); width: 180px; margin-left: -90px; height: 7px; border-radius: 4px;
+  left: 50%; bottom: var(--rw-sb); width: 180px; margin-left: -90px; height: 7px; border-radius: 4px;
   background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(246, 239, 230, 0.3); overflow: hidden;
   opacity: 0; transition: opacity 0.25s;
 }
@@ -527,9 +514,17 @@ const CSS = `
 
 @media (max-height: 380px) {
   .rw-hud { --map: 76px; --map-big: 140px; }
-  .rw-hud .rw-tl { top: calc(var(--rw-st) + 4px); }
-  .rw-full { --map: 96px; }
-  .rw-title { font-size: 32px; top: 28%; }
+  .rw-speedbox, .rw-hpmeter, .rw-clock { width: 80px; }
+  .rw-speedbox { height: 40px; padding-top: 2px; }
+  .rw-speed { font-size: 28px; line-height: 32px; height: 32px; }
+  .rw-hpmeter { top: calc(var(--rw-st) + 52px); }
+  .rw-clock { top: calc(var(--rw-st) + 68px); }
+  .rw-tr { width: 152px; }
+  .rw-money { height: 26px; line-height: 26px; }
+  .rw-strip { width: 300px; height: 72px; margin-left: -150px; }
+  .rw-btn.rw-ammo { width: 152px; height: 24px; top: calc(var(--rw-st) + 56px); }
+  .rw-ammo-name, .rw-ammo-bar { display: none; }
+  .rw-ammo-n { font-size: 14px; }
 }
 `;
 

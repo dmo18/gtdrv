@@ -148,3 +148,80 @@ test('tank: chase behind the aim, far and gunner views, drag turns the aim (task
   pos = step(120);
   assert.ok(pos.x < -8, 'follows the aim while reversing');
 });
+
+test('car weight: 0.18 s yaw lag, roll into turns up to 2 degrees, pitch under braking up to 1.5', async () => {
+  const { LEAN } = await import('../src/render/chasecam.js');
+  const { CAMERA } = await import('../src/entities/handlingbands.js');
+  assert.equal(LEAN.yawLag, CAMERA.yawLag);
+  assert.equal(LEAN.rollMaxDeg, CAMERA.rollMaxDeg);
+  assert.equal(LEAN.pitchMaxDeg, CAMERA.pitchMaxDeg);
+  const cam = new THREE.PerspectiveCamera(62, 2, 0.5, 1800);
+  const chase = createChaseCamera(cam);
+  chase.setMode('car');
+  const t = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 20, height: 1.2 };
+  chase.snap(t);
+  // Heading step: 63 % of it after one time constant.
+  t.heading = 0.5;
+  chase.update(t, LEAN.yawLag, null, null);
+  assert.ok(Math.abs(chase.getLean().heading / 0.5 - (1 - Math.exp(-1))) < 1e-6, `lag ${chase.getLean().heading}`);
+  // A hard right turn (1.5 g): roll into it, capped.
+  chase.snap(t);
+  let maxRoll = 0;
+  for (let i = 0; i < 180; i++) {
+    t.heading += (1.5 * 9.81 / 20) / 60;
+    t.x += Math.cos(t.heading) * 20 / 60;
+    t.z += Math.sin(t.heading) * 20 / 60;
+    chase.update(t, 1 / 60, null, null);
+    maxRoll = Math.max(maxRoll, chase.getLean().rollDeg);
+    assert.ok(Number.isFinite(cam.position.x) && Number.isFinite(cam.quaternion.w));
+  }
+  assert.ok(maxRoll > 1.9 && maxRoll <= LEAN.rollMaxDeg + 1e-9, `roll ${maxRoll}`);
+  // A left turn rolls the other way.
+  for (let i = 0; i < 120; i++) {
+    t.heading -= (0.5 * 9.81 / 20) / 60;
+    chase.update(t, 1 / 60, null, null);
+  }
+  assert.ok(chase.getLean().rollDeg < -0.5);
+  // Hard braking: pitch down, capped; no pitch while accelerating.
+  chase.snap(t);
+  let maxPitch = 0;
+  for (let i = 0; i < 120; i++) {
+    t.speed = Math.max(0, t.speed - 9.5 / 60);
+    chase.update(t, 1 / 60, null, null);
+    maxPitch = Math.max(maxPitch, chase.getLean().pitchDeg);
+  }
+  assert.ok(maxPitch > 1.2 && maxPitch <= LEAN.pitchMaxDeg + 1e-9, `pitch ${maxPitch}`);
+  for (let i = 0; i < 120; i++) {
+    t.speed += 3 / 60;
+    chase.update(t, 1 / 60, null, null);
+  }
+  assert.ok(chase.getLean().pitchDeg < 0.05);
+  // Switched off (or reduced motion): no roll, no pitch.
+  chase.setLean(false);
+  for (let i = 0; i < 60; i++) {
+    t.heading += 0.02;
+    chase.update(t, 1 / 60, null, null);
+  }
+  assert.equal(chase.getLean().rollDeg, 0);
+  assert.equal(chase.getLean().on, false);
+});
+
+test('reduced motion starts the car lean off; on foot never leans', () => {
+  const saved = globalThis.matchMedia;
+  globalThis.matchMedia = (q) => ({ matches: q.includes('reduce') });
+  try {
+    const chase = createChaseCamera(new THREE.PerspectiveCamera(62, 2, 0.5, 1800));
+    assert.equal(chase.getLean().on, false);
+  } finally {
+    globalThis.matchMedia = saved;
+  }
+  const chase = createChaseCamera(new THREE.PerspectiveCamera(62, 2, 0.5, 1800));
+  chase.setMode('foot');
+  const t = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 6, height: 1.5 };
+  chase.snap(t);
+  for (let i = 0; i < 60; i++) {
+    t.heading += 0.05;
+    chase.update(t, 1 / 60, null, null);
+  }
+  assert.equal(chase.getLean().rollDeg, 0);
+});

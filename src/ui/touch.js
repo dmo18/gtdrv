@@ -40,7 +40,8 @@ const STICK_RANGE = 56; // px of drag for full stick
 const STICK_DEAD = 0.1;
 const SPRINT_AT = 0.85;
 const WHEEL_CORE = 16; // px around the wheel centre where angle is ignored
-const PAD_W = SLIDER_RANGE * 2 + 52, PAD_H = 60;
+const PAD_H = 56; // the slider pad is the steering slot wide (160, or 140 at 780x360; docs/REVAMP.md 6.5)
+const PAD_KNOB_RANGE = 56; // px of knob travel drawn inside the pad
 const STICK_W = 128;
 const TILT_WAIT_MS = 2500; // no orientation events by then: no sensor
 const TILT_SMOOTH = 0.07; // s, low-pass time constant
@@ -76,7 +77,7 @@ const ICONS = {
   cannon: '<circle cx="8" cy="15" r="5"/><path d="M11 12l9-6M12 14l9-5"/>',
 };
 const FAN_MS = 4000; // the fan folds away this long after the last use
-const FAN_ROWS = 4; // fan items per column before it wraps to a second column
+const FAN_ROWS = 2; // fan items per column; at most 3 columns (6 items)
 const LOW_AMMO = 0.25; // show the reload chip at or below this magazine fraction
 // Weapon icons (24x24, original line drawings).
 export const WEAPON_ICONS = {
@@ -232,22 +233,30 @@ export function createTouchControls(root, input, opts = {}) {
   // Wheel tracking: centre, last touch angle, accumulated wheel angle (deg).
   const wh = { cx: 0, cy: 0, last: 0, angle: 0, have: false };
 
+  // The inset in px. The custom property holds an unevaluated max(env(...)),
+  // so a probe element resolves it.
+  const insetProbe = el('div', 'rw-inset-probe', layer);
+  insetProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0';
   function safeInset(name) {
-    return parseFloat(getComputedStyle(layer).getPropertyValue(name)) || 0;
+    insetProbe.style.paddingLeft = `var(${name})`;
+    return parseFloat(getComputedStyle(insetProbe).paddingLeft) || 0;
   }
   // Rest positions (bottom corner) so the control is visible before touching.
+  const slotSize = (r) => (r.height < 380 ? 140 : 160);
   function restPosition() {
     const r = root.getBoundingClientRect();
     const slider = steerMode();
-    const w = slider ? PAD_W : STICK_W;
+    // The steering slot (docs/REVAMP.md 6.5): 160 square at 915x412, 140 at 780x360.
+    const slot = slotSize(r);
+    const gap = r.height < 380 ? 16 : 12;
     const h = slider ? PAD_H : STICK_W;
-    const y = r.bottom - 28 - h / 2 - (slider ? 6 : 0);
-    if (leftHanded) return { x: r.right - safeInset('--rw-sr') - 24 - w / 2, y };
-    return { x: r.left + safeInset('--rw-sl') + 24 + w / 2, y };
+    const y = r.bottom - safeInset('--rw-sb') - gap - (slider ? h / 2 : slot / 2);
+    if (leftHanded) return { x: r.right - safeInset('--rw-sr') - 16 - slot / 2, y };
+    return { x: r.left + safeInset('--rw-sl') + 16 + slot / 2, y };
   }
   function placeBase(base, cx, cy) {
     const r = root.getBoundingClientRect();
-    const w = base === pad ? PAD_W : STICK_W;
+    const w = base === pad ? slotSize(r) : STICK_W;
     const h = base === pad ? PAD_H : STICK_W;
     base.style.transform = `translate(${Math.round(cx - r.left - w / 2)}px, ${Math.round(cy - r.top - h / 2)}px)`;
   }
@@ -279,7 +288,12 @@ export function createTouchControls(root, input, opts = {}) {
     down(e) {
       maybeAskTilt();
       if (steerMode()) {
-        if (style === 'wheel') {
+        if (style === 'tilt') {
+          // A touch in the steering zone re-centres tilt (the bar is a display).
+          tilt.zero += tilt.smooth;
+          tilt.smooth = 0;
+          vibrate();
+        } else if (style === 'wheel') {
           const b = wheel.getBoundingClientRect();
           wh.cx = b.left + b.width / 2;
           wh.cy = b.top + b.height / 2;
@@ -289,12 +303,13 @@ export function createTouchControls(root, input, opts = {}) {
           wheelPoint(e);
         } else if (style === 'slider') {
           const r = root.getBoundingClientRect();
+          const padW = slotSize(r);
           // Steering is measured from the touch-down point; the drawn base
           // is nudged so it stays fully on screen.
           origin.x = e.clientX;
           origin.y = e.clientY;
           placeBase(pad,
-            clamp(e.clientX, r.left + PAD_W / 2 + 6, r.right - PAD_W / 2 - 6),
+            clamp(e.clientX, r.left + padW / 2 + 6, r.right - padW / 2 - 6),
             clamp(e.clientY, r.top + PAD_H / 2 + 6, r.bottom - PAD_H / 2 - 6));
           pad.classList.add('rw-active');
           applySlider(e.clientX);
@@ -341,7 +356,7 @@ export function createTouchControls(root, input, opts = {}) {
     const v = clamp((x - origin.x) / SLIDER_RANGE, -1, 1);
     const a = Math.abs(v);
     setRaw(a < SLIDER_DEAD ? 0 : Math.sign(v) * (a - SLIDER_DEAD) / (1 - SLIDER_DEAD));
-    padKnob.style.transform = `translateX(${(v * SLIDER_RANGE).toFixed(1)}px)`;
+    padKnob.style.transform = `translateX(${(v * PAD_KNOB_RANGE).toFixed(1)}px)`;
   }
 
   function applyStick(x, y) {
@@ -389,7 +404,8 @@ export function createTouchControls(root, input, opts = {}) {
   const tiltBar = gate(el('button', 'rw-btn rw-tiltbar rw-st-tilt rw-pri', layer), 'car', 'boat');
   tiltBar.type = 'button';
   tiltBar.tabIndex = -1;
-  tiltBar.setAttribute('aria-label', 'Tilt steering (tap to re-centre)');
+  tiltBar.setAttribute('aria-label', 'Tilt steering (tap the steering area to re-centre)');
+  tiltBar.setAttribute('aria-disabled', 'true');
   const tiltFace = el('span', 'rw-face', tiltBar);
   const tiltTrack = el('span', 'rw-tilt-track', tiltFace);
   const tiltDot = el('span', 'rw-tilt-dot', tiltTrack);
@@ -398,11 +414,6 @@ export function createTouchControls(root, input, opts = {}) {
     listening: false, gotEvent: false, asked: false, timer: 0,
     deg: 0, smooth: 0, zero: 0, onFallback: opts.onSteerFallback || null,
   };
-  track(tiltBar, {
-    down() { maybeAskTilt(); tilt.zero += tilt.smooth; tilt.smooth = 0; vibrate(); },
-    move() {},
-    up() {},
-  });
   function onOrientation(e) {
     if (e.beta == null && e.gamma == null) return;
     tilt.gotEvent = true;
@@ -562,19 +573,13 @@ export function createTouchControls(root, input, opts = {}) {
   // Number the fan items and the extra primary slots for the current mode.
   function layoutActions() {
     fanDirty = false;
-    let n = 0, e = 0, arc = false;
-    // Over an armed-craft arc the fan starts higher: three per column, so
-    // a fourth item (police heli SPOT) wraps instead of leaving a 360 px screen.
-    for (const a of actions) if (a.slot && a.vis && a.modes.includes(mode)) arc = true;
-    const rows = (arc && (mode === 'plane' || mode === 'heli' || mode === 'foot')) || mode === 'car' ? 3 : FAN_ROWS;
+    let n = 0, e = 0;
+    // The fan is 3 columns by 2 rows (docs/REVAMP.md 6.5); slot actions
+    // (HAND, SWAP, RUN, the weapon arc) have fixed rectangles of their own.
     for (const a of actions) {
-      if (!a.vis || !a.modes.includes(mode)) continue;
-      if (a.slot) {
-        arc = true;
-        continue;
-      }
+      if (!a.vis || !a.modes.includes(mode) || a.slot) continue;
       if (a.sec) {
-        const r = n % rows, c = (n / rows) | 0;
+        const r = n % FAN_ROWS, c = (n / FAN_ROWS) | 0;
         n++;
         if (c !== a.c) { a.c = c; a.el.style.setProperty('--c', c); }
         if (r !== a.r) { a.r = r; a.el.style.setProperty('--r', r); }
@@ -584,8 +589,6 @@ export function createTouchControls(root, input, opts = {}) {
       }
     }
     more.classList.toggle('rw-off', n === 0);
-    // An armed-craft arc is on screen: the more fan moves out of its way.
-    layer.classList.toggle('rw-arc', arc);
   }
 
   // ----- primary: car / boat buttons -----
@@ -659,7 +662,7 @@ export function createTouchControls(root, input, opts = {}) {
   // Reload chip next to FIRE: only while the magazine is low or empty.
   gate(pri(nameButton('rw-cmb rw-chipbtn', 'Reload (magazine low)', 'reload', 'RELOAD', 'reload')), 'foot');
   // The ammo counter (HUD Full only): tap to reload early. Shows the weapon too.
-  const ammoBtn = gate(nameButton('rw-cmb rw-ammo', 'Ammo, tap to reload', null, '', 'reload'), 'foot', 'car', 'boat');
+  const ammoBtn = gate(nameButton('rw-cmb rw-ammo', 'Ammo', null, '', 'reload'), 'foot', 'car', 'boat');
   ammoBtn.querySelector('.rw-face').innerHTML = '<i class="rw-ammo-icon"></i><span class="rw-ammo-txt"><b class="rw-ammo-n">-</b><small class="rw-ammo-of"></small></span>'
     + '<em class="rw-ammo-name"></em><i class="rw-ammo-bar"><i></i></i>';
   const ammoIcon = ammoBtn.querySelector('.rw-ammo-icon');
@@ -772,16 +775,16 @@ export function createTouchControls(root, input, opts = {}) {
   // ----- secondary: folded into the fan -----
   const armed = () => shown.show !== false;
   // Handbrake is a primary button: always on screen in a car.
-  addAction({ id: 'handbrake', group: 'primary', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
+  addAction({ id: 'handbrake', group: 'primary', slot: 'hand', label: 'Handbrake', icon: 'handbrake', text: 'HAND', modes: ['car'],
     press() { src.handbrake = true; }, release() { src.handbrake = false; } });
   addAction({ id: 'horn', label: 'Horn', icon: 'horn', text: 'HORN', modes: ['car', 'boat'], input: 'horn' });
   addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
-  addAction({ id: 'swap', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed,
+  addAction({ id: 'swap', group: 'primary', slot: 'hand', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed,
     pointer: { down: swapDown, move: swapMove, up: swapUp } });
   addAction({ id: 'reload', label: 'Reload', icon: 'reload', text: 'RELOAD', modes: ['foot', 'car', 'boat'], input: 'reload',
     visible: () => armed() && (mode === 'foot' || shown.drive === true) });
-  addAction({ id: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
+  addAction({ id: 'run', group: 'primary', slot: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
     press() { src.sprint = true; }, release() { src.sprint = false; }, buzz: false });
   addAction({ id: 'map', label: 'Map', icon: 'map', text: 'MAP', input: 'map' });
   addAction({ id: 'respawn', label: 'Respawn', icon: 'respawn', text: 'RESPAWN', modes: ['foot', 'car', 'boat', 'plane', 'heli', 'tank'], input: 'respawn' });

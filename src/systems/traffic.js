@@ -10,7 +10,7 @@
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
 import { lanePoint, lanesPerDirection, signalState } from '../world/citygen.js';
-import { createVehicle } from '../entities/vehicle.js';
+import { createVehicle, steerLock } from '../entities/vehicle.js';
 import { exitPosition } from '../entities/onfoot.js';
 import { clamp } from '../core/rng.js';
 
@@ -240,7 +240,7 @@ export function placeDriver(dr, v, edgeId, from, d = 0, lane = -1) {
   const city = dr.city;
   if (v) {
     const s = v.spec;
-    const ang = s.steerMax / (1 + 5 / 20);
+    const ang = steerLock(s, 5);
     dr.rmin = Math.max(5.5, (1.1 * s.wheelBase) / Math.tan(ang));
   }
   dr.e0 = edgeId;
@@ -660,7 +660,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   const lx = dx * ch + dz * sh;
   const ly = -dx * sh + dz * ch;
   const spec = v.spec;
-  const maxAng = spec.steerMax / (1 + Math.abs(sp) / 20);
+  const maxAng = steerLock(spec, sp);
   let steer;
   if (lx < 0.5) steer = ly >= 0 ? 1 : -1;
   else {

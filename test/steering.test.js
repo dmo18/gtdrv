@@ -1,54 +1,127 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createInput, shapeSteer, rampSteer, tiltAngle, tiltToSteer, angleDelta, clampSensitivity,
-  STEER_STYLES, TILT_LOCK_DEG,
+  createInput, attachKeyboard, shapeSteer, rampSteer, tiltAngle, tiltToSteer, tiltFilter, tiltFallback, angleDelta,
+  clampSensitivity, wheelCurve, steerTravel, rawFromTravel, createWheelTracker, sliderRaw,
+  STEER_STYLES, TILT_LOCK_DEG, TILT_DEAD_DEG, TILT_SMOOTH, TILT_WAIT, CURVE_LINEAR, WHEEL_CORE_PX, SLIDER_W,
 } from '../src/core/input.js';
 import { defaultProgress, sanitizeProgress } from '../src/core/save.js';
-import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode } from '../src/entities/vehicle.js';
+import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode, lateralGrip } from '../src/entities/vehicle.js';
 import { createRng, angleDiff } from '../src/core/rng.js';
 
-test('response curve: fine near centre, full lock at the end, sensitivity blends', () => {
-  assert.equal(shapeSteer(0), 0);
-  assert.equal(shapeSteer(1), 1);
-  assert.equal(shapeSteer(-1), -1);
-  assert.ok(Math.abs(shapeSteer(0.5) - Math.pow(0.5, 1.6)) < 1e-12, 'default is |x|^1.6');
-  for (const x of [0.1, 0.3, 0.6, 0.9]) {
-    assert.equal(shapeSteer(-x), -shapeSteer(x), 'odd');
-    assert.ok(shapeSteer(x) < x, `finer than linear at ${x}`);
-    assert.ok(shapeSteer(x, 0.5) < shapeSteer(x, 1) && shapeSteer(x, 1) < shapeSteer(x, 1.5), `sensitivity order at ${x}`);
-  }
-  for (const s of [0.5, 0.8, 1, 1.2, 1.5]) assert.equal(shapeSteer(1, s), 1, `full lock reachable at ${s}`);
-  let last = -1;
+test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the centre; sensitivity changes travel only', () => {
+  assert.equal(wheelCurve(0), 0);
+  assert.equal(wheelCurve(1), 1);
+  assert.equal(wheelCurve(-1), -1);
+  assert.ok(Math.abs(wheelCurve(0.5) - 0.44375) < 1e-12);
+  assert.ok(Math.abs(wheelCurve(1e-6) / 1e-6 - CURVE_LINEAR) < 1e-6, 'slope at 0');
+  let last = -2;
   for (let x = -1; x <= 1.0001; x += 0.01) {
-    const y = shapeSteer(x, 1.3);
-    assert.ok(y >= last - 1e-12 && Math.abs(y) <= 1, 'monotonic and bounded');
+    const y = wheelCurve(x);
+    assert.ok(y > last && Math.abs(y) <= 1, 'strictly rising and bounded');
+    assert.ok(Math.abs(wheelCurve(-x) + y) < 1e-12, 'odd');
     last = y;
   }
-  assert.equal(shapeSteer(5), 1);
-  assert.equal(shapeSteer(NaN), 0);
+  assert.equal(wheelCurve(5), 1);
+  assert.equal(wheelCurve(NaN), 0);
+  // shapeSteer is the same curve whatever the sensitivity.
+  for (const x of [0.2, 0.5, 0.9]) for (const k of [0.5, 1, 1.5]) assert.equal(shapeSteer(x, k), wheelCurve(x));
+  // Travel per style, less travel with more sensitivity.
+  assert.equal(steerTravel('wheel'), 110);
+  assert.equal(steerTravel('slider'), 90);
+  assert.equal(steerTravel('tilt'), 22);
+  assert.equal(steerTravel('buttons'), 0.3);
+  assert.equal(steerTravel('wheel', 1.5), 110 / 1.5);
+  assert.equal(steerTravel('wheel', 9), 110 / 1.5);
+  assert.equal(steerTravel('nope'), 110);
+  assert.equal(rawFromTravel('wheel', 55), 0.5);
+  assert.equal(rawFromTravel('wheel', 55, 2), 0.75);
+  assert.equal(rawFromTravel('slider', -400), -1);
   assert.equal(clampSensitivity(9), 1.5);
   assert.equal(clampSensitivity(NaN), 1);
 });
 
-test('button ramp: 0.25 s to full lock, 0.15 s back, independent of frame rate', () => {
+test('buttons: ramp 0.30 s to a full target while held, 0 on release or both, frame-rate independent', () => {
   const run = (hz, target, secs, start = 0) => {
     let v = start;
     for (let i = 0; i < Math.round(secs * hz); i++) v = rampSteer(v, target, 1 / hz);
     return v;
   };
   for (const hz of [30, 60, 120]) {
-    assert.ok(Math.abs(run(hz, 1, 0.1) - 0.4) < 1e-9, `0.1 s at ${hz} Hz`);
-    assert.equal(run(hz, 1, 0.25), 1);
-    assert.equal(run(hz, -1, 0.25), -1);
-    assert.ok(Math.abs(run(hz, 0, 0.1, 1) - (1 - 0.1 / 0.15)) < 1e-9);
-    assert.equal(run(hz, 0, 0.15, 1), 0);
+    assert.ok(Math.abs(run(hz, 1, 0.1) - 1 / 3) < 1e-9, `0.1 s at ${hz} Hz`);
+    assert.equal(run(hz, 1, 0.3), 1);
+    assert.equal(run(hz, -1, 0.3), -1);
+    assert.equal(run(hz, 1, 1), 1);
   }
-  // Switching sides goes back through centre at the return rate first.
-  assert.ok(Math.abs(rampSteer(1, -1, 0.05) - (1 - 0.05 / 0.15)) < 1e-12);
+  assert.equal(rampSteer(0.7, 0, 1 / 60), 0, 'release: target 0 at once');
+  // Pressing the other side ramps from where it is, through the centre.
+  assert.ok(Math.abs(rampSteer(1, -1, 0.06) - 0.8) < 1e-12);
+  // Sensitivity shortens the ramp.
+  assert.ok(Math.abs(rampSteer(0, 1, 0.1, 1.5) - 0.5) < 1e-12);
+  // The keyboard uses the same mapping, one 1/60 s step per poll.
+  const listeners = {};
+  const target = { addEventListener: (t, f) => { listeners[t] = f; }, removeEventListener() {} };
+  const input = createInput();
+  attachKeyboard(input, target);
+  listeners.keydown({ code: 'ArrowRight' });
+  for (let i = 0; i < 9; i++) input.poll();
+  assert.ok(Math.abs(input.steer - 0.5) < 1e-9, `keyboard after 9 steps ${input.steer}`);
+  for (let i = 0; i < 20; i++) input.poll();
+  assert.equal(input.steer, 1);
+  listeners.keydown({ code: 'ArrowLeft' });
+  input.poll();
+  assert.equal(input.steer, 0, 'both held: 0');
+  listeners.keyup({ code: 'ArrowRight' });
+  listeners.keyup({ code: 'ArrowLeft' });
+  input.poll();
+  assert.equal(input.steer, 0);
 });
 
-test('tilt: both landscape orientations, dead zone, 25 degrees = full lock', () => {
+test('wheel tracker: summed angle, 55 deg is half, holds through the core, full at 110, 0 on lift', () => {
+  const R = 60, DEG = Math.PI / 180;
+  const at = (deg) => [R * Math.cos(deg * DEG), R * Math.sin(deg * DEG)];
+  const w = createWheelTracker();
+  // The thumb lands anywhere: no jump.
+  assert.equal(w.down(...at(-40), 0, 0), 0);
+  for (let a = -40; a <= 15; a += 5) w.move(...at(a));
+  assert.ok(Math.abs(w.raw() - 0.5) < 1e-9, `55 deg raw ${w.raw()}`);
+  assert.ok(w.target() >= 0.4 && w.target() <= 0.55);
+  // A path straight through the centre core barely changes the target.
+  const before = w.target();
+  const [x0, y0] = at(15);
+  for (let k = 1; k <= 20; k++) w.move(x0 - (2 * x0 * k) / 20, y0 - (2 * y0 * k) / 20);
+  assert.ok(Math.abs(w.target() - before) < 0.02, `through the core ${before} -> ${w.target()}`);
+  assert.ok(WHEEL_CORE_PX === 16);
+  // Tracked wherever it goes; winding past full lock clamps and unwinds at once.
+  const v = createWheelTracker();
+  v.down(...at(0), 0, 0);
+  for (let a = 0; a <= 200; a += 10) v.move(...at(a));
+  assert.equal(v.raw(), 1);
+  assert.equal(v.target(), 1);
+  v.move(...at(190));
+  assert.ok(Math.abs(v.raw() - 100 / 110) < 1e-9);
+  assert.equal(v.up(), 0);
+  assert.equal(v.raw(), 0);
+  assert.equal(v.move(...at(50)), 0, 'no steering after lift');
+  // Sensitivity shortens the travel only.
+  const s = createWheelTracker();
+  s.down(...at(0), 0, 0, 1.5);
+  for (let a = 0; a <= 55; a += 5) s.move(...at(a));
+  assert.ok(Math.abs(s.raw() - 0.75) < 1e-9);
+});
+
+test('slider: absolute from the bar centre, 45 px is half, works off the bar, clamps at the ends', () => {
+  assert.equal(SLIDER_W, 180);
+  assert.equal(sliderRaw(545, 500), 0.5);
+  assert.equal(sliderRaw(455, 500), -0.5);
+  assert.ok(wheelCurve(sliderRaw(545, 500)) >= 0.4 && wheelCurve(sliderRaw(545, 500)) <= 0.55);
+  assert.equal(sliderRaw(500 + SLIDER_W, 500), 1, 'off the bar still steers, clamped');
+  assert.equal(sliderRaw(0, 500), -1);
+  assert.equal(sliderRaw(530, 500, 1.5), 0.5);
+  assert.equal(sliderRaw(NaN, 500), -1);
+});
+
+test('tilt: both landscape orientations, flat is 0, dead zone 1.5, 22 degrees of travel, filter and fallback', () => {
   // Landscape, phone upright: no tilt either way round.
   assert.ok(Math.abs(tiltAngle(0, -90, 90)) < 1e-9);
   assert.ok(Math.abs(tiltAngle(0, 90, 270)) < 1e-9);
@@ -73,7 +146,20 @@ test('tilt: both landscape orientations, dead zone, 25 degrees = full lock', () 
   assert.equal(tiltToSteer(1), 0);
   assert.equal(tiltToSteer(TILT_LOCK_DEG), 1);
   assert.equal(tiltToSteer(-40), -1);
-  assert.ok(tiltToSteer(12) > 0.4 && tiltToSteer(12) < 0.5);
+  assert.ok(Math.abs(tiltToSteer(TILT_DEAD_DEG + 11) - 0.5) < 1e-12, '12.5 deg past zero is half');
+  assert.ok(Math.abs(tiltToSteer(-12.5) + 0.5) < 1e-12);
+  assert.equal(tiltToSteer(0.5), 0, 'noise at rest');
+  assert.equal(tiltToSteer(-0.5), 0);
+  // The one filter: a 0.08 s low-pass, frame-rate independent.
+  let a = 0, b = 0;
+  for (let i = 0; i < 6; i++) a = tiltFilter(a, 10, 1 / 60);
+  for (let i = 0; i < 12; i++) b = tiltFilter(b, 10, 1 / 120);
+  assert.ok(Math.abs(a - b) < 1e-9 && Math.abs(a - 10 * (1 - Math.exp(-0.1 / TILT_SMOOTH))) < 1e-9);
+  // No event within 1 s, or a refusal: the wheel stands in.
+  assert.equal(tiltFallback(0.5, false), false);
+  assert.equal(tiltFallback(TILT_WAIT, false), true);
+  assert.equal(tiltFallback(5, true), false);
+  assert.equal(tiltFallback(0, false, true), true);
   assert.ok(Math.abs(angleDelta(Math.PI - 0.1, -Math.PI + 0.1) + 0.2) < 1e-12);
 });
 
@@ -96,11 +182,10 @@ test('player input asks for proportional steering; settings sanitise', () => {
   assert.equal(sens(Infinity), 1);
 });
 
-// ---- Car handling: arcade (default) and sim modes. ----
-// Turning circles are measured like this: hold a speed, then full steer
-// with the player's (proportional) mapping and keep holding the speed;
-// the radius is half the larger extent of the path over one full turn,
-// entry included.
+// ---- Car handling: arcade (default) and sim modes (bands in
+// test/handling-bands.test.js). Turning circles are measured like this:
+// hold a speed, then full steer and keep holding the speed; the radius is
+// half the larger extent of the path over one full turn, entry included.
 
 const DT = 1 / 60;
 const DEG = Math.PI / 180;
@@ -158,59 +243,45 @@ test('handling mode: arcade by default, sim on request, anything else is arcade'
   assert.equal(getHandlingMode(), 'arcade');
 });
 
-test('arcade turning circles: tight at every speed, per car', withMode('arcade', () => {
-  const t = radiusTable();
-  // Sedan-class limits (m) at 8, 15, 25, 40 m/s, and sane lower bounds.
-  const max = [5, 10, 27, 65], min = [3.2, 7, 19, 45];
-  const sedan = t.sedan.map((x) => x.r);
-  for (const id of ['compact', 'sedan', 'taxi', 'police']) {
-    SPEEDS.forEach((u, k) => {
-      const r = t[id][k].r;
-      assert.ok(r <= max[k] && r >= min[k], `${id} at ${u} m/s: ${r.toFixed(1)} m, want ${min[k]}..${max[k]}`);
-    });
+test('turning circles: the same at walking pace in both modes, at speed set by the grip', () => {
+  const t = {};
+  for (const mode of ['arcade', 'sim']) {
+    setHandlingMode(mode);
+    t[mode] = radiusTable();
   }
-  // Pickup and van within 20 % of the sedan; the truck 10.5 m at 8 m/s
-  // and within 30 % at speed. Sports and muscle within 1.3x from 15 m/s,
-  // the muscle car no wider than 8 m at walking-ish pace.
-  SPEEDS.forEach((u, k) => {
-    for (const id of ['pickup', 'van']) {
-      const r = t[id][k].r;
-      assert.ok(r <= Math.max(max[k], sedan[k]) * 1.2 && r >= min[k] * 0.8, `${id} at ${u} m/s: ${r.toFixed(1)} m`);
-    }
-    const tr = t.truck[k].r;
-    assert.ok(tr <= (k === 0 ? 10.5 : Math.max(max[k], sedan[k]) * 1.3) && tr > 4.4, `truck at ${u} m/s: ${tr.toFixed(1)} m`);
-    for (const id of ['sports', 'muscle']) {
-      const r = t[id][k].r;
-      const lim = k === 0 ? (id === 'muscle' ? 8 : max[0] * 1.4) : Math.max(max[k], sedan[k]) * 1.3;
-      assert.ok(r <= lim && r >= min[k] * 0.8, `${id} at ${u} m/s: ${r.toFixed(1)} m, max ${lim.toFixed(1)}`);
-    }
-  });
-  // The speed holds through the turn (no scrubbing down to a crawl).
-  for (const id of ALL) {
-    for (const k of [1, 2]) {
-      assert.ok(t[id][k].minSpeed > SPEEDS[k] * 0.75, `${id} kept ${t[id][k].minSpeed.toFixed(1)} m/s of ${SPEEDS[k]}`);
-    }
-  }
-}));
-
-test('sim turning circles stay at today\'s realistic values (within 15 %)', withMode('sim', () => {
-  // Measured with this same method on the code before the arcade mode.
-  const today = {
-    compact: [7.2, 26.5, 77.0, 169.5], sedan: [6.8, 25.4, 71.7, 198.4], taxi: [6.7, 25.4, 71.5, 197.8],
-    police: [6.6, 23.3, 64.8, 169.5], pickup: [8.1, 27.8, 77.4, 179.4], van: [8.0, 29.6, 85.0, 155.1],
-    truck: [12.2, 31.5, 88.0, 109.2], sports: [6.2, 20.9, 57.9, 148.3], muscle: [7.3, 26.0, 70.8, 186.6],
-  };
-  const t = radiusTable();
-  for (const id of ALL) {
-    SPEEDS.forEach((u, k) => {
-      const r = t[id][k].r, ref = today[id][k];
-      assert.ok(Math.abs(r / ref - 1) <= 0.15, `sim ${id} at ${u} m/s: ${r.toFixed(1)} m vs ${ref}`);
-    });
-  }
-  // Realistic means much wider than arcade at speed.
   setHandlingMode('arcade');
-  assert.ok(turnRadius('sedan', 25).r < t.sedan[2].r * 0.5);
-}));
+  for (const id of ALL) {
+    const spec = createVehicle(id, 0, 0, 0).spec;
+    // Walking-ish pace (8 m/s): mostly the lock, near-equal in both modes.
+    assert.ok(Math.abs(t.arcade[id][0].r / t.sim[id][0].r - 1) < 0.25, `${id} at 8 m/s`);
+    for (const k of [1, 2]) {
+      const u = SPEEDS[k];
+      for (const mode of ['arcade', 'sim']) {
+        const { r, minSpeed } = t[mode][id][k];
+        setHandlingMode(mode);
+        const g = lateralGrip(spec) * 9.81;
+        setHandlingMode('arcade');
+        // Entry included, so the circle is a little wider than u^2 / a.
+        const ideal = (u * u) / g;
+        assert.ok(r > ideal * 0.85 && r < ideal * 1.35, `${mode} ${id} at ${u} m/s: ${r.toFixed(1)} m, ideal ${ideal.toFixed(1)}`);
+        assert.ok(minSpeed > u * 0.75, `${mode} ${id} kept ${minSpeed.toFixed(1)} m/s of ${u}`);
+      }
+    }
+  }
+});
+
+test('Sim corners wider than Arcade at speed, never tighter', () => {
+  for (const id of ['sedan', 'sports', 'van']) {
+    for (const u of [15, 25]) {
+      setHandlingMode('arcade');
+      const a = turnRadius(id, u).r;
+      setHandlingMode('sim');
+      const s = turnRadius(id, u).r;
+      setHandlingMode('arcade');
+      assert.ok(s > a * 1.05 && s < a * 1.4, `${id} at ${u}: arcade ${a.toFixed(1)} sim ${s.toFixed(1)}`);
+    }
+  }
+});
 
 // Yaw rate after a full-steer step at 15 m/s: time to 90 % of steady.
 function yawRise(id) {
@@ -225,17 +296,19 @@ function yawRise(id) {
   return { t90: (ys.findIndex((y) => y >= 0.9 * steady) + 1) * DT, overshoot: Math.max(...ys) / steady, steady };
 }
 
-test('arcade yaw response: 90 % of the steady yaw rate within 0.35 s', withMode('arcade', () => {
-  for (const id of ALL) {
-    const { t90, overshoot, steady } = yawRise(id);
-    assert.ok(steady > 1, `${id} steady yaw ${steady.toFixed(2)}`);
-    assert.ok(t90 > 0 && t90 <= 0.35, `${id} t90 ${t90.toFixed(2)} s`);
-    assert.ok(overshoot < 1.2, `${id} overshoot ${overshoot.toFixed(2)}`);
+test('yaw response to full steer at 15 m/s: 90 % within the lock time plus 0.35 s, both modes', () => {
+  for (const mode of ['arcade', 'sim']) {
+    setHandlingMode(mode);
+    for (const id of ALL) {
+      const { t90, overshoot, steady } = yawRise(id);
+      const lockT = 1 / createVehicle(id, 0, 0, 0).spec.lockRate;
+      assert.ok(steady > 0.4, `${mode} ${id} steady yaw ${steady.toFixed(2)}`);
+      assert.ok(t90 > 0 && t90 <= lockT + 0.35, `${mode} ${id} t90 ${t90.toFixed(2)} s`);
+      assert.ok(overshoot < 1.2, `${mode} ${id} overshoot ${overshoot.toFixed(2)}`);
+    }
   }
-  // Sim is noticeably slower to answer.
-  setHandlingMode('sim');
-  assert.ok(yawRise('sedan').t90 > 0.35);
-}));
+  setHandlingMode('arcade');
+});
 
 test('full steer at 40 m/s (and the sports car at 62) never spins, in both modes', () => {
   for (const mode of ['arcade', 'sim']) {
@@ -268,7 +341,7 @@ test('arcade: releasing full steer at 40 m/s straightens within 1.5 s, no weave'
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 40;
     for (let i = 0; i < 90; i++) stepVehicle(v, player({ steer: 1, throttle: 0.6 }), DT, {});
-    assert.ok(v.yawRate > 0.3, `${id} was turning (${v.yawRate.toFixed(2)})`);
+    assert.ok(v.yawRate > 0.15, `${id} was turning (${v.yawRate.toFixed(2)})`);
     const hs = [];
     let settled = -1;
     for (let i = 0; i < 180; i++) {
@@ -284,20 +357,18 @@ test('arcade: releasing full steer at 40 m/s straightens within 1.5 s, no weave'
   }
 }));
 
-test('arcade muscle car: full throttle at full lock power-slides but keeps its speed', withMode('arcade', () => {
+test('arcade muscle car: full throttle at full lock is held by traction control and keeps its speed', withMode('arcade', () => {
   for (const u0 of [12, 15, 20, 25]) {
     const v = createVehicle('muscle', 0, 0, 0);
     v.vx = u0;
-    let minSpeed = Infinity, maxBeta = 0, maxSlip = 0;
+    let minSpeed = Infinity, maxBeta = 0;
     for (let i = 0; i < 240; i++) {
       stepVehicle(v, player({ steer: 1, throttle: 1 }), DT, {});
       minSpeed = Math.min(minSpeed, v.speed);
       maxBeta = Math.max(maxBeta, Math.abs(bodySlip(v)));
-      maxSlip = Math.max(maxSlip, v.slip);
     }
     assert.ok(minSpeed > Math.max(8, u0 * 0.75), `from ${u0} m/s it fell to ${minSpeed.toFixed(1)}`);
-    assert.ok(maxBeta > 5 * DEG && maxBeta < 25 * DEG, `from ${u0} m/s slide ${(maxBeta / DEG).toFixed(1)} deg`);
-    assert.ok(maxSlip > 0.5, `tyres squeal (${maxSlip.toFixed(2)})`);
+    assert.ok(maxBeta < 16 * DEG, `from ${u0} m/s slide ${(maxBeta / DEG).toFixed(1)} deg`);
     // Easing off settles it at once.
     for (let i = 0; i < 120; i++) stepVehicle(v, player({ steer: 1, throttle: 0.2 }), DT, {});
     assert.ok(Math.abs(bodySlip(v)) < 12 * DEG, `settled to ${(Math.abs(bodySlip(v)) / DEG).toFixed(1)} deg`);
@@ -327,7 +398,9 @@ test('handbrake drift is big and recovers after release, in both modes', () => {
         if (recovered < 0 && Math.abs(bodySlip(v)) < 3 * DEG && Math.abs(v.yawRate) < 0.1) recovered = (i + 1) * DT;
       }
       assert.ok(recovered > 0 && recovered < 2, `${tag} recovered after ${recovered.toFixed(2)} s`);
-      assert.ok(minSpeed > 7 && v.speed > 10, `${tag} kept going (${minSpeed.toFixed(1)}, ${v.speed.toFixed(1)})`);
+      // Sim holds the slide while the handbrake is held, so it scrubs more.
+      const keep = mode === 'arcade' ? 7 : 4;
+      assert.ok(minSpeed > keep && v.speed > keep, `${tag} kept going (${minSpeed.toFixed(1)}, ${v.speed.toFixed(1)})`);
       assert.ok(Math.abs(bodySlip(v)) < 1 * DEG);
     }
   }

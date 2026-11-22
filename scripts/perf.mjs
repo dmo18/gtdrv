@@ -90,7 +90,10 @@ const out = await page.evaluate((startGaps) => {
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     }
     const gr = g.graphics || {};
-    return { calls: gr.calls || info.render.calls, triangles: gr.triangles || info.render.triangles, drawCpuMs: +(cpu / 20).toFixed(2), frameMs: +((performance.now() - t) / 20).toFixed(2), newPrograms: (info.programs ? info.programs.length : 0) - p0 };
+    // Far level triangles in the index buffers (before frustum culling).
+    let farTris = 0;
+    g.cityMesh.traverse((o) => { if (o.isMesh && o.name === 'far' && o.visible) farTris += Math.min(o.geometry.drawRange.count, o.geometry.index ? o.geometry.index.count : 0) / 3; });
+    return { farTris: Math.round(farTris), calls: gr.calls || info.render.calls, triangles: gr.triangles || info.render.triangles, drawCpuMs: +(cpu / 20).toFixed(2), frameMs: +((performance.now() - t) / 20).toFixed(2), newPrograms: (info.programs ? info.programs.length : 0) - p0 };
   };
   const day = view(13);
   const night = view(23);
@@ -104,7 +107,8 @@ const out = await page.evaluate((startGaps) => {
     firstFrames: { count: gaps.length, worstMs: sorted.slice(0, 5).map((x) => +x.toFixed(0)), over50ms: gaps.filter((x) => x > 50).length },
     geometries: info.memory.geometries, textures: info.memory.textures, vehicles: kinds,
     map: g.city.map || 'island', cityMs: g.city.buildMs || null, meshMs: Math.round(g.cityMesh.userData.buildMs),
-    stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
+    lots: g.city.lots ? g.city.lots.length : 0,
+    stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, lotStats: g.cityMesh.userData.stream.lotStats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
     heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
   };
 }, startGaps);

@@ -11,7 +11,7 @@
 // driver (createCop / chaseStep) are pure logic, tested in node.
 // createPolice is the game system that spawns cars and officers.
 import { lanePoint, lanesPerDirection } from '../world/citygen.js';
-import { createVehicle } from '../entities/vehicle.js';
+import { createVehicle, steerLock } from '../entities/vehicle.js';
 import { createDriver, placeDriver, driveStep, LANE_SPEED, edgesAround } from './traffic.js';
 import { setVehicleLights } from '../render/vehiclemesh.js';
 import { clamp, createRng } from '../core/rng.js';
@@ -548,7 +548,7 @@ export function chaseStep(cop, v, dt, target, ctx = {}) {
   const lx = dx * ch + dz * sh;
   const ly = -dx * sh + dz * ch;
   const spec = v.spec;
-  const maxAng = spec.steerMax / (1 + Math.abs(sp) / 20);
+  const maxAng = steerLock(spec, sp);
   let steer;
   if (lx < 0.5) steer = ly >= 0 ? 1 : -1;
   else steer = Math.atan(((2 * ly) / (lx * lx + ly * ly)) * spec.wheelBase) / maxAng;

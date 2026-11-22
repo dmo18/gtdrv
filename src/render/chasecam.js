@@ -4,7 +4,8 @@
 // ground/sea), `pitch` and `roll` (aircraft). No allocations per frame.
 // Feel: a short shake on impacts (`kick(strength)`), a faint buzz at very
 // high speed, a little look into turns and a small FOV kick under hard
-// acceleration. All capped; `setShake(0)` turns the shakes off.
+// acceleration. All capped; `setShake(0)` turns the shakes off. Cars
+// also lean and lag to show weight (LEAN).
 import { angleDiff, clamp } from '../core/rng.js';
 
 // follow: position spring rate. turn: heading spring factor.
@@ -81,6 +82,25 @@ export const AIM = {
 // Tank aim: drag turns it (radians per pixel as AIM.drag), pitch limits.
 export const TANK_AIM = { pitchMin: -0.3, pitchMax: 0.42 };
 const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+// Car weight (docs/REVAMP.md 6.3), the same in both handling modes: the
+// chase views lag the car's heading by a 0.18 s time constant, roll up to
+// 2 degrees into a turn and pitch down up to 1.5 degrees under braking.
+// These limits are what the settings show the player; `setLean(false)`
+// and prefers-reduced-motion turn the roll and pitch off.
+export const LEAN = {
+  yawLag: 0.18, // s
+  rollMaxDeg: 2, rollPerG: 2.2, // degrees of roll per g of cornering, capped
+  pitchMaxDeg: 1.5, pitchPerG: 1.6, // degrees of pitch per g of braking, capped
+  ease: 0.15, // s, smoothing of the roll and pitch themselves
+};
+const RAD = Math.PI / 180;
+function prefersReducedMotion() {
+  try {
+    return typeof globalThis.matchMedia === 'function' && !!globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
 
 export function createChaseCamera(camera) {
   let mode = MODES.car;
@@ -114,6 +134,9 @@ export function createChaseCamera(camera) {
   let turnLook = 0; // smoothed sideways look shift (m)
   let accel = 0; // smoothed forward acceleration (m/s^2)
   let fovKick = 0;
+  let yawRateEst = 0; // target heading rate (rad/s), last step
+  let leanOn = !prefersReducedMotion();
+  let leanRoll = 0, leanPitch = 0; // radians, into the turn / nose down
   // Aim view state: `aim.yaw/pitch` is where the crosshair points; the aim
   // controller (combathud.js) may steer it for a lock-on.
   // holdDrag: a lock is steering, the drag does not turn the aim.
@@ -232,8 +255,11 @@ export function createChaseCamera(camera) {
     const rl = Math.sqrt(rdx * rdx + rdy * rdy + rdz * rdz) || 1;
     ray.x = cx; ray.y = cy; ray.z = cz;
     ray.dx = rdx / rl; ray.dy = rdy / rl; ray.dz = rdz / rl;
-    // A little bank with the craft (right side down = clockwise from behind).
-    if (camRoll > 1e-4 || camRoll < -1e-4) camera.rotateZ(-camRoll);
+    // A little bank with the craft (right side down = clockwise from behind),
+    // plus the car's lean into the turn and its pitch under braking.
+    const rz = camRoll + leanRoll;
+    if (rz > 1e-4 || rz < -1e-4) camera.rotateZ(-rz);
+    if (leanPitch > 1e-5) camera.rotateX(-leanPitch);
     applyShake(spd);
   }
 
@@ -278,6 +304,7 @@ export function createChaseCamera(camera) {
     }
     const yawRate = angleDiff(target.heading, lastHeading) / dt;
     lastHeading = target.heading;
+    yawRateEst = yawRate;
     const fwd = Math.max(0, spd);
     const wantLook = clamp(yawRate * Math.min(fwd, 30) * 0.06 * feel.turnLook, -1.4, 1.4);
     turnLook += (wantLook - turnLook) * Math.min(1, 2.5 * dt);
@@ -286,6 +313,16 @@ export function createChaseCamera(camera) {
     accel += (a - accel) * Math.min(1, 4 * dt);
     const wantKick = clamp(accel * feel.fovKick, 0, 4);
     fovKick += (wantKick - fovKick) * Math.min(1, (wantKick > fovKick ? 3 : 1.5) * dt);
+    // Weight: roll into the turn from the cornering g, pitch from braking.
+    let wantRoll = 0, wantPitch = 0;
+    if (leanOn && modeKey === 'car' && mode.dist > 0.5 && aim.k <= 0) {
+      const latG = (yawRate * fwd) / 9.81;
+      wantRoll = clamp(latG * LEAN.rollPerG, -LEAN.rollMaxDeg, LEAN.rollMaxDeg) * RAD;
+      wantPitch = clamp((-accel / 9.81) * LEAN.pitchPerG, 0, LEAN.pitchMaxDeg) * RAD;
+    }
+    const ke = 1 - Math.exp(-dt / LEAN.ease);
+    leanRoll += (wantRoll - leanRoll) * ke;
+    leanPitch += (wantPitch - leanPitch) * ke;
   }
 
   function updateFov(spd, dt, snap) {
@@ -367,6 +404,9 @@ export function createChaseCamera(camera) {
         camHeading = aim.yaw;
         orbitYaw = 0;
         orbitPitch = 0;
+      } else if (modeKey === 'car' && mode.dist > 0.5 && (target.speed || 0) > -2) {
+        // Chase views: a fixed 0.18 s lag, so the car's yaw shows.
+        camHeading += angleDiff(target.heading, camHeading) * (1 - Math.exp(-Math.max(0, dt) / LEAN.yawLag));
       } else if ((target.speed || 0) > -2 || modeKey === 'tank') {
         camHeading += angleDiff(target.heading, camHeading) * Math.min(1, rate * dt);
       }
@@ -387,6 +427,8 @@ export function createChaseCamera(camera) {
       sinceDrag = 99;
       lastHeading = null;
       turnLook = 0;
+      leanRoll = 0;
+      leanPitch = 0;
       accel = 0;
       fovKick = 0;
       trauma = 0;
@@ -422,6 +464,14 @@ export function createChaseCamera(camera) {
     getView() {
       return viewName;
     },
+    // Car lean (roll into turns, pitch under braking) on or off; the
+    // limits are LEAN. Reduced motion starts it off.
+    setLean(on) {
+      leanOn = !!on;
+      if (!leanOn) { leanRoll = 0; leanPitch = 0; }
+    },
+    // Current follow heading (rad) and lean (degrees), for tests and the HUD.
+    getLean: () => ({ on: leanOn, heading: camHeading, rollDeg: leanRoll / RAD, pitchDeg: leanPitch / RAD, yawRate: yawRateEst }),
     // Impact shake: strength is the closing speed in m/s.
     kick(strength) {
       if (!(strength > 1.5)) return;

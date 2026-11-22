@@ -1,75 +1,95 @@
 import { formatDistance, formatMiles } from '../core/units.js';
-// The pause menu: Resume, Scores, Records, Settings and How to play.
+// The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
+// Settings, Help), Settings in four groups, destructive actions on their own
+// confirm screens, and a registry for screens other systems add.
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { setHandlingMode } from '../entities/vehicle.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { nextStation, stationInfo } from '../core/radio.js';
 import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
+import { MAP_CHOICE_KEY } from '../world/maps.js';
 
 const STYLE_ID = 'rw-menu-style';
+const CREDIT = 'Map data (c) OpenStreetMap contributors, ODbL';
 
 const CSS = `
 .rw-menu {
   --rw-accent: #e2733a; --rw-accent-soft: rgba(226,115,58,0.78);
-  --rw-text: #f6efe6; --rw-dim: rgba(246,239,230,0.66);
-  --rw-panel: rgba(24,18,15,0.82); --rw-panel-edge: rgba(246,239,230,0.22);
-  --rw-sl: env(safe-area-inset-left, 0px); --rw-sr: env(safe-area-inset-right, 0px);
-  --rw-st: env(safe-area-inset-top, 0px); --rw-sb: env(safe-area-inset-bottom, 0px);
+  --rw-text: #f6efe6; --rw-dim: rgba(246,239,230,0.74);
+  --rw-panel: rgba(24,18,15,0.88); --rw-panel-edge: rgba(246,239,230,0.22);
+  --rw-sl: max(env(safe-area-inset-left, 0px), var(--rw-test-sl, 0px)); --rw-sr: max(env(safe-area-inset-right, 0px), var(--rw-test-sr, 0px));
+  --rw-st: max(env(safe-area-inset-top, 0px), var(--rw-test-st, 0px)); --rw-sb: max(env(safe-area-inset-bottom, 0px), var(--rw-test-sb, 0px));
   position: fixed; inset: 0; z-index: 40; display: none;
-  padding: calc(8px + var(--rw-st)) calc(10px + var(--rw-sr)) calc(8px + var(--rw-sb)) calc(10px + var(--rw-sl));
-  background: rgba(12,9,8,0.72); color: var(--rw-text);
+  padding: calc(4px + var(--rw-st)) calc(8px + var(--rw-sr)) calc(4px + var(--rw-sb)) calc(8px + var(--rw-sl));
+  background: rgba(12,9,8,0.8); color: var(--rw-text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 15px; line-height: 1.35; touch-action: pan-y;
+  font-size: 15px; line-height: 1.3; touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
 }
-.rw-menu.rw-menu-open { display: flex; gap: 10px; }
+.rw-menu.rw-menu-open { display: flex; gap: 8px; }
 .rw-menu *, .rw-menu *::before, .rw-menu *::after { box-sizing: border-box; }
-.rw-menu-rail {
-  flex: 0 0 150px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
-  padding: 6px; border-radius: 18px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
-}
-.rw-menu-tab, .rw-menu-btn, .rw-menu-seg button {
-  min-height: 56px; border-radius: 14px; border: 2px solid transparent; color: var(--rw-text);
-  background: rgba(246,239,230,0.08); font: inherit; font-weight: 600; font-size: 16px;
-  padding: 0 14px; cursor: pointer; touch-action: manipulation;
+.rw-menu-side { flex: 0 0 132px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.rw-menu-rail { display: flex; flex-direction: column; gap: 4px; }
+.rw-menu button { font-family: inherit; color: var(--rw-text); cursor: pointer; touch-action: manipulation; }
+.rw-menu-tab, .rw-menu-btn, .rw-menu-seg button, .rw-menu-back {
+  min-height: 48px; border-radius: 12px; border: 2px solid transparent;
+  background: rgba(246,239,230,0.1); font-weight: 600; font-size: 15px; padding: 0 12px;
 }
 .rw-menu-tab { text-align: left; width: 100%; flex: 0 0 auto; }
 .rw-menu-tab[aria-selected="true"] { background: var(--rw-accent); color: #1b120d; }
+.rw-menu-back { width: 48px; height: 48px; min-height: 48px; padding: 0; flex: 0 0 48px; display: flex; align-items: center; justify-content: center; }
+.rw-menu-back svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .rw-menu-btn.rw-menu-primary { background: var(--rw-accent); color: #1b120d; }
-.rw-menu-btn.rw-menu-danger { background: #a63a2a; }
+.rw-menu-btn.rw-menu-danger { background: #a63a2a; color: #fff; }
 .rw-menu-btn:disabled { opacity: 0.55; cursor: default; }
 .rw-menu button:focus-visible, .rw-menu input:focus-visible { outline: 3px solid #ffd9a8; outline-offset: 2px; }
 .rw-menu-main {
-  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;
-  border-radius: 18px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
+  flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 14px; background: var(--rw-panel); box-shadow: inset 0 0 0 1px var(--rw-panel-edge);
 }
-.rw-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px 4px; }
-.rw-menu-title { margin: 0; font-size: 20px; }
-.rw-menu-version { margin-left: 8px; font-size: 11px; opacity: 0.6; align-self: center; }
+.rw-menu-head { flex: 0 0 48px; height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; }
+.rw-menu-title { margin: 0; font-size: 20px; flex: 1 1 auto; }
+.rw-menu-version { font-size: 11px; opacity: 0.8; }
 .rw-menu-points { font-weight: 700; color: #ffd08a; font-variant-numeric: tabular-nums; }
-.rw-menu-body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 8px 16px 16px; }
+.rw-menu-groups { display: flex; gap: 4px; flex: 1 1 auto; }
+.rw-menu-groups button { flex: 1 1 0; min-width: 0; height: 48px; min-height: 48px; margin: 0; padding: 0 6px; }
+.rw-menu-groups button[aria-selected="true"] { background: var(--rw-accent); color: #1b120d; }
+.rw-menu-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 12px 4px; }
 .rw-menu-body p { margin: 0 0 8px; }
 .rw-menu-dim { color: var(--rw-dim); }
 .rw-menu-group { margin: 10px 0 4px; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rw-accent); }
-.rw-menu-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 40px; padding: 4px 0; border-bottom: 1px solid rgba(246,239,230,0.1); }
-.rw-menu-medal { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
-.rw-menu-secrets .rw-menu-row { min-height: 26px; padding: 2px 0; font-size: 13px; }
-.rw-menu-secrets .rw-menu-row span:last-child { font-size: 12px; text-align: right; }
-.rw-menu-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 6px; }
-.rw-menu-stat { padding: 8px 12px; border-radius: 12px; background: rgba(246,239,230,0.07); }
-.rw-menu-stat b { display: block; font-size: 20px; }
-.rw-menu-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 4px 0; border-bottom: 1px solid rgba(246,239,230,0.1); flex-wrap: wrap; }
-.rw-menu-vol > span:first-child { flex: 0 0 9.5em; }
-.rw-menu-vol .rw-menu-value { flex: 0 0 3em; text-align: right; opacity: 0.85; }
-.rw-menu-setting input[type=range] { flex: 1 1 160px; min-height: 56px; accent-color: var(--rw-accent); }
+.rw-menu-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 28px; padding: 2px 0; }
+.rw-menu-setting {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 48px; padding: 0;
+  box-shadow: inset 0 -1px rgba(246,239,230,0.1);
+}
+.rw-menu-setting > span:first-child { flex: 0 0 auto; min-width: 7.5em; white-space: nowrap; }
+.rw-menu-setting input[type=range] { flex: 1 1 120px; min-width: 0; height: 48px; margin: 0; accent-color: var(--rw-accent); }
+.rw-menu-setting input[type=range]:disabled { opacity: 0.4; }
+.rw-menu-value { flex: 0 0 3em; text-align: right; opacity: 0.9; font-variant-numeric: tabular-nums; }
 .rw-menu-switch { min-width: 92px; }
 .rw-menu-switch[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; }
-.rw-menu-seg { display: flex; gap: 6px; }
+.rw-menu-seg { display: flex; gap: 4px; }
+.rw-menu-seg button { min-width: 72px; }
 .rw-menu-seg button[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; }
-.rw-menu-confirm { display: flex; gap: 8px; flex-wrap: wrap; }
+.rw-menu-go { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 150px; }
+.rw-menu-go::after { content: "\\203A"; font-size: 22px; line-height: 1; }
+.rw-menu-confirm { display: flex; gap: 8px; flex: 0 0 auto; }
+.rw-menu-confirm .rw-menu-btn { min-width: 112px; }
+.rw-menu-confirmrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 8px 0; box-shadow: inset 0 -1px rgba(246,239,230,0.1); }
+.rw-menu-confirmrow > span { flex: 1 1 auto; }
+.rw-menu-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 2px 0 8px; }
+.rw-menu-stat { padding: 6px 10px; border-radius: 10px; background: rgba(246,239,230,0.08); min-height: 52px; overflow: hidden; }
+.rw-menu-stat b { display: block; font-size: 18px; white-space: nowrap; }
+.rw-menu-stat span { font-size: 12px; }
 .rw-menu ul { margin: 0 0 10px; padding-left: 20px; }
 .rw-menu li { margin-bottom: 4px; }
-.rw-menu-resume { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.rw-menu-hub { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+.rw-menu-hub .rw-menu-primary { height: 64px; font-size: 22px; }
+.rw-menu-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.rw-menu-tile { min-height: 72px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; text-align: left; }
+.rw-menu-tile b { font-size: 17px; }
+.rw-menu-tile span { font-size: 13px; font-weight: 500; color: var(--rw-dim); }
 .rw-menu-steer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 6px 0 8px; }
 .rw-menu-btn.rw-menu-choice {
   min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
@@ -78,16 +98,19 @@ const CSS = `
 .rw-menu-choice b { font-size: 17px; }
 .rw-menu-choice span { font-size: 13px; font-weight: 500; color: var(--rw-dim); }
 .rw-menu-choice[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; border-color: #ffd9a8; }
-.rw-menu-choice[aria-checked="true"] span { color: rgba(27,18,13,0.8); }
-.rw-menu-sens { font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+.rw-menu-choice[aria-checked="true"] span { color: rgba(27,18,13,0.85); }
+.rw-menu-maps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 4px; }
+.rw-menu-card { padding: 10px 12px; border-radius: 12px; background: rgba(246,239,230,0.08); display: flex; flex-direction: column; gap: 8px; min-height: 96px; }
+.rw-menu-card[data-current="true"] { box-shadow: inset 0 0 0 2px var(--rw-accent); }
+.rw-menu-card b { font-size: 18px; }
 .rw-menu-ask {
   position: fixed; inset: 0; z-index: 41; display: flex; align-items: center; justify-content: center;
   padding: calc(8px + var(--rw-st)) calc(10px + var(--rw-sr)) calc(8px + var(--rw-sb)) calc(10px + var(--rw-sl));
-  background: rgba(12,9,8,0.72);
+  background: rgba(12,9,8,0.8);
 }
 .rw-menu-askbox {
   width: min(680px, 100%); max-height: 100%; overflow-y: auto; padding: 12px 16px 14px;
-  border-radius: 18px; background: var(--rw-panel); border: 1px solid var(--rw-panel-edge);
+  border-radius: 18px; background: var(--rw-panel); box-shadow: inset 0 0 0 1px var(--rw-panel-edge);
 }
 .rw-menu-askbox h2 { margin: 0 0 2px; font-size: 20px; }
 .rw-menu-askbox p { margin: 0; }
@@ -96,34 +119,27 @@ const CSS = `
   .rw-menu-askbox { padding: 8px 14px 10px; }
   .rw-menu-askbox h2 { font-size: 18px; }
 }
-.rw-menu-resume .rw-menu-btn { min-width: 220px; font-size: 20px; }
 @media (prefers-reduced-motion: no-preference) {
   .rw-menu.rw-menu-open { animation: rw-menu-in 0.15s ease-out; }
-  .rw-menu-fill { transition: width 0.3s; }
 }
 @keyframes rw-menu-in { from { opacity: 0; } to { opacity: 1; } }
 @media (max-height: 380px) {
   .rw-menu { font-size: 14px; }
-  .rw-menu-rail { flex-basis: 132px; }
-  .rw-menu-card svg { height: 44px; }
+  .rw-menu-tab, .rw-menu-btn, .rw-menu-seg button { font-size: 14px; }
+  .rw-menu-seg button { min-width: 64px; }
+  .rw-menu-stat { padding: 4px 8px; min-height: 48px; }
+  .rw-menu-stat b { font-size: 16px; }
 }
 `;
 
-const TABS = [
-  ['resume', 'Resume'], ['scores', 'Scores'], ['records', 'Records'],
-  ['settings', 'Settings'], ['howto', 'How to play'],
-];
+const TABS = [['resume', 'Resume'], ['stats', 'Stats'], ['settings', 'Settings'], ['help', 'Help']];
+const GROUPS = [['controls', 'Controls'], ['sound', 'Sound'], ['game', 'Game'], ['display', 'Display']];
 const STEER_CHOICES = [
   ['wheel', 'Wheel', 'Turn the on-screen wheel with your thumb.'],
   ['buttons', 'Buttons', 'Hold the left or right arrow; the turn builds up.'],
   ['tilt', 'Tilt', 'Tilt your phone like a steering wheel.'],
   ['slider', 'Slider', 'Slide your thumb left and right on a pad.'],
 ];
-const HANDLING_CHOICES = [
-  ['arcade', 'Arcade', 'Tight and forgiving.'],
-  ['sim', 'Realistic', 'Heavier, more grip-limited.'],
-];
-const MEDAL_COLORS = { bronze: '#c9803f', silver: '#c4cbd2', gold: '#f0c24a' };
 const h = (tag, cls, text) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -137,11 +153,6 @@ function button(text, cls, onClick, label) {
   b.addEventListener('click', onClick);
   return b;
 }
-const pretty = (id) => String(id).replace(/[_-]+/g, ' ').trim().replace(/\b[a-z]/g, (c) => c.toUpperCase());
-const fmtTime = (s) => {
-  const m = Math.floor(s / 60);
-  return m + ':' + (s - m * 60).toFixed(1).padStart(4, '0');
-};
 const num = (n) => Math.round(n).toLocaleString('en-US');
 const isFlag = (k) => k.startsWith('seen_') || k.startsWith('hint_');
 
@@ -156,24 +167,33 @@ export function createMenu(root, game, economy) {
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'true');
   el.setAttribute('aria-label', 'Game menu');
+  const side = h('div', 'rw-menu-side');
+  const back = h('button', 'rw-menu-back');
+  back.type = 'button';
+  back.dataset.role = 'back';
+  back.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
+  back.addEventListener('click', () => goBack());
   const rail = h('div', 'rw-menu-rail');
   rail.setAttribute('role', 'tablist');
   rail.setAttribute('aria-label', 'Menu sections');
+  side.append(back, rail);
   const main = h('div', 'rw-menu-main');
   const head = h('div', 'rw-menu-head');
   const title = h('h2', 'rw-menu-title');
-  const verEl = h('span', 'rw-menu-version');
-  // __VERSION__ comes from package.json at build time (scripts/build.mjs).
-  /* global __VERSION__ */
-  if (typeof __VERSION__ !== 'undefined') verEl.textContent = 'v' + __VERSION__;
+  const groupBar = h('div', 'rw-menu-groups');
+  groupBar.setAttribute('role', 'tablist');
+  groupBar.setAttribute('aria-label', 'Settings groups');
   const pointsEl = h('span', 'rw-menu-points');
   pointsEl.setAttribute('aria-label', 'Score');
-  head.append(title, pointsEl, verEl);
+  head.append(title, groupBar, pointsEl);
   const body = h('div', 'rw-menu-body');
   body.tabIndex = -1;
   main.append(head, body);
-  el.append(rail, main);
+  el.append(side, main);
   root.appendChild(el);
+  // __VERSION__ comes from package.json at build time (scripts/build.mjs).
+  /* global __VERSION__ */
+  const version = typeof __VERSION__ !== 'undefined' ? 'v' + __VERSION__ : '';
 
   const tabButtons = {};
   for (const [id, label] of TABS) {
@@ -181,15 +201,27 @@ export function createMenu(root, game, economy) {
     b.type = 'button';
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-label', label);
-    b.addEventListener('click', () => show(id));
+    b.addEventListener('click', () => { parents.delete(id); show(id); });
     rail.appendChild(b);
     tabButtons[id] = b;
   }
+  const groupButtons = {};
+  for (const [id, label] of GROUPS) {
+    const b = h('button', 'rw-menu-btn', label);
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.dataset.group = id;
+    b.addEventListener('click', () => { group = id; armed = null; render(); });
+    groupBar.appendChild(b);
+    groupButtons[id] = b;
+  }
 
   let active = 'resume';
+  let group = 'controls';
   let opened = false;
-  let confirmReset = false;
-  let confirmNew = false;
+  let armed = null; // key of the confirm row waiting for its second tap
+  const parents = new Map(); // screen id -> the screen Back returns to
+  const screens = new Map(); // registered screens: id -> { id, title, render }
 
   const settings = () => game.progress.settings;
   function applySettings() {
@@ -219,19 +251,72 @@ export function createMenu(root, game, economy) {
   }
   const commit = () => { applySettings(); game.events.emit('progress'); };
 
-  // ---------- tab renderers ----------
+  // ---------- the api given to registered screens ----------
+  // A row with the confirm rule (docs/REVAMP.md 6.4): the first tap swaps the
+  // button for "Cancel" (in the same place, so a double tap cancels) and a red
+  // "Yes, ..." beside it. The armed state ends on Cancel, on leaving the
+  // screen and on closing the menu. No timer.
+  function confirmRow(label, yesText, onYes, opts = {}) {
+    const key = opts.id || label;
+    const isArmed = armed === key;
+    const row = h('div', 'rw-menu-confirmrow');
+    row.dataset.confirm = key;
+    row.appendChild(h('span', isArmed || !opts.dim ? '' : 'rw-menu-dim', opts.text || label));
+    const c = h('div', 'rw-menu-confirm');
+    if (!isArmed) {
+      const b = button(opts.button || label, opts.danger ? 'rw-menu-danger' : '', () => { armed = key; render(); }, opts.button || label);
+      b.dataset.role = opts.role || key;
+      c.appendChild(b);
+    } else {
+      row.setAttribute('role', 'alert');
+      const yes = button(yesText, 'rw-menu-danger', () => { armed = null; onYes(); }, yesText);
+      yes.dataset.role = (opts.role || key) + '-confirm';
+      const cancel = button('Cancel', '', () => { armed = null; render(); }, 'Cancel');
+      cancel.dataset.role = (opts.role || key) + '-cancel';
+      c.append(yes, cancel);
+    }
+    row.appendChild(c);
+    return row;
+  }
+  const api = {
+    back: () => goBack(),
+    close: () => close(),
+    go: (id) => go(id),
+    confirmRow,
+    rerender: () => render(),
+    h, button,
+    game,
+  };
+
+  // ---------- Resume (the hub) ----------
   function renderResume() {
-    const box = h('div', 'rw-menu-resume');
-    box.appendChild(h('p', 'rw-menu-dim', 'The game is paused. Your progress is saved automatically.'));
+    const box = h('div', 'rw-menu-hub');
     const r = button('Resume', 'rw-menu-primary', close, 'Resume game');
     r.dataset.role = 'resume';
     box.appendChild(r);
+    const tiles = h('div', 'rw-menu-tiles');
+    const ex = game.explore && game.explore.counts ? game.explore.counts() : null;
+    const miami = !!(game.city && game.city.map);
+    const tile = (role, name, sub, fn) => {
+      const b = button('', 'rw-menu-tile', fn, name + (sub ? ', ' + sub : ''));
+      b.dataset.role = role;
+      b.append(h('b', '', name), h('span', '', sub));
+      tiles.appendChild(b);
+    };
+    // The first two tiles belong to Miami (the classic island has no garages or adventures).
+    if (miami && ex && screens.has('adventures')) tile('adventures', 'Adventures', ex.adventuresDone + ' / ' + ex.adventuresTotal, () => go('adventures'));
+    if (miami && ex && screens.has('garages')) tile('garages', 'Garages', ex.garagesFound + ' / ' + ex.garagesTotal, () => go('garages'));
+    tile('map', 'Map', 'Open the full map', () => {
+      close();
+      // The map system opens on the map button (systems/mapui.js).
+      if (game.input && game.input.press) { game.input.press('map'); game.input.release('map'); }
+    });
+    box.appendChild(tiles);
     body.appendChild(box);
   }
 
-  // Scores: the high scores, then every race and challenge with its
-  // best time, best score and medal (medals are the achievements).
-  function renderScores() {
+  // ---------- Stats: the old Scores and Records on one page ----------
+  function renderStats() {
     const p = game.progress;
     const sc = p.score;
     const live = game.score;
@@ -245,104 +330,35 @@ export function createMenu(root, game, economy) {
     add(num(sc.sessionBest), 'Best session');
     add(sc.best.combo > 0 ? 'x' + sc.best.combo : '-', 'Best combo');
     add(sc.best.jump > 0 ? formatDistance(sc.best.jump) : '-', 'Longest jump');
-    add(sc.best.airtime > 0 ? sc.best.airtime.toFixed(1) + ' s' : '-', 'Longest airtime');
+    add(sc.best.airtime > 0 ? sc.best.airtime.toFixed(1) + ' s' : '-', 'Air time');
     add(sc.best.drift > 0 ? num(sc.best.drift) : '-', 'Best drift');
-    add(sc.best.nearMiss > 0 ? String(Math.round(sc.best.nearMiss)) : '-', 'Near misses in a row');
-    body.appendChild(stats);
-
-    const courses = (game.activities && Array.isArray(game.activities.courses)) ? game.activities.courses : [];
-    const names = new Map();
-    for (const c of courses) if (c && typeof c.id === 'string') names.set(c.id, String(c.name || ''));
-    const medalIds = Object.keys(p.medals).filter((k) => !isFlag(k));
-    const ids = new Set(medalIds);
-    for (const k of Object.keys(p.bestTimes)) ids.add(k);
-    for (const k of Object.keys(sc.courses)) ids.add(k);
-    const count = (m) => medalIds.filter((k) => p.medals[k] === m).length;
-    body.appendChild(h('div', 'rw-menu-group', 'Achievements'));
-    body.appendChild(h('p', 'rw-menu-dim', medalIds.length
-      ? 'Medals: ' + count('gold') + ' gold, ' + count('silver') + ' silver, ' + count('bronze') + ' bronze'
-      : 'No medals yet. Finish a race or a flying challenge!'));
-
-    const missionIds = Object.keys(sc.missions);
-    if (missionIds.length) {
-      body.appendChild(h('div', 'rw-menu-group', 'Missions'));
-      for (const id of missionIds.sort()) {
-        const m = sc.missions[id];
-        const row = h('div', 'rw-menu-row');
-        row.appendChild(h('span', '', pretty(id)));
-        row.appendChild(h('span', 'rw-menu-dim', (m.done ? 'Done ' : '') + num(m.best) + (m.time > 0 ? '  ' + fmtTime(m.time) : '')));
-        body.appendChild(row);
-      }
-    }
-    if (!ids.size) return;
-    const groups = new Map();
-    for (const id of [...ids].sort()) {
-      const g = id.split(/[_-]/)[0];
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(id);
-    }
-    for (const [g, list] of groups) {
-      body.appendChild(h('div', 'rw-menu-group', pretty(g)));
-      for (const id of list) {
-        const row = h('div', 'rw-menu-row');
-        row.dataset.course = id;
-        row.appendChild(h('span', '', names.get(id) || pretty(id)));
-        const right = h('span', 'rw-menu-dim');
-        const medal = p.medals[id];
-        if (medal) {
-          const dot = h('span', 'rw-menu-medal');
-          dot.style.background = MEDAL_COLORS[medal];
-          right.append(dot, medal + '  ');
-        }
-        if (p.bestTimes[id]) right.appendChild(document.createTextNode(fmtTime(p.bestTimes[id]) + '  '));
-        if (sc.courses[id]) right.appendChild(document.createTextNode(num(sc.courses[id]) + ' pts'));
-        row.appendChild(right);
-        body.appendChild(row);
-      }
-    }
-  }
-
-  function renderRecords() {
-    const p = game.progress;
-    const stats = h('div', 'rw-menu-stats');
-    const add = (v, label) => {
-      const s = h('div', 'rw-menu-stat');
-      s.append(h('b', '', v), h('span', 'rw-menu-dim', label));
-      stats.appendChild(s);
-    };
-    add(formatMiles(p.stats.distance), 'Distance travelled');
-    add(String(Math.floor(p.stats.races)), 'Races');
+    add(sc.best.nearMiss > 0 ? String(Math.round(sc.best.nearMiss)) : '-', 'Near misses');
+    add(formatMiles(p.stats.distance), 'Distance');
     add(String(Math.floor(p.stats.flights)), 'Flights');
-    const foundIds = p.secrets && Array.isArray(p.secrets.found) ? p.secrets.found : [];
-    add(foundIds.length + ' / ' + SECRET_DEFS.length, 'Secrets found');
+    add(String(Math.floor(p.stats.races)), 'Races');
+    const medalIds = Object.keys(p.medals).filter((k) => !isFlag(k));
+    add(String(medalIds.length), 'Medals');
+    const ex = game.explore && game.explore.counts ? game.explore.counts() : null;
+    const seen = Object.keys(p.medals).filter((k) => k.startsWith('seen_')).length;
+    add(ex && Number.isFinite(ex.percent) ? Math.round(ex.percent) + ' %' : String(seen), ex && Number.isFinite(ex.percent) ? 'Explored' : 'Areas seen');
     body.appendChild(stats);
 
-    // Hidden spots: a found one shows its name, the rest stay a question.
-    const list = h('div', 'rw-menu-secrets');
-    for (const d of SECRET_DEFS) {
-      const got = foundIds.includes(d.id);
-      const row = h('div', 'rw-menu-row' + (got ? '' : ' rw-menu-dim'));
-      // A real map words the note for its own spot (world/miami-spots.js).
-      const spot = game.secrets && Array.isArray(game.secrets.spots) ? game.secrets.spots.find((q) => q.id === d.id) : null;
-      const note = spot && spot.note ? spot.note : d.note;
-      row.append(h('span', '', got ? d.name : '???'), h('span', 'rw-menu-dim', got ? note : 'Not found yet'));
-      list.appendChild(row);
-    }
-    body.appendChild(list);
-    const all = foundIds.length >= SECRET_DEFS.length;
-    body.appendChild(h('p', 'rw-menu-dim', all ? GARAGE_NAME + ' unlocked: look for the lock-up garage on the map.' : 'Find all ' + SECRET_DEFS.length + ' to unlock something special.'));
-
-    const seen = Object.keys(p.medals).filter((k) => k.startsWith('seen_')).length;
-    body.appendChild(h('p', 'rw-menu-dim', 'Areas explored: ' + seen));
-    body.appendChild(h('p', 'rw-menu-dim', 'Scores, best times and medals are under Scores.'));
+    // Hidden spots: a found one shows its name.
+    const foundIds = p.secrets && Array.isArray(p.secrets.found) ? p.secrets.found : [];
+    const names = SECRET_DEFS.filter((d) => foundIds.includes(d.id)).map((d) => d.name);
+    const line = h('p', '', 'Secrets ' + foundIds.length + ' / ' + SECRET_DEFS.length + (names.length ? ': ' + names.join(', ') : ''));
+    line.dataset.role = 'secrets';
+    body.appendChild(line);
+    if (foundIds.length >= SECRET_DEFS.length) body.appendChild(h('p', 'rw-menu-dim', GARAGE_NAME + ' unlocked: look for the lock-up garage on the map.'));
   }
 
-  function toggleRow(label, key) {
+  // ---------- Settings: four groups ----------
+  function toggleRow(label, key, dflt = false) {
     const row = h('div', 'rw-menu-setting');
     row.appendChild(h('span', '', label));
-    const on = settings()[key];
+    const on = typeof settings()[key] === 'boolean' ? settings()[key] : dflt;
     const b = button(on ? 'On' : 'Off', 'rw-menu-switch', () => {
-      settings()[key] = !settings()[key];
+      settings()[key] = !on;
       commit();
       render();
     }, label);
@@ -352,261 +368,157 @@ export function createMenu(root, game, economy) {
     row.appendChild(b);
     return row;
   }
-
-  // The four steering styles as big radio buttons; onPick(style) on tap.
-  function steeringChooser(current, onPick) {
-    const grid = h('div', 'rw-menu-steer');
-    grid.setAttribute('role', 'radiogroup');
-    grid.setAttribute('aria-label', 'Steering style');
-    for (const [id, label, desc] of STEER_CHOICES) {
-      const b = h('button', 'rw-menu-btn rw-menu-choice');
+  // A row of radio buttons: choices are [value, label]; onPick(value).
+  function segRow(label, choices, current, attr, onPick) {
+    const row = h('div', 'rw-menu-setting');
+    row.appendChild(h('span', '', label));
+    const seg = h('div', 'rw-menu-seg');
+    seg.setAttribute('role', 'radiogroup');
+    seg.setAttribute('aria-label', label);
+    for (const [val, text] of choices) {
+      const b = h('button', '', text);
       b.type = 'button';
       b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(current === id));
-      b.setAttribute('aria-label', label + ' steering: ' + desc);
-      b.dataset.steering = id;
-      b.append(h('b', '', label), h('span', '', desc));
-      b.addEventListener('click', () => onPick(id));
-      grid.appendChild(b);
+      b.setAttribute('aria-checked', String(current === val));
+      b.dataset[attr] = String(val);
+      b.addEventListener('click', () => onPick(val));
+      seg.appendChild(b);
     }
-    return grid;
+    row.appendChild(seg);
+    return row;
   }
-  // Apply a steering style now (setSteering runs inside this tap, which
-  // tilt needs for its permission question).
-  function pickSteering(id) {
-    settings().steering = id;
-    commit();
-  }
-
-  function renderSteering() {
+  function sliderRow(label, key, o) {
     const s = settings();
-    body.appendChild(h('div', 'rw-menu-group', 'Steering'));
-    body.appendChild(steeringChooser(s.steering, (id) => { pickSteering(id); render(); }));
     const row = h('div', 'rw-menu-setting');
-    row.appendChild(h('span', '', 'Steering sensitivity'));
-    const val = h('span', 'rw-menu-sens', Math.round(s.steerSensitivity * 100) + '%');
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '50'; slider.max = '150'; slider.step = '5';
-    slider.value = String(Math.round(s.steerSensitivity * 100));
-    slider.setAttribute('aria-label', 'Steering sensitivity');
-    slider.dataset.setting = 'steerSensitivity';
-    slider.addEventListener('input', () => {
-      settings().steerSensitivity = Math.max(0.5, Math.min(1.5, Number(slider.value) / 100));
-      val.textContent = slider.value + '%';
+    row.appendChild(h('span', '', label));
+    const val = h('span', 'rw-menu-value', '');
+    const sl = document.createElement('input');
+    sl.type = 'range';
+    sl.min = String(o.min); sl.max = String(o.max); sl.step = String(o.step);
+    const cur = Number.isFinite(s[key]) ? s[key] : o.dflt;
+    sl.value = String(o.toUi(cur));
+    val.textContent = o.text(Number(sl.value));
+    sl.setAttribute('aria-label', o.aria || label);
+    sl.dataset.setting = key;
+    if (o.disabled) sl.disabled = true;
+    sl.addEventListener('input', () => {
+      settings()[key] = o.fromUi(Number(sl.value));
+      if (o.after) o.after();
+      val.textContent = o.text(Number(sl.value));
       applySettings();
     });
-    slider.addEventListener('change', () => commit());
-    row.append(slider, val);
-    body.appendChild(row);
-    renderHandling();
-    body.appendChild(h('div', 'rw-menu-group', 'Other'));
+    sl.addEventListener('change', () => commit());
+    row.append(sl, val);
+    return row;
   }
-
-  // Car handling: two big radio buttons (applies to every car at once).
-  function renderHandling() {
-    const current = settings().handling;
-    body.appendChild(h('div', 'rw-menu-group', 'Handling'));
-    const grid = h('div', 'rw-menu-steer');
-    grid.setAttribute('role', 'radiogroup');
-    grid.setAttribute('aria-label', 'Car handling');
-    for (const [id, label, desc] of HANDLING_CHOICES) {
-      const b = h('button', 'rw-menu-btn rw-menu-choice');
-      b.type = 'button';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(current === id));
-      b.setAttribute('aria-label', 'Handling: ' + label + ', ' + desc);
-      b.dataset.handling = id;
-      b.append(h('b', '', label), h('span', '', desc));
-      b.addEventListener('click', () => { settings().handling = id; commit(); render(); });
-      grid.appendChild(b);
-    }
-    body.appendChild(grid);
+  const vol = (label, key, dflt) => sliderRow(label, key, {
+    min: 0, max: 100, step: 1, dflt, toUi: (v) => Math.round(v * 100), fromUi: (v) => v / 100,
+    text: (v) => v + '%', aria: label + ' volume',
+  });
+  const hourText = (x) => { const hh = Math.floor(x), mm = Math.round((x - hh) * 60); return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); };
+  // A row that opens another screen (shows an arrow).
+  function goRow(label, valueText, role, id) {
+    const row = h('div', 'rw-menu-setting');
+    row.appendChild(h('span', '', label));
+    const b = button(valueText, 'rw-menu-go', () => go(id), label + ': ' + valueText);
+    b.dataset.role = role;
+    row.appendChild(b);
+    return row;
   }
+  const currentMap = () => { try { return localStorage.getItem(MAP_CHOICE_KEY) || 'miami'; } catch { return 'miami'; } };
 
   function renderSettings() {
     const s = settings();
-    renderSteering();
-    // Volume: master scales everything; music, effects and ambience sit
-    // inside it (src/audio/levels.js). Mute all silences without moving them.
-    function volRow(label, key, dflt) {
-      const row = h('div', 'rw-menu-setting rw-menu-vol');
-      row.appendChild(h('span', '', label));
-      const val = h('span', 'rw-menu-value', '');
-      const sl = document.createElement('input');
-      sl.type = 'range';
-      sl.min = '0'; sl.max = '100'; sl.step = '1';
-      const cur = Number.isFinite(s[key]) ? s[key] : dflt;
-      sl.value = String(Math.round(cur * 100));
-      val.textContent = sl.value + '%';
-      sl.setAttribute('aria-label', label + ' volume');
-      sl.dataset.setting = key;
-      sl.addEventListener('input', () => {
-        settings()[key] = Number(sl.value) / 100;
-        val.textContent = sl.value + '%';
-        applySettings();
-      });
-      sl.addEventListener('change', () => commit());
-      row.append(val, sl);
-      body.appendChild(row);
-    }
-    volRow('Master', 'master', 0.8);
-    if (typeof s.muteAll !== 'boolean') s.muteAll = false;
-    body.appendChild(toggleRow('Mute all', 'muteAll'));
-    if (typeof s.music !== 'boolean') s.music = true;
-    body.appendChild(toggleRow('Music on/off', 'music'));
-    volRow('Music', 'musicVol', 0.5);
-    volRow('Sound effects', 'sfxVol', 1);
-    volRow('Ambience', 'ambVol', 1);
-
-    // Car radio: the station that plays in cars and boats (src/systems/radio.js).
-    // Tap to step through Off, Lagoon Drive, Pulse Harbour, Lamplight Keys, Gullspeak.
-    if (game.radio) {
+    if (group === 'controls') {
+      body.appendChild(segRow('Steering', STEER_CHOICES.map(([id, label]) => [id, label]), s.steering, 'steering', (id) => {
+        // setSteering runs inside this tap, which tilt needs for its permission question.
+        settings().steering = id; commit(); render();
+      }));
+      body.appendChild(sliderRow('Steering sensitivity', 'steerSensitivity', {
+        min: 50, max: 150, step: 5, dflt: 1, toUi: (v) => Math.round(v * 100),
+        fromUi: (v) => Math.max(0.5, Math.min(1.5, v / 100)), text: (v) => v + '%',
+      }));
+      body.appendChild(segRow('Handling', [['arcade', 'Arcade'], ['sim', 'Sim']], s.handling, 'handling', (id) => { settings().handling = id; commit(); render(); }));
+      body.appendChild(toggleRow('Left-handed', 'leftHanded'));
+      body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
+    } else if (group === 'sound') {
+      if (typeof s.muteAll !== 'boolean') s.muteAll = false;
+      // The old music on/off switch is gone: the Music slider at 0 is off.
+      if (s.music === false) { s.music = true; s.musicVol = 0; }
+      body.appendChild(vol('Master', 'master', 0.8));
+      body.appendChild(toggleRow('Mute all', 'muteAll'));
+      body.appendChild(vol('Music', 'musicVol', 0.5));
+      body.appendChild(vol('Sound effects', 'sfxVol', 1));
+      body.appendChild(vol('Ambience', 'ambVol', 1));
+      // Car radio: Off and the four stations; a tap steps to the next.
       const row = h('div', 'rw-menu-setting');
       row.appendChild(h('span', '', 'Car radio'));
-      const cur = stationInfo(game.radio.station);
+      const station = game.radio ? game.radio.station : s.station;
+      const cur = stationInfo(station);
       const rb = button(cur.name, 'rw-menu-switch', () => {
-        game.radio.setStation(nextStation(game.radio.station, 1), false);
+        if (game.radio) game.radio.setStation(nextStation(game.radio.station, 1), false);
+        else s.station = nextStation(s.station, 1);
         commit();
         render();
       }, 'Car radio station: ' + cur.name + '. Tap for the next one.');
       rb.dataset.setting = 'station';
       row.appendChild(rb);
       body.appendChild(row);
-    }
-
-    // Time of day: live cycle, or a fixed time the player picks.
-    if (typeof s.liveTime !== 'boolean') s.liveTime = true;
-    body.appendChild(toggleRow('Live day and night', 'liveTime'));
-    const tv = h('div', 'rw-menu-setting');
-    const tlabel = h('span', '', 'Time of day');
-    const tshow = h('span', 'rw-menu-value', '');
-    const hourText = (x) => { const hh = Math.floor(x), mm = Math.round((x - hh) * 60); return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); };
-    const ts = document.createElement('input');
-    ts.type = 'range';
-    ts.min = '0'; ts.max = '23.5'; ts.step = '0.5';
-    ts.value = String(Number.isFinite(s.timeOfDay) ? s.timeOfDay : (game.clock || 9));
-    ts.setAttribute('aria-label', 'Time of day');
-    ts.dataset.setting = 'timeOfDay';
-    tshow.textContent = hourText(Number(ts.value));
-    ts.addEventListener('input', () => {
-      settings().timeOfDay = Number(ts.value);
-      settings().liveTime = false;
-      tshow.textContent = hourText(Number(ts.value));
-      applySettings();
-    });
-    ts.addEventListener('change', () => commit());
-    tv.append(tlabel, ts, tshow);
-    body.appendChild(tv);
-
-    body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
-    body.appendChild(toggleRow('Left-handed layout', 'leftHanded'));
-    body.appendChild(toggleRow('Police chases', 'police'));
-    body.appendChild(toggleRow('Hard: you can die', 'mortal'));
-    // Map: Miami (the default) or the classic island. Switching restarts.
-    const mapRow = h('div', 'rw-menu-setting');
-    mapRow.appendChild(h('span', '', 'Map'));
-    const mapBtn = h('button', 'rw-menu-btn', '');
-    const curMap = (() => { try { return localStorage.getItem('rustwater.map') || 'miami'; } catch { return 'miami'; } })();
-    mapBtn.textContent = curMap === 'island' ? 'Classic island (restart)' : 'Miami (restart)';
-    mapBtn.setAttribute('aria-label', 'Map: switch between Miami and the classic island, restarts the game');
-    mapBtn.addEventListener('click', () => {
-      const next = curMap === 'island' ? 'miami' : 'island';
-      try { localStorage.setItem('rustwater.map', next); } catch { /* storage blocked: the choice lasts this visit */ }
-      commit();
-      location.reload();
-    });
-    mapRow.appendChild(mapBtn);
-    body.appendChild(mapRow);
-
-    const hudRow = h('div', 'rw-menu-setting');
-    hudRow.appendChild(h('span', '', 'HUD'));
-    const hudSeg = h('div', 'rw-menu-seg');
-    hudSeg.setAttribute('role', 'radiogroup');
-    hudSeg.setAttribute('aria-label', 'HUD: Minimal folds extra buttons away, Full shows everything');
-    for (const [label, val] of [['Minimal', 'minimal'], ['Full', 'full']]) {
-      const b = h('button', '', label);
-      b.type = 'button';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(s.hud === val));
-      b.dataset.hud = val;
-      b.addEventListener('click', () => { settings().hud = val; commit(); render(); });
-      hudSeg.appendChild(b);
-    }
-    hudRow.appendChild(hudSeg);
-    body.appendChild(hudRow);
-
-    const q = h('div', 'rw-menu-setting');
-    q.appendChild(h('span', '', 'Graphics quality'));
-    const seg = h('div', 'rw-menu-seg');
-    seg.setAttribute('role', 'radiogroup');
-    seg.setAttribute('aria-label', 'Graphics quality');
-    for (const [label, val] of [['Low', 0.75], ['Normal', 1], ['High', 1.25]]) {
-      const b = h('button', '', label);
-      b.type = 'button';
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(s.quality === val));
-      b.dataset.quality = String(val);
-      b.addEventListener('click', () => { settings().quality = val; commit(); render(); });
-      seg.appendChild(b);
-    }
-    q.appendChild(seg);
-    body.appendChild(q);
-
-    // New game: forget the saved car and place only (scores and settings stay).
-    const fresh = h('div', 'rw-menu-setting');
-    if (!confirmNew) {
-      fresh.appendChild(h('span', 'rw-menu-dim', 'Start again in the starter car. Scores and settings stay.'));
-      const b = button('New game (reset car and place)', '', () => { confirmNew = true; render(); }, 'New game');
-      b.dataset.role = 'newgame';
-      fresh.appendChild(b);
+    } else if (group === 'game') {
+      body.appendChild(toggleRow('Police chases', 'police', true));
+      body.appendChild(toggleRow('Hard: you can die', 'mortal'));
+      body.appendChild(goRow('Map', currentMap() === 'island' ? 'Classic island' : 'Miami', 'map', 'mapchoice'));
+      body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {
-      fresh.setAttribute('role', 'alert');
-      fresh.appendChild(h('span', '', 'Leave this car and place behind? Your scores stay.'));
-      const c = h('div', 'rw-menu-confirm');
-      const yes = button('Yes, new game', 'rw-menu-danger', () => {
-        confirmNew = false;
-        if (game.newSession) game.newSession();
-        close();
-      }, 'Confirm new game');
-      yes.dataset.role = 'newgame-confirm';
-      c.append(yes, button('Keep playing', '', () => { confirmNew = false; render(); }, 'Cancel new game'));
-      fresh.appendChild(c);
-    }
-    body.appendChild(fresh);
-
-    const reset = h('div', 'rw-menu-setting');
-    reset.style.borderBottom = '0';
-    if (!confirmReset) {
-      reset.appendChild(h('span', 'rw-menu-dim', 'Erase scores, medals, records and settings.'));
-      const b = button('Reset progress', 'rw-menu-danger', () => { confirmReset = true; render(); }, 'Reset progress');
-      b.dataset.role = 'reset';
-      reset.appendChild(b);
-    } else {
-      reset.setAttribute('role', 'alert');
-      reset.appendChild(h('span', '', 'Really erase everything? This cannot be undone.'));
-      const c = h('div', 'rw-menu-confirm');
-      const yes = button('Yes, erase', 'rw-menu-danger', () => {
-        confirmReset = false;
-        economy.reset();
-        render();
-      }, 'Confirm reset progress');
-      yes.dataset.role = 'reset-confirm';
-      c.append(yes, button('Keep my game', '', () => { confirmReset = false; render(); }, 'Cancel reset'));
-      reset.appendChild(c);
-    }
-    body.appendChild(reset);
-
-    // Licence condition of the real-map data (docs/MAP.md): shown on
-    // any map built from it.
-    if (game.city && game.city.attribution) {
-      const credit = h('p', 'rw-menu-dim', 'Map data (c) OpenStreetMap contributors, ODbL');
-      credit.dataset.role = 'map-credit';
-      body.appendChild(credit);
+      body.appendChild(segRow('HUD', [['minimal', 'Minimal'], ['full', 'Full']], s.hud, 'hud', (v) => { settings().hud = v; commit(); render(); }));
+      body.appendChild(segRow('Graphics quality', [[0.75, 'Low'], [1, 'Normal'], [1.25, 'High']], s.quality, 'quality', (v) => { settings().quality = v; commit(); render(); }));
+      if (typeof s.liveTime !== 'boolean') s.liveTime = true;
+      body.appendChild(toggleRow('Live day and night', 'liveTime', true));
+      body.appendChild(sliderRow('Time of day', 'timeOfDay', {
+        min: 0, max: 23.5, step: 0.5, dflt: game.clock || 9, toUi: (v) => v, fromUi: (v) => v,
+        text: hourText, disabled: s.liveTime, aria: 'Time of day',
+      }));
     }
   }
 
-  function renderHowto() {
+  // ---------- New game and Map choice (their own screens) ----------
+  function renderNewGame() {
+    body.appendChild(confirmRow('New game', 'Yes, new game', () => {
+      const ses = game.session;
+      if (ses && ses.newGame) ses.newGame();
+      else if (game.newSession) game.newSession();
+      close();
+    }, { id: 'newgame', role: 'newgame', text: 'New game: back to the start street in the starter car. Score, garages and adventures are kept.' }));
+    body.appendChild(confirmRow('Erase all progress', 'Yes, erase everything', () => {
+      economy.reset();
+      render();
+    }, { id: 'reset', role: 'reset', danger: true, text: 'Erase all progress: score, medals, secrets, garages, adventures and settings.' }));
+  }
+  function renderMapChoice() {
+    const cur = currentMap() === 'island' ? 'island' : 'miami';
+    const maps = h('div', 'rw-menu-maps');
+    for (const [id, name, yes] of [['miami', 'Miami', 'Yes, switch to Miami'], ['island', 'Classic island', 'Yes, switch to the classic island']]) {
+      const card = h('div', 'rw-menu-card');
+      card.dataset.map = id;
+      card.dataset.current = String(id === cur);
+      card.appendChild(h('b', '', name));
+      if (id === cur) {
+        card.appendChild(h('span', 'rw-menu-dim', 'Playing now'));
+      } else {
+        const row = confirmRow(name, yes, () => {
+          try { localStorage.setItem(MAP_CHOICE_KEY, id); } catch { /* storage blocked: the choice lasts this visit */ }
+          commit();
+          if (typeof location !== 'undefined' && location.reload) location.reload();
+        }, { id: 'map-' + id, role: 'map-' + id, button: 'Switch', text: 'Switching restarts the game. Your place on each map is kept.' });
+        card.appendChild(row);
+      }
+      maps.appendChild(card);
+    }
+    body.appendChild(maps);
+  }
+
+  // ---------- Help ----------
+  function renderHelp() {
     const inv = settings().invertPitch;
     const sections = [
       ['Driving', ['Turn the steering wheel on the left with your thumb (or pick buttons, tilt or a slider under Settings). Use the pedals for gas and brake.',
@@ -632,29 +544,69 @@ export function createMenu(root, game, economy) {
       for (const i of items) ul.appendChild(h('li', '', i));
       body.appendChild(ul);
     }
+    body.appendChild(h('div', 'rw-menu-group', 'Credits'));
+    const credit = h('p', 'rw-menu-dim', CREDIT);
+    credit.dataset.role = 'map-credit';
+    body.appendChild(credit);
+    const ver = h('p', 'rw-menu-dim', 'Rustwater ' + version);
+    ver.dataset.role = 'version';
+    body.appendChild(ver);
   }
 
-  const RENDERERS = { resume: renderResume, scores: renderScores, records: renderRecords, settings: renderSettings, howto: renderHowto };
+  // ---------- screens ----------
+  const BUILTIN = {
+    resume: { title: 'Resume', render: renderResume },
+    stats: { title: 'Stats', render: renderStats },
+    settings: { title: 'Settings', render: renderSettings },
+    help: { title: 'Help', render: renderHelp },
+    newgame: { title: 'New game', render: renderNewGame },
+    mapchoice: { title: 'Map', render: renderMapChoice },
+  };
+  const screenOf = (id) => BUILTIN[id] || screens.get(id) || null;
+  const isTop = (id) => TABS.some(([t]) => t === id);
 
   function render() {
     const top = body.scrollTop;
     body.textContent = '';
-    for (const [id, label] of TABS) {
-      tabButtons[id].setAttribute('aria-selected', String(id === active));
-      tabButtons[id].tabIndex = id === active ? 0 : -1;
-      if (id === active) title.textContent = label;
+    const sc = screenOf(active) || BUILTIN.resume;
+    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' ? 'settings' : 'resume'));
+    for (const [id] of TABS) {
+      tabButtons[id].setAttribute('aria-selected', String(id === railId));
+      tabButtons[id].tabIndex = id === railId ? 0 : -1;
     }
+    const inSettings = active === 'settings';
+    groupBar.style.display = inSettings ? '' : 'none';
+    title.style.display = inSettings ? 'none' : '';
+    title.textContent = sc.title;
+    for (const [id] of GROUPS) {
+      groupButtons[id].setAttribute('aria-selected', String(id === group));
+      groupButtons[id].tabIndex = id === group ? 0 : -1;
+    }
+    const atTop = isTop(active) && !parents.has(active);
+    back.setAttribute('aria-label', atTop ? 'Resume game' : 'Back');
+    back.dataset.mode = atTop ? 'resume' : 'back';
     pointsEl.textContent = num(game.score ? game.score.total : game.progress.score.total) + ' pts';
-    RENDERERS[active]();
+    if (screenOf(active) === BUILTIN[active]) sc.render();
+    else sc.render(body, api);
     body.scrollTop = top;
   }
 
   function show(id) {
-    if (!RENDERERS[id]) id = 'resume';
-    if (id !== active) body.scrollTop = 0;
+    if (!screenOf(id)) id = 'resume';
+    if (id !== active) { body.scrollTop = 0; armed = null; }
     active = id;
-    if (id !== 'settings') confirmReset = confirmNew = false;
     render();
+  }
+  // Open a screen from another screen: Back returns to where it came from.
+  function go(id) {
+    if (!screenOf(id)) return;
+    const from = active;
+    if (id !== from) parents.set(id, from);
+    show(id);
+  }
+  function goBack() {
+    const p = parents.get(active);
+    if (p && screenOf(p)) { parents.delete(active); show(p); } else close();
   }
 
   rail.addEventListener('keydown', (e) => {
@@ -664,26 +616,31 @@ export function createMenu(root, game, economy) {
     if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') n = (i + TABS.length - 1) % TABS.length;
     if (n < 0) return;
     e.preventDefault();
+    parents.delete(TABS[n][0]);
     show(TABS[n][0]);
     tabButtons[TABS[n][0]].focus();
   });
 
-  function reveal(tab) {
+  function reveal(id) {
     opened = true;
     el.classList.add('rw-menu-open');
     if (game.touch && game.touch.setVisible) game.touch.setVisible(false);
-    show(tab || active);
-    tabButtons[active].focus({ preventScroll: true });
+    if (id && id !== active) parents.delete(id);
+    show(id || active);
+    const f = (isTop(active) ? tabButtons[active] : back);
+    f.focus({ preventScroll: true });
   }
   function hide() {
     if (!opened) return;
     opened = false;
-    confirmReset = false;
+    armed = null;
+    parents.clear();
     el.classList.remove('rw-menu-open');
     if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
   }
-  function open(tab) {
-    reveal(tab);
+  // open() with no id (or a pause) shows the hub; open(id) any screen by id.
+  function open(id) {
+    reveal(id || 'resume');
     if (!game.paused) {
       game.paused = true;
       game.events.emit('pause', true);
@@ -721,7 +678,8 @@ export function createMenu(root, game, economy) {
     box.appendChild(h('h2', '', 'How do you want to steer?'));
     box.appendChild(steeringChooser(settings().steering, (id) => {
       medals.hint_steer = 'bronze';
-      pickSteering(id);
+      settings().steering = id;
+      commit();
       ask.remove();
       ask = null;
       if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
@@ -735,5 +693,34 @@ export function createMenu(root, game, economy) {
     return true;
   }
 
-  return { open, close, isOpen: () => opened, maybeAskSteering, isAsking: () => !!ask };
+  // The four steering styles as big radio buttons; onPick(style) on tap.
+  function steeringChooser(current, onPick) {
+    const grid = h('div', 'rw-menu-steer');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', 'Steering style');
+    for (const [id, label, desc] of STEER_CHOICES) {
+      const b = h('button', 'rw-menu-btn rw-menu-choice');
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(current === id));
+      b.setAttribute('aria-label', label + ' steering: ' + desc);
+      b.dataset.steering = id;
+      b.append(h('b', '', label), h('span', '', desc));
+      b.addEventListener('click', () => onPick(id));
+      grid.appendChild(b);
+    }
+    return grid;
+  }
+
+  return {
+    open, close, isOpen: () => opened, maybeAskSteering, isAsking: () => !!ask,
+    // W11 and others add screens: { id, title, render(body, api) }. Returns a remover.
+    registerScreen(def) {
+      if (!def || typeof def.id !== 'string' || typeof def.render !== 'function' || BUILTIN[def.id]) return () => {};
+      const s = { id: def.id, title: String(def.title || def.id), render: def.render };
+      screens.set(s.id, s);
+      return () => { if (screens.get(s.id) === s) screens.delete(s.id); };
+    },
+    screen: () => active,
+  };
 }

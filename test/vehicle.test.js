@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VEHICLE_SPECS, createVehicle, stepVehicle, collideVehicles, vehicleCorners, damageVehicle, setHandlingMode,
+  steerLock, fullLockCurvature, lateralGrip, steerToward, brakePedal,
 } from '../src/entities/vehicle.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createRng } from '../src/core/rng.js';
@@ -250,7 +251,7 @@ test('0-100 km/h times fall in believable bands per spec', () => {
 });
 
 test('braking from 100 km/h stops in a realistic distance, with ABS and no lock', () => {
-  const bands = { sedan: [34, 46], sports: [28, 38], compact: [36, 48], truck: [45, 65], police: [32, 44] };
+  const bands = { sedan: [33, 42], sports: [28, 36], compact: [33, 42], truck: [45, 56], police: [32, 41] };
   for (const [id, [lo, hi]] of Object.entries(bands)) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 100 / 3.6;
@@ -265,13 +266,16 @@ test('braking from 100 km/h stops in a realistic distance, with ABS and no lock'
       assert.ok(v.slip <= 0.31, `${id} slip ${v.slip}`);
     } while (v.speed > 0.05 && v.gear !== 0 && steps < 600);
     assert.ok(v.x >= lo && v.x <= hi, `${id} stopped in ${v.x.toFixed(1)} m, want ${lo}..${hi}`);
-    assert.ok(absSeen, `${id} ABS active`);
+    // Where full pedal asks more than the tyres give, ABS works (a few
+    // cars' brakes sit just under their limit to land in their band;
+    // test/handling-bands.test.js checks ABS for all of them in the wet).
+    if (v.spec.brake > 1.08 * 0.95 * 9.81 * v.spec.grip) assert.ok(absSeen, `${id} ABS active`);
     assert.ok(maxPitch < -0.02, `${id} nose dives (${maxPitch.toFixed(3)})`);
   }
 });
 
-// Realistic grip numbers: this one only holds in the sim mode (arcade
-// corners at about 2.5 g; see test/steering.test.js).
+// Sim grip numbers (Arcade grips about 12 % more; bands in
+// test/handling-bands.test.js).
 test('steady cornering at 20 m/s with full steer settles to a constant radius (sim)', inMode('sim', () => {
   for (const id of ['sedan', 'sports', 'muscle', 'truck']) {
     const v = createVehicle(id, 0, 0, 0);
@@ -294,9 +298,10 @@ test('steady cornering at 20 m/s with full steer settles to a constant radius (s
     const latG = v.speed * mean / 9.81;
     assert.ok(spread < 0.02, `${id} yaw rate wanders ${spread.toFixed(3)}`);
     assert.ok(maxBeta < 6 * DEG, `${id} body slip ${(maxBeta / DEG).toFixed(1)} deg`);
-    // Full input asks for ~0.85 of grip, never a spin.
+    // Full input asks for 1.10 of grip in Sim: the front sits just past
+    // its peak, the car runs a little wide, never a spin.
     const g = v.spec.grip;
-    assert.ok(latG > 0.7 * g && latG < 0.95 * g, `${id} lateral ${latG.toFixed(2)} g (grip ${g})`);
+    assert.ok(latG > 0.85 * g && latG < 1.0 * g, `${id} lateral ${latG.toFixed(2)} g (grip ${g})`);
     assert.ok(radius > 30 && radius < 70, `${id} radius ${radius.toFixed(1)} m`);
     assert.ok(Math.abs(v.roll) > 0.02 && v.roll < 0, `${id} leans out of a right turn (roll ${v.roll.toFixed(3)})`);
   }
@@ -327,7 +332,7 @@ test('releasing the steering at 40 m/s returns straight without weaving', () => 
   }
 });
 
-test('rwd car: handbrake starts a slide, the assist recovers it after release', inBothModes(() => {
+test('rwd car: handbrake starts a slide, the assist recovers it after release', inBothModes((mode) => {
   for (const id of ['sports', 'muscle']) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 20;
@@ -345,13 +350,14 @@ test('rwd car: handbrake starts a slide, the assist recovers it after release', 
       stepVehicle(v, PLAYER({ throttle: 0.3 }), DT, world);
       if (recovered < 0 && Math.abs(bodySlip(v)) < 3 * DEG && Math.abs(v.yawRate) < 0.1) recovered = (i + 1) * DT;
     }
-    assert.ok(recovered > 0 && recovered < 2, `${id} recovered after ${recovered.toFixed(2)} s`);
-    assert.ok(v.speed > 10, `${id} still driving at ${v.speed.toFixed(1)}`);
+    assert.ok(recovered > 0 && recovered < 2, `${mode} ${id} recovered after ${recovered.toFixed(2)} s`);
+    // Sim holds the slide while the handbrake is held, so it scrubs more.
+    assert.ok(v.speed > (mode === 'arcade' ? 10 : 6), `${mode} ${id} still driving at ${v.speed.toFixed(1)}`);
     assert.ok(Math.abs(bodySlip(v)) < 1 * DEG);
   }
 }));
 
-test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches it', inBothModes((mode) => {
+test('power oversteer in rwd cars (Sim), held by the assist (Arcade); fwd cars understeer', inBothModes((mode) => {
   const powerOn = (id) => {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 12;
@@ -367,8 +373,13 @@ test('power oversteer in rwd cars, gentle understeer in fwd ones; assist catches
     return { before, maxBeta, maxYaw, end: Math.abs(bodySlip(v)) };
   };
   const m = powerOn('muscle');
-  assert.ok(m.maxYaw > m.before * 1.3 && m.maxBeta > 6 * DEG, `muscle oversteer ${JSON.stringify(m)}`);
-  assert.ok(m.maxBeta < 25 * DEG, `muscle caught before spinning ${(m.maxBeta / DEG).toFixed(1)}`);
+  if (mode === 'sim') {
+    // No traction control and no stability assist: the tail steps out.
+    assert.ok(m.maxYaw > m.before * 1.3 && m.maxBeta > 6 * DEG, `sim muscle oversteer ${JSON.stringify(m)}`);
+  } else {
+    // Traction control and the stability assist hold it under 16 degrees.
+    assert.ok(m.maxBeta < 16 * DEG, `arcade muscle caught ${(m.maxBeta / DEG).toFixed(1)}`);
+  }
   const s = powerOn('sedan');
   assert.ok(s.maxYaw <= s.before * 1.05 && s.maxBeta < (mode === 'sim' ? 3 : 5) * DEG, `${mode} sedan understeers ${JSON.stringify(s)}`);
   // Off the throttle the front bites harder than on it (weight transfer).
@@ -449,25 +460,57 @@ test('a kerb or wall strike adds suspension travel that decays', () => {
   assert.ok(v.suspension < 0.05);
 });
 
-test('AI steering keeps its angle mapping, and the same lock as the player', () => {
-  // Traffic and police turn a wanted wheel angle into steer with
-  // steerMax / (1 + u / 20); at town speeds that must still hold.
+test('AI and player steering are one mapping: a share of steerLock, and the curvature follows', () => {
+  // Traffic and police send atan(k * L) / steerLock(spec, u) for a wanted
+  // path curvature k; the car then turns about that curvature.
   const s = VEHICLE_SPECS.sedan;
-  const v = createVehicle('sedan', 0, 0, 0);
-  v.vx = 5;
-  run(v, { steer: 0.5, throttle: 0.1, brake: 0, handbrake: false }, 40);
-  const expect = 0.5 * s.steerMax / (1 + Math.abs(v.speed) / 20);
-  assert.ok(Math.abs(v.steerAngle - expect) < 0.01, `${v.steerAngle} vs ${expect}`);
-  // At speed full input from either is clipped to the grip-based lock.
+  for (const u of [5, 12]) {
+    const want = 1 / 40;
+    const v = createVehicle('sedan', 0, 0, 0);
+    v.vx = u;
+    const c = { steer: Math.atan(want * s.wheelBase) / steerLock(s, u), throttle: 0, brake: 0, handbrake: false };
+    for (let i = 0; i < 180; i++) {
+      c.throttle = Math.max(0, Math.min(1, (u - v.speed) * 0.8 + 0.15));
+      stepVehicle(v, c, DT, emptyWorld());
+    }
+    const k = v.yawRate / v.speed;
+    assert.ok(Math.abs(k / want - 1) < 0.12, `at ${u} m/s curvature ${k.toFixed(4)} for ${want}`);
+  }
+  // The same controls give the same wheels with or without steerMode.
   const a = createVehicle('sedan', 0, 0, 0), p = createVehicle('sedan', 0, 0, 0);
   a.vx = p.vx = 30;
   run(a, { steer: 1, throttle: 0.3, brake: 0, handbrake: false }, 60);
   run(p, PLAYER({ steer: 1, throttle: 0.3 }), 60);
-  assert.ok(Math.abs(a.steerAngle - p.steerAngle) < 0.002);
-  assert.ok(p.steerAngle < s.steerMax / (1 + 30 / 20) * 0.5, `lock at 30 m/s ${p.steerAngle}`);
-  // Half input from the player is about half the lock (useful range).
-  const q = createVehicle('sedan', 0, 0, 0);
-  q.vx = 30;
-  run(q, PLAYER({ steer: 0.5, throttle: 0.3 }), 60);
-  assert.ok(Math.abs(q.steerAngle / p.steerAngle - 0.5) < 0.05);
+  assert.ok(Math.abs(a.steerAngle - p.steerAngle) < 1e-12);
+  // The lock at walking pace is the true steerMax; at speed it is set by the grip.
+  assert.equal(steerLock(s, 1), s.steerMax);
+  assert.ok(steerLock(s, 30) < s.steerMax * 0.25, `lock at 30 m/s ${steerLock(s, 30)}`);
+  assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - lateralGrip(s) * 9.81) < 0.05);
+});
+
+test('steering rate: away from centre at lockRate, back at returnRate, through the centre', () => {
+  const lr = 3.3, rr = 4.2, dt = 1 / 60;
+  assert.ok(Math.abs(steerToward(0, 1, lr, rr, dt) - lr * dt) < 1e-12);
+  assert.ok(Math.abs(steerToward(1, 0, lr, rr, dt) - (1 - rr * dt)) < 1e-12);
+  assert.ok(Math.abs(steerToward(-0.5, -0.2, lr, rr, dt) - (-0.5 + rr * dt)) < 1e-12);
+  // Crossing: the rest of the step after the centre is at the lock rate.
+  const x = steerToward(0.03, -1, lr, rr, dt);
+  assert.ok(Math.abs(x - -(dt - 0.03 / rr) * lr) < 1e-12, `${x}`);
+  assert.equal(steerToward(0.5, 0.5, lr, rr, dt), 0.5);
+  let v = 0, n = 0;
+  while (v < 1) { v = steerToward(v, 1, lr, rr, dt); n++; }
+  assert.equal(n, Math.ceil(60 / lr));
+});
+
+test('brake pedal: exact at 0, half and full, strictly rising', () => {
+  assert.equal(brakePedal(0), 0);
+  assert.equal(brakePedal(0.5), 0.5);
+  assert.equal(brakePedal(1), 1);
+  assert.equal(brakePedal(2), 1);
+  let last = -1;
+  for (let p = 0; p <= 1.0001; p += 0.01) {
+    const y = brakePedal(p);
+    assert.ok(y > last, `rising at ${p}`);
+    last = y;
+  }
 });

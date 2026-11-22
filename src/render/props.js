@@ -276,6 +276,53 @@ function makeMiamiTemplates(rng, R) {
   return T;
 }
 
+// Lighter trees for the lot dressing (there are many more of them than
+// street trees): a canopy of four clumps, a palm crown of seven fronds
+// and a trunk in three pieces. About a third of the street tree's
+// triangles, the same pictures and colours.
+function makeLotTemplates(rng, R) {
+  const T = { canopies: [], foliage: [], palmTrunks: [], palmCrowns: [] };
+  const jit = () => rng.next() - 0.5;
+  for (let v = 0; v < 4; v++) {
+    const t = new MeshBuilder(), f = new MeshBuilder(true);
+    const bark = hexShade(0x5e4632, rng.range(0.85, 1.15));
+    const g = LEAF[(v * 2) % LEAF.length];
+    const th = rng.range(0.3, 0.4);
+    t.cyl(0, 0, 0, th + 0.12, 0.05, 0.032, 5, bark, false, 0.65, 1);
+    leafy(f, R.leaves, 0, th + 0.32, 0, 0.24, 0.17, 0.24, hexShade(g, 0.8), 6, 3, jit);
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.09 + v;
+      const r = rng.range(0.13, 0.16);
+      leafy(f, R.leaves, Math.cos(a) * 0.15, th + 0.3 + (i % 2) * 0.12, Math.sin(a) * 0.15, r, r * 0.8, r, hexShade(LEAF[(v + i * 3) % LEAF.length], rng.range(0.85, 1.12)), 5, 3, jit);
+    }
+    T.canopies.push(t);
+    T.foliage.push(f);
+  }
+  for (let v = 0; v < 3; v++) {
+    const t = new MeshBuilder();
+    const lean = rng.range(0.03, 0.1), la = rng.range(0, TAU);
+    const lx = Math.cos(la) * lean, lz = Math.sin(la) * lean;
+    const SEG = 3, H = 0.95;
+    const trunk = v % 2 ? 0x9a8a74 : 0x8c7a62;
+    for (let i = 0; i < SEG; i++) {
+      const k0 = i / SEG, k1 = (i + 1) / SEG;
+      t.cyl(lx * k1 * k1, lz * k1 * k1, k0 * H, k1 * H + 0.004, i === 0 ? 0.038 : 0.027 - k0 * 0.008, 0.027 - k1 * 0.008, 5, hexShade(trunk, i % 2 ? 0.88 : 1.06), false, 0.82, 1);
+    }
+    t.blob(lx, H + 0.03, lz, 0.034, 0.03, 0.034, 0x4a5a30, 4, 2, 0.7, 1);
+    T.palmTrunks.push(t);
+    const c = new MeshBuilder(true);
+    const nF = 7;
+    for (let i = 0; i < nF; i++) {
+      const a = (i / nF) * TAU + rng.range(-0.2, 0.2);
+      const elev = [0.6, 0.15][i % 2] + rng.range(-0.12, 0.12);
+      frond(c, R.frond, lx, H + 0.035, lz, a, elev, rng.range(0.32, 0.4), rng.range(1.4, 2.2), hexShade(0xe8f0d8, rng.range(0.82, 1.05)));
+    }
+    T.palmCrowns.push(c);
+  }
+  return T;
+}
+const lotTemplateCache = new WeakMap();
+
 // Which Miami streets get palms (the rest get round shade trees).
 const PALM_PLACES = new Set(['Brickell', 'Downtown Miami', 'Brickell Key', 'Bayfront Park', 'Park West', 'Edgewater', 'Margaret Pace Park', 'Museum Park',
   'Miami Beach', 'Watson Island', 'Fisher Island', 'Venetian Islands', 'Hibiscus Island', 'Palm Island', 'Virginia Key', 'Miami']);
@@ -341,21 +388,121 @@ function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
   D.wall(x - dx, z - dz, x + dx, z + dz, y0, y1, color, r.u0, r.v0, r.u1, r.v1, sh);
 }
 
+// The street templates are built once per city. Their random numbers
+// come first from the props stream; later calls skip the same count so
+// the rest of the stream (park flower beds) is unchanged.
+const baseCache = new WeakMap();
+function baseTemplates(city) {
+  let base = baseCache.get(city);
+  if (base) {
+    const rng = createRng(city.seed + 4242);
+    for (let i = 0; i < base.n; i++) rng.next();
+    return { T: base.T, rng };
+  }
+  const src = createRng(city.seed + 4242);
+  let n = 0;
+  const next = () => { n++; return src.next(); };
+  const rng = {
+    next,
+    range: (a, b) => a + (b - a) * next(),
+    int: (a, b) => Math.floor(a + (b - a + 1) * next()),
+    chance: (p) => next() < p,
+    pick: (arr) => arr[Math.floor(next() * arr.length)],
+    sign: () => (next() < 0.5 ? -1 : 1),
+  };
+  const T = makeTemplates(rng);
+  baseCache.set(city, { T, n });
+  return { T, rng };
+}
+function miamiTemplates(city, R) {
+  let MT = templateCache.get(city);
+  if (!MT) templateCache.set(city, (MT = makeMiamiTemplates(createRng(city.seed + 9191), R)));
+  return MT;
+}
+const hash2 = (x, z) => {
+  const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+
+// Stamps for the lot dressing (lotmesh.js): the same trees, palms, lamps
+// and street furniture as the streets, into the builders of C (plain,
+// detail, trees, treesDetail, ao, glow). v (0..1) picks a variant.
+export function lotStamps(C) {
+  const { city } = C;
+  const { T } = baseTemplates(city);
+  let MT = null;
+  if (city.map === 'miami' && C.R && C.R.frond) {
+    MT = lotTemplateCache.get(city);
+    if (!MT) lotTemplateCache.set(city, (MT = makeLotTemplates(createRng(city.seed + 7373), C.R)));
+  }
+  const trees = C.trees || C.plain, treesDetail = C.treesDetail || C.detail;
+  return {
+    tree(x, z, y, h, v) {
+      const k = v;
+      const s = 0.95 + hash2(x + 3, z) * 0.25;
+      if (MT) {
+        const w = h * (0.95 + hash2(x, z + 1) * 0.25);
+        const i = (k * MT.canopies.length) | 0;
+        trees.at(x, z).add(MT.canopies[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s, s, s);
+        treesDetail.at(x, z).add(MT.foliage[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s * 0.96, s, s * 0.92);
+      } else {
+        trees.at(x, z).add(T.trees[(k * T.trees.length) | 0], x, y - 0.04, z, k * TAU * 7, h, h, h, s, s, s);
+      }
+      C.ao.at(x, z).aoDisc(x, z, h * 0.36, y + 0.012, 0.55, 8);
+    },
+    palm(x, z, y, h, v) {
+      const s = 0.85 + hash2(x + 3, z) * 0.3;
+      if (MT) {
+        const i = (v * MT.palmTrunks.length) | 0, w = h * (0.9 + hash2(z, x) * 0.2);
+        trees.at(x, z).add(MT.palmTrunks[i], x, y - 0.04, z, v * TAU * 7, h, h, h, s, s, s);
+        treesDetail.at(x, z).add(MT.palmCrowns[i], x, y - 0.04, z, v * TAU * 7, w, h, w, s, s * 1.02, s * 0.95);
+      } else {
+        trees.at(x, z).add(T.palms[(v * 3) | 0], x, y - 0.04, z, v * TAU * 7, h * 1.15, h, h * 1.15, s, s, s);
+      }
+      C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.012, 0.66, 8);
+    },
+    lamp(x, z, y, rot, h = 7) {
+      trees.at(x, z).add(T.lamp, x, y - 0.02, z, rot, 1, h / 7, 1);
+      // A small lit head (night): the glow layer.
+      if (C.glow) C.glow.at(x, z).box(x + Math.cos(rot) * 1.74 - 0.25, z + Math.sin(rot) * 1.74 - 0.25, x + Math.cos(rot) * 1.74 + 0.25, z + Math.sin(rot) * 1.74 + 0.25, y + (6.6 * h) / 7, y + (6.66 * h) / 7, 0xfff2c4);
+    },
+    bench(x, z, y, rot) {
+      C.plain.at(x, z).add(T.bench, x, y, z, rot);
+      C.ao.at(x, z).aoDisc(x, z, 1.0, y + 0.012, 0.7, 6);
+    },
+    bin(x, z, y, rot, v) {
+      C.plain.at(x, z).add(T.bin, x, y, z, rot, 1, 1, 1, v < 0.5 ? 1 : 1.6, v < 0.5 ? 1 : 1.2, 1);
+    },
+    bollard(x, z, y) {
+      C.plain.at(x, z).add(T.bollard, x, y, z, 0);
+    },
+    planter(x, z, y, rot, v) {
+      const fl = v < 0.35;
+      C.plain.at(x, z).add(T.planter, x, y, z, rot, 1, 1, 1, fl ? 1.5 : 1, fl ? 0.9 : 1, fl ? 1.3 : 1);
+      C.ao.at(x, z).aoDisc(x, z, 1.15, y + 0.012, 0.68, 6);
+    },
+    umbrella(x, z, y, v) {
+      const col = UMBRELLA[(v * UMBRELLA.length) | 0];
+      const P = C.plain.at(x, z);
+      P.cyl(x, z, y, y + 2.25, 0.03, 0.03, 4, 0xe8e4dc);
+      P.cyl(x, z, y + 1.9, y + 2.35, 1.45, 0.04, 8, col, false, 0.8, 1.1);
+      C.ao.at(x, z).aoDisc(x, z, 1.7, y + 0.012, 0.66, 8);
+    },
+  };
+}
+
 // own(x, z): emit geometry only for items it accepts (a streamed tile of
 // the real map; null: everything). side: also add the collision circles
 // (the real map does that once, for the whole map, with no geometry).
-export function addProps(C, own = null, side = true) {
+// lists: the items of one streamed tile ({ props, furniture, signals,
+// palms }); null: the whole city.
+export function addProps(C, own = null, side = true, lists = null) {
   const { city, collision } = C;
   const mine = (x, z) => !own || own(x, z);
-  const rng = createRng(city.seed + 4242);
-  const T = makeTemplates(rng);
+  const { T, rng } = baseTemplates(city);
   const R = C.R;
   const miami = city.map === 'miami' && R && R.frond;
-  let MT = null;
-  if (miami) {
-    MT = templateCache.get(city);
-    if (!MT) templateCache.set(city, (MT = makeMiamiTemplates(createRng(city.seed + 9191), R)));
-  }
+  const MT = miami ? miamiTemplates(city, R) : null;
   const L = city.landmarks || { cranes: [], billboards: [], runwayLights: [] };
   const hash = (x, z) => {
     const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
@@ -414,7 +561,7 @@ export function addProps(C, own = null, side = true) {
 
   // ---- the original scattered trees, palms and lamps ----
   const lamps = [];
-  for (const p of city.props) {
+  for (const p of lists ? lists.props : city.props) {
     if (p.type === 'lamp') {
       lamps.push(p);
       if (mine(p.x, p.z)) C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
@@ -432,7 +579,7 @@ export function addProps(C, own = null, side = true) {
 
   // ---- Miami: palms down the avenues and along the seawalls ----
   if (MT) {
-    const spots = miamiPalmSpots(city, lamps, hash, blocked);
+    const spots = lists ? lists.palms : miamiPalmSpots(city, lamps, hash, blocked);
     for (let i = 0; i < spots.length; i += 3) {
       const x = spots[i], z = spots[i + 1], h = spots[i + 2];
       if (side) collision.addCircle(x, z, 0.3, h, 'tree');
@@ -441,7 +588,7 @@ export function addProps(C, own = null, side = true) {
   }
 
   // ---- street furniture ----
-  for (const f of city.furniture || []) {
+  for (const f of lists ? lists.furniture : city.furniture || []) {
     const { x, z, rot, q, v } = f;
     if (side && (f.type === 'streettree' || f.type === 'palmtree')) collision.addCircle(x, z, 0.22, f.type === 'palmtree' ? 6 : 5, 'tree');
     if (!mine(x, z)) continue;
@@ -547,7 +694,7 @@ export function addProps(C, own = null, side = true) {
 
   // ---- traffic lights: poles here, the lamps as one instanced mesh ----
   const bulbs = [];
-  for (const s of city.signals || []) {
+  for (const s of lists ? lists.signals : city.signals || []) {
     if (!mine(s.x, s.z)) continue;
     const P = C.plain.at(s.x, s.z);
     const y = C.groundY(s.x, s.z);
@@ -568,6 +715,10 @@ export function addProps(C, own = null, side = true) {
       }
     }
   }
+
+  // The rest is drawn once per call set: a streamed tile that hands its
+  // items over in pieces passes extras: false for all but one piece.
+  if (lists && lists.extras === false) return { lamps, bulbs, palms: [] };
 
   // ---- parks: a fountain and benches where the paths cross ----
   for (const b of city.blocks) {
@@ -679,5 +830,5 @@ export function addProps(C, own = null, side = true) {
     C.plain.at(x, z).cyl(x, z, -0.1, 6.2, 0.09, 0.06, 5, 0xe8e4dc);
   }
 
-  return { lamps, bulbs };
+  return { lamps, bulbs, palms: MT ? miamiPalmSpots(city, lamps, hash, blocked) : [] };
 }
