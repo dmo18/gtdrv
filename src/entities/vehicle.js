@@ -878,7 +878,8 @@ export function stepVehicle(v, controls, dt, world) {
       // and (Arcade, `calm`) firmer still near the center of the wheel, so
       // a car let go after a lane change settles straight without a weave.
       const near = v.steer < 0 ? -v.steer : v.steer;
-      const calm = H.calm > 0 && near < CALM_BAND ? H.calm * (1 - near / CALM_BAND) : 0;
+      // (The calm damper is an aid for the player's thumb only: AI drivers steer smoothly already.)
+      const calm = H.calm > 0 && controls && controls.steerShape && near < CALM_BAND ? H.calm * (1 - near / CALM_BAND) : 0;
       const firm = ((eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) + calm) * (H.assist ? presetValues().assistK : 1);
       assistMz -= d.iz * firm * eY;
     } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {

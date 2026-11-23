@@ -844,7 +844,9 @@ export function buildRealCity(city, collision, opts = {}) {
       realRoads(city, B, [], t.edges.slice(a, a + 1), own);
       if (over()) { yield 'roads'; ts = now(); }
     }
-    for (const b of t.blocks) addBlock(B, b, DR, groundY, false);
+    // Block middles only where there is no lot ground (the island): on the real map the lots draw the
+    // ground, and a second layer hid bay lines and fought with lot features.
+    if (!city.lots) for (const b of t.blocks) addBlock(B, b, DR, groundY, false);
     if (over()) { yield 'roads'; ts = now(); }
     addSurfaces(city, B, DR, own);
     if (over()) { yield 'roads'; ts = now(); }

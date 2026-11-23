@@ -140,6 +140,9 @@ export function createGround(city) {
   // curbs between its ends (exact taper and miter), else its sidewalk or
   // median band beside the curbs (from the node at a junction end, where
   // the polygon and the sidewalk corners take over).
+  // Edges whose reach covered the last geoSurface point (read at once by
+  // surfaceAt for the narrow-gap net below).
+  let nearEdges = 0;
   function geoSurface(x, z, c, fills = true) {
     const js = cellJ[c];
     for (let q = 0; q < js.length; q++) {
@@ -149,6 +152,7 @@ export function createGround(city) {
     }
     const es = cellE[c];
     let side = false, median = false;
+    nearEdges = 0;
     for (let q = 0; q < es.length; q++) {
       const k = es[q];
       if (geo.inner[k]) continue;
@@ -157,6 +161,7 @@ export function createGround(city) {
       if (d < -reach[k] || d > len[k] + reach[k]) continue;
       const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
       if (Math.abs(s) > reach[k]) continue;
+      nearEdges++;
       const qa = 2 * k, qb = qa + 1;
       const d0 = geo.jEnd[qa] >= 0 ? 0 : geo.trim[qa] + geo.miter[qa] * s;
       const d1 = geo.jEnd[qb] >= 0 ? len[k] : len[k] - geo.trim[qb] + geo.miter[qb] * s;
@@ -170,7 +175,7 @@ export function createGround(city) {
         if (g > 0) { if (s <= cr + g) return 1; continue; }
         const back = cr + walkOf(e);
         if (supAt(geo, e, 0, d)) continue;
-        if (s <= back || (fills && s <= back + fillAt(k, 0, d))) side = true;
+        if (s <= back || (fills && (s <= back + fillAt(k, 0, d) || (fills !== 1 && closes(k, x, z, s - back, 1, fills === true ? 2 : 1))))) side = true;
         continue;
       }
       const gl = gapAt(k, 1, d);
@@ -178,7 +183,7 @@ export function createGround(city) {
       if (supAt(geo, e, 1, d)) continue;
       const m = medianBand(e) > 0;
       const back = cl - (m ? medianAt(city, e, d, cl) : walkLeftOf(e));
-      if (s >= back) { if (m) median = true; else side = true; } else if (fills && s >= back - fillAt(k, 1, d)) side = true;
+      if (s >= back) { if (m) median = true; else side = true; } else if (fills && (s >= back - fillAt(k, 1, d) || (fills !== 1 && closes(k, x, z, back - s, -1, fills === true ? 2 : 1)))) side = true;
     }
     return median ? 3 : side ? 2 : 0;
   }
@@ -384,6 +389,32 @@ export function createGround(city) {
     }
     return best < FILL_MAX + 0.15 && best > 0.15 ? best : 0;
   }
+  // Exact close, per query: a point `t` m beyond the back of edge k's
+  // sidewalk or median (dir 1 right, -1 left) is filled when more road
+  // space lies within CLOSE_MAX m of that back along the edge's normal. The
+  // sampled fills above cover almost all of it; this makes it certain, so
+  // no strip of ground under 1.5 m is left between two roads (test (d)).
+  // Only points in that narrow band pay for the few extra probes.
+  const CLOSE_MAX = 1.8, CLOSE_STEP = 0.25;
+  function closes(k, x, z, t, dir, level) {
+    if (!(t > 0) || t > CLOSE_MAX) return false;
+    const nx = -uz[k] * dir, nz = ux[k] * dir;
+    for (let g = CLOSE_STEP; t + g <= CLOSE_MAX + 1e-9; g += CLOSE_STEP) {
+      if (probeSurface(x + nx * g, z + nz * g, level) !== 0) return true;
+    }
+    return false;
+  }
+  // Road space as the close sees it: strips, sidewalks, medians and the
+  // sampled fills; level 2 also sees other edges' closes (whose own probes
+  // then run at level 1: one step of chaining, no deeper).
+  function probeSurface(x, z, level) {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    const i = cx - gx0, j = cz - gz0;
+    if (i < 0 || j < 0 || i >= W || j >= H) return 0;
+    const c = j * W + i;
+    if (!cellE[c]) build(c, cx, cz);
+    return geoSurface(x, z, c, level);
+  }
   function baseSurface(x, z) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
     const i = cx - gx0, j = cz - gz0;
@@ -393,6 +424,50 @@ export function createGround(city) {
     return geoSurface(x, z, c, false);
   }
 
+  // The narrow-gap net: ground that is off every road but has road space
+  // on two opposite sides within NET_MAX m (2.75) of each other (in one of four
+  // directions) is road space too, flat like asphalt. It catches what the per-edge rules above leave at strip
+  // ends and suppressed sides, so no strip of ground under 1.5 m survives
+  // between two roads. Only points within reach of an edge get here;
+  // results are kept in a small cache on a 0.25 m lattice.
+  const NET_MAX = 2.0, NET_STEP = 0.25, NET_CAP = 20000;
+  const NET_DIRS = [1, 0, 0, 1, Math.SQRT1_2, Math.SQRT1_2, Math.SQRT1_2, -Math.SQRT1_2];
+  const netCache = new Map(), netCache1 = new Map();
+  // Two rounds: the second sees what the first filled, so a fill never
+  // leaves a new narrow strip beside itself.
+  const net1 = (x, z) => baseSurface(x, z) || netRound(x, z, netCache1, baseSurface);
+  function netAt(x, z) {
+    return netRound(x, z, netCache, net1);
+  }
+  function netRound(x, z, cache, probe) {
+    const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
+    const key = qx * 131071 + qz;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    // Worked out at the lattice point, so the answer is one value per cell
+    // whatever point of the cell asked first.
+    x = qx * NET_STEP;
+    z = qz * NET_STEP;
+    let out = probe === baseSurface ? 0 : probe(x, z);
+    for (let q = 0; q < 8 && !out; q += 2) {
+      const ux2 = NET_DIRS[q], uz2 = NET_DIRS[q + 1];
+      let a = 0;
+      for (let g = NET_STEP / 2; g <= NET_MAX; g += NET_STEP / 2) {
+        if (probe(x + ux2 * g, z + uz2 * g)) { a = g; break; }
+      }
+      if (!a) continue;
+      for (let g = NET_STEP / 2; a + g <= NET_MAX + 1e-9; g += NET_STEP / 2) {
+        const sb = probe(x - ux2 * g, z - uz2 * g);
+        // Flat road ground whatever lies each side: the fill is not drawn
+        // as a raised strip, so it must not be an unseen curb step either.
+        if (sb) { out = 1; break; }
+      }
+    }
+    if (cache.size >= NET_CAP) cache.clear();
+    cache.set(key, out);
+    return out;
+  }
+
   // Kind of ground at (x, z): 0 off any road, 1 road, 2 sidewalk, 3 median.
   function surfaceAt(x, z) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
@@ -400,7 +475,10 @@ export function createGround(city) {
     if (i < 0 || j < 0 || i >= W || j >= H) return 0;
     const c = j * W + i;
     const es = cellE[c] || build(c, cx, cz);
-    if (geo) return geoSurface(x, z, c);
+    if (geo) {
+      const r = geoSurface(x, z, c);
+      return r === 0 && nearEdges >= 1 ? netAt(x, z) : r;
+    }
     const ns = cellN[c];
     let side = false;
     for (let q = 0; q < ns.length; q++) {
