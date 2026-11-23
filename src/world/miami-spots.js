@@ -213,14 +213,19 @@ export const MIAMI_SPOTS = {
     { name: 'Palm Island Skip', street: 'Palm Avenue', x: 1800, z: 20 },
   ],
 
+  // Streets with curb parking on both sides where the data has no parking
+  // tags (OSM has almost none here): the designed start street, whose
+  // first view shows cars parked along it (docs/REVAMP.md 6.8).
+  curbParking: ['Southeast 1st Street'],
+
   // Infill style per neighborhood (docs/PLAN_V3.md 2.1 item 9): a box of
   // generated infill in the rect gets 2 to 4 floors (pastel `beach`
   // palette, flat roofs) unless it may be a tower: within `towerWater` m
   // of the water (the bay front and the ocean front) or `towerReach` m of
   // one of `towerStreets`. Later rects win.
   infillStyles: [
-    { name: 'Mid-Beach', x0: 3550, z0: -3950, x1: 6600, z1: -1900, floors: [2, 6], district: 'residential', towerWater: 40 },
-    { name: 'South Beach', x0: 3550, z0: -1900, x1: 6600, z1: 1700, floors: [2, 4], district: 'beach', towerWater: 40, towerStreets: ['West Avenue'], towerReach: 60 },
+    { name: 'Mid-Beach', x0: 3550, z0: -3950, x1: 6600, z1: -1900, floors: [2, 6], towerWater: 40 },
+    { name: 'South Beach', x0: 3550, z0: -1900, x1: 6600, z1: 1700, floors: [2, 4], palette: 'beach', towerWater: 40, towerStreets: ['West Avenue'], towerReach: 60 },
   ],
 
   // Neighborhood names for the HUD (placeOf). Later entries win. Each

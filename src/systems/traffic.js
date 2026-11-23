@@ -912,6 +912,7 @@ export function createTraffic(game, { max = 14 } = {}) {
   const SEED_LP = { x: 0, z: 0, heading: 0 };
   const SEED_STEP = 17, SEED_SLIDE = [0, 7, -7, 14, -14, 21]; // m
   const START_GAP = 8.5; // no two start cars closer than this (m)
+  const ONEWAY_SEED = [10, 19, 28, 37, 46, -11, 55, 64]; // m ahead of the spawn
   function seedStart(n) {
     const sv = city.startView;
     if (!sv || !sv.spawn || !(n > 0)) return 0;
@@ -944,13 +945,16 @@ export function createTraffic(game, { max = 14 } = {}) {
       // Spread along the street ahead of the spawn; if a spot is taken or
       // off the street, slide it along until one is free (never within
       // START_GAP of another car, so the first view has no queue).
-      const base = 14 + Math.floor(i / 2) * SEED_STEP + (oncoming ? 8 : 0);
+      // A one-way start street: one car every 9 m ahead, all with the
+      // traffic, the sixth between the title camera and the spawn.
+      const base = be.oneway ? ONEWAY_SEED[i % ONEWAY_SEED.length] : 14 + Math.floor(i / 2) * SEED_STEP + (oncoming ? 8 : 0);
       let d = -1, qx = 0, qz = 0, lane = 0;
       for (let k = 0; k < SEED_SLIDE.length && d < 0; k++) {
         const ahead = base + SEED_SLIDE[k];
         const dd = oncoming ? be.length - (spAlong + ahead) : spAlong + ahead;
         if (dd < dMin || dd > dMax) continue;
-        lane = k === 0 ? rng.int(0, lanesFrom(be, from) - 1) : lane;
+        // One lane on a one-way start street (a column, not a jam abreast).
+        lane = k === 0 ? (be.oneway ? lanesFrom(be, from) - 1 : rng.int(0, lanesFrom(be, from) - 1)) : lane;
         lanePoint(city, be, from, dd, lane, SEED_LP);
         qx = SEED_LP.x;
         qz = SEED_LP.z;

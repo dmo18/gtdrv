@@ -819,7 +819,9 @@ export function realRoads(city, B, nodes, edges, own = null) {
     // curb on streets with a profile, and the median half a paired
     // one-way owns along its left curb (planted from 1.5 m).
     const walk = e.lanesF !== undefined && !e.bridge && !e.causeway && !e.ped ? e.sidewalk || 0 : 0;
-    const med = e.median > 0 && !e.bridge ? e.median / 2 : 0;
+    // (A median wider than 8 m is lot ground in its middle: the raised
+    // strip covers the 4 m band along each curb, world/miami.js LOT_SETBACK.)
+    const med = e.median > 0 && !e.bridge ? Math.min(e.median / 2, 4) : 0;
     for (let sg = 0; sg < segs; sg++) {
       const d0 = s0 + ((s1 - s0) * sg) / segs, d1 = s0 + ((s1 - s0) * (sg + 1)) / segs;
       const px0 = a.x + ux * d0 + rx * off, pz0 = a.z + uz * d0 + rz * off, px1 = a.x + ux * d1 + rx * off, pz1 = a.z + uz * d1 + rz * off;
@@ -867,7 +869,7 @@ export function realRoads(city, B, nodes, edges, own = null) {
       // US paint from the profile (world/roadprofile.js paintLines):
       // double yellow center, white dashed lane lines (10 ft dash, 30 ft
       // gap), yellow left edge on one-ways and divided roads, parking lane
-      // lines; no zebra anywhere.
+      // lines; crosswalks are two lines, never striped bars.
       paintLines(e, PAINT);
       const ds0 = s0 + 1, ds1 = s1 - 1;
       for (let k = 0; k < PAINT.length; k += 2) {

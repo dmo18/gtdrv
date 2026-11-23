@@ -208,7 +208,7 @@ function tileList() {
 }
 
 // Road tags kept (2.1 item 2). oneway: 1 along the way, -1 against it
-// (`oneway=-1`); roundabouts and motorways are one-way by default.
+// (`oneway=-1`); traffic circles and motorways are one-way by default.
 const ONEWAY_YES = new Set(['yes', 'true', '1']);
 function onewayOf(t) {
   if (ONEWAY_YES.has(t.oneway)) return 1;

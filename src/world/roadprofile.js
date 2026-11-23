@@ -35,7 +35,9 @@ export const PED_STREETS = new Set(['Lincoln Road', 'Espanola Way', 'Española W
 
 // The cross section of a way (a road of the data file, docs/MAP.md
 // "Contents": class, oneway, lanes, lf, lb, name, bridge, mall).
-// opts: { district } (the district key at the way, for the sidewalk).
+// opts: { district } (the district key at the way, for the sidewalk),
+// curbParking (a hand table says the street parks on its curbs where the
+// data has no parking tags: MIAMI_SPOTS.curbParking).
 // Returns a new object with the edge contract's fields:
 // { lanesF, lanesB, laneW, parkL, parkR, median, center, width, oneway,
 //   sidewalk, ped, tagged }. `lanesF` is along the way's own direction
@@ -95,7 +97,7 @@ export function roadProfile(way, opts = {}) {
   // street of three driving lanes (a turn lane counts) parks on the right
   // curb only and one of four or more on neither, so no untagged-wide
   // street passes MAX_UNTAGGED_W.
-  const park = PARKING.has(cls) && !way.bridge && !ped ? PARK_W : 0;
+  const park = (PARKING.has(cls) || opts.curbParking) && !way.bridge && !ped ? PARK_W : 0;
   const drive = lanesF + lanesB + (center ? 1 : 0);
   const parkR = drive <= 3 ? park : 0, parkL = drive <= 2 ? park : 0;
   const width = (lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER;
@@ -136,7 +138,7 @@ export function profileLaneOffset(e, lane, forward) {
 // 'yellow2' (double yellow), 'yellow' (solid yellow edge line), 'white'
 // (solid white edge line), 'dash' (white dashed lane line), 'park'
 // (parking lane line), 'turn' (yellow center turn lane edges, solid outer
-// dashed inner as one 'turn' line). US style, no zebra anywhere.
+// dashed inner as one 'turn' line). US style: crosswalks are two lines.
 export function paintLines(e, out = []) {
   out.length = 0;
   const L = -e.width / 2 + GUTTER + (e.off || 0);

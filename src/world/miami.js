@@ -42,6 +42,8 @@ const DRIVE = new Set([
 const WALK_RING = SIDEWALK_WIDE;
 const WALK_CLEAR = 1.8;
 const SLIVER = 30;
+// Lots and infill start this far past the curb (the sidewalk band).
+const LOT_SETBACK = 4;
 // A data signal or stop sign this close to a junction belongs to it.
 const SIGNAL_SNAP = 22;
 const HOUSE = new Set(['house', 'detached', 'terrace', 'semidetached_house', 'bungalow']);
@@ -958,7 +960,7 @@ export function createMiamiCity(data, opts = {}) {
       if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
     }
     // The cross section (world/roadprofile.js; docs/MAP.md "Edge contract").
-    const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]) });
+    const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]), curbParking: !!r.name && (S.curbParking || []).includes(r.name) });
     const oneway = prof.oneway;
     const avenue = isAvenue(prof);
     const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || (r.lf || 0) + (r.lb || 0) };
@@ -1470,9 +1472,6 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
   };
-  // Divided roads (2.1 item 4): one-way carriageways of one name paired,
-  // with a raised median as wide as the data gap leaves.
-  graphStats.paired = pairDivided(nodes, edges, edgesNear);
   // The strip of an edge: its node line moved `off` to the right.
   const SEG = [0, 0, 0, 0];
   const stripOf = (e) => {
@@ -1480,6 +1479,9 @@ export function createMiamiCity(data, opts = {}) {
     SEG[0] = a.x - e.uz * o; SEG[1] = a.z + e.ux * o; SEG[2] = b.x - e.uz * o; SEG[3] = b.z + e.ux * o;
     return SEG;
   };
+  // Divided roads (2.1 item 4): one-way carriageways of one name paired,
+  // with a raised median as wide as the data gap leaves.
+  graphStats.paired = pairDivided(nodes, edges, edgesNear);
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
     let best = Infinity;
@@ -1836,14 +1838,12 @@ export function createMiamiCity(data, opts = {}) {
     const R = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: near };
     for (const e of edges) {
       const g = stripOf(e);
-      // The curb, the sidewalk and a 1 m verge; the median strip.
-      stampCapsule(R, g[0], g[1], g[2], g[3], e.width / 2 + (e.sidewalk || 0) + 1, 1);
-      if (e.median > 0) {
-        const o = -(e.width / 2 + e.median / 4);
-        stampCapsule(R, g[0] - e.uz * o, g[1] + e.ux * o, g[2] - e.uz * o, g[3] + e.ux * o, e.median / 4 + 0.5, 1);
-      }
+      // The curb and LOT_SETBACK m beyond it (the drawn sidewalk, 1.8 or
+      // 3 m, and a verge; lots and infill start past it, as before). A
+      // median wider than that band is a lot in its middle.
+      stampCapsule(R, g[0], g[1], g[2], g[3], e.width / 2 + LOT_SETBACK, 1);
     }
-    for (const n of nodes) stampRect(R, n.x - n.hx - WALK_RING, n.z - n.hz - WALK_RING, n.x + n.hx + WALK_RING, n.z + n.hz + WALK_RING, 1);
+    for (const n of nodes) stampRect(R, n.x - n.hx - LOT_SETBACK, n.z - n.hz - LOT_SETBACK, n.x + n.hx + LOT_SETBACK, n.z + n.hz + LOT_SETBACK, 1);
     const owner = labelBuf.fill(-1); // free since the blocks step
     const LX0 = land.x0, LZ0 = land.z0;
     const stampOwner = (k) => stampOwnerBox(owner, buildings[k], k, LX0, LZ0, W, H);
@@ -1966,12 +1966,12 @@ export function createMiamiCity(data, opts = {}) {
         const floors = st.floors[0] + Math.floor(f.color * 997 % 1 * (st.floors[1] - st.floors[0] + 1));
         if (!tower || f.h < floors * 3.2) f.h = Math.round(floors * 3.2 + 1);
         f.kind = 'building';
-        if (st.district) f.district = st.district;
+        if (st.palette) f.palette = st.palette;
       }
       infill.push(f);
     }
     for (const f of infill) {
-      const pal = PALETTES[f.district] || PALETTES.midtown;
+      const pal = PALETTES[f.palette || f.district] || PALETTES.midtown;
       addBuilding(f.x0, f.z0, f.x1, f.z1, f.h, f.district, f.kind, pal[Math.floor(f.color * pal.length)], f.osm, -1, true);
       stampOwner(buildings.length - 1);
     }
@@ -2219,7 +2219,9 @@ export function createMiamiCity(data, opts = {}) {
             }
           }
           if (Math.round(along * 2) % Math.round(SPOT_STEP * 2) === 0 && along > 10 && along < 90) {
-            const off = side * (half - 1.25);
+            // In the parking lane of that curb (MIAMI_SPOTS.curbParking).
+            if (!((side > 0 ? e.parkR : e.parkL) > 0)) continue;
+            const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
             const x = px + rx * off, z = pz + rzv * off;
             if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
             if (parkingSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5.5)) continue;
@@ -2440,8 +2442,9 @@ export function createMiamiCity(data, opts = {}) {
   function edgesNear(x, z, r, out) {
     out.length = 0;
     edgesInRect(x - r, z - r, x + r, z + r, (e) => {
-      const a = nodes[e.a], b = nodes[e.b], h = r + e.width / 2;
-      if (segDist2(x, z, a.x, a.z, b.x, b.z) <= h * h) out.push(e.id);
+      // The strip (moved `off` on a tight divided pair).
+      const g = stripOf(e), h = r + e.width / 2;
+      if (segDist2(x, z, g[0], g[1], g[2], g[3]) <= h * h) out.push(e.id);
     });
     return out;
   }

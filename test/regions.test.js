@@ -50,12 +50,12 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // edge fields), buildings, and lots and the lot grid that follow them.
 // A change here means the build changed: find out why before re-pinning.
 const PINNED = {
-  [WHOLE_BOX]: { nodes: '4978b704', edges: '311ac11d', buildings: 'b8b867b8', lots: 'e300464d', lotGrid: '5d5e7dc1' },
-  'miami-downtown': { nodes: '28d450c1', edges: '18f9aab5', buildings: '85cba4ee', lots: '416bcf6a', lotGrid: 'fa406a8a' },
-  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: 'cbdcc9b1', lots: '0629cfff', lotGrid: 'e2766ddf' },
-  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '85f76a6f', lots: 'df7fa5e5', lotGrid: '89ae392f' },
-  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'ba558edb', lots: '2ba460b3', lotGrid: '45b1d1ab' },
-  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: 'e129e0c3', lots: 'b83cd6b0', lotGrid: '89a1f135' },
+[WHOLE_BOX]: { nodes: '2396c3b4', edges: '5a266754', buildings: '1e4c554c', lots: 'f4b99ceb', lotGrid: '9f1c0370' },
+  'miami-downtown': { nodes: '4ff513f1', edges: '88eaf928', buildings: '1043fe9b', lots: '13f2e574', lotGrid: 'c912f48e' },
+  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: '2686c288', lots: 'cf50be29', lotGrid: '7eef0caa' },
+  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '41257f1b', lots: '0916328d', lotGrid: '8ed5230d' },
+  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'd768b63c', lots: '76885555', lotGrid: '31fcbae9' },
+  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: '1baefd1e', lots: '26c85a9c', lotGrid: 'dcab3406' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

@@ -73,7 +73,7 @@ test('lane offsets: right of the divide, inner lane first; one-ways centered on 
   assert.ok(canDrive({ oneway: true, a: 1, b: 2 }, 1) && !canDrive({ oneway: true, a: 1, b: 2 }, 2) && canDrive({ oneway: false, a: 1, b: 2 }, 2));
 });
 
-test('US paint: double yellow on two-way roads, yellow left and white right on one-ways, no zebra', () => {
+test('US paint: double yellow on two-way roads, yellow left and white right on one-ways', () => {
   const out = [];
   const kinds = (p) => { paintLines({ ...p, off: 0 }, out); const k = []; for (let i = 1; i < out.length; i += 2) k.push(out[i]); return k; };
   assert.deepEqual(kinds(roadProfile({ class: 'residential' })).sort(), ['park', 'park', 'yellow2']);

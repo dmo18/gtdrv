@@ -34,7 +34,7 @@ x -4505.8 to 6508.3 m, z +-3891.8 m (11.0 km by 7.8 km).
 
 ## Contents
 
-`roads` (class, name, oneway (1 along the way, -1 against it; roundabouts and
+`roads` (class, name, oneway (1 along the way, -1 against it; traffic circles and
 motorways one-way by default), bridge, lanes, lf and lb (`lanes:forward`,
 `lanes:backward`), mph (`maxspeed`), turn (`turn:lanes`), svc (`service`:
 alley, parking_aisle, ...), area, mall (Lincoln Road Mall, mapped as a
@@ -834,8 +834,8 @@ direction of travel, (-uz, ux) for forward travel. Traffic keeps right.
 | `lanesF` | int >= 0 | driving lanes carrying traffic a to b |
 | `lanesB` | int >= 0 | driving lanes carrying traffic b to a; 0 on a one-way edge |
 | `laneW` | m | width of one driving lane: 3.3 (11 ft), 3.6 (12 ft) on trunk and motorway |
-| `parkL` | m | parking lane on the left curb, seen travelling a to b (0 or 2.4) |
-| `parkR` | m | parking lane on the right curb, seen travelling a to b (0 or 2.4) |
+| `parkL` | m | parking lane on the left curb, seen traveling a to b (0 or 2.4) |
+| `parkR` | m | parking lane on the right curb, seen traveling a to b (0 or 2.4) |
 | `median` | m | raised median (0: none). Only on a paired one-way (`divided`): the data gap between its left curb and its partner's; the edge owns the half along its left curb (`median / 2` wide, curbed, planted from 1.5 m), which is not part of `width` |
 | `width` | m | curb to curb: `(lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER` (GUTTER 0.3) |
 | `oneway` | bool | true: traffic only a to b (`lanesB` 0); the edge is stored in its legal direction |
@@ -860,7 +860,7 @@ a street (11 m) is 1 + 1 lanes of 4.0 m with 1.2 m parking each side; an
 avenue (18 m) 2 + 2 lanes of 3.5 m, a 1.7 m painted `center` and 0.85 m
 parking each side (lane centers 2.0, 2.6 and 6.1 m as before).
 
-Cross section, from the left curb to the right curb seen travelling a to b:
+Cross section, from the left curb to the right curb seen traveling a to b:
 gutter, `parkL`, the `lanesB` lanes, `center`, the `lanesF` lanes, `parkR`,
 gutter. The middle of `width` lies `off` to the right of the node line.
 The divide (center line of a two-way road, middle of its turn lane; the left
@@ -903,3 +903,18 @@ Nodes keep `signal` (traffic light) and gain `stop` (all-way or minor stop
 sign, from the data's `highway=stop` nodes) and `blade` (true: street-name
 blades stand at this junction). `city.streetNames.atlas` lists every name of
 the region in sign-atlas order; `plateIndex(name)` gives its slot.
+
+### 0.9.0 map truth: measured (2026-11-23)
+
+Data: OSM API 0.6 (the Overpass API is not reachable from the build
+container); the first box's tiles came from `build/osm-cache`, the east
+strip was downloaded. Beach region (x 1400 to 6508): 2,071 edges, 434
+paired one-way edges (211 with a raised median), 164 signals and 229 stop
+sign junctions from the data (11 signals generated), 475 junctions with
+blades, 169 names in the sign atlas, 10,040 building boxes of which 4.6 %
+generated infill, 14.3 km2 of land. Widths: residential two-way 12.0 m,
+Ocean Drive (one-way, 1 lane, parking both curbs) 8.7 m, 5th Street (4
+lanes one-way, 9.2 m median) 13.8 m. Start: Ocean Drive at 10th Street;
+the data maps Ocean Drive one-way southbound from 5th to 15th Street, so
+the start faces south (regions.js). Memory at start (headless, after a
+collection): Beach 150 MB, Downtown 149 MB (0.8.0 tree: 143 and 145).
