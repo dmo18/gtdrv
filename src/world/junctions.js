@@ -65,15 +65,22 @@ export function walkLeftOf(e) {
 // half the real distance to the partner's left curb there (the data gap
 // varies along a pair; a fixed band left a sliver of ground down the
 // middle or ran onto the partner), up to 4 m.
+export const MEDIAN_GAP = 6;
 export function medianAt(city, e, d, lc) {
   const m = medianBand(e);
-  if (!(m > 0) || !(e.pair >= 0) || e.median > 8) return m;
+  if (!(m > 0) || !(e.pair >= 0)) return m;
+  // (No median against a partner drawn as part of a junction.)
+  if (city.roadGeo && city.roadGeo.inner[e.pair]) return 0;
+  if (e.median > 8) return m;
   const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
   const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
   const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
   const dist = Math.abs(lat - ((p.off || 0) - p.width / 2));
   // (+0.3 m: the two halves overlap a little, so no ground shows between
   // them where the pair is not parallel.)
+  // A median only where the two curbs are 6 m apart or more; nearer,
+  // the gap is asphalt (world/ground.js gapAt).
+  if (dist < MEDIAN_GAP) return 0;
   return Math.max(0, Math.min(4, dist / 2 + 0.3));
 }
 const walkR = (e) => walkOf(e);
@@ -615,6 +622,13 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       const e = edges[q >> 1];
       if (!e.causeway && !e.ped && !e.bridge) ctrl[q] = 1;
     }
+  }
+  // Dead ends: the strip runs 1.5 m past its node, so a stub that stops
+  // just short of another road's sidewalk meets it (no sliver between).
+  for (let i = 0; i < NN; i++) {
+    if (deg(i) !== 1 || nodeJ[i] >= 0) continue;
+    const e = edges[nodes[i].edges[0]];
+    trim[2 * e.id + (e.b === i ? 1 : 0)] = -1.5;
   }
   // The junctions by 32 m cell of their boxes (junctionsAt).
   const jGrid = new Map();

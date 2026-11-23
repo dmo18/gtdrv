@@ -250,7 +250,8 @@ function makeMiamiTemplates(rng, R) {
     // A hidden core, then a dome of smaller clumps round it: reads as
     // foliage, not as one ball.
     leafy(f, R.leaves, 0, th + 0.3, 0, 0.2, 0.15, 0.2, hexShade(g, 0.7), 6, 3, jit);
-    const n = 8 + (v % 3);
+    // Six to eight clumps (the near shape reaches 64 m now: treebatch.js NO_POP_R).
+    const n = 6 + (v % 3);
     const rad = rng.range(0.19, 0.24);
     for (let i = 0; i < n; i++) {
       const a = i * 2.39996 + v;
@@ -293,7 +294,7 @@ function makeMiamiTemplates(rng, R) {
       const elev = [0.75, 0.3, -0.15][tier] + rng.range(-0.12, 0.12);
       const len = rng.range(0.3, 0.4) * (tier === 0 ? 0.85 : 1);
       const col = hexShade(0xe8f0d8, rng.range(0.82, 1.05));
-      frond(c, R.frond, lx, H + 0.035, lz, a, elev, len, rng.range(1.4, 2.4), col);
+      frond(c, R.frond, lx, H + 0.035, lz, a, elev, len, rng.range(1.4, 2.4), col, 3);
     }
     // A couple of old fronds hanging down, browned.
     for (let i = 0; i < 2; i++) {
@@ -317,7 +318,7 @@ function makeLotTemplates(rng, R) {
     const g = LEAF[(v * 2) % LEAF.length];
     const th = rng.range(0.3, 0.4);
     t.cyl(0, 0, 0, th + 0.12, 0.05, 0.032, 5, bark, false, 0.65, 1);
-    leafy(f, R.leaves, 0, th + 0.36, 0, 0.22, 0.22, 0.22, hexShade(g, 0.95), 7, 4, jit);
+    leafy(f, R.leaves, 0, th + 0.36, 0, 0.22, 0.22, 0.22, hexShade(g, 0.95), 6, 4, jit);
     for (let i = 0; i < 3; i++) {
       const a = i * 2.09 + v;
       const r = rng.range(0.13, 0.16);
@@ -344,7 +345,7 @@ function makeLotTemplates(rng, R) {
     for (let i = 0; i < nF; i++) {
       const a = (i / nF) * TAU + rng.range(-0.2, 0.2);
       const elev = [0.6, 0.15][i % 2] + rng.range(-0.12, 0.12);
-      frond(c, R.frond, lx, H + 0.035, lz, a, elev, rng.range(0.32, 0.4), rng.range(1.4, 2.2), hexShade(0xe8f0d8, rng.range(0.82, 1.05)));
+      frond(c, R.frond, lx, H + 0.035, lz, a, elev, rng.range(0.32, 0.4), rng.range(1.4, 2.2), hexShade(0xe8f0d8, rng.range(0.82, 1.05)), 3);
     }
     T.palmCrowns.push(c);
   }

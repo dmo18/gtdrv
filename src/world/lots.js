@@ -1182,7 +1182,7 @@ export function dressLot(city, lot, out = []) {
       }
       if (!nt) scatter(1, 'planter', 0.7, 0.9, true, 1.5, null);
       // Light poles down the aisles, one per 450 m2 or so.
-      const nl = Math.max(1, Math.min(8, Math.ceil(area / 800)));
+      const nl = Math.max(1, Math.min(6, Math.ceil(area / 1200)));
       let lit = 0;
       for (let k = 0; k < nl * 3 && lit < nl; k++) {
         const a = span0 + ((k % nl + 0.5) / nl) * (span1 - span0);

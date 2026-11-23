@@ -233,23 +233,25 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 // (a row of shrubs) by a hash of the position, so it is the same every
 // time it is drawn. Colors from SHRUB_GREENS (and FLOWERS where `bloom`).
 // No allocation. Returns the triangles made.
-const PROF = 6; // profile points: base, shoulder, top edge, top edge, shoulder, base
-const PC = [1, 1, 0.7, -0.7, -1, -1], PS = [0, 0, 1, 1, 0, 0];
-const PN = [1, 0.85, 0.3, -0.3, -0.85, -1], PNY = [0, 0.53, 0.95, 0.95, 0.53, 0];
-// A clipped hedge: sides that stay upright to the shoulder (the round is
-// only the top edge), so it reads as a hedge, not a pipe.
-const HN = [1, 0.97, 0.35, -0.35, -0.97, -1], HNY = [0, 0.24, 0.94, 0.94, 0.24, 0];
+// Profiles across the strip, right to left: across (share of the half
+// width), height (share of the round top), normal (across, up).
+// A clipped hedge (6 points): sides upright to the shoulder, the round only
+// at the top edges, so it reads as a hedge, not a pipe. A bed of shrubs (4
+// points): a low mound, round all over (its lumps carry the shape).
+const HEDGE_PROF = { n: 6, c: [1, 1, 0.7, -0.7, -1, -1], s: [0, 0, 1, 1, 0, 0], nx: [1, 0.97, 0.35, -0.35, -0.97, -1], ny: [0, 0.24, 0.94, 0.94, 0.24, 0], top: [2, 3] };
+const BED_PROF = { n: 4, c: [1, 0.72, -0.72, -1], s: [0, 1, 1, 0], nx: [1, 0.5, -0.5, -1], ny: [0, 0.87, 0.87, 0], top: [1, 2] };
 export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump, bloom = 0) {
   const ca = Math.cos(heading), sa = Math.sin(heading);
   const rx = -sa, rz = ca; // across the strip
   const n = Math.max(2, Math.round(len / step) + 1);
   const hw0 = width / 2;
+  const PR = bump > 0.5 ? BED_PROF : HEDGE_PROF, PROF = PR.n, PC = PR.c, PS = PR.s;
   const nv = n * PROF + 2 * (PROF + 1);
   B.ensure(nv, (n - 1) * (PROF - 1) * 6 + 2 * (PROF - 1) * 3);
   const base = B.count;
   // Height of the round top: a bed of shrubs is round all over, a clipped
   // hedge has straight sides and a flat top with soft, rounded edges.
-  const top = bump > 0.5 ? Math.min(hw0 * 0.9, h * 0.45) : Math.min(0.2, h * 0.25);
+  const top = bump > 0.5 ? h * 0.35 : Math.min(0.2, h * 0.25);
   for (let k = 0; k < n; k++) {
     const t = k / (n - 1) - 0.5;
     const cx = x + ca * len * t, cz = z + sa * len * t;
@@ -275,10 +277,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
       const across = PC[p] * hw * (edge ? 0.92 : 1 + j * 0.5);
       const sh = (0.55 + 0.5 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.7) * (bump > 0.5 && k % 2 ? 0.85 : 1);
       const tip = j * 0.8;
-      const pn = bump > 0.5 ? PN[p] : HN[p], pny = bump > 0.5 ? PNY[p] : HNY[p];
+      const pn = PR.nx[p], pny = PR.ny[p];
       const nx = rx * pn + ca * tip, nz = rz * pn + sa * tip, ny = pny;
       const nl = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
-      _cl.setHex(flower && (p === 2 || p === 3) && ((k + p) & 1) ? fcol : col, THREE_SRGB);
+      _cl.setHex(flower && (p === PR.top[0] || p === PR.top[1]) && ((k + p) & 1) ? fcol : col, THREE_SRGB);
       B._vert(base + k * PROF + p, cx + rx * across, yy, cz + rz * across, _cl.r * sh, _cl.g * sh, _cl.b * sh, nx * nl, ny * nl, nz * nl);
     }
   }
@@ -289,7 +291,7 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
     const o = (base + k * PROF) * 3, c0 = capAt + e * (PROF + 1);
     const P = B.P, Cc = B.C;
     const mx = (P[o] + P[o + (PROF - 1) * 3]) / 2, mz = (P[o + 2] + P[o + (PROF - 1) * 3 + 2]) / 2;
-    const my = y0 + (P[o + 3 * 3 + 1] - y0) * 0.45;
+    const my = y0 + (P[o + PR.top[0] * 3 + 1] - y0) * 0.45;
     // Pushed out a little along the strip, so the end is round.
     B._vert(c0, mx + ca * sg * hw0 * 0.45, my, mz + sa * sg * hw0 * 0.45, Cc[o + 9], Cc[o + 10], Cc[o + 11], ca * sg, 0.3, sa * sg);
     for (let p = 0; p < PROF; p++) {

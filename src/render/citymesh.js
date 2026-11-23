@@ -916,7 +916,7 @@ export function realRoads(city, B, nodes, edges, own = null) {
     const G = groundOf(city), gaps = e.ped ? null : G.gapOf(e.id);
     let gapped = false;
     if (gaps) for (let k = 0; k < gaps.length; k++) if (gaps[k] > 0) { gapped = true; break; }
-    edgeStations(geo, e, gapped ? 4 : ROAD_PIECE, ST);
+    edgeStations(geo, e, gapped ? 10 : medianBand(e) > 0 && e.median <= 8 ? 4 : ROAD_PIECE, ST);
     if (gapped) {
       const n = gaps.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
       for (let i = 0; i + 1 < n; i++) {
@@ -990,11 +990,16 @@ export function realRoads(city, B, nodes, edges, own = null) {
         if (med > 0 && !bareL) {
           const mb = e.median > MEDIAN_PLANT ? B.grass.at(mx, mz) : wb;
           const m0 = medianAt(city, e, d0, l0), m1 = medianAt(city, e, d1, l1);
+          if (m0 > 0 && m1 > 0) {
           band(mb, l0 - m0, l0, l1 - m1, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
           curb(wb, l0, l1, true);
           // A round nose where the median starts or stops.
-          if (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          if (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          const before = d0 - 4, after = d1 + 4;
+          if (before > geo.trim[2 * e.id] && !(medianAt(city, e, before, curbsAt(geo, e, before).l) > 0)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          if (after < e.length - geo.trim[2 * e.id + 1] && !(medianAt(city, e, after, curbsAt(geo, e, after).l) > 0)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          }
+          if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
         }
       }
     }
