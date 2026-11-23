@@ -47,6 +47,7 @@ export const INTRO_LINES = {
 export const INTRO_REPEAT_S = 35; // a beat's line comes again after this long without progress
 export const INTRO_GAP_S = 5; // seconds between two intro lines
 export const GARAGE_NEAR = 40; // m from the garage that ends the last beat
+export const CLEAR_NEAR = 70, CLEAR_FAR = 170; // m ahead: where the first run's lane is kept clear of moving traffic
 const words = (s) => s.split(/\s+/).filter(Boolean).length;
 export const INTRO_MAX_WORDS = Math.max(...Object.values(INTRO_LINES).map(words));
 
@@ -96,7 +97,7 @@ export function createTutorial(game) {
     const it = intro();
     it.step = n;
     if (n >= INTRO_STEPS.length) it.done = true;
-    game.events.emit('progress');
+    if (game.loopSave) game.loopSave(); else game.events.emit('progress');
     aim();
   }
   // Point the GPS at this beat's gate (or garage).
@@ -152,6 +153,7 @@ export function createTutorial(game) {
   let pendingNext = ''; // the next beat's line, said after the line that closed the last beat
   let started = false;
   let beatLabel = ''; // the beat line the GPS goal carries
+  let clearT = 0, wasFirstRun = false;
 
   function stepIntro(dt) {
     const s = se();
@@ -166,6 +168,20 @@ export function createTutorial(game) {
     sinceLine += dt;
     if (lineGap > 0) lineGap -= dt;
     const st = stepName();
+    // The very first run is a clear street lined with parked cars: moving
+    // traffic far ahead in the lane is taken away before the player gets to
+    // it (and the queue at the gate once, as the run starts). After the first
+    // medal the streets are as they are.
+    if ((st === 'run' || st === 'medal') && s.clearAhead) {
+      clearT -= dt;
+      const firstRun = !!s.active && s.active.ev.intro === true;
+      if (firstRun && !wasFirstRun) s.clearAhead(CLEAR_FAR, 2, true);
+      wasFirstRun = firstRun;
+      if (clearT <= 0 && (firstRun || st === 'run')) {
+        clearT = 0.25;
+        s.clearAhead(CLEAR_FAR, CLEAR_NEAR, true);
+      }
+    }
     // Things the player ran into by themselves.
     const stars = game.police ? game.police.stars : 0;
     if (stars > 0 && !saidWanted && !pending && intro().step >= 1) { saidWanted = true; say('wanted'); }
@@ -231,7 +247,7 @@ export function createTutorial(game) {
     fixedUpdate(dt) {
       // Nothing while the title screen still shows (the simulation runs behind it).
       if (game.titleCam && game.titleCam.active) return;
-      if (introOn()) {
+      if (introOn() && !game.phoneCheckRunning) {
         const mode = game.player.mode;
         if (mode === 'car' || mode === 'foot') stepIntro(dt);
       }

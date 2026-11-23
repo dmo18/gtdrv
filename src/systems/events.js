@@ -104,7 +104,7 @@ export function createStreetEvents(game, opts = {}) {
       r.points = eventPoints(run.medal, rec.newBest);
       if (ev.tpl === 'jump') noteBest(L, 'jumpFt', run.value);
       // Straight into the score, quietly: the result line says the medal.
-      if (r.points > 0 && game.score && game.score.bankFlow) game.score.bankFlow(r.points);
+      if (r.points > 0 && game.score && game.score.bankFlow) game.score.bankFlow(r.points, true);
       if (run.medal) r.daily = run.daily;
     } else recordTry(L, ev);
     lastResult = r;
@@ -125,7 +125,8 @@ export function createStreetEvents(game, opts = {}) {
       // 'reward' is the chime, 'fail' the low tone (systems/audio.js).
       if (run.medal) bus.emit('reward', r.points, 'event'); else bus.emit('fail', ev.id, run.why || 'No medal');
       bus.emit('streetEventEnd', r);
-      bus.emit('progress');
+      // Saved at the next quiet moment (systems/missions.js), not in the middle of this step.
+      if (game.loopSave) game.loopSave(); else bus.emit('progress');
     }
     markTarget(null);
     if (game.hud && game.hud.setEvent) game.hud.setEvent(null);
@@ -301,7 +302,9 @@ export function createStreetEvents(game, opts = {}) {
     track(ev, label = '') { tracked = ev || null; trackLabel = label || ''; },
     // Stopped traffic in the lane ahead of the player makes room (the start
     // of the intro: the first gate must be reachable without a queue).
-    clearAhead(dist = 90) {
+    // `from`: only traffic at least this far ahead (the far end of the view, where it is small).
+    // `all`: moving traffic too (the intro's first run keeps its lane open; parked cars stay).
+    clearAhead(dist = 90, from = 2, all = false) {
       const p = game.player, v = p.vehicle;
       if (!v) return 0;
       const fx = Math.cos(v.heading), fz = Math.sin(v.heading);
@@ -313,7 +316,7 @@ export function createStreetEvents(game, opts = {}) {
         const dx = o.x - v.x, dz = o.z - v.z;
         const al = dx * fx + dz * fz;
         // anything within 35 m, and whatever stands still farther on
-        if (al > 2 && al < dist && Math.abs(-dx * fz + dz * fx) < 3 && (al < 35 || Math.abs(o.speed || 0) < 2)) { game.removeVehicle(o); n++; }
+        if (al > from && al < dist && Math.abs(-dx * fz + dz * fx) < 3.4 && (all || al < 35 || Math.abs(o.speed || 0) < 2)) { game.removeVehicle(o); n++; }
       }
       return n;
     },
@@ -375,7 +378,7 @@ export function createStreetEvents(game, opts = {}) {
         F.stars = game.police ? game.police.heat.level : 0;
         const res = run.step(dt, F);
         if (res) finish(res);
-      } else if (inCar && !v.wrecked && Number.isFinite(px)) {
+      } else if (inCar && !v.wrecked && Number.isFinite(px) && !game.phoneCheckRunning) {
         // Through a gate, the right way, at more than a crawl: the event starts.
         const sp = Math.abs(v.speed || 0);
         if (sp >= GATE_MIN_SPEED) {

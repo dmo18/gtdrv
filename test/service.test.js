@@ -146,7 +146,11 @@ test('SV-H1: each service spec measures inside its band in both modes; police ke
         assert.ok(inBand(t60, b.t60), `${tag} 0-60 ${t60.toFixed(2)} band ${b.t60}`);
         assert.ok(inBand(top, b.top), `${tag} top ${top.toFixed(1)} band ${b.top}`);
         assert.ok(inBand(stop, b.stop), `${tag} stop ${stop.toFixed(1)} band ${b.stop}`);
-        if (b.circle) assert.ok(inBand(curbCircleFt(VEHICLE_SPECS[id], r), b.circle), `${tag} circle ${curbCircleFt(VEHICLE_SPECS[id], r).toFixed(1)} ft band ${b.circle}`);
+        // (Task PLANTED, deliberate: the police sedan's 40 ft circle is Sim's; in
+        // Arcade it cuts 40 degrees like every car, about 35 ft. The four
+        // service trucks are over 3000 kg and keep their own lock in both modes.)
+        if (b.circle && mode === 'arcade') assert.ok(inBand(curbCircleFt(VEHICLE_SPECS[id], r), [33, 36]), `${tag} circle ${curbCircleFt(VEHICLE_SPECS[id], r).toFixed(1)} ft`);
+        else if (b.circle) assert.ok(inBand(curbCircleFt(VEHICLE_SPECS[id], r), b.circle), `${tag} circle ${curbCircleFt(VEHICLE_SPECS[id], r).toFixed(1)} ft band ${b.circle}`);
         else assert.ok(inBand(r, b.r0), `${tag} r0 ${r.toFixed(2)} band ${b.r0}`);
       }
     });
@@ -171,7 +175,8 @@ test('SV-H2: lateral grip at both test speeds, lock and return times', () => {
           const u = u0 === 30 && s.maxSpeed < 36 ? 0.8 * s.maxSpeed : u0;
           const k = latShare(id, u);
           // HANDLE: on the mode's grip curve (Arcade 1.25 to 1.1 of spec.grip by speed, Sim 1).
-          const f = mode === 'arcade' ? arcadeFactor(u) : 1;
+          // (Task PLANTED: the Arcade curve is 1.6 to 1.25 now; the service vehicles keep 5/12 of its gain, 1.25 to 1.10 as before.)
+          const f = mode === 'arcade' ? arcadeFactor(u, VEHICLE_SPECS[id]) : 1;
           assert.ok(inBand(k / f, LAT_SHARE), `${mode} ${id} at ${u.toFixed(1)}: ${(k / f).toFixed(3)} of the curve x grip`);
         }
         assert.ok(inBand(1 / s.lockRate, LOCK_TIME) && 1 / s.lockRate >= 0.355, `${id} lock ${(1 / s.lockRate).toFixed(3)}`);

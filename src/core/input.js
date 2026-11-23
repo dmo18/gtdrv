@@ -150,7 +150,7 @@ export function attachKeyboard(input, target = window) {
 // (src/entities/vehicle.js) are the only rate limit. The two allowed input
 // filters are the button ramp and the tilt low-pass below.
 export const STEER_STYLES = ['wheel', 'buttons', 'tilt', 'slider'];
-export const CURVE_LINEAR = 0.85;
+export const CURVE_LINEAR = 0.9; // task PLANTED: was 0.85 (nearly linear: no vagueness near the center)
 // Travel for full lock at sensitivity 1: wheel degrees, slider CSS px from
 // the bar center, tilt degrees of phone roll past the dead zone, buttons
 // seconds from center to a full target.
@@ -169,8 +169,8 @@ export const clampSensitivity = (s) => (Number.isFinite(s) ? Math.max(0.5, Math.
 const clamp1 = (x) => (x > 1 ? 1 : x < -1 ? -1 : x);
 
 // Raw input x in -1..1 to the steering target in -1..1: odd, strictly
-// rising, wheelCurve(0) = 0, wheelCurve(1) = 1, wheelCurve(0.5) = 0.44375,
-// slope 0.85 at the center (a gentle curve, nearly linear).
+// rising, wheelCurve(0) = 0, wheelCurve(1) = 1, wheelCurve(0.5) = 0.4625,
+// slope 0.9 at the center (0.9 x + 0.1 x^3: nearly linear).
 export function wheelCurve(x) {
   const a = clamp1(+x || 0);
   return CURVE_LINEAR * a + (1 - CURVE_LINEAR) * a * a * a;

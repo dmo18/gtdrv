@@ -46,7 +46,7 @@ const url = `http://127.0.0.1:${port}/` + (map ? `?map=${map}` : '');
 const installDriver = () => {
   const g = window.__rw;
   const src = g.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false });
-  const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
+  const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, stucks: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
   const toast0 = g.hud.toast;
   g.hud.toast = (t, s, k) => { st.toasts.push([Math.round(g.time * 10) / 10, k || '', String(t)]); toast0(t, s, k); };
   function ahead(dist) {
@@ -76,7 +76,7 @@ const installDriver = () => {
     const tr = g.objective.tracker;
     if (!o.line && tr.active && tr.route.ok) {
       const t = tr.next();
-      if (t && t.kind !== 'arrive' && t.kind !== 'depart' && tr.toTurn < 14 + sp * 1.6) cruise = Math.min(cruise, 8);
+      if (t && t.kind !== 'arrive' && t.kind !== 'depart' && tr.toTurn < 14 + sp * 1.6) cruise = Math.min(cruise, 7);
     }
     let side = 0;
     if (o.ram) {
@@ -122,15 +122,24 @@ const installDriver = () => {
     if (st.stuck > 1.6) {
       st.stuck = 0;
       st.revs++;
+      st.stucks++;
       st.rev = 1.6 + (st.revs % 3) * 0.6;
       st.revSteer = (st.revs % 2 ? -1 : 1) * Math.sign(err || 1) * 0.9;
     }
   }
-  function idle() { src.throttle = 0; src.brake = 1; src.steer = 0; }
+  // Stop and stand (the brake held at a standstill would reverse the car).
+  function idle() {
+    const v = g.player.vehicle;
+    const moving = !!v && Math.abs(v.speed) > 0.4;
+    src.throttle = 0; src.brake = moving ? 1 : 0; src.handbrake = !moving; src.steer = 0;
+  }
   // Run the simulation: `o` as drive(), o.until(g) ends it, o.seconds caps it.
   function run(o) {
     const n = Math.round((o.seconds || 10) * 60);
     let i = 0;
+    const v0 = g.player.vehicle;
+    st.stuck = 0; st.rev = 0; st.lt = 0; st.lx = v0 ? v0.x : 0; st.lz = v0 ? v0.z : 0; st.stucks = 0;
+    src.handbrake = false;
     for (; i < n; i++) {
       if (o.brake) idle(); else drive(o);
       const a = performance.now();
@@ -253,7 +262,7 @@ try {
       const far = [[c.x0 + 400, c.z0 + 400], [c.x1 - 400, c.z1 - 400], [c.x0 + 400, c.z1 - 400], [c.x1 - 400, c.z0 + 400]]
         .sort((a, b) => Math.hypot(b[0] - p.x, b[1] - p.z) - Math.hypot(a[0] - p.x, a[1] - p.z))[1];
       g.waypoint = { x: far[0], z: far[1] };
-      window.__lt.run({ seconds: 100, cruise: 30, pass: true, until: (g2) => g2.tutorial.introStep !== 'police' });
+      window.__lt.run({ seconds: 100, cruise: 24, until: (g2) => g2.tutorial.introStep !== 'police' });
       g.waypoint = null;
     });
     s = await state();
@@ -269,8 +278,20 @@ try {
   check(s.step === 'ramp', `the intro points at a ramp (${s.step}): "${s.line}"`);
   let jumped = false;
   for (let go = 0; go < 3 && !jumped; go++) {
-    await page.evaluate(() => window.__lt.run({ seconds: 150, cruise: 18, to: window.__lt.beyond(), until: (g) => !!g.streetEvents.active || g.tutorial.introStep !== 'ramp' }));
+    const drove = await page.evaluate(() => {
+      const g = window.__rw, lt = window.__lt, se = g.streetEvents;
+      lt.run({ seconds: 150, cruise: 18, to: lt.beyond(), until: () => !!se.active || g.tutorial.introStep !== 'ramp' || lt.st.stucks >= 4 });
+      // The simple driver can wedge itself against a wall. A player would back out; it takes the RETRY kind of help.
+      if (!se.active && g.tutorial.introStep === 'ramp' && se.tracked && se.tracked.id) {
+        const ev = se.tracked;
+        se.stage(ev);
+        lt.run({ seconds: 12, cruise: 20, line: { x: ev.x, z: ev.z, dx: ev.dx, dz: ev.dz }, until: () => !!se.active });
+        return 'staged at the gate after ' + lt.st.stucks + ' stucks';
+      }
+      return 'drove there';
+    });
     s = await state();
+    console.log('   to the purple gate: ' + drove + ' (' + s.t + ' s)');
     if (go === 0) await shot('07-purple-gate');
     await page.evaluate(() => {
       const g = window.__rw, ev = g.streetEvents.active ? g.streetEvents.active.ev : null;
@@ -292,8 +313,25 @@ try {
   s = await state();
   check(s.step === 'garage', `the intro points at the nearest garage (${s.step}): "${s.line}"`);
   await shot('09-to-garage');
-  await page.evaluate(() => window.__lt.run({ seconds: 240, cruise: 18, to: window.__lt.beyond(), until: (g) => !g.tutorial.introOn }));
+  const toGarage = await page.evaluate(() => {
+    const g = window.__rw, lt = window.__lt;
+    let how = 'drove there';
+    for (let k = 0; k < 3 && g.tutorial.introOn; k++) {
+      lt.run({ seconds: 150, cruise: 18, to: lt.beyond(), until: () => !g.tutorial.introOn || lt.st.stucks >= 4 });
+      if (g.tutorial.introOn && lt.st.stucks >= 4) {
+        // Wedged: RESPAWN (the game's own button), then the nearest car, as a player would.
+        g.respawnPlayer();
+        lt.run({ brake: true, seconds: 1 });
+        const p = g.player;
+        const near = g.vehicles.filter((c) => c.kind === 'car' && !c.wrecked && !c.driver).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
+        if (near) g.enterVehicle(near);
+        how = 'respawned and took the nearest car';
+      }
+    }
+    return how;
+  });
   s = await state();
+  console.log('   to the garage: ' + toGarage + ' (' + s.t + ' s)');
   check(!s.on, `the intro ends at the garage (${s.t} s, ${((s.t - t0) / 60).toFixed(1)} min from the start)`);
   await shot('10-garage-done');
 
@@ -333,7 +371,7 @@ try {
 
   // ---- flow: build a run, then stop to bank it ----
   const bank = await page.evaluate(() => {
-    const g = window.__rw, lt = window.__lt;
+    const g = window.__rw;
     const before = g.score.total;
     g.flow.feed('nearMiss', 150, 'Near miss');
     g.flow.feed('nearMiss', 150, 'Near miss x2');
@@ -341,7 +379,7 @@ try {
     g.flow.feed('nearMiss', 150, 'Near miss x4');
     g.flow.feed('nearMiss', 150, 'Near miss x5');
     const tier = g.flow.tier, run = g.flow.run;
-    lt.draw();
+    g.hudState.pending = run; g.hudState.combo = tier; g.hudState.flow = g.flow.meter; g.hudState.flowTier = tier;
     return { before, tier, run };
   });
   await shot('14-flow-x2');

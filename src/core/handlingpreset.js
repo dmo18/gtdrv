@@ -4,24 +4,28 @@
 // one-tap verdict as settings.handlingVerdict (absent reads as 'none').
 //
 // One table, PRESET_VALUES, read by the car model (entities/vehicle.js
-// setHandlingPreset and every step) and by the lab; 'standard' is today's
-// car (every multiplier 1, no lock floor):
+// setHandlingPreset and every step) and by the lab; 'standard' is the
+// Arcade target of task PLANTED (docs/REVAMP.md 6.3: planted, sharp,
+// direct), every multiplier 1:
 //   lockK / returnK  steering rate multipliers (to full lock, back to center)
-//   lockDeg          lowest full-lock wheel angle at walking pace (0: the spec's;
-//                    Sharp's 40 degrees is past every car's own 33 to 36, a
-//                    circle about 0.8 of Standard's)
-//   gripK            lateral grip multiplier
-//   assistK          stability assist (yaw and slide) gain multiplier
+//   lockDeg          lowest full-lock wheel angle at walking pace in either
+//                    mode (0: the spec's, or Arcade's 40 degrees for cars)
+//   lockAdd          degrees added to Arcade's lock (Sharp 44)
+//   gripK            lateral grip multiplier (both modes)
+//   gainK            share of Arcade's grip gain over the real car kept
+//                    (Arcade 1.6 times the table in town: Relaxed 1.42)
 //   rollK            body roll multiplier
 //   shapeK           player input shaping by speed (vehicle.js steerShapeExp):
 //                    multiplier on the exponent's rise above 1 (more is
 //                    finer at speed, less is more direct)
+// Relaxed is gentler (less grip gain, slower steering, more roll); Sharp is quicker and cuts further (Sim too: lockDeg).
+// (assistK went with the Arcade stability assist: the planted model has none.)
 export const PRESETS = ['standard', 'relaxed', 'sharp'];
 export const PRESET_LABELS = { standard: 'Standard', relaxed: 'Relaxed', sharp: 'Sharp' };
 export const PRESET_VALUES = Object.freeze({
-  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 }),
-  relaxed: Object.freeze({ lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3, shapeK: 1.2 }),
-  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85, shapeK: 0.75 }),
+  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1 }),
+  relaxed: Object.freeze({ lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25 }),
+  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, lockAdd: 4, gripK: 1, gainK: 1, rollK: 0.85, shapeK: 0.5 }),
 });
 
 // Verdict ids, their button text and the Phone check token (the id itself).

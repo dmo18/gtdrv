@@ -242,7 +242,9 @@ const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 // Leaf colors of hedges, shrubs and beds; a bed now and then flowers.
 const SHRUB_GREENS = [0x3f6c32, 0x4a7a3a, 0x3a6230, 0x52803e, 0x44703a];
 const FLOWERS = [0xc8507a, 0xe07a3a, 0xd8c040, 0xb05ab0];
-// Planting beds: a shrub every BED_PITCH m.
+// Bay lines are 0.24 m wide (they were 0.16 and vanished at a few meters
+// on a phone). Planting beds: a shrub every BED_PITCH m.
+const BAY_HW = 0.12;
 const BED_PITCH = 2.2;
 const DUMPSTERS = [0x2f5a3c, 0x2a4a6a, 0x4a4e52];
 const FLAGS = [0x2a4a8a, 0xb83a30, 0xf2f0ea, 0x2f7a50];
@@ -514,8 +516,8 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         for (let s = 0; s <= nb; s++) {
           const o = -half + s * bw;
           const px = x + ca * o, pz = z + sa * o;
-          orientedQuad(lb, px - ca * 0.08 - cx * dh, pz - sa * 0.08 - cz * dh, px + ca * 0.08 - cx * dh, pz + sa * 0.08 - cz * dh,
-            px + ca * 0.08 + cx * dh, pz + sa * 0.08 + cz * dh, px - ca * 0.08 + cx * dh, pz - sa * 0.08 + cz * dh, FLAT_Y, 0xeeeee6);
+          orientedQuad(lb, px - ca * BAY_HW - cx * dh, pz - sa * BAY_HW - cz * dh, px + ca * BAY_HW - cx * dh, pz + sa * BAY_HW - cz * dh,
+            px + ca * BAY_HW + cx * dh, pz + sa * BAY_HW + cz * dh, px - ca * BAY_HW + cx * dh, pz - sa * BAY_HW + cz * dh, FLAT_Y, 0xf6f6ee);
         }
         break;
       }

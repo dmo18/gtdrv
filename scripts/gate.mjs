@@ -3,10 +3,14 @@
 //        npm run gate -- --ui    also runs the ui-test (about 8 minutes)
 //        npm run gate -- --regions  also loads and drives every Miami region
 //                                (scripts/smoke-regions.mjs, PLAN_V2 5.4)
+//        npm run gate -- --phone  also plays the Phone check drive at 4x CPU throttle and fails
+//                                on frames over the pinned count (scripts/phonecheck-run.mjs,
+//                                docs/PERF.md; about 6 minutes)
 import { spawnSync } from 'node:child_process';
 
 const ui = process.argv.includes('--ui');
 const regions = process.argv.includes('--regions');
+const phone = process.argv.includes('--phone');
 const node = process.execPath;
 const steps = [
   ['lint', 'npx', ['eslint', '.']],
@@ -18,6 +22,7 @@ const steps = [
   ['touch-test', node, ['scripts/touch-test.mjs']],
 ];
 if (regions) steps.push(['smoke regions', node, ['scripts/smoke-regions.mjs', '--no-build']]);
+if (phone) steps.push(['phone check', node, ['scripts/phonecheck-run.mjs', '--check', '--quiet']]);
 if (ui) steps.push(['ui-test', node, ['scripts/ui-test.mjs']]);
 
 const rows = [];
@@ -33,6 +38,7 @@ for (const [name, cmd, args] of steps) {
 console.log('\nstep            result  time');
 for (const [n, s, t] of rows) console.log(`${n.padEnd(15)} ${s.padEnd(7)} ${t}`);
 if (!regions) console.log('smoke regions   skipped (add --regions)');
+if (!phone) console.log('phone check     skipped (add --phone)');
 if (!ui) console.log('ui-test         skipped (add --ui)');
 console.log(failed ? 'GATE FAILED' : 'GATE PASSED');
 process.exit(failed ? 1 : 0);

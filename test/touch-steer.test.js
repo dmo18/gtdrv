@@ -28,16 +28,19 @@ test('touch-down never steers, wherever the thumb lands (no absolute angle)', ()
   }
 });
 
-test('horizontal travel: 55 px is full input at sensitivity 1, scaled by sensitivity', () => {
-  assert.equal(DRAG_FULL_PX, 55);
-  // inside the core (no rotation): pure horizontal travel
-  let r = run(line(90, 105, 117.5, 105, 5));
+// Task PLANTED (deliberate): full input at 80 px of travel, was 55 (the
+// owner found the wheel loose). The wheel center is far away here so the
+// travel alone is measured (no rotation).
+test('horizontal travel: 80 px is full input at sensitivity 1, scaled by sensitivity', () => {
+  assert.equal(DRAG_FULL_PX, 80);
+  const far = [100, 2000];
+  let r = run(line(90, 105, 130, 105, 5), far);
   assert.ok(near(r.out.at(-1), 0.5), String(r.out.at(-1)));
-  r = run(line(90, 105, 145, 105, 11));
+  r = run(line(90, 105, 170, 105, 16), far);
   assert.ok(near(r.out.at(-1), 1));
-  r = run(line(90, 105, 90 + 27.5 / 1.5, 105, 5), [100, 100], 1.5);
+  r = run(line(90, 105, 90 + 40 / 1.5, 105, 5), far, 1.5);
   assert.ok(near(r.out.at(-1), 0.5, 1e-9));
-  r = run(line(90, 105, 90 - 55, 105, 11), [100, 100], 0.5);
+  r = run(line(90, 105, 90 - 80, 105, 16), far, 0.5);
   assert.ok(near(r.out.at(-1), -0.5));
 });
 
@@ -51,7 +54,7 @@ test('crossing the center does not jump; the value rises smoothly', () => {
   const r = run(line(40, 101, 160, 101, 24));
   for (let i = 1; i < r.out.length; i++) {
     assert.ok(r.out[i] >= r.out[i - 1], `${i}`);
-    assert.ok(r.out[i] - r.out[i - 1] <= 5 / 55 + 1e-9, `step ${i} jumps ${r.out[i] - r.out[i - 1]}`);
+    assert.ok(r.out[i] - r.out[i - 1] <= 5 / DRAG_FULL_PX + 1e-9, `step ${i} jumps ${r.out[i] - r.out[i - 1]}`);
   }
 });
 
@@ -67,10 +70,10 @@ test('rotation about the center: dragging down the right side turns right, up th
 
 test('whichever is larger: rotation leads only when it agrees with the horizontal travel', () => {
   assert.equal(dragSteer(10, 30, 0), 0.5); // agree: rotation (0.5) beats travel (0.18)
-  assert.ok(near(dragSteer(10, -30, 0), 10 / 55)); // disagree: travel wins
+  assert.ok(near(dragSteer(10, -30, 0), 10 / DRAG_FULL_PX)); // disagree: travel wins
   assert.equal(dragSteer(0, 30, 20), 0.5); // a mostly vertical move may rotate alone
-  assert.equal(dragSteer(1, -30, 1), 1 / 55); // a mostly sideways one may not
-  assert.ok(near(dragSteer(55, 0, 0, 1), 1));
+  assert.equal(dragSteer(1, -30, 1), 1 / DRAG_FULL_PX); // a mostly sideways one may not
+  assert.ok(near(dragSteer(DRAG_FULL_PX, 0, 0, 1), 1));
 });
 
 test('inside the core the rotation holds; full lock clamps and turning back answers at once', () => {

@@ -13,6 +13,9 @@ import { nextStation } from '../core/radio.js';
 import { validPreset, validVerdict, VERDICTS, VERDICT_LABELS } from '../core/handlingpreset.js';
 
 export const DRIVE_SECONDS = 60;
+// Frames left out after the screen changes size under the check (its own full screen
+// request at the start, a rotation): the resize frame and the few that settle after it.
+export const RESIZE_SKIP = 12, SKIP_MAX = 30;
 export const SOUND_SECONDS = 3.2; // each of the eight sounds
 export const SOUNDS = ['Engine', 'Tire squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'];
 // What to listen for in each of the eight sounds (shown by Settings, Display, Sound test).
@@ -301,8 +304,17 @@ export function createCheckRun(game, opts = {}) {
   };
 
   // Real frame times in milliseconds (the panel feeds them from requestAnimationFrame).
+  // skipFrames(n): the next n frames are not counted. The panel asks for it when the
+  // check's own switch to full screen (or any other resize) rebuilds every render
+  // target: that stall is the check's doing, not the game's, and play never has it.
+  let skip = 0;
+  run.skipped = 0;
+  run.skipFrames = function skipFrames(n) {
+    if (n > skip) skip = Math.min(SKIP_MAX, n | 0);
+  };
   run.feedFrame = function feedFrame(ms) {
     if (run.phase !== 'drive' && run.phase !== 'sounds') return;
+    if (skip > 0) { skip--; run.skipped++; return; }
     if (ms > 0 && ms < 2000) frames.push(ms);
     const g = game.graphics;
     if (g && g.res && g.res.scale < run.minScale) run.minScale = g.res.scale;
@@ -554,6 +566,12 @@ export function createPhoneCheck(game, root, opts = {}) {
     }
     state.run = run;
     state.last = 0;
+    // The full screen request below resizes the canvas a few frames from now.
+    if (!state.onResize) {
+      state.onResize = () => { if (state.run) state.run.skipFrames(RESIZE_SKIP); };
+      window.addEventListener('resize', state.onResize);
+      document.addEventListener('fullscreenchange', state.onResize);
+    }
     if (!sys && game.addSystem) sys = game.addSystem({ name: 'phonecheck', fixedUpdate(dt) { if (state.run) state.run.step(dt); } });
     // Best effort: ask for fullscreen on this tap (the check reports whether it was granted).
     Promise.resolve().then(() => document.documentElement.requestFullscreen && !document.fullscreenElement && document.documentElement.requestFullscreen({ navigationUI: 'hide' })).catch(() => {});

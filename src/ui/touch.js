@@ -344,7 +344,7 @@ export function createTouchControls(root, input, opts = {}) {
       if (steerMode()) {
         if (style === 'wheel') {
           setRaw(drag.move(e.clientX, e.clientY, sensitivity));
-          setWheelAngle(raw * WHEEL_SHOW_DEG, false);
+          setWheelAngle(wheelCurve(raw) * WHEEL_SHOW_DEG, false); // the drawn wheel shows the steer sent, curve and all
         } else if (style === 'slider') applySlider(e.clientX);
         else if (style === 'buttons') {
           const sd = zoneSideOf(e.clientX);

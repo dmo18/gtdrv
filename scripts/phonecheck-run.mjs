@@ -525,6 +525,7 @@ async function main() {
       console.log(`  frames over (excess above ${overMs} ms): ${d.over}   worst excess ${d.worstExcess.toFixed(1)} ms = ${d.phoneWorst.toFixed(0)} ms on the phone   over half: ${d.half}   res ${d.res === null ? 'n/a' : d.res.toFixed(2)}`);
       console.log(`  main thread per frame: median ${d.median.toFixed(1)} ms (step ${d.meanStepMs} + draw ${d.meanDrawMs} mean), p99 ${d.p99.toFixed(1)}, worst ${d.worst.toFixed(1)}   programs ${d.programsStart} to ${d.programsEnd}   slowest system call ${d.slowsys}`);
       if (d.gc) console.log(`  garbage collection (first pass, throttled): ${d.gc.minor} minor, ${d.gc.major} major, ${d.gc.pauseMs} ms in all, worst ${d.gc.worstMs} ms; ${d.gc.allocMb} MB allocated = ${(d.gc.allocMb * 1024 / Math.max(1, d.frames)).toFixed(1)} KB a frame`);
+      if (d.gc && d.gc.majors.length) console.log('  major collections (second, ms, type, MB before to after): ' + d.gc.majors.map((m) => `${m.s}s ${m.ms} ${m.type} ${m.beforeMb}>${m.afterMb}`).join('; '));
       console.log(`  to the GPU in play: ${d.uploadMb} MB uploaded; ${d.gpuEvents.filter((e) => e.newPrograms > 0).length} frames with new programs, ${d.gpuEvents.filter((e) => e.newTextures > 0).length} with new textures, ${d.gpuEvents.filter((e) => e.uploadKb > 256).length} with over 256 KB`);
       if (quiet) return;
       console.log('  slow frames: frame, second, excess, step, draw | cause');

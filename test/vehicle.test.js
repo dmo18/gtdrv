@@ -373,13 +373,15 @@ test('power oversteer in rwd cars (Sim), held by the assist (Arcade); fwd cars u
     const world = emptyWorld();
     for (let i = 0; i < 180; i++) stepVehicle(v, PLAYER({ steer: 0.8, throttle: 0.25 }), DT, world);
     const before = v.yawRate;
-    let maxBeta = 0, maxYaw = 0;
+    let maxBeta = 0, maxYaw = 0, maxRear = 0;
     for (let i = 0; i < 120; i++) {
       stepVehicle(v, PLAYER({ steer: 0.8, throttle: 1 }), DT, world);
       maxBeta = Math.max(maxBeta, Math.abs(bodySlip(v)));
       maxYaw = Math.max(maxYaw, v.yawRate);
+      const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
+      maxRear = Math.max(maxRear, Math.abs(Math.atan2(-v.vx * sh + v.vz * ch - v.spec.wheelBase * v.spec.cgFront * v.yawRate, v.vx * ch + v.vz * sh)));
     }
-    return { before, maxBeta, maxYaw, end: Math.abs(bodySlip(v)) };
+    return { before, maxBeta, maxYaw, maxRear, end: Math.abs(bodySlip(v)) };
   };
   const m = powerOn('muscle');
   if (mode === 'sim') {
@@ -390,7 +392,11 @@ test('power oversteer in rwd cars (Sim), held by the assist (Arcade); fwd cars u
     assert.ok(m.maxBeta < 16 * DEG, `arcade muscle caught ${(m.maxBeta / DEG).toFixed(1)}`);
   }
   const s = powerOn('sedan');
-  assert.ok(s.maxYaw <= s.before * 1.05 && s.maxBeta < (mode === 'sim' ? 3 : 5) * DEG, `${mode} sedan understeers ${JSON.stringify(s)}`);
+  // (Task PLANTED, deliberate: in Arcade the slide is read at the rear axle,
+  // under 4 degrees. The body slip at the center of mass was under 5; it now
+  // holds the plain geometry of a 1.0 g turn at 12 m/s, 5.5 degrees with no
+  // tire sliding. Power never rotates the planted car.)
+  assert.ok(s.maxYaw <= s.before * 1.05 && (mode === 'sim' ? s.maxBeta < 3 * DEG : s.maxRear < 4 * DEG && m.maxRear < 4 * DEG), `${mode} sedan understeers ${JSON.stringify(s)}`);
   // Off the throttle the front bites harder than on it (weight transfer).
   const turnIn = (throttle) => {
     const v = createVehicle('sedan', 0, 0, 0);
@@ -491,12 +497,18 @@ test('AI and player steering are one mapping: a share of steerLock, and the curv
   run(a, { steer: 1, throttle: 0.3, brake: 0, handbrake: false }, 60);
   run(p, PLAYER({ steer: 1, throttle: 0.3 }), 60);
   assert.ok(Math.abs(a.steerAngle - p.steerAngle) < 1e-12);
-  // The lock at walking pace is the true steerMax; at speed it is set by the grip.
-  assert.equal(steerLock(s, 1), s.steerMax);
+  // The lock at walking pace is the mode's full lock (task PLANTED,
+  // deliberate: Arcade cuts 40 degrees, Sim the true steerMax); at speed it
+  // is set by the grip.
+  assert.ok(Math.abs(steerLock(s, 1) - 40 * Math.PI / 180) < 1e-12);
+  setHandlingMode('sim');
+  try { assert.equal(steerLock(s, 1), s.steerMax); } finally { setHandlingMode('arcade'); }
   assert.ok(steerLock(s, 30) < s.steerMax * 0.25, `lock at 30 m/s ${steerLock(s, 30)}`);
   // Full input asks the mode's share of the grip at speed: Arcade 100 % (DRIVE,
   // deliberate, was 115 %), Sim 115 % (HANDLE, docs/PLAN_V3.md 2.4 item 4).
-  assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - handlingParams('arcade').ask * lateralGrip(s, 30) * 9.81) < 0.05);
+  // (Task PLANTED: Arcade's 100 % is built in, there is no `ask` row to read.)
+  assert.equal(handlingParams('arcade').ask, undefined);
+  assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - lateralGrip(s, 30) * 9.81) < 0.05);
 });
 
 test('steering rate: away from center at lockRate, back at returnRate, through the center', () => {
@@ -555,9 +567,13 @@ test('handling presets: standard (default), relaxed, sharp; unknown means standa
   assert.equal(setHandlingPreset('nonsense'), 'standard');
   assert.equal(setHandlingPreset(undefined), 'standard');
   // (DRIVE, deliberate: shapeK, the input shaping by speed, joins the row.)
-  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 });
+  // (PLANTED, deliberate: assistK left with the stability assist; lockAdd and
+  // gainK join; in Arcade every car cuts 40 degrees, Sim keeps the spec's lock.)
+  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1 });
   const spec = createVehicle('sedan', 0, 0, 0).spec;
-  assert.equal(steerMaxOf(spec), spec.steerMax);
+  assert.ok(Math.abs(steerMaxOf(spec) - (40 * Math.PI) / 180) < 1e-12);
+  setHandlingMode('sim');
+  try { assert.equal(steerMaxOf(spec), spec.steerMax); } finally { setHandlingMode('arcade'); }
   const base = presetFigures();
   const got = {};
   for (const p of PRESETS) {
@@ -570,7 +586,9 @@ test('handling presets: standard (default), relaxed, sharp; unknown means standa
     }
   }
   setHandlingPreset('sharp');
-  assert.ok(Math.abs(steerMaxOf(spec) - (40 * Math.PI) / 180) < 1e-12, 'sharp: 40 degree lock at walking pace (HANDLE: past the cars\' own 33 to 36)');
+  assert.ok(Math.abs(steerMaxOf(spec) - (44 * Math.PI) / 180) < 1e-12, 'sharp: 44 degree lock at walking pace in Arcade (PLANTED, deliberate: was 40, which is now Standard)');
+  setHandlingMode('sim');
+  try { assert.ok(Math.abs(steerMaxOf(spec) - (40 * Math.PI) / 180) < 1e-12, 'sharp in Sim: 40 degrees, as before'); } finally { setHandlingMode('arcade'); }
   setHandlingPreset('standard');
   assert.deepEqual(presetFigures(), base, 'back to standard: the same car');
 });

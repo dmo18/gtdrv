@@ -11,7 +11,7 @@ import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 import { CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
-import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt, pairGap, MEDIAN_GAP, curbsAt, supAt, onJunction } from '../world/junctions.js';
+import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt, pairGap, MEDIAN_GAP, curbsAt, supAt, onJunction, inJunctionArea } from '../world/junctions.js';
 import { groundFn, groundOf, FILL_STEP } from '../world/ground.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
@@ -896,6 +896,18 @@ export function realRoads(city, B, nodes, edges, own = null) {
         if (c.tris) flatTris(B.asphalt.at(J.x, J.z), c.tris, -0.004, COL.junction);
         continue;
       }
+      if (c.tris && J.fan) {
+        // A fan junction (its ring crosses itself): only the corner
+        // triangles off its asphalt, as the ground has it (the junction
+        // area is road first), and no curb through the crossing.
+        for (let k = 0; k + 5 < c.tris.length; k += 6) {
+          const t = c.tris;
+          if (inJunctionArea(J, (t[k] + t[k + 2] + t[k + 4]) / 3, (t[k + 1] + t[k + 3] + t[k + 5]) / 3)) continue;
+          for (let i = 0; i < 6; i++) TRI6[i] = t[k + i];
+          flatTris(wb, TRI6, CURB_H, COL.sidewalk);
+        }
+        continue;
+      }
       if (c.tris) flatTris(wb, c.tris, CURB_H, COL.sidewalk);
       const p = c.curb;
       for (let k = 0; k + 3 < p.length; k += 2) {
@@ -1054,6 +1066,25 @@ export function realRoads(city, B, nodes, edges, own = null) {
         B.sidewalk.at(mx, mz).wall(wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), -0.02, CURB_H, COL.curb, 0, 0, (db - da) / 4.8, 0.05, 1, 1);
       }
     }
+    // Where a street crosses a divided road its median stops short of the
+    // junction (sup): from the node to the nose this half's share of the
+    // gap is asphalt, so the crossing is one paved area between the two
+    // halves' junctions, not a band of the block's ground.
+    if (e.divided && e.pair >= 0 && !geo.inner[e.id] && !geo.inner[e.pair] && !e.bridge) {
+      for (let end = 0; end < 2; end++) {
+        const q = 2 * e.id + end;
+        if (geo.mthru[q] || geo.jEnd[q] < 0) continue;
+        const reach = Math.min(e.length / 2, Math.max(geo.trim[q], geo.sup[2 * q + 1]));
+        if (!(reach > 0.5)) continue;
+        const da = end ? e.length - reach : 0, db = end ? e.length : reach;
+        const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
+        if (own && !own(mx, mz)) continue;
+        const la = curbsAt(geo, e, da).l, lb = curbsAt(geo, e, db).l;
+        const ga = Math.min(16, pairGap(city, e, da, la)), gb = Math.min(16, pairGap(city, e, db, lb));
+        if (!(ga > 0.05 || gb > 0.05)) continue;
+        orientedQuad(B.asphalt.at(mx, mz), wx(da, la), wz(da, la), wx(db, lb), wz(db, lb), wx(db, lb - gb / 2 - 0.3), wz(db, lb - gb / 2 - 0.3), wx(da, la - ga / 2 - 0.3), wz(da, la - ga / 2 - 0.3), -0.006, COL.junction);
+      }
+    }
     // Sliver fills (world/ground.js fillOf): raised concrete over gaps
     // under 1.5 m between this road's back of sidewalk and more road.
     const fill = e.ped ? null : G.fillOf(e.id);
@@ -1118,18 +1149,23 @@ export function netRoads(city, B, x0, z0, x1, z1) {
   if (!G || !G.netQuads) return 0;
   NETQ.length = 0;
   G.netQuads(x0, z0, x1, z1, NETQ);
+  let n = 0;
   for (let k = 0; k + 3 < NETQ.length; k += 4) {
     const xa = NETQ[k], za = NETQ[k + 1], xb = NETQ[k + 2], zb = NETQ[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
-    // Between sidewalks it is paving (flush, like a curb ramp); else asphalt.
+    // Asphalt where the gap lies between roadways. Between two sidewalks
+    // the ground of the block shows (a planting strip, a paved one): it is
+    // flat there too, and a raster of paving beside a lawn would only
+    // show its steps.
     let walk = 0, road = 0;
     for (let q = 0; q < 4; q++) {
       const s = G.baseAt(q === 0 ? xa - 0.3 : q === 1 ? xb + 0.3 : mx, q === 2 ? za - 0.3 : q === 3 ? zb + 0.3 : mz);
       if (s === 1) road++; else if (s) walk++;
     }
-    if (walk > road) B.sidewalk.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.sidewalk);
-    else B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
+    if (!road || walk > road) continue;
+    B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
+    n++;
   }
-  return NETQ.length / 4;
+  return n;
 }
 
 function edgeHash(id) {

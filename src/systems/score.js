@@ -135,7 +135,8 @@ export function createScore(game) {
     : reason === 'Chain blast' ? 'chain' : 'other');
 
   // A banked flow run goes into the total (systems/flow.js calls this).
-  function bankFlow(amount) {
+  // `later`: the save is left to the caller (a bank at speed must not save in the middle of a step).
+  function bankFlow(amount, later = false) {
     if (!(amount > 0)) return 0;
     const a = Math.min(MAX_PENDING, Math.round(amount));
     const s = prog();
@@ -149,7 +150,7 @@ export function createScore(game) {
     }
     nmChain = 0;
     events.emit('scoreBanked', a);
-    events.emit('progress');
+    if (!later) events.emit('progress');
     return a;
   }
 
@@ -442,6 +443,8 @@ export function createScore(game) {
         hs.score = total;
         hs.pending = f ? f.run : pending;
         hs.combo = f ? f.tier : combo;
+        // The Flow meter (after everything that can bank this step, so the HUD never shows half a state).
+        if (f) { hs.flow = f.meter; hs.flowTier = f.tier; }
       }
     },
   };

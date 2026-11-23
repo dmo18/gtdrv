@@ -60,21 +60,30 @@ export function curbCircleFt(spec, rc) {
   return 2 * (Math.hypot(rr + t / 2, L) + TIRE_HALF) / FT;
 }
 
-// Arcade grip curve (2.4 item 3): steady lateral grip = factor * spec.grip,
-// the factor `low` up to `v1` mph, falling linearly to `high` at `v2` mph
-// and held there. Sim: factor 1 (the table as is).
-export const ARCADE_GRIP = { low: 1.25, high: 1.10, v1: 30, v2: 60 };
-export function arcadeFactor(u) {
+// Arcade grip curve: steady lateral grip = factor * spec.grip, the factor
+// `low` up to `v1` mph, falling linearly to `high` at `v2` mph and held
+// there. Sim: factor 1 (the table as is).
+// Task PLANTED (owner round 5, deliberate): 1.6 up to 35 mph, 1.25 from 75
+// mph (the sedan about 1.31 g in town). Was 1.25 up to 30 mph and 1.1 from
+// 60 mph (2.4 item 3): the owner could not turn sharp enough.
+export const ARCADE_GRIP = { low: 1.6, high: 1.25, v1: 35, v2: 75 };
+// The four tall service vehicles (6.11) keep SERVICE_GAIN of the gain over
+// 1 (1.25 in town, 1.10 at speed, as before task PLANTED): with more their
+// inner wheels would lift on full lock (test SV-H3).
+export const SERVICE_GAIN = 5 / 12;
+export function arcadeFactor(u, spec = null) {
   const mph = Math.abs(u) * 2.23694;
   const { low, high, v1, v2 } = ARCADE_GRIP;
-  return mph <= v1 ? low : mph >= v2 ? high : low + (high - low) * (mph - v1) / (v2 - v1);
+  const f = mph <= v1 ? low : mph >= v2 ? high : low + (high - low) * (mph - v1) / (v2 - v1);
+  return spec && spec.service ? 1 + (f - 1) * SERVICE_GAIN : f;
 }
 // Steady full-lock lateral grip measured at the test speeds, as a share of
 // the mode's curve times spec.grip (every car, both modes).
 export const LAT_SHARE = [0.96, 1.04];
-// Section 2 line (K10), Arcade (the default): ordinary cars hold 0.9 to 1.1 g at
-// the test speeds. Sim holds the real car's skidpad figure instead (REFERENCE).
-export const LAT_G_LINE = [0.9, 1.1];
+// Arcade (the default): ordinary cars hold 1.0 to 1.4 g at the test speeds
+// (task PLANTED, deliberate: was the section 2 line K10, 0.9 to 1.1 g, on
+// the old 1.25 curve). Sim holds the real car's skidpad figure (REFERENCE).
+export const LAT_G_LINE = [1.0, 1.4];
 export const ORDINARY_CARS = ['compact', 'sedan', 'taxi'];
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
 export const LOCK_TIME = [0.25, 0.40]; // s, center to full lock, at 0 to 10 m/s (service vehicles)
@@ -92,6 +101,21 @@ export const LOCK_TIME_FAST_MAX = 0.55; // s, at 30 m/s
 // (2.4 item 2); trucks, buses and the vans cut further on longer wheelbases
 // (the tests check the circle; this only keeps the angles real).
 export const LOCK_DEG = { car: [33, 36], heavy: [28, 42] };
+// Arcade (task PLANTED, deliberate: the lock was the same in both modes):
+// every vehicle up to ARCADE_LOCK.mass kg cuts ARCADE_LOCK.deg degrees at
+// full input up to ARCADE_LOCK.fullMph (the car always uses its whole lock
+// in town); heavier vehicles keep their own. The sedan's curb-to-curb
+// circle comes to `sedanFt` (Sim keeps the reference table's 40 ft).
+export const ARCADE_LOCK = { deg: 40, mass: 3000, fullMph: 15, sedanFt: [33, 36] };
+// Arcade, the player's steering (controls.steerShape): center to full lock
+// and back in `time` s (AI drivers keep DRIVE_LOCK_TIME and RETURN_TARGET).
+export const ARCADE_PLAYER_STEER = { time: [0.07, 0.10] };
+// Arcade is planted (task PLANTED): without the handbrake the slip angle at
+// the rear axle never passes `slipDeg` degrees; the yaw rate answers the
+// input within `delay` s (63 % of the settled rate, a full step) at every
+// speed; a released car is straight within `release` s; the handbrake
+// slide recovers within `recover` s of the release with no yaw the other way.
+export const PLANTED = { slipDeg: 4, delay: 0.12, release: 0.25, recover: 0.6, slideDeg: [25, 37], shapeExp: 1.25 };
 export const HEAVY = ['minivan', 'van', 'suv', 'crewcab', 'pickup', 'truck', 'semi', 'schoolbus', 'citybus'];
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %
@@ -166,17 +190,22 @@ export const B4_KEEP = 0.6;
 export const BRAKE_PEDAL_S = 1.0;
 // Assist rows of the Arcade versus Sim table.
 export const ARCADE_SLIP_MAX_DEG = { fwd: 8, rwd: 16 };
-export const SAG = { arcade: [0, 0.06], sim: [0.18, 0.22] };
+// Task PLANTED (deliberate): the tire rows are Sim's alone. Arcade has no
+// tire curve (no sag, no ask past the grip, no squeal onset in peak slips):
+// full input is 1.00 of the lateral grip by construction, the grip in use
+// is reported as v.slipF (USE.arcade at full input), and the squeal follows
+// the real slip angle at the rear axle, silent under SQUEAL_DEG degrees.
+export const SAG = { sim: [0.18, 0.22] };
 // Full input asks this share of the steady lateral grip. Sim 1.15 (2.4 item
-// 4: past the limit the front pushes wide). Arcade 1.00 (task DRIVE,
-// deliberate, was 1.15): the tightest turn the car makes without sliding,
-// with the front at USE of its peak, quiet, never pushing wide.
+// 4: past the limit the front pushes wide). Arcade 1.00 (task DRIVE): the
+// tightest turn the car makes without sliding, quiet, never pushing wide.
 export const ASK = { arcade: 1, sim: 1.15 };
 export const USE = { arcade: 0.95, sim: 1.15 };
-export const HB_SLIP_CAP = 0.6; // rad, Arcade handbrake slide cap
-export const SQUEAL = { arcade: 1.05, sim: 0.9 };
+export const HB_SLIP_CAP = 0.6; // rad, Arcade: the handbrake slide full steering asks for
+export const SQUEAL = { sim: 0.9 };
+export const SQUEAL_DEG = 3; // Arcade
 // Touch curve and travel.
-export const HALF_TRAVEL = [0.40, 0.55];
+export const HALF_TRAVEL = [0.40, 0.55]; // 0.4625 on the 0.9 x + 0.1 x^3 curve (task PLANTED; 0.444 before)
 // Slalom pass rule (K9): all `cones` reached in order, each passed on its own side
 // with the car's center at least `clear` m out, at least `keep` of the speed held,
 // one scripted driver for every style (only the input device and its rate limit differ).
@@ -197,8 +226,12 @@ export const CAMERA = { rollMaxDeg: 2, yawLag: 0.12, pitchMaxDeg: 1.5, lookDeg: 
 //   roll     body roll in a steady 0.7 g turn at 20 m/s
 export const PRESETS = ['standard', 'relaxed', 'sharp'];
 export const PRESET_DEFAULT = 'standard';
+// Task PLANTED (deliberate): Standard is the planted target; Relaxed steers
+// slower still (1.3 to 1.6 of the lock time, was 1.15 to 1.35); Sharp cuts
+// 44 degrees (Standard already cuts 40, so its circle is 0.8 to 0.95 of
+// Standard's; was 0.6 to 0.85 of a 35 degree lock).
 export const PRESET_BANDS = {
   standard: { r0: [1, 1], lockTime: [1, 1], roll: [1, 1] },
-  relaxed: { r0: [0.97, 1.03], lockTime: [1.15, 1.35], roll: [1.15, 1.45] },
-  sharp: { r0: [0.6, 0.85], lockTime: [0.7, 0.88], roll: [0.75, 0.95] },
+  relaxed: { r0: [0.97, 1.03], lockTime: [1.3, 1.6], roll: [1.15, 1.45] },
+  sharp: { r0: [0.8, 0.95], lockTime: [0.7, 0.88], roll: [0.75, 0.95] },
 };

@@ -91,6 +91,21 @@ test('mesh warmer: one listed mesh every few steps, only where the game draws', 
   assert.ok(w2.done, 'no scene: nothing to warm');
 });
 
+test('mesh warmer: behind the title screen it builds one every step', () => {
+  const made = [];
+  const game = { scene: {}, titleCam: { active: true }, kinds: { car: { createMesh: (spec) => made.push(spec.id) } } };
+  const w = createWarmer([['car', { id: 'a' }], ['car', { id: 'b' }], ['car', { id: 'c' }], ['car', { id: 'd' }]], 6, 2);
+  w.step(game); // step 1: before the phase
+  assert.deepEqual(made, []);
+  w.step(game); w.step(game);
+  assert.deepEqual(made, ['a', 'b']);
+  game.titleCam.active = false; // play began: back to one every sixth step
+  for (let i = 0; i < 4; i++) w.step(game);
+  assert.deepEqual(made, ['a', 'b']);
+  w.step(game);
+  assert.deepEqual(made, ['a', 'b', 'c']);
+});
+
 // ---------------------------------------------------------------------------
 // The real map: the ambient systems drive round the start at 20 m/s.
 // ---------------------------------------------------------------------------

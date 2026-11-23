@@ -48,7 +48,7 @@ export function createDaily(game, opts = {}) {
       if (!how) return;
       const n = st.done.filter(Boolean).length;
       toast(how === 'all' ? 'Daily Three done!  Day ' + st.streak : 'Daily ' + n + ' of 3 done' + (how === 'first' ? '  Day ' + st.streak : ''), 3.5);
-      game.events.emit('progress');
+      if (game.loopSave) game.loopSave(); else game.events.emit('progress');
     });
   }
   return {

@@ -128,9 +128,13 @@ nothing. No reward is ever withheld for missing days.
 
 ## e. The first five minutes
 
-A new game: parked on Ocean Drive (each region's start street), the queue ahead removed. One
-line at a time in the top stack, 9 words at most, the GPS on the beat's gate. Beats wait for
-what the player does; a beat's line comes again after 35 s without progress.
+A new game: parked on Ocean Drive (each region's start street). Ocean Drive is one lane between
+two rows of parked cars with a traffic light every block, so the first run would be a queue and
+a ram: until the first medal, moving traffic 70 to 170 m ahead in the player's lane is taken
+away (and the queue at the gate once, as the run starts). The parked cars stay: they are what
+the player passes close. One line at a time in the top stack, 9 words at most, the GPS on the
+beat's gate. Beats wait for what the player does; a beat's line comes again after 35 s without
+progress.
 
 | time | beat | line | ends when |
 |---|---|---|---|

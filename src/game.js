@@ -622,6 +622,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   const placeNow = { key: '', name: '' };
   let promptFor = null;
   let wakeTick = 0;
+  const walkOff = []; // hidden top-level objects left out of the renderer's matrix walk
   function render(alpha, dt) {
     const p = game.player;
     const vs = game.vehicles;
@@ -746,6 +747,27 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     hud.update(h);
     // Real map: build and swap detail tiles round the camera.
     if (cityMesh.userData.stream) cityMesh.userData.stream.update(camera);
+    // Hidden things cost no matrix work (docs/PERF.md, 0.12.0): the renderer walks and
+    // composes the matrices of invisible objects too (parked people, far craft, markers:
+    // over half of the walk). A hidden top-level object is left out of the walk and
+    // rejoins it, updated in full, in the frame it shows again.
+    // (One that is shown again, or moved under another parent, rejoins at once.)
+    for (let i = walkOff.length - 1; i >= 0; i--) {
+      const o = walkOff[i];
+      if (!o.visible && o.parent === scene) continue;
+      o.matrixWorldAutoUpdate = true;
+      o.matrixWorldNeedsUpdate = true;
+      walkOff[i] = walkOff[walkOff.length - 1];
+      walkOff.pop();
+    }
+    const kids = scene.children;
+    for (let i = 0; i < kids.length; i++) {
+      const o = kids[i];
+      if (!o.visible && o.matrixWorldAutoUpdate) {
+        o.matrixWorldAutoUpdate = false;
+        walkOff.push(o);
+      }
+    }
     // A graphics module may take over the final draw (post effects).
     try {
       if (game.renderFrame) game.renderFrame(dt);

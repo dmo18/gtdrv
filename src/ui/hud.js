@@ -84,19 +84,19 @@ const FLOW_CSS = `
 .rw-combo, .rw-money { background-image: linear-gradient(var(--flowc), var(--flowc)); background-repeat: no-repeat; background-position: left bottom; }
 .rw-combo { background-size: var(--flow) 4px; transform-origin: right center; }
 .rw-money { background-size: 0 0; }
-.rw-combo.rw-pop { animation: rw-flow-pop 0.22s ease-out; }
-.rw-combo.rw-pop2 { animation: rw-flow-pop2 0.4s ease-out; }
-@keyframes rw-flow-pop { 0% { transform: scale(1.16); } 100% { transform: none; } }
 /* a flow callout lands with a bounce (the row and its rect do not move) */
 .rw-msg.rw-k-score.rw-in { animation: rw-flow-call 0.3s cubic-bezier(0.2, 1.5, 0.4, 1); }
 @keyframes rw-flow-call { 0% { opacity: 0.2; transform: scale(1.4); } 100% { opacity: 1; transform: none; } }
-@keyframes rw-flow-pop2 { 0% { transform: scale(1.45); } 100% { transform: none; } }
 .rw-flowflash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 2; box-shadow: inset 0 0 70px 14px var(--flashc, #ffd34d); }
 .rw-prompt.rw-event { border-color: #ffd34d; background: rgba(20, 16, 6, 0.78); font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { .rw-combo.rw-pop, .rw-combo.rw-pop2, .rw-msg.rw-k-score.rw-in { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rw-msg.rw-k-score.rw-in { animation: none; } }
 @media (max-height: 300px) { .rw-money { background-size: var(--flow) 3px; } }
 `;
 const TIER_COLORS = ['#ffb43a', '#ffb43a', '#ffd34d', '#8bd66f', '#45c7dc', '#ff5a8a'];
+// The meter's pop (a source: scale 1.16 for 0.22 s; a tier up, bank, crash or medal: 1.45 for 0.4 s) and the edge flash.
+const POP_SMALL = [{ transform: 'scale(1.16)' }, { transform: 'none' }], POP_SMALL_T = { duration: 220, easing: 'ease-out' };
+const POP_BIG = [{ transform: 'scale(1.45)' }, { transform: 'none' }], POP_BIG_T = { duration: 400, easing: 'ease-out' };
+const FLASH_KEYS = [{ opacity: 0.85 }, { opacity: 0 }], FLASH_T = { duration: 340, easing: 'ease-out' }, FLASH_LONG_T = { duration: 520, easing: 'ease-out' };
 const FLASH_COLORS = { tier: '', bank: '#8bd66f', crash: '#ff4a3a', medal: '#ffd34d' };
 function injectNavStyles() {
   if (!document.getElementById('rw-flow-styles')) {
@@ -566,14 +566,14 @@ export function createHud(root) {
   }
   // Flow feedback: 'feed' pops the meter, 'tier', 'bank', 'crash' and
   // 'medal' pop it harder and flash the screen edge (not under reduced motion).
+  // Web animations, not class changes: nothing here forces a layout in the middle of a step.
   function flowPop(kind, tier) {
     const big = kind !== 'feed';
-    comboEl.classList.remove('rw-pop', 'rw-pop2');
-    void comboEl.offsetWidth;
-    comboEl.classList.add(big ? 'rw-pop2' : 'rw-pop');
-    if (!big || !flashEl.animate || (calm && calm.matches)) return;
+    if (!comboEl.animate || (calm && calm.matches)) return;
+    comboEl.animate(big ? POP_BIG : POP_SMALL, big ? POP_BIG_T : POP_SMALL_T);
+    if (!big) return;
     flashEl.style.setProperty('--flashc', FLASH_COLORS[kind] || TIER_COLORS[Math.max(1, Math.min(5, tier | 0))]);
-    flashEl.animate([{ opacity: 0.85 }, { opacity: 0 }], { duration: kind === 'bank' || kind === 'medal' ? 520 : 340, easing: 'ease-out' });
+    flashEl.animate(FLASH_KEYS, kind === 'bank' || kind === 'medal' ? FLASH_LONG_T : FLASH_T);
   }
   function setPrompt(text) {
     const v = text || null;

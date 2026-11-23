@@ -98,7 +98,9 @@ export function createFlowSystem(game) {
       if (h && h.flowPop) h.flowPop('tier', a);
     } else if (kind === 'bank') {
       const best = recordBank(loop(), slug, a);
-      if (game.score && game.score.bankFlow) game.score.bankFlow(a);
+      // Standing still: saved at once. At speed (an event's end, a flow gone cold): at the next quiet moment.
+      if (game.score && game.score.bankFlow) game.score.bankFlow(a, b !== 'stop');
+      if (b !== 'stop' && game.loopSave) game.loopSave();
       const how = b === 'stop' && c > 1 ? '  (x' + c + ' bonus)' : '';
       callout(best && a >= 1000 ? 'Best flow run!  ' + num(a) : 'Banked  ' + num(a) + how, 2.2);
       sound('reward');
@@ -124,6 +126,8 @@ export function createFlowSystem(game) {
   // A source from play. `text` replaces the word of the callout; `seconds`
   // is the length of a drift or flight. Returns the points added.
   function feed(kind, points, text = '', seconds = 0, silent = false) {
+    // The Phone check drives the car itself: nothing it does is the player's flow.
+    if (game.phoneCheckRunning) return 0;
     label = text;
     quiet = silent;
     const got = flow.feed(kind, points, seconds);
@@ -170,7 +174,7 @@ export function createFlowSystem(game) {
   // ---- crashes, rams, smashes ----
   let preSpeed = 0; // the car's speed one step before (a hard crash stops it)
   function hardCrash(v, impact) {
-    if (!(impact > CRASH_MPS)) return;
+    if (!(impact > CRASH_MPS) || game.phoneCheckRunning) return;
     // A glancing scrape at speed is not a crash: the car must lose most of its speed.
     const sp = Math.abs(v.speed || 0);
     if (preSpeed > 6 && sp > preSpeed * HARD_STOP) return;
@@ -266,13 +270,6 @@ export function createFlowSystem(game) {
         }
         lx = p.x;
         lz = p.z;
-      }
-      const hs = game.hudState;
-      if (hs) {
-        hs.pending = flow.run;
-        hs.combo = flow.tier;
-        hs.flow = flow.meter;
-        hs.flowTier = flow.tier;
       }
     },
   };

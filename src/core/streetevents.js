@@ -132,6 +132,7 @@ export const END_HOLD = 0.6; // seconds a counting event lingers after gold (the
 export function createEventRun() {
   const st = {
     ev: null, on: false, t: 0, value: NaN, count: 0, result: '', why: '', medal: null, armed: false, endT: 0,
+    daily: -1, // the Daily Three slot this run counts for (set by the game system)
   };
   st.start = function start(ev) {
     st.ev = ev;

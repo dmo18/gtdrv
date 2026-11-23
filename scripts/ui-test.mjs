@@ -1336,11 +1336,15 @@ try {
   check('Flow meter: gone when the flow is cold and banked', !fl.shown && fl.bar === '0%' && !/ rw-t\d/.test(fl.cls), JSON.stringify(fl));
   await hudCar({ pending: 300, combo: 1, flow: 0.5, flowTier: 1 });
   await page.evaluate(() => rw.hud.flowPop('feed', 1));
-  check('Flow meter: a source pops it', await page.evaluate(() => document.querySelector('.rw-combo').classList.contains('rw-pop')));
+  check('Flow meter: a source pops it (0.22 s, no flash)', await page.evaluate(() => {
+    const a = document.querySelector('.rw-combo').getAnimations();
+    return a.length === 1 && a[0].effect.getComputedTiming().duration === 220 && document.querySelector('.rw-flowflash').getAnimations().length === 0;
+  }));
+  await page.waitForTimeout(300);
   await page.evaluate(() => rw.hud.flowPop('tier', 3));
-  const fp = await page.evaluate(() => ({ pop2: document.querySelector('.rw-combo').classList.contains('rw-pop2'), anims: document.querySelector('.rw-flowflash').getAnimations().length,
+  const fp = await page.evaluate(() => ({ pop2: document.querySelector('.rw-combo').getAnimations().map((a) => a.effect.getComputedTiming().duration).join(), anims: document.querySelector('.rw-flowflash').getAnimations().length,
     pe: getComputedStyle(document.querySelector('.rw-flowflash')).pointerEvents }));
-  check('Flow meter: a tier up pops it harder and flashes the screen edge (never a touch target)', fp.pop2 && fp.anims === 1 && fp.pe === 'none', JSON.stringify(fp));
+  check('Flow meter: a tier up pops it harder (0.4 s) and flashes the screen edge (never a touch target)', fp.pop2 === '400' && fp.anims === 1 && fp.pe === 'none', JSON.stringify(fp));
   await page.waitForTimeout(600);
   check('Flow meter: the edge flash is gone in half a second', await page.evaluate(() => Number(getComputedStyle(document.querySelector('.rw-flowflash')).opacity) === 0 && document.querySelector('.rw-flowflash').getAnimations().length === 0));
   // the event line uses the prompt strip: an alert wins, the normal prompt comes back

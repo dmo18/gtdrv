@@ -278,6 +278,9 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     accelX: 0, accelY: 0, brakeP: 0, abs: false,
     wheelSpin: 0,
     slip: 0,
+    // Arcade (planted model): the handbrake slide asked for (rad, + nose
+    // right of the travel), its rate, and the time a crash leaves the car loose.
+    slide: 0, slideV: 0, knock: 0,
     // Front tire slip as a multiple of its peak (1 = at the grip limit) and
     // how far past the limit the front is pushing (0..1, understeer).
     slipF: 0, push: 0,
@@ -365,67 +368,78 @@ const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
 const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse
 const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
 const REAR_K = 1.08; // rear tires a little grippier than the front: the car settles at the limit (both modes)
-const TC_X = 1.0; // traction control starts at the rear peak slip
+const SCRUB = 0.2; // Arcade: share of the front's cornering drag that slows the car in a turn
+const KNOCK_MIN = 3, KNOCK_S = 0.4, KNOCK_PER = 30; // Arcade: a crash over 3 m/s leaves the car loose for up to 0.4 s (closing speed / 30)
+const SLIP_QUIET = 0.05, SLIP_FULL = 0.5; // Arcade: rear slip angle (rad) where the squeal starts and where v.slip reaches 1
+const HB_SQUEAL = 0.3; // Arcade: v.slip of locked rear wheels with no slide (under the drift score's line)
+const ARCADE_ROLL = 1.2; // Arcade: body roll at the grip limit, as a multiple of the class table's roll
+const USE_K = 0.95; // Arcade: v.slipF at full input (the front just under its peak, as since task DRIVE)
+const COUNTER = 0.7; // Arcade: share of a slide the drawn front wheels steer into
 const ASK_V1 = 10, ASK_V2 = 20; // m/s: the full-input ask ramps in between
-const CALM_BAND = 0.15; // steer share under which the Arcade yaw damper firms up (HANDLING calm)
 const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arcade, at its limit)
 
 // Two handling modes, module-wide (every car at once), docs/REVAMP.md 6.3.
-// Both modes have the same straight line (power, gears, brakes with ABS),
-// the same steering timing (lockRate, returnRate, steerMax) and the same
-// input; they differ only in these rows:
-//   lat      steady lateral grip as multiples of spec.grip (the real
-//            car's skidpad g): lat[0] up to LAT_V1, falling linearly to
-//            lat[1] at LAT_V2 and above (docs/PLAN_V3.md 2.4 item 3:
-//            Arcade 1.25 up to 30 mph, 1.1 from 60 mph; Sim the table)
-//   cal      tire friction over that steady grip, at LAT_V1 and below and
-//            at LAT_V2 and above: what the front loses past its peak at
-//            full input (the sag below) and to drag, so the steady
-//            full-lock lateral g is lat * spec.grip
-//   fall     tire force sag past the peak slip
-//   ask      share of lateral grip (the steady figure above) that full
-//            steering input asks for. Arcade 1.00 (task DRIVE): full input
-//            is the tightest turn the car makes at that speed without
-//            sliding, never more. Sim 1.15 (2.4 item 4): past the limit
-//            the front pushes wide with a slip angle and tire noise.
-//   use      share of the front tire's peak force full input uses (the
-//            slip angle steerAngle builds in): Arcade 0.95, so on full lock
-//            the front works just under its peak, quiet, and never slides
-//            (its tire friction, cal, sits a little above the steady grip);
-//            Sim the same as ask (past the peak)
-//   calm     Arcade: extra yaw damping (per second) near the center of
-//            the steering, so a released wheel settles straight with no
-//            weave; 0 in Sim
-//   assist   stability assist (yaw and slide correction) on
-//   yawK / yawFirm  yaw assist gains (under / over rotating); sim keeps a
-//            light damper only
-//   betaK    slide correction gain
-//   tc       traction control: drive cut in a slide, at least cutMin kept
-//   hbCap    handbrake slide capped at hbBeta (rad) and yaw at hbYaw, and
-//            it recovers by itself; off = free slide while held
-//   transfer share of the longitudinal weight transfer the lateral grip
-//            (the balance) sees; braking and traction always see all of it
-//   squeal   tire squeal onset in multiples of the peak slip
+// Both modes have the same straight line (power, gears, brakes with ABS,
+// traction limits) and the same input. Sim is the single-track tire model
+// (the real car's numbers). Arcade (the default, task PLANTED) is a planted
+// model: the car goes where the nose points and the nose goes where the
+// thumb says; it has no tire state that can let the rear step out.
+//
+// Arcade rows:
+//   planted   the model below (stepVehicle: "Arcade: planted")
+//   lat       steady lateral grip as multiples of spec.grip: lat[0] up to
+//             latV[0] mph, easing linearly to lat[1] at latV[1] mph and above
+//   lockDeg   full-lock wheel angle of every vehicle up to LIGHT_MASS (cars,
+//             SUVs, pickups, vans); heavier ones keep their own steerMax
+//   lockV     mph: at or below lockV[0] full input is the full lock whatever
+//             the grip table says; the bonus fades out by lockV[1]
+//   yawTau    s: the yaw rate follows the steering command with this lag
+//   plantK    lateral velocity at the rear axle is taken out at up to this
+//             multiple of the lateral grip (a hit from the side decays, the
+//             car's own cornering never needs more than 1)
+//   lockRate / returnRate  the player's steering (controls.steerShape):
+//             full locks per second away from / back to the center. AI
+//             drivers keep the spec's own rates (their planners are tuned
+//             to them).
+//   knockTau / knockK  after a crash (v.knock seconds): the yaw lag and the
+//             share of plantK kept, so a hit can still turn the car a little
+//   hbSlide   handbrake: the rear slip angle (rad) full steering asks for;
+//             the tail swings out toward it at hbRate (rad/s) from hbV[0]
+//             m/s (none) to hbV[1] m/s (all of it)
+//   hbCourse  share of the steering's turn the path keeps while sliding
+//   hbDrag    extra deceleration at a full slide, as a share of lateral grip
+//   hbRec     s: time constant of the recovery after release (the travel
+//             lines up with the nose; the nose never swings back), with a
+//             floor of hbRecMin rad/s
+//
+// Sim rows (unchanged since HANDLE and DRIVE):
+//   lat       1 (the table's skidpad g)
+//   cal       tire friction over that steady grip
+//   fall      tire force sag past the peak slip
+//   ask       share of lateral grip that full steering input asks for (1.15:
+//             past the limit the front pushes wide with tire noise)
+//   use       share of the front tire's peak force full input uses
+//   yawK / yawFirm  light yaw damper gains (under / over rotating)
+//   squeal    tire squeal onset in multiples of the peak slip
 const HANDLING = {
   arcade: {
-    lat: [1.25, 1.10], cal: [1.055, 1.085], fall: 0.05, ask: 1, use: 0.95, calm: 6, assist: true, yawK: 16, yawFirm: 10, betaK: 150,
-    tc: true, cutMin: 0.3, hbCap: true, hbBeta: 0.6, hbYaw: 2.2, transfer: 0.5, squeal: 1.05,
+    planted: true, lat: [1.6, 1.25], latV: [35, 75], lockDeg: 40, lockV: [15, 25], yawTau: 0.04, plantK: 2,
+    lockRate: 12, returnRate: 12, knockTau: 0.25, knockK: 0.45,
+    hbSlide: 0.6, hbRate: 2.2, hbV: [3, 8], hbCourse: 0.85, hbDrag: 0.3, hbRec: 0.12, hbRecMin: 0.5,
   },
   sim: {
-    lat: [1.0, 1.0], cal: [1.04, 1.04], fall: 0.2, ask: 1.15, use: 1.15, calm: 0, assist: false, yawK: 1.2, yawFirm: 3, betaK: 0,
-    tc: false, cutMin: 1, hbCap: false, hbBeta: 0, hbYaw: 0, transfer: 1, squeal: 0.9,
+    planted: false, lat: [1.0, 1.0], latV: [30, 60], cal: [1.04, 1.04], fall: 0.2, ask: 1.15, use: 1.15, yawK: 1.2, yawFirm: 3, squeal: 0.9,
   },
 };
 let handlingMode = 'arcade';
 let H = HANDLING.arcade;
-let FALL = H.fall; // tire force falls this much past the peak slip
+const FALL = HANDLING.sim.fall; // Sim: tire force falls this much past the peak slip
 
 // Pick the handling for every car: 'arcade' (default) or 'sim'. Anything
 // else means 'arcade'.
 export function setHandlingMode(mode) {
   handlingMode = mode === 'sim' ? 'sim' : 'arcade';
   H = HANDLING[handlingMode];
-  FALL = H.fall;
   return handlingMode;
 }
 
@@ -433,13 +447,13 @@ export function getHandlingMode() {
   return handlingMode;
 }
 
-// Handling presets (docs/PLAN_V3.md 2.4 item 5, the Handling lab's first
-// form): settings.handlingPreset, 'standard' (default, today's car),
-// 'relaxed' (slower steering, softer assist, more roll, a little less
-// grip) or 'sharp' (quicker steering, 40 degree lock at walking pace, more
-// assist, less roll). Module-wide like the mode; on top of either mode.
-// The one table and the active name live in core/handlingpreset.js
-// (PRESET_VALUES, read here every step through presetValues()).
+// Handling presets (docs/PLAN_V3.md 2.4 item 5, the Handling lab):
+// settings.handlingPreset, 'standard' (default, the target of task PLANTED),
+// 'relaxed' (gentler: less of Arcade's grip gain, slower steering, more
+// roll) or 'sharp' (quicker steering and more lock, less roll). Module-wide
+// like the mode; on top of either mode. The one table and the active name
+// live in core/handlingpreset.js (PRESET_VALUES, read here every step
+// through presetValues()).
 export const HANDLING_PRESETS = PRESETS;
 // Pick the preset for every car; anything else means 'standard'.
 export function setHandlingPreset(name) {
@@ -452,27 +466,68 @@ export function getHandlingPreset() {
 export function presetParams(name) {
   return Object.assign({}, presetValues(validPreset(name)));
 }
-// Full-lock wheel angle at walking pace under the preset.
+// Full-lock wheel angle at walking pace in the current mode under the
+// preset: the spec's own, at least the preset's floor, and in Arcade at
+// least the mode's lock (plus the preset's lockAdd) for every vehicle up to
+// LIGHT_MASS.
+export const LIGHT_MASS = 3000; // kg
 export function steerMaxOf(spec) {
-  const lockMin = (presetValues().lockDeg * Math.PI) / 180;
+  const pv = presetValues();
+  let deg = pv.lockDeg;
+  if (H.planted && spec.mass <= LIGHT_MASS && H.lockDeg + pv.lockAdd > deg) deg = H.lockDeg + pv.lockAdd;
+  const lockMin = (deg * Math.PI) / 180;
   return spec.steerMax > lockMin ? spec.steerMax : lockMin;
 }
 
 // The mode's steady lateral grip as a multiple of spec.grip at speed u
-// (m/s): Arcade 1.25 up to 30 mph, falling to 1.1 at 60 mph; Sim 1.
-export const LAT_V1 = 30 / 2.23694, LAT_V2 = 60 / 2.23694;
+// (m/s): Arcade 1.6 up to 35 mph, easing to 1.25 at 75 mph (the preset
+// keeps its gainK share of the gain above 1); Sim 1.
+const MPH = 2.23694;
+export const SERVICE_GAIN = 5 / 12;
+export const LAT_V1 = HANDLING.arcade.latV[0] / MPH, LAT_V2 = HANDLING.arcade.latV[1] / MPH;
 function latRamp(u) {
   const au = u < 0 ? -u : u;
-  return au <= LAT_V1 ? 0 : au >= LAT_V2 ? 1 : (au - LAT_V1) / (LAT_V2 - LAT_V1);
+  const v1 = H.latV[0] / MPH, v2 = H.latV[1] / MPH;
+  return au <= v1 ? 0 : au >= v2 ? 1 : (au - v1) / (v2 - v1);
 }
 export function gripFactor(u = 0) {
-  return H.lat[0] + (H.lat[1] - H.lat[0]) * latRamp(u);
+  const f = H.lat[0] + (H.lat[1] - H.lat[0]) * latRamp(u);
+  return H.planted ? 1 + (f - 1) * presetValues().gainK : f;
 }
 
 // Steady lateral grip (g) of a spec at speed u in the current mode: what a
-// skidpad run on full lock measures (dry, the preset's grip included).
+// skidpad run on full input measures above town speeds (dry, the preset's
+// grip included). In Arcade at town speeds a full lock can ask a little
+// more (arcadeLatA).
 export function lateralGrip(spec, u = 0) {
-  return gripFactor(u) * spec.grip * presetValues().gripK;
+  let f = gripFactor(u);
+  // The four tall service vehicles (docs/REVAMP.md 6.11) keep 5/12 of
+  // Arcade's gain (1.25 in town, 1.10 at speed, as before task PLANTED):
+  // with more their inner wheels would lift (test SV-H3).
+  if (H.planted && spec.service) f = 1 + (f - 1) * SERVICE_GAIN;
+  return f * spec.grip * presetValues().gripK;
+}
+
+// Arcade: the lateral acceleration (m/s^2) full input gives at speed au
+// when the lock does not limit it: the grip curve, and at or below
+// lockV[0] whatever the full lock takes (so the car always uses its whole
+// lock in town), that bonus fading out by lockV[1].
+function arcadeLatA(spec, au, kLock) {
+  let a = lateralGrip(spec, au) * G;
+  const v1 = H.lockV[0] / MPH, v2 = H.lockV[1] / MPH;
+  if (au < v2) {
+    const aLock = kLock * v1 * v1;
+    if (aLock > a) a += (aLock - a) * (au <= v1 ? 1 : (v2 - au) / (v2 - v1));
+  }
+  return a;
+}
+// Arcade: path curvature (1/m) of full input at speed au: the full lock,
+// or the turn the lateral grip allows.
+function arcadeK(spec, au) {
+  const kLock = Math.tan(steerMaxOf(spec)) / spec.wheelBase;
+  if (au <= H.lockV[0] / MPH) return kLock;
+  const k = arcadeLatA(spec, au, kLock) / (au * au);
+  return k < kLock ? k : kLock;
 }
 
 // Normalized engine torque, peak around 60% of the redline.
@@ -628,6 +683,8 @@ function lockBlend(au) {
 // gripAngle of the share s of the turn full input gives (all of the
 // grip-limited turn, or the part of it the lock reaches).
 export function steerAngle(spec, u, s) {
+  // Arcade: the geometric angle (a planted car has no slip angles to add).
+  if (H.planted) return steerGeo(spec, u, s < -1 ? -1 : s > 1 ? 1 : s);
   const d = derive(spec);
   const au = u < 0 ? -u : u;
   const as = s < 0 ? -s : s > 1 ? 1 : s;
@@ -656,6 +713,7 @@ export function fullLockCurvature(spec, u) {
 function steerGeo(spec, u, s) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
+  if (H.planted) return s * Math.atan(d.L * arcadeK(spec, au));
   const ask = askAt(au);
   const geo = geoAngle(d, spec, au, ask);
   const smax = steerMaxOf(spec);
@@ -667,13 +725,14 @@ function steerGeo(spec, u, s) {
 
 // Player input shaping by speed (task DRIVE, docs/REVAMP.md 6.3): the
 // player's steer x (-1..1) becomes sign(x) * |x|^e, the exponent rising
-// smoothly from 1 at SHAPE_V1 (15 mph) to SHAPE_EXP (1.8) at SHAPE_V2
-// (70 mph), times the preset's shapeK on the rise. Small thumb moves give
-// small lane corrections on the highway, full input is still full lock,
-// and the response stays monotonic (no dead zone). Only controls flagged
+// smoothly from 1 at SHAPE_V1 (15 mph) to SHAPE_EXP (1.2; task PLANTED,
+// was 1.8, which felt vague near the center) at SHAPE_V2 (70 mph), times
+// the preset's shapeK on the rise. Small thumb moves give small lane
+// corrections on the highway, full input is still full lock, and the
+// response stays monotonic (no dead zone). Only controls flagged
 // `steerShape` (the player's input, src/core/input.js) are shaped; the AI
 // planners send a share of the lock and get it unchanged.
-export const SHAPE_V1 = 15 / 2.23694, SHAPE_V2 = 70 / 2.23694, SHAPE_EXP = 1.8;
+export const SHAPE_V1 = 15 / 2.23694, SHAPE_V2 = 70 / 2.23694, SHAPE_EXP = 1.2;
 export function steerShapeExp(u) {
   const au = u < 0 ? -u : u;
   const t = au <= SHAPE_V1 ? 0 : au >= SHAPE_V2 ? 1 : (au - SHAPE_V1) / (SHAPE_V2 - SHAPE_V1);
@@ -742,12 +801,19 @@ export function stepVehicle(v, controls, dt, world) {
   const wet = wetGrip(rain);
   let ch = Math.cos(v.heading), sh = Math.sin(v.heading);
   const vf0 = v.vx * ch + v.vz * sh;
-  const m = s.mass, mg = m * G, mu = d.muLong * wet, muLat = lateralGrip(s, vf0) * (H.cal[0] + (H.cal[1] - H.cal[0]) * latRamp(vf0)) * wet, fLat = wetUnderSteer(rain);
+  const planted = H.planted;
+  const m = s.mass, mg = m * G, mu = d.muLong * wet, muLat = lateralGrip(s, vf0) * (planted ? 1 : H.cal[0]) * wet, fLat = wetUnderSteer(rain);
   const avf0 = Math.abs(vf0);
+  if (v.slide === undefined) { v.slide = 0; v.slideV = 0; v.knock = 0; }
+  if (v.knock > 0) v.knock = Math.max(0, v.knock - dt);
+  if (hitBefore > KNOCK_MIN) v.knock = Math.max(v.knock, Math.min(KNOCK_S, hitBefore / KNOCK_PER));
 
-  // ---- Steering: one rate limit (the car's lockRate / returnRate), the
-  // same for the player and the AI. steer is a share of the lock.
-  v.steer = steerToward(v.steer, steerIn, d.lockRate * presetValues().lockK, d.returnRate * presetValues().returnK, dt);
+  // ---- Steering: one rate limit, steer is a share of the lock. The car's
+  // lockRate / returnRate; in Arcade the player's own quicker rates (the
+  // thumb, not the car, sets the pace; AI planners keep the spec's).
+  const pv = presetValues();
+  const quick = planted && controls && controls.steerShape;
+  v.steer = steerToward(v.steer, steerIn, (quick ? H.lockRate : d.lockRate) * pv.lockK, (quick ? H.returnRate : d.returnRate) * pv.returnK, dt);
   const delta = steerAngle(s, vf0, v.steer);
   const deltaGeo = steerGeo(s, vf0, v.steer);
   v.steerAngle = delta;
@@ -833,73 +899,36 @@ export function stepVehicle(v, controls, dt, world) {
   const a = d.a, b = d.b, L = d.L;
   let spinMax = 0, absOn = false, slideF = 0, slideR = 0, hbSlide = 0;
   let sumAx = 0, sumAy = 0;
+  // Arcade: the turn the steering asks (curvature), the lateral
+  // acceleration the road gives now, how hard the rear axle is held in
+  // line, and the yaw lag (a crash loosens both for v.knock seconds).
+  const kGeo = Math.tan(deltaGeo) / L, sinGeo = Math.abs(Math.sin(deltaGeo));
+  const aCap = planted ? arcadeLatA(s, avf0, Math.tan(steerMaxOf(s)) / L) * wet * fLat : 0;
+  const plantA = planted ? muLat * G * H.plantK * (v.knock > 0 ? H.knockK : 1) : 0;
+  const kYaw = planted ? 1 - Math.exp(-h / (v.knock > 0 ? H.knockTau : H.yawTau)) : 0;
   for (let k = 0; k < NSUB; k++) {
     ch = Math.cos(v.heading);
     sh = Math.sin(v.heading);
     const vf = v.vx * ch + v.vz * sh;
     const vl = -v.vx * sh + v.vz * ch;
-    const r = v.yawRate;
+    let r = v.yawRate;
     const avf = vf < 0 ? -vf : vf;
-    // Loads with longitudinal weight transfer (from last sub-step's accel).
-    // Brakes and traction see all of it; the lateral balance sees the
-    // mode's share (Arcade half, Sim full).
+    // Loads with longitudinal weight transfer (from last sub-step's accel):
+    // brakes and traction see it in both modes.
     const dFz = m * v.accelX * d.h / L;
     const fzF = clamp(mg * d.cgF - dFz, 0.2 * mg, 0.85 * mg);
     const fzR = mg - fzF;
-    const fzLF = clamp(mg * d.cgF - dFz * H.transfer, 0.2 * mg, 0.85 * mg);
-    const fzLR = mg - fzLF;
     const capF = mu * fzF, capR = mu * fzR; // longitudinal limits
-    const capLF = muLat * fLat * fzLF, capLR = muLat * REAR_K * fzLR; // lateral limits
-
-    // Stability assist (Arcade), or a light yaw damper (Sim).
-    const beta = Math.atan2(vl, Math.max(avf, V0));
-    let assistMz = 0;
-    let driveScale = 1;
-    if (!handbrake && avf > 4 && !v.wrecked) {
-      let yawRef = vf * Math.tan(deltaGeo) / L;
-      const yLim = muLat * G / Math.max(avf, 1);
-      yawRef = clamp(yawRef, -yLim, yLim);
-      if (H.assist) {
-        // The slide is measured at the rear axle past its peak, so the big
-        // body slip of a tight turn at low speed is not mistaken for one.
-        const sl = Math.atan2(vl - b * r, Math.max(avf, V0));
-        const over = Math.abs(sl) - d.betaAllow - d.apR;
-        if (over > 0) {
-          assistMz += d.iz * H.betaK * presetValues().assistK * (sl > 0 ? over : -over);
-          if (H.tc) driveScale = clamp(1 - over * 5, H.cutMin, 1);
-        }
-        // Traction control: ease the drive off as the driven rear tires
-        // reach their peak slip, so power does not break them loose.
-        const xr = (sl < 0 ? -sl : sl) / d.apR;
-        if (H.tc && d.frontDrive < 1 && xr > TC_X) driveScale = Math.min(driveScale, clamp(1 - (xr - TC_X) * 4, H.cutMin, 1));
-      }
-      const eY = r - yawRef;
-      // Damp yaw toward the steering's intent; firmer when over-rotating,
-      // and (Arcade, `calm`) firmer still near the center of the wheel, so
-      // a car let go after a lane change settles straight without a weave.
-      const near = v.steer < 0 ? -v.steer : v.steer;
-      // (The calm damper is an aid for the player's thumb only: AI drivers steer smoothly already.)
-      const calm = H.calm > 0 && controls && controls.steerShape && near < CALM_BAND ? H.calm * (1 - near / CALM_BAND) : 0;
-      const firm = ((eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) + calm) * (H.assist ? presetValues().assistK : 1);
-      assistMz -= d.iz * firm * eY;
-    } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {
-      // Arcade handbrake: a big slide, but held short of a spin-out.
-      // Starts a little short of the cap so the slide does not overshoot it.
-      const over = Math.abs(beta) - H.hbBeta * 0.9;
-      if (over > 0) assistMz += d.iz * H.betaK * 3 * (beta > 0 ? over : -over);
-      const rOver = Math.abs(r) - H.hbYaw;
-      if (rOver > 0) assistMz -= d.iz * 12 * (r > 0 ? rOver : -rOver);
-    }
 
     // Longitudinal forces per axle (along each wheel), friction limited.
     // The brake force is shared by axle load (brake force distribution),
-    // so ABS holds both axles near their limit together.
-    const df = driveF * driveScale;
+    // so ABS holds both axles near their limit together. The same in both
+    // modes: Arcade and Sim share the straight line.
     const sgn = vf > 0 ? 1 : vf < 0 ? -1 : 0;
     const fade = Math.min(1, avf / BRAKE_FADE_V);
     const resist = brakeF * fade;
     const shareF = fzF / mg;
-    const dF = df * d.frontDrive, dR = handbrake ? 0 : df - dF;
+    const dF = driveF * d.frontDrive, dR = handbrake ? 0 : driveF - dF;
     let fxF = dF - sgn * (resist * shareF + engBrake * d.frontDrive * fade);
     let fxR = handbrake ? 0 : dR - sgn * (resist * (1 - shareF) + engBrake * (1 - d.frontDrive) * fade);
     const roll = (ROLL_RES * mg + coast) * Math.min(1, avf / 0.5) * sgn;
@@ -916,6 +945,79 @@ export function stepVehicle(v, controls, dt, world) {
       if (tracR) spinMax = Math.max(spinMax, Math.abs(fxR) / limR - 1);
       else absOn = true;
       fxR = fxR > 0 ? limR : -limR;
+    }
+    const spd = Math.hypot(vf, vl);
+    const drag = d.kd * spd;
+
+    if (planted) {
+      // ---- Arcade: planted. The nose follows the steering (yaw rate =
+      // speed times the curvature asked, within what the road gives, with a
+      // short lag) and the travel follows the nose (the rear axle's
+      // sideways velocity is taken out). Power and brakes act along the
+      // car only: nothing here can rotate it or let the tail step out. The
+      // one slide is the handbrake's, asked for by the player (v.slide).
+      const r0 = r, w0 = vl - b * r; // the rear axle's sideways velocity
+      const aw = w0 < 0 ? -w0 : w0;
+      const aLat = vf * r;
+      let fx = fxF + fxR - drag * vf - roll;
+      if (handbrake) fx -= sgn * HB_K * muLat * fzR * Math.min(1, avf / 0.5); // locked rear wheels
+      // Cornering scrub, and the drag of a slide (tires going sideways).
+      fx -= sgn * m * (SCRUB * (aLat < 0 ? -aLat : aLat) * sinGeo + H.hbDrag * muLat * G * aw / Math.hypot(aw, avf > V0 ? avf : V0));
+      const ax = fx / m;
+      sumAx += ax;
+      sumAy += aLat;
+      v.accelX += (ax - v.accelX) * Math.min(1, 25 * h);
+      const nf = vf + ax * h;
+      const anf = nf < 0 ? -nf : nf;
+      const rLim = aCap / (anf > 1 ? anf : 1);
+      let rRef = clamp(nf * kGeo, -rLim, rLim);
+      // The handbrake slide: the tail swings out toward the steering's
+      // side (the nose turns in by the slide's rate); with the handbrake
+      // off it comes back by the travel lining up with the nose.
+      let slideV = 0;
+      if (handbrake || v.slide !== 0) {
+        const as = v.slide < 0 ? -v.slide : v.slide;
+        let next;
+        if (handbrake) {
+          const hk = v.wrecked ? 0 : clamp((nf - H.hbV[0]) / (H.hbV[1] - H.hbV[0]), 0, 1);
+          next = approach(v.slide, v.steer * H.hbSlide * hk, H.hbRate * h);
+          rRef *= H.hbCourse;
+        } else next = approach(v.slide, 0, Math.max(as / H.hbRec, H.hbRecMin) * h);
+        if ((next < 0 ? -next : next) > as) slideV = (next - v.slide) / h;
+        v.slide = next;
+      }
+      r += (rRef - (r - v.slideV)) * kYaw + (slideV - v.slideV);
+      v.slideV = slideV;
+      r = clamp(r, -4, 4);
+      v.yawRate = r;
+      v.heading = angleDiff(v.heading + r * h, 0);
+      ch = Math.cos(v.heading);
+      sh = Math.sin(v.heading);
+      // The old velocity seen from the turned nose: the rear axle's
+      // sideways part of it is what the tires take out.
+      const want = nf > 0 ? -Math.tan(v.slide) * nf : 0;
+      const w = approach(-v.vx * sh + v.vz * ch - b * r0, want, plantA * h);
+      const nl = w + b * r;
+      v.vx = nf * ch - nl * sh;
+      v.vz = nf * sh + nl * ch;
+      const use = rLim > 0 ? (r < 0 ? -r : r) / rLim : 0;
+      if (use > slideF) slideF = use;
+      if (handbrake && avf > hbSlide) hbSlide = avf;
+      continue;
+    }
+
+    // ---- Sim: the single-track tire model.
+    // The lateral balance sees all of the weight transfer.
+    const capLF = muLat * fLat * fzF, capLR = muLat * REAR_K * fzR; // lateral limits
+    // A light yaw damper toward the steering's intent, firmer when over-rotating.
+    let assistMz = 0;
+    if (!handbrake && avf > 4 && !v.wrecked) {
+      let yawRef = vf * Math.tan(deltaGeo) / L;
+      const yLim = muLat * G / Math.max(avf, 1);
+      yawRef = clamp(yawRef, -yLim, yLim);
+      const eY = r - yawRef;
+      const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK;
+      assistMz -= d.iz * firm * eY;
     }
 
     // Front axle: slip angle between wheel heading and contact velocity.
@@ -956,8 +1058,6 @@ export function stepVehicle(v, controls, dt, world) {
     }
 
     // Aero drag along the velocity.
-    const spd = Math.hypot(vf, vl);
-    const drag = d.kd * spd;
     const fx = ffx + frx - drag * vf - roll;
     const fy = ffy + fry - drag * vl;
     const mz = a * ffy - b * fry + assistMz;
@@ -1026,7 +1126,10 @@ export function stepVehicle(v, controls, dt, world) {
   // ---- Body motion: damped springs for pitch (dive/squat) and roll.
   if (hitBefore > 0) bump(v, hitBefore);
   const pitchEq = clamp(axAvg * 0.0065, -0.075, 0.06);
-  const rollEq = clamp(-ayAvg * d.rollPerA * presetValues().rollK, -ROLL_MAX, ROLL_MAX);
+  // Arcade corners at up to 1.6 times the real car's grip: the body rolls
+  // ARCADE_ROLL times the real car's roll at its own limit, not 1.6 times.
+  const rollK = planted ? ARCADE_ROLL / (H.lat[0] + (H.lat[1] - H.lat[0]) * latRamp(vf)) : 1;
+  const rollEq = clamp(-ayAvg * d.rollPerA * pv.rollK * rollK, -ROLL_MAX, ROLL_MAX);
   const w = 9, z2 = 2 * 0.5 * w;
   v.pitchV += (w * w * (pitchEq - v.pitch) - z2 * v.pitchV) * dt;
   v.pitch += v.pitchV * dt;
@@ -1038,13 +1141,28 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.suspension < 1e-4) v.suspension = 0;
 
   v.wheelSpin = (v.wheelSpin + (vf + Math.sign(driveF) * v.spin * 8) * dt / s.wheelRadius) % (Math.PI * 2);
-  // Squeal starts past the tire peak (a little later in Arcade, whose tires
-  // saturate softly). A front pushing wide past its limit is heard at once.
-  const slideAmt = Math.max(clamp((slideR - H.squeal) / 1.2, 0, 1), clamp((slideF - H.squeal) / 0.5, 0, 1));
-  const hbAmt = handbrake && Math.abs(vf) > 3 ? clamp(0.4 + hbSlide / 25, 0, 1) : 0;
-  v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
-  v.slipF = slideF;
-  v.push = clamp(slideF - 1, 0, 1);
+  if (planted) {
+    // Arcade: squeal, smoke and the drift score follow the real slide (the
+    // rear axle's slip angle): silent under 3 degrees, full at 29. Locked
+    // rear wheels squeal on their own; wheelspin and ABS as in Sim. The
+    // drawn front wheels steer into a slide (automatic countersteer).
+    const sl = Math.atan2(vl - b * v.yawRate, Math.max(Math.abs(vf), V0));
+    const asl = sl < 0 ? -sl : sl;
+    const slideAmt = clamp((asl - SLIP_QUIET) / (SLIP_FULL - SLIP_QUIET), 0, 1);
+    const hbAmt = handbrake && hbSlide > 3 ? HB_SQUEAL : 0;
+    v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
+    v.slipF = slideF * USE_K; // the grip in use: full input reports the front at 0.95 of its peak
+    v.push = 0;
+    if (asl > SLIP_QUIET && vf > V0) v.steerAngle = clamp(deltaGeo + COUNTER * sl, -steerMaxOf(s), steerMaxOf(s));
+  } else {
+    // Sim: squeal starts past the tire peak. A front pushing wide past its
+    // limit is heard at once.
+    const slideAmt = Math.max(clamp((slideR - H.squeal) / 1.2, 0, 1), clamp((slideF - H.squeal) / 0.5, 0, 1));
+    const hbAmt = handbrake && Math.abs(vf) > 3 ? clamp(0.4 + hbSlide / 25, 0, 1) : 0;
+    v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
+    v.slipF = slideF;
+    v.push = clamp(slideF - 1, 0, 1);
+  }
 
   // Integrate position in sub-steps with collision.
   const move = Math.hypot(v.vx, v.vz) * dt;
@@ -1082,8 +1200,8 @@ export function stepVehicle(v, controls, dt, world) {
     v.x = v.px; v.z = v.pz; v.heading = v.pheading;
     v.vx = 0; v.vz = 0; v.yawRate = 0; v.speed = 0;
   }
-  if (!Number.isFinite(v.pitch + v.roll + v.pitchV + v.rollV + v.rpm + v.accelX + v.steer + v.brakeP)) {
-    v.pitch = 0; v.roll = 0; v.pitchV = 0; v.rollV = 0; v.rpm = IDLE; v.accelX = 0; v.steer = 0; v.brakeP = 0;
+  if (!Number.isFinite(v.pitch + v.roll + v.pitchV + v.rollV + v.rpm + v.accelX + v.steer + v.brakeP + v.slide + v.slideV)) {
+    v.pitch = 0; v.roll = 0; v.pitchV = 0; v.rollV = 0; v.rpm = IDLE; v.accelX = 0; v.steer = 0; v.brakeP = 0; v.slide = 0; v.slideV = 0;
   }
 }
 

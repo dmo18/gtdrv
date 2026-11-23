@@ -12,11 +12,13 @@ import {
   PRESETS, PRESET_VALUES, VERDICTS, validPreset, validVerdict, setActivePreset, activePreset, presetValues,
 } from '../src/core/handlingpreset.js';
 
-test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the center; sensitivity changes travel only', () => {
+// Task PLANTED (deliberate): 0.9 x + 0.1 x^3, 0.4625 at half (was 0.85 x + 0.15 x^3, 0.44375).
+test('wheel curve: odd, rising, 0.4625 at half, slope 0.9 at the center; sensitivity changes travel only', () => {
   assert.equal(wheelCurve(0), 0);
   assert.equal(wheelCurve(1), 1);
   assert.equal(wheelCurve(-1), -1);
-  assert.ok(Math.abs(wheelCurve(0.5) - 0.44375) < 1e-12);
+  assert.ok(Math.abs(wheelCurve(0.5) - 0.4625) < 1e-12);
+  assert.equal(CURVE_LINEAR, 0.9);
   assert.ok(Math.abs(wheelCurve(1e-6) / 1e-6 - CURVE_LINEAR) < 1e-6, 'slope at 0');
   let last = -2;
   for (let x = -1; x <= 1.0001; x += 0.01) {
@@ -193,9 +195,16 @@ test('handling presets: values, default standard, enum validation, one table wit
   // DRIVE re-pin (deliberate, docs/PLAN_V3.md 13): each preset also scales
   // the player's input shaping by speed (shapeK: Relaxed finer, Sharp more direct).
   assert.deepEqual(PRESETS, ['standard', 'relaxed', 'sharp']);
-  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 }, 'standard is today');
-  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3, shapeK: 1.2 });
-  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85, shapeK: 0.75 });
+  // PLANTED re-pin (deliberate, docs/REVAMP.md 6.3): Standard is the planted
+  // Arcade target. assistK is gone with the stability assist; lockAdd (degrees
+  // on Arcade's 40 degree lock) and gainK (share of Arcade's grip gain kept)
+  // join. Relaxed: slower steering (0.7, was 0.8), 0.7 of the grip gain
+  // (was gripK 0.95), finer shaping (1.25 of a rise that is now 0.2, was 1.2
+  // of 0.8). Sharp: 44 degrees in Arcade, shaping halved (was 0.75).
+  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1 }, 'standard is the target');
+  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25 });
+  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, lockAdd: 4, gripK: 1, gainK: 1, rollK: 0.85, shapeK: 0.5 });
+  assert.ok(PRESET_VALUES.relaxed.gainK < 1 && PRESET_VALUES.sharp.lockAdd > 0);
   assert.ok(PRESET_VALUES.relaxed.shapeK > 1 && PRESET_VALUES.sharp.shapeK < 1);
   assert.ok(PRESET_VALUES.relaxed.lockK < 1 && PRESET_VALUES.sharp.lockK > 1);
   for (const id of PRESETS) assert.deepEqual(presetParams(id), PRESET_VALUES[id], `${id}: the car reads the same row`);
@@ -284,7 +293,11 @@ test('handling mode: arcade by default, sim on request, anything else is arcade'
   assert.equal(getHandlingMode(), 'arcade');
 });
 
-test('turning circles: the same at walking pace in both modes, at speed set by the grip', () => {
+// Task PLANTED (deliberate, was "the same at walking pace in both modes"):
+// Arcade cuts 40 degrees for every vehicle up to 3000 kg, so at 5 m/s it
+// turns tighter than Sim by the ratio of the two locks; heavier vehicles
+// turn the same circle in both modes.
+test('turning circles: at walking pace the lock (40 degrees in Arcade for cars), at speed set by the grip', () => {
   const t = {};
   for (const mode of ['arcade', 'sim']) {
     setHandlingMode(mode);
@@ -293,8 +306,12 @@ test('turning circles: the same at walking pace in both modes, at speed set by t
   setHandlingMode('arcade');
   for (const id of ALL) {
     const spec = createVehicle(id, 0, 0, 0).spec;
-    // Walking-ish pace (5 m/s): the lock, near-equal in both modes.
-    assert.ok(Math.abs(t.arcade[id][0].r / t.sim[id][0].r - 1) < 0.1, `${id} at 5 m/s: arcade ${t.arcade[id][0].r.toFixed(2)} sim ${t.sim[id][0].r.toFixed(2)}`);
+    // Walking-ish pace (5 m/s): the lock.
+    const b = spec.wheelBase * spec.cgFront;
+    const geo = (lock) => Math.hypot(spec.wheelBase / Math.tan(lock), b);
+    const want = spec.mass <= 3000 ? geo(Math.max(spec.steerMax, 40 * Math.PI / 180)) / geo(spec.steerMax) : 1;
+    assert.ok(Math.abs(t.arcade[id][0].r / t.sim[id][0].r / want - 1) < 0.1, `${id} at 5 m/s: arcade ${t.arcade[id][0].r.toFixed(2)} sim ${t.sim[id][0].r.toFixed(2)}, lock ratio ${want.toFixed(2)}`);
+    assert.ok(t.arcade[id][0].r <= t.sim[id][0].r * 1.02, `${id}: Arcade is never wider at walking pace`);
     for (const k of [1, 2]) {
       const u = SPEEDS[k];
       for (const mode of ['arcade', 'sim']) {
@@ -319,7 +336,8 @@ test('Sim corners wider than Arcade at speed, never tighter', () => {
       setHandlingMode('sim');
       const s = turnRadius(id, u).r;
       setHandlingMode('arcade');
-      assert.ok(s > a * 1.05 && s < a * 1.4, `${id} at ${u}: arcade ${a.toFixed(1)} sim ${s.toFixed(1)}`);
+      // (Task PLANTED, deliberate: Arcade grips up to 1.6 times Sim, was 1.25: the upper bound was 1.4.)
+      assert.ok(s > a * 1.05 && s < a * 1.75, `${id} at ${u}: arcade ${a.toFixed(1)} sim ${s.toFixed(1)}`);
     }
   }
 });

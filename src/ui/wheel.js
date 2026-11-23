@@ -57,7 +57,9 @@ export function placeWheel(cx, cy, r, w, h, rects, out, margin = 6) {
 // from how the thumb moves after it touches down, never from where it is, so
 // touching down anywhere gives no steer. Each move adds the larger of two
 // measures of that move:
-//   - horizontal travel: DRAG_FULL_PX of travel is full input at sensitivity 1;
+//   - horizontal travel: DRAG_FULL_PX of travel is full input at sensitivity 1
+//     (80 px since task PLANTED: 55 px made the wheel loose, a thumb's own
+//     tremor was a tenth of the travel);
 //   - rotation about the drawn wheel's center (outside ROT_CORE_PX of it):
 //     ROT_FULL_DEG of rotation is full input.
 // Rotation only counts when it turns the same way as the horizontal travel,
@@ -66,7 +68,7 @@ export function placeWheel(cx, cy, r, w, h, rects, out, margin = 6) {
 // steers right, never left, and crossing the center never jumps. The sum is
 // clamped to full input, so turning back answers at once.
 // ---------------------------------------------------------------------------
-export const DRAG_FULL_PX = 55;
+export const DRAG_FULL_PX = 80;
 export const ROT_FULL_DEG = 60;
 export const ROT_CORE_PX = 40;
 export const WHEEL_SHOW_DEG = 100; // the drawn wheel's angle at full input

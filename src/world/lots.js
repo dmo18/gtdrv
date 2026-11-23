@@ -9,6 +9,7 @@
 // toward +z.
 import { createRng, firstNext } from '../core/rng.js';
 import { SERVICE_SPOTS } from '../entities/servicevehicles.js';
+import { onJunction } from './junctions.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -899,6 +900,7 @@ export function dressLot(city, lot, out = []) {
   if (!G || !lot || lot.type === 'verge' || lot.type === 'airfield') return out;
   const set = DRESS_SETS[lot.dress] || DRESS_SETS[DRESS[lot.type].midtown[0]];
   const rng = createRng(lot.seed);
+  const roadGeo = city.roadGeo || null;
   const cell = G.cell, W = G.w;
   const id = lot.id;
   const cap = featureCap(lot);
@@ -968,6 +970,9 @@ export function dressLot(city, lot, out = []) {
     // Rounded to the centimeter first, so the stored point is the tested one.
     const x = Math.round(x0f * 100) / 100, z = Math.round(z0f * 100) / 100;
     if (!inLot(x, z) || inGarage(x, z, Math.max(l, w) / 2 + r) || !offBuildings(x, z, heading, l, w, r)) return false;
+    // Never on a junction's asphalt (a wide junction can reach over the
+    // lot raster: a tree would stand in the road).
+    if (roadGeo && onJunction(roadGeo, x, z)) return false;
     const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays

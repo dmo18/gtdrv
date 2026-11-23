@@ -10,6 +10,8 @@ import { createStreetEvents } from './events.js';
 import { createDaily } from './daily.js';
 import { createCustom } from './custom.js';
 
+export const SAVE_SPEED = 2, SAVE_WAIT = 8; // m/s and seconds: when a change of the loop is written to storage
+
 export function createMissions(game, uiRoot) {
   const parts = [];
   const add = (key, make) => {
@@ -28,6 +30,22 @@ export function createMissions(game, uiRoot) {
     if (game.streetEvents) add('daily', () => createDaily(game));
     add('custom', () => createCustom(game));
   }
+  // What the loop changed is saved at the next quiet moment: the car slow, or
+  // SAVE_WAIT seconds on. (A save is a few milliseconds of work: never in the
+  // step a medal or a callout lands in. Leaving the page saves as always.)
+  let saveDue = false, saveT = 0;
+  game.loopSave = () => { saveDue = true; };
+  function stepSave(dt) {
+    if (!saveDue) return;
+    saveT += dt;
+    const v = game.player ? game.player.vehicle : null;
+    const speed = v ? Math.abs(v.speed || 0) : 0;
+    if (speed < SAVE_SPEED || saveT >= SAVE_WAIT) {
+      saveDue = false;
+      saveT = 0;
+      game.events.emit('progress');
+    }
+  }
   return {
     name: 'missions',
     game,
@@ -42,6 +60,7 @@ export function createMissions(game, uiRoot) {
     },
     fixedUpdate(dt) {
       for (let i = 0; i < parts.length; i++) if (parts[i].fixedUpdate) parts[i].fixedUpdate(dt);
+      stepSave(dt);
     },
     render(alpha, dt) {
       for (let i = 0; i < parts.length; i++) if (parts[i].render) parts[i].render(alpha, dt);

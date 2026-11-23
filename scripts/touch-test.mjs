@@ -86,10 +86,11 @@ try {
     const brake = await rect('.rw-touch .rw-brake');
     const fire = await rect('.rw-touch .rw-dbfire');
 
-    // The steering finger's path: right A px in steps of 10, back 2A, back to the start (A = 80,
-    // 100 for the slider). Returns the steer read after every step.
+    // The steering finger's path: right A px in steps of 10, back 2A, back to the start (A = 100).
+    // Task PLANTED: the wheel's full input is at 80 px of travel (was 55), so its sweeps reach 100
+    // px and must be full within 85. Returns the steer read after every step.
     const sweep = async (id, x0, y0, opts = {}) => {
-      const A = opts.amp || 80, n = A / 10;
+      const A = opts.amp || 100, n = A / 10;
       const rows = [];
       await down(id, x0, y0);
       rows.push({ x: x0, ...(await read(opts.steps || 1)) });
@@ -140,7 +141,7 @@ try {
         check(`${tag} tilt without a sensor falls back to the wheel`, now === 'wheel', now);
       }
       const st = style === 'tilt' ? 'tilt-fallback' : style;
-      const opts = style === 'buttons' ? { noFull: true, steps: 3 } : style === 'slider' ? { fullPx: 95, amp: 100 } : { fullPx: 60 };
+      const opts = style === 'buttons' ? { noFull: true, steps: 3 } : style === 'slider' ? { fullPx: 95, amp: 100 } : { fullPx: 85 };
       const wb = style === 'buttons' ? await rect('.rw-steerbtn.rw-sright') : null;
       // Starting points across the whole zone: below the wheel center, on it, at 3 o'clock, up near
       // the minimap, at the far right of the zone, at the bottom edge.
@@ -228,13 +229,13 @@ try {
       if (style === 'wheel') {
         // The drawn wheel shows the input; it springs back on release.
         await down(2, W0.x - 10, W0.y + 10);
-        await move(2, W0.x + 17, W0.y + 10);
+        await move(2, W0.x + 30, W0.y + 10);
         const half = await read();
         const rot = await pg.evaluate(() => document.querySelector('.rw-wheel-rot').style.transform);
         await up(2);
         const rotUp = await pg.evaluate(() => document.querySelector('.rw-wheel-rot').style.transform);
-        check(`${tag} wheel: 27 px of travel is about half input and the drawn wheel turns right; back to center on release`,
-          half.s > 0.35 && half.s < 0.55 && /rotate\(\d/.test(rot) && rotUp === '', JSON.stringify([half.s, rot, rotUp]));
+        check(`${tag} wheel: 40 px of travel is about half input and the drawn wheel turns right; back to center on release`,
+          half.s > 0.4 && half.s < 0.6 && /rotate\(\d/.test(rot) && rotUp === '', JSON.stringify([half.s, rot, rotUp]));
         // Rotation about the center: dragging down the right side turns right.
         await down(2, W0.r - 8, W0.y - 20);
         for (let i = 1; i <= 6; i++) await move(2, W0.r - 8 - i, W0.y - 20 + i * 10);
@@ -248,11 +249,11 @@ try {
     const lz = await rect('.rw-stickzone');
     const lg = await rect('.rw-touch .rw-gas');
     await down(1, lg.x, lg.y);
-    judge('left-handed wheel, GAS held', await sweep(2, (lz.l + lz.r) / 2, (lz.t + lz.b) / 2), { fullPx: 60, held: 'GAS', heldOk: (r) => r.t === 1 });
+    judge('left-handed wheel, GAS held', await sweep(2, (lz.l + lz.r) / 2, (lz.t + lz.b) / 2), { fullPx: 85, held: 'GAS', heldOk: (r) => r.t === 1 });
     await up(1);
     await pg.evaluate(() => { window.__rw.touch.setLeftHanded(false); window.__rw.touch.update(1 / 60); });
-    // Sensitivity: 1.5 needs less travel, 0.5 more (full input at 55 / sensitivity px).
-    for (const [sens, px] of [[1.5, 40], [0.5, 115]]) {
+    // Sensitivity: 1.5 needs less travel, 0.5 more (full input at 80 / sensitivity px).
+    for (const [sens, px] of [[1.5, 55], [0.5, 165]]) {
       await pg.evaluate((s) => window.__rw.touch.setSteering('wheel', s), sens);
       const x0 = W0.x - 20, y0 = W0.y + 10;
       await down(2, x0, y0);
