@@ -199,7 +199,10 @@ export default async function extra(page, check) {
     const peds = g.peds.slots.map((s) => s.ped).filter((p) => p.active && p.life === 'ok');
     if (!peds.length) return { ok: false, why: 'no peds' };
     peds.sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z));
-    const ped = peds[0];
+    // The nearest ped that has a clear line of fire from 6 m west (solid props such as palms, poles and
+    // fences now stop shots, as they should): the check is about holding fire, not about the scenery.
+    const col = g.world && g.world.collision && g.world.collision.lineClear ? g.world.collision : null;
+    const ped = (col && peds.find((q) => col.lineClear(q.x - 6, q.z, q.x, q.z))) || peds[0];
     // Stand 6 m from the ped.
     w.x = w.px = ped.x - 6;
     w.z = w.pz = ped.z;
