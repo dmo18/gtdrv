@@ -243,8 +243,8 @@ test('the real map: the spawn street lots are dressed, fast enough to stream', (
   assert.ok(ms / slices < 2, `average slice ${(ms / slices).toFixed(2)} ms`);
 });
 
-test('streaming: static matrices, packed far level, no tiles in fast or high flight, tree detail by distance', async () => {
-  const { buildRealCity, FLY_HOLD, TREE_DETAIL_R, TILE } = await import('../src/render/realcity.js');
+test('streaming: static matrices, packed far level, no tiles in fast or high flight, trees by distance', async () => {
+  const { buildRealCity, FLY_HOLD, TREE_NEAR_R, TREE_FAR_R, TILE } = await import('../src/render/realcity.js');
   const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
   const city = createMiamiCity(data);
   const rect = { u0: 0, u1: 1, v0: 0, v1: 1, w: 64, h: 64 };
@@ -288,21 +288,43 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
   assert.ok(st.stats.built > built0, 'slow and low: tiles build again');
   // Tile groups added later are static too.
   for (const t of st.tiles) if (t.group) assert.equal(t.group.matrixAutoUpdate, false);
-  // Tree detail by distance (Normal tier), at the spawn street.
+  // Trees by distance (Normal tier), at the spawn street: every tree of
+  // a shown tile is an instance of the tree batch, in its near shape
+  // within TREE_NEAR_R, its far shape within TREE_FAR_R, else the
+  // distant one (a few meters of hysteresis at each edge).
   cam.position.x = s.x;
   cam.position.z = s.z;
   st.flush(cam);
   st.update(cam, 3);
-  let near = 0, far2 = 0;
+  const trees = st.trees();
+  assert.ok(trees && trees.mesh.isBatchedMesh, 'the tree batch');
+  assert.ok(!group.children.some((o) => o.name === 'tile' && o.children.some((m) => m.name === 'trees-detail')), 'no tree meshes in the tiles');
+  let near = 0, far2 = 0, distant = 0;
   for (const t of st.tiles) {
-    if (!t.group || !t.shown) continue;
-    for (const m of t.trees) {
-      const bb = m.geometry.boundingBox;
-      const dx = Math.max(bb.min.x - cam.position.x, 0, cam.position.x - bb.max.x), dz = Math.max(bb.min.z - cam.position.z, 0, cam.position.z - bb.max.z);
-      const d = Math.hypot(dx, dz);
-      if (d > TREE_DETAIL_R[1] + 16) { far2++; assert.equal(m.visible, false, `tree detail ${d.toFixed(0)} m off`); }
-      if (d < TREE_DETAIL_R[1]) { near++; assert.equal(m.visible, true); }
+    if (!t.group) continue;
+    const e = trees.tiles.get(t.k);
+    if (!e) continue;
+    assert.equal(e.shown, t.shown);
+    for (let i = 0; i < e.n; i++) {
+      const d = Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z);
+      const vis = trees.mesh.getVisibleAt(e.ids[i]);
+      assert.equal(vis, t.shown, 'drawn while its tile is shown');
+      if (!t.shown) continue;
+      const lod = e.lod[i];
+      if (d < TREE_NEAR_R[1]) { near++; assert.equal(lod, 2, `tree ${d.toFixed(0)} m near`); }
+      else if (d > TREE_NEAR_R[1] + 5 && d < TREE_FAR_R[1]) { far2++; assert.equal(lod, 1, `tree ${d.toFixed(0)} m far`); }
+      else if (d > TREE_FAR_R[1] + 9) { distant++; assert.equal(lod, 0, `tree ${d.toFixed(0)} m distant`); }
+      // The batch draws the shape the tree asks for.
+      const geo = trees.mesh.getGeometryIdAt(e.ids[i]);
+      assert.equal(geo, e.sp[i] * 3 + lod);
     }
   }
-  assert.ok(near > 0 && far2 > 0, `near ${near}, far ${far2}`);
+  assert.ok(near > 0 && far2 > 0 && distant > 0, `near ${near}, far ${far2}, distant ${distant}`);
+  // Moving off: the trees left behind fall back to their far shapes.
+  cam.position.x = s.x + 200;
+  st.update(cam, 3);
+  for (const e of trees.tiles.values()) {
+    if (!e.shown) continue;
+    for (let i = 0; i < e.n; i++) if (Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z) > TREE_NEAR_R[1] + 5) assert.notEqual(e.lod[i], 2);
+  }
 });

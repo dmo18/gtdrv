@@ -28,7 +28,8 @@ import { ChunkedBuilder, MeshBuilder, takeFloats, takeIndices, giveBack, freezeS
 import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
-import { addProps } from './props.js';
+import { addProps, treeSpecies } from './props.js';
+import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { groundFn } from '../world/ground.js';
@@ -58,6 +59,12 @@ export const FLY_HOLD = { height: 60, speed: 60 };
 // are drawn out to this distance (m, by quality tier: Low, Normal, High);
 // past it the trunks and canopies in 'plain' carry the tree.
 export const TREE_DETAIL_R = [70, 110, 200];
+// With the tree batch (treebatch.js, the default on the Miami map) every
+// tree is drawn as far as its tile is; within this distance (m, by tier)
+// in its full shape, past it in its low far shape.
+export const TREE_NEAR_R = [30, 45, 75];
+// Past this (m, by tier) the far shape gives way to the distant one.
+export const TREE_FAR_R = [90, 120, 180];
 
 // Near-tile mesh arrays come from the builders' pool (views of pooled
 // arrays, the pooled array kept on the attribute as rwPool) and go back
@@ -139,31 +146,43 @@ function* boundsOf(pos, n, bb, over) {
   }
   bb[6] = Math.sqrt(bb[6]);
 }
-function* buildSliced(cb, material, o, over, out, sub = 0) {
-  const parts = [cb.map.get(sub * 3), cb.map.get(sub * 3 + 1), cb.map.get(sub * 3 + 2)];
+// The parts of builder cb for the given quarters (subs), by tier:
+// [[tier 0 builders], [tier 1], [tier 2]] (tier-major, so the tiers'
+// draw ranges stay contiguous).
+function partsOf(cb, subs) {
+  const out = [[], [], []];
+  for (let t = 0; t < 3; t++) for (const sub of subs) { const p = cb.map.get(sub * 3 + t); if (p && p.count) out[t].push(p); }
+  return out;
+}
+// One mesh from tier lists of builders. posOnly: positions and indices
+// only, and the builders are kept (a shadow proxy, made from builders
+// that a drawn mesh takes next); else every builder used is released.
+function* buildParts(tiers, withUv, material, o, over, out, posOnly) {
   let nv = 0, ni = 0;
-  for (const p of parts) if (p) { nv += p.count; ni += p.ni; }
-  if (!nv) { for (const p of parts) if (p) p.release(); return; }
-  const uv = cb.withUv;
+  for (const list of tiers) for (const p of list) { nv += p.count; ni += p.ni; }
+  if (!nv) return;
+  const uv = withUv && !posOnly;
   // Big new arrays are zero-filled when taken: a break after each.
   const pos = takeFloats(nv * 3);
   if (over()) yield 'mesh';
-  const col = takeFloats(nv * 3);
+  const col = posOnly ? null : takeFloats(nv * 3);
   if (over()) yield 'mesh';
-  const nor = takeFloats(nv * 3);
+  const nor = posOnly ? null : takeFloats(nv * 3);
   if (over()) yield 'mesh';
   const uvs = uv ? takeFloats(nv * 2) : null;
   if (over()) yield 'mesh';
   const idx = takeIndices(ni, nv > 65535);
   if (over()) yield 'mesh';
-  const tiered = !!(parts[1] || parts[2]);
+  const tiered = tiers[1].length > 0 || tiers[2].length > 0;
   const counts = [];
   let v = 0, k = 0;
-  for (const p of parts) {
-    if (p) {
+  for (const list of tiers) {
+    for (const p of list) {
       yield* copyInto(pos, p.P, p.count * 3, v * 3, over);
-      yield* copyInto(col, p.C, p.count * 3, v * 3, over);
-      yield* copyInto(nor, p.N, p.count * 3, v * 3, over);
+      if (!posOnly) {
+        yield* copyInto(col, p.C, p.count * 3, v * 3, over);
+        yield* copyInto(nor, p.N, p.count * 3, v * 3, over);
+      }
       if (uvs) {
         if (p.U) yield* copyInto(uvs, p.U, p.count * 2, v * 2, over);
         else uvs.fill(0, v * 2, (v + p.count) * 2);
@@ -171,14 +190,16 @@ function* buildSliced(cb, material, o, over, out, sub = 0) {
       yield* copyInto(idx, p.I, p.ni, k, over, v);
       v += p.count;
       k += p.ni;
-      p.release();
+      if (!posOnly) p.release();
     }
     counts.push(k);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', pooledAttr(pos, nv * 3, 3));
-  geo.setAttribute('color', pooledAttr(col, nv * 3, 3));
-  geo.setAttribute('normal', pooledAttr(nor, nv * 3, 3));
+  if (!posOnly) {
+    geo.setAttribute('color', pooledAttr(col, nv * 3, 3));
+    geo.setAttribute('normal', pooledAttr(nor, nv * 3, 3));
+  }
   if (uvs) geo.setAttribute('uv', pooledAttr(uvs, nv * 2, 2));
   geo.setIndex(pooledAttr(idx, ni, 1));
   geo.addEventListener('dispose', onTileGeoDispose);
@@ -220,13 +241,48 @@ class QuarterBuilder {
     return b;
   }
 }
-const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao', 'lotSolid']);
+const FACADES = ['glass', 'brick', 'office', 'stucco', 'siding', 'corrugated', 'roofing', 'shopfront', 'havana'];
+const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao', 'lotSolid', ...FACADES]);
+// Quartered builders drawn as one mesh per tile (fewer draws; the
+// quarters only split the shadow proxies, or cull too little to pay).
+const ONE_MESH = new Set(['props', 'ao', 'lotSolid', 'trim', ...FACADES]);
+
+// The shadow casters of a tile (the solid, opaque ones) cast through
+// one position-only proxy mesh per quarter on SHADOW_LAYER (the sun's
+// shadow camera sees that layer, the view camera does not, graphics.js),
+// so the shadow pass costs a draw per quarter, not one per material.
+const CAST_KEYS = ['plain', ...FACADES];
+// Builders drawn inside another key's mesh (same material and options
+// once the proxies cast): lot solids with the plain quarters, building
+// trim with the street props (both gone at the middle level).
+const MERGE_INTO = { plain: ['lotSolid'], props: ['trim'] };
+const MERGED = new Set(['lotSolid', 'trim']);
+export const SHADOW_LAYER = 2;
+const proxyMat = new THREE.MeshBasicMaterial();
+proxyMat.name = 'shadow-proxy';
 
 // Builders that draw nothing (the one-off pass that only wants the side
 // effects: collision circles, lamp and glow lists).
 const NOOP = () => undefined;
 const NULL_MB = new Proxy({}, { get: () => NOOP });
 const NULL_B = { at: () => NULL_MB };
+
+// The trees' material: the detail one (atlas, cut-out leaves), with the
+// batch's normals turned but not scaled, as the tile builders stamped
+// them (MeshBuilder.add): a canopy wider than tall keeps its soft,
+// rounded light instead of a darker rim.
+function treeMaterial(detail) {
+  const m = detail.clone();
+  m.name = 'trees';
+  m.emissiveIntensity = 0;
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <defaultnormal_vertex>', THREE.ShaderChunk.defaultnormal_vertex.replace(
+      'transformedNormal /= vec3( dot( bm[ 0 ], bm[ 0 ] ), dot( bm[ 1 ], bm[ 1 ] ), dot( bm[ 2 ], bm[ 2 ] ) );',
+      'transformedNormal /= sqrt( vec3( dot( bm[ 0 ], bm[ 0 ] ), dot( bm[ 1 ], bm[ 1 ] ), dot( bm[ 2 ], bm[ 2 ] ) ) );'));
+  };
+  m.customProgramCacheKey = () => 'rw-trees';
+  return m;
+}
 
 // Material for the far blocks: vertex colors, windows (darker glass by day, some lit at night)
 // from the world position in the fragment shader. emissiveIntensity is
@@ -352,13 +408,14 @@ class FarChunks {
 }
 
 // Rebuilds a far block's drawn index without the tiles shown near
-// (near[k] 1), and without the detail level (small buildings, parapets,
-// roof plant) of tiles far off (detail[k] 0). Returns true when
-// something changed.
+// (near[k] 1), without the detail level (small buildings, parapets,
+// roof plant) of tiles far off (detail[k] 0), and without the tiles
+// wholly inside the fog (detail[k] 2). Returns true when something
+// changed.
 export function compactFar(mesh, near, detail) {
   const F = mesh.userData.far;
   let dirty = false;
-  const on = (R) => (near[R.tile] || (R.lvl && !detail[R.tile]) ? 0 : 1);
+  const on = (R) => (near[R.tile] || detail[R.tile] === 2 || (R.lvl && !detail[R.tile]) ? 0 : 1);
   for (let r = 0; r < F.ranges.length; r++) if (F.state[r] !== on(F.ranges[r])) { dirty = true; break; }
   if (!dirty) return false;
   const out = mesh.geometry.index.array, full = F.full;
@@ -444,7 +501,7 @@ const TILE_KEYS = [
   ['paint', true, 2], ['decal', true, 1], ['ao', false, 1], ['plain', false, 1], ['detail', true, 1], ['glow', false, 1],
   ['glass', true, 1], ['brick', true, 1], ['office', true, 1], ['stucco', true, 1], ['siding', true, 1], ['corrugated', true, 1],
   ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1], ['havana', true, 1], ['treeDetail', true, 1],
-  ['sand', true, 6], ['lotSolid', false, 1],
+  ['sand', true, 6], ['lotSolid', false, 1], ['trim', false, 1],
 ];
 // key: material, draw options, hidden at the middle level
 function tileMeshPlan(M) {
@@ -467,10 +524,13 @@ function tileMeshPlan(M) {
     ['treeDetail', M.detailMat, { ...solid, name: 'trees-detail' }],
     // Lot ground in sand and dirt (beaches, building sites).
     ['sand', M.lotSandMat, ground],
-    // Lot hedges, walls, parked cars, stacks: drawn at the middle level,
-    // no cast shadow (contact shadows under them instead): the shadow
-    // map pass is the dearest part of a dense street.
+    // Lot hedges, walls, parked cars, stacks: drawn at the middle level, no cast shadow (contact shadows under
+    // them instead): the shadow map pass is the dearest part of a dense
+    // street.
     ['lotSolid', M.plainMat, { receive: true, name: 'lot-solid' }],
+    // Building trim (string courses, pilasters, eyebrows, plinths): no
+    // cast shadow, and gone at the middle level with the props.
+    ['trim', M.plainMat, { receive: true, name: 'trim' }, true],
   ];
 }
 
@@ -696,12 +756,29 @@ export function buildRealCity(city, collision, opts = {}) {
   let windsock = null;
   const ws = city.landmarks && city.landmarks.windsock;
   if (ws) {
+    // In the detail material (two-sided; the atlas's white cell, its color
+    // in the vertices): no program of its own.
     const g = new THREE.CylinderGeometry(0.42, 0.14, 3.2, 8, 1, true).rotateZ(Math.PI / 2).translate(1.7, 0, 0);
-    windsock = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xf06a20, side: THREE.DoubleSide, roughness: 0.8 }));
+    const n = g.attributes.position.count, W = R.white || { u0: 0, u1: 0, v0: 0, v1: 0 };
+    const col = new THREE.Color().setHex(0xf06a20, THREE.SRGBColorSpace);
+    g.setAttribute('color', new THREE.BufferAttribute(Float32Array.from({ length: n * 3 }, (_, i) => col.toArray()[i % 3]), 3));
+    for (let i = 0; i < n; i++) g.attributes.uv.setXY(i, (W.u0 + W.u1) / 2, (W.v0 + W.v1) / 2);
+    windsock = new THREE.Mesh(g, M.detailMat);
     windsock.position.set(ws.x, 5.9, ws.z);
     windsock.castShadow = true;
     windsock.name = 'windsock';
     group.add(windsock);
+  }
+
+  // ---- Trees: one batch for every near tile (treebatch.js). A renderer
+  // without multi-draw gets them stamped into the tiles instead
+  // (setTreeBatch(false), graphics.js). ----
+  let trees = null;
+  // Shadow proxies (see CAST_KEYS): on unless opts.shadowProxy is false.
+  const proxies = opts.shadowProxy !== false;
+  if (city.map === 'miami' && R && R.frond && R.white && opts.treeBatch !== false) {
+    trees = createTreeBatch(treeSpecies(city, R), treeMaterial(M.detailMat));
+    group.add(trees.mesh);
   }
 
   // ---- Near tiles. ----
@@ -737,6 +814,10 @@ export function buildRealCity(city, collision, opts = {}) {
     for (const [key, uv, scale] of TILE_KEYS) B[key] = QUARTERED.has(key) ? new QuarterBuilder(t, uv, scale) : new ChunkedBuilder(1e7, 1, uv, scale);
     const own = (x, z) => tileOf(x, z) === t.k;
     const C = { city, collision: null, ...B, R, DR, glows: [], groundY };
+    // Trees go to the batch (TREE_STRIDE numbers each) when there is one.
+    const treeData = [];
+    const batch = trees;
+    const treeSink = batch ? (sp, x, y, z, rot, sx, sy, sz, sh) => { treeData.push(sp, x, y, z, rot, sx, sy, sz, sh); } : null;
     const G = city.landGrid;
     const di = (v, o) => Math.max(0, Math.min(G.w - 1, Math.ceil((v - o) / G.cell - 0.5)));
     const dj = (v, o) => Math.max(0, Math.min(G.h - 1, Math.ceil((v - o) / G.cell - 0.5)));
@@ -774,7 +855,7 @@ export function buildRealCity(city, collision, opts = {}) {
     ts = now();
     // Street props: the one-off pieces first, then the tile's items in
     // pieces of PROP_PIECE.
-    const PC = { ...C, plain: B.props, detail: B.propsDetail, trees: B.plain, treesDetail: B.treeDetail };
+    const PC = { ...C, plain: B.props, detail: B.propsDetail, trees: B.plain, treesDetail: B.treeDetail, treeSink };
     const TL = t.lists;
     addProps(PC, own, false, { props: [], furniture: [], signals: [], palms: [] });
     if (over()) { yield 'props'; ts = now(); }
@@ -790,7 +871,7 @@ export function buildRealCity(city, collision, opts = {}) {
     const LC = {
       city, R, DR, groundY, lotStats,
       props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, sidewalk: B.sidewalk, ao: B.ao, glow: B.glow,
-      plain: B.props, trees: B.plain, treesDetail: B.treeDetail,
+      plain: B.props, trees: B.plain, treesDetail: B.treeDetail, treeSink,
     };
     const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.ni; return n; };
     const before = {};
@@ -814,22 +895,52 @@ export function buildRealCity(city, collision, opts = {}) {
     const g = new THREE.Group();
     g.name = 'tile';
     const small = [], meshes = [];
-    for (const [key, mat, opts, isSmall] of plan) {
-      for (let sub = 0; sub < (B[key].subs || 1); sub++) {
-      const holder = [];
-      for (const step of buildSliced(B[key], mat, opts, over, holder, sub)) { yield step; ts = now(); }
-      const m = holder[0];
-      if (m) {
-        g.add(m);
-        meshes.push(m);
-        if (isSmall) small.push(m);
-        if (m.userData.tierCounts) {
-          m.geometry.setDrawRange(0, m.userData.tierCounts[ud.tier ?? 1]);
-          tiered.push(m);
+    const put = (m, isSmall) => {
+      if (!m) return;
+      g.add(m);
+      meshes.push(m);
+      if (isSmall) small.push(m);
+      if (m.userData.tierCounts) {
+        m.geometry.setDrawRange(0, m.userData.tierCounts[ud.tier ?? 1]);
+        tiered.push(m);
+      }
+    };
+    // Shadow proxies first (they read the casters' builders, which the
+    // drawn meshes then take and release).
+    if (proxies) {
+      for (let q = 0; q < 4; q++) {
+        const tiersQ = [[], [], []];
+        for (const key of CAST_KEYS) {
+          const pq = partsOf(B[key], [q]);
+          for (let k = 0; k < 3; k++) tiersQ[k].push(...pq[k]);
         }
+        const holder = [];
+        for (const step of buildParts(tiersQ, false, proxyMat, { cast: true, name: 'shadow-proxy' }, over, holder, true)) { yield step; ts = now(); }
+        const m = holder[0];
+        if (m) m.layers.set(SHADOW_LAYER);
+        put(m, false);
       }
+    }
+    for (const [key, mat, opts0, isSmall] of plan) {
+      if (proxies && MERGED.has(key)) continue;
+      const opts = proxies && CAST_KEYS.includes(key) ? { ...opts0, cast: false } : opts0;
+      const one = ONE_MESH.has(key);
+      const extra = proxies ? MERGE_INTO[key] || [] : [];
+      for (let sub = 0; sub < (one ? 1 : B[key].subs || 1); sub++) {
+        const holder = [];
+        const subs = one ? [0, 1, 2, 3] : [sub];
+        const parts = partsOf(B[key], subs);
+        for (const e of extra) {
+          const pe = partsOf(B[e], B[e].subs ? subs : [0]);
+          for (let k = 0; k < 3; k++) parts[k].push(...pe[k]);
+        }
+        for (const step of buildParts(parts, B[key].withUv, mat, opts, over, holder, false)) { yield step; ts = now(); }
+        put(holder[0], isSmall);
       }
-      B[key] = null;
+      for (const k of [key, ...extra]) {
+        for (const p of B[k].map.values()) if (!p.count) p.release();
+        B[k] = null;
+      }
       if (over()) { yield 'mesh'; ts = now(); }
     }
     // A rebuild (a prop broke or stood again): the old meshes go only now,
@@ -843,6 +954,8 @@ export function buildRealCity(city, collision, opts = {}) {
         if (i >= 0) tiered.splice(i, 1);
       }
     }
+    if (batch && batch === trees) batch.addTile(t.k, Float32Array.from(treeData), treeData.length / TREE_STRIDE, t.x0, t.z0, TILE, was);
+    else if (trees) trees.removeTile(t.k);
     t.group = g;
     t.small = small;
     t.meshes = meshes;
@@ -866,6 +979,7 @@ export function buildRealCity(city, collision, opts = {}) {
       if (i >= 0) tiered.splice(i, 1);
     }
     t.group = t.small = t.meshes = t.trees = null;
+    if (trees) trees.removeTile(t.k);
     if (t.shown) {
       t.shown = false;
       nearMask[t.k] = 0;
@@ -906,6 +1020,8 @@ export function buildRealCity(city, collision, opts = {}) {
       }
     }
   }
+  let fogTick = 0;
+  const fwd = new THREE.Vector3();
   function dist(t, x, z, hy) {
     const dx = x < t.x0 ? t.x0 - x : x > t.x1 ? x - t.x1 : 0;
     const dz = z < t.z0 ? t.z0 - z : z > t.z1 ? z - t.z1 : 0;
@@ -927,17 +1043,35 @@ export function buildRealCity(city, collision, opts = {}) {
     const hold = budgetMs !== Infinity && (camera.position.y > FLY_HOLD.height || stats.speed > FLY_HOLD.speed);
     stats.hold = hold;
     const treeR = TREE_DETAIL_R[ud.tier ?? 1] ?? TREE_DETAIL_R[1];
+    // Fog (ud.fogFar, set by graphics.js): a far tile whose nearest
+    // corner lies deeper in the view than the fog's far end is all haze;
+    // it is left out (checked every 4th update).
+    const fogFar = ud.fogFar || Infinity;
+    const fogCheck = fogFar < Infinity && camera.isCamera && (fogTick++ & 3) === 0;
+    if (fogCheck) camera.getWorldDirection(fwd);
+    const margin = Math.abs(fwd.y) * 320;
     for (let k = 0; k < NT; k++) {
       const t = tiles[k];
       const d = dist(t, x, z, hy);
       // The far copy's detail level (small buildings, roofs) near by.
-      const fd = d < (farDetail[k] ? FAR_DETAIL + LOD.hyst : FAR_DETAIL) ? 1 : 0;
+      let fd = d < (farDetail[k] === 1 ? FAR_DETAIL + LOD.hyst : FAR_DETAIL) ? 1 : 0;
+      if (fogFar === Infinity) {
+        // no fog: nothing hidden
+      } else if (!fogCheck) {
+        if (farDetail[k] === 2) fd = 2;
+      } else if (d > fogFar * 0.5) {
+        const ox = t.x0 - x, oz = t.z0 - z, oy = -camera.position.y;
+        const ax = TILE * fwd.x, az = TILE * fwd.z, b0 = ox * fwd.x + oz * fwd.z + oy * fwd.y;
+        const depth = b0 + Math.min(0, ax) + Math.min(0, az) - margin;
+        if (depth > fogFar + (farDetail[k] === 2 ? 10 : 40)) fd = 2;
+      }
       if (fd !== farDetail[k]) { farDetail[k] = fd; farChanged = true; }
       if (t.group) {
         const show = d < (t.shown ? LOD.near + LOD.hyst : LOD.near);
         if (show !== t.shown) {
           t.shown = show;
           t.group.visible = show;
+          if (trees) trees.setShown(k, show);
           nearMask[k] = show ? 1 : 0;
           changed = true;
         }
@@ -994,6 +1128,7 @@ export function buildRealCity(city, collision, opts = {}) {
         if (d < LOD.near) {
           t.shown = true;
           t.group.visible = true;
+          if (trees) trees.setShown(t.k, true);
           nearMask[t.k] = 1;
           changed = true;
           t.mid = d > LOD.mid;
@@ -1014,6 +1149,10 @@ export function buildRealCity(city, collision, opts = {}) {
       }
     }
     stats.buildMs += now() - t0;
+    if (trees) {
+      const tier = TREE_NEAR_R[ud.tier] ? ud.tier : 1;
+      trees.update(camera, TREE_NEAR_R[tier], TREE_FAR_R[tier]);
+    }
     if (changed) {
       for (const m of farMeshes) compactFar(m, nearMask, farDetail);
       refillBulbs();
@@ -1035,7 +1174,19 @@ export function buildRealCity(city, collision, opts = {}) {
     lotLayer = attachLotCollision(city, collision, dress);
     buildFar();
   }
-  ud.stream = { update, flush, reset, propBreak, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
+  // Trees back in the tiles' own meshes (a renderer without multi-draw):
+  // every tile is built again.
+  function setTreeBatch(on) {
+    if (on || !trees) return;
+    group.remove(trees.mesh);
+    trees.mesh.dispose();
+    trees = null;
+    ud.trees = null;
+    if (job) { job = null; jobTile = null; }
+    for (const t of tiles) if (t.group) dropTile(t);
+  }
+  ud.trees = trees;
+  ud.stream = { update, flush, reset, propBreak, setTreeBatch, trees: () => trees, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
 
   // Start: the tiles round the spawn point.
   flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });

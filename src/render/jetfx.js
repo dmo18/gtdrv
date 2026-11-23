@@ -19,7 +19,7 @@ export function createJetFx(game) {
     geo.rotateZ(-Math.PI / 2); // narrow (+y) end toward the nose (+x)
     mat = new THREE.MeshBasicMaterial({
       color: 0xf4f8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
-      depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      depthWrite: false, side: THREE.DoubleSide, toneMapped: false, forceSinglePass: true,
     });
     ring = new THREE.Mesh(geo, mat);
     ring.visible = false;

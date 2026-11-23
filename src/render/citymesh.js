@@ -75,14 +75,33 @@ function makeAoMaterial() {
   });
 }
 
+// 1 by 1 stand-in maps (docs/PERF.md, shader programs): a material given
+// the same set of maps as another compiles to the same program, so
+// these neutral ones let materials share: a flat normal, and white
+// roughness and metalness (the material's own values stand).
+let neutral = null;
+function neutralMaps() {
+  if (neutral) return neutral;
+  const tex = (r, g, b) => {
+    const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.needsUpdate = true;
+    return t;
+  };
+  neutral = { normal: tex(128, 128, 255), white: tex(255, 255, 255) };
+  return neutral;
+}
+
 export function makeMaterials(T) {
   const std = (o) => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, ...o });
+  const N = neutralMaps();
   const ns = (v) => new THREE.Vector2(v, v);
   const M = {
     asphaltMat: std({ map: T.asphalt.map, normalMap: T.asphalt.normalMap, normalScale: ns(0.7), roughnessMap: T.asphalt.wetMap, roughness: 0.93 }),
     sidewalkMat: std({ map: T.sidewalk.map, normalMap: T.sidewalk.normalMap, normalScale: ns(0.6), roughness: 0.88 }),
     grassMat: std({ map: T.grass.map, roughness: 1 }),
-    woodMat: std({ map: T.wood.map, roughness: 0.85 }),
+    // A flat normal map: wood, ground and sand share the sidewalk's program.
+    woodMat: std({ map: T.wood.map, normalMap: N.normal, roughness: 0.85 }),
     paintMat: std({ map: T.paint.map, roughness: 0.6, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     decalMat: std({ map: T.decals.map, roughness: 0.82, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
     aoMat: makeAoMaterial(),
@@ -90,10 +109,12 @@ export function makeMaterials(T) {
     detailMat: std({ map: T.details.map, emissiveMap: T.details.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7 }),
     glowMat: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
     glass: std({ map: T.glass.map, emissiveMap: T.glass.emissiveMap, roughnessMap: T.glass.roughnessMap, metalnessMap: T.glass.metalnessMap, normalMap: T.glass.normalMap, normalScale: ns(0.6), roughness: 1, metalness: 0.6, emissive: 0xffffff, emissiveIntensity: 0, envMapIntensity: 1.7 }),
-    brick: std({ map: T.brick.map, emissiveMap: T.brick.emissiveMap, normalMap: T.brick.normalMap, normalScale: ns(0.5), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.9 }),
+    // Brick, stucco and havana take neutral roughness and metalness maps:
+    // one program with glass and office.
+    brick: std({ map: T.brick.map, emissiveMap: T.brick.emissiveMap, normalMap: T.brick.normalMap, normalScale: ns(0.5), roughnessMap: N.white, metalnessMap: N.white, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.9 }),
     office: std({ map: T.office.map, emissiveMap: T.office.emissiveMap, roughnessMap: T.office.roughnessMap, metalnessMap: T.office.metalnessMap, normalMap: T.office.normalMap, normalScale: ns(0.7), roughness: 1, metalness: 1, emissive: 0xffffff, emissiveIntensity: 0 }),
-    stucco: std({ map: T.stucco.map, emissiveMap: T.stucco.emissiveMap, normalMap: T.stucco.normalMap, normalScale: ns(0.8), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
-    havana: std({ map: T.havana.map, emissiveMap: T.havana.emissiveMap, normalMap: T.havana.normalMap, normalScale: ns(0.9), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
+    stucco: std({ map: T.stucco.map, emissiveMap: T.stucco.emissiveMap, normalMap: T.stucco.normalMap, normalScale: ns(0.8), roughnessMap: N.white, metalnessMap: N.white, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
+    havana: std({ map: T.havana.map, emissiveMap: T.havana.emissiveMap, normalMap: T.havana.normalMap, normalScale: ns(0.9), roughnessMap: N.white, metalnessMap: N.white, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.92 }),
     siding: std({ map: T.siding.map, roughness: 0.8 }),
     corrugated: std({ map: T.corrugated.map, roughness: 0.55, metalness: 0.35 }),
     roofing: std({ map: T.roofing.map, roughness: 0.9 }),
@@ -103,8 +124,8 @@ export function makeMaterials(T) {
   // Land under everything: pushed back a touch so roads sit on top.
   M.landMat = std({ map: T.grass.map, roughness: 1, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
   M.landRimMat = std({ map: T.grass.map, roughness: 1, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  M.groundMat = std({ map: T.sidewalk.map, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
-  M.sandMat = std({ map: T.sand.map, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 });
+  M.groundMat = std({ map: T.sidewalk.map, normalMap: N.normal, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+  M.sandMat = std({ map: T.sand.map, normalMap: N.normal, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 });
 
   // Wet roads: in the rain the asphalt goes dark and glossy, with
   // standing water where the puddle mask says so.

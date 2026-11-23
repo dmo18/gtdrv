@@ -123,58 +123,154 @@ for (const id of Object.keys(DRESS_SETS)) {
 export const SRC_FLAG = 0, SRC_ID = 1, SRC_ZERO = 2;
 // The cells of list next to a source (the first of the four sides, then
 // the corners), at step 1, queued in list order. Returns the queue length.
-function seedSources(W, N, src, pass, pv, sg, bias, dist, owner, queue, list, n) {
-  let qt = 0;
+// One copy per source test, each with its own array type at its loads
+// (a single copy for every mode saw Uint8 and Int32 sources at one load
+// and ran it polymorphic): ...Flag src[c] > 0, ...Id src[c] >= 0,
+// ...Zero src[c] <= 0 (the tests of the one copy, sg * src + bias >= 0).
+// A cell off the raster's border whose eight neighbors fail the test as a
+// whole (one AND of them) is skipped at once; the rest take the full test.
+// The column comes from the row, followed along the list (row order),
+// not from c % W.
+function seedFlag(W, N, src, pass, pv, dist, queue, list, n) {
+  let qt = 0, rs = 0;
   for (let k = 0; k < n; k++) {
     const c = list[k];
     if (pass[c] !== pv) continue;
-    const i = c % W;
+    if (c < rs) rs = c - (c % W);
+    while (c >= rs + W) rs += W;
+    const i = c - rs;
     const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
+    if ((lf && src[c - 1] > 0) || (rt && src[c + 1] > 0) || (up && src[c - W] > 0) || (dn && src[c + W] > 0) ||
+      (up && lf && src[c - W - 1] > 0) || (up && rt && src[c - W + 1] > 0) || (dn && lf && src[c + W - 1] > 0) || (dn && rt && src[c + W + 1] > 0)) {
+      dist[c] = 1;
+      queue[qt++] = c;
+    }
+  }
+  return qt;
+}
+// src unsigned (Uint8): all eight over 0 when their AND is.
+function seedZero(W, N, src, pass, pv, dist, queue, list, n) {
+  let qt = 0, rs = 0;
+  for (let k = 0; k < n; k++) {
+    const c = list[k];
+    if (pass[c] !== pv) continue;
+    if (c < rs) rs = c - (c % W);
+    while (c >= rs + W) rs += W;
+    const i = c - rs;
+    const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
+    if (up && dn && lf && rt && (src[c - 1] & src[c + 1] & src[c - W] & src[c + W] & src[c - W - 1] & src[c - W + 1] & src[c + W - 1] & src[c + W + 1]) > 0) continue;
+    if ((lf && src[c - 1] <= 0) || (rt && src[c + 1] <= 0) || (up && src[c - W] <= 0) || (dn && src[c + W] <= 0) ||
+      (up && lf && src[c - W - 1] <= 0) || (up && rt && src[c - W + 1] <= 0) || (dn && lf && src[c + W - 1] <= 0) || (dn && rt && src[c + W + 1] <= 0)) {
+      dist[c] = 1;
+      queue[qt++] = c;
+    }
+  }
+  return qt;
+}
+// SRC_ID (Int32): all eight negative when their AND is. seedIdOwner also
+// gives owner the id of the first source side (two copies: a call without
+// owner, then one with it, made the one copy bail out).
+function seedId(W, N, src, pass, pv, dist, queue, list, n) {
+  let qt = 0, rs = 0;
+  for (let k = 0; k < n; k++) {
+    const c = list[k];
+    if (pass[c] !== pv) continue;
+    if (c < rs) rs = c - (c % W);
+    while (c >= rs + W) rs += W;
+    const i = c - rs;
+    const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
+    if (up && dn && lf && rt && (src[c - 1] & src[c + 1] & src[c - W] & src[c + W] & src[c - W - 1] & src[c - W + 1] & src[c + W - 1] & src[c + W + 1]) < 0) continue;
+    if ((lf && src[c - 1] >= 0) || (rt && src[c + 1] >= 0) || (up && src[c - W] >= 0) || (dn && src[c + W] >= 0) ||
+      (up && lf && src[c - W - 1] >= 0) || (up && rt && src[c - W + 1] >= 0) || (dn && lf && src[c + W - 1] >= 0) || (dn && rt && src[c + W + 1] >= 0)) {
+      dist[c] = 1;
+      queue[qt++] = c;
+    }
+  }
+  return qt;
+}
+function seedIdOwner(W, N, src, pass, pv, dist, owner, queue, list, n) {
+  let qt = 0, rs = 0;
+  for (let k = 0; k < n; k++) {
+    const c = list[k];
+    if (pass[c] !== pv) continue;
+    if (c < rs) rs = c - (c % W);
+    while (c >= rs + W) rs += W;
+    const i = c - rs;
+    const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
+    if (up && dn && lf && rt && (src[c - 1] & src[c + 1] & src[c - W] & src[c + W] & src[c - W - 1] & src[c - W + 1] & src[c + W - 1] & src[c + W + 1]) < 0) continue;
     let o = -1;
-    if (lf && sg * src[c - 1] + bias >= 0) o = c - 1;
-    else if (rt && sg * src[c + 1] + bias >= 0) o = c + 1;
-    else if (up && sg * src[c - W] + bias >= 0) o = c - W;
-    else if (dn && sg * src[c + W] + bias >= 0) o = c + W;
-    else if (up && lf && sg * src[c - W - 1] + bias >= 0) o = c - W - 1;
-    else if (up && rt && sg * src[c - W + 1] + bias >= 0) o = c - W + 1;
-    else if (dn && lf && sg * src[c + W - 1] + bias >= 0) o = c + W - 1;
-    else if (dn && rt && sg * src[c + W + 1] + bias >= 0) o = c + W + 1;
+    if (lf && src[c - 1] >= 0) o = c - 1;
+    else if (rt && src[c + 1] >= 0) o = c + 1;
+    else if (up && src[c - W] >= 0) o = c - W;
+    else if (dn && src[c + W] >= 0) o = c + W;
+    else if (up && lf && src[c - W - 1] >= 0) o = c - W - 1;
+    else if (up && rt && src[c - W + 1] >= 0) o = c - W + 1;
+    else if (dn && lf && src[c + W - 1] >= 0) o = c + W - 1;
+    else if (dn && rt && src[c + W + 1] >= 0) o = c + W + 1;
     if (o < 0) continue;
     dist[c] = 1;
-    if (owner) owner[c] = src[o];
+    owner[c] = src[o];
     queue[qt++] = c;
   }
   return qt;
 }
-export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, mode = SRC_FLAG, pv = 1) {
-  dist.fill(255);
-  const N = W * H;
-  // sg * src + bias >= 0 is the source test for every mode.
-  const sg = mode === SRC_ZERO ? -1 : 1, bias = mode === SRC_FLAG ? -1 : 0;
-  let qt = seedSources(W, N, src, pass, pv, sg, bias, dist, owner, queue, list, n);
+// The breadth-first spread from the seeded queue (without and with owner).
+function spread(W, N, pass, pv, max, dist, queue, qt) {
   let qh = 0;
   while (qh < qt) {
     const c = queue[qh++];
     const d = dist[c];
     if (d >= max) continue;
-    const nd = d + 1, ow = owner ? owner[c] : 0;
+    const nd = d + 1;
     const i = c % W;
     const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
     let m;
     // The eight neighbors, unrolled.
-    if (lf) { m = c - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
-    if (rt) { m = c + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
+    if (lf) { m = c - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
+    if (rt) { m = c + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
     if (up) {
-      m = c - W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; }
-      if (lf) { m = c - W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
-      if (rt) { m = c - W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
+      m = c - W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; }
+      if (lf) { m = c - W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
+      if (rt) { m = c - W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
     }
     if (dn) {
-      m = c + W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; }
-      if (lf) { m = c + W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
-      if (rt) { m = c + W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
+      m = c + W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; }
+      if (lf) { m = c + W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
+      if (rt) { m = c + W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; queue[qt++] = m; } }
     }
   }
+}
+function spreadOwner(W, N, pass, pv, max, dist, owner, queue, qt) {
+  let qh = 0;
+  while (qh < qt) {
+    const c = queue[qh++];
+    const d = dist[c];
+    if (d >= max) continue;
+    const nd = d + 1, ow = owner[c];
+    const i = c % W;
+    const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
+    let m;
+    if (lf) { m = c - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+    if (rt) { m = c + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+    if (up) {
+      m = c - W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; }
+      if (lf) { m = c - W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+      if (rt) { m = c - W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+    }
+    if (dn) {
+      m = c + W; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; }
+      if (lf) { m = c + W - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+      if (rt) { m = c + W + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; owner[m] = ow; queue[qt++] = m; } }
+    }
+  }
+}
+export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, mode = SRC_FLAG, pv = 1) {
+  dist.fill(255);
+  const N = W * H;
+  const qt = mode === SRC_ID ? (owner ? seedIdOwner(W, N, src, pass, pv, dist, owner, queue, list, n) : seedId(W, N, src, pass, pv, dist, queue, list, n))
+    : mode === SRC_ZERO ? seedZero(W, N, src, pass, pv, dist, queue, list, n) : seedFlag(W, N, src, pass, pv, dist, queue, list, n);
+  if (owner) spreadOwner(W, N, pass, pv, max, dist, owner, queue, qt);
+  else spread(W, N, pass, pv, max, dist, queue, qt);
 }
 
 // ---------------------------------------------------------------------
@@ -203,27 +299,35 @@ export function planInfill(inp) {
   const { W, H, x0, z0, cell, free, bdist, water, mask } = inp;
   const out = [];
   const gx0 = x0, gz0 = z0, gx1 = x0 + W * cell, gz1 = z0 + H * cell;
+  // The parcels that pass the quick reject on their center cell (pi, pj
+  // per parcel), then the rest of the test (rare) in infillParcel: two
+  // loops, so the long first one has no call in it.
+  const cand = [];
   for (const district of Object.keys(INFILL)) {
     const P = INFILL[district];
-    const pi0 = Math.floor(gx0 / P.pitch), pi1 = Math.floor(gx1 / P.pitch);
-    const pj0 = Math.floor(gz0 / P.pitch), pj1 = Math.floor(gz1 / P.pitch);
-    for (let pj = pj0; pj <= pj1; pj++) {
-      // Quick reject on the parcel's center cell; the rest (rare) in
-      // infillParcel.
-      const cz = (pj + 0.5) * P.pitch;
-      const cj = Math.floor((cz - z0) / cell);
-      if (cj < 0 || cj >= H) continue;
-      for (let pi = pi0; pi <= pi1; pi++) {
-        const cx = (pi + 0.5) * P.pitch;
-        const ci = Math.floor((cx - x0) / cell);
-        if (ci < 0 || ci >= W) continue;
-        const cc = cj * W + ci;
-        if (!free[cc] || mask[cc] || bdist[cc] < INFILL_GAP || water[cc] < 4) continue;
-        infillParcel(inp, district, P, pi, pj, cx, cz, out);
-      }
+    cand.length = 0;
+    quickParcels(P.pitch, Math.floor(gx0 / P.pitch), Math.floor(gx1 / P.pitch), Math.floor(gz0 / P.pitch), Math.floor(gz1 / P.pitch), W, H, x0, z0, cell, free, bdist, water, mask, cand);
+    for (let k = 0; k < cand.length; k += 2) {
+      const pi = cand[k], pj = cand[k + 1];
+      infillParcel(inp, district, P, pi, pj, (pi + 0.5) * P.pitch, (pj + 0.5) * P.pitch, out);
     }
   }
   return out;
+}
+function quickParcels(pitch, pi0, pi1, pj0, pj1, W, H, x0, z0, cell, free, bdist, water, mask, cand) {
+  for (let pj = pj0; pj <= pj1; pj++) {
+    const cz = (pj + 0.5) * pitch;
+    const cj = Math.floor((cz - z0) / cell);
+    if (cj < 0 || cj >= H) continue;
+    for (let pi = pi0; pi <= pi1; pi++) {
+      const cx = (pi + 0.5) * pitch;
+      const ci = Math.floor((cx - x0) / cell);
+      if (ci < 0 || ci >= W) continue;
+      const cc = cj * W + ci;
+      if (!free[cc] || mask[cc] || bdist[cc] < INFILL_GAP || water[cc] < 4) continue;
+      cand.push(pi, pj);
+    }
+  }
 }
 // One parcel that passed the quick reject: its box, if it may be built.
 function infillParcel(inp, district, P, pi, pj, cx, cz, out) {
@@ -237,7 +341,9 @@ function infillParcel(inp, district, P, pi, pj, cx, cz, out) {
   const bx0 = cx - sx / 2, bz0 = cz - sz / 2, bx1 = cx + sx / 2, bz1 = cz + sz / 2;
   for (let q = 0; q < keepOpen.length; q++) {
     const k = keepOpen[q];
-    if (Math.hypot(Math.max(bx0 - k.x, 0, k.x - bx1), Math.max(bz0 - k.z, 0, k.z - bz1)) < k.r) return;
+    // The gap to the box on each axis; hypot is at least either one.
+    const gx = Math.max(bx0 - k.x, 0, k.x - bx1), gz = Math.max(bz0 - k.z, 0, k.z - bz1);
+    if (gx < k.r && gz < k.r && Math.hypot(gx, gz) < k.r) return;
   }
   // Every cell under the box plus 5 m is free, far enough from the
   // existing buildings and the water, and not in a park.
@@ -321,7 +427,7 @@ function segRectDist(ax, az, bx, bz, x0, z0, x1, z1) {
   return Math.sqrt(d);
 }
 
-// ---- buildLots steps (small top-level functions: the optimiser takes
+// ---- buildLots steps (small top-level functions: the optimizer takes
 // them at once, not the whole of buildLots) ----
 function newPiece(tmp, k, building, W, H) {
   tmp.push({ cls: k, building, n: 0, i0: W, i1: -1, j0: H, j1: -1 });
@@ -459,6 +565,56 @@ function lotObjects(city, tmp, remap, lots, G, cell) {
   }
 }
 
+// The buildLots loops, one per function (each optimized on its own, once).
+// Class per free cell: 1 beach, 2 water edge, 3 park, 4 grass, 7 still to
+// place (4c or 4d).
+function classify(list, nList, water, park, inBeach, beachSteps, stripSteps, cls) {
+  for (let k = 0; k < nList; k++) {
+    const c = list[k];
+    const d = water[c];
+    if (d <= beachSteps && inBeach && inBeach(c)) cls[c] = 1;
+    else if (d <= stripSteps) cls[c] = 2;
+    else if (park[c] === 1) cls[c] = 3;
+    else if (park[c] === 2) cls[c] = 4;
+    else cls[c] = 7;
+  }
+}
+// 7 becomes 5 (a building within reach) or 6 (open).
+function placeClasses(list, nList, bd, cls) {
+  for (let k = 0; k < nList; k++) {
+    const c = list[k];
+    if (cls[c] === 7) cls[c] = bd[c] !== 255 ? 5 : 6;
+  }
+}
+// The main box of each box's footprint: the largest box of the same `fp`.
+function mainBoxes(B) {
+  const mainOf = new Int32Array(B.length);
+  const best = new Map();
+  for (let k = 0; k < B.length; k++) {
+    const b = B[k];
+    if (b.fp === undefined || b.fp < 0) continue;
+    const a = (b.x1 - b.x0) * (b.z1 - b.z0);
+    const o = best.get(b.fp);
+    if (o === undefined || a > (B[o].x1 - B[o].x0) * (B[o].z1 - B[o].z0)) best.set(b.fp, k);
+  }
+  for (let k = 0; k < B.length; k++) {
+    const b = B[k];
+    mainOf[k] = b.fp === undefined || b.fp < 0 ? k : best.get(b.fp);
+  }
+  return mainOf;
+}
+// Lot ids (remapped pieces, -1 none) and type codes on the free cells.
+function typeCells(list, nList, lid, remap, code, typeGrid) {
+  for (let q = 0; q < nList; q++) {
+    const c = list[q];
+    const p = lid[c];
+    if (p < 0) { lid[c] = -1; continue; }
+    const id = remap[p];
+    lid[c] = id;
+    typeGrid[c] = id >= 0 ? code[id] : 0;
+  }
+}
+
 // inp (from createMiamiCity): { free, owner, park, inBeach, water, queue,
 // list, nList }. park: 1 park or forest, 2 grass, per cell; inBeach(c):
 // the cell is in a beach rect; owner: building index per cell (-1 none).
@@ -497,41 +653,16 @@ export function buildLots(city, inp) {
   // Class per free cell: 1 beach, 2 water edge, 3 park, 4 grass, 5 to a
   // building, 6 open.
   const cls = inp.scratch8 ? inp.scratch8.fill(0) : new Uint8Array(N);
-  for (let k = 0; k < nList; k++) {
-    const c = list[k];
-    const d = water[c];
-    if (d <= beachSteps && inBeach && inBeach(c)) cls[c] = 1;
-    else if (d <= stripSteps) cls[c] = 2;
-    else if (park[c] === 1) cls[c] = 3;
-    else if (park[c] === 2) cls[c] = 4;
-    else cls[c] = 7; // still to place: 4c or 4d
-  }
+  classify(list, nList, water, park, inBeach, beachSteps, stripSteps, cls);
   // 4c: the nearest building box (main box of its footprint) within reach.
   const own = new Int32Array(N);
   const bd = water; // reused: the water steps are no longer needed
   stepDistance(W, H, owner, cls, Math.floor(LOT_REACH / cell), bd, own, queue, list, nList, SRC_ID, 7);
-  for (let k = 0; k < nList; k++) {
-    const c = list[k];
-    if (cls[c] === 7) cls[c] = bd[c] !== 255 ? 5 : 6;
-  }
+  placeClasses(list, nList, bd, cls);
   lap('lots.classes');
   // Main box of each footprint: the largest box of the same `fp`.
   const B = city.buildings;
-  const mainOf = new Int32Array(B.length);
-  {
-    const best = new Map();
-    for (let k = 0; k < B.length; k++) {
-      const b = B[k];
-      if (b.fp === undefined || b.fp < 0) continue;
-      const a = (b.x1 - b.x0) * (b.z1 - b.z0);
-      const o = best.get(b.fp);
-      if (o === undefined || a > (B[o].x1 - B[o].x0) * (B[o].z1 - B[o].z0)) best.set(b.fp, k);
-    }
-    for (let k = 0; k < B.length; k++) {
-      const b = B[k];
-      mainOf[k] = b.fp === undefined || b.fp < 0 ? k : best.get(b.fp);
-    }
-  }
+  const mainOf = mainBoxes(B);
   // Pieces: one lot per building (cells sharing it, connected or not);
   // other classes are connected pieces, shore runs cut by the 80 m grid,
   // park, grass and open pieces cut by it only when over LOT_MAX_AREA.
@@ -552,14 +683,10 @@ export function buildLots(city, inp) {
   lotObjects(city, tmp, remap, lots, G, cell);
   lap('lots.objects');
   const typeGrid = new Uint8Array(N);
-  for (let q = 0; q < nList; q++) {
-    const c = list[q];
-    const p = lid[c];
-    if (p < 0) { lid[c] = -1; continue; }
-    const id = remap[p];
-    lid[c] = id;
-    typeGrid[c] = id >= 0 ? T[lots[id].type] + 1 : 0;
-  }
+  // Each lot's type code (+1), looked up once per lot, not per cell.
+  const code = new Uint8Array(lots.length);
+  for (let k = 0; k < lots.length; k++) code[k] = T[lots[k].type] + 1;
+  typeCells(list, nList, lid, remap, code, typeGrid);
   lap('lots.grid');
   const lotGrid = { x0: G.x0, z0: G.z0, cell, w: W, h: H, id: lid, type: typeGrid };
   const cellAt = (x, z) => {

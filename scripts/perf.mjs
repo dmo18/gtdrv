@@ -119,6 +119,7 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
       let n = geo.index ? Math.min(geo.index.count, geo.drawRange.count) : Math.min(geo.attributes.position.count, geo.drawRange.count);
       n /= 3;
       if (o.isInstancedMesh) n *= o.count;
+      if (o.isBatchedMesh) { n = 0; for (let i = 0; i < o._multiDrawCount; i++) n += o._multiDrawCounts[i] / 3; }
       let p = o.parent, top = '';
       while (p) { if (p.name) top = p.name; p = p.parent; }
       const k = pass + ' ' + (o.name || o.material.name || o.material.type) + ' in ' + top;
@@ -126,10 +127,12 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
       cat[k][0]++;
       cat[k][1] += n;
     };
+    // Wrapped, not replaced: a batch (the trees) builds its draw list there.
     g.scene.traverse((o) => {
       if (!o.isMesh) return;
-      o.onBeforeRender = function () { count(this, 'main'); };
-      o.onBeforeShadow = function () { count(this, 'shadow'); };
+      const r = o.onBeforeRender, sh = o.onBeforeShadow;
+      o.onBeforeRender = function (...a) { const x = r.apply(this, a); count(this, 'main'); return x; };
+      o.onBeforeShadow = function (...a) { const x = sh.apply(this, a); count(this, 'shadow'); return x; };
     });
     g.draw(1, 1 / 60);
     day.breakdown = Object.entries(cat).sort((a, b) => b[1][1] - a[1][1]).slice(0, 16).map(([k, v]) => `${k}: ${v[0]} calls, ${Math.round(v[1])} tris`);

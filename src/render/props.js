@@ -163,8 +163,8 @@ const LEAF = [0x5f9a44, 0x6fa84a, 0x548f42, 0x7cb04c, 0x5a9452, 0x88b44c, 0x66a0
 // One palm frond as a folded strip with the leaflet picture (atlas
 // rect r): from (x, y, z) out along heading a, rising at `elev`
 // radians and bending down by `droop` toward the tip.
-function frond(B, r, x, y, z, a, elev, len, droop, color) {
-  const S = 4, ca = Math.cos(a), sa = Math.sin(a);
+function frond(B, r, x, y, z, a, elev, len, droop, color, S = 4) {
+  const ca = Math.cos(a), sa = Math.sin(a);
   const sx = -sa, sz = ca;
   let px = x, py = y, pz = z;
   const vm = (r.v0 + r.v1) / 2;
@@ -347,6 +347,129 @@ function makeLotTemplates(rng, R) {
 }
 const lotTemplateCache = new WeakMap();
 
+// ---- Miami trees as instances (render/treebatch.js) ----
+// With C.treeSink a Miami tree or palm is not stamped into the tile
+// builders: the sink gets (species, x, y, z, rot, sx, sy, sz, shade) and
+// the tree batch draws it, near in full and far as a low shape. Species:
+// the street canopies, street palms, lot canopies, lot palms.
+export const SP_TREE = 0, SP_PALM = 6, SP_LOT_TREE = 10, SP_LOT_PALM = 14, SP_COUNT = 17;
+// Crown color over the trunk's, by kind (the builders' per-call tints).
+const LEAF_TINT = [0.96, 1, 0.92], FROND_TINT = [1, 1.02, 0.95];
+function lotTemplates(city, R) {
+  let MT = lotTemplateCache.get(city);
+  if (!MT) lotTemplateCache.set(city, (MT = makeLotTemplates(createRng(city.seed + 7373), R)));
+  return MT;
+}
+// Trunk and crown in one shape: the trunk takes the atlas's white cell
+// (no picture), the crown keeps its picture and gets its tint.
+function joinTree(trunk, crown, tint, white) {
+  const B = new MeshBuilder(true);
+  B.add(trunk, 0, 0, 0);
+  whiteUv(B, 0, white);
+  B.add(crown, 0, 0, 0, 0, 1, 1, 1, tint[0], tint[1], tint[2]);
+  return B;
+}
+function whiteUv(B, n0, white) {
+  const wu = white ? (white.u0 + white.u1) / 2 : 0, wv = white ? (white.v0 + white.v1) / 2 : 0;
+  for (let v = n0; v < B.count; v++) { B.U[v * 2] = wu; B.U[v * 2 + 1] = wv; }
+}
+// Bounds of a template: center and half sizes, and its mean color.
+function boundsOf(B) {
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, r = 0, g = 0, b = 0;
+  for (let v = 0; v < B.count; v++) {
+    const o = v * 3, x = B.P[o], y = B.P[o + 1], z = B.P[o + 2];
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+    r += B.C[o]; g += B.C[o + 1]; b += B.C[o + 2];
+  }
+  const n = Math.max(1, B.count);
+  return { c: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], r: [(x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2], y0, col: [r / n, g / n, b / n] };
+}
+// A linear color (times k) as the sRGB hex the builders take.
+const _hc = new THREE.Color();
+const hexOf = (c, k = 1) => _hc.setRGB(c[0] * k, c[1] * k, c[2] * k, THREE.LinearSRGBColorSpace).getHex(THREE.SRGBColorSpace);
+// A leaning post of four sides from (x0, y0, z0) to (x1, y1, z1).
+function post(B, x0, y0, z0, x1, y1, z1, r0, r1, color) {
+  B.ensure(10, 24);
+  _hc.setHex(color, THREE.SRGBColorSpace);
+  const n0 = B.count;
+  for (let i = 0; i <= 4; i++) {
+    const a = (i / 4) * TAU + 0.6, ca = Math.cos(a), sa = Math.sin(a);
+    B._vert(n0 + i * 2, x0 + ca * r0, y0, z0 + sa * r0, _hc.r * 0.8, _hc.g * 0.8, _hc.b * 0.8, ca, 0, sa);
+    B._vert(n0 + i * 2 + 1, x1 + ca * r1, y1, z1 + sa * r1, _hc.r, _hc.g, _hc.b, ca, 0, sa);
+  }
+  let k = B.ni;
+  for (let i = 0; i < 4; i++) {
+    const a = n0 + i * 2;
+    B.I[k] = a; B.I[k + 1] = a + 1; B.I[k + 2] = a + 3; B.I[k + 3] = a; B.I[k + 4] = a + 3; B.I[k + 5] = a + 2;
+    k += 6;
+  }
+  B.ni = k;
+  B.count += 10;
+}
+// The far shape of a canopy tree: a four-sided trunk and two leafy balls
+// in the crown's bounds and mean color (64 triangles, against 150 to 470
+// near).
+function farCanopy(trunk, crown, tint, R, rng, distant = false) {
+  const B = new MeshBuilder(true);
+  const t = boundsOf(trunk), c = boundsOf(crown);
+  post(B, 0, 0, 0, 0, c.c[1], 0, Math.max(0.03, t.r[0] * 0.7), Math.max(0.014, t.r[0] * 0.4), hexOf(t.col, 1.15));
+  whiteUv(B, 0, R.white);
+  const col = hexOf([c.col[0] * tint[0], c.col[1] * tint[1], c.col[2] * tint[2]], 1.12);
+  const jit = () => rng.next() - 0.5;
+  const n0 = B.count;
+  if (distant) {
+    leafy(B, R.leaves, c.c[0], c.c[1], c.c[2], c.r[0] * 0.95, c.r[1] * 0.9, c.r[2] * 0.95, col, 5, 3, jit);
+    roundCanopy(B, n0, c.c[0], c.c[1], c.c[2], 0.8);
+    return B;
+  }
+  leafy(B, R.leaves, c.c[0], c.c[1] + c.r[1] * 0.1, c.c[2], c.r[0] * 0.88, c.r[1] * 0.8, c.r[2] * 0.88, col, 6, 4, jit);
+  leafy(B, R.leaves, c.c[0] + c.r[0] * 0.22, c.c[1] - c.r[1] * 0.2, c.c[2] - c.r[2] * 0.18, c.r[0] * 0.7, c.r[1] * 0.6, c.r[2] * 0.7, hexShade(col, 0.9), 5, 3, jit);
+  roundCanopy(B, n0, c.c[0], c.c[1], c.c[2], 0.8);
+  return B;
+}
+// The far shape of a palm: a leaning four-sided trunk and a crown of six
+// two-piece fronds (56 triangles, against 160 to 420 near).
+function farPalm(trunk, crown, R, rng, distant = false) {
+  const B = new MeshBuilder(true);
+  const c = boundsOf(crown), t = boundsOf(trunk);
+  // The crown's foot is the trunk top (the first frond starts there).
+  const H = 0.95, lx = crown.P[0], lz = crown.P[2];
+  const col = hexOf(t.col, 1.1);
+  post(B, 0, 0, 0, lx, H + 0.03, lz, 0.034, 0.02, col);
+  whiteUv(B, 0, R.white);
+  const fc = hexOf([c.col[0] * FROND_TINT[0], c.col[1] * FROND_TINT[1], c.col[2] * FROND_TINT[2]], 1.05);
+  const reach = Math.max(c.r[0], c.r[2]);
+  const n = distant ? 5 : 6;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU + rng.range(-0.2, 0.2);
+    if (distant) frond(B, R.frond, lx, H + 0.03, lz, a, i % 2 ? -0.1 : 0.25, reach, 0.9, fc, 1);
+    else frond(B, R.frond, lx, H + 0.03, lz, a, i % 2 ? 0.15 : 0.6, reach * 1.02, 1.8, fc, 2);
+  }
+  return B;
+}
+const speciesCache = new WeakMap();
+// Every tree species of a Miami city: { near, far, distant } builders
+// (position, normal, color, uv), species ids as SP_*. R: the detail atlas
+// rects. distant: 28 triangles (one leafy ball, or five one-piece fronds).
+export function treeSpecies(city, R) {
+  let S = speciesCache.get(city);
+  if (S) return S;
+  const MT = miamiTemplates(city, R), LT = lotTemplates(city, R);
+  const rng = createRng(city.seed + 5151);
+  S = [];
+  const W = R.white;
+  const canopy = (t, f) => ({ near: joinTree(t, f, LEAF_TINT, W), far: farCanopy(t, f, LEAF_TINT, R, rng), distant: farCanopy(t, f, LEAF_TINT, R, rng, true) });
+  const palm = (t, c) => ({ near: joinTree(t, c, FROND_TINT, W), far: farPalm(t, c, R, rng), distant: farPalm(t, c, R, rng, true) });
+  for (let i = 0; i < 6; i++) S.push(canopy(MT.canopies[i], MT.foliage[i]));
+  for (let i = 0; i < 4; i++) S.push(palm(MT.palmTrunks[i], MT.palmCrowns[i]));
+  for (let i = 0; i < 4; i++) S.push(canopy(LT.canopies[i], LT.foliage[i]));
+  for (let i = 0; i < 3; i++) S.push(palm(LT.palmTrunks[i], LT.palmCrowns[i]));
+  speciesCache.set(city, S);
+  return S;
+}
+
 // The Miami avenue and seawall palms: world/propsolid.js (their trunks are
 // solid there). Kept for the callers' argument order.
 const templateCache = new WeakMap();
@@ -403,10 +526,7 @@ export function lotStamps(C) {
   const { city } = C;
   const { T } = baseTemplates(city);
   let MT = null;
-  if (city.map === 'miami' && C.R && C.R.frond) {
-    MT = lotTemplateCache.get(city);
-    if (!MT) lotTemplateCache.set(city, (MT = makeLotTemplates(createRng(city.seed + 7373), C.R)));
-  }
+  if (city.map === 'miami' && C.R && C.R.frond) MT = lotTemplates(city, C.R);
   const trees = C.trees || C.plain, treesDetail = C.treesDetail || C.detail;
   return {
     tree(x, z, y, h, v) {
@@ -415,8 +535,11 @@ export function lotStamps(C) {
       if (MT) {
         const w = h * (0.95 + hash2(x, z + 1) * 0.25);
         const i = (k * MT.canopies.length) | 0;
-        trees.at(x, z).add(MT.canopies[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s, s, s);
-        treesDetail.at(x, z).add(MT.foliage[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s * 0.96, s, s * 0.92);
+        if (C.treeSink) C.treeSink(SP_LOT_TREE + i, x, y - 0.04, z, k * TAU * 7, w, h, w, s);
+        else {
+          trees.at(x, z).add(MT.canopies[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s, s, s);
+          treesDetail.at(x, z).add(MT.foliage[i], x, y - 0.04, z, k * TAU * 7, w, h, w, s * 0.96, s, s * 0.92);
+        }
       } else {
         trees.at(x, z).add(T.trees[(k * T.trees.length) | 0], x, y - 0.04, z, k * TAU * 7, h, h, h, s, s, s);
       }
@@ -426,8 +549,11 @@ export function lotStamps(C) {
       const s = 0.85 + hash2(x + 3, z) * 0.3;
       if (MT) {
         const i = (v * MT.palmTrunks.length) | 0, w = h * (0.9 + hash2(z, x) * 0.2);
-        trees.at(x, z).add(MT.palmTrunks[i], x, y - 0.04, z, v * TAU * 7, h, h, h, s, s, s);
-        treesDetail.at(x, z).add(MT.palmCrowns[i], x, y - 0.04, z, v * TAU * 7, w, h, w, s, s * 1.02, s * 0.95);
+        if (C.treeSink) C.treeSink(SP_LOT_PALM + i, x, y - 0.04, z, v * TAU * 7, w, h, w, s);
+        else {
+          trees.at(x, z).add(MT.palmTrunks[i], x, y - 0.04, z, v * TAU * 7, h, h, h, s, s, s);
+          treesDetail.at(x, z).add(MT.palmCrowns[i], x, y - 0.04, z, v * TAU * 7, w, h, w, s, s * 1.02, s * 0.95);
+        }
       } else {
         trees.at(x, z).add(T.palms[(v * 3) | 0], x, y - 0.04, z, v * TAU * 7, h * 1.15, h, h * 1.15, s, s, s);
       }
@@ -562,8 +688,11 @@ export function addProps(C, own = null, side = true, lists = null) {
       const gy = C.groundY(x, z);
       const w = h * (1.15 + hash(x, z + 1) * 0.3);
       const i = (k * MT.canopies.length) | 0;
-      (C.trees || C.plain).at(x, z, q).add(MT.canopies[i], x, gy - 0.04, z, k * TAU, w, h, w, v, v, v);
-      (C.treesDetail || C.detail).at(x, z, q).add(MT.foliage[i], x, gy - 0.04, z, k * TAU, w, h, w, v * 0.96, v, v * 0.92);
+      if (C.treeSink) C.treeSink(SP_TREE + i, x, gy - 0.04, z, k * TAU, w, h, w, v);
+      else {
+        (C.trees || C.plain).at(x, z, q).add(MT.canopies[i], x, gy - 0.04, z, k * TAU, w, h, w, v, v, v);
+        (C.treesDetail || C.detail).at(x, z, q).add(MT.foliage[i], x, gy - 0.04, z, k * TAU, w, h, w, v * 0.96, v, v * 0.92);
+      }
       C.ao.at(x, z).aoDisc(x, z, w * 0.32, gy + 0.012, 0.5, 8);
       return;
     }
@@ -581,8 +710,11 @@ export function addProps(C, own = null, side = true, lists = null) {
     const gy = C.groundY(x, z);
     if (MT) {
       const i = (k * MT.palmTrunks.length) | 0, s = h * (0.9 + hash(z, x) * 0.2);
-      (C.trees || C.plain).at(x, z, q).add(MT.palmTrunks[i], x, gy - 0.04, z, k * TAU, h, h, h, v, v, v);
-      (C.treesDetail || C.detail).at(x, z, q).add(MT.palmCrowns[i], x, gy - 0.04, z, k * TAU, s, h, s, v, v * 1.02, v * 0.95);
+      if (C.treeSink) C.treeSink(SP_PALM + i, x, gy - 0.04, z, k * TAU, s, h, s, v);
+      else {
+        (C.trees || C.plain).at(x, z, q).add(MT.palmTrunks[i], x, gy - 0.04, z, k * TAU, h, h, h, v, v, v);
+        (C.treesDetail || C.detail).at(x, z, q).add(MT.palmCrowns[i], x, gy - 0.04, z, k * TAU, s, h, s, v, v * 1.02, v * 0.95);
+      }
       C.ao.at(x, z).aoDisc(x, z, h * 0.3, gy + 0.012, 0.66, 8);
       return;
     }

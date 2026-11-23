@@ -660,7 +660,14 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       const sg = new THREE.BufferGeometry();
       sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
       sg.setAttribute('aLamp', new THREE.BufferAttribute(sl, 4));
-      sg.setIndex(si);
+      // Drawn: only the lamps near the camera (updateStreaks; they fade
+      // out by uFadeFar anyway), the index refilled as the camera moves.
+      const sIdx = new THREE.BufferAttribute(NLm * 4 > 65535 ? new Uint32Array(si) : new Uint16Array(si), 1);
+      sIdx.setUsage(THREE.DynamicDrawUsage);
+      sg.setIndex(sIdx);
+      sg.setDrawRange(0, 0);
+      vis.streakLamps = Float32Array.from(lamps.flatMap((l, i) => [pool[i * 12] + 7.5, pool[i * 12 + 2] + 7.5]));
+      vis.streakAt = [Infinity, Infinity];
       const streakMat = new THREE.ShaderMaterial({
         uniforms: {
           uColor: { value: new THREE.Color().setHex(0xffc27a, THREE.SRGBColorSpace) },
@@ -946,6 +953,31 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     }
   }
 
+  // Refills the streaks' index with the lamps within STREAK_R of the
+  // camera, when it has moved STREAK_STEP since the last fill.
+  const STREAK_R = 260, STREAK_STEP = 30;
+  function updateStreaks(cam) {
+    const S = V.streaks;
+    if (!S || !cam || !S.visible) return;
+    const x = cam.position.x, z = cam.position.z, at = V.streakAt;
+    if ((x - at[0]) * (x - at[0]) + (z - at[1]) * (z - at[1]) < STREAK_STEP * STREAK_STEP) return;
+    at[0] = x;
+    at[1] = z;
+    const L = V.streakLamps, idx = S.geometry.index, a = idx.array, r2 = (STREAK_R + STREAK_STEP) ** 2;
+    let k = 0;
+    for (let i = 0, n = L.length / 2; i < n; i++) {
+      const dx = L[i * 2] - x, dz = L[i * 2 + 1] - z;
+      if (dx * dx + dz * dz > r2) continue;
+      const v = i * 4;
+      a[k] = v; a[k + 1] = v + 2; a[k + 2] = v + 1; a[k + 3] = v; a[k + 4] = v + 3; a[k + 5] = v + 2;
+      k += 6;
+    }
+    S.geometry.setDrawRange(0, k);
+    idx.clearUpdateRanges();
+    idx.addUpdateRange(0, Math.max(6, k));
+    idx.needsUpdate = true;
+  }
+
   function updateClouds(cam) {
     if (!SHOW_PUFFS) return;
     const C = V.clouds, n = C.count;
@@ -1189,6 +1221,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
         V.lampU.uScale.value = hpx / (2 * Math.tan(((cam.fov || 60) * Math.PI) / 360));
       }
       updateClouds(cam);
+      updateStreaks(cam);
       updateHeadlights(cam, alpha);
       updateRain(cam, Number.isFinite(dt) ? Math.min(dt, 0.1) : 1 / 60);
     },

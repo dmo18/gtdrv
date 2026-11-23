@@ -662,7 +662,7 @@ export function discMaterial() {
     t.minFilter = THREE.LinearMipmapLinearFilter;
     t.generateMipmaps = true;
     t.needsUpdate = true;
-    discMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    discMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   }
   return discMat;
 }

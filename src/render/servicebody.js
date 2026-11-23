@@ -484,7 +484,7 @@ export function attachServiceLook(game, sys) {
   drops.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   const jit = new Float32Array(JET_N * 3);
   for (let i = 0; i < jit.length; i++) jit[i] = rng.next() * 2 - 1;
-  const splash = new THREE.Mesh(new THREE.RingGeometry(0.4, 1.0, 20), new THREE.MeshBasicMaterial({ color: 0xe8f4fa, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+  const splash = new THREE.Mesh(new THREE.RingGeometry(0.4, 1.0, 20), new THREE.MeshBasicMaterial({ color: 0xe8f4fa, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
   splash.rotation.x = -Math.PI / 2;
   splash.visible = false;
   splash.name = 'rw-splash';

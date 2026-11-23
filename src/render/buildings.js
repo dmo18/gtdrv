@@ -292,10 +292,10 @@ function fin(P, s, a0, a1, o, y0, y1, color, s0 = 0.9) {
 function groundFloor(C, b, L, style, gf, trim, tint) {
   const { x0, z0, x1, z1 } = b;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  const P = C.plain.at(cx, cz);
+  const P = C.plain.at(cx, cz), TR = (C.trim || C.plain).at(cx, cz);
   const stone = style === 'glass' || style === 'office' ? 0x8a8e92 : shade(mixHex(tint, 0x9a948a, 0.55), 0.82);
-  P.walls(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.16, 0.55, stone, 1, 1, 0.62, 0.9);
-  P.ring(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.1, 0.55, shade(stone, 1.12));
+  TR.walls(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.16, 0.55, stone, 1, 1, 0.62, 0.9);
+  TR.ring(x0 - 0.08, z0 - 0.08, x1 + 0.08, z1 + 0.08, 0.1, 0.55, shade(stone, 1.12));
   if (b.h < 24) return;
   let best = null;
   for (const s of sidesOf(x0, z0, x1, z1)) if ((b.street & s.m) && s.L >= 10 && (!best || s.L > best.L)) best = s;
@@ -306,9 +306,10 @@ function groundFloor(C, b, L, style, gf, trim, tint) {
 }
 
 // Fins, piers, corner pilasters and floor lines on one tier.
+// Trim: no cast shadow (C.trim, when the caller has it).
 function relief(C, b, L, style, x0, z0, x1, z1, y0, y1, floors, bay, trim, tint, first) {
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
-  const P = C.plain.at(cx, cz);
+  const P = (C.trim || C.plain).at(cx, cz);
   const sides = sidesOf(x0, z0, x1, z1);
   const fh = (y1 - y0) / floors;
   if (style === 'glass' || style === 'office') {
@@ -398,7 +399,7 @@ function hipRoof(C, b, x0, z0, x1, z1, y, col, trim) {
 // windows, a center fin rising over the roof, speed-line bands.
 function deco(C, b, L, gf, h, floors, trim, tint) {
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
-  const P = C.plain.at(cx, cz);
+  const P = (C.trim || C.plain).at(cx, cz);
   const all = sidesOf(b.x0, b.z0, b.x1, b.z1);
   const sides = all.filter((s) => (b.street & s.m) && s.L >= 7).slice(0, 2);
   if (!sides.length) sides.push(all[0]);

@@ -452,7 +452,7 @@ function sprayGeometry(sp) {
   return g;
 }
 const SPRAY_MAT = new THREE.MeshBasicMaterial({
-  vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
 });
 
 // ---- caches -----------------------------------------------------------------------

@@ -8,8 +8,9 @@
 //   --child  one cold run, prints its stage times as JSON (used by the parent;
 //            add `node --cpu-prof` in front of it to profile one build).
 //   --ratio  one cold build between calibration runs (the workload of
-//            test/fixtures/build-budget-run.mjs), prints wall, cpu and the
-//            calibration times as JSON (test/build-budget.test.js, regions).
+//            test/fixtures/build-budget-run.mjs), prints wall, cpu, main-
+//            thread cpu (thread) and the calibration times as JSON
+//            (test/build-budget.test.js, regions).
 import fs from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -204,16 +205,23 @@ async function ratio() {
   const { createMiamiCity } = await import('../src/world/miami.js');
   const file = region ? region + '.json' : 'miami.json';
   const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/' + file, import.meta.url), 'utf8'));
+  // Main-thread CPU as well (as test/fixtures/build-budget-run.mjs): the
+  // compiler's and the GC's helper threads, which a loaded runner slows
+  // with everything else, are not in it.
+  const threadMs = typeof process.threadCpuUsage === 'function'
+    ? () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; }
+    : () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
   const timeIt = (fn) => {
-    const c0 = process.cpuUsage(), t0 = performance.now();
+    const c0 = process.cpuUsage(), t0 = performance.now(), m0 = threadMs();
     const r = fn();
-    return { r, wall: performance.now() - t0, cpu: process.cpuUsage(c0).user / 1000 };
+    return { r, wall: performance.now() - t0, cpu: process.cpuUsage(c0).user / 1000, thread: threadMs() - m0 };
   };
   const cals = [timeIt(calibrate)];
-  const build = timeIt(() => createMiamiCity(data, region ? { region } : {}));
+  const build = timeIt(() => createMiamiCity(data, region ? { region, cpuClock: threadMs } : { cpuClock: threadMs }));
   for (let k = 0; k < 3; k++) cals.push(timeIt(calibrate));
   const calWall = Math.min(...cals.map((c) => c.wall)), calCpu = Math.min(...cals.map((c) => c.cpu));
-  process.stdout.write(JSON.stringify({ region, wall: build.wall, cpu: build.cpu, calWall, calCpu, buildings: build.r.buildings.length, timings: build.r.timings }) + '\n');
+  const calThread = Math.min(...cals.map((c) => c.thread));
+  process.stdout.write(JSON.stringify({ region, wall: build.wall, cpu: build.cpu, thread: build.thread, calWall, calCpu, calThread, buildings: build.r.buildings.length, timings: build.r.timings, cpuTimings: build.r.cpuTimings }) + '\n');
 }
 
 if (args.includes('--ratio')) await ratio();

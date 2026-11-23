@@ -17,6 +17,7 @@ import { TANK_SPECS } from '../entities/tank.js';
 import { makeWindowAtlas } from './textures.js';
 import { patchWindows, bakeLampLight, patchLampLight, setSpotLight, CARS } from './nightlights.js';
 import { setBeamDaylight, BEAM_TAN } from './aircraftmesh.js';
+import { SHADOW_LAYER } from './realcity.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -147,6 +148,8 @@ export function createGraphics(game) {
   const SHADOW_MAX = 0.82;
   scene.add(sun.target);
   const sc = sun.shadow.camera;
+  // The street tiles' shadow proxies live on their own layer (realcity.js).
+  sc.layers.enable(SHADOW_LAYER);
   let extent = 72, mapSize = 0;
   const dir = new THREE.Vector3(), right = new THREE.Vector3(), upv = new THREE.Vector3(), focus = new THREE.Vector3(), view = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
@@ -213,6 +216,25 @@ export function createGraphics(game) {
   // draw budget (docs/PLAN_V2.md section 4: 200 calls, 250k triangles).
   const CAST_RS = [30, 34, 48];
   let CAST_R = CAST_RS[1];
+  // A car (vehiclemesh.js) casts through its one-call far body, drawn on
+  // the shadow layer only (a tenth of the near body's triangles; the
+  // shadow is the same shape).
+  const shadowMat = new THREE.MeshBasicMaterial();
+  shadowMat.name = 'car-shadow';
+  function carShadow(m) {
+    const ud = m.userData, far = ud.far;
+    if (!far || !far.isMesh || !ud.bodyLod || !far.parent) return null;
+    const p = new THREE.Mesh(far.geometry, shadowMat);
+    p.name = 'car-shadow';
+    p.position.copy(far.position);
+    p.quaternion.copy(far.quaternion);
+    p.scale.copy(far.scale);
+    p.layers.set(SHADOW_LAYER);
+    p.castShadow = false;
+    far.parent.add(p);
+    m.traverse((o) => { if (o.isMesh && o !== p) o.castShadow = false; });
+    return p;
+  }
   function markCasters() {
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {
@@ -222,7 +244,9 @@ export function createGraphics(game) {
       // else casts from every solid part.
       const preset = m.userData.rwShadow === true;
       const list = (m.userData.rwCasters = []);
-      m.traverse((o) => {
+      const proxy = preset ? carShadow(m) : null;
+      if (proxy) list.push(proxy);
+      else m.traverse((o) => {
         if (o.isMesh && o.material && !o.material.transparent && (!preset || o.castShadow)) list.push(o);
       });
       m.userData.rwShadow = true;
@@ -232,7 +256,7 @@ export function createGraphics(game) {
   // Cars past FAR_RS (m, by tier) are drawn as the one-call far body
   // (game.js does the same past 75 m for every tier); the player's own
   // car never.
-  const FAR_RS = [36, 46, 75];
+  const FAR_RS = [32, 36, 75];
   let farR = FAR_RS[1];
   function updateCarLod() {
     const vs = game.vehicles, cx = camera.position.x, cz = camera.position.z;
@@ -247,6 +271,36 @@ export function createGraphics(game) {
       if (far !== (ud.lodDist === true)) ud.lodDist = far;
       const want = far || !!v.lodFar;
       if (want !== ud.lodFar) setVehicleLod(m, want);
+    }
+  }
+  // Vehicles deep in the fog are not drawn (the fleet keeps boats and
+  // aircraft out to 1.2 km): past the fog's far end by view depth (all
+  // haze), and boats and cars also past 65 % of the way from its near to
+  // its far end by distance (75 % haze or more, a few pixels). Aircraft
+  // only by depth (bigger, and seen against the sky).
+  // Only the root's visibility is ours (rwFogHid); nothing else switches
+  // a vehicle's root.
+  const fwd = new THREE.Vector3();
+  function fogCull() {
+    const fog = scene.fog, vs = game.vehicles;
+    if (!vs) return;
+    const far = fog && fog.far > 0 ? fog.far + 25 : Infinity;
+    const lim = fog && fog.far > 0 ? fog.near + (fog.far - fog.near) * 0.65 : Infinity, lim2 = lim * lim;
+    camera.getWorldDirection(fwd);
+    const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+    const own = game.player && game.player.vehicle;
+    for (let i = 0; i < vs.length; i++) {
+      const v = vs[i], m = v.mesh;
+      if (!m) continue;
+      const air = v.kind === 'plane' || v.kind === 'heli';
+      const dx = v.x - cx, dz = v.z - cz;
+      const hide = v !== own && (dx * fwd.x + ((v.y || 0) - cy) * fwd.y + dz * fwd.z > far || (!air && dx * dx + dz * dz > lim2));
+      if (hide) {
+        if (m.visible) { m.visible = false; m.userData.rwFogHid = true; }
+      } else if (m.userData.rwFogHid) {
+        m.visible = true;
+        m.userData.rwFogHid = false;
+      }
     }
   }
   function updateCasters() {
@@ -494,6 +548,26 @@ export function createGraphics(game) {
         /* drawn on first use instead */
       }
     };
+    // Every street material, whether the start tiles use it or not (a
+    // brick or siding street first met in play would compile then).
+    const M = ud.materials;
+    if (M) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0, 0.01]), 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9).fill(1), 3));
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(6), 2));
+      g.setAttribute('aWin', new THREE.BufferAttribute(new Float32Array(3), 1));
+      const seen = new Set();
+      for (const k in M) {
+        const m = M[k];
+        if (!m || !m.isMaterial || seen.has(m)) continue;
+        seen.add(m);
+        const o = new THREE.Mesh(g, m);
+        o.castShadow = !m.transparent;
+        warmGroup.add(o);
+      }
+    }
     for (const id in BOAT_SPECS) add('boat', BOAT_SPECS[id]);
     for (const id in AIRCRAFT_SPECS) add(AIRCRAFT_SPECS[id].kind || 'plane', AIRCRAFT_SPECS[id]);
     for (const id in TANK_SPECS) add('tank', TANK_SPECS[id]);
@@ -561,10 +635,19 @@ export function createGraphics(game) {
     sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
     sys.warmDone = true;
   }
+  // The sky reflection map must exist before anything compiles: a
+  // material compiled without it is compiled again (an envMap variant)
+  // at the first draw, and both programs are kept (about half of them
+  // were such stale copies before 0.9.0).
+  function envFirst() {
+    const sky = game.daynight && game.daynight.sky;
+    if (sky && !envRT) updateEnv(sky, true);
+  }
   function warmUp() {
     warmed = true;
     let t = performance.now();
     try {
+      envFirst();
       fillWarmGroup();
       scene.add(warmGroup);
       // The async form lets the driver compile in parallel where it can
@@ -586,6 +669,7 @@ export function createGraphics(game) {
   function warmNow() {
     if (!warmed) {
       warmed = true;
+      envFirst();
       fillWarmGroup();
       scene.add(warmGroup);
       renderer.compile(scene, camera);
@@ -641,9 +725,12 @@ export function createGraphics(game) {
         const pv = game.player && game.player.vehicle;
         streamStats.speed = pv ? Math.max(Math.abs(pv.speed || 0), Math.hypot(pv.vx || 0, pv.vz || 0)) : 0;
       }
-      if ((frame & 31) === 0) markCasters();
-      if ((frame & 7) === 0) updateCasters();
+      if ((frame & 3) === 0) markCasters();
+      if ((frame & 3) === 0) updateCasters();
       updateCarLod();
+      fogCull();
+      // The street tiles leave the far blocks wholly inside the fog out.
+      ud.fogFar = scene.fog && scene.fog.far > 0 ? scene.fog.far : 0;
       if ((frame & 7) === 0) updateSignals();
       frame++;
       if (sky && sky.version !== skyVersion) {

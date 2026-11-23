@@ -34,13 +34,16 @@ function fadeTube(radius = 1, height = 1, segs = 28, a0 = 1) {
   return g;
 }
 
+// Two-sided see-through glows, drawn in one pass (forceSinglePass): no
+// back-faces-first pass, so half the draws and no second program each
+// (they write no depth, the order inside one marker does not show).
 function glow(color, opacity) {
   return new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, vertexColors: true, fog: true,
+    color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, vertexColors: true, fog: true, forceSinglePass: true,
   });
 }
 function flat(color, opacity) {
-  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, fog: true });
+  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, fog: true, forceSinglePass: true });
 }
 
 // Unit-sized shared geometries (scaled per use).

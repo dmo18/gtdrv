@@ -218,90 +218,113 @@ function stampLine(R, ax, az, bx, bz, v) {
 // distance transform of each side) less half a cell, clamped to CLAMP.
 // A squared distance of FAR cells or more always clamps, so the column
 // pass caps at FAR (squared run length to the nearest cell of the other
-// side, two row-major sweeps for both sides at once), and the row pass
-// builds the lower envelope of the cells under FAR only.
+// side: one sweep down, then one sweep up fused with the row passes), and
+// the row pass builds the lower envelope of the cells under FAR only,
+// within `reach` cells of the row's first and last cell of its side,
+// skipping cells of the other side inside a run of it (never the
+// nearest), and writes the clamp past reach of the outer sources. Each
+// skip leaves out only parabolas that are never the minimum under FAR,
+// so the field is the full transform's, value for value.
 function signedField(R) {
   const W = R.w, H = R.h, N = W * H, m = R.data;
   const lim = CLAMP * 10;
   const FAR = (Math.ceil(lim / (10 * R.cell) + 0.5) + 1) ** 2;
-  // Every squared distance under FAR, as the output it gives.
+  let reach = 0;
+  while (reach * reach < FAR) reach++;
   const posOf = new Int16Array(FAR), negOf = new Int16Array(FAR);
   for (let d = 0; d < FAR; d++) {
     const p = Math.round((Math.sqrt(d) - 0.5) * R.cell * 10), q = Math.round(-(Math.sqrt(d) - 0.5) * R.cell * 10);
     posOf[d] = p > lim ? lim : p < -lim ? -lim : p;
     negOf[d] = q > lim ? lim : q < -lim ? -lim : q;
   }
-  // Column pass: one field for both sides (a cell's distance is to the
-  // other side), squared, capped at FAR.
-  const col = new Int32Array(N);
-  {
-    const run = new Int32Array(W).fill(-1); // rows since the side changed (-1 none)
-    const side = new Uint8Array(W).fill(2);
-    for (let j = 0, c = 0; j < H; j++) {
-      for (let i = 0; i < W; i++, c++) {
-        const t = m[c] ? 1 : 0;
-        if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
-        if (run[i] >= 0) run[i]++;
-        col[c] = run[i];
-      }
-    }
-    run.fill(-1);
-    side.fill(2);
-    for (let j = H - 1, c = N - 1; j >= 0; j--) {
-      for (let i = W - 1; i >= 0; i--, c--) {
-        const t = m[c] ? 1 : 0;
-        if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
-        if (run[i] >= 0) run[i]++;
-        const up = col[c], dn = run[i];
-        const r = up < 0 ? dn : dn < 0 ? up : up < dn ? up : dn;
-        col[c] = r < 0 || r * r >= FAR ? FAR : r * r;
-      }
-    }
-  }
-  // Row pass: per row and side, the parabolas (q - p)^2 + g[p] of the
-  // other side's cells (g = 0) and of this side's cells under FAR.
+  const sd = sidesOf(m, N);
+  const col = FAR < 32768 ? new Int16Array(N) : new Int32Array(N);
+  colUp(sd, col, W, H);
   const out = new Int16Array(N);
   const v = new Int32Array(W), zz = new Float64Array(W + 1), gv = new Float64Array(W);
-  for (let y = 0, row = 0; y < H; y++, row += W) {
+  const run = new Int32Array(W).fill(-1), side = new Uint8Array(W).fill(2);
+  for (let y = H - 1; y >= 0; y--) {
+    const row = y * W;
+    colDown(sd, col, row, W, FAR, run, side);
     for (let t = 0; t < 2; t++) {
-      // t = 1: land cells, distance to water; t = 0: water cells, to land.
-      const tab = t ? posOf : negOf;
-      let k = -1;
-      for (let x = 0; x < W; x++) {
-        const c = row + x;
-        const own = (m[c] ? 1 : 0) === t;
-        const g = own ? col[c] : 0;
-        if (g >= FAR) continue;
-        // A cell of the other side is a source at 0.
-        const gq = g + x * x;
-        let s = -Infinity;
-        while (k >= 0) {
-          s = (gq - (gv[k] + v[k] * v[k])) / (2 * x - 2 * v[k]);
-          if (s > zz[k]) break;
-          k--;
-        }
-        if (k < 0) s = -Infinity;
-        k++;
-        v[k] = x;
-        gv[k] = g;
-        zz[k] = s;
-      }
-      if (k < 0) {
-        for (let x = 0; x < W; x++) if ((m[row + x] ? 1 : 0) === t) out[row + x] = t ? lim : -lim;
-        continue;
-      }
-      zz[k + 1] = Infinity;
-      let e = 0;
-      for (let x = 0; x < W; x++) {
-        const c = row + x;
-        if ((m[c] ? 1 : 0) !== t) continue;
-        while (zz[e + 1] < x) e++;
-        const d = (x - v[e]) * (x - v[e]) + gv[e];
-        out[c] = d < FAR ? tab[d] : t ? lim : -lim;
-      }
+      let a = 0, b = W - 1;
+      while (a < W && sd[row + a] !== t) a++;
+      if (a === W) continue;
+      while (sd[row + b] !== t) b--;
+      rowPass(sd, col, out, row, W, t, a, b, reach, FAR, t ? posOf : negOf, t ? lim : -lim, v, zz, gv);
     }
   }
   return out;
+}
+// The side of each cell (0 water, 1 land).
+function sidesOf(m, N) {
+  const sd = new Uint8Array(N);
+  for (let c = 0; c < N; c++) sd[c] = m[c] ? 1 : 0;
+  return sd;
+}
+function colUp(sd, col, W, H) {
+  // rows since the side changed going down (-1: none yet)
+  for (let i = 0; i < W; i++) col[i] = -1;
+  for (let c = W, N = W * H; c < N; c++) {
+    const p = col[c - W];
+    col[c] = sd[c] !== sd[c - W] ? 1 : p >= 0 ? p + 1 : -1;
+  }
+}
+function colDown(sd, col, row, W, FAR, run, side) {
+  for (let i = 0; i < W; i++) {
+    const c = row + i, t = sd[c];
+    if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
+    if (run[i] >= 0) run[i]++;
+    const up = col[c], dn = run[i];
+    const r = up < 0 ? dn : dn < 0 ? up : up < dn ? up : dn;
+    col[c] = r < 0 || r * r >= FAR ? FAR : r * r;
+  }
+}
+function rowPass(sd, col, out, row, W, t, a, b, reach, FAR, tab, far, v, zz, gv) {
+  const x0 = a - reach < 0 ? 0 : a - reach, x1 = b + reach > W - 1 ? W - 1 : b + reach;
+  let k = -1;
+  for (let x = x0; x <= x1; x++) {
+    const c = row + x;
+    let g;
+    if (sd[c] === t) {
+      g = col[c];
+      if (g >= FAR) continue;
+    } else {
+      // A cell of the other side inside a run of its side is never the
+      // nearest of them to a cell of this side.
+      if (x > 0 && x < W - 1 && sd[c - 1] !== t && sd[c + 1] !== t) continue;
+      g = 0;
+    }
+    const gq = g + x * x;
+    let s = -Infinity;
+    while (k >= 0) {
+      s = (gq - (gv[k] + v[k] * v[k])) / (2 * x - 2 * v[k]);
+      if (s > zz[k]) break;
+      k--;
+    }
+    if (k < 0) s = -Infinity;
+    k++;
+    v[k] = x;
+    gv[k] = g;
+    zz[k] = s;
+  }
+  if (k < 0) {
+    for (let x = a; x <= b; x++) if (sd[row + x] === t) out[row + x] = far;
+    return;
+  }
+  zz[k + 1] = Infinity;
+  // Past reach of the first and last source every distance clamps.
+  const lo = v[0] - reach + 1 > a ? v[0] - reach + 1 : a, hi = v[k] + reach - 1 < b ? v[k] + reach - 1 : b;
+  for (let x = a; x < lo; x++) if (sd[row + x] === t) out[row + x] = far;
+  for (let x = hi + 1; x <= b; x++) if (sd[row + x] === t) out[row + x] = far;
+  let e = 0;
+  for (let x = lo; x <= hi; x++) {
+    const c = row + x;
+    if (sd[c] !== t) continue;
+    while (zz[e + 1] < x) e++;
+    const d = (x - v[e]) * (x - v[e]) + gv[e];
+    out[c] = d < FAR ? tab[d] : far;
+  }
 }
 
 // Bilinear sample of a signed field at cell centers; meters.
@@ -319,43 +342,86 @@ function makeSampler(R, f) {
   };
 }
 
-// Labels the 4-connected regions of cells where wall is 0. Returns the
-// count. Regions are numbered in the row order of their first cell (a
-// span fill: each run of a row is labeled at once, and one seed per
-// open run above and below it is stacked). queue: unused scratch.
-function labelRegions(wall, W, H, label, queue) {
-  const NC = W * H;
+// Labels the 4-connected regions of cells where wall is 0 (wall holds
+// 0 and 1 only). Returns the count. Regions are numbered in the row order
+// of their first cell. Run based: the open runs of each row (found with
+// indexOf, native) are joined to the runs they touch in the row above
+// (union-find), then each run is filled with its region's label. `runs`
+// (makeRuns) keeps the runs, start and end cell and label, for applyVotes.
+function makeRuns(cap = 1024) {
+  return { n: 0, a: new Int32Array(cap), b: new Int32Array(cap), lab: new Int32Array(cap), up: new Int32Array(cap) };
+}
+function growRuns(runs) {
+  for (const k of ['a', 'b', 'lab', 'up']) {
+    const o = runs[k], g = new Int32Array(o.length * 2);
+    g.set(o);
+    runs[k] = g;
+  }
+}
+// The root of run x (path halving).
+function runRoot(up, x) {
+  while (up[x] !== x) x = up[x] = up[up[x]];
+  return x;
+}
+function labelRegions(wall, W, H, label, runs) {
   label.fill(-1);
-  void queue;
-  const stack = [];
-  let n = 0;
-  for (let s = 0; s < NC; s++) {
-    if (wall[s] || label[s] >= 0) continue;
-    stack.length = 0;
-    stack.push(s);
-    while (stack.length) {
-      const c = stack.pop();
-      if (label[c] >= 0) continue;
-      const row = c - (c % W), end = row + W - 1;
-      let l = c, r = c;
-      while (l > row && !wall[l - 1] && label[l - 1] < 0) l--;
-      while (r < end && !wall[r + 1] && label[r + 1] < 0) r++;
-      for (let k = l; k <= r; k++) label[k] = n;
-      if (row >= W) seedRuns(wall, label, l - W, r - W, stack);
-      if (row + W < NC) seedRuns(wall, label, l + W, r + W, stack);
+  const nr = wallRuns(wall, W, H, runs);
+  runs.n = nr;
+  return labelRuns(runs, nr, label);
+}
+// The open runs of every row, joined to the runs above (one loop per
+// function: each is optimized on its own, once).
+function wallRuns(wall, W, H, runs) {
+  let nr = 0, prev0 = 0;
+  for (let j = 0, row = 0; j < H; j++, row += W) {
+    const end = row + W, cur0 = nr;
+    let c = row;
+    while (c < end) {
+      const s = wall.indexOf(0, c);
+      if (s < 0 || s >= end) break;
+      let e = wall.indexOf(1, s);
+      if (e < 0 || e > end) e = end;
+      if (nr === runs.a.length) growRuns(runs);
+      runs.a[nr] = s;
+      runs.b[nr] = e;
+      runs.up[nr] = nr;
+      nr++;
+      c = e;
     }
-    n++;
+    joinRuns(runs, prev0, cur0, nr, W);
+    prev0 = cur0;
+  }
+  return nr;
+}
+// Joins the runs of a row (cur0..nr) to the runs above (prev0..cur0) that
+// share a column; the smaller run id stays the root, so a region's root is
+// its first run.
+function joinRuns(runs, prev0, cur0, nr, W) {
+  const A = runs.a, B = runs.b, up = runs.up;
+  let p = prev0, q = cur0;
+  while (p < cur0 && q < nr) {
+    const pa = A[p] + W, pb = B[p] + W;
+    if (pa < B[q] && A[q] < pb) {
+      const x = runRoot(up, p), y = runRoot(up, q);
+      if (x < y) up[y] = x; else if (y < x) up[x] = y;
+    }
+    if (pb < B[q]) p++; else q++;
+  }
+}
+// Labels in run order (a region's first run holds its first cell), filled.
+function labelRuns(runs, nr, label) {
+  const up = runs.up, lab = runs.lab;
+  let n = 0;
+  for (let r = 0; r < nr; r++) {
+    const x = runRoot(up, r);
+    lab[r] = x === r ? n++ : lab[x];
+    label.fill(lab[r], runs.a[r], runs.b[r]);
   }
   return n;
 }
-// Stacks the first cell of every open, unlabeled run in a..b.
-function seedRuns(wall, label, a, b, stack) {
-  let inRun = false;
-  for (let k = a; k <= b; k++) {
-    const open = !wall[k] && label[k] < 0;
-    if (open && !inRun) stack.push(k);
-    inRun = open;
-  }
+// Every labeled cell takes its region's vote (land when over 0), run by run.
+function applyVotes(runs, votes, data) {
+  for (let r = 0; r < runs.n; r++) data.fill(votes[runs.lab[r]] > 0 ? 1 : 0, runs.a[r], runs.b[r]);
 }
 
 // Each region's vote from one coast line: +1 per sample on its land side
@@ -380,9 +446,6 @@ function voteCoast(pts, R, label, votes, bx1, bz1, hits = null) {
     }
   }
 }
-function applyVotes(label, votes, data, NC) {
-  for (let c = 0; c < NC; c++) if (label[c] >= 0) data[c] = votes[label[c]] > 0 ? 1 : 0;
-}
 
 // The whole box's land and sea at COARSE m (coast walls along every
 // coastline and the box, regions voted as in step 1). A region build
@@ -403,11 +466,11 @@ function coarseLand(data, coast) {
   stampLine(wall, x1, z0, x1, z1, 1);
   stampLine(wall, x1, z1, x0, z1, 1);
   stampLine(wall, x0, z1, x0, z0, 1);
-  const NC = R.w * R.h, label = new Int32Array(NC);
-  const n = labelRegions(wall.data, R.w, R.h, label, null);
+  const NC = R.w * R.h, label = new Int32Array(NC), runs = makeRuns();
+  const n = labelRegions(wall.data, R.w, R.h, label, runs);
   const votes = new Float64Array(n);
   for (const pts of coast) voteCoast(pts, R, label, votes, R.x0 + R.w * COARSE, R.z0 + R.h * COARSE);
-  applyVotes(label, votes, R.data, NC);
+  applyVotes(runs, votes, R.data);
   settleWalls(wall.data, R.data, R.w, R.h);
   coarseCache.set(data, R);
   return R;
@@ -415,8 +478,8 @@ function coarseLand(data, coast) {
 
 // Regions of the fine raster that no coast sample reached and that run
 // off the raster's edge take the majority side of the coarse whole-box
-// mask over their cells.
-function voteUnreached(R, label, nLab, hits, coarse) {
+// mask over their cells (coarseOf() gives it).
+function voteUnreached(R, label, nLab, hits, coarseOf) {
   const W = R.w, H = R.h, NC = W * H;
   const open = new Uint8Array(nLab);
   for (let i = 0; i < W; i++) {
@@ -428,6 +491,8 @@ function voteUnreached(R, label, nLab, hits, coarse) {
   let any = false;
   for (let k = 0; k < nLab; k++) if (open[k]) any = true;
   if (!any) return;
+  // The coarse whole-box mask, only built when some region needs it.
+  const coarse = coarseOf();
   const score = new Float64Array(nLab);
   for (let c = 0; c < NC; c++) {
     const k = label[c];
@@ -443,19 +508,25 @@ function voteUnreached(R, label, nLab, hits, coarse) {
 }
 
 // Coastline wall cells (1) take the majority of their settled neighbors.
+// Three passes in cell order over the wall cells only (found with
+// indexOf: wall holds 0 and 1 here).
 function settleWalls(wall, land, W, H) {
   const NC = W * H;
+  let n = 0;
+  for (let c = wall.indexOf(1); c >= 0; c = wall.indexOf(1, c + 1)) n++;
+  const list = new Int32Array(n);
+  for (let c = wall.indexOf(1), k = 0; c >= 0; c = wall.indexOf(1, c + 1)) list[k++] = c;
   for (let pass = 0; pass < 3; pass++) {
-    for (let c = 0; c < NC; c++) {
-      if (!wall[c]) continue;
-      let l = 0, n = 0;
+    for (let k = 0; k < n; k++) {
+      const c = list[k];
+      let l = 0, m = 0;
       const i = c % W;
-      if (i > 0 && wall[c - 1] !== 1) { n++; l += land[c - 1]; }
-      if (i < W - 1 && wall[c + 1] !== 1) { n++; l += land[c + 1]; }
-      if (c >= W && wall[c - W] !== 1) { n++; l += land[c - W]; }
-      if (c < NC - W && wall[c + W] !== 1) { n++; l += land[c + W]; }
-      if (n) {
-        land[c] = l * 2 >= n ? 1 : 0;
+      if (i > 0 && wall[c - 1] !== 1) { m++; l += land[c - 1]; }
+      if (i < W - 1 && wall[c + 1] !== 1) { m++; l += land[c + 1]; }
+      if (c >= W && wall[c - W] !== 1) { m++; l += land[c - W]; }
+      if (c < NC - W && wall[c + W] !== 1) { m++; l += land[c + W]; }
+      if (m) {
+        land[c] = l * 2 >= m ? 1 : 0;
         wall[c] = 2;
       }
     }
@@ -465,47 +536,78 @@ function settleWalls(wall, land, W, H) {
 // Greedy cover of the 1-cells of a cw x ch mask by up to 6 rectangles
 // (largest first, via the histogram method), until 85 % is covered.
 // Writes [i0, j0, i1, j1] per rectangle into out; returns the count.
-function largestRects(cells, cw, ch, filled, hist, stack, out) {
+// The pick is the first largest rectangle in scan order (rows, then the
+// histogram's pops). Each row keeps its histogram (HIST, row by row) and
+// its own first largest (bottom row j: ROW_A area, ROW_I0 and ROW_I1
+// columns, ROW_H height); taking a rectangle changes the histograms only
+// from its top row down, so the next pass redoes those rows only (the
+// earliest row with the largest area is the scan's pick, as before).
+// The picks never grow (a later one was all 1-cells for the earlier pass
+// too), so once one after the first is under minLater cells, so is every
+// later one: the cover stops there (the caller drops pieces that small).
+const ROW_A = new Int32Array(201), ROW_I0 = new Int32Array(201), ROW_I1 = new Int32Array(201), ROW_H = new Int32Array(201);
+const HIST = new Int32Array(201 * 201), STACK_H = new Int32Array(202);
+function largestRects(cells, cw, ch, filled, stack, out, minLater = 0) {
   const total = filled;
-  let n = 0;
+  let n = 0, from = 0;
   while (n < 6 && filled > total * 0.15) {
-    let best = 0, bi0 = 0, bj0 = 0, bi1 = 0, bj1 = 0;
-    for (let i = 0; i < cw; i++) hist[i] = 0;
-    for (let j = 0; j < ch; j++) {
-      const row = j * cw;
-      for (let i = 0; i < cw; i++) hist[i] = cells[row + i] === 1 ? hist[i] + 1 : 0;
-      let sp = 0;
-      for (let i = 0; i <= cw; i++) {
-        const hh = i < cw ? hist[i] : 0;
-        while (sp > 0 && hist[stack[sp - 1]] >= hh) {
-          const height = hist[stack[--sp]];
-          const left = sp > 0 ? stack[sp - 1] + 1 : 0;
-          const a = height * (i - left);
-          if (a > best) { best = a; bi0 = left; bi1 = i - 1; bj1 = j; bj0 = j - height + 1; }
-        }
-        stack[sp++] = i;
-      }
-    }
-    if (best < 4) break;
+    histRows(cells, cw, ch, from, stack);
+    let best = 0, bj = 0;
+    for (let j = 0; j < ch; j++) if (ROW_A[j] > best) { best = ROW_A[j]; bj = j; }
+    if (best < 4 || (n > 0 && best < minLater)) break;
+    const bi0 = ROW_I0[bj], bi1 = ROW_I1[bj], bj1 = bj, bj0 = bj - ROW_H[bj] + 1;
     for (let j = bj0; j <= bj1; j++) for (let i = bi0; i <= bi1; i++) cells[j * cw + i] = 2;
     filled -= best;
     out[4 * n] = bi0; out[4 * n + 1] = bj0; out[4 * n + 2] = bi1; out[4 * n + 3] = bj1;
     n++;
+    from = bj0;
   }
   return n;
+}
+// The histograms of rows from..ch-1 (HIST) and their first largest
+// rectangles (ROW_*).
+function histRows(cells, cw, ch, from, stack) {
+  const hist = HIST, hs = STACK_H;
+  for (let j = from; j < ch; j++) {
+    const row = j * cw;
+    if (j === 0) for (let i = 0; i < cw; i++) hist[i] = cells[i] === 1 ? 1 : 0;
+    else for (let i = 0; i < cw; i++) hist[row + i] = cells[row + i] === 1 ? hist[row - cw + i] + 1 : 0;
+    // The stack holds each column (stack) with its height (hs).
+    let best = 0, b0 = 0, b1 = 0, bh = 0, sp = 0;
+    for (let i = 0; i <= cw; i++) {
+      const hh = i < cw ? hist[row + i] : 0;
+      while (sp > 0 && hs[sp - 1] >= hh) {
+        const height = hs[--sp];
+        const left = sp > 0 ? stack[sp - 1] + 1 : 0;
+        const a = height * (i - left);
+        if (a > best) { best = a; b0 = left; b1 = i - 1; bh = height; }
+      }
+      stack[sp] = i;
+      hs[sp++] = hh;
+    }
+    ROW_A[j] = best; ROW_I0[j] = b0; ROW_I1[j] = b1; ROW_H[j] = bh;
+  }
 }
 
 // Free lot cells: drawn land (visual 1) off the road strips (near 0) and
 // outside every building box (owner < 0). Sets free[c] = 1 and returns
 // the free cells in row order. (Hot loops live in small top-level
-// functions: the optimiser takes them at once, not the whole build.)
+// functions: the optimizer takes them at once, not the whole build.)
 function freeCells(visual, near, owner, free, NC) {
+  const n = markFree(visual, near, owner, free, NC);
+  return listSet(free, n);
+}
+function markFree(visual, near, owner, free, NC) {
   let n = 0;
   for (let c = 0; c < NC; c++) {
     if (visual[c] === 1 && near[c] === 0 && owner[c] < 0) { free[c] = 1; n++; }
   }
+  return n;
+}
+// The n set cells of a, in row order.
+function listSet(a, n) {
   const list = new Int32Array(n);
-  for (let c = 0, k = 0; k < n; c++) if (free[c]) list[k++] = c;
+  for (let c = 0, k = 0; k < n; c++) if (a[c]) list[k++] = c;
   return list;
 }
 
@@ -523,15 +625,16 @@ function polyBox(pts, out) {
 
 // A footprint rasterised on R (its cells at 2 m, R.data the buffer) and
 // covered by largestRects (into rects). Returns the rectangle count (0
-// when no cell center is inside the polygon).
-function footprintRects(R, pts, hist, stack, rects) {
+// when no cell center is inside the polygon). Pieces after the first under
+// minLater cells are left out (the caller would drop them).
+function footprintRects(R, pts, stack, rects, minLater = 0) {
   const cw = R.w, ch = R.h, cells = R.data;
   cells.fill(0, 0, cw * ch);
   fillPolygon(R, pts, 1);
   let filled = 0;
   for (let k = 0; k < cw * ch; k++) filled += cells[k];
   if (!filled) return 0;
-  return largestRects(cells, cw, ch, filled, hist, stack, rects);
+  return largestRects(cells, cw, ch, filled, stack, rects, minLater);
 }
 
 // Building box k on the owner raster (CELL cells from x0, z0): the cells
@@ -552,7 +655,9 @@ function boxesWithin(boxes, x, z, r) {
   const out = [];
   for (let k = 0; k < boxes.length; k++) {
     const b = boxes[k];
-    if (b.depot || Math.hypot((b.x0 + b.x1) / 2 - x, (b.z0 + b.z1) / 2 - z) > r) continue;
+    const dx = (b.x0 + b.x1) / 2 - x, dz = (b.z0 + b.z1) / 2 - z;
+    // hypot is at least |dx| and |dz|: the far ones are skipped first.
+    if (b.depot || dx > r || dx < -r || dz > r || dz < -r || Math.hypot(dx, dz) > r) continue;
     out.push(k);
   }
   return out;
@@ -574,42 +679,91 @@ function keepFree(list, n, free) {
   return m;
 }
 
-// Flood fills one road-free land region from cell s (inside the crop
-// window ci0..ci1, cj0..cj1). out: [cells, i0, i1, j0, j1, park cells,
-// 1 if it stays clear of the window edge].
-function floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, out) {
-  let qh = 0, qt = 0, i0 = s % W, i1 = i0, j0 = (s - i0) / W, j1 = j0, parks = 0, ok = 1;
-  queue[qt++] = s;
-  lab[s] = s;
-  while (qh < qt) {
-    const c = queue[qh++];
-    const ci = c % W, cj = (c - ci) / W;
-    if (ci <= ci0 || ci >= ci1 || cj <= cj0 || cj >= cj1) ok = 0;
-    if (ci < i0) i0 = ci;
-    if (ci > i1) i1 = ci;
-    if (cj < j0) j0 = cj;
-    if (cj > j1) j1 = cj;
-    if (park[c]) parks++;
-    if (ci > ci0 && lab[c - 1] < 0 && land[c - 1] === 1 && road[c - 1] === 0) { lab[c - 1] = s; queue[qt++] = c - 1; }
-    if (ci < ci1 && lab[c + 1] < 0 && land[c + 1] === 1 && road[c + 1] === 0) { lab[c + 1] = s; queue[qt++] = c + 1; }
-    if (cj > cj0 && lab[c - W] < 0 && land[c - W] === 1 && road[c - W] === 0) { lab[c - W] = s; queue[qt++] = c - W; }
-    if (cj < cj1 && lab[c + W] < 0 && land[c + W] === 1 && road[c + W] === 0) { lab[c + W] = s; queue[qt++] = c + W; }
+// The raster kernels on small mixed rasters at load (WARM_RUNS times:
+// V8 keeps type feedback for a function only from about its eighth
+// call). The build's first calls are long single loops, so the code
+// optimized inside them lacked the feedback of paths not yet taken and of
+// the code after the loop, bailed out and was compiled again (before
+// 0.9.0 the block flood fill did so at the end of every region after the
+// first large one, 80 times a build). The rasters' origin is fractional, so raster
+// objects start with float fields and keep one shape (an origin that
+// turned float later changed the shape under code already optimized).
+// Nothing here is kept; it costs well under a millisecond.
+const WARM_RUNS = 10;
+(function warmKernels() {
+  for (let k = 0; k < WARM_RUNS; k++) {
+    floodRegions(3, 0, 2, 0, 2, Uint8Array.of(1, 1, 0, 1, 1, 0, 0, 0, 1), new Uint8Array(9), Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0, 0), new Int32Array(9).fill(-1), makeRuns(1));
+    const R = makeRaster(0.5, 0.5, 60.5, 60.5, 5), wall = makeRaster(0.5, 0.5, 60.5, 60.5, 5);
+    stampCapsule(R, 10, 10, 40, 30, 8, 1);
+    stampRect(R, 30, 35, 55, 55, 1);
+    fillPolygon(R, Float64Array.of(5, 40, 25, 40, 20, 58), 1);
+    stampLine(R, 2, 2, 58, 20, 0);
+    signedField(R);
+    stampLine(wall, 0, 30, 60, 30, 1);
+    stampLine(wall, 30, 0, 30, 60, 1);
+    const runs = makeRuns(1); // (so the warm-up grows it too)
+    labelRegions(wall.data, R.w, R.h, new Int32Array(R.w * R.h), runs);
+    applyVotes(runs, new Float64Array(runs.n).fill(1), R.data);
+    settleWalls(wall.data, R.data, R.w, R.h);
   }
-  out[0] = qt; out[1] = i0; out[2] = i1; out[3] = j0; out[4] = j1; out[5] = parks; out[6] = ok;
-}
+})();
 
-// floodBlock from every unlabeled road-free land cell of the window, in
-// row order. Returns an Int32Array of 7 values per region (as FB).
-function floodRegions(W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, FB) {
-  let out = new Int32Array(7 * 4096), n = 0;
+// The road-free land regions (land 1, road 0) of the crop window
+// ci0..ci1, cj0..cj1, 4-connected inside it, in the row order of their
+// first cell s: lab gets s on every cell of the region. Returns an
+// Int32Array of 7 values per region: [cells, i0, i1, j0, j1, park cells,
+// 1 if it stays clear of the window edge]. Run based, as labelRegions
+// (the runs of a row joined to the runs they touch in the row above; a
+// region's root is its first run, whose first cell is s).
+function floodRegions(W, ci0, ci1, cj0, cj1, land, road, park, lab, runs) {
+  const nr = blockRuns(W, ci0, ci1, cj0, cj1, land, road, runs);
+  return blockStats(W, ci0, ci1, cj0, cj1, park, lab, runs, nr);
+}
+function blockRuns(W, ci0, ci1, cj0, cj1, land, road, runs) {
+  let nr = 0, prev0 = 0;
   for (let j = cj0; j <= cj1; j++) {
-    for (let i = ci0; i <= ci1; i++) {
-      const s = j * W + i;
-      if (lab[s] >= 0 || land[s] !== 1 || road[s] !== 0) continue;
-      floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, FB);
-      if (n + 7 > out.length) { const o = new Int32Array(out.length * 2); o.set(out); out = o; }
-      for (let k = 0; k < 7; k++) out[n++] = FB[k];
+    const row = j * W, cur0 = nr;
+    let i = ci0;
+    while (i <= ci1) {
+      if (land[row + i] !== 1 || road[row + i] !== 0) { i++; continue; }
+      const st = i;
+      while (i <= ci1 && land[row + i] === 1 && road[row + i] === 0) i++;
+      if (nr === runs.a.length) growRuns(runs);
+      runs.a[nr] = row + st;
+      runs.b[nr] = row + i;
+      runs.up[nr] = nr;
+      nr++;
     }
+    joinRuns(runs, prev0, cur0, nr, W);
+    prev0 = cur0;
+  }
+  return nr;
+}
+// Regions in root order (the order of their first cells), with their
+// stats; lab gets each region's first cell.
+function blockStats(W, ci0, ci1, cj0, cj1, park, lab, runs, nr) {
+  const up = runs.up, reg = runs.lab, A = runs.a, B = runs.b;
+  let out = new Int32Array(7 * 4096), n = 0;
+  for (let r = 0; r < nr; r++) {
+    const x = runRoot(up, r);
+    if (x === r) {
+      if (n + 7 > out.length) { const o = new Int32Array(out.length * 2); o.set(out); out = o; }
+      const c = A[r], ci = c % W, cj = (c - ci) / W;
+      reg[r] = n;
+      out[n] = 0; out[n + 1] = ci; out[n + 2] = ci; out[n + 3] = cj; out[n + 4] = cj; out[n + 5] = 0; out[n + 6] = 1;
+      n += 7;
+    } else reg[r] = reg[x];
+    const k = reg[r], s = A[x], a = A[r], b = B[r];
+    const ai = a % W, j = (a - ai) / W, bi = ai + (b - a) - 1;
+    out[k] += b - a;
+    if (ai < out[k + 1]) out[k + 1] = ai;
+    if (bi > out[k + 2]) out[k + 2] = bi;
+    if (j > out[k + 4]) out[k + 4] = j;
+    let parks = 0;
+    for (let c = a; c < b; c++) if (park[c]) parks++;
+    out[k + 5] += parks;
+    if (ai <= ci0 || bi >= ci1 || j <= cj0 || j >= cj1) out[k + 6] = 0;
+    lab.fill(s, a, b);
   }
   return out.subarray(0, n);
 }
@@ -702,6 +856,51 @@ function splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf) {
   return null;
 }
 
+// True when some item of list (x, z fields) has Math.hypot(dx, dz) < r
+// (hypot is at least |dx| and |dz|: the far ones are skipped first).
+function anyWithin(list, x, z, r) {
+  for (let k = 0; k < list.length; k++) {
+    const dx = list[k].x - x, dz = list[k].z - z;
+    if (dx < r && dx > -r && dz < r && dz > -r && Math.hypot(dx, dz) < r) return true;
+  }
+  return false;
+}
+
+// CSR lists of a GRID m spatial index (gw x gh cells from gx0, gz0): for
+// every cell, the items whose bounds (B: x0, z0, x1, z1 per item) touch it,
+// in item order. { start, items }.
+function gridIndex(count, B, gx0, gz0, gw, gh) {
+  const cnt = new Int32Array(gw * gh + 1);
+  gridCount(count, B, gx0, gz0, gw, gh, cnt);
+  for (let c = 0; c < gw * gh; c++) cnt[c + 1] += cnt[c];
+  const items = new Int32Array(cnt[gw * gh]);
+  gridFill(count, B, gx0, gz0, gw, gh, cnt.slice(), items);
+  return { start: cnt, items };
+}
+function gridCount(count, B, gx0, gz0, gw, gh, cnt) {
+  for (let k = 0; k < count; k++) {
+    const i0 = Math.max(0, Math.floor((B[4 * k] - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((B[4 * k + 2] - gx0) / GRID));
+    const j0 = Math.max(0, Math.floor((B[4 * k + 1] - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((B[4 * k + 3] - gz0) / GRID));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cnt[j * gw + i + 1]++;
+  }
+}
+function gridFill(count, B, gx0, gz0, gw, gh, fill, items) {
+  for (let k = 0; k < count; k++) {
+    const i0 = Math.max(0, Math.floor((B[4 * k] - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((B[4 * k + 2] - gx0) / GRID));
+    const j0 = Math.max(0, Math.floor((B[4 * k + 1] - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((B[4 * k + 3] - gz0) / GRID));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) items[fill[j * gw + i]++] = k;
+  }
+}
+// x0, z0, x1, z1 of every box of a list, for gridIndex.
+function boxBounds(list) {
+  const B = new Float64Array(4 * list.length);
+  for (let k = 0; k < list.length; k++) {
+    const b = list[k];
+    B[4 * k] = b.x0; B[4 * k + 1] = b.z0; B[4 * k + 2] = b.x1; B[4 * k + 3] = b.z1;
+  }
+  return B;
+}
+
 // Removes the spots (only parking lot ones when lotOnly) with
 // Math.hypot(dx, dz) < r from (x, z), keeping the order of the rest;
 // hypot only where the squared distance is within rounding of r squared.
@@ -709,9 +908,9 @@ function dropSpotsNear(spots, x, z, r, lotOnly) {
   const r2 = r * r, lo = r2 * (1 - 1e-9), hi = r2 * (1 + 1e-9);
   let w = 0;
   for (let i = 0; i < spots.length; i++) {
-    const p = spots[i];
+    const p = spots[i], lot = p.lot; // (read always: one shape of code for both kinds of call)
     const dx = p.x - x, dz = p.z - z, d2 = dx * dx + dz * dz;
-    const near = (!lotOnly || p.lot) && (d2 < lo || (d2 <= hi && Math.hypot(dx, dz) < r));
+    const near = (!lotOnly || lot) && (d2 < lo || (d2 <= hi && Math.hypot(dx, dz) < r));
     if (!near) spots[w++] = p;
   }
   spots.length = w;
@@ -782,6 +981,10 @@ export function regionSpots(base, region) {
 // whole data box (milestone 3); `opts.crop` (a test option, e.g.
 // MIAMI_CROP) limits it to a rect with land cut LAND_MARGIN m outside it.
 export function createMiamiCity(data, opts = {}) {
+  // (Its stages run as inner functions, `(function stage() { ... })()`:
+  // this function's own bytecode is over V8's limit for the optimizing
+  // compiler, so a loop written straight in its body never leaves the
+  // interpreter and boxes every number it makes.)
   const tStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const region = opts.region ? (typeof opts.region === 'string' ? regionFor(opts.region) : opts.region) : null;
   if (opts.region && !region) throw new Error('miami: unknown region ' + String(opts.region).slice(0, 40));
@@ -826,7 +1029,7 @@ export function createMiamiCity(data, opts = {}) {
   const W = land.w, H = land.h, NC = W * H;
   const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
   let coastLand = null;
-  {
+  (function landMask() {
     // Coastline cells form walls; regions between them are flood filled
     // and each region votes land or water from the side of the coast
     // lines it touches (OSM: land on the left of a coastline way, seen
@@ -850,13 +1053,14 @@ export function createMiamiCity(data, opts = {}) {
     if (boxSide.x0) stampLine(wall, cut.x0, cut.z1, cut.x0, cut.z0, 1);
     lap('land.coast');
     const label = labelBuf;
-    const nLab = labelRegions(wall.data, W, H, label, queueBuf);
+    const runs = makeRuns();
+    const nLab = labelRegions(wall.data, W, H, label, runs);
     lap('land.fill');
     const votes = new Float64Array(nLab);
     const hits = region ? new Uint8Array(nLab) : null;
     for (const pts of coast) voteCoast(pts, land, label, votes, bx1, bz1, hits);
-    applyVotes(label, votes, land.data, NC);
-    if (region) voteUnreached(land, label, nLab, hits, coarseLand(data, coast));
+    applyVotes(runs, votes, land.data);
+    if (region) voteUnreached(land, label, nLab, hits, () => coarseLand(data, coast));
     lap('land.votes');
     // Wall cells: majority of their labeled neighbors.
     settleWalls(wall.data, land.data, W, H);
@@ -891,10 +1095,10 @@ export function createMiamiCity(data, opts = {}) {
         land.data.fill(0, j * W + ci1 + 1, (j + 1) * W);
       }
     }
-  }
+  })();
   const baseLand = land.data.slice(); // before the islet: "is it real land"
   // Hot lookups read the raster bounds from constants, not the raster
-  // object (whose shape the optimiser may see change during the build).
+  // object (whose shape the optimizer may see change during the build).
   const landCell = cellLookup(land);
   const baseAt = (x, z) => {
     const c = landCell(x, z);
@@ -916,10 +1120,12 @@ export function createMiamiCity(data, opts = {}) {
     for (const d of S.districts) if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) k = d.key;
     return k;
   };
-  for (const r of data.roads) {
+  // One way of the data (a function: createMiamiCity itself is too large
+  // for the optimizing compiler, so its own loops run unoptimized).
+  const readRoad = (r) => {
     // Pedestrian streets: only the named malls (2.1 item 8), drivable.
-    if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) continue;
-    if (r.name && /tunnel/i.test(r.name)) continue;
+    if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) return;
+    if (r.name && /tunnel/i.test(r.name)) return;
     const pts = decodePolyline(r.p);
     if (r.oneway === -1) {
       // Stored against the traffic: reverse, so every one-way runs along its points.
@@ -932,7 +1138,7 @@ export function createMiamiCity(data, opts = {}) {
     {
       let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
       for (let k = 0; k < pts.length; k += 2) { if (pts[k] < bx0) bx0 = pts[k]; if (pts[k] > bx1) bx1 = pts[k]; if (pts[k + 1] < bz0) bz0 = pts[k + 1]; if (pts[k + 1] > bz1) bz1 = pts[k + 1]; }
-      if (bx1 < crop.x0 || bx0 > crop.x1 || bz1 < crop.z0 || bz0 > crop.z1) continue;
+      if (bx1 < crop.x0 || bx0 > crop.x1 || bz1 < crop.z0 || bz0 > crop.z1) return;
     }
     const nearWater = (x, z) => {
       for (let k = 0; k < 8; k++) {
@@ -944,7 +1150,7 @@ export function createMiamiCity(data, opts = {}) {
     const m = pts.length;
     // Freeway pieces at grade between the dropped flyovers are islands of
     // ramps; only the ones that run out to a water crossing are kept.
-    if (!r.bridge && r.class.startsWith('motorway') && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
+    if (!r.bridge && r.class.startsWith('motorway') && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) return;
     if (r.bridge) {
       // A long bridge over land is a flyover: the flat world would make
       // it cross the streets below at grade, so it is left out.
@@ -958,7 +1164,7 @@ export function createMiamiCity(data, opts = {}) {
         }
       }
       // Bridges that land near the water are approaches to a crossing: kept.
-      if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
+      if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) return;
     }
     // The cross section (world/roadprofile.js; docs/MAP.md "Edge contract").
     const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]), curbParking: !!r.name && (S.curbParking || []).includes(r.name) });
@@ -997,7 +1203,8 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
     flush();
-  }
+  };
+  for (let k = 0; k < data.roads.length; k++) readRoad(data.roads[k]);
 
   // Vertices are shared where the data shares them (same decimeter).
   const vx = [], vz = [], vflag = []; // flag: 1 street, 2 bridge, 4 way end
@@ -1045,7 +1252,7 @@ export function createMiamiCity(data, opts = {}) {
     while (parent[v] !== v) v = parent[v] = parent[parent[v]];
     return v;
   };
-  {
+  (function mergeJunctions() {
     const deg = new Int32Array(nv);
     for (let s = 0; s < segA.length; s++) { deg[segA[s]]++; deg[segB[s]]++; }
     const grid = new Map();
@@ -1074,15 +1281,17 @@ export function createMiamiCity(data, opts = {}) {
         }
       }
     }
-  }
+  })();
   // Representative positions: the mean of each merged group.
   const px = new Float64Array(nv), pz = new Float64Array(nv), pn = new Int32Array(nv);
-  for (let v = 0; v < nv; v++) {
-    const r = find(v);
-    px[r] += vx[v];
-    pz[r] += vz[v];
-    pn[r]++;
-  }
+  (function repPositions() {
+    for (let v = 0; v < nv; v++) {
+      const r = find(v);
+      px[r] += vx[v];
+      pz[r] += vz[v];
+      pn[r]++;
+    }
+  })();
   // Adjacency on representatives (one segment per pair, the wider wins).
   const adj = new Map(); // rep -> Map(rep -> way index)
   const link = (a, b, wi) => {
@@ -1094,31 +1303,33 @@ export function createMiamiCity(data, opts = {}) {
   // One-way ways: the directed rep pairs they run along (the edges are
   // stored in their legal direction, docs/MAP.md "Edge contract").
   const legal = new Set();
-  for (let s = 0; s < segA.length; s++) {
-    const a = find(segA[s]), b = find(segB[s]);
-    if (a === b) continue;
-    link(a, b, segW[s]);
-    link(b, a, segW[s]);
-    if (ways[segW[s]].oneway) legal.add(a * 1e7 + b);
-  }
-  for (const s of S.links || []) {
-    // Hand-made links: nearest representative to each end.
-    const near = (x, z) => {
-      let best = -1, bd = Infinity;
-      for (const r of adj.keys()) {
-        const d = (px[r] / pn[r] - x) ** 2 + (pz[r] / pn[r] - z) ** 2;
-        if (d < bd) { bd = d; best = r; }
-      }
-      return best;
-    };
-    const a = near(s[0], s[1]), b = near(s[2], s[3]);
-    if (a >= 0 && b >= 0 && a !== b) {
-      const prof = roadProfile({ class: 'unclassified' });
-      ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: prof.width, prof, mph: 0, lanesTag: 0, pts: [] });
-      link(a, b, ways.length - 1);
-      link(b, a, ways.length - 1);
+  (function linkReps() {
+    for (let s = 0; s < segA.length; s++) {
+      const a = find(segA[s]), b = find(segB[s]);
+      if (a === b) continue;
+      link(a, b, segW[s]);
+      link(b, a, segW[s]);
+      if (ways[segW[s]].oneway) legal.add(a * 1e7 + b);
     }
-  }
+    for (const s of S.links || []) {
+      // Hand-made links: nearest representative to each end.
+      const near = (x, z) => {
+        let best = -1, bd = Infinity;
+        for (const r of adj.keys()) {
+          const d = (px[r] / pn[r] - x) ** 2 + (pz[r] / pn[r] - z) ** 2;
+          if (d < bd) { bd = d; best = r; }
+        }
+        return best;
+      };
+      const a = near(s[0], s[1]), b = near(s[2], s[3]);
+      if (a >= 0 && b >= 0 && a !== b) {
+        const prof = roadProfile({ class: 'unclassified' });
+        ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: prof.width, prof, mph: 0, lanesTag: 0, pts: [] });
+        link(a, b, ways.length - 1);
+        link(b, a, ways.length - 1);
+      }
+    }
+  })();
   const posX = (r) => px[r] / pn[r], posZ = (r) => pz[r] / pn[r];
   const sameKind = (w1, w2) => w1 === w2 || (ways[w1].width === ways[w2].width && ways[w1].bridge === ways[w2].bridge && ways[w1].cls === ways[w2].cls && ways[w1].name === ways[w2].name &&
     ways[w1].oneway === ways[w2].oneway && ways[w1].prof.lanesF === ways[w2].prof.lanesF);
@@ -1234,18 +1445,20 @@ export function createMiamiCity(data, opts = {}) {
     }
     simplify(chain, wi);
   };
-  for (const r of adj.keys()) {
-    if (!isBreak(r)) continue;
-    for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
-  }
-  for (const r of adj.keys()) {
-    // Loops with no junction on them (a traffic circle on its own).
-    for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
-  }
-  for (const e of edges) {
-    nodes[e.a].edges.push(e.id);
-    nodes[e.b].edges.push(e.id);
-  }
+  (function walkChains() {
+    for (const r of adj.keys()) {
+      if (!isBreak(r)) continue;
+      for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
+    }
+    for (const r of adj.keys()) {
+      // Loops with no junction on them (a traffic circle on its own).
+      for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
+    }
+    for (const e of edges) {
+      nodes[e.a].edges.push(e.id);
+      nodes[e.b].edges.push(e.id);
+    }
+  })();
   lap('graph');
 
   // ---- 3. Airfield islet and causeway (citygen's layout, placed here). ----
@@ -1286,7 +1499,7 @@ export function createMiamiCity(data, opts = {}) {
 
   // Keep the largest connected road network only.
   const graphStats = {};
-  {
+  (function keepMainNetwork() {
     const comp = new Int32Array(nodes.length).fill(-1);
     let best = -1, bestN = 0, c = 0;
     for (const n of nodes) {
@@ -1345,28 +1558,30 @@ export function createMiamiCity(data, opts = {}) {
     nodes.push(...keptNodes);
     edges.length = 0;
     edges.push(...keptEdges);
-  }
+  })();
   if (gate && (gate.id >= nodes.length || nodes[gate.id] !== gate)) throw new Error('miami: the airfield causeway is not on the main road network');
   // Junction boxes: half the widest road, kept short of the edges.
-  for (const n of nodes) {
-    n.stop = false;
-    n.blade = false;
-    n.signalSrc = '';
-    if (n.i < 0) continue;
-    let half = 0, minLen = Infinity;
-    for (const eid of n.edges) {
-      const e = edges[eid];
-      half = Math.max(half, e.width / 2);
-      minLen = Math.min(minLen, e.length);
+  (function junctionBoxes() {
+    for (const n of nodes) {
+      n.stop = false;
+      n.blade = false;
+      n.signalSrc = '';
+      if (n.i < 0) continue;
+      let half = 0, minLen = Infinity;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        half = Math.max(half, e.width / 2);
+        minLen = Math.min(minLen, e.length);
+      }
+      const deg = n.edges.length;
+      const want = deg === 2 ? 2 : half;
+      n.hx = n.hz = Math.max(1, Math.min(want, minLen * 0.4));
+      if (deg === 2) n.bend = true;
     }
-    const deg = n.edges.length;
-    const want = deg === 2 ? 2 : half;
-    n.hx = n.hz = Math.max(1, Math.min(want, minLen * 0.4));
-    if (deg === 2) n.bend = true;
-  }
+  })();
   // Signals and stop signs where the data has them (2.1 item 6): each
   // data point goes to the nearest junction within SIGNAL_SNAP m.
-  {
+  (function signalsAndStops() {
     const juncGrid = new Map();
     const JG = 32;
     for (const n of nodes) {
@@ -1421,57 +1636,50 @@ export function createMiamiCity(data, opts = {}) {
       }
       if (avenue && two && (!hasData || !dataNear(n.x, n.z))) { n.signal = true; n.signalSrc = 'gen'; }
     }
-  }
+  })();
   lap('network');
 
   // ---- 4. Spatial index of edges; shoreDist with every road on land. ----
   const gx0 = land.x0, gz0 = land.z0;
   const gw = Math.ceil((W * CELL) / GRID), gh = Math.ceil((H * CELL) / GRID);
-  const buildIndex = (count, bounds) => {
-    // CSR lists: for every GRID cell, the items whose bounds touch it.
-    const cnt = new Int32Array(gw * gh + 1);
-    const each = (k, fn) => {
-      const b = bounds(k);
-      const i0 = Math.max(0, Math.floor((b[0] - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((b[2] - gx0) / GRID));
-      const j0 = Math.max(0, Math.floor((b[1] - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((b[3] - gz0) / GRID));
-      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) fn(j * gw + i);
-    };
-    for (let k = 0; k < count; k++) each(k, (c) => cnt[c + 1]++);
-    for (let c = 0; c < gw * gh; c++) cnt[c + 1] += cnt[c];
-    const items = new Int32Array(cnt[gw * gh]);
-    const fill = cnt.slice();
-    for (let k = 0; k < count; k++) each(k, (c) => { items[fill[c]++] = k; });
-    return { start: cnt, items };
-  };
-  const EB = [0, 0, 0, 0];
-  const edgeIndex = buildIndex(edges.length, (k) => {
-    // + 4 m: room for a paired one-way's `off` (set just below).
-    const e = edges[k], a = nodes[e.a], b = nodes[e.b], r = e.width / 2 + 4;
-    EB[0] = Math.min(a.x, b.x) - r; EB[1] = Math.min(a.z, b.z) - r; EB[2] = Math.max(a.x, b.x) + r; EB[3] = Math.max(a.z, b.z) + r;
-    return EB;
-  });
+  const buildIndex = (count, B) => gridIndex(count, B, gx0, gz0, gw, gh);
+  const edgeIndex = buildIndex(edges.length, (() => {
+    const B = new Float64Array(4 * edges.length);
+    for (let k = 0; k < edges.length; k++) {
+      // + 4 m: room for a paired one-way's `off` (set just below).
+      const e = edges[k], a = nodes[e.a], b = nodes[e.b], r = e.width / 2 + 4;
+      B[4 * k] = Math.min(a.x, b.x) - r; B[4 * k + 1] = Math.min(a.z, b.z) - r; B[4 * k + 2] = Math.max(a.x, b.x) + r; B[4 * k + 3] = Math.max(a.z, b.z) + r;
+    }
+    return B;
+  })());
   const gridCell = (x, z) => {
     const i = Math.floor((x - gx0) / GRID), j = Math.floor((z - gz0) / GRID);
     return i < 0 || j < 0 || i >= gw || j >= gh ? -1 : j * gw + i;
   };
-  // Calls fn(edge) for every edge whose strip may come within r of the rect.
+  // The ids of every edge whose index cells touch the rect, each once, in
+  // index order, into EIDS; returns the count. The callers loop over them
+  // themselves (one callback for all of them ran polymorphic). Not
+  // re-entrant: a caller is done with EIDS before the next call.
   const edgeSeen = new Int32Array(edges.length);
+  const EIDS = new Int32Array(edges.length);
   let edgeMark = 0;
-  const edgesInRect = (x0, z0, x1, z1, fn) => {
+  const edgeIds = (x0, z0, x1, z1) => {
     const i0 = Math.max(0, Math.floor((x0 - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((x1 - gx0) / GRID));
     const j0 = Math.max(0, Math.floor((z0 - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((z1 - gz0) / GRID));
-    const mark = ++edgeMark;
+    const mark = ++edgeMark, start = edgeIndex.start, items = edgeIndex.items;
+    let n = 0;
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const c = j * gw + i;
-        for (let k = edgeIndex.start[c]; k < edgeIndex.start[c + 1]; k++) {
-          const id = edgeIndex.items[k];
+        for (let k = start[c]; k < start[c + 1]; k++) {
+          const id = items[k];
           if (edgeSeen[id] === mark) continue;
           edgeSeen[id] = mark;
-          if (fn(edges[id]) === false) return;
+          EIDS[n++] = id;
         }
       }
     }
+    return n;
   };
   // The strip of an edge: its node line moved `off` to the right.
   const SEG = [0, 0, 0, 0];
@@ -1486,12 +1694,14 @@ export function createMiamiCity(data, opts = {}) {
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
     let best = Infinity;
-    edgesInRect(x0 - 12, z0 - 12, x1 + 12, z1 + 12, (e) => {
-      if (e === skip) return;
+    const n = edgeIds(x0 - 12, z0 - 12, x1 + 12, z1 + 12);
+    for (let k = 0; k < n; k++) {
+      const e = edges[EIDS[k]];
+      if (e === skip) continue;
       const a = nodes[e.a], b = nodes[e.b];
       const d = segRectDist(a.x, a.z, b.x, b.z, x0, z0, x1, z1) - e.width / 2;
       if (d < best) best = d;
-    });
+    }
     return best;
   };
 
@@ -1501,11 +1711,12 @@ export function createMiamiCity(data, opts = {}) {
   function trimRect(r, margin, minSize) {
     for (let k = 0; k < 12; k++) {
       let hit = null;
-      edgesInRect(r.x0 - 12, r.z0 - 12, r.x1 + 12, r.z1 + 12, (e) => {
+      const n = edgeIds(r.x0 - 12, r.z0 - 12, r.x1 + 12, r.z1 + 12);
+      for (let q = 0; q < n; q++) {
+        const e = edges[EIDS[q]];
         const a = nodes[e.a], b = nodes[e.b];
-        if (segRectDist(a.x, a.z, b.x, b.z, r.x0, r.z0, r.x1, r.z1) - e.width / 2 < margin - 0.01) { hit = e; return false; }
-        return true;
-      });
+        if (segRectDist(a.x, a.z, b.x, b.z, r.x0, r.z0, r.x1, r.z1) - e.width / 2 < margin - 0.01) { hit = e; break; }
+      }
       if (!hit) return true;
       const a = nodes[hit.a], b = nodes[hit.b];
       const half = hit.width / 2 + margin;
@@ -1578,7 +1789,7 @@ export function createMiamiCity(data, opts = {}) {
   const blocks = [];
   let parkCells; // 1 park or forest, 2 grass (data.parks)
   let blockLab; // region label (its first cell) per land cell, -1 off land and on roads
-  {
+  (function findBlocks() {
     const road = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, CELL);
     for (const e of edges) {
       const g = stripOf(e);
@@ -1602,12 +1813,10 @@ export function createMiamiCity(data, opts = {}) {
     }
     parkCells = parkMask.data;
     const lab = labelBuf.fill(-1);
-    const queue = queueBuf;
-    const FB = new Int32Array(7);
     const ci0 = Math.max(0, Math.floor((crop.x0 - land.x0) / CELL)), ci1 = Math.min(W - 1, Math.floor((crop.x1 - land.x0) / CELL));
     const cj0 = Math.max(0, Math.floor((crop.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((crop.z1 - land.z0) / CELL));
     // Every road-free land region of the crop window, in scan order.
-    const regions = floodRegions(W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, queue, FB);
+    const regions = floodRegions(W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, makeRuns());
     // The block (road-free land region) of each cell, for the infill rule.
     blockLab = lab.slice();
     for (let r = 0; r < regions.length; r += 7) {
@@ -1635,12 +1844,8 @@ export function createMiamiCity(data, opts = {}) {
         blocks.push({ id: blocks.length, i: 0, j: 0, x0, z0, x1, z1, district });
       }
     }
-  }
-  const blockIndex = buildIndex(blocks.length, (k) => {
-    const b = blocks[k];
-    EB[0] = b.x0; EB[1] = b.z0; EB[2] = b.x1; EB[3] = b.z1;
-    return EB;
-  });
+  })();
+  const blockIndex = buildIndex(blocks.length, boxBounds(blocks));
   const blockAt = (x, z) => {
     const c = gridCell(x, z);
     if (c < 0) return null;
@@ -1660,10 +1865,9 @@ export function createMiamiCity(data, opts = {}) {
     // Every field step 11 fills is declared here, so all boxes share one shape.
     buildings.push({ x0, z0, x1, z1, h, district, kind, color: color ?? rng.pick(PALETTES[district] ?? PALETTES.midtown), osm, fp, gen, landmark: '', style: '', tint: 0, vseed: 0, block: -1, street: 0 });
   };
-  {
+  (function cutFootprints() {
     const BC = 2;
     const cellsBuf = new Uint8Array(200 * 200);
-    const hist = new Int32Array(201);
     const stack = new Int32Array(202);
     const rects = new Int32Array(24);
     const FB4 = new Float64Array(5);
@@ -1685,7 +1889,10 @@ export function createMiamiCity(data, opts = {}) {
       // Rasterise at 2 m (cell centers inside the polygon), then the
       // largest all-inside rectangles, until 85 % is covered.
       R2.x0 = x0; R2.z0 = z0; R2.w = cw; R2.h = ch;
-      const nb = footprintRects(R2, pts, hist, stack, rects);
+      // Pieces after the first under SLIVER m2 are dropped below; one of
+      // fewer cells than that is under it whatever its edges (each cell is
+      // BC m or less across), so the cover stops at the first such piece.
+      const nb = footprintRects(R2, pts, stack, rects, Math.ceil(SLIVER / (BC * BC)));
       if (!nb) continue;
       const kindTag = b.kind || '';
       const h = Math.max(3, b.h || 8);
@@ -1701,7 +1908,7 @@ export function createMiamiCity(data, opts = {}) {
         placeBox(bx0, bz0, bx1, bz1, h, kindTag, srcIds ? srcIds[fp] : fp);
       }
     }
-  }
+  })();
   function placeBox(x0, z0, x1, z1, h, tag, fp) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const blk = blockAt(cx, cz);
@@ -1834,7 +2041,7 @@ export function createMiamiCity(data, opts = {}) {
   // empty pieces of built-up districts get plain infill boxes (`gen`).
   let lotIn;
   const landmarkSites = [];
-  {
+  (function lotRasters() {
     const near = new Uint8Array(NC);
     const R = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: near };
     for (const e of edges) {
@@ -1858,10 +2065,12 @@ export function createMiamiCity(data, opts = {}) {
     // (MIAMI_SPOTS.beaches), looked up only near the water.
     const parkR = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: parkCells };
     for (const r of S.districts) if (r.key === 'park') stampRect(parkR, r.x0, r.z0, r.x1, r.z1, 1);
-    const beachRects = (S.beaches || []).map((r) => [Math.ceil((r.x0 - land.x0) / CELL - 0.5), Math.floor((r.x1 - land.x0) / CELL - 0.5), Math.ceil((r.z0 - land.z0) / CELL - 0.5), Math.floor((r.z1 - land.z0) / CELL - 0.5)]);
+    // i0, i1, j0, j1 per beach rect.
+    const beachRects = new Int32Array((S.beaches || []).length * 4);
+    (S.beaches || []).forEach((r, k) => beachRects.set([Math.ceil((r.x0 - land.x0) / CELL - 0.5), Math.floor((r.x1 - land.x0) / CELL - 0.5), Math.ceil((r.z0 - land.z0) / CELL - 0.5), Math.floor((r.z1 - land.z0) / CELL - 0.5)], 4 * k));
     const inBeach = (c) => {
       const i = c % W, j = (c - i) / W;
-      for (const r of beachRects) if (i >= r[0] && i <= r[1] && j >= r[2] && j <= r[3]) return true;
+      for (let k = 0; k < beachRects.length; k += 4) if (i >= beachRects[k] && i <= beachRects[k + 1] && j >= beachRects[k + 2] && j <= beachRects[k + 3]) return true;
       return false;
     };
     const free = new Uint8Array(NC);
@@ -1936,13 +2145,20 @@ export function createMiamiCity(data, opts = {}) {
       return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i;
     };
     const fpBlock = new Uint8Array(NC);
-    for (const b of buildings) {
+    const markBlock = (x, z) => {
+      const c = cellAt(x, z);
+      const L = c >= 0 && blockLab ? blockLab[c] : -1;
+      if (L >= 0) fpBlock[L] = 1;
+    };
+    for (let k = 0; k < buildings.length; k++) {
+      const b = buildings[k];
       if (b.fp < 0) continue;
-      for (const [x, z] of [[(b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2], [b.x0 + 0.5, b.z0 + 0.5], [b.x1 - 0.5, b.z1 - 0.5], [b.x0 + 0.5, b.z1 - 0.5], [b.x1 - 0.5, b.z0 + 0.5]]) {
-        const c = cellAt(x, z);
-        const L = c >= 0 && blockLab ? blockLab[c] : -1;
-        if (L >= 0) fpBlock[L] = 1;
-      }
+      // The center and the four corners (0.5 m in).
+      markBlock((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+      markBlock(b.x0 + 0.5, b.z0 + 0.5);
+      markBlock(b.x1 - 0.5, b.z1 - 0.5);
+      markBlock(b.x0 + 0.5, b.z1 - 0.5);
+      markBlock(b.x1 - 0.5, b.z0 + 0.5);
     }
     const styles = S.infillStyles || [];
     const styleAt = (x, z) => {
@@ -1991,15 +2207,11 @@ export function createMiamiCity(data, opts = {}) {
     }
     lap('infill.plan');
     lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList, scratch8: near };
-  }
+  })();
   lap('infill');
 
   // Building index (for spots, props and buildingsNear).
-  const buildingIndex = buildIndex(buildings.length, (k) => {
-    const b = buildings[k];
-    EB[0] = b.x0; EB[1] = b.z0; EB[2] = b.x1; EB[3] = b.z1;
-    return EB;
-  });
+  const buildingIndex = buildIndex(buildings.length, boxBounds(buildings));
   const buildingSeen = new Int32Array(buildings.length);
   let buildingMark = 0;
   const inBuilding = (x, z, m = 0) => {
@@ -2033,30 +2245,31 @@ export function createMiamiCity(data, opts = {}) {
   };
   // Other edge strips at a point, ignoring `own`.
   const onOtherRoad = (x, z, own, m) => {
-    let hit = false;
-    edgesInRect(x - 1, z - 1, x + 1, z + 1, (e) => {
-      if (e === own) return true;
+    const n = edgeIds(x - 1, z - 1, x + 1, z + 1);
+    for (let k = 0; k < n; k++) {
+      const e = edges[EIDS[k]];
+      if (e === own) continue;
       const a = nodes[e.a], b = nodes[e.b], h = e.width / 2 + m;
-      if (segDist2(x, z, a.x, a.z, b.x, b.z) < h * h) { hit = true; return false; }
-      return true;
-    });
-    return hit;
+      if (segDist2(x, z, a.x, a.z, b.x, b.z) < h * h) return true;
+    }
+    return false;
   };
   const inJunctionBox = (x, z, m) => {
-    let hit = false;
-    edgesInRect(x - 1, z - 1, x + 1, z + 1, (e) => {
-      for (const id of [e.a, e.b]) {
-        const n = nodes[id];
-        if (n.edges.length !== 2 && Math.abs(x - n.x) < n.hx + m && Math.abs(z - n.z) < n.hz + m) { hit = true; return false; }
+    const cnt = edgeIds(x - 1, z - 1, x + 1, z + 1);
+    for (let k = 0; k < cnt; k++) {
+      const e = edges[EIDS[k]];
+      // Both end nodes, a first.
+      for (let q = 0; q < 2; q++) {
+        const n = nodes[q ? e.b : e.a];
+        if (n.edges.length !== 2 && Math.abs(x - n.x) < n.hx + m && Math.abs(z - n.z) < n.hz + m) return true;
       }
-      return true;
-    });
-    return hit;
+    }
+    return false;
   };
 
   // ---- 9. Spawn: on the named street, near the given point. ----
   let spawn;
-  {
+  (function placeSpawn() {
     let best = null, bd = Infinity;
     const LP = { x: 0, z: 0 };
     for (const e of edges) {
@@ -2084,189 +2297,196 @@ export function createMiamiCity(data, opts = {}) {
       best = { x: n.x, z: n.z, heading: 0 };
     }
     spawn = best;
-  }
+  })();
 
   // ---- 10. Curb parking, lamps, street trees, signals. ----
   const parkingSpots = [], props = [], furniture = [], signals = [];
   const dr = createRng(seed ^ 0x5eed51);
-  for (const e of edges) {
-    const a = nodes[e.a], b = nodes[e.b];
-    const half = e.width / 2;
-    const startPad = a.hx + 6, endPad = b.hx + 6;
-    const usable = e.length - startPad - endPad;
-    const rx = -e.uz, rzv = e.ux; // right of a -> b
-    if (!e.bridge && !e.causeway) {
-      for (let d = startPad; d <= e.length - endPad; d += 34) {
-        const side = ((d / 34) | 0) % 2 ? 1 : -1;
-        const lo = (e.off || 0) + side * (half + 0.8);
-        const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
-        if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.3) || mainShore(x, z) < 1) continue;
-        props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
+  (function streetProps() {
+    for (const e of edges) {
+      const a = nodes[e.a], b = nodes[e.b];
+      const half = e.width / 2;
+      const startPad = a.hx + 6, endPad = b.hx + 6;
+      const usable = e.length - startPad - endPad;
+      const rx = -e.uz, rzv = e.ux; // right of a -> b
+      if (!e.bridge && !e.causeway) {
+        for (let d = startPad; d <= e.length - endPad; d += 34) {
+          const side = ((d / 34) | 0) % 2 ? 1 : -1;
+          const lo = (e.off || 0) + side * (half + 0.8);
+          const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
+          if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.3) || mainShore(x, z) < 1) continue;
+          props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
+        }
       }
-    }
-    if (!e.causeway && !e.bridge && usable > 14) {
-      // Curb spots only in the parking lanes of the profile (2.1 item 3),
-      // in the middle of the lane; cars face the traffic of their side (on
-      // a one-way street both curbs face its direction).
-      for (const side of [-1, 1]) {
-        const park = side > 0 ? e.parkR : e.parkL;
-        if (!(park > 0)) continue;
-        for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
-          if (!rng.chance(0.22)) continue;
-          const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
-          const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rzv * off;
-          if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
-          const heading = side > 0 || e.oneway ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
-          parkingSpots.push({ x, z, heading, lot: false });
+      if (!e.causeway && !e.bridge && usable > 14) {
+        // Curb spots only in the parking lanes of the profile (2.1 item 3),
+        // in the middle of the lane; cars face the traffic of their side (on
+        // a one-way street both curbs face its direction).
+        for (let side = -1; side <= 1; side += 2) {
+          const park = side > 0 ? e.parkR : e.parkL;
+          if (!(park > 0)) continue;
+          for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
+            if (!rng.chance(0.22)) continue;
+            const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
+            const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rzv * off;
+            if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
+            const heading = side > 0 || e.oneway ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
+            parkingSpots.push({ x, z, heading, lot: false });
+          }
         }
       }
     }
-  }
-  const TREE_P = { downtown: 0.55, midtown: 0.5, residential: 0.7, beach: 0.7, docks: 0.08, industrial: 0.1, park: 0.7, airfield: 0 };
-  for (const e of edges) {
-    if (e.causeway || e.bridge) continue;
-    const a = nodes[e.a];
-    const half = e.width / 2;
-    const rx = -e.uz, rzv = e.ux;
-    for (const side of [-1, 1]) {
-      const treeP = TREE_P[districtOf(a.x, a.z)] ?? 0.3;
-      for (let d = a.hx + 10; d + 10 <= e.length - nodes[e.b].hx; d += 24) {
-        if (!dr.chance(treeP)) continue;
-        const lo = (e.off || 0) + side * (half + 1.15);
-        const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
-        if (!blockAt(x, z) || inBuilding(x, z, 1) || onOtherRoad(x, z, e, 0.5)) continue;
-        furniture.push({ type: 'streettree', x, z, rot: dr.range(0, TAU), q: 0, v: dr.next() });
+    const TREE_P = { downtown: 0.55, midtown: 0.5, residential: 0.7, beach: 0.7, docks: 0.08, industrial: 0.1, park: 0.7, airfield: 0 };
+    for (const e of edges) {
+      if (e.causeway || e.bridge) continue;
+      const a = nodes[e.a];
+      const half = e.width / 2;
+      const rx = -e.uz, rzv = e.ux;
+      for (let side = -1; side <= 1; side += 2) {
+        const treeP = TREE_P[districtOf(a.x, a.z)] ?? 0.3;
+        for (let d = a.hx + 10; d + 10 <= e.length - nodes[e.b].hx; d += 24) {
+          if (!dr.chance(treeP)) continue;
+          const lo = (e.off || 0) + side * (half + 1.15);
+          const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
+          if (!blockAt(x, z) || inBuilding(x, z, 1) || onOtherRoad(x, z, e, 0.5)) continue;
+          furniture.push({ type: 'streettree', x, z, rot: dr.range(0, TAU), q: 0, v: dr.next() });
+        }
       }
     }
-  }
-  for (const n of nodes) {
-    if (!n.signal || n.i < 0) continue;
-    for (const eid of n.edges) {
-      const e = edges[eid];
-      const o = nodes[e.a === n.id ? e.b : e.a];
-      const l = Math.hypot(n.x - o.x, n.z - o.z);
-      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
-      const rx = -tz, rzv = tx;
-      // The right curb of the approach (the strip may sit `off` aside).
-      const rc = e.width / 2 + 0.9 + (e.b === n.id ? e.off || 0 : -(e.off || 0));
-      const x = n.x - tx * (n.hx + 0.9) + rx * rc;
-      const z = n.z - tz * (n.hx + 0.9) + rzv * rc;
-      if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
-      signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
+    for (const n of nodes) {
+      if (!n.signal || n.i < 0) continue;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        const o = nodes[e.a === n.id ? e.b : e.a];
+        const l = Math.hypot(n.x - o.x, n.z - o.z);
+        const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
+        const rx = -tz, rzv = tx;
+        // The right curb of the approach (the strip may sit `off` aside).
+        const rc = e.width / 2 + 0.9 + (e.b === n.id ? e.off || 0 : -(e.off || 0));
+        const x = n.x - tx * (n.hx + 0.9) + rx * rc;
+        const z = n.z - tz * (n.hx + 0.9) + rzv * rc;
+        if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
+        signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
+      }
     }
-  }
+  })();
 
   // ---- 10b. The designed start street (MIAMI_SPOTS.startView, core hand
   // content): street trees on both curbs and curb spaces (`start`, filled
   // first) along the spawn street ahead of the title camera. No rng.
-  if (S.startView) {
-    const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
-    const TREE_STEP = 7, SPOT_STEP = 6.5;
-    // The two framed views stay clear of trunks and posts (docs/PLAN_V1.md
-    // W2b): the title shot (a cone of FRAME_DEG round the view line within
-    // FRAME_R m, along the whole dolly) and the near sidewalk in front of
-    // the chase camera at the start (NEAR_R m, the width of the view).
-    const cam = S.startView.camera;
-    const FRAME_DEG = 9.5, FRAME_R = 42, NEAR_R = 16.5, NEAR_DEG = 55, CHASE_BACK = 7.5;
-    const tanF = Math.tan((FRAME_DEG * Math.PI) / 180), cosN = Math.cos((NEAR_DEG * Math.PI) / 180);
-    const framed = (x, z, r) => {
-      for (let d = 0; d <= cam.dolly + 1e-9; d += cam.dolly / 4 || 1) {
-        // Camera and look point as in render/titlecam.js titlePose.
-        const cx = spawn.x + fx * (d - cam.back) - fz * cam.side, cz = spawn.z + fz * (d - cam.back) + fx * cam.side;
-        const lx = spawn.x + fx * (d + cam.lookAhead) - cx, lz = spawn.z + fz * (d + cam.lookAhead) - cz;
-        const ll = Math.hypot(lx, lz);
-        const along = ((x - cx) * lx + (z - cz) * lz) / ll, lat = Math.abs((x - cx) * lz - (z - cz) * lx) / ll;
-        if (along > 0 && along < FRAME_R + r && lat - r < along * tanF) return true;
-        // Nothing tall right in front of the title camera either.
-        if (along > 0 && along < NEAR_R && along > lat * 0.8) return true;
-        if (!cam.dolly) break;
-      }
-      const qx = x - (spawn.x - fx * CHASE_BACK), qz = z - (spawn.z - fz * CHASE_BACK), q = Math.hypot(qx, qz);
-      return q < NEAR_R && (qx * fx + qz * fz) > q * cosN;
-    };
-    const TALL = new Set(['streettree', 'palmtree', 'lamp', 'shelter', 'streetsign', 'namesign', 'stopsign', 'umbrella']);
-    const keep = (list) => {
-      let n = 0;
-      for (const f of list) if (!(TALL.has(f.type) && framed(f.x, f.z, 0.5))) list[n++] = f;
-      list.length = n;
-    };
-    keep(props);
-    keep(furniture);
-    for (const e of edges) {
-      if (e.name !== S.spawn.street || e.bridge || e.causeway) continue;
-      const a = nodes[e.a], b = nodes[e.b];
-      const half = e.width / 2;
-      const rx = -e.uz, rzv = e.ux;
-      let prevSlot = null;
-      for (let d = a.hx + 4; d <= e.length - b.hx - 4; d += 1) {
-        const px = a.x + e.ux * d, pz = a.z + e.uz * d;
-        const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
-        const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
-        if (along < -20 || along > 110 || Math.abs(lat) > 12) continue;
-        // One tree slot each TREE_STEP m of `along` (the first meter step
-        // into a new slot), so no slot is skipped or doubled by rounding.
-        const slot = Math.floor((along + 20) / TREE_STEP);
-        const newSlot = slot !== prevSlot;
-        prevSlot = slot;
-        const k = slot * TREE_STEP;
-        for (const side of [-1, 1]) {
-          if (newSlot) {
-            // On the curb line, or set back into the plaza where the curb
-            // line is in a framed view.
-            for (const off of [1.15, 4.8]) {
-              const x = px + rx * side * (half + off), z = pz + rzv * side * (half + off);
-              if (framed(x, z, off > 2 ? 1.5 : 0.5)) continue;
-              if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !furniture.some((f) => Math.hypot(f.x - x, f.z - z) < 4)) {
-                furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+  (function startStreet() {
+    if (S.startView) {
+      const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
+      const TREE_STEP = 7, SPOT_STEP = 6.5;
+      // The two framed views stay clear of trunks and posts (docs/PLAN_V1.md
+      // W2b): the title shot (a cone of FRAME_DEG round the view line within
+      // FRAME_R m, along the whole dolly) and the near sidewalk in front of
+      // the chase camera at the start (NEAR_R m, the width of the view).
+      const cam = S.startView.camera;
+      const FRAME_DEG = 9.5, FRAME_R = 42, NEAR_R = 16.5, NEAR_DEG = 55, CHASE_BACK = 7.5;
+      const tanF = Math.tan((FRAME_DEG * Math.PI) / 180), cosN = Math.cos((NEAR_DEG * Math.PI) / 180);
+      const framed = (x, z, r) => {
+        for (let d = 0; d <= cam.dolly + 1e-9; d += cam.dolly / 4 || 1) {
+          // Camera and look point as in render/titlecam.js titlePose.
+          const cx = spawn.x + fx * (d - cam.back) - fz * cam.side, cz = spawn.z + fz * (d - cam.back) + fx * cam.side;
+          const lx = spawn.x + fx * (d + cam.lookAhead) - cx, lz = spawn.z + fz * (d + cam.lookAhead) - cz;
+          const ll = Math.hypot(lx, lz);
+          const along = ((x - cx) * lx + (z - cz) * lz) / ll, lat = Math.abs((x - cx) * lz - (z - cz) * lx) / ll;
+          if (along > 0 && along < FRAME_R + r && lat - r < along * tanF) return true;
+          // Nothing tall right in front of the title camera either.
+          if (along > 0 && along < NEAR_R && along > lat * 0.8) return true;
+          if (!cam.dolly) break;
+        }
+        const qx = x - (spawn.x - fx * CHASE_BACK), qz = z - (spawn.z - fz * CHASE_BACK), q = Math.hypot(qx, qz);
+        return q < NEAR_R && (qx * fx + qz * fz) > q * cosN;
+      };
+      const TALL = new Set(['streettree', 'palmtree', 'lamp', 'shelter', 'streetsign', 'namesign', 'stopsign', 'umbrella']);
+      const keep = (list) => {
+        let n = 0;
+        for (const f of list) if (!(TALL.has(f.type) && framed(f.x, f.z, 0.5))) list[n++] = f;
+        list.length = n;
+      };
+      keep(props);
+      keep(furniture);
+      for (const e of edges) {
+        if (e.name !== S.spawn.street || e.bridge || e.causeway) continue;
+        const a = nodes[e.a], b = nodes[e.b];
+        const half = e.width / 2;
+        const rx = -e.uz, rzv = e.ux;
+        let prevSlot = null;
+        for (let d = a.hx + 4; d <= e.length - b.hx - 4; d += 1) {
+          const px = a.x + e.ux * d, pz = a.z + e.uz * d;
+          const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
+          const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
+          if (along < -20 || along > 110 || Math.abs(lat) > 12) continue;
+          // One tree slot each TREE_STEP m of `along` (the first meter step
+          // into a new slot), so no slot is skipped or doubled by rounding.
+          const slot = Math.floor((along + 20) / TREE_STEP);
+          const newSlot = slot !== prevSlot;
+          prevSlot = slot;
+          const k = slot * TREE_STEP;
+          for (let side = -1; side <= 1; side += 2) {
+            if (newSlot) {
+              // On the curb line, or set back into the plaza where the curb
+              // line is in a framed view.
+              for (let q = 0; q < 2; q++) {
+                const off = q ? 4.8 : 1.15;
+                const x = px + rx * side * (half + off), z = pz + rzv * side * (half + off);
+                if (framed(x, z, off > 2 ? 1.5 : 0.5)) continue;
+                if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !anyWithin(furniture, x, z, 4)) {
+                  furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+                }
+                break;
               }
-              break;
             }
-          }
-          if (Math.round(along * 2) % Math.round(SPOT_STEP * 2) === 0 && along > 10 && along < 90) {
-            // In the parking lane of that curb (MIAMI_SPOTS.curbParking).
-            if (!((side > 0 ? e.parkR : e.parkL) > 0)) continue;
-            const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
-            const x = px + rx * off, z = pz + rzv * off;
-            if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
-            if (parkingSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5.5)) continue;
-            const heading = side > 0 ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
-            parkingSpots.push({ x, z, heading, lot: false, start: true });
+            if (Math.round(along * 2) % Math.round(SPOT_STEP * 2) === 0 && along > 10 && along < 90) {
+              // In the parking lane of that curb (MIAMI_SPOTS.curbParking).
+              if (!((side > 0 ? e.parkR : e.parkL) > 0)) continue;
+              const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
+              const x = px + rx * off, z = pz + rzv * off;
+              if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
+              if (anyWithin(parkingSpots, x, z, 5.5)) continue;
+              const heading = side > 0 ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
+              parkingSpots.push({ x, z, heading, lot: false, start: true });
+            }
           }
         }
       }
     }
-  }
+  })();
 
   // ---- 11. Facade styles (citygen's rules, own random stream). ----
-  for (const b of buildings) {
-    if (b.style) continue; // the depot sets its own
-    const blk = blockAt((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
-    b.block = blk ? blk.id : -1;
-    let street = 0;
-    if (blk) {
-      const lim = b.kind === 'house' ? 12.5 : 9;
-      if (b.z0 - blk.z0 < lim) street |= 1;
-      if (blk.z1 - b.z1 < lim) street |= 2;
-      if (b.x0 - blk.x0 < lim) street |= 4;
-      if (blk.x1 - b.x1 < lim) street |= 8;
+  (function facadeStyles() {
+    for (const b of buildings) {
+      if (b.style) continue; // the depot sets its own
+      const blk = blockAt((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+      b.block = blk ? blk.id : -1;
+      let street = 0;
+      if (blk) {
+        const lim = b.kind === 'house' ? 12.5 : 9;
+        if (b.z0 - blk.z0 < lim) street |= 1;
+        if (blk.z1 - b.z1 < lim) street |= 2;
+        if (b.x0 - blk.x0 < lim) street |= 4;
+        if (blk.x1 - b.x1 < lim) street |= 8;
+      }
+      b.street = street;
+      let style;
+      if (b.kind === 'house') style = 'house';
+      else if (b.kind === 'container') style = 'container';
+      else if (b.kind === 'warehouse') style = !blk ? (b.district === 'industrial' ? 'hangar' : 'shed') : dr.chance(0.25) ? 'brick' : 'shed';
+      else if (b.district === 'beach') style = 'stucco';
+      else if (b.district === 'downtown') style = b.h > 58 ? (dr.chance(0.85) ? 'glass' : 'office') : dr.chance(0.6) ? 'glass' : 'office';
+      else if (b.h >= 24) style = dr.pick(['office', 'office', 'brick', 'glass', 'stucco']);
+      else style = dr.chance(0.5) ? 'stucco' : dr.chance(0.6) ? 'brick' : 'office';
+      b.style = style;
+      b.tint = style === 'glass' ? dr.pick(GLASS_TINTS) : b.color;
+      b.vseed = dr.int(1, 1e9);
     }
-    b.street = street;
-    let style;
-    if (b.kind === 'house') style = 'house';
-    else if (b.kind === 'container') style = 'container';
-    else if (b.kind === 'warehouse') style = !blk ? (b.district === 'industrial' ? 'hangar' : 'shed') : dr.chance(0.25) ? 'brick' : 'shed';
-    else if (b.district === 'beach') style = 'stucco';
-    else if (b.district === 'downtown') style = b.h > 58 ? (dr.chance(0.85) ? 'glass' : 'office') : dr.chance(0.6) ? 'glass' : 'office';
-    else if (b.h >= 24) style = dr.pick(['office', 'office', 'brick', 'glass', 'stucco']);
-    else style = dr.chance(0.5) ? 'stucco' : dr.chance(0.6) ? 'brick' : 'office';
-    b.style = style;
-    b.tint = style === 'glass' ? dr.pick(GLASS_TINTS) : b.color;
-    b.vseed = dr.int(1, 1e9);
-  }
+  })();
 
   // Police roof pad: the midtown roof nearest a downtown anchor.
   const roofPads = [];
-  {
+  (function roofPad() {
     let best = null, bd = Infinity;
     const ax = S.roofPadAnchor ? S.roofPadAnchor.x : -1100, az = S.roofPadAnchor ? S.roofPadAnchor.z : 600;
     for (const b of buildings) {
@@ -2276,7 +2496,7 @@ export function createMiamiCity(data, opts = {}) {
     }
     if (best) roofPads.push({ x: (best.x0 + best.x1) / 2, z: (best.z0 + best.z1) / 2, y: best.h, building: buildings.indexOf(best) });
     for (const r of roofPads) aircraftSpots.push({ x: r.x, z: r.z, heading: 0, spec: 'patrolheli', roof: true });
-  }
+  })();
 
   // Landmarks: windsock, runway lights and the port cranes.
   const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: runway ? { x: runway.x0 + 70, z: runway.z0 - 14 } : null, runwayLights: [] };
@@ -2297,25 +2517,27 @@ export function createMiamiCity(data, opts = {}) {
   });
   // The Cinder tank: open ground in a Wynwood yard (no parking lots in the
   // data); curb spaces within 6 m are cleared, as in citygen.
-  if (S.cinder) {
-    let spot = null;
-    for (let r = 0; r <= 400 && !spot; r += 4) {
-      const n = r ? Math.max(8, Math.round((TAU * r) / 4)) : 1;
-      for (let k = 0; k < n && !spot; k++) {
-        const x = S.cinder.x + Math.cos((k / n) * TAU) * r, z = S.cinder.z + Math.sin((k / n) * TAU) * r;
-        if (districtOf(x, z) !== 'industrial' || mainShore(x, z) < 8 || inBuilding(x, z, 4.5)) continue;
-        let road = onRoad(x, z);
-        for (let a = 0; a < 8 && !road; a++) road = onRoad(x + Math.cos((a / 8) * TAU) * 5, z + Math.sin((a / 8) * TAU) * 5);
-        if (!road) spot = { x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10 };
+  (function cinderTank() {
+    if (S.cinder) {
+      let spot = null;
+      for (let r = 0; r <= 400 && !spot; r += 4) {
+        const n = r ? Math.max(8, Math.round((TAU * r) / 4)) : 1;
+        for (let k = 0; k < n && !spot; k++) {
+          const x = S.cinder.x + Math.cos((k / n) * TAU) * r, z = S.cinder.z + Math.sin((k / n) * TAU) * r;
+          if (districtOf(x, z) !== 'industrial' || mainShore(x, z) < 8 || inBuilding(x, z, 4.5)) continue;
+          let road = onRoad(x, z);
+          for (let a = 0; a < 8 && !road; a++) road = onRoad(x + Math.cos((a / 8) * TAU) * 5, z + Math.sin((a / 8) * TAU) * 5);
+          if (!road) spot = { x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10 };
+        }
+      }
+      if (spot) {
+        tankSpots.push({ x: spot.x, z: spot.z, heading: 0, spec: 'rustback', place: 'cinder' });
+        for (let i = parkingSpots.length - 1; i >= 0; i--) {
+          if (Math.hypot(parkingSpots[i].x - spot.x, parkingSpots[i].z - spot.z) < 6) parkingSpots.splice(i, 1);
+        }
       }
     }
-    if (spot) {
-      tankSpots.push({ x: spot.x, z: spot.z, heading: 0, spec: 'rustback', place: 'cinder' });
-      for (let i = parkingSpots.length - 1; i >= 0; i--) {
-        if (Math.hypot(parkingSpots[i].x - spot.x, parkingSpots[i].z - spot.z) < 6) parkingSpots.splice(i, 1);
-      }
-    }
-  }
+  })();
   for (let x = runway ? runway.x0 : 1; runway && x <= runway.x1 + 0.1; x += 35.5) {
     landmarks.runwayLights.push({ x, z: runway.z0 - 1.4, color: 0xfff2d0 }, { x, z: runway.z1 + 1.4, color: 0xfff2d0 });
   }
@@ -2352,55 +2574,63 @@ export function createMiamiCity(data, opts = {}) {
   const topNames = atlas.slice(0, 32);
   while (topNames.length < 32) topNames.push('Biscayne Bay');
   const plateOf = new Map(atlas.map((nm, k) => [nm, k]));
-  const streetNames = { x: topNames.slice(0, 16), z: topNames.slice(16, 32), atlas, plates: atlas.map(plateText), plateIndex: (nm) => (plateOf.has(nm) ? plateOf.get(nm) : -1) };
+  // plates: made at the first read (the renderer's sign atlas), not at build.
+  let plates = null;
+  const streetNames = {
+    x: topNames.slice(0, 16), z: topNames.slice(16, 32), atlas,
+    get plates() { return plates || (plates = atlas.map(plateText)); },
+    plateIndex: (nm) => (plateOf.has(nm) ? plateOf.get(nm) : -1),
+  };
   let bladeCount = 0, stopCount = 0;
-  for (const n of nodes) {
-    if (n.i < 0 || n.edges.length < 3) continue;
-    // The two signed roads: the first edge of each of two names.
-    let ea = null, eb = null;
-    for (const eid of n.edges) {
-      const e = edges[eid];
-      if (!plateOf.has(e.name)) continue;
-      if (!ea) ea = e;
-      else if (e.name !== ea.name && !eb) eb = e;
-    }
-    if (ea && eb) {
-      // Directions away from the junction along each road.
-      const dir = (e) => (e.a === n.id ? 1 : -1);
-      const ax = ea.ux * dir(ea), az = ea.uz * dir(ea), bx = eb.ux * dir(eb), bz = eb.uz * dir(eb);
-      // The corner between them, clear of both carriageways; else the
-      // other corners in turn.
-      for (const [sa, sb] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-        const x = n.x + sa * ax * (eb.width / 2 + 1.0) + sb * bx * (ea.width / 2 + 1.0);
-        const z = n.z + sa * az * (eb.width / 2 + 1.0) + sb * bz * (ea.width / 2 + 1.0);
-        if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
-        // Each blade runs along its own road.
-        furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
-        n.blade = true;
-        bladeCount++;
-        break;
+  (function bladesAndStops() {
+    for (const n of nodes) {
+      if (n.i < 0 || n.edges.length < 3) continue;
+      // The two signed roads: the first edge of each of two names.
+      let ea = null, eb = null;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        if (!plateOf.has(e.name)) continue;
+        if (!ea) ea = e;
+        else if (e.name !== ea.name && !eb) eb = e;
+      }
+      if (ea && eb) {
+        // Directions away from the junction along each road.
+        const dir = (e) => (e.a === n.id ? 1 : -1);
+        const ax = ea.ux * dir(ea), az = ea.uz * dir(ea), bx = eb.ux * dir(eb), bz = eb.uz * dir(eb);
+        // The corner between them, clear of both carriageways; else the
+        // other corners in turn.
+        for (const [sa, sb] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const x = n.x + sa * ax * (eb.width / 2 + 1.0) + sb * bx * (ea.width / 2 + 1.0);
+          const z = n.z + sa * az * (eb.width / 2 + 1.0) + sb * bz * (ea.width / 2 + 1.0);
+          if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
+          // Each blade runs along its own road.
+          furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
+          n.blade = true;
+          bladeCount++;
+          break;
+        }
+      }
+      if (!n.stop) continue;
+      let main = false;
+      for (const eid of n.edges) if (edges[eid].avenue) main = true;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        if (main && e.avenue) continue;
+        // Traffic comes in on this edge only if it may drive toward n.
+        if (e.oneway && e.b !== n.id) continue;
+        const o = nodes[e.a === n.id ? e.b : e.a];
+        const l = Math.hypot(n.x - o.x, n.z - o.z) || 1;
+        const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
+        const fwd = e.b === n.id;
+        // The right curb of the approach, seen driving toward n.
+        const rc = fwd ? e.width / 2 + (e.off || 0) : e.width / 2 - (e.off || 0);
+        const x = n.x - tx * (n.hx + 1.5) - tz * (rc + 0.7), z = n.z - tz * (n.hx + 1.5) + tx * (rc + 0.7);
+        if (onRoad(x, z) || inBuilding(x, z, 0.5)) continue;
+        furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
+        stopCount++;
       }
     }
-    if (!n.stop) continue;
-    let main = false;
-    for (const eid of n.edges) if (edges[eid].avenue) main = true;
-    for (const eid of n.edges) {
-      const e = edges[eid];
-      if (main && e.avenue) continue;
-      // Traffic comes in on this edge only if it may drive toward n.
-      if (e.oneway && e.b !== n.id) continue;
-      const o = nodes[e.a === n.id ? e.b : e.a];
-      const l = Math.hypot(n.x - o.x, n.z - o.z) || 1;
-      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
-      const fwd = e.b === n.id;
-      // The right curb of the approach, seen driving toward n.
-      const rc = fwd ? e.width / 2 + (e.off || 0) : e.width / 2 - (e.off || 0);
-      const x = n.x - tx * (n.hx + 1.5) - tz * (rc + 0.7), z = n.z - tz * (n.hx + 1.5) + tx * (rc + 0.7);
-      if (onRoad(x, z) || inBuilding(x, z, 0.5)) continue;
-      furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
-      stopCount++;
-    }
-  }
+  })();
   graphStats.blades = bladeCount;
   graphStats.stopSigns = stopCount;
 
@@ -2445,20 +2675,25 @@ export function createMiamiCity(data, opts = {}) {
   // Spatial queries (out arrays are cleared and filled with indices).
   function edgesNear(x, z, r, out) {
     out.length = 0;
-    edgesInRect(x - r, z - r, x + r, z + r, (e) => {
+    const n = edgeIds(x - r, z - r, x + r, z + r);
+    for (let k = 0; k < n; k++) {
+      const e = edges[EIDS[k]];
       // The strip (moved `off` on a tight divided pair).
       const g = stripOf(e), h = r + e.width / 2;
       if (segDist2(x, z, g[0], g[1], g[2], g[3]) <= h * h) out.push(e.id);
-    });
+    }
     return out;
   }
   // The street under a point (docs/MAP.md "Edge contract", 2.1 item 11):
   // the edge whose strip holds it, its name, the next named cross street
-  // ahead. Cross streets are found once per edge end at build (through
-  // bends and junctions along the same name), so a query only scans the
-  // point's grid cell. No allocation when `out` is given.
-  const crossF = new Array(edges.length).fill(''), crossB = new Array(edges.length).fill('');
-  {
+  // ahead. Cross streets are found once per edge end, at the first query
+  // (not at build: the build itself never asks; through bends and
+  // junctions along the same name), so a query only scans the point's
+  // grid cell. No allocation when `out` is given.
+  let crossF = null, crossB = null;
+  function crossStreets() {
+    crossF = new Array(edges.length).fill('');
+    crossB = new Array(edges.length).fill('');
     const crossFrom = (e0, toward) => {
       let e = e0, n = nodes[toward];
       for (let guard = 0; guard < 40; guard++) {
@@ -2483,12 +2718,18 @@ export function createMiamiCity(data, opts = {}) {
       crossB[e.id] = crossFrom(e, e.a);
     }
   }
-  let nameBest = null, nameBd = Infinity, nameX = 0, nameZ = 0;
-  const nameScan = (e) => {
-    if (!e.name) return;
-    const g = stripOf(e);
-    const d = segDist2(nameX, nameZ, g[0], g[1], g[2], g[3]);
-    if (d < nameBd) { nameBd = d; nameBest = e; }
+  // The nearest named strip within 40 m (unnamed edges take its name).
+  const nearestName = (x, z) => {
+    let best = null, bd = 1600;
+    const n = edgeIds(x - 40, z - 40, x + 40, z + 40);
+    for (let k = 0; k < n; k++) {
+      const e = edges[EIDS[k]];
+      if (!e.name) continue;
+      const g = stripOf(e);
+      const d = segDist2(x, z, g[0], g[1], g[2], g[3]);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best ? best.name : '';
   };
   function streetAt(x, z, out = { edge: -1, name: '', cross: '', d: 0, side: 1 }, heading) {
     const c = gridCell(x, z);
@@ -2505,14 +2746,11 @@ export function createMiamiCity(data, opts = {}) {
     const e = best, a = nodes[e.a];
     const d = (x - a.x) * -e.uz + (z - a.z) * e.ux;
     let name = e.name;
-    if (!name) {
-      nameBest = null; nameBd = 1600; nameX = x; nameZ = z;
-      edgesInRect(x - 40, z - 40, x + 40, z + 40, nameScan);
-      name = nameBest ? nameBest.name : '';
-    }
+    if (!name) name = nearestName(x, z);
     const fwd = heading === undefined || Math.cos(heading) * e.ux + Math.sin(heading) * e.uz >= 0;
     out.edge = e.id;
     out.name = name;
+    if (!crossF) crossStreets();
     out.cross = fwd ? crossF[e.id] : crossB[e.id];
     out.d = d;
     out.side = d >= divideOf(e) ? 1 : -1;
@@ -2571,7 +2809,7 @@ export function createMiamiCity(data, opts = {}) {
   // dual road get their own). Data only (no rng, nothing else moves).
   const roadEnds = [];
   const city0 = () => ({ nodes });
-  {
+  (function roadEndsAt() {
     const CUT_SNAP = MERGE + 1;
     const seenNode = new Set();
     const sideOf = (x, z) => {
@@ -2580,16 +2818,33 @@ export function createMiamiCity(data, opts = {}) {
       for (let q = 1; q < 4; q++) if (d[q] < d[k]) k = q;
       return ['x0', 'x1', 'z0', 'z1'][k];
     };
+    // The nodes on the spatial index (a point each), for the nearest node
+    // to each cut: the closest under CUT_SNAP m, the lowest index of equals
+    // (the first of a scan of every node in order, as before).
+    const nodeIndex = cuts.length ? buildIndex(nodes.length, (() => {
+      const B = new Float64Array(4 * nodes.length);
+      for (let k = 0; k < nodes.length; k++) { B[4 * k] = B[4 * k + 2] = nodes[k].x; B[4 * k + 1] = B[4 * k + 3] = nodes[k].z; }
+      return B;
+    })()) : null;
     for (let q = 0; q < cuts.length; q += 5) {
       const x = cuts[q], z = cuts[q + 1], ox = cuts[q + 2], oz = cuts[q + 3];
       const side = sideOf(x, z);
       if (boxSide[side]) continue;
       // The kept node this cut vertex became (merged junctions included).
       let n = null, bd = CUT_SNAP;
-      for (const m of nodes) {
-        if (m.i < 0) continue;
-        const d = Math.hypot(m.x - x, m.z - z);
-        if (d < bd) { bd = d; n = m; }
+      const i0 = Math.max(0, Math.floor((x - CUT_SNAP - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((x + CUT_SNAP - gx0) / GRID));
+      const j0 = Math.max(0, Math.floor((z - CUT_SNAP - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((z + CUT_SNAP - gz0) / GRID));
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const c = j * gw + i;
+          for (let t = nodeIndex.start[c]; t < nodeIndex.start[c + 1]; t++) {
+            const m = nodes[nodeIndex.items[t]];
+            // hypot is at least |dx| and |dz|: the far ones are skipped first.
+            if (m.i < 0 || Math.abs(m.x - x) > bd || Math.abs(m.z - z) > bd) continue;
+            const d = Math.hypot(m.x - x, m.z - z);
+            if (d < bd || (d === bd && n && m.id < n.id)) { bd = d; n = m; }
+          }
+        }
       }
       if (!n || seenNode.has(n.id)) continue;
       // The edge it ends: the one whose far end lies most against `out`.
@@ -2635,51 +2890,53 @@ export function createMiamiCity(data, opts = {}) {
         barrier: { x: hx + ux * (head ? 0 : reach + 3), z: hz + uz * (head ? 0 : reach + 3), heading: Math.atan2(uz, ux), w: e.width + 2 },
       });
     }
-  }
+  })();
   // Travel pads (3.4): each of the region's links snapped to the nearest
   // road end of its road (within LINK_SNAP m), with the arrival pose 30 m
   // inside on the right-hand lane, facing in. `twin` is the link of the
   // same id in region `to`.
   const travelPads = [];
-  if (region) {
-    const LINK_SNAP = 60, ARRIVE = 30;
-    const P = { x: 0, z: 0, heading: 0 };
-    for (const lk of region.links || []) {
-      let end = null, bd = LINK_SNAP;
-      for (const re of roadEnds) {
-        if (re.road !== lk.road) continue;
-        const d = Math.hypot(re.x - lk.x, re.z - lk.z);
-        if (d < bd) { bd = d; end = re; }
-      }
-      if (!end) continue;
-      // Walk in from the end along the road (through bends) ARRIVE m.
-      let cur = nodes[end.node], ce = edges[end.edge], left = ARRIVE + (end.head ? Math.hypot(end.x - end.head.x, end.z - end.head.z) : 0), guard = 0;
-      while (left > ce.length - 6 && guard++ < 20) {
-        // On through bends and junctions: the next edge of the same road
-        // that goes on most straight.
-        const far = nodes[ce.a === cur.id ? ce.b : ce.a];
-        const tx = (far.x - cur.x) / ce.length, tz = (far.z - cur.z) / ce.length;
-        let next = null, bestDot = 0.5;
-        for (const id of far.edges) {
-          if (id === ce.id) continue;
-          const ne = edges[id];
-          if (far.edges.length > 2 && ne.name !== ce.name) continue;
-          const o2 = nodes[ne.a === far.id ? ne.b : ne.a];
-          const dot = ((o2.x - far.x) * tx + (o2.z - far.z) * tz) / ne.length;
-          if (dot > bestDot) { bestDot = dot; next = ne; }
+  (function travelPadsAt() {
+    if (region) {
+      const LINK_SNAP = 60, ARRIVE = 30;
+      const P = { x: 0, z: 0, heading: 0 };
+      for (const lk of region.links || []) {
+        let end = null, bd = LINK_SNAP;
+        for (const re of roadEnds) {
+          if (re.road !== lk.road) continue;
+          const d = Math.hypot(re.x - lk.x, re.z - lk.z);
+          if (d < bd) { bd = d; end = re; }
         }
-        if (!next) break;
-        left -= ce.length;
-        cur = far;
-        ce = next;
+        if (!end) continue;
+        // Walk in from the end along the road (through bends) ARRIVE m.
+        let cur = nodes[end.node], ce = edges[end.edge], left = ARRIVE + (end.head ? Math.hypot(end.x - end.head.x, end.z - end.head.z) : 0), guard = 0;
+        while (left > ce.length - 6 && guard++ < 20) {
+          // On through bends and junctions: the next edge of the same road
+          // that goes on most straight.
+          const far = nodes[ce.a === cur.id ? ce.b : ce.a];
+          const tx = (far.x - cur.x) / ce.length, tz = (far.z - cur.z) / ce.length;
+          let next = null, bestDot = 0.5;
+          for (const id of far.edges) {
+            if (id === ce.id) continue;
+            const ne = edges[id];
+            if (far.edges.length > 2 && ne.name !== ce.name) continue;
+            const o2 = nodes[ne.a === far.id ? ne.b : ne.a];
+            const dot = ((o2.x - far.x) * tx + (o2.z - far.z) * tz) / ne.length;
+            if (dot > bestDot) { bestDot = dot; next = ne; }
+          }
+          if (!next) break;
+          left -= ce.length;
+          cur = far;
+          ce = next;
+        }
+        lanePoint(city0(), ce, cur.id, Math.max(2, Math.min(left, ce.length - 2)), 0, P);
+        travelPads.push({
+          id: lk.id, to: lk.to, road: lk.road, end: end.id, x: end.pad.x, z: end.pad.z, r: end.pad.r, heading: end.heading,
+          arrive: { x: Math.round(P.x * 10) / 10, z: Math.round(P.z * 10) / 10, heading: Math.round(P.heading * 1000) / 1000 },
+        });
       }
-      lanePoint(city0(), ce, cur.id, Math.max(2, Math.min(left, ce.length - 2)), 0, P);
-      travelPads.push({
-        id: lk.id, to: lk.to, road: lk.road, end: end.id, x: end.pad.x, z: end.pad.z, r: end.pad.r, heading: end.heading,
-        arrive: { x: Math.round(P.x * 10) / 10, z: Math.round(P.z * 10) / 10, heading: Math.round(P.heading * 1000) / 1000 },
-      });
     }
-  }
+  })();
   lap('extras');
 
   const span = Math.max(Math.abs(cut.x0), Math.abs(cut.x1), Math.abs(cut.z0), Math.abs(cut.z1));
@@ -2722,7 +2979,7 @@ export function createMiamiCity(data, opts = {}) {
   };
 
   // ---- 11b. Lots: every free land cell typed and dressed (world/lots.js). ----
-  {
+  (function lotsAndBays() {
     lotIn.timings = timings;
     const L = buildLots(city, lotIn);
     city.lots = L.lots;
@@ -2756,7 +3013,7 @@ export function createMiamiCity(data, opts = {}) {
       if (t.place !== 'cinder') continue;
       dropSpotsNear(parkingSpots, t.x, t.z, 6, true);
     }
-  }
+  })();
   lap('lots');
 
   // ---- 12. Places and activities (docs/MAP.md milestone 2). ----

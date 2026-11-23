@@ -630,7 +630,7 @@ const BUILDERS = {
 // ---- extras: afterburner glow, light bar, spotlight beam ----------------------
 const EXTRA_MAT = {
   glow: new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide, fog: false,
+    vertexColors: true, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide, fog: false, forceSinglePass: true,
   }),
   lamp: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
 };
