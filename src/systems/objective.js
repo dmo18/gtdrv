@@ -72,8 +72,9 @@ export function navLines(tr, out) {
 // The one line of the turn pill for a tracker state: { kind, text, soon }
 // into `out`. "200 ft · SW 1st Ave"; at the turn the verb ("Turn right ·
 // SW 1st Ave"); "U-turn · S Miami Ave"; "0.4 mi · Lincoln Rd" before the end.
+// On foot (walk) a U-turn reads "Turn around".
 const CAP_VERB = { uturn: 'U-turn' };
-export function navPill(tr, out) {
+export function navPill(tr, out, walk = false) {
   const t = tr.next();
   if (!t) { out.kind = ''; out.text = ''; out.soon = false; return out; }
   const d = tr.toTurn;
@@ -82,7 +83,7 @@ export function navPill(tr, out) {
   const name = t.name || '';
   let head;
   if (t.kind === 'arrive') head = d > 15 ? formatTurnDistance(d) : 'Arriving';
-  else if (CAP_VERB[t.kind]) head = CAP_VERB[t.kind];
+  else if (CAP_VERB[t.kind]) head = walk && t.kind === 'uturn' ? 'Turn around' : CAP_VERB[t.kind];
   else if (d > 15) head = formatTurnDistance(d);
   else {
     const phrase = turnPhrase({ kind: t.kind, name: '' });
@@ -109,7 +110,7 @@ export function createObjective(game) {
   let streetT = 0, streetShown = '', crossShown = '';
   let chimeTurn = -1, chimeStage = 0, chimeRev = -1;
   let alertCraft = null;
-  let navB = -2, navTurn = -1, navRev = -1;
+  let navB = -2, navTurn = -1, navRev = -1, navWalk = false;
 
   function pickGoal() {
     goal.on = false;
@@ -293,9 +294,10 @@ export function createObjective(game) {
         const holdU = !!nt && nt.kind === 'uturn' && uturnT < UTURN_WAIT_S && !!p && p.mode !== 'foot'; // a walker just turns round
         if (nt && !holdU) {
           const b = navBucket(tracker.toTurn);
-          if (b !== navB || tracker.turn !== navTurn || tracker.rev !== navRev) {
-            navB = b; navTurn = tracker.turn; navRev = tracker.rev;
-            navPill(tracker, lines);
+          const walk = p.mode === 'foot';
+          if (b !== navB || tracker.turn !== navTurn || tracker.rev !== navRev || walk !== navWalk) {
+            navB = b; navTurn = tracker.turn; navRev = tracker.rev; navWalk = walk;
+            navPill(tracker, lines, walk);
           }
           hud.setNav(true, lines.kind, lines.text, '', tracker.toTurn < PREP_M);
           if (tracker.rev !== chimeRev || tracker.turn !== chimeTurn) {

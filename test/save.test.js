@@ -287,3 +287,11 @@ test('settings.mapNorthUp: a strict boolean is kept, anything else is dropped (a
   assert.equal(sanitizeProgress({ settings: { mapNorthUp: false } }).settings.mapNorthUp, false);
   for (const bad of ['true', 1, 0, null, {}, ['x']]) assert.equal(sanitizeProgress({ settings: { mapNorthUp: bad } }).settings.mapNorthUp, undefined);
 });
+
+test('the Street names setting survives a load only as a real boolean', () => {
+  const p = defaultProgress();
+  p.settings.streetLabel = false;
+  assert.equal(sanitizeProgress(JSON.parse(JSON.stringify(p))).settings.streetLabel, false);
+  p.settings.streetLabel = 'off';
+  assert.equal(sanitizeProgress(JSON.parse(JSON.stringify(p))).settings.streetLabel, undefined);
+});

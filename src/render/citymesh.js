@@ -865,7 +865,9 @@ export function realRoads(city, B, nodes, edges, own = null) {
       const p = c.curb;
       for (let k = 0; k + 3 < p.length; k += 2) {
         const L = Math.hypot(p[k + 2] - p[k], p[k + 3] - p[k + 1]);
-        if (L > 0.01) wb.wall(p[k], p[k + 1], p[k + 2], p[k + 3], -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+        // (A curb under 0.6 m long, where the return meets the strip's
+        // own curb, is not drawn: under a pixel past a few meters.)
+        if (L > 0.6) wb.wall(p[k], p[k + 1], p[k + 2], p[k + 3], -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
       }
     }
   }

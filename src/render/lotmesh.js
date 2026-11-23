@@ -233,9 +233,9 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 // (a row of shrubs) by a hash of the position, so it is the same every
 // time it is drawn. Colors from SHRUB_GREENS (and FLOWERS where `bloom`).
 // No allocation. Returns the triangles made.
-const PROF = 7; // profile points: base, shoulder, two on the round, top, ...
-const PC = [1, 1, 0.8, 0, -0.8, -1, -1], PS = [0, 0, 0.6, 1, 0.6, 0, 0];
-const PN = [1, 0.96, 0.7, 0, -0.7, -0.96, -1], PNY = [0, 0.28, 0.72, 1, 0.72, 0.28, 0];
+const PROF = 6; // profile points: base, shoulder, top edge, top edge, shoulder, base
+const PC = [1, 1, 0.5, -0.5, -1, -1], PS = [0, 0, 1, 1, 0, 0];
+const PN = [1, 0.9, 0.35, -0.35, -0.9, -1], PNY = [0, 0.44, 0.94, 0.94, 0.44, 0];
 export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump, bloom = 0) {
   const ca = Math.cos(heading), sa = Math.sin(heading);
   const rx = -sa, rz = ca; // across the strip
@@ -366,7 +366,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const col = shadeHex(HEDGE, 0.92 + (f.v % 4) * 0.05);
         // Low planting is small stuff: shown to the middle level (170 m), as
         // the street props are; the hedge's collision stays.
-        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 3.2, 0.35);
+        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 5, 0.35);
         if (Math.abs(sa) < 0.02 || Math.abs(ca) < 0.02) C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.5, EDGE_Y + 0.004, 0.75);
         break;
       }
@@ -376,13 +376,14 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 2.2, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
+        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
         break;
       }
       case 'wall': {
         const hgt = f.h || 1.6, col = WALLS[f.v % WALLS.length];
         S.obox(x, z, hl, Math.max(0.12, hw), y, y + hgt, h, col, col, 0.62, 1);
-        S.obox(x, z, hl + 0.04, Math.max(0.12, hw) + 0.05, y + hgt, y + hgt + 0.1, h, shadeHex(col, 1.06), 0xf4f2ec);
+        // A coping on a wall; a seat wall (under 0.6 m) is one block.
+        if (hgt > 0.6) S.obox(x, z, hl + 0.04, Math.max(0.12, hw) + 0.05, y + hgt, y + hgt + 0.1, h, shadeHex(col, 1.06), 0xf4f2ec);
         break;
       }
       case 'gate': {
@@ -433,13 +434,8 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         // island (l by w along the heading) in a parking row.
         if (f.l > 0 && f.w > 0) {
           if (Math.abs(f.l - f.w) < 0.01) {
-            // A stone frame round a dark iron grate, side by side (no overlap).
-            const fr = 0.12;
-            S.flat(x - hl, z - hw, x + hl, z - hw + fr, FLAT_Y, 0x8a8478);
-            S.flat(x - hl, z + hw - fr, x + hl, z + hw, FLAT_Y, 0x8a8478);
-            S.flat(x - hl, z - hw + fr, x - hl + fr, z + hw - fr, FLAT_Y, 0x8a8478);
-            S.flat(x + hl - fr, z - hw + fr, x + hl, z + hw - fr, FLAT_Y, 0x8a8478);
-            S.flat(x - hl + fr, z - hw + fr, x + hl - fr, z + hw - fr, FLAT_Y, 0x3a3c3e);
+            // A dark iron grate, one square.
+            S.flat(x - hl, z - hw, x + hl, z + hw, FLAT_Y, 0x3e4042);
           } else S.obox(x, z, Math.max(hl, hw), Math.min(hl, hw), y, y + 0.15, Math.abs(f.l) >= Math.abs(f.w) ? h : h + Math.PI / 2, 0xcfcac0, 0x6f9a4a, 0.75, 1);
         }
         // v: TREE_VARIANTS (lots.js): royalpalm, coconut, then broadleaf
@@ -584,7 +580,8 @@ export const LOT_CAR_CAP_MAX = 60; // the most a quality tier may ask for
 // The sedan and hatchback roles are the fleet bodies (docs/FLEET.md),
 // drawn as their L2 shell (systems/parked.js).
 export const LOT_CAR_MIX = {
-  downtown: ['midsize', 'midsize', 'taxi', 'suv', 'sports', 'van', 'midsize'],
+  // Downtown: three bodies (each body in view is a draw; the paint varies).
+  downtown: ['midsize', 'midsize', 'taxi', 'suv', 'midsize', 'suv'],
   midtown: ['midsize', 'suv', 'crewcab', 'pickup', 'van', 'muscle', 'midsize'],
   residential: ['suv', 'midsize', 'pickup', 'midsize', 'muscle', 'crewcab'],
   beach: ['sports', 'suv', 'muscle', 'midsize', 'pickup', 'suv'],

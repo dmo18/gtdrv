@@ -593,8 +593,14 @@ export function lotStamps(C) {
       }
       C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.044, 0.66, 6);
     },
+    // A light pole of a lot: a four-sided pole and one box head on a short
+    // arm (about 22 triangles; the street lamp has 60, and a parking lot
+    // has many more of them).
     lamp(x, z, y, rot, h = 7) {
-      trees.at(x, z).add(T.lamp, x, y - 0.02, z, rot, 1, h / 7, 1);
+      const P = trees.at(x, z), ca = Math.cos(rot), sa = Math.sin(rot);
+      P.cyl(x, z, y - 0.02, y + h - 0.1, 0.09, 0.06, 4, 0x4a4e52);
+      P.obox(x + ca * 0.85, z + sa * 0.85, 0.95, 0.05, y + h - 0.16, y + h - 0.08, rot, 0x4a4e52);
+      P.obox(x + ca * 1.74, z + sa * 1.74, 0.34, 0.16, y + h - 0.28, y + h - 0.1, rot, 0x3a3e42, 0x3a3e42);
       // A small lit head (night): the glow layer.
       if (C.glow) C.glow.at(x, z).box(x + Math.cos(rot) * 1.74 - 0.25, z + Math.sin(rot) * 1.74 - 0.25, x + Math.cos(rot) * 1.74 + 0.25, z + Math.sin(rot) * 1.74 + 0.25, y + (6.6 * h) / 7, y + (6.66 * h) / 7, 0xfff2c4);
     },

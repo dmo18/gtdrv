@@ -54,6 +54,7 @@ test('turn pill: "300 ft · Alton Rd", the verb at the turn, "U-turn · street",
   tr.next = () => ({ kind: 'uturn', name: 'S Miami Ave' });
   tr.toTurn = 40;
   assert.equal(navPill(tr, out).text, 'U-turn · S Miami Ave');
+  assert.equal(navPill(tr, out, true).text, 'Turn around · S Miami Ave'); // on foot
   tr.next = () => ({ kind: 'arrive', name: 'Lincoln Rd' });
   tr.toTurn = 700;
   assert.equal(navPill(tr, out).text, '0.4 mi · Lincoln Rd');

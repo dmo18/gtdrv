@@ -922,7 +922,7 @@ are unchanged: everything is in side arrays indexed by end
   signal, stop, ring, tris, corners, arms, x0, z0, x1, z1, fan }`. `ring` is
   the junction's one asphalt polygon (x, z pairs): every arm's strip end
   (left curb, right curb) and between arms the curb return (radius 1.5 to
-  4.5 m from the sidewalk widths, 5 segments) or a straight curb. `tris`
+  4.5 m from the sidewalk widths, 3 segments) or a straight curb. `tris`
   its triangles. `fan` (about 2 % of junctions): the ring crosses itself
   and its area is the union of `tris`, a fan round (x, z); use
   `inJunctionArea(J, x, z)`. `corners[k]`: `{ curb, tris }`, the curb line

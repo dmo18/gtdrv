@@ -33,7 +33,7 @@ export const DIVIDED_LINK = 45;
 export const TAPER_LEN = 10;
 export const CURB_R_MIN = 1.5;
 export const CURB_R_MAX = 4.5;
-export const ARC_SEGS = 5;
+export const ARC_SEGS = 3;
 export const MITER_MAX = Math.PI / 3;
 export const TRIM_MAX = 40;
 // Paint at a controlled approach (signal or stop sign): a two-line
@@ -806,8 +806,8 @@ export function edgeStations(geo, e, piece, out) {
   push(d0, geo.miter[qa]);
   const ta = Math.min(geo.taper[qa], d1), tb = Math.max(d0, e.length - geo.taper[qb]);
   const cuts = [];
-  if (geo.taper[qa] > 0) for (let m = 1; m <= 3; m++) cuts.push(d0 + ((ta - d0) * m) / 3);
-  if (geo.taper[qb] > 0) for (let m = 0; m < 3; m++) cuts.push(tb + ((d1 - tb) * m) / 3);
+  if (geo.taper[qa] > 0) for (let m = 1; m <= 2; m++) cuts.push(d0 + ((ta - d0) * m) / 2);
+  if (geo.taper[qb] > 0) for (let m = 0; m < 2; m++) cuts.push(tb + ((d1 - tb) * m) / 2);
   cuts.push(d1);
   cuts.sort((a, b) => a - b);
   let last = d0;
