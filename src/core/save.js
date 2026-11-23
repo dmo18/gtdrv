@@ -174,6 +174,8 @@ export function sanitizeProgress(raw) {
       if (own(s, 'handlingPreset') && typeof s.handlingPreset === 'string' && PRESETS.includes(s.handlingPreset)) d.handlingPreset = s.handlingPreset;
       if (own(s, 'handlingVerdict') && typeof s.handlingVerdict === 'string' && VERDICTS.includes(s.handlingVerdict)) d.handlingVerdict = s.handlingVerdict;
       if (own(s, 'hud') && HUD_MODES.includes(s.hud)) d.hud = s.hud;
+      // Map orientation (systems/mapui.js): a strict boolean; absent reads as false (heading up).
+      if (own(s, 'mapNorthUp') && typeof s.mapNorthUp === 'boolean') d.mapNorthUp = s.mapNorthUp;
       // car radio: only a known station id is kept; absent means off (core/radio.js)
       if (own(s, 'station') && typeof s.station === 'string' && STATION_IDS.includes(s.station)) d.station = s.station;
       if (own(s, 'steerSensitivity') && isNum(s.steerSensitivity)) {

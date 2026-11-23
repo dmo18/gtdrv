@@ -280,3 +280,10 @@ test('saves: region sessions load, an unknown map id falls back to the island re
   assert.equal(boat(4800), 'boat');
   assert.equal(boat(-3000), 'start');
 });
+
+test('settings.mapNorthUp: a strict boolean is kept, anything else is dropped (absent reads as false)', () => {
+  assert.equal(defaultProgress().settings.mapNorthUp, undefined);
+  assert.equal(sanitizeProgress({ settings: { mapNorthUp: true } }).settings.mapNorthUp, true);
+  assert.equal(sanitizeProgress({ settings: { mapNorthUp: false } }).settings.mapNorthUp, false);
+  for (const bad of ['true', 1, 0, null, {}, ['x']]) assert.equal(sanitizeProgress({ settings: { mapNorthUp: bad } }).settings.mapNorthUp, undefined);
+});
