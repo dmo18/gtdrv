@@ -2,6 +2,7 @@
 // place the Continue button can bring the player back to, and where does
 // "Start" put them. No three.js, no DOM.
 import { MODES } from './garage.js';
+import { inRegion } from '../world/regions.js';
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -17,6 +18,9 @@ export function placeValid(s, mapId, city) {
     if (!isNum(s.x) || !isNum(s.z)) return false;
     const cut = city && city.cut;
     if (cut && (s.x < cut.x0 || s.x > cut.x1 || s.z < cut.z0 || s.z > cut.z1)) return false;
+    // A region's saved place lies inside its crop (boats and aircraft may be out past it).
+    const air = s.mode === 'plane' || s.mode === 'heli' || s.mode === 'boat';
+    if (city && city.region && !inRegion(city.region, s.x, s.z, air ? -650 : 0)) return false;
     if (s.mode === 'plane' || s.mode === 'heli') return true;
     if (s.mode === 'boat') return !(city && city.isLand && city.isLand(s.x, s.z));
     return !(city && city.isGround && !city.isGround(s.x, s.z));

@@ -25,6 +25,8 @@
 import { sanitizeSession, sanitizeMapSessions } from './garage.js';
 import { STATION_IDS } from './radio.js';
 import { SECRET_IDS, emptySecrets, secretsDone } from '../world/secrets.js';
+import { regionFor, regionOfPoint, inRegion, DEFAULT_REGION } from '../world/regions.js';
+import { MAP_CHOICE_KEY } from '../world/maps.js';
 
 export const SAVE_KEY = 'rustwater.save.v1';
 export const SAVE_VERSION = 3;
@@ -195,5 +197,45 @@ export function saveProgress(storage, progress) {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Rules 3.5.2 and 3.5.3 (docs/PLAN_V2.md): players of 0.4.0 to 0.6.0 played
+// the whole box ('miami', stored or just the default). Once, the stored map
+// choice becomes the region that holds the saved Miami position (Downtown
+// where regions overlap, Downtown with no saved position), and the Miami
+// session is COPIED into that region's slot when its place is 60 m or more
+// inside the crop (the 'miami' slot itself is never touched; the runtime
+// check placeValid decides whether Continue is offered). The choice is
+// rewritten, so this happens once. Returns the stored choice afterwards
+// (null: nothing stored). Never throws.
+export const MIGRATE_INSIDE = 60;
+export function migrateMapChoice(storage, key = MAP_CHOICE_KEY) {
+  let stored = null;
+  try {
+    stored = storage ? storage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+  try {
+    const progress = loadProgress(storage);
+    const parked = progress.mapSessions;
+    const ses = progress.session && progress.session.map === 'miami' ? progress.session : (own(parked, 'miami') ? parked.miami : null);
+    if (stored !== 'miami' && !(stored === null && ses)) return stored;
+    const placed = !!ses && ses.mode !== 'start';
+    const id = placed ? regionOfPoint(ses.x, ses.z) : DEFAULT_REGION;
+    const region = regionFor(id);
+    const current = progress.session && progress.session.map === id;
+    if (placed && region && !current && !own(parked, id) && inRegion(region, ses.x, ses.z, MIGRATE_INSIDE)) {
+      const copy = sanitizeSession({ ...ses, map: id });
+      if (copy && copy.map === id && copy.mode !== 'start') {
+        parked[id] = copy;
+        saveProgress(storage, progress);
+      }
+    }
+    storage.setItem(key, id);
+    return id;
+  } catch {
+    return stored;
   }
 }

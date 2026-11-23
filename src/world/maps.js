@@ -2,6 +2,7 @@
 // the default; the procedural island is picked with ?map=island; a Miami
 // region (world/regions.js, docs/PLAN_V2.md 3) by its id. Pure: runs in
 // node tests.
+/* global __PROD__ */
 import { DISTRICTS } from './citygen.js';
 import { REGION_IDS, regionFor, loadRegionData, WHOLE_BOX } from './regions.js';
 
@@ -12,7 +13,7 @@ export const SHORE_NAME = 'The Strand';
 // ids load one region each.
 export const MAP_IDS = ['island', WHOLE_BOX, ...REGION_IDS];
 
-export const DEFAULT_MAP = 'miami';
+export const DEFAULT_MAP = 'miami-downtown';
 
 // The URL parameter wins (tests and links); otherwise the map the player
 // picked in Settings (stored as its own key, see main.js); otherwise Miami.
@@ -32,8 +33,8 @@ export function mapFromSearch(search = '', stored = null) {
 // The city of a map id, built from its own data chunk (the data is
 // bundled with the game and fetched from the page's own origin, never
 // from elsewhere): null for the island (createGame generates it), a
-// region's city for a region id, the whole box for 'miami'. Throws for an
-// id that is not a map.
+// region's city for a region id, the whole box for 'miami' (not in the
+// production bundle). Throws for an id that is not a map.
 export async function loadMapCity(id) {
   if (id === 'island') return null;
   const region = regionFor(id);
@@ -41,7 +42,9 @@ export async function loadMapCity(id) {
     const [{ createMiamiCity }, data] = await Promise.all([import('./miami.js'), loadRegionData(id)]);
     return createMiamiCity(data, { region });
   }
-  if (id === WHOLE_BOX) {
+  // The whole box is for tests, benches and a development build only: the
+  // production bundle (define __PROD__) never imports its data file.
+  if (id === WHOLE_BOX && !(typeof __PROD__ !== 'undefined' && __PROD__)) {
     const [{ createMiamiCity }, m] = await Promise.all([import('./miami.js'), import('./data/miami.json')]);
     return createMiamiCity(m.default || m);
   }

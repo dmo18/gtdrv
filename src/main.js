@@ -1,7 +1,7 @@
 import { createGame } from './game.js';
 import { registerServiceWorker } from './pwa.js';
 import { createTitle } from './ui/title.js';
-import { mapFromSearch, MAP_CHOICE_KEY } from './world/maps.js';
+import { mapFromSearch, loadMapCity, MAP_CHOICE_KEY } from './world/maps.js';
 
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
@@ -44,10 +44,10 @@ function storedMap() {
 }
 
 async function loadCity() {
-  if (mapFromSearch(location.search, storedMap()) !== 'miami') return null;
+  const id = mapFromSearch(location.search, storedMap());
+  if (id === 'island') return null;
   try {
-    const [{ createMiamiCity }, { default: data }] = await Promise.all([import('./world/miami.js'), import('./world/data/miami.json')]);
-    return createMiamiCity(data);
+    return await loadMapCity(id);
   } catch (err) {
     // A device that cannot build the real map still gets the game: the island.
     console.error('Miami map failed, using the classic island', err);

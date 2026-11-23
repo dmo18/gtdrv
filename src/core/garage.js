@@ -6,6 +6,7 @@ import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { BOAT_SPECS } from '../entities/boat.js';
 import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
 import { TANK_SPECS } from '../entities/tank.js';
+import { REGION_IDS, regionFor, inRegion } from '../world/regions.js';
 
 export const GARAGE_MAX = 8;
 // Metres from the origin, either axis: the Miami map reaches about 4.5 km
@@ -16,8 +17,11 @@ export const MODES = ['start', 'foot', 'car', 'boat', 'plane', 'heli', 'tank'];
 export const SAFE_ALT = 120; // altitude an airborne craft comes back at
 // Maps a session can belong to (world/maps.js MAP_IDS). A session saved
 // before maps had ids has none: it was made on the island.
-export const SESSION_MAPS = ['island', 'miami'];
+export const SESSION_MAPS = ['island', 'miami', ...REGION_IDS];
 export const OLD_SESSION_MAP = 'island';
+// A saved boat or aircraft may be out past a region's crop (craft turn back
+// 600 m past it); everything else must be inside the crop itself.
+const OFF_CROP_AIR = 650;
 const MIN_HEALTH = 0.05;
 const MAX_SCAN = 64;
 const TAU = Math.PI * 2;
@@ -103,6 +107,10 @@ export function sanitizeSession(raw) {
   const mode = has(raw, 'mode') && typeof raw.mode === 'string' && MODES.includes(raw.mode) ? raw.mode : 'start';
   if (mode === 'start' || !isNum(raw.x) || !isNum(raw.z)) return s;
   const x = round2(coord(raw.x)), z = round2(coord(raw.z));
+  // On a region a place only means something inside its crop (PLAN_V2 3.5
+  // rule 4): anywhere else the region's start place is used.
+  const region = regionFor(map);
+  if (region && !inRegion(region, x, z, mode === 'boat' || mode === 'plane' || mode === 'heli' ? -OFF_CROP_AIR : 0)) return s;
   const heading = has(raw, 'heading') && isNum(raw.heading) ? wrapAngle(raw.heading) : 0;
   if (mode === 'foot') {
     s.mode = 'foot';

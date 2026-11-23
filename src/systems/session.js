@@ -38,7 +38,7 @@ export function createSession(game, storage) {
   const city = game.city, collision = game.collision;
   // Sessions belong to a map: this map's comes out of the save, another
   // map's is kept aside (never moved here).
-  const mapId = city.map || 'island';
+  const mapId = city.mapId || city.map || 'island';
   selectMapSession(game.progress, mapId);
   const garage = [];
   game.garage = garage;

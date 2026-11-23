@@ -249,9 +249,9 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // point toward the closer of the main island and the airfield.
   const landAim = { x: 0, z: 0 };
   function findRescueSpot(x, z, out) {
-    const islet = city.airfield.islet;
-    const ix = (islet.x0 + islet.x1) / 2, iz = (islet.z0 + islet.z1) / 2;
-    const toIslet = Math.hypot(x - ix, z - iz) < Math.hypot(x, z) - 500;
+    const islet = city.airfield && city.airfield.islet;
+    const ix = islet ? (islet.x0 + islet.x1) / 2 : 0, iz = islet ? (islet.z0 + islet.z1) / 2 : 0;
+    const toIslet = !!islet && Math.hypot(x - ix, z - iz) < Math.hypot(x, z) - 500;
     let tx = toIslet ? ix : 0, tz = toIslet ? iz : 0;
     // A real map has no land at the origin: aim for the nearest dry land.
     if (city.landTarget) {

@@ -12,7 +12,7 @@ test('without a parameter the stored choice is used, then Miami', () => {
   assert.equal(mapFromSearch('', 'island'), 'island');
   assert.equal(mapFromSearch('', 'miami'), 'miami');
   assert.equal(mapFromSearch('', null), DEFAULT_MAP);
-  assert.equal(DEFAULT_MAP, 'miami');
+  assert.equal(DEFAULT_MAP, 'miami-downtown');
 });
 
 test('junk values are ignored (allow-list only)', () => {
