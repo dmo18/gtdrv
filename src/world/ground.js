@@ -20,6 +20,8 @@ export const SEA_FLOOR = -2.2; // m, deepest the shallows go
 const CELL = 32;
 export const FILL_STEP = 2; // m between sliver fill samples
 export const FILL_MAX = 1.5; // m, gaps narrower than this are filled
+export const GAP_MAX = 6; // m, a gap to a facing strip under this is asphalt
+const GAP_COS = Math.cos((25 * Math.PI) / 180);
 const NOFILL_ALL = new Float32Array(0);
 
 // The sidewalk beside an edge: its own `sidewalk` (a real map's profile,
@@ -163,11 +165,16 @@ export function createGround(city) {
       const cl = C.l, cr = C.r;
       if (s >= cl && s <= cr) return 1;
       if (s > cr) {
+        // A gap to a facing strip under GAP_MAX: asphalt (gapAt).
+        const g = gapAt(k, 0, d);
+        if (g > 0) { if (s <= cr + g) return 1; continue; }
         const back = cr + walkOf(e);
         if (supAt(geo, e, 0, d)) continue;
         if (s <= back || (fills && s <= back + fillAt(k, 0, d))) side = true;
         continue;
       }
+      const gl = gapAt(k, 1, d);
+      if (gl > 0) { if (s >= cl - gl) return 1; continue; }
       if (supAt(geo, e, 1, d)) continue;
       const m = medianBand(e) > 0;
       const back = cl - (m ? medianAt(city, e, d, cl) : walkLeftOf(e));
@@ -187,6 +194,76 @@ export function createGround(city) {
   // (Samples are worked out one at a time when first needed, so no call
   // costs more than a couple of samples; fillOf, for the meshes, works
   // out all of an edge's in its tile's build slice.)
+  // Facing strips (docs/PLAN_V3.md 13, ROADS pass 3): along each curb, in
+  // FILL_STEP stations, the gap to the nearest curb of another strip that
+  // faces it (within 25 degrees of parallel either way) when under GAP_MAX
+  // m. That gap is asphalt: no sidewalk, median or fill on that side, so
+  // two strips that fork or run close read as one widening surface.
+  // Per edge, right then left; a station is worked out when first asked.
+  const gapCache = new Map();
+  function gapArr(k) {
+    let f = gapCache.get(k);
+    if (f) return f;
+    const e = edges[k];
+    if (geo.inner[k] || e.ped) { gapCache.set(k, NOFILL); return NOFILL; }
+    const n = Math.max(1, Math.ceil((len[k] - geo.trim[2 * k + 1] - geo.trim[2 * k]) / FILL_STEP)) + 1;
+    f = new Float32Array(2 * n).fill(NaN);
+    gapCache.set(k, f);
+    return f;
+  }
+  function gapStation(k, f, i) {
+    f[2 * i] = f[2 * i + 1] = 0;
+    const e = edges[k];
+    const d0 = geo.trim[2 * k], d1 = len[k] - geo.trim[2 * k + 1];
+    const d = Math.min(d1, d0 + i * FILL_STEP);
+    const C = curbsAt(geo, e, d);
+    const cl = C.l, cr = C.r;
+    for (let side = 0; side < 2; side++) {
+      const o = side ? cl : cr, dir = side ? -1 : 1;
+      const x = ax[k] + ux[k] * d - uz[k] * o, z = az[k] + uz[k] * d + ux[k] * o;
+      const nx = -uz[k] * dir, nz = ux[k] * dir;
+      const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), ci = cx - gx0, cj = cz - gz0;
+      if (ci < 0 || cj < 0 || ci >= W || cj >= H) continue;
+      const c = cj * W + ci;
+      const es = cellE[c] || build(c, cx, cz);
+      let best = Infinity;
+      for (let q = 0; q < es.length; q++) {
+        const k2 = es[q];
+        if (k2 === k || geo.inner[k2] || edges[k2].ped || !!edges[k2].bridge !== !!e.bridge) continue;
+        if (Math.abs(ux[k] * ux[k2] + uz[k] * uz[k2]) < GAP_COS) continue;
+        const out = hw[k2] + Math.abs(edges[k2].off || 0) + Math.abs(geo.eoff[k2]) + GAP_MAX + 1;
+        if (segD2(x, z, k2) > out * out) continue;
+        const d2 = (x - ax[k2]) * ux[k2] + (z - az[k2]) * uz[k2];
+        if (d2 < geo.trim[2 * k2] - 1 || d2 > len[k2] - geo.trim[2 * k2 + 1] + 1) continue;
+        const s2 = -(x - ax[k2]) * uz[k2] + (z - az[k2]) * ux[k2];
+        const C2 = curbsAt(geo, edges[k2], Math.max(0, Math.min(len[k2], d2)));
+        const facing = nx * -uz[k2] + nz * ux[k2];
+        let g;
+        if (s2 > C2.r && facing < 0) g = s2 - C2.r;
+        else if (s2 < C2.l && facing > 0) g = C2.l - s2;
+        else continue;
+        if (g < best) best = g;
+      }
+      if (best <= GAP_MAX && best > 0.02) f[2 * i + side] = best + 0.05;
+    }
+  }
+  function gapAt(k, side, d) {
+    const f = gapArr(k);
+    if (!f.length) return 0;
+    const d0 = geo.trim[2 * k], d1 = len[k] - geo.trim[2 * k + 1];
+    if (d < d0 - 0.01 || d > d1 + 0.01) return 0;
+    const n = f.length / 2;
+    const i = Math.min(n - 1, Math.max(0, Math.floor((d - d0) / FILL_STEP))), j = Math.min(n - 1, i + 1);
+    if (Number.isNaN(f[2 * i])) gapStation(k, f, i);
+    if (Number.isNaN(f[2 * j])) gapStation(k, f, j);
+    return Math.max(f[2 * i + side], f[2 * j + side]);
+  }
+  function gapOf(k) {
+    const f = gapArr(k);
+    for (let i = 0; i < f.length / 2; i++) if (Number.isNaN(f[2 * i])) gapStation(k, f, i);
+    return f;
+  }
+
   function fillArr(k) {
     let f = fillCache.get(k);
     if (f) return f;
@@ -213,7 +290,7 @@ export function createGround(city) {
       const cl = C.l, cr = C.r;
       const backR = cr + walkOf(e), backL = cl - (medianBand(e) > 0 ? medianAt(city, e, d, cl) : walkLeftOf(e));
       for (let side = 0; side < 2; side++) {
-        if (supAt(geo, e, side, d)) continue;
+        if (supAt(geo, e, side, d) || gapAt(k, side, d) > 0) continue;
         const b = side ? backL : backR, dir = side ? -1 : 1;
         const bx = ax[k] + ux[k] * d - uz[k] * b, bz = az[k] + uz[k] * d + ux[k] * b;
         // (None where the back of sidewalk is already on road space.)
@@ -368,7 +445,7 @@ export function createGround(city) {
     }
     return 0;
   }
-  return { groundAt, surfaceAt, fillOf: geo ? fillOf : () => NOFILL_ALL, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
+  return { groundAt, surfaceAt, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
 }
 
 // The ground of a city, made once and kept (city.groundAt when the city

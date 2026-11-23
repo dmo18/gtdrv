@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { buildRealCity } from '../src/render/realcity.js';
+import { createLotCarField, LOT_CAR_CAP } from '../src/render/lotmesh.js';
 
 const id = process.argv.slice(2).find((a) => !a.startsWith('--')) || 'miami-downtown';
 const FR = +(process.argv.find((a) => a.startsWith('--frames=')) || '--frames=200').slice(9);
@@ -63,7 +64,27 @@ const route = [];
 }
 const cam = { isCamera: false, position: { x: route[0][0], y: 3, z: route[0][1] } };
 st.flush(cam);
-const pops = [], treePops = [];
+const pops = [], treePops = [], carPops = [];
+// The parked cars of the lots (systems/parked.js asks the field a few
+// times a second; here at every update): a car that comes into the field
+// within 60 m of the camera, in front of it, is a pop.
+const field = createLotCarField(city, { cap: LOT_CAR_CAP });
+let carSet = null;
+function carEvents(f, hx, hz, fx, fz) {
+  field.update(cam.position.x, cam.position.z, fx, fz, 13);
+  const now = new Set();
+  for (let i = 0; i < field.n; i++) now.add(Math.round(field.x[i] * 2) * 100003 + Math.round(field.z[i] * 2));
+  if (carSet) {
+    for (let i = 0; i < field.n; i++) {
+      const key = Math.round(field.x[i] * 2) * 100003 + Math.round(field.z[i] * 2);
+      if (carSet.has(key)) continue;
+      const dx = field.x[i] - cam.position.x, dz = field.z[i] - cam.position.z, d = Math.hypot(dx, dz);
+      if (d < 60 && dx * fx + dz * fz > 0.6 * d) carPops.push(`frame ${f}: parked car ${d.toFixed(0)} m`);
+    }
+  }
+  carSet = now;
+  void hx; void hz;
+}
 const lastLod = new Map();
 const depth = new Map();
 let checked = 0;
@@ -154,6 +175,7 @@ for (let f = 0; f < FR; f++) {
     cam.position.z = hz - Math.sin(p[2]) * 7;
     st.update(cam, 3);
     treeEvents(f);
+    if (s % 5 === 0) carEvents(f, hx, hz, Math.cos(p[2]), Math.sin(p[2]));
   }
   st.tiles.forEach((t, k) => {
     if (t.shown && !was[k]) {
@@ -167,6 +189,6 @@ for (let f = 0; f < FR; f++) {
 const top = [...conflicts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
 console.log(JSON.stringify({
   region: id, frames: FR, routeM: route.length, built: st.stats.built,
-  tilePops: pops.length, treePops: treePops.length, popSamples: [...pops, ...treePops].slice(0, 8),
+  tilePops: pops.length, treePops: treePops.length, carPops: carPops.length, popSamples: [...pops, ...treePops, ...carPops].slice(0, 8),
   depthPointsChecked: checked, depthConflicts: [...conflicts.values()].reduce((a, b) => a + b, 0), byPair: Object.fromEntries(top),
 }, null, 1));

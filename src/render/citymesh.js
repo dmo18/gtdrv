@@ -911,7 +911,35 @@ export function realRoads(city, B, nodes, edges, own = null) {
         wb.wall(ax, az, bx, bz, -0.02, CURB_H, COL.curb, 0, 0, 0.2, 0.05, 1, 1);
       }
     };
-    edgeStations(geo, e, ROAD_PIECE, ST);
+    // Gaps to facing strips under 6 m (world/ground.js gapOf): asphalt,
+    // and no sidewalk, median or fill on that side there.
+    const G = groundOf(city), gaps = e.ped ? null : G.gapOf(e.id);
+    let gapped = false;
+    if (gaps) for (let k = 0; k < gaps.length; k++) if (gaps[k] > 0) { gapped = true; break; }
+    edgeStations(geo, e, gapped ? 4 : ROAD_PIECE, ST);
+    if (gapped) {
+      const n = gaps.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
+      for (let i = 0; i + 1 < n; i++) {
+        const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
+        if (d1 - d0 < 0.05) continue;
+        for (let side = 0; side < 2; side++) {
+          const w = Math.max(gaps[2 * i + side], gaps[2 * i + 2 + side]);
+          if (!(w > 0)) continue;
+          const c0 = curbsAt(geo, e, d0), a0 = side ? c0.l : c0.r;
+          const c1 = curbsAt(geo, e, d1), a1 = side ? c1.l : c1.r;
+          const mx = wx((d0 + d1) / 2, a0), mz = wz((d0 + d1) / 2, a0);
+          if (own && !own(mx, mz)) continue;
+          const b0 = side ? a0 - w : a0 + w, b1 = side ? a1 - w : a1 + w;
+          const lo0 = Math.min(a0, b0), hi0 = Math.max(a0, b0), lo1 = Math.min(a1, b1), hi1 = Math.max(a1, b1);
+          orientedQuad(B.asphalt.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), 0.008, COL.junction); // (over lot ground, BLOCK_Y)
+          // A white edge line along the strip where the gap is wide.
+          if (w > 1.5) {
+            const p0 = side ? a0 + 0.25 : a0 - 0.25, p1 = side ? a1 + 0.25 : a1 - 0.25;
+            orientedQuad(B.paint.at(mx, mz), wx(d0, p0 + 0.07), wz(d0, p0 + 0.07), wx(d1, p1 + 0.07), wz(d1, p1 + 0.07), wx(d1, p1 - 0.07), wz(d1, p1 - 0.07), wx(d0, p0 - 0.07), wz(d0, p0 - 0.07), 0.015, COL.line);
+          }
+        }
+      }
+    }
     // Raised strips beside the road (2.1 item 7): sidewalks with a 0.15 m
     // curb on streets with a profile, and the median half a paired
     // one-way owns along its left curb (planted from 1.5 m).
@@ -950,7 +978,7 @@ export function realRoads(city, B, nodes, edges, own = null) {
       if (wR > 0 || med > 0) {
         const wb = B.sidewalk.at(mx, mz);
         // (Bare where a gore or a median nose keeps the side clear.)
-        const dm = (d0 + d1) / 2, bareR = supAt(geo, e, 0, dm), bareL = supAt(geo, e, 1, dm);
+        const dm = (d0 + d1) / 2, bareR = supAt(geo, e, 0, dm) || G.gapAt(e.id, 0, dm) > 0, bareL = supAt(geo, e, 1, dm) || G.gapAt(e.id, 1, dm) > 0;
         if (wR > 0 && !bareR) {
           band(wb, r0, r0 + wR, r1, r1 + wR, CURB_H, COL.sidewalk);
           curb(wb, r0, r1, false);
@@ -965,14 +993,14 @@ export function realRoads(city, B, nodes, edges, own = null) {
           band(mb, l0 - m0, l0, l1 - m1, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
           curb(wb, l0, l1, true);
           // A round nose where the median starts or stops.
-          if (supAt(geo, e, 1, d0 - 0.05)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          if (supAt(geo, e, 1, d1 + 0.05)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          if (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          if (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
         }
       }
     }
     // Sliver fills (world/ground.js fillOf): raised concrete over gaps
     // under 1.5 m between this road's back of sidewalk and more road.
-    const fill = e.ped ? null : groundOf(city).fillOf(e.id);
+    const fill = e.ped ? null : G.fillOf(e.id);
     if (fill && fill.length) {
       const n = fill.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
       const backAt = (d, side) => {
@@ -988,7 +1016,7 @@ export function realRoads(city, B, nodes, edges, own = null) {
           const mx = wx((d0 + d1) / 2, b0), mz = wz((d0 + d1) / 2, b0);
           if (own && !own(mx, mz)) continue;
           // (Never on a junction's asphalt, nor beside a gore.)
-          if (supAt(geo, e, side, (d0 + d1) / 2) || onJunction(geo, mx + (wx(0, side ? -1 : 1) - wx(0, 0)) * 0.5, mz + (wz(0, side ? -1 : 1) - wz(0, 0)) * 0.5)) continue;
+          if (supAt(geo, e, side, (d0 + d1) / 2) || G.gapAt(e.id, side, (d0 + d1) / 2) > 0 || onJunction(geo, mx + (wx(0, side ? -1 : 1) - wx(0, 0)) * 0.5, mz + (wz(0, side ? -1 : 1) - wz(0, 0)) * 0.5)) continue;
           const lo0 = side ? b0 - w0 : b0, hi0 = side ? b0 : b0 + w0, lo1 = side ? b1 - w1 : b1, hi1 = side ? b1 : b1 + w1;
           orientedQuad(B.sidewalk.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, COL.sidewalk);
         }

@@ -236,6 +236,9 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 const PROF = 6; // profile points: base, shoulder, top edge, top edge, shoulder, base
 const PC = [1, 1, 0.7, -0.7, -1, -1], PS = [0, 0, 1, 1, 0, 0];
 const PN = [1, 0.85, 0.3, -0.3, -0.85, -1], PNY = [0, 0.53, 0.95, 0.95, 0.53, 0];
+// A clipped hedge: sides that stay upright to the shoulder (the round is
+// only the top edge), so it reads as a hedge, not a pipe.
+const HN = [1, 0.97, 0.35, -0.35, -0.97, -1], HNY = [0, 0.24, 0.94, 0.94, 0.24, 0];
 export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump, bloom = 0) {
   const ca = Math.cos(heading), sa = Math.sin(heading);
   const rx = -sa, rz = ca; // across the strip
@@ -258,8 +261,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
     const hh = h * dip * (1 + (q - 0.5) * 0.5 * bump) * (endK === 1 ? 1 : 0.92);
     const hw = hw0 * (1 + (q - 0.5) * 0.4 * bump) * endK;
     const flower = bloom && q > 0.72;
-    const col = flower ? FLOWERS[(Math.round(cx * 7) & 255) % FLOWERS.length] : bump > 0.5 ? SHRUB_GREENS[(Math.round(q * 97) + k) % SHRUB_GREENS.length] : color;
-    _cl.setHex(col, THREE_SRGB);
+    const col = bump > 0.5 ? SHRUB_GREENS[(Math.round(q * 97) + k) % SHRUB_GREENS.length] : color;
+    // A flowering bed shows its blooms on the tops of its mounds only, half
+    // in the leaves.
+    const fcol = flower ? FLOWERS[(Math.round(cx * 7) & 255) % FLOWERS.length] : col;
     for (let p = 0; p < PROF; p++) {
       const edge = p === 0 || p === PROF - 1;
       // Lumps: every point above the base pushed in or out by its own
@@ -270,8 +275,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
       const across = PC[p] * hw * (edge ? 0.92 : 1 + j * 0.5);
       const sh = (0.55 + 0.5 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.7) * (bump > 0.5 && k % 2 ? 0.85 : 1);
       const tip = j * 0.8;
-      const nx = rx * PN[p] + ca * tip, nz = rz * PN[p] + sa * tip, ny = PNY[p];
+      const pn = bump > 0.5 ? PN[p] : HN[p], pny = bump > 0.5 ? PNY[p] : HNY[p];
+      const nx = rx * pn + ca * tip, nz = rz * pn + sa * tip, ny = pny;
       const nl = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      _cl.setHex(flower && (p === 2 || p === 3) && ((k + p) & 1) ? fcol : col, THREE_SRGB);
       B._vert(base + k * PROF + p, cx + rx * across, yy, cz + rz * across, _cl.r * sh, _cl.g * sh, _cl.b * sh, nx * nl, ny * nl, nz * nl);
     }
   }
@@ -378,7 +385,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 2.4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
+        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : -0.4), y + curb, curb ? 0.55 : 0.7, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 2.4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
         break;
       }
       case 'wall': {
