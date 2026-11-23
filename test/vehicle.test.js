@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VEHICLE_SPECS, createVehicle, stepVehicle, collideVehicles, vehicleCorners, damageVehicle, setHandlingMode,
-  steerLock, fullLockCurvature, lateralGrip, steerToward, brakePedal,
+  steerLock, fullLockCurvature, lateralGrip, steerToward, brakePedal, handlingParams,
 } from '../src/entities/vehicle.js';
+import { REFERENCE } from '../src/entities/handlingbands.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createRng } from '../src/core/rng.js';
 
@@ -227,10 +228,12 @@ const inBothModes = (fn) => () => {
 };
 
 test('0-100 km/h times fall in believable bands per spec', () => {
-  const bands = {
-    compact: [9, 12.5], sedan: [8, 10.5], taxi: [8, 10.5], sports: [3.6, 5.2], muscle: [4.8, 6.8],
-    pickup: [8.5, 11.5], van: [11, 15], police: [5.2, 7.5],
-  };
+  // HANDLE (deliberate): from the reference table's 0-60 mph (100 km/h is
+  // 62 mph, a little more than 0-60), no longer the invented bands.
+  const bands = {};
+  for (const id of ['compact', 'sedan', 'taxi', 'sports', 'muscle', 'pickup', 'van', 'police']) {
+    bands[id] = [REFERENCE[id].t60 * 1.0, REFERENCE[id].t60 * 1.2];
+  }
   const timeTo = (id, target) => {
     const v = createVehicle(id, 0, 0, 0);
     const world = emptyWorld();
@@ -251,7 +254,12 @@ test('0-100 km/h times fall in believable bands per spec', () => {
 });
 
 test('braking from 100 km/h stops in a realistic distance, with ABS and no lock', () => {
-  const bands = { sedan: [33, 42], sports: [28, 36], compact: [33, 42], truck: [45, 56], police: [32, 41] };
+  // HANDLE (deliberate): the reference table's 60-0 mph, scaled to 100 km/h, within 8 %.
+  const bands = {};
+  for (const id of ['sedan', 'sports', 'compact', 'truck', 'police']) {
+    const m = REFERENCE[id].stop * 0.3048 * (27.78 / 26.82) ** 2;
+    bands[id] = [m * 0.92, m * 1.08];
+  }
   for (const [id, [lo, hi]] of Object.entries(bands)) {
     const v = createVehicle(id, 0, 0, 0);
     v.vx = 100 / 3.6;
@@ -269,12 +277,12 @@ test('braking from 100 km/h stops in a realistic distance, with ABS and no lock'
     // Where full pedal asks more than the tires give, ABS works (a few
     // cars' brakes sit just under their limit to land in their band;
     // test/handling-bands.test.js checks ABS for all of them in the wet).
-    if (v.spec.brake > 1.08 * 0.95 * 9.81 * v.spec.grip) assert.ok(absSeen, `${id} ABS active`);
+    if (v.spec.brake > 0.95 * 9.81 * (v.spec.gripLong || 1.08 * v.spec.grip)) assert.ok(absSeen, `${id} ABS active`);
     assert.ok(maxPitch < -0.02, `${id} nose dives (${maxPitch.toFixed(3)})`);
   }
 });
 
-// Sim grip numbers (Arcade grips about 12 % more; bands in
+// Sim grip numbers (Arcade grips 10 to 25 % more; bands in
 // test/handling-bands.test.js).
 test('steady cornering at 20 m/s with full steer settles to a constant radius (sim)', inMode('sim', () => {
   for (const id of ['sedan', 'sports', 'muscle', 'truck']) {
@@ -298,10 +306,11 @@ test('steady cornering at 20 m/s with full steer settles to a constant radius (s
     const latG = v.speed * mean / 9.81;
     assert.ok(spread < 0.02, `${id} yaw rate wanders ${spread.toFixed(3)}`);
     assert.ok(maxBeta < 6 * DEG, `${id} body slip ${(maxBeta / DEG).toFixed(1)} deg`);
-    // Full input asks for 1.10 of grip in Sim: the front sits just past
-    // its peak, the car runs a little wide, never a spin.
+    // Full input asks 1.15 of grip: the front sits just past its peak, the
+    // car runs a little wide, never a spin. HANDLE: spec.grip is the real
+    // skidpad g and Sim holds it within 0.03 g (was 0.85 to 1.0 of it).
     const g = v.spec.grip;
-    assert.ok(latG > 0.85 * g && latG < 1.0 * g, `${id} lateral ${latG.toFixed(2)} g (grip ${g})`);
+    assert.ok(Math.abs(latG - g) <= 0.03, `${id} lateral ${latG.toFixed(3)} g (grip ${g})`);
     assert.ok(radius > 30 && radius < 70, `${id} radius ${radius.toFixed(1)} m`);
     assert.ok(Math.abs(v.roll) > 0.02 && v.roll < 0, `${id} leans out of a right turn (roll ${v.roll.toFixed(3)})`);
   }
@@ -485,7 +494,8 @@ test('AI and player steering are one mapping: a share of steerLock, and the curv
   // The lock at walking pace is the true steerMax; at speed it is set by the grip.
   assert.equal(steerLock(s, 1), s.steerMax);
   assert.ok(steerLock(s, 30) < s.steerMax * 0.25, `lock at 30 m/s ${steerLock(s, 30)}`);
-  assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - lateralGrip(s) * 9.81) < 0.05);
+  // Full input asks 115 % of the grip at speed (HANDLE, docs/PLAN_V3.md 2.4 item 4).
+  assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - handlingParams('arcade').ask * lateralGrip(s, 30) * 9.81) < 0.05);
 });
 
 test('steering rate: away from center at lockRate, back at returnRate, through the center', () => {
@@ -558,7 +568,7 @@ test('handling presets: standard (default), relaxed, sharp; unknown means standa
     }
   }
   setHandlingPreset('sharp');
-  assert.ok(Math.abs(steerMaxOf(spec) - (35 * Math.PI) / 180) < 1e-12, 'sharp: 35 degree lock at walking pace');
+  assert.ok(Math.abs(steerMaxOf(spec) - (40 * Math.PI) / 180) < 1e-12, 'sharp: 40 degree lock at walking pace (HANDLE: past the cars\' own 33 to 36)');
   setHandlingPreset('standard');
   assert.deepEqual(presetFigures(), base, 'back to standard: the same car');
 });

@@ -176,13 +176,17 @@ test('silhouettes: the fleet and the older road cars have distinct outlines at 5
   assert.equal(new Set(o.map(([, s]) => s.hash)).size, ids.length, 'hashes differ');
   // And not by a stray pixel: every pair differs in at least 12 pixels
   // (the taxi is the sedan's body by design: its sign and paint tell it).
+  // HANDLE: the police car is that body too (PLAN_V3 2.6 item 1) and now
+  // its size (5.1 m, the reference full-size sedan): its light bar and push
+  // bar must still tell it from the sedan by at least 6 pixels.
+  const same = (p, q) => [p, q].sort().join() === 'police,sedan';
   for (let i = 0; i < o.length; i++) {
     for (let j = i + 1; j < o.length; j++) {
       if (o[i][0] === 'sedan' && o[j][0] === 'taxi') continue;
       let d = 0;
       const a = o[i][1].grid, b = o[j][1].grid;
       for (let k = 0; k < a.length; k++) d += a[k] !== b[k] ? 1 : 0;
-      assert.ok(d >= 12, `${o[i][0]} vs ${o[j][0]}: ${d} px apart`);
+      assert.ok(d >= (same(o[i][0], o[j][0]) ? 6 : 12), `${o[i][0]} vs ${o[j][0]}: ${d} px apart`);
     }
   }
 });

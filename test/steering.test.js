@@ -186,13 +186,14 @@ test('player input asks for proportional steering; settings sanitise', () => {
 });
 
 test('handling presets: values, default standard, enum validation, one table with the car', () => {
+  // HANDLE re-pin (deliberate): Sharp's lock floor 35 to 40 degrees, as every car's own lock is now 33 to 36.
   // 0.9.0 re-pin (deliberate): the lab's own steer-scale table (lockScale,
   // speedReduction, gripFeel), which no car read, is gone; PRESET_VALUES is
   // now the one table the car model reads (entities/vehicle.js).
   assert.deepEqual(PRESETS, ['standard', 'relaxed', 'sharp']);
   assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 }, 'standard is today');
   assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 });
-  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 35, gripK: 1, assistK: 1.25, rollK: 0.85 });
+  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85 });
   assert.ok(PRESET_VALUES.relaxed.lockK < 1 && PRESET_VALUES.sharp.lockK > 1);
   for (const id of PRESETS) assert.deepEqual(presetParams(id), PRESET_VALUES[id], `${id}: the car reads the same row`);
   assert.equal(activePreset(), 'standard');
@@ -227,7 +228,7 @@ test('handling presets: values, default standard, enum validation, one table wit
 const DT = 1 / 60;
 const DEG = Math.PI / 180;
 const ALL = ['compact', 'sedan', 'taxi', 'police', 'pickup', 'van', 'truck', 'sports', 'muscle'];
-const SPEEDS = [8, 15, 25, 40];
+const SPEEDS = [5, 15, 25, 40]; // HANDLE: 5 m/s (was 8) is the lock-limited pace now that Arcade grips 1.25 of the real car in town
 const player = (o) => ({ steer: 0, throttle: 0, brake: 0, handbrake: false, steerMode: 'proportional', ...o });
 const bodySlip = (v) => {
   const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
@@ -289,14 +290,14 @@ test('turning circles: the same at walking pace in both modes, at speed set by t
   setHandlingMode('arcade');
   for (const id of ALL) {
     const spec = createVehicle(id, 0, 0, 0).spec;
-    // Walking-ish pace (8 m/s): mostly the lock, near-equal in both modes.
-    assert.ok(Math.abs(t.arcade[id][0].r / t.sim[id][0].r - 1) < 0.25, `${id} at 8 m/s`);
+    // Walking-ish pace (5 m/s): the lock, near-equal in both modes.
+    assert.ok(Math.abs(t.arcade[id][0].r / t.sim[id][0].r - 1) < 0.1, `${id} at 5 m/s: arcade ${t.arcade[id][0].r.toFixed(2)} sim ${t.sim[id][0].r.toFixed(2)}`);
     for (const k of [1, 2]) {
       const u = SPEEDS[k];
       for (const mode of ['arcade', 'sim']) {
         const { r, minSpeed } = t[mode][id][k];
         setHandlingMode(mode);
-        const g = lateralGrip(spec) * 9.81;
+        const g = lateralGrip(spec, u) * 9.81;
         setHandlingMode('arcade');
         // Entry included, so the circle is a little wider than u^2 / a.
         const ideal = (u * u) / g;

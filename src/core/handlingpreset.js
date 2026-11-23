@@ -7,7 +7,9 @@
 // setHandlingPreset and every step) and by the lab; 'standard' is today's
 // car (every multiplier 1, no lock floor):
 //   lockK / returnK  steering rate multipliers (to full lock, back to center)
-//   lockDeg          lowest full-lock wheel angle at walking pace (0: the spec's)
+//   lockDeg          lowest full-lock wheel angle at walking pace (0: the spec's;
+//                    Sharp's 40 degrees is past every car's own 33 to 36, a
+//                    circle about 0.8 of Standard's)
 //   gripK            lateral grip multiplier
 //   assistK          stability assist (yaw and slide) gain multiplier
 //   rollK            body roll multiplier
@@ -16,7 +18,7 @@ export const PRESET_LABELS = { standard: 'Standard', relaxed: 'Relaxed', sharp: 
 export const PRESET_VALUES = Object.freeze({
   standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 }),
   relaxed: Object.freeze({ lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 }),
-  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 35, gripK: 1, assistK: 1.25, rollK: 0.85 }),
+  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85 }),
 });
 
 // Verdict ids, their button text and the Phone check token (the id itself).

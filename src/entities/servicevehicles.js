@@ -229,10 +229,10 @@ export const SERVICE_SPOTS = [
   { kind: 'towtruck', x: 1306.8, z: 598.8, heading: 0.416, name: 'Sunline Towing', yard: true },
   { kind: 'towtruck', x: 1261.8, z: 578.8, heading: 0.416, name: 'Sunline Towing', yard: true },
   { kind: 'towtruck', x: -1053.16, z: 948.3, heading: -2.462, name: 'Sunline Towing curb bay', curb: true },
-  { kind: 'police', x: -1492.8, z: 985.3, heading: 0.067, name: 'Central Patrol Base' },
+  { kind: 'police', x: -1493.8, z: 985.3, heading: 0.067, name: 'Central Patrol Base' }, // 1 m west for the 5.1 m patrol car (HANDLE)
   { kind: 'police', x: -1488.8, z: 977.3, heading: 0.067, name: 'Central Patrol Base' },
-  { kind: 'police', x: -2321.3, z: 586.8, heading: -1.605, name: 'Ocho Patrol Base' },
-  { kind: 'police', x: -2316.3, z: 586.8, heading: -1.605, name: 'Ocho Patrol Base' },
+  { kind: 'police', x: -2321.3, z: 587.55, heading: -1.605, name: 'Ocho Patrol Base' }, // 0.75 m back for the 5.1 m patrol car (HANDLE)
+  { kind: 'police', x: -2316.3, z: 587.55, heading: -1.605, name: 'Ocho Patrol Base' }, // 0.75 m back for the 5.1 m patrol car (HANDLE)
   { kind: 'police', x: -964.83, z: -118.63, heading: 3.1043, name: 'Biscayne patrol bay', curb: true },
   { kind: 'police', x: -1174.5, z: 1739.29, heading: -2.9102, name: 'Brickell patrol bay', curb: true },
 ];

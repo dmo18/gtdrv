@@ -90,26 +90,37 @@ function runAt(c, w, wcol, deg, mph) {
   }
   if (back < 3) return null;
   const h = Math.atan2(dz, dx);
-  const v = createVehicle('sedan', w.mx - dx * back, w.mz - dz * back, h);
+  // Past the line: on the water side of the nearest wall segment (by
+  // that segment's own land side).
+  const past = (x, z) => {
+    let best = null, bd = Infinity;
+    for (const q of w.round) { const d = segDist(x, z, q); if (d < bd) { bd = d; best = q; } }
+    if (!best || bd > 6) return 0;
+    const side = (x - (best.x0 + best.x1) / 2) * best.nx + (z - (best.z0 + best.z1) / 2) * best.nz;
+    return side < 0 ? bd : 0;
+  };
+  const corners = new Array(8);
+  // The car starts with its whole body on the land side (HANDLE: the 5.1 m
+  // sedan's rear corner can reach over a neighboring piece of rail where the
+  // 4.85 m one did not; the start moves up, never past the line).
+  let v = null;
+  for (; back >= 3; back -= 0.5) {
+    v = createVehicle('sedan', w.mx - dx * back, w.mz - dz * back, h);
+    vehicleCorners(v, corners);
+    let clear = true;
+    for (let k = 0; k < 8; k += 2) if (past(corners[k], corners[k + 1]) > 0) clear = false;
+    if (clear) break;
+  }
+  if (back < 3) return null;
   const sp = mph / MPH;
   v.vx = dx * sp;
   v.vz = dz * sp;
   const world = { collision: wcol, city: c, time: 0 };
-  const corners = new Array(8);
   let centerPast = 0, cornerPast = 0, hit = 0;
   const steps = Math.ceil((back + 6) / sp / DT) + 60;
   for (let i = 0; i < steps; i++) {
     stepVehicle(v, { throttle: Math.hypot(v.vx, v.vz) < sp ? 1 : 0 }, DT, world);
     if (v.impact > 0) hit++;
-    // Past the line: on the water side of the nearest wall segment (by
-    // that segment's own land side).
-    const past = (x, z) => {
-      let best = null, bd = Infinity;
-      for (const q of w.round) { const d = segDist(x, z, q); if (d < bd) { bd = d; best = q; } }
-      if (!best || bd > 6) return 0;
-      const side = (x - (best.x0 + best.x1) / 2) * best.nx + (z - (best.z0 + best.z1) / 2) * best.nz;
-      return side < 0 ? bd : 0;
-    };
     centerPast = Math.max(centerPast, past(v.x, v.z));
     vehicleCorners(v, corners);
     for (let k = 0; k < 8; k += 2) cornerPast = Math.max(cornerPast, past(corners[k], corners[k + 1]));

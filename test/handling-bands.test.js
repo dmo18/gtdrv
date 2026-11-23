@@ -4,13 +4,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VEHICLE_SPECS, createVehicle, stepVehicle, setHandlingMode, steerLock, fullLockCurvature, lateralGrip, tireCurve, handlingParams,
-  brakePedal,
+  brakePedal, gripFactor, setHandlingPreset, RETURN_RATE,
 } from '../src/entities/vehicle.js';
 import {
-  MODES, LAT_G_FACTOR, LAT_TEST_SPEEDS, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, MODE_BRAKE_DIFF,
+  MODES, LAT_SHARE, LAT_TEST_SPEEDS, REFERENCE, FLEET_CLASSES, TOL, FT, curbCircleFt, arcadeFactor, ARCADE_GRIP,
+  RETURN_TARGET, LOCK_DEG, HEAVY, UTURN, HB_TURN, LIFT_OFF, PUSH, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, MODE_BRAKE_DIFF,
   MODE_STRAIGHT_DIFF, BANDS, A1_LINEAR, A2_OVERSHOOT, A2_SETTLE, A3_MIRROR, A4_DRIFT, A5, B1_HALF, B2, B4_KEEP,
   ARCADE_SLIP_MAX_DEG, SAG, ASK, HB_SLIP_CAP, SQUEAL, HALF_TRAVEL, SLALOM, LAT_G_LINE, ORDINARY_CARS, BRAKE_PEDAL_S,
 } from '../src/entities/handlingbands.js';
+import { SERVICE_IDS } from '../src/entities/servicevehicles.js';
 import {
   wheelCurve, steerTravel, rawFromTravel, createWheelTracker, rampSteer, tiltToSteer, tiltFilter, sliderRaw,
   TILT_DEAD_DEG,
@@ -99,14 +101,17 @@ function r0(id) {
   return (maxX - minX + maxZ - minZ) / 4;
 }
 // Steady lateral acceleration on full lock at a held speed, in g / spec.grip.
+// (HANDLE: measured from 2 to 4 s after the turn-in, settled, while the
+// heavy service trucks can still hold the speed against the scrub of a front
+// pushed past its limit; was 5 to 8 s.)
 function latShare(id, u) {
   const { v, c } = moving(id, u);
   c.steer = 1;
   let s = 0, n = 0;
-  for (let i = 0; i < 60 * 8; i++) {
+  for (let i = 0; i < 60 * 4; i++) {
     hold(v, c, u);
     stepVehicle(v, c, DT, W);
-    if (i > 60 * 5) { s += v.yawRate * v.speed; n++; }
+    if (i >= 120) { s += v.yawRate * v.speed; n++; }
   }
   return s / n / G / v.spec.grip;
 }
@@ -142,16 +147,31 @@ test('bands: every car has a band, steering rates sit in the lock and return tim
     assert.ok(s, `${id} spec`);
     assert.ok(inBand(1 / s.lockRate, LOCK_TIME), `${id} 1/lockRate ${(1 / s.lockRate).toFixed(3)}`);
     assert.ok(inBand(1 / s.returnRate, RETURN_TIME), `${id} 1/returnRate ${(1 / s.returnRate).toFixed(3)}`);
-    assert.ok(s.steerMax > 0.3 && s.steerMax < 0.6, `${id} steerMax`);
+    assert.ok(s.steerMax > 0.3 && s.steerMax < 0.75, `${id} steerMax`);
+  }
+  // HANDLE: the eighteen fleet classes carry the reference table's wheelbase
+  // and grip, steer back to center in 0.25 s, and lock 33 to 36 degrees (cars).
+  assert.equal(FLEET_CLASSES.length, 18);
+  for (const id of FLEET_CLASSES) {
+    const s = VEHICLE_SPECS[id], r = REFERENCE[id];
+    assert.ok(Math.abs(s.wheelBase - r.wb) < 0.005, `${id} wheelbase ${s.wheelBase} vs ${r.wb}`);
+    assert.equal(s.grip, r.grip, `${id} grip`);
+    assert.equal(s.returnRate, RETURN_RATE);
+    assert.ok(Math.abs(1 / s.returnRate - RETURN_TARGET) < 1e-12, `${id} return ${1 / s.returnRate} s`);
+    const deg = s.steerMax / DEG, [lo, hi] = HEAVY.includes(id) ? LOCK_DEG.heavy : LOCK_DEG.car;
+    assert.ok(deg >= lo && deg <= hi, `${id} lock ${deg.toFixed(1)} deg, band ${lo} to ${hi}`);
   }
   for (const id of Object.keys(VEHICLE_SPECS)) assert.ok(BANDS[id], `${id} has a band`);
   // The Ghostwake stays 10 % above the sports car at the top.
   assert.ok(Math.abs(VEHICLE_SPECS.ghostwake.maxSpeed / VEHICLE_SPECS.sports.maxSpeed - 1.1) < 0.005);
   // The reward cars follow the 6.6 table.
+  // (HANDLE, deliberate: they keep the drivetrain of the chassis they were
+  // built on, muscle 215 kW, pickup 112 kW and sedan 92 kW; the fleet's own
+  // was retuned to the reference table after them.)
   const r = VEHICLE_SPECS;
-  assert.equal(r.sunchaser.power, Math.round(r.muscle.power * 1.08));
-  assert.equal(r.tidewinder.power, Math.round(r.pickup.power * 1.15));
-  assert.equal(r.nightheron.power, Math.round(r.sedan.power * 1.4));
+  assert.equal(r.sunchaser.power, Math.round(215 * 1.08));
+  assert.equal(r.tidewinder.power, Math.round(112 * 1.15));
+  assert.equal(r.nightheron.power, Math.round(92 * 1.4));
   assert.deepEqual([r.sunchaser.maxSpeed, r.tidewinder.maxSpeed, r.nightheron.maxSpeed], [64, 49, 58]);
   assert.deepEqual([r.sunchaser.grip, r.tidewinder.grip, r.nightheron.grip, r.tidewinder.health], [1.05, 0.92, 1.05, 1400]);
   assert.deepEqual([r.sunchaser.body, r.tidewinder.body, r.nightheron.body], [r.muscle.body, r.pickup.body, r.sedan.body]);
@@ -180,10 +200,15 @@ test('bands: straight line the same in both modes (0-60 and top within 3 %, stop
   }
 });
 
-test('bands: turning radius at walking pace, the same in both modes', () => {
+test('bands: turning circle at walking pace (curb to curb for the fleet), the same in both modes', () => {
   for (const id of IDS) {
     const ra = inMode('arcade', () => r0(id)), rs = inMode('sim', () => r0(id));
-    assert.ok(inBand(ra, BANDS[id].r0), `${id} r0 ${ra.toFixed(2)} m, band ${BANDS[id].r0}`);
+    if (BANDS[id].circle) {
+      const ft = curbCircleFt(VEHICLE_SPECS[id], ra);
+      assert.ok(inBand(ft, BANDS[id].circle), `${id} circle ${ft.toFixed(1)} ft, band ${BANDS[id].circle.map((x) => x.toFixed(1))}`);
+    } else {
+      assert.ok(inBand(ra, BANDS[id].r0), `${id} r0 ${ra.toFixed(2)} m, band ${BANDS[id].r0}`);
+    }
     assert.ok(Math.abs(ra / rs - 1) < 0.01, `${id} r0 arcade ${ra.toFixed(2)} sim ${rs.toFixed(2)}`);
     // steerMax is the true wheel angle: the kinematic radius of the center.
     const s = VEHICLE_SPECS[id], b = s.wheelBase * (s.cgFront || 0.55);
@@ -193,25 +218,40 @@ test('bands: turning radius at walking pace, the same in both modes', () => {
 });
 
 test('bands: steady lateral grip on full lock at 15 and 30 m/s, per mode', () => {
+  // HANDLE (deliberate): spec.grip is the real car's skidpad g. Sim holds it
+  // (within TOL.simG for the fleet); Arcade holds the 2.4 item 3 curve times
+  // it (1.25 up to 30 mph, 1.1 from 60 mph). The K10 line (0.9 to 1.1 g for
+  // the ordinary cars) is the Arcade default's; Sim is the real figure.
   for (const mode of MODES) {
     inMode(mode, () => {
       for (const id of IDS) {
         const s = VEHICLE_SPECS[id];
         for (const u0 of LAT_TEST_SPEEDS) {
           const u = u0 === 30 && s.maxSpeed < 36 ? 0.8 * s.maxSpeed : u0;
-          const k = latShare(id, u);
-          assert.ok(inBand(k, LAT_G_FACTOR[mode]), `${mode} ${id} at ${u.toFixed(1)} m/s: ${k.toFixed(3)} x grip, band ${LAT_G_FACTOR[mode]}`);
-          // K10: ordinary cars sit on the section 2 line in both modes.
-          if (ORDINARY_CARS.includes(id)) {
+          const k = latShare(id, u), f = mode === 'arcade' ? arcadeFactor(u) : 1;
+          assert.ok(inBand(k / f, LAT_SHARE), `${mode} ${id} at ${u.toFixed(1)} m/s: ${(k / f).toFixed(3)} of the curve, band ${LAT_SHARE}`);
+          if (mode === 'sim' && REFERENCE[id]) {
             const g = k * s.grip;
-            assert.ok(inBand(g, LAT_G_LINE), `${mode} ${id} at ${u.toFixed(1)} m/s: ${g.toFixed(3)} g, line ${LAT_G_LINE}`);
+            assert.ok(Math.abs(g - REFERENCE[id].grip) <= TOL.simG, `sim ${id} at ${u.toFixed(1)} m/s: ${g.toFixed(3)} g, table ${REFERENCE[id].grip}`);
+          }
+          if (mode === 'arcade' && ORDINARY_CARS.includes(id)) {
+            const g = k * s.grip;
+            assert.ok(inBand(g, LAT_G_LINE), `arcade ${id} at ${u.toFixed(1)} m/s: ${g.toFixed(3)} g, line ${LAT_G_LINE}`);
           }
         }
       }
     });
   }
-  // lateralGrip is factor * spec.grip.
-  inMode('sim', () => assert.ok(Math.abs(lateralGrip(VEHICLE_SPECS.sedan) / VEHICLE_SPECS.sedan.grip - handlingParams('sim').latK) < 1e-12));
+  // lateralGrip is the mode curve times spec.grip, and the curve is 2.4 item 3's.
+  for (const u of [0, 10, 13.41, 18, 22.35, 26.82, 40]) {
+    inMode('sim', () => assert.ok(Math.abs(lateralGrip(VEHICLE_SPECS.sedan, u) - VEHICLE_SPECS.sedan.grip) < 1e-12));
+    inMode('arcade', () => {
+      assert.ok(Math.abs(gripFactor(u) - arcadeFactor(u)) < 1e-9, `arcade curve at ${u} m/s: ${gripFactor(u)}`);
+      assert.ok(Math.abs(lateralGrip(VEHICLE_SPECS.sedan, u) - arcadeFactor(u) * VEHICLE_SPECS.sedan.grip) < 1e-9);
+    });
+  }
+  assert.deepEqual(handlingParams('arcade').lat, [ARCADE_GRIP.low, ARCADE_GRIP.high]);
+  assert.deepEqual(handlingParams('sim').lat, [1, 1]);
 });
 
 test('bands: center to full lock and back at the wheels, the same in both modes', () => {
@@ -666,7 +706,7 @@ test('boost: steady lateral grip on full lock is unchanged with boost held', () 
       return s / n / G / v.spec.grip;
     };
     const k0 = share(false), k1 = share(true);
-    assert.ok(inBand(k1, LAT_G_FACTOR.arcade), `${id} boosted lateral grip ${k1.toFixed(3)} x grip`);
+    assert.ok(inBand(k1 / arcadeFactor(u), LAT_SHARE), `${id} boosted lateral grip ${k1.toFixed(3)} x grip`);
     assert.ok(Math.abs(k1 / k0 - 1) <= 0.03, `${id} lateral grip ${k1.toFixed(3)} boosted vs ${k0.toFixed(3)} plain`);
   }
 });
@@ -770,5 +810,204 @@ test('owner check: steering at the wheel center is near linear, at the curve and
         }
       }
     });
+  }
+});
+
+// ---- HANDLE (docs/PLAN_V3.md 2.4, task HANDLE): the reference table per
+// class, the Arcade grip curve, understeer past the limit, the handbrake
+// turn, the U-turn, lift-off at 80 mph. Each test prints what it measured. ----
+
+const ROLL_SPEED = 15; // m/s, the skidpad run (about a 200 ft circle on full lock)
+// Steady full-lock skidpad run at u: lateral g and body roll (degrees), the
+// mean from 2 to 4 s after the turn-in (as latShare).
+function skidpad(id, u = ROLL_SPEED) {
+  const { v, c } = moving(id, u);
+  c.steer = 1;
+  let s = 0, roll = 0, n = 0;
+  for (let i = 0; i < 60 * 4; i++) {
+    hold(v, c, u);
+    stepVehicle(v, c, DT, W);
+    if (i >= 120) { s += v.yawRate * v.speed; roll += Math.abs(v.roll); n++; }
+  }
+  return { g: s / n / G, roll: roll / n / DEG };
+}
+
+test('reference table: every fleet class measures its row (circle, 0-60, 60-0, skidpad g, roll)', () => {
+  const st = straightTable('arcade'), rows = [];
+  for (const id of FLEET_CLASSES) {
+    const r = REFERENCE[id], s = VEHICLE_SPECS[id];
+    const circle = curbCircleFt(s, r0(id));
+    const t = st[id].t60, stopFt = st[id].stop / FT;
+    const sim = inMode('sim', () => skidpad(id)), arc = inMode('arcade', () => skidpad(id));
+    rows.push(`# ${id.padEnd(12)} circle ${circle.toFixed(1)} ft (${r.circle})  0-60 ${t.toFixed(2)} s (${r.t60})  60-0 ${stopFt.toFixed(0)} ft (${r.stop})`
+      + `  skidpad ${sim.g.toFixed(3)} g sim (${r.grip}), ${arc.g.toFixed(3)} g arcade (${(r.grip * arcadeFactor(ROLL_SPEED)).toFixed(3)})  roll ${sim.roll.toFixed(1)} deg (${r.roll})`);
+    assert.ok(Math.abs(circle / r.circle - 1) <= TOL.circle, `${id} circle ${circle.toFixed(1)} ft vs ${r.circle}`);
+    assert.ok(Math.abs(t / r.t60 - 1) <= TOL.t60, `${id} 0-60 ${t.toFixed(2)} s vs ${r.t60}`);
+    assert.ok(Math.abs(stopFt / r.stop - 1) <= TOL.stop, `${id} 60-0 ${stopFt.toFixed(0)} ft vs ${r.stop}`);
+    assert.ok(Math.abs(sim.g - r.grip) <= TOL.simG, `${id} sim skidpad ${sim.g.toFixed(3)} g vs ${r.grip}`);
+    assert.ok(Math.abs(arc.g - r.grip * arcadeFactor(ROLL_SPEED)) <= TOL.arcadeG, `${id} arcade skidpad ${arc.g.toFixed(3)} g`);
+    assert.ok(Math.abs(sim.roll - r.roll) <= TOL.roll, `${id} roll at the limit ${sim.roll.toFixed(2)} deg vs ${r.roll}`);
+  }
+  console.log(rows.join('\n'));
+  // Classes differ more than before HANDLE: the sports car out-grips the
+  // sedan, which out-grips the pickup, which out-grips the buses (Arcade too).
+  const g = (id) => inMode('arcade', () => skidpad(id).g);
+  assert.ok(g('sports') > g('sedan') + 0.15 && g('sedan') > g('pickup') + 0.08 && g('pickup') > g('citybus') + 0.2);
+});
+
+test('Arcade grip curve: 1.25 up to 30 mph, 1.1 from 60 mph; a street corner at 22 mph is easy', () => {
+  // The sedan at 22 mph on a 12 m street corner (radius about 9 m) needs
+  // 1.1 g... of which Arcade gives it 1.03 g on full lock; at 18 mph (0.74 g) it has room.
+  inMode('arcade', () => {
+    const k = skidpad('sedan', 22 / MPH).g;
+    assert.ok(Math.abs(k - 1.25 * 0.82) <= TOL.arcadeG, `sedan at 22 mph holds ${k.toFixed(3)} g`);
+    const sp = skidpad('sports', 13).g, pu = skidpad('pickup', 13).g;
+    assert.ok(Math.abs(sp - 1.25 * 1.03) <= 0.04 && Math.abs(pu - 1.25 * 0.74) <= 0.03, `sports ${sp.toFixed(3)} g, pickup ${pu.toFixed(3)} g in town`);
+    const hi = skidpad('sedan', 28).g;
+    assert.ok(Math.abs(hi - 1.1 * 0.82) <= TOL.arcadeG, `sedan at 63 mph holds ${hi.toFixed(3)} g`);
+    console.log(`# arcade sedan: ${k.toFixed(3)} g at 22 mph, ${hi.toFixed(3)} g at 63 mph; sports ${sp.toFixed(3)} g, pickup ${pu.toFixed(3)} g at 29 mph`);
+  });
+});
+
+test('U-turn: every car turns round inside a 12 m street, tires between the curbs (trucks and buses: three-point turn)', () => {
+  const out = [];
+  for (const id of FLEET_CLASSES) {
+    const s = VEHICLE_SPECS[id], L = s.wheelBase, a = L * (1 - (s.cgFront || 0.55)), b = L * (s.cgFront || 0.55), t = (s.width - 0.25) / 2;
+    // At rest by the right curb (z = 0), the right tires UTURN.gap m off it, full left lock set at rest.
+    const v = createVehicle(id, 0, -(UTURN.gap + t + 0.12), 0);
+    const c = ctl({ steer: -1 });
+    for (let i = 0; i < 40; i++) stepVehicle(v, c, DT, W);
+    let zMin = Infinity, zMax = -Infinity, turned = 0, last = v.heading;
+    for (let i = 0; i < 60 * 40 && turned < Math.PI; i++) {
+      hold(v, c, UTURN.speed);
+      stepVehicle(v, c, DT, W);
+      turned -= Math.atan2(Math.sin(v.heading - last), Math.cos(v.heading - last));
+      last = v.heading;
+      const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
+      for (const lo of [a, -b]) {
+        for (const la of [t, -t]) {
+          const z = v.z + sh * lo + ch * la;
+          zMin = Math.min(zMin, z - 0.12);
+          zMax = Math.max(zMax, z + 0.12);
+        }
+      }
+    }
+    const need = zMax - Math.min(zMin, zMax - UTURN.street);
+    out.push(`${id} ${(zMax - zMin).toFixed(2)} m`);
+    assert.ok(turned >= Math.PI - 0.02, `${id} turned ${turned.toFixed(2)} rad`);
+    if (UTURN.threePoint.includes(id)) continue;
+    assert.ok(zMax <= 0 && zMin >= -UTURN.street, `${id} U-turn needs ${(zMax - zMin).toFixed(2)} m of street (${need.toFixed(2)})`);
+  }
+  console.log(`# U-turn, curb to curb used: ${out.join(', ')}`);
+});
+
+test('handbrake turn: 90 degrees at 25 mph into a 12 m cross street, then away (Arcade)', () => {
+  const out = [];
+  inMode('arcade', () => {
+    for (const id of FLEET_CLASSES) {
+      if (HB_TURN.except.includes(id)) continue;
+      const u = HB_TURN.mph / MPH;
+      const { v, c } = moving(id, u);
+      const x0 = v.x, goal = Math.PI / 2;
+      let along = 0, phase = 0, maxBeta = 0;
+      for (let i = 0; i < 60 * 6; i++) {
+        if (phase === 0) {
+          // Pull: handbrake and full lock until the nose is half a radian short of the new street.
+          Object.assign(c, { steer: 1, handbrake: true, throttle: 0, brake: 0 });
+          if (v.heading > goal - 0.5) phase = 1;
+        } else {
+          // Catch: release, steer onto the new heading, drive away.
+          Object.assign(c, { handbrake: false, throttle: 0.4, brake: 0, steer: Math.max(-1, Math.min(1, 2.5 * (goal - v.heading) - 0.6 * v.yawRate)) });
+        }
+        stepVehicle(v, c, DT, W);
+        along = Math.max(along, v.x - x0);
+        maxBeta = Math.max(maxBeta, Math.abs(bodySlip(v)));
+      }
+      out.push(`${id} ${along.toFixed(1)} m`);
+      assert.ok(along <= HB_TURN.street, `${id} slid ${along.toFixed(2)} m on, past the ${HB_TURN.street} m cross street`);
+      assert.ok(Math.abs(v.heading - goal) <= HB_TURN.endDeg * DEG, `${id} ends at ${(v.heading / DEG).toFixed(1)} deg`);
+      assert.ok(v.speed > 5 && maxBeta < HB_SLIP_CAP + 0.08, `${id} drives away (${v.speed.toFixed(1)} m/s), slide ${(maxBeta / DEG).toFixed(0)} deg`);
+    }
+  });
+  console.log(`# handbrake turn at 25 mph, center travel past the pull: ${out.join(', ')}`);
+});
+
+test('past the limit the front pushes wide: more lock, a slip angle and tire squeal, never a silent cut', () => {
+  const out = [];
+  for (const mode of MODES) {
+    inMode(mode, () => {
+      for (const id of FLEET_CLASSES) {
+        const run = (steer) => {
+          const { v, c } = moving(id, PUSH.speed);
+          c.steer = steer;
+          let k = 0, ang = 0, x = 0, sq = 0, n = 0;
+          for (let i = 0; i < 60 * 3; i++) {
+            hold(v, c, PUSH.speed);
+            stepVehicle(v, c, DT, W);
+            if (i >= 120) { k += v.yawRate * v.speed; ang += v.steerAngle; x += v.slipF; sq += v.slip; n++; }
+          }
+          return { k: k / n, ang: ang / n, x: x / n, sq: sq / n };
+        };
+        const part = run(PUSH.share), full = run(1), tag = `${mode} ${id}`;
+        assert.ok(full.ang > part.ang * 1.05, `${tag} more lock: ${(part.ang / DEG).toFixed(1)} to ${(full.ang / DEG).toFixed(1)} deg`);
+        assert.ok(Math.abs(full.k / part.k - 1) <= PUSH.same, `${tag} the same turn: ${(full.k / part.k).toFixed(3)}`);
+        assert.ok(full.x > 1 && full.sq >= PUSH.squeal, `${tag} front past its peak (${full.x.toFixed(2)}), squeal ${full.sq.toFixed(2)}`);
+        assert.ok(part.sq < full.sq, `${tag} quieter under the limit`);
+        if (id === 'sedan') out.push(`${mode} sedan at 20 m/s: steer ${PUSH.share} ${(part.ang / DEG).toFixed(1)} deg, ${(part.k / G).toFixed(3)} g, squeal ${part.sq.toFixed(2)}; full ${(full.ang / DEG).toFixed(1)} deg, ${(full.k / G).toFixed(3)} g, front at ${full.x.toFixed(2)} of its peak slip, squeal ${full.sq.toFixed(2)}`);
+      }
+    });
+  }
+  console.log(`# ${out.join('\n# ')}`);
+});
+
+test('lift-off at 80 mph in a fast turn: a little tuck-in, no snap oversteer, both modes', () => {
+  const out = [];
+  for (const mode of MODES) {
+    inMode(mode, () => {
+      // Every car that reaches 80 mph but the service trucks (not in the
+      // reference table; their tall bodies tuck in up to a third in Arcade).
+      for (const id of IDS) {
+        const u = LIFT_OFF.mph / MPH;
+        if (SERVICE_IDS.includes(id)) continue;
+        if (VEHICLE_SPECS[id].maxSpeed < u + 1) continue;
+        const { v, c } = moving(id, u);
+        c.steer = LIFT_OFF.share / ASK[mode];
+        for (let i = 0; i < 180; i++) { hold(v, c, u); stepVehicle(v, c, DT, W); }
+        const y0 = v.yawRate;
+        c.throttle = 0;
+        c.brake = 0;
+        let yMax = y0, bMax = 0;
+        for (let i = 0; i < 120; i++) {
+          stepVehicle(v, c, DT, W);
+          yMax = Math.max(yMax, v.yawRate);
+          bMax = Math.max(bMax, Math.abs(bodySlip(v)));
+        }
+        const bEnd = Math.abs(bodySlip(v)), rise = yMax / y0 - 1, tag = `${mode} ${id}`;
+        assert.ok(y0 > 0.1, `${tag} was turning`);
+        assert.ok(rise <= LIFT_OFF.yawRise[mode], `${tag} yaw rose ${(rise * 100).toFixed(0)} %`);
+        assert.ok(bMax < LIFT_OFF.slipDeg[mode] * DEG, `${tag} body slip ${(bMax / DEG).toFixed(1)} deg`);
+        assert.ok(bEnd <= bMax + 1e-9 && bEnd > bMax - 3 * DEG, `${tag} slip settles (${(bEnd / DEG).toFixed(1)} deg at 2 s)`);
+        if (id === 'sedan' || id === 'muscle' || id === 'suv') out.push(`${tag} +${(rise * 100).toFixed(0)} % yaw, ${(bMax / DEG).toFixed(1)} deg slip`);
+      }
+    });
+  }
+  console.log(`# lift-off at 80 mph: ${out.join(', ')}`);
+});
+
+test('Handling lab presets on the new model: Sharp turns tighter, Relaxed is slower and softer, one table', () => {
+  const circle = () => curbCircleFt(VEHICLE_SPECS.sedan, r0('sedan'));
+  const g = () => skidpad('sedan').g;
+  const base = { c: circle(), g: g() };
+  try {
+    setHandlingPreset('sharp');
+    const sh = { c: circle(), g: g() };
+    setHandlingPreset('relaxed');
+    const re = { c: circle(), g: g() };
+    assert.ok(sh.c < base.c * 0.9, `sharp circle ${sh.c.toFixed(1)} ft vs ${base.c.toFixed(1)}`);
+    assert.ok(Math.abs(re.c / base.c - 1) < 0.03, `relaxed circle ${re.c.toFixed(1)} ft`);
+    assert.ok(Math.abs(re.g / base.g - 0.95) < 0.02, `relaxed grip ${(re.g / base.g).toFixed(3)} of standard`);
+    console.log(`# presets, sedan: circle standard ${base.c.toFixed(1)} ft, sharp ${sh.c.toFixed(1)}, relaxed ${re.c.toFixed(1)}; skidpad ${base.g.toFixed(3)}, ${sh.g.toFixed(3)}, ${re.g.toFixed(3)} g`);
+  } finally {
+    setHandlingPreset('standard');
   }
 });

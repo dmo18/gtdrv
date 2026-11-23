@@ -10,8 +10,8 @@ import {
   VEHICLE_SPECS, createVehicle, stepVehicle, setHandlingMode, fullLockCurvature,
 } from '../src/entities/vehicle.js';
 import {
-  MODES, LAT_G_FACTOR, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, BANDS, A1_LINEAR, A2_OVERSHOOT, A2_SETTLE,
-  A3_MIRROR, A4_DRIFT, A5, B1_HALF, B2, B4_KEEP,
+  MODES, LAT_SHARE, arcadeFactor, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, BANDS, A1_LINEAR, A2_OVERSHOOT, A2_SETTLE,
+  A3_MIRROR, A4_DRIFT, A5, B1_HALF, B2, B4_KEEP, REFERENCE, curbCircleFt,
 } from '../src/entities/handlingbands.js';
 import {
   SERVICE_SPECS, SERVICE_BANDS, SERVICE_IDS, LIGHTBARS, SIRENS, EXTRAS, SERVICE_SPOTS, SPOT_RULES, TRAFFIC_SHARES,
@@ -93,25 +93,30 @@ function r0(id) {
   }
   return (b - a + e - d) / 4;
 }
+// HANDLE (deliberate, as test/handling-bands.test.js): settled from 2 to 4 s
+// after the turn-in (was 5 to 8 s), while the heavy trucks still hold the
+// speed against the scrub of a front pushed past its limit (full input now
+// asks 115 % of the grip, docs/PLAN_V3.md 2.4 item 4).
 function latShare(id, u) {
   const { v, c } = moving(id, u);
   c.steer = 1;
   let s = 0, n = 0;
-  for (let i = 0; i < 60 * 8; i++) {
+  for (let i = 0; i < 60 * 4; i++) {
     hold(v, c, u);
     stepVehicle(v, c, DT, W);
-    if (i > 60 * 5) { s += v.yawRate * v.speed; n++; }
+    if (i >= 120) { s += v.yawRate * v.speed; n++; }
   }
   return s / n / G / v.spec.grip;
 }
-function curvature(id, u, steer, secs = 5, tail = 1.5) {
+// atSpeed: report lateral acceleration / atSpeed^2 (the curvature at that held speed).
+function curvature(id, u, steer, secs = 5, tail = 1.5, atSpeed = 0) {
   const { v, c } = moving(id, u);
   c.steer = steer;
   let s = 0, n = 0;
   for (let i = 0; i < 60 * secs; i++) {
     hold(v, c, u);
     stepVehicle(v, c, DT, W);
-    if (i >= 60 * (secs - tail)) { s += v.yawRate / v.speed; n++; }
+    if (i >= 60 * (secs - tail)) { s += atSpeed ? v.yawRate * v.speed / (atSpeed * atSpeed) : v.yawRate / v.speed; n++; }
   }
   return s / n;
 }
@@ -127,9 +132,12 @@ function pathSteer(v, z, tau = 0.1, k1 = 0.03, k2 = 0.2) {
   return Math.max(-1, Math.min(1, k / fullLockCurvature(v.spec, v.speed)));
 }
 
-test('SV-H1: each service spec measures inside its band in both modes; police keeps its 6.3 row', () => {
+test('SV-H1: each service spec measures inside its band in both modes; police keeps its own row', () => {
   for (const id of FOUR) assert.deepEqual(BANDS[id], SERVICE_BANDS[id], `${id} band merged`);
-  assert.deepEqual(BANDS.police, { r0: [5.0, 6.5], t60: [6, 7], top: [130, 140], stop: [33, 40] });
+  // HANDLE (deliberate): the police row is now the reference table's (PLAN_V3 2.4):
+  // 40 ft curb to curb, 0-60 in 6.0 s and 60-0 in 125 ft within 5 / 8 / 8 %, top as before.
+  assert.deepEqual(REFERENCE.police, { wb: 2.95, circle: 40, grip: 0.88, t60: 6.0, stop: 125, roll: 4 });
+  assert.deepEqual(BANDS.police.top, [130, 140]);
   for (const mode of MODES) {
     inMode(mode, () => {
       for (const id of [...FOUR, 'police']) {
@@ -138,7 +146,8 @@ test('SV-H1: each service spec measures inside its band in both modes; police ke
         assert.ok(inBand(t60, b.t60), `${tag} 0-60 ${t60.toFixed(2)} band ${b.t60}`);
         assert.ok(inBand(top, b.top), `${tag} top ${top.toFixed(1)} band ${b.top}`);
         assert.ok(inBand(stop, b.stop), `${tag} stop ${stop.toFixed(1)} band ${b.stop}`);
-        assert.ok(inBand(r, b.r0), `${tag} r0 ${r.toFixed(2)} band ${b.r0}`);
+        if (b.circle) assert.ok(inBand(curbCircleFt(VEHICLE_SPECS[id], r), b.circle), `${tag} circle ${curbCircleFt(VEHICLE_SPECS[id], r).toFixed(1)} ft band ${b.circle}`);
+        else assert.ok(inBand(r, b.r0), `${tag} r0 ${r.toFixed(2)} band ${b.r0}`);
       }
     });
   }
@@ -161,7 +170,9 @@ test('SV-H2: lateral grip at both test speeds, lock and return times', () => {
         for (const u0 of [15, 30]) {
           const u = u0 === 30 && s.maxSpeed < 36 ? 0.8 * s.maxSpeed : u0;
           const k = latShare(id, u);
-          assert.ok(inBand(k, LAT_G_FACTOR[mode]), `${mode} ${id} at ${u.toFixed(1)}: ${k.toFixed(3)} x grip`);
+          // HANDLE: on the mode's grip curve (Arcade 1.25 to 1.1 of spec.grip by speed, Sim 1).
+          const f = mode === 'arcade' ? arcadeFactor(u) : 1;
+          assert.ok(inBand(k / f, LAT_SHARE), `${mode} ${id} at ${u.toFixed(1)}: ${(k / f).toFixed(3)} of the curve x grip`);
         }
         assert.ok(inBand(1 / s.lockRate, LOCK_TIME) && 1 / s.lockRate >= 0.355, `${id} lock ${(1 / s.lockRate).toFixed(3)}`);
         assert.ok(inBand(1 / s.returnRate, RETURN_TIME), `${id} return`);
@@ -180,10 +191,13 @@ test('SV-H3: steering A1 to A5 and braking B1 to B4 for all four; no wheel unloa
     inMode(mode, () => {
       for (const id of FOUR) {
         const tag = `${mode} ${id}`;
-        // A1 linear.
-        const full = curvature(id, 10, 1, 1.6, 0.6);
+        // A1 linear. (HANDLE, deliberate: the curvature at the held 10 m/s,
+        // lateral acceleration over 10^2. On full lock in Arcade's town grip
+        // these heavy trucks scrub off a little speed, and the path curvature
+        // of a slower car at the same grip is not the steering's share.)
+        const full = curvature(id, 10, 1, 1.6, 0.6, 10);
         for (const s of [0.25, 0.5, 0.75]) {
-          const k = curvature(id, 10, s, 1.6, 0.6);
+          const k = curvature(id, 10, s, 1.6, 0.6, 10);
           assert.ok(Math.abs(k / (s * full) - 1) <= A1_LINEAR, `${tag} A1 ${s}: ${(k / full).toFixed(3)}`);
         }
         // A2 settle.

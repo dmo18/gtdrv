@@ -7,53 +7,139 @@
 import { SERVICE_BANDS } from './servicevehicles.js'; // V1: the four service vehicles (6.11)
 
 export const MODES = ['arcade', 'sim']; // settings.handling, default 'arcade'
-export const LAT_G_FACTOR = { arcade: [1.00, 1.12], sim: [0.88, 1.00] }; // times spec.grip
-// Section 2 line (K10): ordinary cars hold 0.9 to 1.1 g at the test speeds, in both modes.
+
+// The reference table (docs/PLAN_V3.md 2.4 item 1, task HANDLE): one row per
+// fleet class, approximate published figures for a US vehicle of that
+// class, re-checked for this task. The model's specs (CLASS_HANDLING in
+// vehicle.js) are tuned to it; these are the targets the tests hold it to.
+//   wb      wheelbase, m
+//   circle  curb-to-curb turning circle, ft (the outer front tire's path)
+//   grip    skidpad lateral g (Sim holds it; Arcade multiplies it, below)
+//   t60     0 to 60 mph, s
+//   stop    60 to 0 mph, ft (dry, full brake with ABS)
+//   roll    body roll at the limit, degrees (Sim)
+// Reference classes: compact sedan; midsize sedan; full-size sedan (the
+// taxi is the same car); police pursuit sedan; compact crossover SUV;
+// full-size SUV; full-size crew cab pickup; regular cab short bed work
+// pickup (base V6; table row added by HANDLE); muscle coupe; sports car;
+// convertible cruiser; minivan; full-size cargo van; 16 ft box truck;
+// semi tractor (no trailer); 40 ft school bus; 40 ft city bus.
+export const REFERENCE = {
+  compact: { wb: 2.70, circle: 36, grip: 0.83, t60: 8.5, stop: 125, roll: 4.5 },
+  midsize: { wb: 2.83, circle: 38, grip: 0.84, t60: 7.5, stop: 125, roll: 4.5 },
+  sedan: { wb: 2.95, circle: 40, grip: 0.82, t60: 7.5, stop: 130, roll: 5 },
+  taxi: { wb: 2.95, circle: 40, grip: 0.82, t60: 7.5, stop: 130, roll: 5 },
+  police: { wb: 2.95, circle: 40, grip: 0.88, t60: 6.0, stop: 125, roll: 4 },
+  crossover: { wb: 2.75, circle: 37, grip: 0.80, t60: 8.0, stop: 130, roll: 5.5 },
+  suv: { wb: 3.07, circle: 40, grip: 0.76, t60: 7.0, stop: 135, roll: 6 },
+  crewcab: { wb: 3.68, circle: 47, grip: 0.74, t60: 7.0, stop: 135, roll: 6 },
+  pickup: { wb: 3.12, circle: 41, grip: 0.74, t60: 7.5, stop: 140, roll: 6 },
+  muscle: { wb: 2.72, circle: 38, grip: 0.95, t60: 4.8, stop: 110, roll: 3.5 },
+  sports: { wb: 2.72, circle: 38, grip: 1.03, t60: 3.6, stop: 100, roll: 2.5 },
+  convertible: { wb: 2.85, circle: 39, grip: 0.85, t60: 7.0, stop: 125, roll: 4.5 },
+  minivan: { wb: 3.03, circle: 39, grip: 0.78, t60: 8.0, stop: 130, roll: 5.5 },
+  van: { wb: 3.30, circle: 42, grip: 0.72, t60: 9.5, stop: 140, roll: 6 },
+  truck: { wb: 4.50, circle: 55, grip: 0.62, t60: 16, stop: 170, roll: 5 },
+  semi: { wb: 3.90, circle: 60, grip: 0.55, t60: 20, stop: 200, roll: 4 },
+  schoolbus: { wb: 6.40, circle: 72, grip: 0.52, t60: 22, stop: 190, roll: 5 },
+  citybus: { wb: 7.20, circle: 86, grip: 0.52, t60: 24, stop: 190, roll: 5 },
+};
+export const FLEET_CLASSES = Object.keys(REFERENCE);
+// How close the model must come (PLAN_V3 section 6, item 8): circle within
+// 5 %, 0-60 and 60-0 within 8 %, Sim grip within 0.03 g, roll within 0.5 deg.
+export const TOL = { circle: 0.05, t60: 0.08, stop: 0.08, simG: 0.03, arcadeG: 0.03, roll: 0.5 };
+export const FT = 0.3048;
+// Curb-to-curb circle (ft) from the measured radius rc (m) of the path of
+// the car's center (its center of mass) on full lock at walking pace: the
+// rear axle's radius from the center's, then the outer front tire's outer
+// edge. Track = width - 0.25 m, tire half width 0.12 m.
+export const TIRE_HALF = 0.12;
+export function curbCircleFt(spec, rc) {
+  const L = spec.wheelBase, b = L * (spec.cgFront || 0.55), t = spec.width - 0.25;
+  const rr = Math.sqrt(Math.max(0, rc * rc - b * b));
+  return 2 * (Math.hypot(rr + t / 2, L) + TIRE_HALF) / FT;
+}
+
+// Arcade grip curve (2.4 item 3): steady lateral grip = factor * spec.grip,
+// the factor `low` up to `v1` mph, falling linearly to `high` at `v2` mph
+// and held there. Sim: factor 1 (the table as is).
+export const ARCADE_GRIP = { low: 1.25, high: 1.10, v1: 30, v2: 60 };
+export function arcadeFactor(u) {
+  const mph = Math.abs(u) * 2.23694;
+  const { low, high, v1, v2 } = ARCADE_GRIP;
+  return mph <= v1 ? low : mph >= v2 ? high : low + (high - low) * (mph - v1) / (v2 - v1);
+}
+// Steady full-lock lateral grip measured at the test speeds, as a share of
+// the mode's curve times spec.grip (every car, both modes).
+export const LAT_SHARE = [0.96, 1.04];
+// Section 2 line (K10), Arcade (the default): ordinary cars hold 0.9 to 1.1 g at
+// the test speeds. Sim holds the real car's skidpad figure instead (REFERENCE).
 export const LAT_G_LINE = [0.9, 1.1];
 export const ORDINARY_CARS = ['compact', 'sedan', 'taxi'];
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
 export const LOCK_TIME = [0.25, 0.40]; // s, center to full lock, at 0 to 10 m/s
 export const RETURN_TIME = [0.20, 0.30]; // s, full lock to center, hands off
+export const RETURN_TARGET = 0.25; // s, every fleet class (2.4 item 4)
 export const LOCK_TIME_FAST_MAX = 0.55; // s, at 30 m/s
+// Steering lock at full input and walking pace, degrees: 33 to 36 for cars
+// (2.4 item 2); trucks, buses and the vans cut further on longer wheelbases
+// (the tests check the circle; this only keeps the angles real).
+export const LOCK_DEG = { car: [33, 36], heavy: [28, 42] };
+export const HEAVY = ['minivan', 'van', 'suv', 'crewcab', 'pickup', 'truck', 'semi', 'schoolbus', 'citybus'];
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %
+// [min, max]. Fleet classes: circle (ft), t60 (s) and stop (m) from REFERENCE
+// within TOL; top (mph) as before HANDLE. Other cars: r0 (m) as before.
+const TOP = {
+  compact: [95, 105], midsize: [110, 120], sedan: [110, 120], taxi: [110, 120], police: [130, 140],
+  crossover: [105, 118], suv: [95, 105], crewcab: [95, 105], pickup: [95, 105], muscle: [130, 145],
+  sports: [150, 165], convertible: [105, 118], minivan: [83, 95], van: [85, 95], truck: [65, 75],
+  semi: [64, 75], schoolbus: [64, 75], citybus: [64, 75],
+};
+const fleetBand = (id) => {
+  const r = REFERENCE[id];
+  return {
+    circle: [r.circle * (1 - TOL.circle), r.circle * (1 + TOL.circle)],
+    t60: [r.t60 * (1 - TOL.t60), r.t60 * (1 + TOL.t60)],
+    top: TOP[id],
+    stop: [r.stop * FT * (1 - TOL.stop), r.stop * FT * (1 + TOL.stop)],
+  };
+};
 export const BANDS = { // [min, max]
-  // compact, sedan, taxi, police, sports, muscle, van and truck carry the
-  // fleet's bodies (docs/FLEET.md): their new size and mass on the old
-  // drivetrain, so the heavier ones are slower off the line until HANDLE.
-  compact: { r0: [5.0, 6.5], t60: [10, 12.5], top: [95, 105], stop: [34, 42] },
-  sedan: { r0: [5.0, 6.5], t60: [7.5, 9], top: [110, 120], stop: [34, 42] },
-  taxi: { r0: [5.0, 6.5], t60: [7.5, 9.5], top: [110, 120], stop: [34, 42] },
-  police: { r0: [5.0, 6.5], t60: [6, 7], top: [130, 140], stop: [33, 40] },
-  sports: { r0: [5.0, 6.5], t60: [3.5, 4.5], top: [150, 165], stop: [30, 36] },
+  ...Object.fromEntries(FLEET_CLASSES.map((id) => [id, fleetBand(id)])),
   ghostwake: { r0: [5.0, 6.5], t60: [3.3, 4.3], top: [165, 180], stop: [30, 36] },
-  muscle: { r0: [5.0, 6.5], t60: [5, 6], top: [130, 145], stop: [34, 42] },
-  pickup: { r0: [6.0, 7.5], t60: [9, 11], top: [95, 105], stop: [36, 44] },
-  van: { r0: [6.0, 7.5], t60: [11, 13], top: [85, 95], stop: [40, 46] },
-  truck: { r0: [9.0, 11.0], t60: [18, 24], top: [65, 75], stop: [46, 55] },
   // The three reward cars of section 6.6 (W3): bands set from their base
-  // chassis and the top speed the table gives them.
+  // chassis as it was when they were built, and the top speed the table gives them.
   sunchaser: { r0: [5.0, 6.5], t60: [4.6, 5.6], top: [135, 150], stop: [34, 42] },
   tidewinder: { r0: [6.0, 7.5], t60: [8, 10], top: [102, 115], stop: [36, 44] },
   nightheron: { r0: [5.0, 6.5], t60: [5.5, 7], top: [122, 135], stop: [34, 42] },
-  // The first fleet bodies (docs/FLEET.md): the base chassis' bands until
-  // the HANDLE task gives them their own (PLAN_V3 2.4).
-  midsize: { r0: [5.0, 6.5], t60: [7.5, 9], top: [110, 120], stop: [34, 42] },
-  suv: { r0: [6.0, 7.5], t60: [9, 11], top: [95, 105], stop: [36, 44] },
-  crewcab: { r0: [6.5, 8.0], t60: [9, 11], top: [95, 105], stop: [36, 44] },
-  // The rest of the fleet (task FLEET): the base chassis' handling (sedan
-  // for the crossover and the convertible, van for the minivan, truck for
-  // the semi and the buses) on their own size and mass, until HANDLE.
-  crossover: { r0: [5.0, 6.5], t60: [8.5, 10.2], top: [105, 118], stop: [34, 42] },
-  convertible: { r0: [5.0, 6.5], t60: [8.5, 10.2], top: [105, 118], stop: [34, 42] },
-  minivan: { r0: [6.0, 7.5], t60: [9.5, 11.5], top: [83, 95], stop: [40, 46] },
-  semi: { r0: [8.0, 10.0], t60: [20, 25], top: [64, 75], stop: [46, 55] },
-  schoolbus: { r0: [8.5, 10.5], t60: [29, 35], top: [64, 75], stop: [46, 55] },
-  citybus: { r0: [9.6, 11.6], t60: [33, 40], top: [64, 75], stop: [46, 55] },
   ...SERVICE_BANDS,
 };
+// circle: curb-to-curb ft (curbCircleFt of the radius at 2 m/s on full lock).
 // r0: radius (m) of the path of the car's center at 2 m/s on full lock.
 // t60: s from rest to 26.82 m/s. top: mph, reached within 90 s. stop: m from 26.82 m/s to rest.
+
+// Street tests (2.4 item 4), a 12 m street curb to curb:
+// U-turn: from rest beside the right curb (tires `gap` m off it), full lock
+// set at rest, then away at walking pace (`speed` m/s): every tire stays
+// between the curbs (the body may overhang them, as over a real curb).
+// Trucks and buses make a three-point turn instead (`threePoint`).
+export const UTURN = { street: 12, gap: 0.3, speed: 2.5, threePoint: ['crewcab', 'van', 'truck', 'semi', 'schoolbus', 'citybus'] };
+// Handbrake turn (Arcade, the default): at 25 mph pull the handbrake on full
+// lock and turn 90 degrees into a cross street 12 m wide: the car's center
+// goes no more than `street` m further along, the slide stays under the
+// Arcade cap, the car ends within `endDeg` of the new street's heading and
+// drives away. Every fleet class but the trucks and buses (`except`).
+export const HB_TURN = { mph: 25, street: 12, endDeg: 15, except: ['truck', 'semi', 'schoolbus', 'citybus'] };
+// Lift-off at 80 mph in a steady turn (`share` of the lateral grip asked),
+// every car that reaches 80 mph: the nose tucks in a little (more in Sim, with
+// its full weight transfer), never a snap: the yaw rate rises no more than
+// `yawRise`, the body slip stays under `slipDeg` and is not growing 2 s on.
+export const LIFT_OFF = { mph: 80, share: 0.8, yawRise: { arcade: 0.25, sim: 0.5 }, slipDeg: { arcade: 5, sim: 9 } };
+// Past the limit (2.4 item 4): at 20 m/s full input gives more wheel angle
+// than `share` of it, the same curvature within `same`, the front past its
+// peak and tire squeal of at least `squeal`.
+export const PUSH = { speed: 20, share: 0.85, same: 0.04, squeal: 0.15 };
 
 // Steering accuracy and braking accuracy limits (6.3, tests A1 to A5 and B1 to B4).
 export const A1_LINEAR = 0.12; // curvature share error at 0.25, 0.5, 0.75
@@ -71,9 +157,9 @@ export const BRAKE_PEDAL_S = 1.0;
 // Assist rows of the Arcade versus Sim table.
 export const ARCADE_SLIP_MAX_DEG = { fwd: 8, rwd: 16 };
 export const SAG = { arcade: [0, 0.06], sim: [0.18, 0.22] };
-export const ASK = { arcade: 1.00, sim: 1.10 };
+export const ASK = { arcade: 1.15, sim: 1.15 }; // full input asks 115 % of the grip (2.4 item 4), both modes
 export const HB_SLIP_CAP = 0.6; // rad, Arcade handbrake slide cap
-export const SQUEAL = { arcade: 1.3, sim: 0.9 };
+export const SQUEAL = { arcade: 1.05, sim: 0.9 };
 // Touch curve and travel.
 export const HALF_TRAVEL = [0.40, 0.55];
 // Slalom pass rule (K9): all `cones` reached in order, each passed on its own side
