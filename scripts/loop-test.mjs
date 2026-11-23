@@ -1,4 +1,3 @@
-/* global window, document */
 // Plays the loop (docs/LOOP.md) in headless Chromium at the owner's phone
 // size (748x360): a new game, the first five minutes with simulated input
 // (a steering, gas and brake source like a thumb would give), one event of
@@ -47,7 +46,7 @@ const url = `http://127.0.0.1:${port}/` + (map ? `?map=${map}` : '');
 const installDriver = () => {
   const g = window.__rw;
   const src = g.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false });
-  const st = { stuck: 0, rev: 0, revSteer: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
+  const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
   const toast0 = g.hud.toast;
   g.hud.toast = (t, s, k) => { st.toasts.push([Math.round(g.time * 10) / 10, k || '', String(t)]); toast0(t, s, k); };
   function ahead(dist) {
@@ -71,8 +70,14 @@ const installDriver = () => {
       const a = (v.x - o.line.x) * o.line.dx + (v.z - o.line.z) * o.line.dz + 14 + sp * 0.7;
       const h = o.hug || 0; // m to the right of the line: toward the parked row
       pt = { x: o.line.x + o.line.dx * a - o.line.dz * h, z: o.line.z + o.line.dz * a + o.line.dx * h };
-    } else pt = ahead(Math.max(9, Math.min(32, 6 + sp * 0.85))) || o.to || null;
+    } else pt = ahead(Math.max(7, Math.min(20, 5 + sp * 0.6))) || o.to || null;
     let cruise = o.cruise || 19;
+    // Slow down for the next turn of the GPS line.
+    const tr = g.objective.tracker;
+    if (!o.line && tr.active && tr.route.ok) {
+      const t = tr.next();
+      if (t && t.kind !== 'arrive' && t.kind !== 'depart' && tr.toTurn < 14 + sp * 1.6) cruise = Math.min(cruise, 8);
+    }
     let side = 0;
     if (o.ram) {
       let best = null, bd = 90;
@@ -106,10 +111,20 @@ const installDriver = () => {
     src.steer = Math.max(-1, Math.min(1, err * 2.4));
     src.throttle = sp < want ? 1 : 0;
     src.brake = sp > want + 4 ? 0.8 : 0;
-    if (sp < 0.8) {
-      st.stuck += 1 / 60;
-      if (st.stuck > 1.6) { st.stuck = 0; st.rev = 1.5; st.revSteer = -Math.sign(err || 1) * 0.8; }
-    } else st.stuck = 0;
+    // Stuck (standing, or no ground made in four seconds): back out, the other way each time.
+    st.lt += 1 / 60;
+    if (st.lt >= 4) {
+      if (Math.hypot(v.x - st.lx, v.z - st.lz) < 4) st.stuck = 9;
+      st.lt = 0; st.lx = v.x; st.lz = v.z;
+    }
+    if (sp < 0.8) st.stuck += 1 / 60;
+    else if (st.stuck < 9) st.stuck = 0;
+    if (st.stuck > 1.6) {
+      st.stuck = 0;
+      st.revs++;
+      st.rev = 1.6 + (st.revs % 3) * 0.6;
+      st.revSteer = (st.revs % 2 ? -1 : 1) * Math.sign(err || 1) * 0.9;
+    }
   }
   function idle() { src.throttle = 0; src.brake = 1; src.steer = 0; }
   // Run the simulation: `o` as drive(), o.until(g) ends it, o.seconds caps it.
@@ -137,10 +152,17 @@ const installDriver = () => {
   return true;
 };
 
+// A screenshot of the moment (the camera is settled first). Software
+// rendering at night can take very long: a shot that cannot be taken is
+// reported and the run goes on.
 const shot = async (name) => {
-  await page.evaluate(() => window.__lt.draw());
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: join(shots, name + '.png') });
+  try {
+    await page.evaluate(() => window.__lt.draw());
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: join(shots, name + '.png'), timeout: 90000 });
+  } catch (e) {
+    console.log('   (no screenshot ' + name + ': ' + String(e.message).split('\n')[0] + ')');
+  }
 };
 const state = () => page.evaluate(() => {
   const g = window.__rw, se = g.streetEvents, f = g.flow;

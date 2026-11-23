@@ -44,6 +44,7 @@ export function createStreetEvents(game, opts = {}) {
   let lineKey = -2, shownLine = null;
   let px = NaN, pz = NaN;
   let nearGate = false;
+  let wrongT = 0;
   const F = { x: 0, z: 0, px: 0, pz: 0, speed: 0, inCar: false, wrecked: false, passes: 0, smashes: 0, jump: 0, escaped: false, busted: false, stars: 0 };
   const OBJ = { x: 0, z: 0, label: '' };
 
@@ -340,11 +341,15 @@ export function createStreetEvents(game, opts = {}) {
       }
       if (tracked) {
         // Not for the last few meters: the gate is in view, and the GPS would call the gate "arrived" before it is crossed.
+        // A gate is approached from behind: the GPS leads to a point 18 m before it, in the lane.
         const p = game.player;
-        const d = Math.hypot(tracked.x - p.x, tracked.z - p.z);
+        const a = tracked.dx !== undefined ? Math.min(18, tracked.back || 18) : 0;
+        const ax = a ? tracked.x - tracked.dx * a - tracked.dz * (tracked.side || 0) : tracked.x;
+        const az = a ? tracked.z - tracked.dz * a + tracked.dx * (tracked.side || 0) : tracked.z;
+        const d = Math.hypot(ax - p.x, az - p.z);
         if (d < TRACK_NEAR) nearGate = true; else if (d > TRACK_NEAR + 14) nearGate = false;
         if (nearGate) return null;
-        OBJ.x = tracked.x; OBJ.z = tracked.z; OBJ.label = trackLabel || cap(tracked.name);
+        OBJ.x = ax; OBJ.z = az; OBJ.label = trackLabel || cap(tracked.name);
         return OBJ;
       }
       return null;
@@ -353,6 +358,7 @@ export function createStreetEvents(game, opts = {}) {
       const p = game.player;
       const v = p.vehicle;
       if (retryT > 0) retryT -= dt;
+      if (wrongT > 0) wrongT -= dt;
       const inCar = !!v && v.kind === 'car';
       if (run.on) {
         F.x = p.x; F.z = p.z; F.px = Number.isFinite(px) ? px : p.x; F.pz = Number.isFinite(pz) ? pz : p.z;
@@ -379,9 +385,15 @@ export function createStreetEvents(game, opts = {}) {
             if (dx > 40 || dx < -40 || dz > 40 || dz < -40) continue;
             const a1 = dx * ev.dx + dz * ev.dz;
             const a0 = (px - ev.x) * ev.dx + (pz - ev.z) * ev.dz;
-            if (a0 < 0 && a1 >= 0 && a1 - a0 < 6 && Math.abs(-dx * ev.dz + dz * ev.dx) <= ev.w + 1.2) {
+            const across = Math.abs(-dx * ev.dz + dz * ev.dx) <= ev.w + 1.2;
+            if (a0 < 0 && a1 >= 0 && a1 - a0 < 6 && across) {
               begin(ev);
               break;
+            }
+            // Through it the wrong way: say so, once in a while.
+            if (a0 > 0 && a1 <= 0 && a0 - a1 < 6 && across && wrongT <= 0) {
+              wrongT = 6;
+              toast('Wrong way: enter the gate from the other side', 2.5, 'info');
             }
           }
         }

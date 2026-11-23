@@ -36,7 +36,7 @@ const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsa
 // hitches). OVER_MS of excess is what cost the phone one refresh (a frame over 33 ms there):
 // calibrated on the two versions the owner measured (0.7.0: 4 frames, 0.10.0: 20 frames).
 export const LIMITS = {
-  overMs: 40, // main-thread ms above the running level: one lost refresh on the phone
+  overMs: 28, // main-thread ms above the running level: one lost refresh on the phone
   maxOver: 4, // frames over in the drive (the owner's target: at most 4 frames over 33 ms)
   maxWorstPhoneMs: 50, // worst frame in phone terms: 16.7 * (1 + excess / overMs)
   maxNewPrograms: 0, // shader programs compiled during the drive
@@ -156,6 +156,22 @@ function installTimers(cfg) {
     if (md) for (const k of ['multiDrawElementsWEBGL', 'multiDrawArraysWEBGL', 'multiDrawElementsInstancedWEBGL', 'multiDrawArraysInstancedWEBGL']) md[k] = none;
   }
   D.gl = gl;
+  // Bytes handed to the GPU each frame (buffers and texture pixels): on the phone an upload
+  // is driver work this run cannot time, so it is counted.
+  D.up = 0;
+  const wrapUp = (k, size) => {
+    const f = gl[k];
+    if (typeof f !== 'function') return;
+    gl[k] = function counted(...a) { try { D.up += size(a) || 0; } catch { /* count only */ } return f.apply(gl, a); };
+  };
+  const bytes = (x) => (typeof x === 'number' ? x : x && x.byteLength ? x.byteLength : 0);
+  const pix = (x) => (x && x.width ? x.width * x.height * 4 : x && x.byteLength ? x.byteLength : 0);
+  wrapUp('bufferData', (a) => bytes(a[1]));
+  wrapUp('bufferSubData', (a) => bytes(a[2]));
+  wrapUp('texImage2D', (a) => (a.length >= 9 ? (a[8] ? a[3] * a[4] * 4 : 0) : pix(a[5])));
+  wrapUp('texSubImage2D', (a) => (a.length >= 9 ? (a[8] && a[8].byteLength ? a[4] * a[5] * 4 : pix(a[8])) : pix(a[6])));
+  wrapUp('texImage3D', (a) => (a[9] ? a[3] * a[4] * a[5] * 4 : 0));
+  wrapUp('texSubImage3D', (a) => (a[10] ? a[5] * a[6] * a[7] * 4 : 0));
   // The owner's phone runs the High tier at a fixed 2.00; the resolution a run would
   // lead to is worked out afterwards from the frame times.
   if (cfg.quality > 0) g.quality = cfg.quality;
@@ -211,7 +227,7 @@ function syncMark() {
 // n frames: one fixed step and one draw each, as the phone runs it at 60 Hz.
 // Returns compact per-frame rows:
 // [ms, stepMs, drawMs, signature, topSystemIndex, topSystemMs, coreMs, streamMs, renderFrameMs, hudMs,
-//  programs, geometries, textures, vehicles, stars, t0, t1]
+//  programs, geometries, textures, vehicles, stars, t0, t1, bytes uploaded]
 function driveFrames(cfg) {
   const g = window.__rw, D = window.__pcr;
   const STEP = 1 / 60;
@@ -220,7 +236,7 @@ function driveFrames(cfg) {
   let done = false;
   for (let f = 0; f < cfg.n; f++) {
     if (cfg.check && !document.querySelector('.rw-pc-on')) { done = true; break; }
-    D.cur.fill(0); D.part.fill(0);
+    D.cur.fill(0); D.part.fill(0); D.up = 0;
     if (D.heat && D.frame % 60 === 0 && g.police && g.police.heat) {
       const hh = g.police.heat;
       hh.level = 4; hh.grace = 0; hh.cooldown = 0; hh.unseen = 0;
@@ -252,7 +268,7 @@ function driveFrames(cfg) {
     // The state of the run, to tell whether two passes played the same drive.
     const sig = Math.round(g.player.x * 100) + Math.round(g.player.z * 100) * 7 + g.vehicles.length * 1000003 + stars * 17;
     rows.push([t2 - t0, t1 - t0, t2 - t1, sig, bi, bm, core, D.part[0], D.part[1], D.part[2],
-      info.programs ? info.programs.length : 0, info.memory.geometries, info.memory.textures, g.vehicles.length, stars, t0, t2]);
+      info.programs ? info.programs.length : 0, info.memory.geometries, info.memory.textures, g.vehicles.length, stars, t0, t2, D.up]);
   }
   return { rows, done };
 }
@@ -472,7 +488,7 @@ async function main() {
           frame: i, s: +(i / 60).toFixed(1), ms: +r[0].toFixed(1), excess: +excess[i].toFixed(1), stepMs: +r[1].toFixed(1), drawMs: +r[2].toFixed(1),
           topSystem: r[4] >= 0 ? names[r[4]] : '', topSystemMs: +r[5].toFixed(1), coreMs: +r[6].toFixed(1), streamMs: +r[7].toFixed(1),
           renderMs: +r[8].toFixed(1), hudMs: +r[9].toFixed(1), newPrograms: r[10] - prev[10], newGeometries: r[11] - prev[11], newTextures: r[12] - prev[12],
-          vehicles: r[13], stars: r[14],
+          vehicles: r[13], stars: r[14], uploadKb: Math.round((r[17] || 0) / 1024),
         };
         const P = passes[f.from[i]];
         if (P.index) {
@@ -482,6 +498,15 @@ async function main() {
         slow.push(row);
       }
       out.slow = slow;
+      // What reached the GPU in play: frames with new programs or textures, and the largest uploads.
+      const r0 = passes[0][key].rows;
+      const ev = [];
+      for (let i = 1; i < r0.length; i++) {
+        const a = r0[i - 1], b = r0[i];
+        if (b[10] > a[10] || b[12] > a[12] || (b[17] || 0) > 262144) ev.push({ frame: i, s: +(i / 60).toFixed(1), newPrograms: b[10] - a[10], newTextures: b[12] - a[12], newGeometries: b[11] - a[11], uploadKb: Math.round((b[17] || 0) / 1024), excess: +excess[i].toFixed(1) });
+      }
+      out.gpuEvents = ev;
+      out.uploadMb = +(r0.reduce((a, r) => a + (r[17] || 0), 0) / 1048576).toFixed(1);
       const P0 = passes[0];
       if (P0.index && P0[key].rows.length) {
         const rr = P0[key].rows;
@@ -495,6 +520,7 @@ async function main() {
       console.log(`  frames over (excess above ${overMs} ms): ${d.over}   worst excess ${d.worstExcess.toFixed(1)} ms = ${d.phoneWorst.toFixed(0)} ms on the phone   over half: ${d.half}   res ${d.res === null ? 'n/a' : d.res.toFixed(2)}`);
       console.log(`  main thread per frame: median ${d.median.toFixed(1)} ms (step ${d.meanStepMs} + draw ${d.meanDrawMs} mean), p99 ${d.p99.toFixed(1)}, worst ${d.worst.toFixed(1)}   programs ${d.programsStart} to ${d.programsEnd}   slowest system call ${d.slowsys}`);
       if (d.gc) console.log(`  garbage collection (first pass, throttled): ${d.gc.minor} minor, ${d.gc.major} major, ${d.gc.pauseMs} ms in all, worst ${d.gc.worstMs} ms; ${d.gc.allocMb} MB allocated = ${(d.gc.allocMb * 1024 / Math.max(1, d.frames)).toFixed(1)} KB a frame`);
+      console.log(`  to the GPU in play: ${d.uploadMb} MB uploaded; ${d.gpuEvents.filter((e) => e.newPrograms > 0).length} frames with new programs, ${d.gpuEvents.filter((e) => e.newTextures > 0).length} with new textures, ${d.gpuEvents.filter((e) => e.uploadKb > 256).length} with over 256 KB`);
       if (quiet) return;
       console.log('  slow frames: frame, second, excess, step, draw | cause');
       for (const r of d.slow.slice().sort((a, b) => b.excess - a.excess).slice(0, has('--all') ? 1e9 : 25)) {
@@ -502,6 +528,7 @@ async function main() {
         if (r.newPrograms) cause.push(`${r.newPrograms} new programs`);
         if (r.newGeometries > 0) cause.push(`${r.newGeometries} new geometries`);
         if (r.newTextures > 0) cause.push(`${r.newTextures} new textures`);
+        if (r.uploadKb > 64) cause.push(`upload ${r.uploadKb} KB`);
         if (r.streamMs > 4) cause.push(`tiles ${r.streamMs}`);
         if (r.topSystemMs > 4) cause.push(`${r.topSystem} ${r.topSystemMs}`);
         if (r.coreMs > 4) cause.push(`core ${r.coreMs}`);
