@@ -27,3 +27,7 @@ Reset point: the counters above restart at 0.8.0 publish for the V3 cap.
 ## Cap change (2026-11-23)
 
 The owner said they are away until the game is ready and told me not to stop. The V3 cap of 3.5M was reached at 0.9.0. Raised to 7.0M for 0.10.0, 0.11.0 and 1.0.0 (plan estimates 2.1M to 3.0M plus the store milestone and fixes). Stop and ask at 7.0M, after 5 failed attempts, or if /usage shows 80 percent.
+
+## 2026-11-23, after 0.10.0
+
+0.10.0 used 2.5M (fleet, views, handling, build fix). V3 total 5.9M. Owner round 3 needs about 1.8M: cap raised to 8.0M, announced to the owner in the status block. Stop and ask at 8.0M.

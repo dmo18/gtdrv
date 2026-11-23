@@ -688,3 +688,25 @@ in route following, ground sampling or prop breaks.
 ## 12. Market reference additions (docs/MARKET.md)
 
 New row in 0.11.0: CUSTOM (Sonnet, Opus review, 150k to 220k): free vehicle paint, metallic finishes, wheels, tint, decals, saved looks, a few outfits and accessories; owns src/ui/garage screens, src/core/garage.js look fields (sanitised), carbody color hooks. No purchases, no ads, no currency.
+
+## 13. Owner round 3 (after 0.10.0, 2026-11-23): 0.11.0 "What you saw"
+
+Phone check 0.10.0: median 16.6 ms, worst 100 ms, 20 frames over 33 ms (was 4), res 1.90,
+start 4.1 s, mem 215 MB, slowsys traffic 9.0 ms. Owner's words and screenshots
+(docs/owner/r3-*.jpg): roads look broken at junctions; the car is still impossible to steer;
+the on-screen display kills the view; the cockpit dash is poor; weapons cannot be switched
+while driving; planes do not fly right; the map is still full of glitchy wastelands.
+
+This round replaces the old 0.11.0 scope. The loop work (section 2.9) moves to 0.12.0.
+
+| id | task | model | owns |
+|---|---|---|---|
+| ROADS | Clean junctions (one asphalt area per junction, strips trimmed, no paint through, round curb corners, merged junction clusters, tapers where lane counts change, no slivers between paired one-ways), sidewalks as offsets | Opus | src/world/miami.js, roadprofile.js, citygen.js, ground.js, src/render/citymesh.js, realcity.js, textures.js |
+| LOTS | No wastelands: block interiors dressed by rule (forecourt, surface parking, park), ugly cone shrubs and box hedges replaced, one ground per block, no flicker or pop | Opus | src/world/lots.js, src/render/lotmesh.js, props.js, treebatch.js, buildings.js, src/world/propsolid.js |
+| CONTROLS | Touch steering that works with two fingers (relative drag wheel), SWAP while driving, on-screen display out of the view (compact turn pill in the top row, street name under the minimap, no prompts unless a destination was chosen), narrow browser sizes | Opus | src/ui/touch.js, wheel.js, hud.js, styles.js, combathud.js, phonecheck.js, src/systems/objective.js, scripts/ui-test.mjs |
+| DRIVE | Car response a thumb can drive: full input equals the most the car can turn at that speed, no push past grip in Arcade, precision at speed, camera follows promptly, a human-driver test | Opus | src/entities/vehicle.js, handlingbands.js, src/core/input.js, handlingpreset.js, src/render/chasecam.js (chase views) |
+| AIR | Planes fly right (arcade flight: easy takeoff, coordinated turns, hands-off level flight, soft stall, easy landing) and a proper cockpit dash | Opus | src/entities/aircraft.js, src/render/carinterior.js |
+| PERF | After the five land: back to at most 4 frames over 33 ms in the Phone check drive | Opus | by finding |
+
+Publish: 0.10.1 as soon as CONTROLS and DRIVE pass the gates; 0.11.0 with ROADS, LOTS, AIR, PERF.
+Cap: this round is estimated at 1.8M; V3 cap raised from 7.0M to 8.0M (docs/USAGE.md).
