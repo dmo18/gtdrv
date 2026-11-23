@@ -1,6 +1,7 @@
 # Rustwater: plan version 3, "a real American city you can drive"
 
-Written 2026-11-23 against the 0.8.0 work in progress (commit 2349e0d plus uncommitted work).
+Written 2026-11-23. Measured on the 0.8.0 tree just before it was published (commit 2349e0d
+plus the work that became edda035).
 Design only: no source file was changed. It replaces docs/PLAN_V2.md section 5 from 0.9.0 on
 (V2's "0.9.0 Polish" and "1.0.0 Store" move behind the three versions below). The rules of
 PLAN_V1 2.1 and 2.6 and PLAN_V2 5.4 (gates, one owner per file, Phone check) stay in force.
@@ -177,13 +178,18 @@ Sedan, Arcade mode, steady circle (node, `stepVehicle`):
   sedan (real midsize 37 to 38 ft), 48 ft pickup (real, fine), 73 ft box truck.
 - Every ordinary car holds 0.98 g at full input from 18 mph up (a real family sedan 0.80 to
   0.85 g), with no visible slide: it feels like rails, then like a wall.
-- Between 18 and 25 mph the turn radius doubles (6.7 to 12.6 m) because the lock is cut to the
-  grip limit: exactly at street-corner speed the same thumb travel gives half the turn. A
-  right turn into an 11 m street needs about 8 m radius: fine at 18 mph, impossible at 25.
+- Above 18 mph the lock is cut silently to the grip limit (27 degrees at 18 mph, 15.5 at 25,
+  9.6 at 34): past that point more thumb travel does nothing, with no slide and no tire noise
+  to say why. The radius itself (12.6 m at 25 mph) is what physics allows at 1 g.
+- A U-turn needs 12.5 m between curbs; the streets are drawn 11 m wide, so no car can turn
+  around in one move on any ordinary street.
 - Roll 4 degrees for every class; no handbrake turn tuned; 0 to 60: sedan 8.0 s, sports 3.7,
   pickup 9.4, muscle 5.2, truck 19.4 (plausible).
-- The existing bands (handlingbands.js) pin these numbers, so the tests pass and the feel is
-  untested: no tuning was ever chosen by the owner on the phone.
+- Honest reading: no single number here is far from an arcade-tuned real car, so the tests
+  (handlingbands.js) pass. What they cannot see is the feel: the silent limit, the same roll
+  on everything, the touch wheel mapping (not measured here), and corners on streets of the
+  wrong width with no curbs. No tuning was ever chosen by the owner on the phone. That, not a
+  formula, is the gap.
 
 ### 1.9 Items 9 and 10: British, not American
 
@@ -304,8 +310,9 @@ Word counts in src (code, comments and text):
      most 8 alive), a hydrant sprays for 6 s. The prop comes back when its tile is rebuilt
      or after 120 s out of view. Breaks score (2.8).
    - `flat`: paint, paths, towels, drives, bays: no shape.
-3. The collision world gets one new primitive, a capsule segment (`addSegment`), used for all
-   long thin things: sea walls, bridge rails, medians' curbs are not segments (see 5).
+3. The collision world gets one new primitive, a capsule segment (`addSegment`), used for the
+   long thin solids: sea walls and bridge rails. Curbs and medians are not collision shapes;
+   they are ground height (item 5).
 4. Sea wall and rails. A new build step traces the land outline (the zero line of
    `shoreDist`, simplified to 2 m) into `city.edgeLines`: closed polylines tagged `seawall`,
    `rail` (bridge and causeway deck edges), `beach` (no wall: OSM beach areas and the island
@@ -343,7 +350,7 @@ Word counts in src (code, comments and text):
    damage a car. A parked car can never hurt anyone.
 6. Wanted stars: no star for car contact under 11 mph relative speed or for breaking props.
 
-### 2.4 Handling (item 8) - data in 0.9.0, model in 0.10.0
+### 2.4 Handling (item 8) - owner's presets in 0.9.0, data and model in 0.10.0
 
 1. A spec table per class from real US vehicles replaces the invented one. Figures are
    approximate published values for the named reference class and are re-checked by the
@@ -370,17 +377,21 @@ Word counts in src (code, comments and text):
 
 2. Steering lock 33 to 36 degrees for cars (the table's circle follows from wheelbase and
    lock; the test checks the circle, not the angle).
-3. Arcade (default) gets a low-speed grip boost so a street corner is takeable at the speed a
-   player arrives: grip x 1.35 up to 22 mph, falling to x 1.0 at 55 mph. With it the sedan's
-   full-input radius is about 4.5 m at 11 mph, 9 m at 25 mph, 17 m at 34 mph and the radius
-   may not grow faster than 1.0 m per mph anywhere (today 0.84 m per mph across 18 to 25 mph,
-   after a flat 5 to 7 m: the jump is the bug, the test pins the slope). Sim keeps real grip.
-4. Model work (0.10.0): past the limit the front pushes wide with tire noise instead of the
-   lock being cut silently; the handbrake swings the tail (a 90 degree handbrake turn at
-   25 mph inside one 12 m street); roll by class from the table; steering return 0.25 s.
-5. A "Handling lab" page in Settings (0.10.0): three presets (Tight, Standard, Heavy), a
-   steering sensitivity slider and a 20 s test loop on a closed lot. The owner's choice on his
-   phone becomes the shipped default. This is the only honest way to close item 8.
+3. Arcade (default) multiplies the table's real grip by 1.25 up to 30 mph, falling to 1.1 at
+   60 mph (sedan about 1.05 g in town, as today; pickup 0.93; sports 1.29), so classes differ
+   more than today and a street corner is still takeable at 22 mph. Sim uses the table as is.
+4. Model work (0.10.0): past the limit the front pushes wide with tire noise and a little
+   more lock (full input asks 115 percent of grip) instead of the lock being cut silently; the
+   handbrake swings the tail (a 90 degree handbrake turn at 25 mph inside one 12 m street);
+   roll by class from the table; steering return 0.25 s; every sedan makes a U-turn inside a
+   12 m street.
+5. "Handling lab" in Settings, first form in 0.9.0 (cheap, and it brings the owner's verdict a
+   version early): three presets on today's model, Tight (lock 35 degrees, quicker lock,
+   more assist), Standard (today), Heavy (real grip, slower lock, more roll), plus the
+   steering sensitivity slider and a one-tap "feels right / feels wrong" that is saved and
+   reported in the Phone check line. Full form in 0.10.0: the same presets on the new model
+   and a 20 s test loop on a closed lot. The owner's choice on his phone becomes the shipped
+   default. This is the only honest way to close item 8.
 
 ### 2.5 American pass (items 9, 10) - version 0.9.0, first task, alone on the tree
 
@@ -497,7 +508,7 @@ all in 0.9.0, in this order of value:
 3. The car and the player stop dying for nothing.
 4. A route line and a turn prompt.
 5. American words; no box cars in lots.
-6. Corner-speed steering fix (data only).
+6. Three handling presets to choose from on the phone (the real fix follows his choice).
 
 Then 0.10.0: American fleet with three real levels of detail, handling model and lab, hood and
 cockpit views. Then 0.11.0: flow, events, daily three, the board, the guided start, raised
@@ -510,7 +521,7 @@ flyovers and I-95 on stilts, a second handling rewrite, online boards.
 
 | version | theme | workstreams | spend (tokens) | exit |
 |---|---|---|---|---|
-| 0.9.0 | Real streets, solid world | U0 alone, then MAP, SOLID, LOTS, NAV in parallel, then SEC-L, RV | 1.5M to 2.1M | section 6 checks for items 1 to 7, 9, 11; budgets of section 7; owner's Phone check with the "local test" (he names five intersections, drives to each by GPS) |
+| 0.9.0 | Real streets, solid world | U0 alone, then MAP, SOLID, LOTS, NAV, LAB in parallel, then SEC-L, RV | 1.5M to 2.1M | section 6 checks for items 1 to 7, 9, 11; budgets of section 7; owner's Phone check with the "local test" (he names five intersections, drives to each by GPS) |
 | 0.10.0 | American iron | FLEET-0 (three bodies) then owner yes, then FLEET, HANDLE, VIEW in parallel, then RV | 1.2M to 1.7M | checks for items 8, 10, 12, 13; the owner's preset chosen in the Handling lab |
 | 0.11.0 | Hooked | LOOP-D (design), then LOOP, START, BRIDGE in parallel, then SEC-F, RV | 0.9M to 1.3M | checks for item 14; a 20 minute session by the owner without a stuck moment |
 | 0.12.0 | Polish (V2's 0.9.0) | as PLAN_V2 5.3 Q1, A2, W | as V2 | as V2 |
@@ -536,9 +547,10 @@ listed belongs to the coordinator.
 |---|---|---|---|
 | U0 | Rename wave to US English across the tree, save-key migration, test/us-english.test.js with its allowlist, units and clock text, vehicle labels, shop signs. Runs alone; everything after obeys the lint | Haiku for the renames, Sonnet for the test and migration, Opus review, 150k to 220k | every file for one day; then test/us-english.test.js, src/core/units.js |
 | MAP | Wider box and richer tags (2.1 items 1, 2), roadprofile.js, divided-road pairing, lane functions, US paint, real signals and stop signs, sidewalks and curbs, infill rule, new Beach crop and start, `city.streetAt`, every-name sign atlas and blades | Opus, 400k to 550k | scripts/fetch-map.mjs, scripts/split-map.mjs, src/world/data/*, src/world/miami.js, roadprofile.js (new), citygen.js (lane functions), regions.js, miami-spots.js, regioncontent.js, src/systems/traffic.js, src/render/citymesh.js, realcity.js, textures.js, test/mapdata, miami*, regions*, traffic tests, test/roadprofile.test.js (new) |
-| SOLID | propsolid.js and `fillPropCollision`, capsule segments, edge lines with sea wall and rails drawn, ground.js and wheel following, the damage rule of 2.3, person and car contact, star rule, corner-speed data fix of 2.4 item 3 with the spec table and new bands | Opus, 400k to 550k | src/world/collision.js, propsolid.js (new), ground.js (new), edgelines.js (new), src/entities/vehicle.js, onfoot.js, handlingbands.js, src/systems/combat.js, police.js, peds.js, src/render/props.js, vehiclemesh.js, combatfx.js, test/prop-collision, ground, seawall, damage-rules tests (new) |
+| SOLID | propsolid.js and `fillPropCollision`, capsule segments, edge lines with sea wall and rails drawn, ground.js and wheel following, the damage rule of 2.3, person and car contact, star rule, the preset hook LAB asks for | Opus, 400k to 550k | src/world/collision.js, propsolid.js (new), ground.js (new), edgelines.js (new), src/entities/vehicle.js, onfoot.js, handlingbands.js, src/systems/combat.js, police.js, peds.js, src/render/props.js, vehiclemesh.js, combatfx.js, test/prop-collision, ground, seawall, damage-rules tests (new) |
 | LOTS | Parking lots only where mapped, fill by type and hour, the 60-in-view cap, bay cars drawn with the real far body (instanced), no oboxes, curbside spots from the parking lanes | Sonnet, Opus review, 150k to 220k | src/world/lots.js, src/render/lotmesh.js, src/systems/parked.js, test/lotmesh, world-density tests |
 | NAV | route.js, minimap route line and north-up switch, turn prompt, road chevrons, full map names and zoom, tap to route, HUD street line, objectives and adventures route through it | Opus for route.js, Sonnet for the UI, Opus review, 250k to 350k | src/core/route.js (new), src/ui/minimap.js, hud.js, src/systems/mapui.js, objective.js, test/route.test.js (new), map-test script |
+| LAB | Handling lab, first form (2.4 item 5): three presets, sensitivity, the one-tap verdict saved and shown in the Phone check line | Sonnet, Opus review, 60k to 90k | src/ui/menu.js, phonecheck.js, test/steering.test.js (preset values); vehicle.js lines go through SOLID |
 | SEC-L | Security review, light: the data pipeline (dev-time fetch only, no runtime request, attribution), the save migration, new storage keys, the precache list | Opus, independent, read only, 30k to 40k | none |
 | RV | Milestone review: all gates, section 6 and 7, review shots of Ocean Drive, Lincoln Road, Alton at 5th, a divided road, a sea wall, a bridge rail, a lot, the map at three zooms, a turn prompt | Opus, different session, 70k to 100k | none |
 
@@ -553,7 +565,7 @@ prop types only through that table.
 |---|---|---|---|
 | FLEET-0 | Style sheet (Fable brief, 20k) and three bodies at L0, L1, L2 with the smoothness test; review sheets to the owner | Opus, 150k to 200k | src/render/carbody.js, test/carmesh.test.js, scripts/vehicle-shots.mjs |
 | FLEET | The other thirteen bodies, L2 instancing by model, static parked cars on L2, plates, US service details, spawn mix by district (SUVs and pickups half the traffic) | Opus, 350k to 500k | src/render/carbody.js, servicebody.js, vehiclemesh.js, vehiclemats.js, graphics.js (car level switch), src/entities/vehicle.js (specs only: sizes, eye points), servicevehicles.js, traffic spawn table |
-| HANDLE | Understeer past the limit, handbrake turn, roll by class, steering return, the Handling lab page and its closed test lot, bands for all sixteen classes | Opus, 250k to 350k | src/entities/vehicle.js (model; FLEET sends spec lines through this owner), handlingbands.js, src/ui/menu.js (lab page), test/handling-bands, steering tests |
+| HANDLE | The spec table of 2.4 as data and bands for all sixteen classes, Arcade grip curve, understeer past the limit, handbrake turn, roll by class, steering return, the full Handling lab with its closed test lot | Opus, 250k to 350k | src/entities/vehicle.js (model; FLEET sends spec lines through this owner), handlingbands.js, src/ui/menu.js (lab page), test/handling-bands, steering tests |
 | VIEW | Hood and cockpit views, interior mesh kit, drag look, per-class eye points, view tests | Opus, 200k to 280k | src/render/chasecam.js, carinterior.js (new), src/ui/touch.js (look drag), test/chasecam, firstview tests |
 | RV | Milestone review with every body's sheet and both views in every class looked at | Opus, 70k to 100k | none |
 
@@ -580,7 +592,7 @@ prop types only through that table.
 | 5 | At 2,000 seeded land points and along 20 routes across curbs, lots and sand: every wheel bottom within -2 cm and +3 cm of `groundAt` after 0.5 s; no frame with a wheel more than 3 cm under; a curb crossing produces a jolt event | test/ground.test.js |
 | 6 | Along every `seawall` and `rail` line, a car at 11, 45 and 90 mph at 30, 60 and 90 degrees never gets its center past the line with y < 0.9; no part of the car box crosses by more than 0.2 m; `gap` and `beach` stretches let it pass; a boat launches from each pier and slipway; the drawn wall lies within 0.1 m of the collision line | test/seawall.test.js |
 | 7 | Default mode: 50 crashes at 60 mph leave the player's car driveable (health >= 15 percent, not wrecked); a walker at sprint into a parked car: no fall, no damage, both modes; car at 10 mph into the player: no fall; Hard mode table of 2.3 item 5; no car explodes without 8 s of fire; crash damage alone never starts a fire; no star under 11 mph contact | test/damage-rules.test.js |
-| 8 | Spec table test per class: curb-to-curb circle within 5 percent of the table, steady grip within 0.03 g (Sim) and the boost curve (Arcade), 0-60 within 8 percent, 60-0 within 8 percent, roll within 0.5 degree; radius growth <= 1.0 m per mph from 5 to 60 mph; a right turn into a 12 m street at 22 mph stays in lane (Arcade); handbrake turn test | test/handling-bands.test.js |
+| 8 | Spec table test per class: curb-to-curb circle within 5 percent of the table, steady grip within 0.03 g (Sim) and on the Arcade curve, 0-60 within 8 percent, 60-0 within 8 percent, roll within 0.5 degree; full input past the limit gives a slip angle and a squeal event, never a silent cut; a sedan U-turns inside a 12 m street; a right turn into a 12 m street at 22 mph stays in lane (Arcade); the handbrake turn; the three presets differ by the stated amounts | test/handling-bands.test.js |
 | 8 | The owner picks a preset in the Handling lab and says the car turns right | owner |
 | 9 | Zero British words, metric units or 24-hour clock text outside the allowlist | test/us-english.test.js |
 | 10 | Fleet list equals the sixteen classes; none of the retired bodies; hood length share >= 0.24 of length for sedans and pickups; driver eye z on the left; rear plate only; traffic mix by district | test/carmesh.test.js, traffic.test.js |
@@ -595,17 +607,18 @@ prop types only through that table.
 The base is whatever 0.8.0 publishes (its targets: Normal 200 calls and 250k triangles, High
 260 and 380k; measured before it: Normal about 306 calls and 397k). No V3 version may publish
 above the allowance below, measured by scripts/perf-scenarios.mjs at the new Ocean Drive start
-and on Downtown. The Phone check stays: median 16.7 ms, worst 34 ms, no frame over 33 ms
+and on Downtown. High lands above the 0.8.0 target of 380k and below the 478k the S24 Ultra
+held at 60 before; if its Phone check slips, the parked-car cap halves first. The Phone check stays: median 16.7 ms, worst 34 ms, no frame over 33 ms
 after the first 2 s.
 
 | version | allowed change to the street view (Normal) | ceiling, Normal | ceiling, High |
 |---|---|---|---|
-| 0.9.0 | medians, curbs, parking lines +8k tris in existing tile draws; sea wall and rails +6k, 0 new draws (tile merged); blades and signs +3k; static parked cars at most 60 x 700 = 42k but replacing about 9k of boxes and capped (was uncapped); falling props 1 instanced draw, 8 alive; chevrons 1 draw | 210 calls, 290k | 270 calls, 410k |
-| 0.10.0 | cars, 40 in view: L0 4 cars x 4 draws x 6k = 16 draws, 24k; L1 8 cars x 1 draw x 1.2k = 8 draws, 9.6k; L2 28 cars, <= 8 model draws, 7.3k: total <= 32 draws and 41k (today 42 draws and 45.6k for ten cars); parked cars move to L2: 60 x 260 = 15.6k; cockpit +1 draw, +1.5k while the exterior is hidden | 205 calls, 265k | 265 calls, 390k |
-| 0.11.0 | event gates and boards <= 6 draws, 4k; flow meter is DOM; raised decks +10k in tile draws | 211 calls, 269k | 271 calls, 394k |
+| 0.9.0 | medians, curbs, parking lines +8k tris in existing tile draws; sea wall and rails +6k, 0 new draws (tile merged); blades and signs +3k; static parked cars at most 40 in view x 700 (today's far body) = 28k in <= 8 instanced draws, replacing the box cars (36 triangles each, uncapped); falling props 1 instanced draw, 8 alive; chevrons 1 draw. Total +45k, +10 calls | 210 calls, 295k | 270 calls, 425k |
+| 0.10.0 | cars, 40 in view: L0 4 cars x 4 draws x 6k = 16 draws, 24k; L1 8 cars x 1 draw x 1.2k = 8 draws, 9.6k; L2 28 cars, <= 8 model draws, 7.3k: total <= 32 draws and 41k (today 42 draws and 45.6k for ten cars); parked cars move to L2 and the cap rises to 60: 15.6k; cockpit +1 draw, +1.5k while the exterior is hidden. Total against the 0.8.0 base +30k, +5 calls | 205 calls, 280k | 265 calls, 410k |
+| 0.11.0 | as 0.10.0 plus event gates and boards <= 6 draws, 4k; flow meter is DOM; raised decks +10k in tile draws | 211 calls, 294k | 271 calls, 424k |
 
-Other limits: region data chunk for the Beach <= 0.75 MB gzip (today 0.5 MB plain file of
-509 KB before gzip grows by the east strip); script memory at start <= the 0.8.0 budget
+Other limits: the Beach region data file <= 900 KB plain and 290 KB gzip (today 509 KB
+plain, before the east strip and the new tags); script memory at start <= the 0.8.0 budget
 (120 MB) + 10 MB; city build <= the 0.8.0 budget + 15 percent; route search < 8 ms; ground
 sampling <= 0.05 ms a step for 70 vehicles (4 lookups each on a grid); no allocation per step
 in route following, ground sampling or prop breaks.
