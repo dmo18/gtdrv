@@ -304,6 +304,7 @@ function makePaint(rng, N) {
 
 // ------------------------------------------------------------ atlas tool ----
 // Packs named pictures onto one canvas in rows and remembers where.
+let atlasWarned = false;
 function createAtlas(size, height = size) {
   const c = canvas(size, height), e = canvas(size, height);
   const g = c.getContext('2d'), ge = e.getContext('2d');
@@ -323,7 +324,7 @@ function createAtlas(size, height = size) {
       if (y + h > height) {
         // Out of room: leave this picture out rather than stop the game.
         // Its users check for the missing entry (props.js, buildings.js).
-        console.warn('atlas full, skipped: ' + name);
+        if (!atlasWarned) { atlasWarned = true; console.warn('atlas full, skipped: ' + name + ' (further misses not logged)'); }
         return;
       }
       for (const ctx of [g, ge]) {

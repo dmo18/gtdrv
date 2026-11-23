@@ -216,6 +216,11 @@ test('compactFar leaves out near tiles and far detail', () => {
   compactFar(mesh, Uint8Array.of(1, 1), Uint8Array.of(0, 0));
   assert.equal(drawn, 0);
   assert.equal(mesh.visible, false);
+  // A tile wholly inside the fog (detail 2) is left out at every level.
+  compactFar(mesh, Uint8Array.of(0, 0), Uint8Array.of(2, 1));
+  assert.equal(drawn, 12, 'tile 0 in the fog');
+  assert.deepEqual([...mesh.geometry.index.array.slice(0, 12)], [...full.slice(18, 30)]);
+  assert.equal(mesh.visible, true);
 });
 
 test('the real map: the spawn street lots are dressed, fast enough to stream', () => {
@@ -320,6 +325,27 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
     }
   }
   assert.ok(near > 0 && far2 > 0 && distant > 0, `near ${near}, far ${far2}, distant ${distant}`);
+  // Shadows: each shown tile casts through position-only proxies (one per
+  // quarter at most) on SHADOW_LAYER; its drawn meshes do not cast,
+  // except the cut-out detail (fences, railings: alpha-tested).
+  const { SHADOW_LAYER } = await import('../src/render/realcity.js');
+  const M = group.userData.materials;
+  let proxies = 0;
+  for (const t of st.tiles) {
+    if (!t.group) continue;
+    let mine = 0;
+    for (const m of t.meshes) {
+      if (m.name === 'shadow-proxy') {
+        mine++;
+        assert.equal(m.layers.mask, 1 << SHADOW_LAYER);
+        assert.ok(m.castShadow && !m.geometry.attributes.normal && !m.geometry.attributes.color, 'positions only');
+      } else if (m.castShadow) assert.equal(m.material, M.detailMat, `${m.name} casts`);
+      else assert.ok(m.layers.isEnabled(0));
+    }
+    assert.ok(mine <= 4);
+    proxies += mine;
+  }
+  assert.ok(proxies > 0);
   // Moving off: the trees left behind fall back to their far shapes.
   cam.position.x = s.x + 200;
   st.update(cam, 3);
@@ -327,4 +353,11 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
     if (!e.shown) continue;
     for (let i = 0; i < e.n; i++) if (Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z) > TREE_NEAR_R[1] + 5) assert.notEqual(e.lod[i], 2);
   }
+  // A renderer without multi-draw: the trees go back into the tiles.
+  st.setTreeBatch(false);
+  assert.equal(st.trees(), null);
+  assert.ok(!group.children.some((o) => o.isBatchedMesh), 'the batch is gone');
+  let stamped = 0;
+  for (const t of st.tiles) if (t.group && t.shown) stamped += t.meshes.filter((m) => m.name === 'trees-detail').length;
+  assert.ok(stamped > 0, 'tree meshes in the rebuilt tiles');
 });

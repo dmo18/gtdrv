@@ -2,6 +2,11 @@
 // step/draw cost in a fixed daytime street view, a night view and the
 // worst frame of the first seconds of play (first-time costs).
 // usage: node scripts/perf.mjs [query]   (e.g. map=island)
+// The two street views of the budget (docs/PERF.md, docs/PLAN_V3.md 7):
+//   node scripts/perf.mjs                      the Beach start (default map)
+//   node scripts/perf.mjs map=miami-downtown   Downtown
+// RW_QUALITY=1.25 measures the High tier (0.75 Low, 1 Normal, the default);
+// the last line says whether the day and night views keep to its budget.
 import { createRequire } from 'node:module';
 import { buildGame, serve } from './build.mjs';
 
@@ -53,8 +58,10 @@ const startGaps = await page.evaluate(() => {
   return window.__rwGaps.length;
 });
 await page.waitForTimeout(6000);
-const out = await page.evaluate(([startGaps, breakdown, service]) => {
+const quality = process.env.RW_QUALITY ? Number(process.env.RW_QUALITY) : 1;
+const out = await page.evaluate(([startGaps, breakdown, service, quality]) => {
   const g = window.__rw;
+  g.quality = quality;
   const gaps = window.__rwGaps.slice(startGaps);
   const sorted = gaps.slice().sort((a, b) => b - a);
   g.loop.stop();
@@ -153,7 +160,13 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
     stream: g.cityMesh.userData.stream ? { ...g.cityMesh.userData.stream.stats, lotStats: g.cityMesh.userData.stream.lotStats, worstSliceMs: +g.cityMesh.userData.stream.stats.worstSliceMs.toFixed(1), buildMs: Math.round(g.cityMesh.userData.stream.stats.buildMs) } : null,
     heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null,
   };
-}, [startGaps, !!process.env.RW_BREAKDOWN, !!process.env.RW_SERVICE]);
+}, [startGaps, !!process.env.RW_BREAKDOWN, !!process.env.RW_SERVICE, quality]);
 console.log(JSON.stringify(out, null, 1));
+// Budget of the street view by tier (PLAN_V3 section 7, 0.9.0).
+const BUDGET = { 0.75: null, 1: { calls: 210, tris: 295000, name: 'Normal' }, 1.25: { calls: 270, tris: 425000, name: 'High' } }[quality];
+if (BUDGET) {
+  const ok = (v) => v.calls <= BUDGET.calls && v.triangles <= BUDGET.tris;
+  console.log(`${BUDGET.name} budget ${BUDGET.calls} calls, ${BUDGET.tris / 1000}k triangles: day ${out.day.calls} / ${(out.day.triangles / 1000).toFixed(0)}k ${ok(out.day) ? 'ok' : 'OVER'}, night ${out.night.calls} / ${(out.night.triangles / 1000).toFixed(0)}k ${ok(out.night) ? 'ok' : 'OVER'}; ${out.programs} programs`);
+}
 await browser.close();
 server.close();

@@ -440,6 +440,10 @@ export function createGraphics(game) {
     if (bloom.on) sizeBloom();
   });
 
+  // ---- trees: the batch needs multi-draw (one draw for every tree);
+  // without it the street tiles stamp their trees again (realcity.js) ----
+  if (ud.stream && ud.stream.setTreeBatch && renderer.extensions && !renderer.extensions.has('WEBGL_multi_draw')) ud.stream.setTreeBatch(false);
+
   // ---- lit windows: per-window rooms from one shared atlas ----
   const win = ud.materials ? patchWindows(ud.materials, makeWindowAtlas(game.city ? game.city.seed + 31 : 31)) : null;
 

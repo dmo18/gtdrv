@@ -71,3 +71,55 @@ Measured by hand or by another script; they stay in PLAN_V2 section 4.
   helicopter, plane. Each records new shader programs, new geometries and the draw and step
   times for 48 steps. The software renderer draws in hundreds of ms, so "draws over 16 ms" is
   informational; the budget is on new programs.
+
+## G1b: the Normal street view at the 0.9.0 budget
+
+Budget (docs/PLAN_V3.md section 7): Normal at most 210 draw calls and 295k triangles, High at
+most 270 and 425k, on both street views, day and night. Measured with `scripts/perf.mjs`
+(phone size, software renderer, pixel ratio 1; `RW_QUALITY=1.25` for High; the last line of its
+output checks the budget):
+
+    node scripts/perf.mjs                      Beach start (the default map)
+    node scripts/perf.mjs map=miami-downtown   Downtown start
+
+| view (Normal) | before: calls, triangles | after: calls, triangles |
+|---|---|---|
+| Beach start, day | 187, 563k | 135, 237k |
+| Beach start, night | 195, 568k | 141, 238k |
+| Downtown start, day | 306, 415k | 200, 283k |
+| Downtown start, night | 291, 414k | 202, 283k |
+| High: Beach day / Downtown day | - | 161, 251k / 237, 302k |
+
+Shader programs after the first draws: 105 (Beach) and 110 (Downtown) before, 73 and 75 after,
+with every street material compiled at the warm-up (none compiles in play; `newPrograms` 0).
+Screenshots before and after (915x412, day and night): `dist/g1b/` (Beach start, Downtown
+start, a parking lot, a divided road).
+
+What changed (all in `src/render`, plus the lamp streaks in `src/systems/daynight.js`):
+
+- Trees (`treebatch.js`): every Miami tree and palm is an instance of one `BatchedMesh` (one
+  draw, one shadow draw; needs `WEBGL_multi_draw`, else the tiles stamp them as before). Each
+  species has three shapes: near (the full template) within `TREE_NEAR_R` (30, 45, 75 m by
+  tier), far (two leafy balls, or eight solid two-piece fronds; 64 to 72 triangles) within
+  `TREE_FAR_R` (90, 120, 180 m), distant (28 to 32 triangles) beyond. Culled by 50 m cells; the
+  shadow pass culls tree by tree. Before, crowns past 110 m were not drawn at all (bare trunks);
+  now every tree of a near tile has its crown.
+- Shadows: a near tile casts through position-only proxies, one per quarter, on its own layer
+  (`SHADOW_LAYER`, seen by the sun's shadow camera only), so the shadow pass is a draw per
+  quarter instead of one per material. Building trim and lot solids do not cast. A car casts
+  through its one-call far body (a tenth of the near body's triangles), on the same layer.
+- Draws per tile: facades, props, contact shadows and lot solids are one mesh per tile (their
+  quarters only split the proxies); lot solids are drawn in the plain quarters, building trim
+  (string courses, pilasters, eyebrows, plinths) with the props, the props' cut-out detail with the
+  buildings' detail; trim and props are gone at the middle level.
+- Far level: tiles wholly inside the fog by view depth are left out of the far blocks
+  (`ud.fogFar`, checked every fourth frame); boats and cars past 65 % of the fog's depth range
+  by distance, and any vehicle past its far end by depth, are not drawn.
+- Cars: the far body from 36 m on Normal (was 46; High stays 75).
+- Lamp reflection streaks: only the lamps within 260 m are in the index (was every lamp of
+  the map, 9k triangles at night).
+- Programs: the sky reflection map exists before the warm-up compiles (before, every lit
+  material compiled twice, without and with it, and kept both); brick, stucco and havana take
+  neutral roughness and metalness maps (one program with glass and office); ground, sand and
+  wood take a flat normal map (one program with the sidewalk); the windsock is in the detail
+  material; two-sided see-through markers, spray, rotor discs and jet flames draw in one pass.

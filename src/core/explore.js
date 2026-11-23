@@ -248,7 +248,7 @@ export function deriveExplore(ex) {
 // Ids saved by older builds under their British spelling: read as the new id.
 const LEGACY_ADVENTURE_IDS = { 'a-port-quay': 'a-port-pier' };
 function modernIds(list) {
-  return Array.isArray(list) ? list.map((id) => (typeof id === 'string' && has(LEGACY_ADVENTURE_IDS, id) ? LEGACY_ADVENTURE_IDS[id] : id)) : list;
+  return Array.isArray(list) ? list.slice(0, 512).map((id) => (typeof id === 'string' && has(LEGACY_ADVENTURE_IDS, id) ? LEGACY_ADVENTURE_IDS[id] : id)) : list;
 }
 
 // Anything -> a valid explore state. Returns { state, newer }: `newer` is

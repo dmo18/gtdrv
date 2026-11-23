@@ -227,7 +227,8 @@ function mphOf(v) {
   const m = /^(\d+)\s*(mph)?/.exec(v);
   if (!m) return undefined;
   const n = parseInt(m[1], 10);
-  return m[2] ? n : Math.round(n / 1.609);
+  const mph = m[2] ? n : Math.round(n / 1.609);
+  return mph >= 5 && mph <= 85 ? mph : undefined;
 }
 const PED_MALLS = new Set(['Lincoln Road', 'Espanola Way', 'Española Way']);
 const BARRIER_LINES = new Set(['wall', 'retaining_wall', 'fence', 'guard_rail', 'hedge', 'jersey_barrier', 'city_wall', 'handrail']);

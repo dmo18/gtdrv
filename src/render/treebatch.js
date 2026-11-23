@@ -1,22 +1,27 @@
 // Miami trees and palms as instances of one batch (docs/PERF.md, G1b):
-// every species (street canopies and palms, the lighter lot ones) has a
-// near shape (the full template: trunk and crown in one) and a far shape
-// (a low canopy of two leafy balls, a palm of six two-piece fronds), all
-// in one THREE.BatchedMesh with the detail material, so the trees of the
-// whole near street cost one draw and one shadow draw.
+// every species (street canopies and palms, the lighter lot ones) has
+// three shapes in one THREE.BatchedMesh with the detail material: near
+// (the full template, trunk and crown in one), far (two leafy balls, or
+// eight solid two-piece fronds) and distant (one ball, or six one-piece
+// fronds), so the trees of the whole near street cost one draw and one
+// shadow draw, whatever their species.
 //
 // Each street tile hands in its trees when it is built (addTile) and
 // takes them out when it is dropped (removeTile). update() runs every
 // drawn frame: the trees of a tile are grouped in CELL m cells; a cell
 // is drawn when its bounds meet the view (or it is close enough to cast a
 // shadow into it), and a tree in a drawn cell takes its near shape
-// within nearR of the camera (with a few meters of hysteresis), else its
-// far shape. Instance slots are kept in our own pool (never deleted from
-// the batch, so its internal free list never needs sorting), and nothing
-// is allocated per frame.
+// within nearR of the camera, its far one within farR, else the distant
+// one (a few meters of hysteresis at each edge). The shadow pass culls
+// tree by tree against the shadow camera (TreeBatch.onBeforeShadow).
+// Instance slots are kept in our own pool (never deleted from the batch,
+// so its internal free list never needs sorting), and nothing is
+// allocated per frame.
 //
 // No DOM: the batch only fills typed arrays until the renderer uploads
-// them, so node tests run it.
+// them, so node tests run it. A renderer without WEBGL_multi_draw would
+// draw it one tree at a time: graphics.js then has the tiles stamp their
+// trees again (realcity.js setTreeBatch).
 import * as THREE from 'three';
 
 export const TREE_STRIDE = 9; // species, x, y, z, rot, sx, sy, sz, shade

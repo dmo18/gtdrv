@@ -28,7 +28,7 @@ import { ChunkedBuilder, MeshBuilder, takeFloats, takeIndices, giveBack, freezeS
 import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
-import { addProps, treeSpecies } from './props.js';
+import { addProps, treeSpecies, rectColor } from './props.js';
 import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
@@ -254,9 +254,10 @@ const ONE_MESH = new Set(['props', 'ao', 'lotSolid', 'trim', ...FACADES]);
 const CAST_KEYS = ['plain', ...FACADES];
 // Builders drawn inside another key's mesh (same material and options
 // once the proxies cast): lot solids with the plain quarters, building
-// trim with the street props (both gone at the middle level).
-const MERGE_INTO = { plain: ['lotSolid'], props: ['trim'] };
-const MERGED = new Set(['lotSolid', 'trim']);
+// trim with the street props, the props' cut-out detail with the
+// buildings' (all three pairs gone at the middle level, or neither).
+const MERGE_INTO = { plain: ['lotSolid'], props: ['trim'], detail: ['propsDetail'] };
+const MERGED = new Set(['lotSolid', 'trim', 'propsDetail']);
 export const SHADOW_LAYER = 2;
 const proxyMat = new THREE.MeshBasicMaterial();
 proxyMat.name = 'shadow-proxy';
@@ -777,7 +778,7 @@ export function buildRealCity(city, collision, opts = {}) {
   // Shadow proxies (see CAST_KEYS): on unless opts.shadowProxy is false.
   const proxies = opts.shadowProxy !== false;
   if (city.map === 'miami' && R && R.frond && R.white && opts.treeBatch !== false) {
-    trees = createTreeBatch(treeSpecies(city, R), treeMaterial(M.detailMat));
+    trees = createTreeBatch(treeSpecies(city, R, rectColor(T.details && T.details.map, R.frond)), treeMaterial(M.detailMat));
     group.add(trees.mesh);
   }
 
@@ -1021,6 +1022,7 @@ export function buildRealCity(city, collision, opts = {}) {
     }
   }
   let fogTick = 0;
+  const lastCam = { x: city.spawn.x, y: 2, z: city.spawn.z };
   const fwd = new THREE.Vector3();
   function dist(t, x, z, hy) {
     const dx = x < t.x0 ? t.x0 - x : x > t.x1 ? x - t.x1 : 0;
@@ -1031,6 +1033,9 @@ export function buildRealCity(city, collision, opts = {}) {
   // tile that should be near now, e.g. at start or for a screenshot).
   function update(camera, budgetMs = 3) {
     const x = camera.position.x, z = camera.position.z, hy = Math.max(0, camera.position.y) * 0.6;
+    lastCam.x = x;
+    lastCam.y = camera.position.y;
+    lastCam.z = z;
     let changed = false, best = null, bd = Infinity, near = 0, redo = null;
     // Broken props standing again: their tiles are drawn again with them.
     for (let i = brokenAt.length - 1; i >= 0; i--) {
@@ -1184,6 +1189,7 @@ export function buildRealCity(city, collision, opts = {}) {
     ud.trees = null;
     if (job) { job = null; jobTile = null; }
     for (const t of tiles) if (t.group) dropTile(t);
+    flush({ position: lastCam });
   }
   ud.trees = trees;
   ud.stream = { update, flush, reset, propBreak, setTreeBatch, trees: () => trees, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };

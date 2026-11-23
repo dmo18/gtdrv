@@ -163,7 +163,10 @@ const LEAF = [0x5f9a44, 0x6fa84a, 0x548f42, 0x7cb04c, 0x5a9452, 0x88b44c, 0x66a0
 // One palm frond as a folded strip with the leaflet picture (atlas
 // rect r): from (x, y, z) out along heading a, rising at `elev`
 // radians and bending down by `droop` toward the tip.
-function frond(B, r, x, y, z, a, elev, len, droop, color, S = 4) {
+// S: pieces along it; wide: width factor (the far shapes have fewer,
+// wider fronds, so the crown keeps its mass where the cut-out leaflets
+// thin out with distance).
+function frond(B, r, x, y, z, a, elev, len, droop, color, S = 4, wide = 1) {
   const ca = Math.cos(a), sa = Math.sin(a);
   const sx = -sa, sz = ca;
   let px = x, py = y, pz = z;
@@ -171,7 +174,9 @@ function frond(B, r, x, y, z, a, elev, len, droop, color, S = 4) {
   let prev = null;
   for (let k = 0; k <= S; k++) {
     const t = k / S;
-    const w = len * 0.2 * Math.sin(Math.PI * Math.min(1, t * 0.95 + 0.12)) + 0.004;
+    // One piece: a broad strip tapering a little (the curve's middle
+    // width, not its pointed ends).
+    const w = len * 0.2 * wide * (S === 1 ? (t ? 0.6 : 0.95) : Math.sin(Math.PI * Math.min(1, t * 0.95 + 0.12))) + 0.004;
     const fold = w * 0.45;
     const cur = [px, py, pz, w, fold, r.u0 + (r.u1 - r.u0) * t];
     if (prev) {
@@ -355,6 +360,8 @@ const lotTemplateCache = new WeakMap();
 export const SP_TREE = 0, SP_PALM = 6, SP_LOT_TREE = 10, SP_LOT_PALM = 14, SP_COUNT = 17;
 // Crown color over the trunk's, by kind (the builders' per-call tints).
 const LEAF_TINT = [0.96, 1, 0.92], FROND_TINT = [1, 1.02, 0.95];
+// The frond picture's mean color (linear), when the atlas cannot be read.
+const FROND_AVG = [0.16, 0.3, 0.07];
 function lotTemplates(city, R) {
   let MT = lotTemplateCache.get(city);
   if (!MT) lotTemplateCache.set(city, (MT = makeLotTemplates(createRng(city.seed + 7373), R)));
@@ -424,14 +431,14 @@ function farCanopy(trunk, crown, tint, R, rng, distant = false) {
     roundCanopy(B, n0, c.c[0], c.c[1], c.c[2], 0.8);
     return B;
   }
-  leafy(B, R.leaves, c.c[0], c.c[1] + c.r[1] * 0.1, c.c[2], c.r[0] * 0.88, c.r[1] * 0.8, c.r[2] * 0.88, col, 6, 4, jit);
-  leafy(B, R.leaves, c.c[0] + c.r[0] * 0.22, c.c[1] - c.r[1] * 0.2, c.c[2] - c.r[2] * 0.18, c.r[0] * 0.7, c.r[1] * 0.6, c.r[2] * 0.7, hexShade(col, 0.9), 5, 3, jit);
+  leafy(B, R.leaves, c.c[0] - c.r[0] * 0.08, c.c[1] - c.r[1] * 0.05, c.c[2] + c.r[2] * 0.06, c.r[0] * 0.86, c.r[1] * 0.92, c.r[2] * 0.86, col, 6, 4, jit);
+  leafy(B, R.leaves, c.c[0] + c.r[0] * 0.3, c.c[1] + c.r[1] * 0.25, c.c[2] - c.r[2] * 0.25, c.r[0] * 0.6, c.r[1] * 0.62, c.r[2] * 0.6, hexShade(col, 1.06), 5, 3, jit);
   roundCanopy(B, n0, c.c[0], c.c[1], c.c[2], 0.8);
   return B;
 }
-// The far shape of a palm: a leaning four-sided trunk and a crown of six
-// two-piece fronds (56 triangles, against 160 to 420 near).
-function farPalm(trunk, crown, R, rng, distant = false) {
+// The far shape of a palm: a leaning four-sided trunk and a crown of
+// eight wide two-piece fronds (72 triangles, against 160 to 420 near).
+function farPalm(trunk, crown, R, rng, distant = false, frondAvg = null) {
   const B = new MeshBuilder(true);
   const c = boundsOf(crown), t = boundsOf(trunk);
   // The crown's foot is the trunk top (the first frond starts there).
@@ -439,21 +446,48 @@ function farPalm(trunk, crown, R, rng, distant = false) {
   const col = hexOf(t.col, 1.1);
   post(B, 0, 0, 0, lx, H + 0.03, lz, 0.034, 0.02, col);
   whiteUv(B, 0, R.white);
-  const fc = hexOf([c.col[0] * FROND_TINT[0], c.col[1] * FROND_TINT[1], c.col[2] * FROND_TINT[2]], 1.05);
+  // Solid fronds (the white cell, the leaflet picture's mean color in
+  // the vertices): far off, the cut-out leaflets thin away to nothing
+  // under the alpha test, a solid strip keeps the crown's mass.
+  const fa = frondAvg || FROND_AVG;
+  const fc = hexOf([c.col[0] * FROND_TINT[0] * fa[0], c.col[1] * FROND_TINT[1] * fa[1], c.col[2] * FROND_TINT[2] * fa[2]], 1.05);
   const reach = Math.max(c.r[0], c.r[2]);
-  const n = distant ? 5 : 6;
+  const n = distant ? 6 : 8;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * TAU + rng.range(-0.2, 0.2);
-    if (distant) frond(B, R.frond, lx, H + 0.03, lz, a, i % 2 ? -0.1 : 0.25, reach, 0.9, fc, 1);
-    else frond(B, R.frond, lx, H + 0.03, lz, a, i % 2 ? 0.15 : 0.6, reach * 1.02, 1.8, fc, 2);
+    if (distant) frond(B, R.white, lx, H + 0.03, lz, a, i % 2 ? -0.15 : 0.2, reach, 0.9, fc, 1, 0.9);
+    else frond(B, R.white, lx, H + 0.03, lz, a, [0.65, 0.2, -0.1][i % 3], reach * 1.05, 1.8, fc, 2, 0.8);
   }
   return B;
 }
 const speciesCache = new WeakMap();
+// The mean color (linear rgb, weighted by its alpha) of the atlas rect r
+// of a canvas texture; null without a readable canvas (node tests).
+export function rectColor(texture, r) {
+  try {
+    const img = texture && texture.image;
+    if (!img || !img.getContext || !r) return null;
+    const x0 = Math.floor(r.u0 * img.width), x1 = Math.ceil(r.u1 * img.width);
+    const y0 = Math.floor((1 - r.v1) * img.height), y1 = Math.ceil((1 - r.v0) * img.height);
+    const d = img.getContext('2d').getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+    let cr = 0, cg = 0, cb = 0, a = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const w = d[i + 3] / 255;
+      cr += d[i] * w; cg += d[i + 1] * w; cb += d[i + 2] * w; a += w;
+    }
+    if (a < 1) return null;
+    _hc.setRGB(cr / a / 255, cg / a / 255, cb / a / 255, THREE.SRGBColorSpace);
+    return [_hc.r, _hc.g, _hc.b];
+  } catch {
+    return null;
+  }
+}
 // Every tree species of a Miami city: { near, far, distant } builders
 // (position, normal, color, uv), species ids as SP_*. R: the detail atlas
-// rects. distant: 28 triangles (one leafy ball, or five one-piece fronds).
-export function treeSpecies(city, R) {
+// rects. distant: 28 or 32 triangles (one leafy ball, or six one-piece
+// fronds).
+// frondAvg: the frond picture's mean color, linear rgb (frondColor).
+export function treeSpecies(city, R, frondAvg = null) {
   let S = speciesCache.get(city);
   if (S) return S;
   const MT = miamiTemplates(city, R), LT = lotTemplates(city, R);
@@ -461,7 +495,7 @@ export function treeSpecies(city, R) {
   S = [];
   const W = R.white;
   const canopy = (t, f) => ({ near: joinTree(t, f, LEAF_TINT, W), far: farCanopy(t, f, LEAF_TINT, R, rng), distant: farCanopy(t, f, LEAF_TINT, R, rng, true) });
-  const palm = (t, c) => ({ near: joinTree(t, c, FROND_TINT, W), far: farPalm(t, c, R, rng), distant: farPalm(t, c, R, rng, true) });
+  const palm = (t, c) => ({ near: joinTree(t, c, FROND_TINT, W), far: farPalm(t, c, R, rng, false, frondAvg), distant: farPalm(t, c, R, rng, true, frondAvg) });
   for (let i = 0; i < 6; i++) S.push(canopy(MT.canopies[i], MT.foliage[i]));
   for (let i = 0; i < 4; i++) S.push(palm(MT.palmTrunks[i], MT.palmCrowns[i]));
   for (let i = 0; i < 4; i++) S.push(canopy(LT.canopies[i], LT.foliage[i]));
