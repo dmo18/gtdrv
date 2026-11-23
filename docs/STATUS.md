@@ -779,3 +779,9 @@ None critical or high.
 - Map to the ocean, real lane widths and street names, Beach default start (Ocean Drive, facing south because the street is one way), solid props and sea walls, ground following, fair damage rules, parking lots without box cars, GPS with turn prompts, American English, Handling lab, lighter rendering (Normal street view Beach 135 calls / 237k triangles, Downtown 200 / 283k).
 - Gates: lint, 887 tests, smoke --extra, five region smoke, full ui-test 731/731. Security review: 0 critical, high, medium.
 - Open: shader programs 73 to 75 (target 60); heat 5 tank not on the Beach; handling model per class (0.10.0).
+
+## 2026-11-23: version 0.10.0 American iron
+
+- 18 smooth American vehicle bodies at three detail levels (about 6,300 / 1,300 / 290 triangles), left-hand driver, rear Florida-style plates; retired hatchback, one-box van and cab-over truck. Hood and cockpit first-person views (Bumper removed). Real handling per class from US reference figures (circle, 0-60, 60-0, skidpad g, handbrake, understeer, U-turns), Arcade and Sim brake identically.
+- Gates: lint, 916 tests, smoke --extra, five region smoke, ui-test 744/744. Normal street view Beach 130 calls / 216k, Downtown 188 / 262k.
+- Open: shader programs 73 to 76 (target 60); L1 and L2 noses faceted up close; semi without trailer; closed-lot test loop in the Handling lab not built.
