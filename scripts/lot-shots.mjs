@@ -26,6 +26,7 @@ page.setDefaultTimeout(240000);
 page.on('pageerror', (e) => console.log('pageerror', String(e)));
 await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 90000 });
+if (process.env.LOT_HULL) await page.evaluate(() => { window.__lotHull = true; });
 if (process.env.LOT_CLOSE) await page.evaluate((n) => { window.__lotClose = n; }, +process.env.LOT_CLOSE);
 const res = await page.evaluate(async () => {
   const g = window.__rw;
@@ -59,6 +60,7 @@ const res = await page.evaluate(async () => {
   };
   if (window.__lotClose) {
     // Close-up: 9 m from the nearest lot car, looking at it.
+    if (window.__lotHull) g.systems.find((q) => q.name === 'parked').lotView.nearM = 0;
     await shot('prep', 13);
     const f = g.systems.find((q) => q.name === 'parked').lotField;
     if (f.n) {
@@ -70,12 +72,17 @@ const res = await page.evaluate(async () => {
   }
   await shot('day', 13);
   const cam = { x: g.camera.position.x, z: g.camera.position.z };
-  const day = g.renderer.domElement.toDataURL('image/png');
+  if (window.__lotClose) {
+    const f = g.systems.find((q) => q.name === 'parked').lotField;
+    const near = [];
+    for (let i = 0; i < f.n; i++) if (Math.hypot(f.x[i] - g.camera.position.x, f.z[i] - g.camera.position.z) < 25) near.push(['lot', f.spec[i], +f.x[i].toFixed(1), +f.z[i].toFixed(1), +f.yaw[i].toFixed(2)]);
+    for (const q of g.vehicles) if (Math.hypot(q.x - g.camera.position.x, q.z - g.camera.position.z) < 25 && q !== g.player.vehicle) near.push([q.kind, q.spec.id, +q.x.toFixed(1), +q.z.toFixed(1), +q.heading.toFixed(2), q.parked ? 'parked' : 'moving']);
+    stats.near = near;
+  }
   await shot('night', 23);
-  return { lot: best.id, type: best.type, district: best.district, area: Math.round(best.area), px, pz, heading, cam, stats, day };
+  return { lot: best.id, type: best.type, district: best.district, area: Math.round(best.area), px, pz, heading, cam, stats };
 });
-const { day, ...rest } = res;
-console.log(JSON.stringify(rest));
+console.log(JSON.stringify(res));
 await page.screenshot({ path: `${out}/lot-${tag}-night.png` });
 // Back to day for the second shot.
 await page.evaluate(() => { const g = window.__rw; g.daynight.setHour(13); for (let i = 0; i < 60; i++) g.step(1 / 60); g.draw(1, 1 / 60); });

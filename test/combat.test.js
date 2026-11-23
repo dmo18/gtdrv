@@ -15,7 +15,7 @@ import {
 import {
   createCombat, damage, initActor, addActor, trace, createTraceResult, cylinderT,
   CAPS, HP, DOWN_T, OUT_LIE_T, FADE_T, PLAYER_DOWN_T, PLAYER_FADE_T, WRECK_T,
-  WRECK_LIE_T, WRECK_FADE_T, WRECK_MAX, WRECK_FLAME_T, BODY_LIE_T, BODY_MAX,
+  WRECK_LIE_T, WRECK_FADE_T, WRECK_MAX, WRECK_FLAME_T, BODY_LIE_T, BODY_MAX, BURN_T, BURN_BELOW,
 } from '../src/systems/combat.js';
 
 const DT = 1 / 60;
@@ -51,6 +51,19 @@ const shooter = (game, x, z, weapon = 'pistol', team = 'crew') => {
 };
 const steps = (game, n) => {
   for (let i = 0; i < n; i++) game.combat.fixedUpdate(DT);
+};
+// Fire before explosion (docs/PLAN_V3.md 2.3 item 4): a car taken to zero
+// by a weapon or blast burns BURN_T s first. Steps until it has blown up
+// (asserting the fire stage lasted), at most BURN_T + 1 s.
+const burnDown = (game, car) => {
+  let n = 0;
+  while (!car.wrecked && n < (BURN_T + 1) * 60) {
+    game.combat.fixedUpdate(DT);
+    n++;
+  }
+  assert.ok(car.wrecked, 'blew up after its fire');
+  assert.ok(n >= BURN_T * 60 - 1, `burned ${(n / 60).toFixed(2)} s first`);
+  return n;
 };
 const record = (game, name) => {
   const list = [];
@@ -384,7 +397,9 @@ test('rocket flies straight at 40 m/s, detonates on a wall or at range; fizz arc
   assert.equal(ex4.length, 0);
 });
 
-test('craft: damage multipliers, burning below 25%, explodes after 6 s', () => {
+test('craft: damage multipliers, burning below 20% from weapon damage, explodes after 8 s', () => {
+  assert.equal(BURN_BELOW, 0.2);
+  assert.equal(BURN_T, 8);
   const game = makeGame();
   const car = createVehicle('sedan', 0, 0, 0, null);
   game.vehicles.push(car);
@@ -393,7 +408,14 @@ test('craft: damage multipliers, burning below 25%, explodes after 6 s', () => {
   assert.equal(damage(game, car, 100, null, 'melee'), 10);
   assert.equal(damage(game, car, 100, null, 'ram'), 100);
   const burning = record(game, 'burning'), ex = record(game, 'explosion');
-  car.health = max * 0.24;
+  // Under 20 % by a ram alone: no fire.
+  car.health = max * 0.21;
+  damage(game, car, max * 0.05, null, 'ram');
+  steps(game, 1);
+  assert.ok(!car.burning, 'a ram never lights a car');
+  // A bullet that leaves it under 20 %: alight.
+  car.health = max * 0.21;
+  damage(game, car, 40, null, 'bullet');
   steps(game, 1);
   assert.equal(car.burning, true);
   assert.equal(car.onFire, true);
@@ -401,7 +423,10 @@ test('craft: damage multipliers, burning below 25%, explodes after 6 s', () => {
   const h0 = car.health;
   steps(game, 60);
   assert.ok(Math.abs(h0 - car.health - max * 0.03) < 1, 'loses 3% of max per s');
-  steps(game, 60 * 5 + 5);
+  assert.equal(ex.length, 0, 'no blast before 8 s of fire');
+  steps(game, 60 * 7 - 30);
+  assert.equal(ex.length, 0, 'still burning at 7.5 s');
+  steps(game, 40);
   assert.equal(ex.length, 1);
   assert.equal(ex[0].radius, 10, 'a car blast is 10 m (REVAMP 6.7; was 8)');
   assert.equal(car.wrecked, true);
@@ -419,7 +444,7 @@ test('burning craft cap: at most 4 at once', () => {
   for (let i = 0; i < 8; i++) {
     const c = createVehicle('sedan', i * 30, 0, 0, null);
     game.vehicles.push(c);
-    damage(game, c, c.spec.health * 0.8 * 2, null, 'bullet');
+    damage(game, c, c.spec.health * 0.85 * 2, null, 'bullet');
   }
   steps(game, 1);
   assert.equal(game.vehicles.filter((c) => c.burning).length, CAPS.burning);
@@ -437,7 +462,8 @@ test('explosion chain: depth at most 2, at most 3 per 0.5 s, extras queued', () 
   let t = 0;
   game.events.on('explosion', (e) => ex.push({ t, depth: e.depth, x: e.x }));
   damage(game, game.vehicles[0], 1000, game.player.walker, 'bullet');
-  for (let i = 0; i < 60 * 6; i++) {
+  // Each car in the chain burns BURN_T s before its blast reaches the next.
+  for (let i = 0; i < 60 * (6 + BURN_T * 3); i++) {
     t += DT;
     game.combat.fixedUpdate(DT);
   }
@@ -539,6 +565,8 @@ test('player: a craft exploding with the player inside downs the player', () => 
   car.driver = 'player';
   const pd = record(game, 'down');
   damage(game, car, 1e6, null, 'blast');
+  assert.equal(car.wrecked, false, 'burning first');
+  burnDown(game, car);
   assert.equal(car.wrecked, true);
   assert.equal(game.player.vehicle, null);
   assert.equal(game.player.mode, 'foot');
@@ -647,6 +675,7 @@ test('a destroyed car explodes, its hull lies 60 s, then sinks away and is remov
   game.vehicles.push(car);
   const ex = record(game, 'explosion');
   damage(game, car, 1e5, null, 'blast');
+  burnDown(game, car);
   steps(game, 2);
   assert.ok(car.wrecked);
   assert.equal(ex.length, 1);
@@ -674,6 +703,7 @@ test('wrecks go through game.removeVehicle when the game has it', () => {
   const car = createVehicle('sedan', 30, 0, 0, null);
   game.vehicles.push(car);
   damage(game, car, 1e5, null, 'blast');
+  burnDown(game, car);
   steps(game, Math.round((WRECK_T + 1) * 60));
   assert.deepEqual(seen, [car]);
 });
@@ -686,6 +716,7 @@ test('the player is ejected from a destroyed car and never left stuck in a remov
   game.player.vehicle = car;
   game.player.mode = 'car';
   game.combat.damage(car, 1e5, null, 'blast');
+  burnDown(game, car);
   steps(game, 2);
   assert.equal(game.player.vehicle, null, 'ejected at the blast');
   steps(game, Math.round((WRECK_T + 1) * 60));
@@ -720,12 +751,13 @@ test('explosions kill and throw people in range, and chain blasts stay capped', 
   }
   const ex = record(game, 'explosion');
   damage(game, cars[0], 1e5, null, 'blast');
-  steps(game, 60 * 10);
+  // Every car burns BURN_T s before it goes up and reaches the next ones.
+  steps(game, 60 * (10 + BURN_T));
   assert.ok(ex.length >= 2 && ex.length <= cars.length + 1, `${ex.length} blasts`);
   // Hulls stay now, but never more than WRECK_MAX standing (not fading) at once.
   const standing = cars.filter((c) => c.wrecked && !c.removed && c.wreckT !== undefined && c.wreckT < WRECK_LIE_T).length;
   assert.ok(standing <= WRECK_MAX, `${standing} standing hulls`);
-  steps(game, Math.round((WRECK_T + 1) * 60));
+  steps(game, Math.round((WRECK_T + 1 + BURN_T * 3) * 60));
   assert.ok(cars.every((c) => c.removed || !c.wrecked), cars.map((c) => [c.wrecked, c.removed, c.wreckT, c.exploded, c.health].join()).join(' | '));
 });
 
@@ -745,6 +777,12 @@ test('hull cap: never more than 6 standing hulls; a seventh makes the oldest fad
     game.vehicles.push(c);
     made.push(c);
     damage(game, c, 1e5, null, 'blast');
+    // Its fire stage (no hull yet), then the 1.5 s the test always gave.
+    while (!c.wrecked) {
+      steps(game, 1);
+      const n = game.vehicles.filter((v) => v.wrecked && v.wreckT !== undefined && v.wreckT < WRECK_LIE_T).length;
+      worst = Math.max(worst, n);
+    }
     for (let k = 0; k < 90; k++) {
       steps(game, 1);
       const n = game.vehicles.filter((v) => v.wrecked && v.wreckT !== undefined && v.wreckT < WRECK_LIE_T).length;
@@ -801,8 +839,9 @@ test('determinism: the same seed gives the same fight', () => {
     const a = shooter(game, -10, 0, 'smg', 'crew');
     const car = createVehicle('sedan', 12, 3, 0, null);
     game.vehicles.push(car);
-    for (let k = 0; k < 240; k++) {
-      if (k % 3 === 0) game.combat.fire(a, 1, 0, 0);
+    // The car burns BURN_T s before its blast throws the people.
+    for (let k = 0; k < 240 + BURN_T * 60; k++) {
+      if (k % 3 === 0 && k < 240) game.combat.fire(a, 1, 0, 0);
       if (k === 60) damage(game, car, 1e5, null, 'blast');
       steps(game, 1);
     }

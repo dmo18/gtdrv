@@ -276,14 +276,18 @@ export function createVehicleMesh(spec, color) {
 
 // Write the four wheel instance matrices: rotation Ry(yaw) * Rz(spin) at
 // the wheel center. Wheels 0, 1 front (right, left), 2, 3 rear.
-function writeWheels(ud, steer, spin, roll, pitch) {
+// gDy: each wheel's ground offset from the body's ground plane (wheel i
+// as in vehicle.js: 0 front-right, 1 front-left, 2 rear-right, 3 rear-left),
+// within the spring travel.
+function writeWheels(ud, steer, spin, roll, pitch, gDy = null) {
   const a = ud.anchors;
   const m = ud.wheelMatrix.array;
   for (let i = 0; i < 4; i++) {
     const front = i < 2, right = i % 2 === 0;
     const px = front ? a.ax : -a.ax, pz = right ? a.az : -a.az;
     const dy = -roll * pz + pitch * px;
-    const py = a.wr + Math.max(-0.03, Math.min(0.035, dy * 0.45));
+    const g = gDy ? Math.max(-0.12, Math.min(0.12, gDy[i] || 0)) : 0;
+    const py = a.wr + Math.max(-0.03, Math.min(0.035, dy * 0.45)) + g;
     const yaw = (front ? -steer : 0) + (right ? 0 : Math.PI);
     const sp = right ? -spin : spin;
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cz = Math.cos(sp), sz = Math.sin(sp);
@@ -407,7 +411,11 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   const h = v.pheading + angleDiff(v.heading, v.pheading) * alpha;
   const ud = mesh.userData;
   mesh.position.set(x, Number.isFinite(v.y) ? v.y : 0, z);
-  mesh.rotation.set(0, -h, 0);
+  // The ground plane under the four wheels (vehicle.js followGround):
+  // pitch about the car's side axis, roll about its length.
+  const gp = Number.isFinite(v.gPitch) ? (Number.isFinite(v.pgPitch) ? v.pgPitch + (v.gPitch - v.pgPitch) * alpha : v.gPitch) : 0;
+  const gr = Number.isFinite(v.gRoll) ? (Number.isFinite(v.pgRoll) ? v.pgRoll + (v.gRoll - v.pgRoll) * alpha : v.gRoll) : 0;
+  mesh.rotation.set(gr, -h, gp, 'YXZ');
 
   // Body lean about a roll / pitch center a little above the ground.
   const roll = Math.max(-MAX_ROLL, Math.min(MAX_ROLL, v.roll || 0));
@@ -423,7 +431,7 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
 
   // Wheels: spin, steer, and follow part of the body's travel.
   const steer = v.steerAngle != null ? v.steerAngle : (v.steer || 0) * (v.spec.steerMax || 0.6);
-  writeWheels(ud, steer, v.wheelSpin || 0, roll, pitch);
+  writeWheels(ud, steer, v.wheelSpin || 0, roll, pitch, v.wheelDy || null);
 
   // Distance LOD (also driven by game.js through head.visible, and by
   // graphics.js through lodDist: the quality tier's own, nearer limit).

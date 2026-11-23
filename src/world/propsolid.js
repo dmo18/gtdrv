@@ -170,14 +170,20 @@ export function eachStreetProp(city, fn) {
 // The collision shape objects of one prop (pushed to `list`): a circle,
 // an axis-aligned box, or a row of circles along an oblique box. Same
 // objects as the collision world's (kind 0 box, kind 1 circle), with
-// `brk` (the table entry of a breakable prop, else null), `ptype` and
-// `grp` (all shapes of the same prop: they break together).
+// `brk` (the table entry of a breakable prop, else null), `ptype` and a
+// hidden `grp` (all shapes of the same prop: they break together).
 const TAGS = { tree: 'tree', palm: 'tree', streettree: 'tree', palmtree: 'tree' };
 function circle(x, z, r, h, tag) {
-  return { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null };
+  return { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
 }
 function box(x0, z0, x1, z1, h, tag) {
-  return { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null };
+  return { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
+}
+// A breakable shape's group (every shape of its prop), kept out of the
+// shape's enumerable fields (shapes are compared and printed as JSON).
+export function setBreakGroup(shape, entry, grp) {
+  shape.brk = entry;
+  Object.defineProperty(shape, 'grp', { value: grp, enumerable: false, writable: true, configurable: true });
 }
 // Shapes for an oriented box of half length hl and half width hw.
 function orientedBox(list, x, z, heading, hl, hw, h, tag) {
@@ -223,7 +229,7 @@ export function propShapes(type, x, z, rot, hIn, list, feat = null, tagIn = null
   for (let i = n0; i < list.length; i++) {
     const s = list[i];
     s.ptype = type;
-    if (grp) { s.brk = e; s.grp = grp; }
+    if (grp) setBreakGroup(s, e, grp);
   }
   return list.length - n0;
 }

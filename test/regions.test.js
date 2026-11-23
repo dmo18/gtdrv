@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createMiamiCity, MIAMI_CORE, MIAMI_SPOTS, regionSpots, buildWindow } from '../src/world/miami.js';
 import {
-  REGIONS, REGION_IDS, DEFAULT_REGION, BOX, WHOLE_BOX, REGION_BUDGET, PLACE_MARGIN, START_EDGE,
+  REGIONS, REGION_IDS, DEFAULT_REGION, CORE_REGION, BOX, WHOLE_BOX, REGION_BUDGET, PLACE_MARGIN, START_EDGE,
   regionFor, inRegion, holdsAll, pointsIn, regionsAt, regionOfPoint, cityFingerprint, loadRegionData,
 } from '../src/world/regions.js';
 import { loadMapCity, MAP_IDS } from '../src/world/maps.js';
@@ -57,21 +57,25 @@ const fpOf = (c) => {
 test('the five regions: exact crops, ids, names, the default', () => {
   assert.deepEqual(REGIONS.map((r) => [r.id, r.name, r.crop]), [
     ['miami-downtown', 'Downtown and the Bay', { x0: -2700, z0: -2700, x1: 2450, z1: 1900 }],
-    ['miami-beach', 'Miami Beach and the Islands', { x0: 1400, z0: -3891, x1: 4505, z1: 3891 }],
+    // 0.9.0: the Beach reaches the Atlantic (docs/PLAN_V3.md 2.1 item 1).
+    ['miami-beach', 'Miami Beach and the Islands', { x0: 1400, z0: -3891, x1: 6508, z1: 3891 }],
     ['miami-north', 'Wynwood and the North Side', { x0: -4505, z0: -3891, x1: 1500, z1: -1500 }],
     ['miami-west', 'Little Havana and Civic Center', { x0: -4505, z0: -1700, x1: -1900, z1: 2050 }],
     ['miami-south', 'The Roads and the South Shore', { x0: -4505, z0: 1850, x1: 1400, z1: 3891 }],
   ]);
-  assert.equal(DEFAULT_REGION, 'miami-downtown');
-  assert.deepEqual(regionFor(DEFAULT_REGION).crop, MIAMI_CORE, 'Downtown is the core');
-  assert.deepEqual(BOX, { x0: -4505, z0: -3891, x1: 4505, z1: 3891 });
+  // 0.9.0 (2.1 item 10): a new game starts on the Beach; Downtown is the core.
+  assert.equal(DEFAULT_REGION, 'miami-beach');
+  assert.equal(CORE_REGION, 'miami-downtown');
+  assert.deepEqual(regionFor(CORE_REGION).crop, MIAMI_CORE, 'Downtown is the core');
+  // Only x1 grew (the east strip); origin, x0, z0, z1 and the lattice stay.
+  assert.deepEqual(BOX, { x0: -4505, z0: -3891, x1: 6508, z1: 3891 });
   for (const r of REGIONS) assert.equal(regionFor(r.id), r);
   for (const junk of ['island', WHOLE_BOX, '', null, undefined, '__proto__', 'constructor', 'miami-Downtown']) assert.equal(regionFor(junk), null, String(junk));
   for (const id of REGION_IDS) assert.ok(MAP_IDS.includes(id), id);
 });
 
 test('the filter rule: 40 m inside the crop; the whole box holds everything', () => {
-  const d = regionFor(DEFAULT_REGION);
+  const d = regionFor(CORE_REGION);
   assert.equal(PLACE_MARGIN, 40);
   assert.ok(inRegion(d, -2660, 0) && !inRegion(d, -2661, 0) && inRegion(d, -2690, 0, 0));
   assert.ok(inRegion('miami-downtown', 0, 0) && !inRegion('miami-downtown', 4000, 0));
@@ -121,11 +125,11 @@ test('every region builds from its own data file; fingerprints pinned; Downtown 
   }
   // Today's core crop (the crop option on the whole data file).
   const core = createMiamiCity(data, { crop: MIAMI_CORE });
-  assert.deepEqual(fpOf(core), fpOf(cities[DEFAULT_REGION]));
-  assert.deepEqual(core.spawn, cities[DEFAULT_REGION].spawn);
-  assert.deepEqual(core.parkingSpots, cities[DEFAULT_REGION].parkingSpots);
+  assert.deepEqual(fpOf(core), fpOf(cities[CORE_REGION]));
+  assert.deepEqual(core.spawn, cities[CORE_REGION].spawn);
+  assert.deepEqual(core.parkingSpots, cities[CORE_REGION].parkingSpots);
   assert.equal(core.courses.length, 14);
-  assert.equal(cities[DEFAULT_REGION].courses.length, 14);
+  assert.equal(cities[CORE_REGION].courses.length, 14);
   // A region built from the whole file is the region built from its own
   // file (West: its shore lies outside the window, see coarseLand).
   assert.deepEqual(fpOf(createMiamiCity(data, { region: 'miami-west' })), PINNED['miami-west']);
@@ -160,7 +164,7 @@ test('start places: on a road, on land, 300 m or more from every edge; the arriv
     const st = regionFor(id).start;
     if (st) assert.ok(c.edgesNear(s.x, s.z, 1, []).some((e) => c.edges[e].name === st.street), `${id} on ${st.street}`);
   }
-  assert.equal(cities[DEFAULT_REGION].startView.spawn.x, cities[DEFAULT_REGION].spawn.x, 'Downtown keeps the designed first view');
+  assert.equal(cities[CORE_REGION].startView.spawn.x, cities[CORE_REGION].spawn.x, 'Downtown keeps the designed first view');
 });
 
 test('road ends: every road cut by a sea edge ends in a barrier and a turning pad on land', () => {
@@ -237,7 +241,7 @@ test('placement filter: a region is offered only what it holds; every hand place
   }
   for (const p of pointsIn(MIAMI_SPOTS.secrets)) assert.ok(regionsAt(p.x, p.z).length > 0);
   // Downtown's content floor (3.3: as today).
-  const d = cities[DEFAULT_REGION];
+  const d = cities[CORE_REGION];
   assert.equal(d.piers.length, 4);
   assert.equal(d.rampSpots.length, 6);
   assert.equal(d.secretSpots.length, 6);
@@ -272,7 +276,7 @@ test('split data files: generated from miami.json, same features and bytes; the 
 });
 
 test('the build window: sea sides and box sides', () => {
-  assert.deepEqual(buildWindow(data, regionFor(DEFAULT_REGION)).box, { x0: false, z0: false, x1: false, z1: false });
+  assert.deepEqual(buildWindow(data, regionFor(CORE_REGION)).box, { x0: false, z0: false, x1: false, z1: false });
   assert.deepEqual(buildWindow(data, regionFor('miami-beach')).box, { x0: false, z0: true, x1: true, z1: true });
   assert.deepEqual(buildWindow(data, regionFor('miami-south')).crop, { x0: -4465, z0: 1850, x1: 1400, z1: 3851 });
   assert.deepEqual(buildWindow(data, null).box, { x0: true, z0: true, x1: true, z1: true });

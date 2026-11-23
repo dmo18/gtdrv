@@ -17,7 +17,7 @@
 // (`grp`) off and queues a break record; stepBroken brings it back after
 // BREAK_BACK_T s when the given point (the player) is BREAK_BACK_FAR away.
 import { dressLot, eachBay, lotDressCache } from './lots.js';
-import { PROP_SOLIDS, createPropLayer } from './propsolid.js';
+import { PROP_SOLIDS, createPropLayer, setBreakGroup } from './propsolid.js';
 import { createEdgeLayer } from './edgelines.js';
 import { attachGround } from './ground.js';
 
@@ -52,7 +52,7 @@ export function createCollisionWorld() {
 
   let joined = null; // boxes and circles with the lot layer's, by lot id
   function addBox(x0, z0, x1, z1, h = 10, tag = null) {
-    const b = { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false };
+    const b = { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
     boxes.push(b);
     insert(b, x0, z0, x1, z1);
     joined = null;
@@ -60,7 +60,7 @@ export function createCollisionWorld() {
   }
 
   function addCircle(x, z, r, h = 5, tag = null) {
-    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false };
+    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
     circles.push(c);
     insert(c, x - r, z - r, x + r, z + r);
     joined = null;
@@ -602,7 +602,7 @@ export function addLotSolids(collision, feats, n, list = null) {
       for (let i = list.length - (made - first); i < list.length; i++) {
         const sh = list[i];
         sh.ptype = f.kind;
-        if (grp) { sh.brk = e; sh.grp = grp; }
+        if (grp) setBreakGroup(sh, e, grp);
       }
     }
   }
@@ -653,8 +653,8 @@ export const LOT_SHAPE_REACH = 6;
 // The shape objects of the collision world, made without a grid: the
 // lazy layer lists them in its own cells.
 const SHAPE_SINK = {
-  addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null }),
-  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null }),
+  addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
+  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
 };
 
 // The lots' solids as a lazy layer of `collision` (replacing any layer it

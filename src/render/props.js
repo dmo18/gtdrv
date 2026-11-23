@@ -3,9 +3,11 @@
 // template shapes into the per-tile prop meshes, so the whole lot costs
 // a few draw calls. Collision is not made here: the street props' shapes
 // are world/propsolid.js (fillPropCollision), the landmarks' world/collision.js.
+import * as THREE from 'three';
 import { MeshBuilder } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
 import { PALM_PLACES, miamiPalmSpots as palmSpots } from '../world/propsolid.js';
+import { WALL_H } from '../world/edgelines.js';
 
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
 const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
@@ -867,4 +869,98 @@ export function addProps(C, own = null, side = true, lists = null) {
   }
 
   return { lamps, bulbs, palms: MT ? miamiPalmSpots(city) : [] };
+}
+
+// ---- Sea walls and bridge rails (docs/PLAN_V3.md 2.2 item 4) ----
+// Drawn on exactly the collision lines of world/edgelines.js: a concrete
+// cap wall on the shore, a Jersey barrier with a steel rail on bridges,
+// causeways, water-side roads and piers. One instanced mesh round the
+// camera (the same program as the wreck debris), refilled when the camera
+// moves to another 64 m square; new edge cells are traced a few per frame.
+export const EDGE_VIEW_R = 260, EDGE_VIEW_MAX = 4000, EDGE_CELLS_PER_FRAME = 10;
+const EDGE_COLORS = { seawall: 0xbdb7aa, rail: 0xa9aaa6, steel: 0x8d949b };
+
+// The wall pieces of the edge lines in a rectangle, as flat numbers in
+// `out` (x0, z0, x1, z1, kind) with kind 0 sea wall, 1 rail. Only cells
+// already traced are read unless `trace` (cells to trace now) allows more;
+// returns the number of cells still untraced. Pure (no three.js).
+export function edgeLinePieces(layer, x0, z0, x1, z1, out, trace = Infinity) {
+  out.length = 0;
+  let missing = 0, budget = trace;
+  const C = 32;
+  for (let cz = Math.floor(z0 / C); cz <= Math.floor(z1 / C); cz++) {
+    for (let cx = Math.floor(x0 / C); cx <= Math.floor(x1 / C); cx++) {
+      if (!layer.hasCell(cx, cz)) {
+        if (budget <= 0) { missing++; continue; }
+        budget--;
+      }
+      const r = layer.rawCell(cx, cz);
+      for (let s = 0, t = 0; s < r.segs.length; s += 4, t++) {
+        const tag = r.tags[t];
+        if (tag !== 'seawall' && tag !== 'rail') continue;
+        out.push(r.segs[s], r.segs[s + 1], r.segs[s + 2], r.segs[s + 3], tag === 'rail' ? 1 : 0);
+      }
+    }
+  }
+  return missing;
+}
+
+export function createEdgeLineView(game) {
+  const scene = game && game.scene, city = game && game.city;
+  const layer = city && city.edgeLines;
+  if (!scene || !layer || typeof document === 'undefined') return null;
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  geo.translate(0, 0.5, 0);
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), EDGE_VIEW_MAX);
+  mesh.name = 'edge-walls';
+  mesh.frustumCulled = false;
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const col = new THREE.Color();
+  for (let i = 0; i < EDGE_VIEW_MAX; i++) { mesh.setMatrixAt(i, zero); mesh.setColorAt(i, col.setHex(EDGE_COLORS.seawall)); }
+  mesh.count = 0;
+  scene.add(mesh);
+  const pieces = [];
+  let lastKey = null, pending = 0;
+  const ground = city.groundAt || (() => 0);
+  function put(i, x0, z0, x1, z1, y0, h, w, hex) {
+    const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz);
+    p.set((x0 + x1) / 2, y0, (z0 + z1) / 2);
+    q.setFromAxisAngle(up, -Math.atan2(dz, dx));
+    sc.set(L + 0.06, h, w);
+    m.compose(p, q, sc);
+    mesh.setMatrixAt(i, m);
+    mesh.setColorAt(i, col.setHex(hex));
+  }
+  function refill(cx, cz) {
+    pending = edgeLinePieces(layer, cx - EDGE_VIEW_R, cz - EDGE_VIEW_R, cx + EDGE_VIEW_R, cz + EDGE_VIEW_R, pieces, EDGE_CELLS_PER_FRAME);
+    let n = 0;
+    for (let k = 0; k < pieces.length && n < EDGE_VIEW_MAX - 1; k += 5) {
+      const x0 = pieces[k], z0 = pieces[k + 1], x1 = pieces[k + 2], z1 = pieces[k + 3], rail = pieces[k + 4] === 1;
+      const y = Math.min(ground(x0, z0), ground(x1, z1)) - 0.05;
+      if (rail) {
+        put(n++, x0, z0, x1, z1, y, 0.82, 0.5, EDGE_COLORS.rail);
+        put(n++, x0, z0, x1, z1, y + 0.82, 0.08, 0.12, EDGE_COLORS.steel);
+      } else put(n++, x0, z0, x1, z1, -0.95, 0.95 + WALL_H, 0.5, EDGE_COLORS.seawall); // from below the water to the cap
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+  return {
+    mesh,
+    update(x, z) {
+      const kx = Math.floor(x / 64), kz = Math.floor(z / 64);
+      const key = kx * 100003 + kz;
+      if (key === lastKey && pending === 0) return;
+      lastKey = key;
+      refill((kx + 0.5) * 64, (kz + 0.5) * 64);
+    },
+    get pieces() { return pieces; },
+    dispose() {
+      scene.remove(mesh);
+      geo.dispose();
+      mesh.material.dispose();
+    },
+  };
 }

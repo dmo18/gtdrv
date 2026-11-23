@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
 import { regionCity, allRegionCities, REGION_IDS } from './regionfixture.js';
-import { regionFor, inRegion, START_EDGE, DEFAULT_REGION } from '../src/world/regions.js';
+import { regionFor, inRegion, START_EDGE, CORE_REGION } from '../src/world/regions.js';
 import { GARAGE_DEFS } from '../src/world/garages.js';
 import { ADVENTURE_DEFS, adventureInRegion, attachExplore } from '../src/world/adventures.js';
 import { SECRET_IDS } from '../src/world/secrets.js';
@@ -58,7 +58,7 @@ test('the content floor: start, garages, adventures, courses, a pier with boats,
     const pads = c.helipads.filter((h) => !onIslet(h));
     assert.ok(pads.length >= 1, id + ' helipad');
     for (const h of pads) {
-      if (id === DEFAULT_REGION) continue; // Watson Island's pad has no helicopter today
+      if (id === CORE_REGION) continue; // Watson Island's pad has no helicopter today
       assert.ok(c.aircraftSpots.some((a) => a.spec === 'heli' && Math.hypot(a.x - h.x, a.z - h.z) < 1), id + ' a helicopter on the pad');
     }
     // Two stunt ramps.
@@ -71,7 +71,7 @@ test('the content floor: start, garages, adventures, courses, a pier with boats,
     }
     // Craft text names this region's places, not Downtown's.
     assert.ok(c.texts && c.texts.craft && c.texts.fleet && c.texts.boot, id + ' texts');
-    if (id !== DEFAULT_REGION) assert.ok(!/Bayfront Marina|Saltyard/.test(c.texts.craft + c.texts.fleet), id + ' texts of another region');
+    if (id !== CORE_REGION) assert.ok(!/Bayfront Marina|Saltyard/.test(c.texts.craft + c.texts.fleet), id + ' texts of another region');
   }
 });
 
@@ -144,7 +144,7 @@ test('region content is deterministic, and attaching twice changes nothing', () 
   const pick = (c) => JSON.stringify([c.piers, c.boatSpots, c.helipads, c.aircraftSpots, c.rampSpots, c.garages, c.adventures, c.courses, c.routes, c.startView, c.secretSpots, c.texts]);
   for (const id of ['miami-beach', 'miami-west']) {
     const a = regionCity(id);
-    assert.ok(a.regionContent && (id === DEFAULT_REGION || a.regionDressed));
+    assert.ok(a.regionContent && (id === CORE_REGION || a.regionDressed));
     const once = pick(a);
     attachExplore(a);
     attachRegionContent(a);
@@ -171,7 +171,7 @@ test('one start place a region: regions.js start, REGION_STARTS, travel regionSt
   const { regionStart } = await import('../src/core/travel.js');
   for (const id of REGION_IDS) {
     const st = regionFor(id).start;
-    if (id === DEFAULT_REGION) {
+    if (id === CORE_REGION) {
       assert.equal(st, null, 'Downtown starts at MIAMI_SPOTS.spawn');
       assert.equal(REGION_STARTS[id], undefined);
       assert.deepEqual(regionStart(id), { x: MIAMI_SPOTS.spawn.x, z: MIAMI_SPOTS.spawn.z, heading: MIAMI_SPOTS.spawn.heading });
@@ -187,7 +187,7 @@ test('one start place a region: regions.js start, REGION_STARTS, travel regionSt
     // session.arrive(null), so only the street is checked for it.
     const c = regionCity(id), s = regionStart(id);
     const d = Math.hypot(c.spawn.x - s.x, c.spawn.z - s.z);
-    if (id !== DEFAULT_REGION) {
+    if (id !== CORE_REGION) {
       assert.ok(d < 0.5, `${id}: spawn ${d.toFixed(1)} m from regionStart`);
       assert.ok(Math.cos(c.spawn.heading - s.heading) > 0.999, id + ' heading');
     } else assert.ok(d < 60, `${id}: spawn ${d.toFixed(1)} m from regionStart`);

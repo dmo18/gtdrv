@@ -32,12 +32,14 @@ function quietBuild(collision) {
   }
 }
 
-// A lot wall or fence box far from the spawn (its tile is not built at
-// start), with a clear run of road or lot of 15 to 40 m west of it.
+// A solid lot wall box far from the spawn (its tile is not built at
+// start), with a clear run of road or lot of 15 to 40 m west of it. (A
+// fence or gate is breakable since PLAN_V3 2.2: the car may shear it, so
+// it is not a wall to stop at; test/prop-collision.test.js covers those.)
 function pickTarget(collision, shapes, st) {
   const s = city.spawn;
   for (const b of shapes) {
-    if (b.kind !== 0 || b.tag !== 'lot' || b.z1 - b.z0 < 3) continue;
+    if (b.kind !== 0 || b.tag !== 'lot' || b.brk || b.z1 - b.z0 < 3) continue;
     const cz = (b.z0 + b.z1) / 2;
     if (Math.hypot(b.x0 - s.x, cz - s.z) < 600) continue;
     if (st.tiles[st.tileOf(b.x0, cz)].group) continue;

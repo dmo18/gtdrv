@@ -2081,7 +2081,8 @@ export function createMiamiCity(data, opts = {}) {
     if (!e.bridge && !e.causeway) {
       for (let d = startPad; d <= e.length - endPad; d += 34) {
         const side = ((d / 34) | 0) % 2 ? 1 : -1;
-        const x = a.x + e.ux * d + rx * side * (half + 0.8), z = a.z + e.uz * d + rzv * side * (half + 0.8);
+        const lo = (e.off || 0) + side * (half + 0.8);
+        const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
         if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.3) || mainShore(x, z) < 1) continue;
         props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
       }
@@ -2114,7 +2115,8 @@ export function createMiamiCity(data, opts = {}) {
       const treeP = TREE_P[districtOf(a.x, a.z)] ?? 0.3;
       for (let d = a.hx + 10; d + 10 <= e.length - nodes[e.b].hx; d += 24) {
         if (!dr.chance(treeP)) continue;
-        const x = a.x + e.ux * d + rx * side * (half + 1.15), z = a.z + e.uz * d + rzv * side * (half + 1.15);
+        const lo = (e.off || 0) + side * (half + 1.15);
+        const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
         if (!blockAt(x, z) || inBuilding(x, z, 1) || onOtherRoad(x, z, e, 0.5)) continue;
         furniture.push({ type: 'streettree', x, z, rot: dr.range(0, TAU), q: 0, v: dr.next() });
       }
@@ -2128,8 +2130,10 @@ export function createMiamiCity(data, opts = {}) {
       const l = Math.hypot(n.x - o.x, n.z - o.z);
       const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
       const rx = -tz, rzv = tx;
-      const x = n.x - tx * (n.hx + 0.9) + rx * (e.width / 2 + 0.9);
-      const z = n.z - tz * (n.hx + 0.9) + rzv * (e.width / 2 + 0.9);
+      // The right curb of the approach (the strip may sit `off` aside).
+      const rc = e.width / 2 + 0.9 + (e.b === n.id ? e.off || 0 : -(e.off || 0));
+      const x = n.x - tx * (n.hx + 0.9) + rx * rc;
+      const z = n.z - tz * (n.hx + 0.9) + rzv * rc;
       if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
       signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
     }

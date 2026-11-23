@@ -59,6 +59,7 @@ export const NUDGE_MPH = 5, KNOCK_MPH = 15, RAM_DMG_PER_MPH = 3;
 export const STUMBLE_PUSH = 1.6; // m/s sideways shove of a stumble
 export const RAM_MIN = KNOCK_MPH / MPH; // m/s car speed that knocks a person down
 export const RAM_DMG = RAM_DMG_PER_MPH * MPH; // damage per m/s over RAM_MIN
+export const TANK_RAM_MIN = 4, TANK_RAM_DMG = 4; // a tank: m/s that runs a person down, damage per m/s
 // Crash damage (2.3 items 2 and 3): in the default "cannot die" mode a
 // crash never takes the player's car under CRASH_FLOOR of its health.
 export const CRASH_FLOOR = 0.15;
@@ -433,14 +434,15 @@ function damageCraft(game, c, amount, source, kind, px, pz) {
   c.lastHitBy = source;
   c.lastKind = kind;
   c.combatHit = true;
-  const maxH = (c.spec && c.spec.health) || 1000;
-  if (!NO_FIRE_KINDS[kind] && c.health < maxH * BURN_BELOW) c.ignite = true;
-  // A car always burns before it blows up.
-  if (c.kind === 'car' && c.health <= 0 && !NO_FIRE_KINDS[kind] && !c.doused && !(c.burning && c.burnT >= BURN_T)) c.health = 1;
   if (c.occ) hurtOccupants(game, c, amount, source, kind, hitY);
   c.hitT = HIT_FLASH;
   // Depth an explosion of this craft would have (blast chains count up).
   c.chainDepth = kind === 'blast' && curDepth >= 0 ? curDepth + 1 : kind === 'fire' ? (c.chainDepth || 0) : 0;
+  const maxH = (c.spec && c.spec.health) || 1000;
+  if (!NO_FIRE_KINDS[kind] && c.health < maxH * BURN_BELOW) c.ignite = true;
+  // A car always burns before it blows up (past the chain limit it is a
+  // hull at once, with no blast; a doused car has burned already).
+  if (c.kind === 'car' && c.health <= 0 && !NO_FIRE_KINDS[kind] && !c.doused && c.chainDepth <= MAX_DEPTH && !(c.burning && c.burnT >= BURN_T)) c.health = 1;
   if (px || pz) {
     c.vx += px;
     c.vz += pz;
@@ -2414,8 +2416,10 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const toX = a.x - c.x, toZ = a.z - c.z;
       if (!(cvx * toX + cvz * toZ > 0)) continue; // the person walked into it
       const mph = sp * MPH;
-      if (mph < NUDGE_MPH) continue;
-      if (mph < KNOCK_MPH) {
+      // A tank is no car: anything over walking pace runs a person down.
+      const tank = c.kind === 'tank';
+      if (tank ? sp <= TANK_RAM_MIN : mph < NUDGE_MPH) continue;
+      if (!tank && mph < KNOCK_MPH) {
         // Stumble aside: a shove away from the car's path, nothing more.
         const l = Math.sqrt(toX * toX + toZ * toZ) || 1;
         a.kx = (a.kx || 0) + (toX / l) * STUMBLE_PUSH;
@@ -2425,7 +2429,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       }
       setPush((cvx / sp) * sp * 0.5, (cvz / sp) * sp * 0.5);
       setFall(cvx, cvz, Math.min(FALL_RAM_MAX, FALL_RAM_K * sp), Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * sp));
-      damage(game, a, Math.max(1, (mph - KNOCK_MPH) * RAM_DMG_PER_MPH), c, 'ram');
+      damage(game, a, tank ? TANK_RAM_DMG * sp : Math.max(1, (mph - KNOCK_MPH) * RAM_DMG_PER_MPH), c, 'ram');
     }
   }
 

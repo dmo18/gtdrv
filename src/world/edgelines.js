@@ -295,5 +295,6 @@ export function createEdgeLayer(city) {
     near = edgesFor(Math.floor(x / CELL), Math.floor(z / CELL));
     return field(x, z);
   }
-  return { name: 'edges', cell, eachLine, fieldAt, rawCell, stats, allShapes: null };
+  const hasCell = (cx, cz) => raw.has(cx * 100003 + cz);
+  return { name: 'edges', cell, eachLine, fieldAt, rawCell, hasCell, stats, allShapes: null };
 }

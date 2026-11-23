@@ -117,6 +117,8 @@ function createLotCarView(game, field) {
   const hullN = new Int32Array(nSpec);
   const view = {
     root, hulls, stats: { hull: 0, real: 0, draws: 0 },
+    // The distance inside which the real body is drawn (a tool may change it).
+    nearM: LOT_NEAR_M,
     // Write the field's cars into the instanced meshes.
     sync() {
       hullN.fill(0);
@@ -131,7 +133,7 @@ function createLotCarView(game, field) {
         // Heading h (x ahead, z toward +z) is a turn of -h about y.
         tmp.makeRotationY(-field.yaw[i]);
         tmp.setPosition(field.x[i], LOT_Y, field.z[i]);
-        if (field.dist[i] < LOT_NEAR_M && nReal < LOT_NEAR_MAX) {
+        if (field.dist[i] < view.nearM && nReal < LOT_NEAR_MAX) {
           nReal++;
           const r = realOf(si);
           const b = bodyOf(r, field.color[i]);
@@ -203,6 +205,7 @@ export function createParkedCars(game) {
   const lotField = city.lots && city.lots.length ? createLotCarField(city) : null;
   const lotView = lotField && game.scene ? createLotCarView(game, lotField) : null;
   let lotTimer = 0;
+  const blockers = new Float32Array(6 * 48);
   const nearEdges = [];
   // True when the curb spot s lies where its street has a parking lane. The
   // streets say so with parkL / parkR (the side the spot is on, left or
@@ -435,7 +438,20 @@ export function createParkedCars(game) {
       const dx = v.x - cx, dz = v.z - cz, d = Math.hypot(dx, dz);
       if (d < 150 && (d < 14 || dx * fx + dz * fz > 0.54 * d)) curb++;
     }
-    lotField.update(cx, cz, fx, fz, game.clock ?? 12, Math.max(8, cap - curb));
+    // Real vehicles standing near (not ones of the lot's own listed bays,
+    // which the field never fills): their bays stay empty.
+    let nb = 0;
+    const vs = game.vehicles;
+    for (let i = 0; vs && i < vs.length && nb < 48; i++) {
+      const v = vs[i];
+      if (!v || v.removed || !v.spec) continue;
+      if (Math.abs(v.x - cx) > 170 || Math.abs(v.z - cz) > 170 || Math.abs(v.speed || 0) > 2) continue;
+      const o = nb++ * 6;
+      blockers[o] = v.x; blockers[o + 1] = v.z;
+      blockers[o + 2] = Math.cos(v.heading); blockers[o + 3] = Math.sin(v.heading);
+      blockers[o + 4] = (v.spec.length || 4.5) / 2; blockers[o + 5] = (v.spec.width || 1.8) / 2;
+    }
+    lotField.update(cx, cz, fx, fz, game.clock ?? 12, Math.max(8, cap - curb), blockers, nb);
     if (lotView) lotView.sync();
   }
 

@@ -16,6 +16,12 @@ import { createRng } from '../core/rng.js';
 import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt } from './effects.js';
 import { PARTS_MAX, PART, createParts, addPart, launchCarParts, stepParts, partScale, liveParts } from './carparts.js';
 import { BLAST, ROLL_V, ROLL_S0, ROLL_S1, blastScale, fireRadius, shakeAt, dustTone } from './blastplan.js';
+import { createEdgeLineView } from './props.js';
+
+// Props sheared by cars (docs/PLAN_V3.md 2.2 item 2): a falling piece from
+// the wreck part pool, at most PROP_PIECES_MAX alive; a hydrant sprays.
+export const PROP_PIECES_MAX = 8, PROP_PIECE_LIFE = 4, SPRAYS_MAX = 4;
+const BREAK_HEX = { lamp: 0x4a4e52, meter: 0x55585c, stopsign: 0x8a9096, namesign: 0x6a7076, streetsign: 0x6a7076, umbrella: 0xe8e4dc, bench: 0x8a6a48, bin: 0x2f4a3a, hydrant: 0xc8382c, mailbox: 0x2c4f8a, bikes: 0x9aa0a6, fence: 0x8a8a84, gate: 0x7a7a74, pallet: 0x9a7a55, shrub: 0x4a8a3e };
 
 const MAX_ALPHA = 420;
 const MAX_ADD = 300;
@@ -1145,8 +1151,51 @@ export function createCombatFx(game) {
     if (k === 'wall' || k === 'ground') impact(k, e.hx, e.hy, e.hz, e.dx, e.dy, e.dz);
   }
 
+  // ---- props sheared by cars ----
+  const pieceT = new Float32Array(PROP_PIECES_MAX).fill(-1);
+  const sprays = [];
+  for (let i = 0; i < SPRAYS_MAX; i++) sprays.push({ t: 0, x: 0, z: 0 });
+  function onPropBreak(e) {
+    if (!e) return;
+    let slot = -1;
+    for (let i = 0; i < PROP_PIECES_MAX; i++) if (pieceT[i] < 0) { slot = i; break; }
+    if (slot >= 0 && near(e.x, e.z)) {
+      pieceT[slot] = PROP_PIECE_LIFE;
+      const hex = BREAK_HEX[e.type] || 0x6a6e72;
+      const k = Math.min(1, (e.speed || 0) / 25);
+      const pole = e.fall === 'pole';
+      const h = Math.max(0.5, Math.min(7, e.h || 1));
+      chunk(e.x, pole ? h * 0.5 : h * 0.5, e.z, (e.vx || 0) * (0.5 + 0.3 * k), pole ? 1 + 2 * k : 2 + 3 * k, (e.vz || 0) * (0.5 + 0.3 * k), pole ? 0.16 : Math.min(1.6, h), pole ? h : Math.min(1.2, h), pole ? 0.16 : 0.5, hex);
+      dust(e.x, 0.3, e.z, rs() * 0.5, 0.6, rs() * 0.5, 0.9, 0.4, 1.4, 0.35, 0.6);
+    }
+    if (e.spray > 0) {
+      for (let i = 0; i < SPRAYS_MAX; i++) {
+        const sp = sprays[i];
+        if (sp.t > 0) continue;
+        sp.t = e.spray;
+        sp.x = e.x;
+        sp.z = e.z;
+        break;
+      }
+    }
+  }
+  function stepPropFx(dt, qq) {
+    for (let i = 0; i < PROP_PIECES_MAX; i++) if (pieceT[i] >= 0) pieceT[i] = pieceT[i] - dt > 0 ? pieceT[i] - dt : -1;
+    for (let i = 0; i < SPRAYS_MAX; i++) {
+      const sp = sprays[i];
+      if (!(sp.t > 0)) continue;
+      sp.t -= dt;
+      if (!S || !near(sp.x, sp.z) || (tick & 1)) continue;
+      const n = Math.max(1, Math.round(3 * qq));
+      for (let k = 0; k < n; k++) alpha(sp.x + rs() * 0.1, 0.6, sp.z + rs() * 0.1, rs() * 1.2, 6 + rnd() * 3, rs() * 1.2, 0.9 + rnd() * 0.4, 0.12, 0.5, 0.55, 0.82, 0.9, 0.98, PUFF, 9.8, 0.6, 0.05);
+    }
+  }
+  // The sea walls and rails, drawn on their collision lines.
+  const edgeView = scene && typeof document !== 'undefined' ? createEdgeLineView(game) : null;
+
   if (game && game.events && game.events.on) {
     const on = (n, f) => offs.push(game.events.on(n, f));
+    on('propBreak', onPropBreak);
     on('shot', onShot);
     on('hit', onHit);
     on('down', onDown);
@@ -1203,12 +1252,15 @@ export function createCombatFx(game) {
       syncScorch();
       stepBlood();
       stepDebris(dt);
+      stepPropFx(dt, qq);
       if (S) {
         stepPool(S, dt);
         stepPool(G, dt);
       }
     },
+    edgeView,
     render() {
+      if (edgeView && camera) edgeView.update(camera.position.x, camera.position.z);
       if (!S) return;
       tossVisuals();
       const h = Number.isFinite(game.clock) ? game.clock : 12;
@@ -1228,6 +1280,7 @@ export function createCombatFx(game) {
         m.material.dispose();
       }
       if (atlas) atlas.dispose();
+      if (edgeView) edgeView.dispose();
     },
   };
   return sys;

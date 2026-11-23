@@ -4,7 +4,7 @@ import { RULES } from '../src/core/weapons.js';
 RULES.invulnerable = false;
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initActor, addActor, damage, craftBlast, explosionSize, TOSS_G } from '../src/systems/combat.js';
+import { initActor, addActor, damage, craftBlast, explosionSize, TOSS_G, BURN_T } from '../src/systems/combat.js';
 import { createVehicle } from '../src/entities/vehicle.js';
 import { createTank } from '../src/entities/tank.js';
 import { makeFightGame, step, yard } from './fightgame.js';
@@ -86,7 +86,8 @@ test('a destroyed car pops up and a wreck can flip; a tank only shudders', () =>
   const car = g.addVehicle(createVehicle('sedan', 10, 0, 0));
   const flips = new Set();
   damage(g, car, 1e6, null, 'blast');
-  step(g, [], 30);
+  // It burns BURN_T s first (PLAN_V3 2.3 item 4), then goes up.
+  step(g, [], BURN_T * 60 + 30);
   flips.add(Math.abs(car.tRollEnd));
   assert.equal(car.wrecked, true);
   assert.ok(car.tossing || car.y === 0);

@@ -535,8 +535,11 @@ export function createLotCarField(city, opts = {}) {
   const cache = lotDressCache(city, dress);
   const seen = new Set();
   // (cx, cz): the camera; (fx, fz): its look direction on the ground
-  // (unit); hour: the clock; cap: cars wanted (default field.cap).
-  field.update = (cx, cz, fx, fz, hour, cap = field.cap) => {
+  // (unit); hour: the clock; cap: cars wanted (default field.cap). blk, nBlk:
+  // the real vehicles standing in the lots, six floats each (x, z, cos, sin
+  // of the heading, half length, half width): a bay one of them overlaps
+  // stays empty (a parked fire truck, a car the player left).
+  field.update = (cx, cz, fx, fz, hour, cap = field.cap, blk = null, nBlk = 0) => {
     const want = Math.min(MAX, Math.max(0, cap | 0));
     let n = 0;
     field.stats.updates++;
@@ -577,6 +580,13 @@ export function createLotCarField(city, opts = {}) {
               if (n >= want && d >= field.dist[n - 1]) continue;
               const u = lotCarAt(city, bx, bz, f.v, fill);
               if (u < 0) continue;
+              let blocked = false;
+              for (let k = 0; k < nBlk && !blocked; k++) {
+                const o = k * 6, rx = bx - blk[o], rz = bz - blk[o + 1];
+                const lx = rx * blk[o + 2] + rz * blk[o + 3], lz = -rx * blk[o + 3] + rz * blk[o + 2];
+                blocked = Math.abs(lx) < blk[o + 4] + 2.4 && Math.abs(lz) < blk[o + 5] + 1.0;
+              }
+              if (blocked) continue;
               // Insert by distance (the arrays hold the nearest `want`).
               let at = n < want ? n++ : want - 1;
               while (at > 0 && field.dist[at - 1] > d) {
@@ -677,7 +687,10 @@ export function buildLotHull(spec) {
     const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [d[0] - c[0], d[1] - c[1], d[2] - c[2]];
     let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
     const p = vp(i, j);
-    const out = [0, p[1] - 0.6 * H, p[2]];
+    // Outward: away from the middle of this station's ring.
+    let cy = 0;
+    for (let q = 0; q < NJ; q++) cy += G[(i * NJ + q) * 3 + 1] / NJ;
+    const out = [0, p[1] - cy, p[2]];
     if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0) n = [-n[0], -n[1], -n[2]];
     const l = Math.hypot(n[0], n[1], n[2]) || 1;
     return [n[0] / l, n[1] / l, n[2] / l];

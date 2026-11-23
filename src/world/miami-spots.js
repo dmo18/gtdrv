@@ -242,11 +242,6 @@ export const MIAMI_SPOTS = {
     { name: 'Midtown', src: 'Midtown', x0: -1700, z0: -3450, x1: -480, z1: -2700 },
     { name: 'Design District', src: 'Design District', x0: -1700, z0: -3950, x1: -480, z1: -3450 },
     { name: 'Miami Beach', src: 'Miami Beach', x0: 2700, z0: -3950, x1: 6600, z1: 1700 },
-    // South Beach (0.9.0): the owner's ground, south of Dade Boulevard.
-    { name: 'South Beach', src: 'South Beach', x0: 3550, z0: -1900, x1: 6600, z1: 1700 },
-    { name: 'South of Fifth', src: 'South of Fifth Boardwalk', x0: 3900, z0: 600, x1: 6600, z1: 1700 },
-    { name: 'Flamingo Park', src: 'Flamingo Park', x0: 4250, z0: -700, x1: 4560, z1: -250 },
-    { name: 'Lummus Park', src: 'Lummus Park', x0: 4930, z0: -800, x1: 5250, z1: 560 },
     { name: 'Fisher Island', src: 'Fisher Island', x0: 3300, z0: 1700, x1: 4600, z1: 2700 },
     { name: 'Virginia Key', src: 'Virginia Key Beach North Point Park', x0: 1500, z0: 2700, x1: 4600, z1: 3950 },
     { name: 'Overtown', src: 'Overtown Transit Village North', x0: -2700, z0: -1700, x1: -1450, z1: 400 },

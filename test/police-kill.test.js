@@ -6,7 +6,7 @@ RULES.invulnerable = false;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPolice } from '../src/systems/police.js';
-import { damage, occupantsAlive, canBeHit } from '../src/systems/combat.js';
+import { damage, occupantsAlive, canBeHit, BURN_T } from '../src/systems/combat.js';
 import { makeFightGame, step, cityAndCollision } from './fightgame.js';
 
 function setup() {
@@ -122,7 +122,8 @@ test('a wrecked patrol car kills every officer inside', () => {
   const v = copCar(game, police, w.x + 25, w.z);
   assert.equal(occupantsAlive(v), 2);
   damage(game, v, 1e6, w, 'blast');
-  step(game, [police], 5);
+  // It burns BURN_T s first (PLAN_V3 2.3 item 4), then the hull gives.
+  step(game, [police], BURN_T * 60 + 5);
   assert.equal(v.wrecked, true);
   assert.equal(occupantsAlive(v), 0);
   assert.equal(log.down.filter((d) => d.t.team === 'police' && d.hp === 0).length, 2);

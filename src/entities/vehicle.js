@@ -583,8 +583,9 @@ export function stepVehicle(v, controls, dt, world) {
     if (v.shiftT > 0) driveF *= 0.2; // torque dip while the clutch is out
     // Badly dented (under 30 percent): 15 percent less power (2.3 item 2).
     if (v.health < s.health * 0.3) driveF *= 0.85;
-    // Wading: the water takes the drive away (gone at 0.5 m).
-    if (v.wade > 0) driveF *= 1 - v.wade;
+    // Wading: the water takes most of the drive away (followGround stops
+    // the car going deeper than BOG_DEPTH; it can still back out).
+    if (v.wade > 0) driveF *= 1 - 0.7 * v.wade;
   }
   // Engine braking at the driven wheels when off the pedal.
   let engBrake = 0;
@@ -883,7 +884,10 @@ function collideStatic(v, col) {
     for (let tries = 0; tries < 3 && res.brk && col.breakShape; tries++) {
       const b = res.brk;
       const pvx = v.vx - v.yawRate * oz, pvz = v.vz + v.yawRate * ox;
-      const close = -(pvx * res.bnx + pvz * res.bnz);
+      // The car's speed into the prop (a glancing hit on a long bench
+      // shears it as well as a square one).
+      const into = -(pvx * res.bnx + pvz * res.bnz);
+      const close = into > 0 ? Math.sqrt(pvx * pvx + pvz * pvz) : 0;
       if (!(close > b.brk.breakSpeed)) break;
       col.breakShape(b, v.vx, v.vz, v);
       const keep = 1 - (b.brk.slow || 0);
