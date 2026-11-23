@@ -31,3 +31,7 @@ The owner said they are away until the game is ready and told me not to stop. Th
 ## 2026-11-23, after 0.10.0
 
 0.10.0 used 2.5M (fleet, views, handling, build fix). V3 total 5.9M. Owner round 3 needs about 1.8M: cap raised to 8.0M, announced to the owner in the status block. Stop and ask at 8.0M.
+
+## 2026-11-23, 0.11.0 published
+
+Round 3 used 2.5M (roads 0.55M over four passes, lots 0.60M, controls 0.45M, car response 0.36M, planes and cockpit 0.43M, security 0.13M). V3 total 8.4M against the 8.0M cap: 0.4M over. No new helper work starts until the owner sets a new cap.
