@@ -710,3 +710,12 @@ This round replaces the old 0.11.0 scope. The loop work (section 2.9) moves to 0
 
 Publish: 0.10.1 as soon as CONTROLS and DRIVE pass the gates; 0.11.0 with ROADS, LOTS, AIR, PERF.
 Cap: this round is estimated at 1.8M; V3 cap raised from 7.0M to 8.0M (docs/USAGE.md).
+
+## 14. Version 0.12.0 "Smooth and hooked" (owner: cap 10M, Fable allowed)
+
+| id | task | model | owns |
+|---|---|---|---|
+| PERF | Phone check back to at most 4 frames over 33 ms, start under 3 s, memory under 180 MB | Fable | src/systems/* (not score, activities, tutorial, objective), src/render/graphics.js, vehiclemesh.js, adaptres.js, src/game.js, src/main.js, scripts/perf*.mjs, docs/PERF.md |
+| STREETSCAPE | Roads and blocks to the owner's eye: net-filled gaps drawn, the strip at S Miami Ave, lot planting, far level, a drive review in every region | Fable | src/world/junctions.js, ground.js, lots.js, roadprofile.js, miami.js, src/render/citymesh.js, realcity.js, lotmesh.js, props.js, treebatch.js, buildings.js, textures.js |
+| LOOP | The fun loop: flow meter, street events with medals, records board, daily three, guided first five minutes, free paint and wheels | Fable | docs/LOOP.md, src/systems/score.js, activities.js, tutorial.js, events (new), src/ui/hud.js (meter only), menu.js (board), src/core/save.js (new fields), garage.js |
+| SEC, RV | Security review and the gate | Opus | none |
