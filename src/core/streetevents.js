@@ -10,7 +10,7 @@ export const MEDALS = ['bronze', 'silver', 'gold'];
 // Per template: the title, the unit of its value and whether more is better.
 export const TEMPLATE_INFO = {
   trap: { title: 'Speed trap', more: true, color: '#ffcf5a', icon: 'race' },
-  miss: { title: 'Traffic run', more: true, color: '#45c7dc', icon: 'street' },
+  miss: { title: 'Near-miss run', more: true, color: '#45c7dc', icon: 'street' },
   jump: { title: 'Jump', more: true, color: '#b48cff', icon: 'stunt' },
   dash: { title: 'Rush drop', more: false, color: '#8bd66f', icon: 'delivery' },
   heat: { title: 'Heat escape', more: false, color: '#ff5a4a', icon: 'depot' },
@@ -38,7 +38,7 @@ export function trapTargets(runup) {
   return triple(Math.round(v * TRAP_SHARE[0]), Math.round(v * TRAP_SHARE[1]), Math.round(v * TRAP_SHARE[2]));
 }
 
-// Traffic run: close passes (near misses and clean passes) in the time.
+// Near-miss run: close passes in the time (near misses, head-on misses, clean passes, close shaves of parked cars).
 // `busy`: 1 on a main road, less on a quiet street.
 export const MISS_LIMIT = 45, MISS_RATE = 0.16;
 export function missTargets(limit = MISS_LIMIT, busy = 1) {

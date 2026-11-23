@@ -62,7 +62,7 @@ test('gates stand on a street, on land, inside the region, apart from each other
   }
 });
 
-test('the first gate is a traffic run on the start street, just ahead of the start place', () => {
+test('the first gate is a near-miss run on the start street, just ahead of the start place', () => {
   for (const [id, c] of cities) {
     const e = placed.get(id)[0];
     assert.equal(e.tpl, 'miss', id);

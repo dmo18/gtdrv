@@ -92,7 +92,7 @@ test('speed trap: the speed at the line, in mph; too late fails', () => {
   assert.equal(run.medal, null);
 });
 
-test('traffic run and wrecking spree: counts over the time, an early end at gold', () => {
+test('near-miss run and wrecking spree: counts over the time, an early end at gold', () => {
   const run = createEventRun();
   const e = ev('miss', { limit: 2, targets: { gold: 3, silver: 2, bronze: 1 } });
   run.start(e);

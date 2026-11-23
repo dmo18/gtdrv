@@ -155,14 +155,17 @@ const installDriver = () => {
 // A screenshot of the moment (the camera is settled first). Software
 // rendering at night can take very long: a shot that cannot be taken is
 // reported and the run goes on.
-const shot = async (name) => {
+const snap = async (name) => {
   try {
-    await page.evaluate(() => window.__lt.draw());
-    await page.waitForTimeout(250);
-    await page.screenshot({ path: join(shots, name + '.png'), timeout: 90000 });
+    await page.screenshot({ path: join(shots, name + '.png'), timeout: 180000 });
   } catch (e) {
     console.log('   (no screenshot ' + name + ': ' + String(e.message).split('\n')[0] + ')');
   }
+};
+const shot = async (name) => {
+  await page.evaluate(() => window.__lt.draw());
+  await page.waitForTimeout(250);
+  await snap(name);
 };
 const state = () => page.evaluate(() => {
   const g = window.__rw, se = g.streetEvents, f = g.flow;
@@ -183,7 +186,7 @@ try {
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);
   await page.waitForFunction(() => window.__rw && document.getElementById('play') && !document.getElementById('play').disabled, null, { timeout: 120000 });
-  await page.screenshot({ path: join(shots, '00-title.png') });
+  await snap('00-title');
   await page.tap('#play');
   await page.waitForFunction(() => window.__rw.loop.running && !(window.__rw.titleCam && window.__rw.titleCam.active), null, { timeout: 30000 });
   // First run: the steering question (take the wheel).
@@ -210,7 +213,7 @@ try {
   const t0 = s.t;
   await page.evaluate(() => { const e = window.__rw.streetEvents.list[0]; window.__lt.run({ seconds: 30, cruise: 17, pass: true, to: { x: e.x + e.dx * 30, z: e.z + e.dz * 30 }, until: (g) => !!g.streetEvents.active }); });
   s = await state();
-  check(s.active === info.first && s.t - t0 <= 20, `pulled into the first traffic run within 20 s (${(s.t - t0).toFixed(1)} s, ${s.active})`);
+  check(s.active === info.first && s.t - t0 <= 20, `pulled into the first near-miss run within 20 s (${(s.t - t0).toFixed(1)} s, ${s.active})`);
   await shot('02-traffic-run');
 
   // ---- beat 2: a first medal within 2 minutes (RETRY when it takes two goes) ----
@@ -379,13 +382,13 @@ try {
   await page.waitForTimeout(200);
   const board = await page.evaluate(() => ({ title: document.querySelector('.rw-menu-title').textContent, stats: document.querySelectorAll('[data-role="records-stats"] .rw-menu-stat').length, rows: document.querySelectorAll('.rw-lp-row').length, regions: document.querySelectorAll('[data-role="records-regions"] tr').length }));
   check(board.title === 'Records' && board.stats >= 8 && board.rows >= 20 && board.regions >= 6, `Records: two taps from play (${JSON.stringify(board)})`);
-  await page.screenshot({ path: join(shots, '17-records.png') });
+  await snap('17-records');
   await page.tap('[data-role="back"]');
   await page.tap('[data-role="daily"]');
   await page.waitForTimeout(200);
   const dly = await page.evaluate(() => ({ cards: document.querySelectorAll('.rw-lp-card').length, text: document.querySelector('.rw-menu-body').innerText.slice(0, 300) }));
   check(dly.cards === 3, `Daily Three shows three events (${dly.text.replace(/\n/g, ' | ')})`);
-  await page.screenshot({ path: join(shots, '18-daily.png') });
+  await snap('18-daily');
   // Go: the first daily puts the car at its gate with the twist set.
   await page.tap('.rw-lp-card [data-role="daily-go"]');
   await page.waitForTimeout(600);
@@ -415,7 +418,7 @@ try {
   await page.waitForTimeout(500);
   const look = await page.evaluate(() => { const g = window.__rw, v = g.player.vehicle; return { look: g.progress.loop.looks[v.spec.id], code: v.mesh.userData.color, spec: v.spec.id }; });
   check(look.look && look.look.paint === 0 && look.look.finish === 1 && look.look.wheels === 1, `Customize saves the look for the class (${JSON.stringify(look)})`);
-  await page.screenshot({ path: join(shots, '20-customize.png') });
+  await snap('20-customize');
   await page.tap('[data-role="customize-done"]');
   await page.tap('[data-role="resume"]');
   await page.waitForTimeout(400);

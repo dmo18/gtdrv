@@ -578,9 +578,9 @@ try {
   check('records: twelve tiles, best flow run here and overall, miles', (await page.locator('[data-role="records-stats"] .rw-menu-stat').count()) === 12 && recText.includes('12,450') && recText.includes('10.0 mi') && recText.includes('97 mph') && recText.includes('118 ft') && recText.includes('x4') && /2 \/ 26/.test(recText), recText.slice(0, 400));
   const regions = await ev(() => [...document.querySelectorAll('[data-role="records-regions"] tr')].map((r) => r.innerText.replace(/\s+/g, ' ').trim()));
   check('records: every region and overall (gold, silver, bronze, best flow, miles)', regions.length === 7 && regions[1] === 'Miami Beach 1 0 1 12,450 10.0' && regions.includes('North Side 0 1 0 800 1.0') && regions[6] === 'Overall 1 1 1 12,450 11.0', JSON.stringify(regions));
-  const close3 = await ev(() => [...document.querySelectorAll('.rw-menu-group')].find((g) => g.textContent === 'Closest medals') && [...document.querySelectorAll('.rw-lp-row')].slice(0, 3).map((r) => r.dataset.event + '|' + r.querySelector('i').textContent));
+  const close3 = await ev(() => [...document.querySelectorAll('.rw-menu-group')].find((g) => g.textContent === 'Closest medals') && [...document.querySelectorAll('.rw-lp-row')].slice(0, 3).map((r) => r.dataset.event + '|' + r.querySelector(':scope > i').textContent));
   check('records: the three closest medals with their next target', close3 && close3[0].startsWith('ev_beach_dash_2|1:20') && /bronze 1:0\d/.test(close3[0]) && close3.length === 3, JSON.stringify(close3));
-  check('records: medals by event for all six templates', (await page.locator('.rw-lp-row').count()) === 15 && ['Speed trap  1 / 2', 'Traffic run  1 / 2', 'Jump  0 / 2', 'Rush drop  0 / 2', 'Heat escape  0 / 2', 'Wrecking spree  0 / 2'].every((t) => recText.replace(/\u00a0/g, ' ').toUpperCase().includes(t.toUpperCase().replace(/\s+/g, ' ')) || recText.toUpperCase().includes(t.toUpperCase())), recText.slice(-600));
+  check('records: medals by event for all six templates', (await page.locator('.rw-lp-row').count()) === 15 && ['Speed trap  1 / 2', 'Near-miss run  1 / 2', 'Jump  0 / 2', 'Rush drop  0 / 2', 'Heat escape  0 / 2', 'Wrecking spree  0 / 2'].every((t) => recText.replace(/\u00a0/g, ' ').toUpperCase().includes(t.toUpperCase().replace(/\s+/g, ' ')) || recText.toUpperCase().includes(t.toUpperCase())), recText.slice(-600));
   check('records: no flags, no money', !/hint_|seen_|\$|buy/i.test(recText));
   await page.locator('.rw-lp-row [data-role="route"]').first().tap();
   check('records: Route puts the GPS on the gate and resumes', (await ev(() => window.rw.log.tracked)) === 'ev_beach_dash_2' && !(await isOpen()));
@@ -588,7 +588,7 @@ try {
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await page.locator('[data-role="daily"]').tap();
   const cards = await ev(() => [...document.querySelectorAll('.rw-lp-card')].map((c) => c.dataset.slot + ':' + c.dataset.done + ':' + c.querySelector('b').textContent));
-  check('daily: three cards, one easy, one skill, one mayhem, each with a twist', cards.length === 3 && /^0:false:Easy: (Speed trap|Jump) /.test(cards[0]) && /^1:false:Skill: (Traffic run|Rush drop) /.test(cards[1]) && /^2:false:Mayhem: (Heat escape|Wrecking spree) /.test(cards[2])
+  check('daily: three cards, one easy, one skill, one mayhem, each with a twist', cards.length === 3 && /^0:false:Easy: (Speed trap|Jump) /.test(cards[0]) && /^1:false:Skill: (Near-miss run|Rush drop) /.test(cards[1]) && /^2:false:Mayhem: (Heat escape|Wrecking spree) /.test(cards[2])
     && cards.every((c) => /( in a | in the | at | under )/.test(c)), JSON.stringify(cards));
   check('daily: days played, and a missed day costs nothing', /Days played: 0\./.test(await page.locator('[data-role="daily-streak"]').innerText()) && /missed day costs nothing/.test(await page.locator('[data-role="daily-msg"]').innerText()));
   await page.locator('.rw-lp-card [data-role="daily-go"]').first().tap();
@@ -607,7 +607,7 @@ try {
   // Customize: on foot it says so; in a car every base option is open and free.
   await page.locator('[data-role="customize"]').tap();
   check('customize: on foot it asks for a car', (await page.locator('[data-role="customize-none"]').count()) === 1);
-  await page.locator('.rw-menu-back').tap();
+  await page.locator('[data-role="customize-done"]').tap();
   await ev(() => { window.rw.game.player.vehicle = window.rw.log.car; });
   await page.locator('[data-role="customize"]').tap();
   const cz = await ev(() => ({

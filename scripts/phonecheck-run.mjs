@@ -299,9 +299,14 @@ export function gcStats(events, label) {
   if (a === null || b === null) return null;
   const gcs = events.filter((e) => (e.name === 'MinorGC' || e.name === 'MajorGC') && e.ph === 'X' && e.ts >= a && e.ts <= b).sort((x, y) => x.ts - y.ts);
   let minor = 0, major = 0, pause = 0, worst = 0, alloc = 0, last = null;
+  const majors = [];
   for (const e of gcs) {
-    if (e.name === 'MinorGC') minor++; else major++;
     const d = (e.dur || 0) / 1000;
+    if (e.name === 'MinorGC') minor++;
+    else {
+      major++;
+      majors.push({ s: +((e.ts - a) / 1e6).toFixed(1), ms: +d.toFixed(1), type: (e.args && e.args.type) || '', beforeMb: Math.round(((e.args && e.args.usedHeapSizeBefore) || 0) / 1048576), afterMb: Math.round(((e.args && e.args.usedHeapSizeAfter) || 0) / 1048576) });
+    }
     pause += d;
     if (d > worst) worst = d;
     const before = e.args && e.args.usedHeapSizeBefore, after = e.args && e.args.usedHeapSizeAfter;
@@ -309,7 +314,7 @@ export function gcStats(events, label) {
     if (after >= 0) last = after;
   }
   const seconds = (b - a) / 1e6;
-  return { minor, major, pauseMs: +pause.toFixed(1), worstMs: +worst.toFixed(1), allocMb: +(alloc / 1048576).toFixed(1), seconds: +seconds.toFixed(1) };
+  return { minor, major, pauseMs: +pause.toFixed(1), worstMs: +worst.toFixed(1), allocMb: +(alloc / 1048576).toFixed(1), seconds: +seconds.toFixed(1), majors };
 }
 
 // Pure: the fastest pass of each frame. passes: [{ rows }]; frames whose state differs from the

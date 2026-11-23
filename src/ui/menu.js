@@ -863,7 +863,9 @@ export function createMenu(root, game, economy) {
       ['Getting in and out', ['Walk up to any craft and tap ENTER. Tap ENTER again to get out once you are slow enough.']],
       ['Map and races', ['Open the map to place a waypoint and see race starts.',
         'Finish races and challenges for medals and points. Everything is open from the start.']],
-      ['Scores', ['Stunts, wrecks and takedowns of the rival crew earn points. Keep scoring within 4 seconds to build a combo. A hard crash or going down loses the points you have not banked yet.',
+      ['Flow and events', ['Near misses, clean passes, drifts, air time, smashes, wrecks and escapes fill the Flow bar under the score; a full bar raises the multiplier, up to x5. Stop anywhere with no stars to bank the run. A hard crash costs two steps and a fifth of the run.',
+        'Drive through a glowing gate to start its event: bronze, silver and gold. RETRY puts you back at the gate. Pause shows Records, the Daily Three and Customize.']],
+      ['Scores', ['Race and stunt medals and street event medals pay points straight into the score. Everything is open from the start.',
         (game.city && game.city.texts && game.city.texts.fleet) || 'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
     ];
     const aboutRow = goRow('About Rustwater', 'Open', 'about', 'about');

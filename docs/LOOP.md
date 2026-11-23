@@ -18,6 +18,7 @@ One run of unbanked points, one multiplier (x1 to x5), one meter toward the next
 |---|---|---|---|
 | Near miss (gap under 1.2 m, over 45 mph, a driven car) | 150 | 0.25 | score.js |
 | Head-on miss (the same, the car coming the other way) | 225 | 0.35 | score.js |
+| Close shave (a parked car passed flank to flank within 0.6 m, over 45 mph, one per 0.5 s) | 50 | 0.1 | score.js |
 | Clean pass (a moving car ahead ends up behind, within 4.2 m to the side, 3 m/s faster, over 27 mph, no contact) | 60 | 0.12 | systems/flow.js |
 | Drift (slip over 0.35 above 27 mph, 0.5 s or more) | 50 per second | 0.2 + 0.2 per second | score.js |
 | Air (0.5 s or more off the ground), and the jump's length | 100 per second, 10 per meter | 0.3 + 0.15 per second, 0.3 | score.js |
@@ -50,7 +51,7 @@ Juice (`src/systems/flow.js`; off under Reduce motion except the text and the so
 |---|---|---|---|
 | Near miss | "Near miss x3  +300  x2" | checkpoint ping | kick 5.5 |
 | Head-on miss | "Head-on miss  +225" | checkpoint ping | kick 8, 2 frame hold |
-| Clean pass | "Clean pass  +60" | UI click | kick 3.5 |
+| Close shave, clean pass | "Close shave  +50", "Clean pass  +60" | UI click | kick 4.5, 3.5 |
 | Drift, air | "Drift 2.1 s  +105", "Air 1.4 s  +140" | click, ping | kick 4, kick 7 |
 | Smash, ram | "Smash x4  +40", "Ram  +80" | the prop's and the crash's own | kick 4, 2 frame hold |
 | Takedown | "Wrecked  +250" | the blast (combat) | kick 6, combat's 4 frame hold |
@@ -65,24 +66,25 @@ up, a bank and a crash.
 
 ## b. Street events
 
-Six templates, 30 gates in every region (quota: 6 speed traps, 6 traffic runs, 4 jumps, 6 rush
+Six templates, 30 gates in every region (quota: 6 speed traps, 6 near-miss runs, 4 jumps, 6 rush
 drops, 3 heat escapes, 5 wrecking sprees; never under 20), placed by `placeEvents(city)` from
 seed 41077 on named streets: 150 m inside the region, on land, 170 m from any other gate, 420 m
 from a gate of the same template, clear of garages, travel pads and the old ramps. A gate is two
 posts and a beam across the street with a see-through curtain in the template's color (three
 instanced draws for all of them). Driving through it the right way at 7 mph or more starts the
-event at once: no menu, no countdown, no card.
+event at once: no menu, no countdown, no card. The wrong way says "Wrong way: enter the gate
+from the other side". A gate the GPS leads to is approached from 18 m behind it, in the lane.
 
 | template (color) | rule | value | bronze / silver / gold | limit |
 |---|---|---|---|---|
 | Speed trap (yellow) | a white line 260 to 420 m down the same straight street | mph at the line | 62 / 78 / 92 percent of `min(94 mph, sqrt(13^2 + 2 x 2.6 x run))` | 30 s |
-| Traffic run (blue) | main roads; near misses and clean passes count 1 each | passes | gold `round(45 x 0.16 x busy)`, silver 65, bronze 40 percent of gold (7 / 5 / 3 on an avenue) | 45 s, ends at gold |
+| Near-miss run (blue) | main roads; near misses, head-on misses, clean passes and close shaves count 1 each | passes | gold `round(45 x 0.16 x busy)`, silver 65, bronze 40 percent of gold (7 / 5 / 3 on an avenue) | 45 s, ends at gold |
 | Jump (violet) | a ramp 95 m past the gate on a quiet street, 70 m of landing | feet flown | the ballistic distance off the 1.5 m ramp at 58 / 74 / 90 percent of the reference speed (33 m/s cap) | 25 s |
 | Rush drop (green) | a point 380 to 760 m of blocks away, GPS turn by turn | seconds | gold `6 + m / 17`, silver x 1.25, bronze x 1.6 | bronze x 1.2, 90 s at most |
 | Heat escape (red) | the gate sets 1, 2 or 3 stars | seconds to lose them | out-of-sight time (12, 18, 25 s) + 12 / 26 / 45 s | 90 s |
 | Wrecking spree (orange) | streets with sidewalks; a prop 1, a ram 2, a wreck 3 | things smashed | gold `round(40 x 0.3 x dense)` (12), silver 65, bronze 40 percent | 40 s, ends at gold |
 
-Sample (Miami Beach): Ocean Dr traffic run 2 / 3 / 5; a 420 m trap 61 / 77 / 91 mph; a jump with
+Sample (Miami Beach): Ocean Dr near-miss run 2 / 3 / 5; a 420 m trap 61 / 77 / 91 mph; a jump with
 a 95 m run-up 52 / 76 / 106 ft; a 600 m drop 0:41 / 0:51 / 1:06 (gold first); two stars 0:30 /
 0:44 / 1:03.
 
@@ -93,7 +95,7 @@ chime or the fail tone, a 3 frame hold for a medal and the slow motion beat for 
 1,000 / 2,000 / 3,000, +500 for a new best; no medal, no points. The flow run is banked.
 RETRY (the offer cell above MORE, 9 s) puts the car back 14 to 40 m before the gate, standing
 still, traffic on the spot removed, stars cleared: about 3 s from tap to gate. Leaving the car
-or wrecking it ends the event. The first gate (a traffic run with bronze 2) stands 115 m ahead
+or wrecking it ends the event. The first gate (a near-miss run with bronze 2) stands 115 m ahead
 of the region's start place; the first one-star heat escape and the first jump are within
 800 m of it. Jump ramps are added to the stunt system's ramps (they keep their stunt medals).
 
@@ -112,7 +114,7 @@ Pause, then the Records tile: two taps from play. One scrolling page:
 
 ## d. Daily Three
 
-Three of the region's events a day, one easy (trap or jump), one skill (traffic run or rush
+Three of the region's events a day, one easy (trap or jump), one skill (near-miss run or rush
 drop), one mayhem (heat escape or wrecking spree), picked by `createRng(day x 2654435761 xor
 hash(region))` where day is yyyymmdd of the phone's LOCAL date, read once when the game is
 built (`createDaily(game, { now })`, injectable; the simulation never sees a clock). Each has
@@ -132,7 +134,7 @@ what the player does; a beat's line comes again after 35 s without progress.
 
 | time | beat | line | ends when |
 |---|---|---|---|
-| 0:00 | run | "Hold GAS. Drive through the blue gate." (115 m ahead) | the traffic run starts (by 0:20) |
+| 0:00 | run | "Hold GAS. Drive through the blue gate." (115 m ahead) | the near-miss run starts (by 0:20) |
 | 0:20 | first run | "Pass cars close: 2 for bronze", then "Pass close. Every pass counts." | a medal on any event; without one: "No medal yet. Tap RETRY." |
 | by 2:00 | medal | "First medal! Gates glow on the map." | the line is up |
 | 2:10 | police | "Red gate next: it calls the police." (one star, under 800 m) | any escape; "Police! Break their line of sight." on the first star |

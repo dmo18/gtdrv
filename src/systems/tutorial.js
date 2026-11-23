@@ -1,7 +1,7 @@
 // The first five minutes (docs/LOOP.md section e), then the short
 // first-time hints. The intro leads a new player through five beats with
 // one short line each (9 words at most) and the GPS on the next gate: a
-// traffic run, a first medal, the police and an escape, a ramp, a garage.
+// near-miss run, a first medal, the police and an escape, a ramp, a garage.
 // Every beat waits for what the player actually does, so it can be done in
 // any order and at any pace; Pause, Skip intro ends it and Replay intro
 // starts it again (`game.tutorial`). The step is kept in the save

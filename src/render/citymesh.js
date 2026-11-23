@@ -852,8 +852,13 @@ function bareEnd(geo, G, edges, q, side) {
   const e = edges[q >> 1];
   if (!e || e.ped) return false;
   const span = e.length - geo.trim[q | 1] - geo.trim[q & ~1];
-  const d = q & 1 ? e.length - geo.trim[q] - Math.min(1, span / 2) : geo.trim[q] + Math.min(1, span / 2);
-  return supAt(geo, e, side, d) || G.gapAt(e.id, side, d) > 0;
+  // (Just outside the junction, and where the strip's first piece is
+  // judged: its middle, up to 5 m out.)
+  for (const t of [Math.min(1, span / 2), Math.min(5, span / 2)]) {
+    const d = q & 1 ? e.length - geo.trim[q] - t : geo.trim[q] + t;
+    if (supAt(geo, e, side, d) || G.gapAt(e.id, side, d) > 0) return true;
+  }
+  return false;
 }
 
 // Roads (docs/PLAN_V3.md 13, ROADS; world/junctions.js): one asphalt
@@ -1029,6 +1034,24 @@ export function realRoads(city, B, nodes, edges, own = null) {
           if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
           if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
         }
+      }
+    }
+    // The median carried through a junction that nothing crosses it at
+    // (world/junctions.js mthru): from the strip end to the node, along
+    // the curb line the junction's asphalt ends on.
+    if (med > 0 && !geo.inner[e.id]) {
+      for (let end = 0; end < 2; end++) {
+        const q = 2 * e.id + end;
+        if (!geo.mthru[q] || geo.jEnd[q] < 0 || !(geo.trim[q] > 0.05)) continue;
+        const da = end ? e.length - geo.trim[q] : 0, db = end ? e.length : geo.trim[q];
+        const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
+        if (own && !own(mx, mz)) continue;
+        const lc = curbsAt(geo, e, end ? da : db).l;
+        const m0 = medianAt(city, e, da, lc), m1 = medianAt(city, e, db, lc);
+        if (!(m0 > 0 && m1 > 0)) continue;
+        const planted = e.median > MEDIAN_PLANT;
+        orientedQuad((planted ? B.grass : B.sidewalk).at(mx, mz), wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), wx(db, lc - m1), wz(db, lc - m1), wx(da, lc - m0), wz(da, lc - m0), CURB_H, planted ? COL.lawn : COL.curb);
+        B.sidewalk.at(mx, mz).wall(wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), -0.02, CURB_H, COL.curb, 0, 0, (db - da) / 4.8, 0.05, 1, 1);
       }
     }
     // Sliver fills (world/ground.js fillOf): raised concrete over gaps

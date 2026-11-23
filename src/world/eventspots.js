@@ -164,7 +164,7 @@ export function placeEvents(city, seed = EVENT_SEED) {
     return -1;
   };
 
-  // --- 0. The first gate: a traffic run on the start street, just ahead of the start place. ---
+  // --- 0. The first gate: a near-miss run on the start street, just ahead of the start place. ---
   if (spawn) {
     let best = null, bd = 14;
     const hx = Math.cos(spawn.heading), hz = Math.sin(spawn.heading);
@@ -203,7 +203,7 @@ export function placeEvents(city, seed = EVENT_SEED) {
     push('trap', P, { limit: TRAP_LIMIT, targets: trapTargets(run), tx: r1(Q.x), tz: r1(Q.z), run: Math.round(run), tdx: Q.dx, tdz: Q.dz, tw: r1(Q.w) });
   }
 
-  // --- 2. Traffic runs: main roads, where the cars are. ---
+  // --- 2. Near-miss runs: main roads, where the cars are. ---
   for (const c of order('miss', (e) => MAIN[e.cls] > 0 && e.length >= 70)) {
     if ((counts.miss || 0) >= QUOTA.miss) break;
     if (walk(city, c.e, c.from, 400, S) < 220) continue;

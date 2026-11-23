@@ -242,8 +242,8 @@ const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 // Leaf colors of hedges, shrubs and beds; a bed now and then flowers.
 const SHRUB_GREENS = [0x3f6c32, 0x4a7a3a, 0x3a6230, 0x52803e, 0x44703a];
 const FLOWERS = [0xc8507a, 0xe07a3a, 0xd8c040, 0xb05ab0];
-// Planting beds: shrubs every BED_PITCH m on a strip of mulch.
-const BED_PITCH = 2.2, MULCH = 0x5a4a3a, MULCH_Y = EDGE_Y + 0.01;
+// Planting beds: a shrub every BED_PITCH m.
+const BED_PITCH = 2.2;
 const DUMPSTERS = [0x2f5a3c, 0x2a4a6a, 0x4a4e52];
 const FLAGS = [0x2a4a8a, 0xb83a30, 0xf2f0ea, 0x2f7a50];
 
@@ -456,12 +456,6 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        else if (C.ground) {
-          // On a lawn: a strip of dark mulch under the shrubs.
-          const ml = hl + 0.2, mw = hw + 0.25;
-          orientedQuad(C.ground.at(x, z), x - ca * ml - sa * mw, z - sa * ml + ca * mw, x + ca * ml - sa * mw, z + sa * ml + ca * mw,
-            x + ca * ml + sa * mw, z + sa * ml - ca * mw, x - ca * ml + sa * mw, z - sa * ml - ca * mw, MULCH_Y, MULCH);
-        }
         // Shrubs of two sizes, a big one and a small one in turn, with
         // room between: a planted row, not one long roll.
         const nm = Math.max(2, Math.round(L / BED_PITCH)), bloom = (f.v + Math.abs(Math.round(x))) % 3 === 0;

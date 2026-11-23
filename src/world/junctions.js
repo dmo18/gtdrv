@@ -554,6 +554,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   // Per end and side (q * 2 + 0 right, 1 left, edge frame): no sidewalk,
   // median or fill within this many m of that end's node (gores, noses).
   const sup = new Float64Array(4 * NE);
+  const mthru = new Uint8Array(2 * NE);
   const junctions = [];
   for (const [r, g] of groups) {
     const list = arms.get(r);
@@ -611,7 +612,17 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       sup[2 * G.qb + G.sideB] = Math.max(sup[2 * G.qb + G.sideB], G.lb);
     }
     // Median noses stop 2 m short of the junction.
-    for (const A of list) if (medianBand(A.e) > 0) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
+    // (Not where nothing leaves the junction on the median's side: a
+    // street that ends at one half of a divided road, a T. The median
+    // runs on past it, `mthru`, and the meshes carry it through.)
+    for (const A of list) {
+      if (!(medianBand(A.e) > 0)) continue;
+      const sg = A.end ? 1 : -1;
+      let crossed = false;
+      for (const B of list) if (B !== A && (B.ux * A.rx + B.uz * A.rz) * sg > 0.35) { crossed = true; break; }
+      if (crossed || list.length < 2) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
+      else mthru[A.q] = 1;
+    }
     for (const id of g) nodeJ[id] = J.id;
     for (const A of list) {
       trim[A.q] = A.trim;
@@ -649,7 +660,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       }
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup };
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup, mthru };
 }
 
 // Two one-way ways in the same direction drawn over each other (a turn
