@@ -10,6 +10,7 @@
 // uses game.debug.spawnCar / spawnOccupied, game.combat.explode and the
 // existing audio events.
 import { nextStation } from '../core/radio.js';
+import { validPreset, validVerdict, VERDICTS, VERDICT_LABELS } from '../core/handlingpreset.js';
 
 export const DRIVE_SECONDS = 60;
 export const SOUND_SECONDS = 3.2; // each of the eight sounds
@@ -43,7 +44,8 @@ export function frameStats(ms) {
 // One line, plain ASCII: version, screen size and insets, median and worst frame
 // time, frames over 33 ms, the lowest adaptive resolution scale, the start time
 // (page load to running), the map id, script heap in MB, the system with the
-// slowest single step, fullscreen, bad sounds. A field that is not known prints n/a.
+// slowest single step, fullscreen, bad sounds, the handling preset and the last
+// one-tap verdict of the Handling lab (none until tapped). A field that is not known prints n/a.
 const ID_CLEAN = /[^A-Za-z0-9_.]/g;
 const MAP_CLEAN = /[^A-Za-z0-9_.-]/g; // region ids have hyphens: miami-downtown
 export function formatResult(r) {
@@ -57,9 +59,10 @@ export function formatResult(r) {
   return `RW ${r.version || 'dev'} | ${Math.round(r.w)}x${Math.round(r.h)} inset L${Math.round(ins.l)} R${Math.round(ins.r)} T${Math.round(ins.t)} B${Math.round(ins.b)}`
     + ` | median ${r.median.toFixed(1)} ms worst ${r.worst.toFixed(1)} ms | over33 ${r.over33} | res ${r.scale.toFixed(2)}`
     + ` | start ${start} | map ${map} | mem ${mem} | slowsys ${sys}`
-    + ` | fullscreen ${r.fullscreen ? 'yes' : 'no'} | bad ${bad}`;
+    + ` | fullscreen ${r.fullscreen ? 'yes' : 'no'} | bad ${bad}`
+    + ` | handling ${validPreset(r.handlingPreset)} ${validVerdict(r.handlingVerdict)}`;
 }
-export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| start (\d+\.\d s|n\/a) \| map ([A-Za-z0-9_.-]+|n\/a) \| mem (\d+ MB|n\/a) \| slowsys ([A-Za-z0-9_.]+ \d+\.\d ms|n\/a) \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*)$/;
+export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| start (\d+\.\d s|n\/a) \| map ([A-Za-z0-9_.-]+|n\/a) \| mem (\d+ MB|n\/a) \| slowsys ([A-Za-z0-9_.]+ \d+\.\d ms|n\/a) \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*) \| handling (standard|relaxed|sharp) (none|right|twitchy|heavy|wide)$/;
 
 // Times each system's own calls (fixedUpdate and always) while a check runs and
 // remembers the slowest single call. It wraps the methods in place at start()
@@ -314,6 +317,7 @@ export function createCheckRun(game, opts = {}) {
       fullscreen: run.fullscreen || !!env.fullscreen, bad: [...bad],
       startMs: env.startMs, map: env.map, memMb: env.memMb,
       worstSystem: sysTimer ? sysTimer.worst() : (run.lastWorst || null),
+      handlingPreset: env.handlingPreset, handlingVerdict: env.handlingVerdict,
     };
   };
 
@@ -367,6 +371,10 @@ const CSS = `
 .rw-pc-card textarea { box-sizing: border-box; width: 100%; height: 64px; resize: none; padding: 6px 8px; border-radius: 8px; background: #fff; color: #111; border: 0; font: 12px/1.3 ui-monospace, monospace; user-select: text; -webkit-user-select: text; }
 .rw-pc-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
 .rw-pc-actions .rw-pc-note { flex: 1; font-size: 12px; opacity: 0.85; }
+.rw-pc-labbar { bottom: auto; top: calc(var(--rw-st) + 8px); }
+.rw-pc-labcard { width: min(460px, calc(100vw - var(--rw-sl) - var(--rw-sr) - 24px)); }
+.rw-pc-labgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.rw-pc-labcard > .rw-pc-btn { width: 100%; }
 `;
 
 export function createPhoneCheck(game, root, opts = {}) {
@@ -407,6 +415,8 @@ export function createPhoneCheck(game, root, opts = {}) {
     version: version(), w: window.innerWidth, h: window.innerHeight, insets: insets(),
     scale: game.graphics && game.graphics.res ? game.graphics.res.scale : 1, fullscreen: !!document.fullscreenElement,
     startMs: startMs(), map: game.city && (game.city.mapId || game.city.map), memMb: memoryMb(),
+    handlingPreset: game.progress && game.progress.settings ? game.progress.settings.handlingPreset : undefined,
+    handlingVerdict: game.progress && game.progress.settings ? game.progress.settings.handlingVerdict : undefined,
   });
   const el = (tag, cls, parent, text) => {
     const e = document.createElement(tag);
@@ -559,4 +569,152 @@ export function createPhoneCheck(game, root, opts = {}) {
     resultLine: () => (state.finished ? formatResult(state.finished.result(env())) : ''),
     get run() { return state.run; },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Handling lab test drive (docs/PLAN_V3.md 2.4 item 5): the player in the sedan
+// on a long straight street near the start, no traffic, then back where they
+// were. Pure part first: the street is the nearest straight edge of 120 m or
+// more that is not a bridge or causeway.
+// ---------------------------------------------------------------------------
+export const LAB_MIN_EDGE = 120;
+export const LAB_CLEAR_RADIUS = 160;
+export function findLabStreet(city, x, z) {
+  if (!city || !city.nodes || !city.edges) return null;
+  let best = null, bestD = Infinity;
+  for (const e of city.edges) {
+    if (!(e.length >= LAB_MIN_EDGE) || e.bridge || e.causeway) continue;
+    const a = city.nodes[e.a], b = city.nodes[e.b];
+    if (!a || !b) continue;
+    const d = Math.hypot((a.x + b.x) / 2 - x, (a.z + b.z) / 2 - z);
+    if (d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && best && e.id < best.id)) { bestD = d; best = e; }
+  }
+  if (!best) return null;
+  const a = city.nodes[best.a], b = city.nodes[best.b];
+  const heading = Math.atan2(b.z - a.z, b.x - a.x);
+  const along = Math.min(20, best.length * 0.15); // start a little past the crossing, a long run ahead
+  return { edge: best.id, x: a.x + Math.cos(heading) * along, z: a.z + Math.sin(heading) * along, heading, run: best.length - along };
+}
+
+export function createLabDrive(game, root, opts = {}) {
+  const st = { active: false, car: null, saved: null, panel: null, sys: null, street: null };
+  const hasDom = typeof document !== 'undefined' && !!root;
+  const safe = (fn) => { try { return fn(); } catch { return undefined; } };
+  const api = {
+    isActive: () => st.active,
+    error: '',
+    get car() { return st.car; },
+    start() {
+      const p = game.player;
+      api.error = '';
+      if (st.active) return true;
+      if (!p || (p.mode !== 'foot' && p.mode !== 'car')) { api.error = 'Get out of the boat or aircraft first.'; return false; }
+      if (!game.debug || !game.debug.spawnCar) { api.error = 'Cannot place the test car.'; return false; }
+      const street = findLabStreet(game.city, p.x, p.z);
+      if (!street) { api.error = 'No straight street here.'; return false; }
+      st.saved = { x: p.x, z: p.z, vehicle: p.vehicle || null };
+      if (p.vehicle && game.exitVehicle) game.exitVehicle();
+      const car = game.debug.spawnCar('sedan', street.x, street.z, street.heading);
+      if (!car) { api.error = 'Cannot place the test car.'; return false; }
+      car.driver = 'player';
+      st.car = car;
+      st.street = street;
+      p.walker.x = p.walker.px = street.x;
+      p.walker.z = p.walker.pz = street.z;
+      if (game.enterVehicle) game.enterVehicle(car);
+      p.x = street.x; p.z = street.z;
+      st.active = true;
+      clearTraffic();
+      if (!st.sys && game.addSystem) st.sys = game.addSystem({ name: 'handlinglab', fixedUpdate() { if (st.active) clearTraffic(); } });
+      if (hasDom) showPanel();
+      return true;
+    },
+    // Put everything back: the test car goes, the player returns on foot or into the car they left.
+    finish() {
+      if (!st.active) return;
+      st.active = false;
+      const p = game.player;
+      if (p && p.vehicle === st.car && game.exitVehicle) game.exitVehicle();
+      if (st.car) safe(() => game.removeVehicle(st.car));
+      if (st.saved && p) {
+        p.walker.x = p.walker.px = st.saved.x;
+        p.walker.z = p.walker.pz = st.saved.z;
+        p.x = st.saved.x; p.z = st.saved.z;
+        const back = st.saved.vehicle;
+        if (back && !back.wrecked && !back.removed && game.enterVehicle) safe(() => game.enterVehicle(back));
+      }
+      st.car = null;
+      if (st.panel) { st.panel.remove(); st.panel = null; }
+      if (opts.onEnd) opts.onEnd();
+    },
+  };
+  // No traffic on the street: traffic cars near the test car are removed (no allocation).
+  function clearTraffic() {
+    const c = st.car, list = game.vehicles;
+    if (!c || !list) return;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const v = list[i];
+      if (v === c || !v.traffic || v.driver === 'player') continue;
+      if (Math.hypot(v.x - c.x, v.z - c.z) < LAB_CLEAR_RADIUS) safe(() => game.removeVehicle(v));
+    }
+  }
+  // While driving: one small button at the top center ("Finish"). It opens the
+  // verdict card: one tap on a verdict saves it and ends the drive.
+  function showPanel() {
+    injectPcCss();
+    const panel = document.createElement('div');
+    panel.className = 'rw-hud rw-pc rw-pc-lab';
+    root.appendChild(panel);
+    st.panel = panel;
+    const bar = document.createElement('div');
+    bar.className = 'rw-pc-bar rw-pc-labbar';
+    panel.appendChild(bar);
+    const text = document.createElement('span');
+    text.textContent = 'Test drive';
+    const fin = document.createElement('button');
+    fin.type = 'button';
+    fin.className = 'rw-pc-btn rw-pc-main';
+    fin.textContent = 'Finish';
+    fin.dataset.role = 'labdrive-finish';
+    fin.addEventListener('click', () => { bar.remove(); showVerdict(panel); });
+    bar.append(text, fin);
+  }
+  function showVerdict(panel) {
+    const card = document.createElement('div');
+    card.className = 'rw-pc-card rw-pc-labcard';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', 'How did it feel?');
+    panel.appendChild(card);
+    const h3 = document.createElement('h3');
+    h3.textContent = 'How did it feel?';
+    card.appendChild(h3);
+    const grid = document.createElement('div');
+    grid.className = 'rw-pc-labgrid';
+    card.appendChild(grid);
+    for (const id of VERDICTS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'rw-pc-btn' + (id === 'right' ? ' rw-pc-main' : '');
+      b.textContent = VERDICT_LABELS[id];
+      b.dataset.verdict = id;
+      b.addEventListener('click', () => { if (opts.onVerdict) opts.onVerdict(id); api.finish(); });
+      grid.appendChild(b);
+    }
+    const skip = document.createElement('button');
+    skip.type = 'button';
+    skip.className = 'rw-pc-btn';
+    skip.textContent = 'Back, no verdict';
+    skip.dataset.role = 'labdrive-skip';
+    skip.addEventListener('click', () => api.finish());
+    card.appendChild(skip);
+  }
+  return api;
+}
+
+function injectPcCss() {
+  if (typeof document === 'undefined' || document.getElementById('rw-pc-css')) return;
+  const s = document.createElement('style');
+  s.id = 'rw-pc-css';
+  s.textContent = CSS;
+  document.head.appendChild(s);
 }

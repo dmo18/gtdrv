@@ -24,6 +24,7 @@
 // Both were added without a new version.
 import { sanitizeSession, sanitizeMapSessions } from './garage.js';
 import { STATION_IDS } from './radio.js';
+import { PRESETS, VERDICTS } from './handlingpreset.js';
 import { SECRET_IDS, emptySecrets, secretsDone } from '../world/secrets.js';
 import { regionFor, regionOfPoint, inRegion, DEFAULT_REGION } from '../world/regions.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
@@ -169,6 +170,9 @@ export function sanitizeProgress(raw) {
       }
       if (own(s, 'steering') && STEERING.includes(s.steering)) d.steering = s.steering;
       if (own(s, 'handling') && HANDLING.includes(s.handling)) d.handling = s.handling;
+      // Handling lab (core/handlingpreset.js): absent reads as 'standard' and 'none'.
+      if (own(s, 'handlingPreset') && typeof s.handlingPreset === 'string' && PRESETS.includes(s.handlingPreset)) d.handlingPreset = s.handlingPreset;
+      if (own(s, 'handlingVerdict') && typeof s.handlingVerdict === 'string' && VERDICTS.includes(s.handlingVerdict)) d.handlingVerdict = s.handlingVerdict;
       if (own(s, 'hud') && HUD_MODES.includes(s.hud)) d.hud = s.hud;
       // car radio: only a known station id is kept; absent means off (core/radio.js)
       if (own(s, 'station') && typeof s.station === 'string' && STATION_IDS.includes(s.station)) d.station = s.station;

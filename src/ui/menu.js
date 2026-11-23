@@ -1,11 +1,12 @@
 import { formatDistance, formatMiles, formatClock12 } from '../core/units.js';
-import { createPhoneCheck, SOUNDS, SOUND_NOTES, DRIVE_SECONDS, SOUND_SECONDS } from './phonecheck.js';
+import { createPhoneCheck, createLabDrive, SOUNDS, SOUND_NOTES, DRIVE_SECONDS, SOUND_SECONDS } from './phonecheck.js';
 import { fillAbout } from './title.js';
 // The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
 // Settings, Help), Settings in four groups, destructive actions on their own
 // confirm screens, and a registry for screens other systems add.
 // All text goes through textContent / DOM APIs, never innerHTML.
 import { setHandlingMode } from '../entities/vehicle.js';
+import { PRESETS, PRESET_LABELS, VERDICTS, VERDICT_LABELS, validPreset, validVerdict, setActivePreset } from '../core/handlingpreset.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { nextStation, stationInfo } from '../core/radio.js';
 import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
@@ -234,6 +235,8 @@ export function createMenu(root, game, economy) {
   let opened = false;
   let armed = null; // key of the confirm row waiting for its second tap
   let phone = null; // the Phone check (created on first use)
+  let labDrive = null; // the Handling lab test drive (created on first use)
+  if (game.progress && game.progress.settings) setActivePreset(game.progress.settings.handlingPreset);
   const parents = new Map(); // screen id -> the screen Back returns to
   const screens = new Map(); // registered screens: id -> { id, title, render }
 
@@ -249,6 +252,7 @@ export function createMenu(root, game, economy) {
         game.timeLocked = false;
       }
     }
+    setActivePreset(st.handlingPreset); // the Handling lab preset (core/handlingpreset.js)
     if (economy && economy.applySettings) { economy.applySettings(); return; }
     const s = settings();
     if (game.audio && game.audio.setVolume) game.audio.setVolume(volumeFromSettings(s));
@@ -269,6 +273,17 @@ export function createMenu(root, game, economy) {
     if (!phone) phone = createPhoneCheck(game, root);
     close();
     if (!phone.start() && game.hud && game.hud.toast) game.hud.toast(phone.error() || 'The phone check cannot start here', 3, 'info');
+  }
+
+  // The Handling lab test drive: the menu closes, the player is in the sedan on a clear straight street.
+  function startLabDrive() {
+    if (!labDrive) {
+      labDrive = createLabDrive(game, root, {
+        onVerdict: (id) => { settings().handlingVerdict = validVerdict(id); commit(); },
+      });
+    }
+    close();
+    if (!labDrive.start() && game.hud && game.hud.toast) game.hud.toast(labDrive.error || 'The test drive cannot start here', 3, 'info');
   }
 
   // ---------- the api given to registered screens ----------
@@ -469,6 +484,7 @@ export function createMenu(root, game, economy) {
         fromUi: (v) => Math.max(0.5, Math.min(1.5, v / 100)), text: (v) => v + '%',
       }));
       body.appendChild(segRow('Handling', [['arcade', 'Arcade'], ['sim', 'Sim']], s.handling, 'handling', (id) => { settings().handling = id; commit(); render(); }));
+      body.appendChild(goRow('Handling lab', PRESET_LABELS[validPreset(s.handlingPreset)], 'handlinglab', 'handlinglab'));
       body.appendChild(toggleRow('Left-handed', 'leftHanded'));
       body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));
     } else if (group === 'sound') {
@@ -539,6 +555,28 @@ export function createMenu(root, game, economy) {
     const go1 = button('Start the Phone check', 'rw-menu-primary', startPhoneCheck, 'Start the Phone check');
     go1.dataset.role = 'phonecheck-start';
     body.appendChild(go1);
+  }
+
+  // ---------- Handling lab: three presets, sensitivity, a test drive, a one-tap verdict ----------
+  function renderHandlingLab() {
+    const s = settings();
+    body.appendChild(segRow('Preset', PRESETS.map((id) => [id, PRESET_LABELS[id]]), validPreset(s.handlingPreset), 'preset', (id) => {
+      settings().handlingPreset = id; commit(); render();
+    }));
+    body.appendChild(sliderRow('Steering sensitivity', 'steerSensitivity', {
+      min: 50, max: 150, step: 5, dflt: 1, toUi: (v) => Math.round(v * 100),
+      fromUi: (v) => Math.max(0.5, Math.min(1.5, v / 100)), text: (v) => v + '%',
+    }));
+    const row = h('div', 'rw-menu-setting');
+    row.appendChild(h('span', '', 'Test drive'));
+    const tb = button('Start', 'rw-menu-go', startLabDrive, 'Test drive: the sedan on a clear straight street, no traffic. Start');
+    tb.dataset.role = 'labdrive';
+    row.appendChild(tb);
+    body.appendChild(row);
+    const cur = validVerdict(s.handlingVerdict);
+    body.appendChild(segRow('How it feels', VERDICTS.map((id) => [id, VERDICT_LABELS[id]]), cur, 'verdict', (id) => {
+      settings().handlingVerdict = id; commit(); render();
+    }));
   }
 
   // ---------- About: version, credits, map license, names, privacy ----------
@@ -635,6 +673,7 @@ export function createMenu(root, game, economy) {
     help: { title: 'Help', render: renderHelp },
     about: { title: 'About', render: renderAbout },
     soundtest: { title: 'Sound test', render: renderSoundTest },
+    handlinglab: { title: 'Handling lab', render: renderHandlingLab },
     newgame: { title: 'New game', render: renderNewGame },
     mapchoice: { title: 'Map', render: renderMapChoice },
     travel: { title: 'Travel', render: renderTravel },
@@ -646,7 +685,7 @@ export function createMenu(root, game, economy) {
     const top = body.scrollTop;
     body.textContent = '';
     const sc = screenOf(active) || BUILTIN.resume;
-    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' || active === 'soundtest' ? 'settings' : (active === 'about' ? 'help' : 'resume')));
+    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' || active === 'soundtest' || active === 'handlinglab' ? 'settings' : (active === 'about' ? 'help' : 'resume')));
     for (const [id] of TABS) {
       tabButtons[id].setAttribute('aria-selected', String(id === railId));
       tabButtons[id].tabIndex = id === railId ? 0 : -1;

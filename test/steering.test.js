@@ -8,6 +8,9 @@ import {
 import { defaultProgress, sanitizeProgress } from '../src/core/save.js';
 import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode, lateralGrip } from '../src/entities/vehicle.js';
 import { createRng, angleDiff } from '../src/core/rng.js';
+import {
+  PRESETS, PRESET_VALUES, VERDICTS, validPreset, validVerdict, setActivePreset, activePreset, presetValues, steerScale, SPEED_FULL,
+} from '../src/core/handlingpreset.js';
 
 test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the center; sensitivity changes travel only', () => {
   assert.equal(wheelCurve(0), 0);
@@ -180,6 +183,39 @@ test('player input asks for proportional steering; settings sanitise', () => {
   assert.equal(sens('1.2'), 1);
   assert.equal(sens(NaN), 1);
   assert.equal(sens(Infinity), 1);
+});
+
+test('handling presets: values, default standard, enum validation, steer scale', () => {
+  assert.deepEqual(PRESETS, ['standard', 'relaxed', 'sharp']);
+  assert.deepEqual(PRESET_VALUES.standard, { lockScale: 1, speedReduction: 0, gripFeel: 1 }, 'standard is today');
+  assert.deepEqual(PRESET_VALUES.relaxed, { lockScale: 0.85, speedReduction: 0.25, gripFeel: 0.94 });
+  assert.deepEqual(PRESET_VALUES.sharp, { lockScale: 1.15, speedReduction: 0.05, gripFeel: 1.06 });
+  assert.ok(PRESET_VALUES.relaxed.lockScale < 1 && PRESET_VALUES.sharp.lockScale > 1);
+  assert.equal(activePreset(), 'standard');
+  assert.equal(setActivePreset('sharp'), 'sharp');
+  assert.equal(presetValues(), PRESET_VALUES.sharp);
+  assert.equal(setActivePreset('bogus'), 'standard');
+  assert.equal(presetValues('relaxed'), PRESET_VALUES.relaxed);
+  for (const bad of ['', 'Sharp', 5, null, undefined, ['sharp'], {}]) assert.equal(validPreset(bad), 'standard');
+  // standard never changes the steer share; relaxed gives less lock and less still when fast
+  for (const u of [0, 5, 15, 30, 60]) assert.equal(steerScale(u, 'standard'), 1);
+  assert.equal(steerScale(0, 'relaxed'), 0.85);
+  assert.ok(steerScale(SPEED_FULL, 'relaxed') < steerScale(10, 'relaxed') && steerScale(10, 'relaxed') < 0.85);
+  assert.ok(Math.abs(steerScale(SPEED_FULL, 'relaxed') - 0.85 * 0.75) < 1e-12);
+  assert.equal(steerScale(90, 'relaxed'), steerScale(SPEED_FULL, 'relaxed'));
+  assert.ok(steerScale(0, 'sharp') > 1);
+  // settings: absent reads as standard / none, only enums are kept
+  assert.equal(defaultProgress().settings.handlingPreset, undefined);
+  for (const id of PRESETS) assert.equal(sanitizeProgress({ settings: { handlingPreset: id } }).settings.handlingPreset, id);
+  for (const bad of ['', 'Sharp', 'tight', 3, null, ['sharp'], { a: 1 }]) {
+    const s = sanitizeProgress({ settings: { handlingPreset: bad, handlingVerdict: bad } }).settings;
+    assert.equal(validPreset(s.handlingPreset), 'standard');
+    assert.equal(s.handlingPreset, undefined);
+    assert.equal(s.handlingVerdict, undefined);
+  }
+  for (const id of VERDICTS) assert.equal(sanitizeProgress({ settings: { handlingVerdict: id } }).settings.handlingVerdict, id);
+  assert.equal(validVerdict('twitchy'), 'twitchy');
+  assert.equal(validVerdict('nope'), 'none');
 });
 
 // ---- Car handling: arcade (default) and sim modes (bands in

@@ -5,7 +5,7 @@ import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
 import { createInput } from '../src/core/input.js';
 import { createRng } from '../src/core/rng.js';
 import {
-  frameStats, formatResult, RESULT_RE, createSystemTimer, buildRoute, createDriver, createCheckRun, SOUNDS,
+  frameStats, formatResult, RESULT_RE, createSystemTimer, buildRoute, createDriver, createCheckRun, SOUNDS, findLabStreet, createLabDrive,
 } from '../src/ui/phonecheck.js';
 import { makeFightGame, cityAndCollision } from './fightgame.js';
 
@@ -27,16 +27,72 @@ test('result line: one ASCII line in the agreed format', () => {
     scale: 0.85, fullscreen: true, bad: [5, 2], startMs: 4630, map: 'miami-downtown', memMb: 255.4, worstSystem: { name: 'parked', ms: 7.34 },
   });
   assert.match(line, RESULT_RE);
-  assert.equal(line, 'RW 0.5.0 | 915x412 inset L40 R0 T0 B0 | median 16.7 ms worst 48.3 ms | over33 3 | res 0.85 | start 4.6 s | map miami-downtown | mem 255 MB | slowsys parked 7.3 ms | fullscreen yes | bad 2,5');
+  assert.equal(line, 'RW 0.5.0 | 915x412 inset L40 R0 T0 B0 | median 16.7 ms worst 48.3 ms | over33 3 | res 0.85 | start 4.6 s | map miami-downtown | mem 255 MB | slowsys parked 7.3 ms | fullscreen yes | bad 2,5 | handling standard none');
   const none = formatResult({ version: 'dev', w: 780, h: 360, median: 8.3, worst: 9, over33: 0, scale: 1, fullscreen: false, bad: [] });
   assert.match(none, RESULT_RE);
-  assert.ok(none.endsWith('fullscreen no | bad none'));
+  assert.ok(none.endsWith('fullscreen no | bad none | handling standard none'));
   assert.ok(none.includes('| start n/a | map n/a | mem n/a | slowsys n/a |'), none);
   // Names are cleaned to plain ASCII so the line always matches.
   const odd = formatResult({ version: 'dev', w: 780, h: 360, median: 8.3, worst: 9, over33: 0, scale: 1, fullscreen: false, bad: [], map: 'mi ami\u2014-x', worstSystem: { name: 'a b', ms: 1 } });
   assert.match(odd, RESULT_RE);
   assert.ok(/\| map miami-x \| mem n\/a \| slowsys ab 1\.0 ms \|/.test(odd), odd);
   assert.ok(!/[\u2013\u2014\n]/.test(line + none), 'no dashes, no newline');
+});
+
+test('result line: the Handling lab preset and verdict close the line, bad values read as standard none', () => {
+  const base = { version: 'dev', w: 748, h: 360, median: 8.3, worst: 9, over33: 0, scale: 1, fullscreen: false, bad: [1] };
+  const a = formatResult({ ...base, handlingPreset: 'sharp', handlingVerdict: 'twitchy' });
+  assert.match(a, RESULT_RE);
+  assert.ok(a.endsWith('| bad 1 | handling sharp twitchy'), a);
+  for (const [p, v] of [['relaxed', 'heavy'], ['standard', 'wide'], ['sharp', 'right']]) {
+    assert.match(formatResult({ ...base, handlingPreset: p, handlingVerdict: v }), RESULT_RE);
+  }
+  const bad = formatResult({ ...base, handlingPreset: 'x y\n', handlingVerdict: 9 });
+  assert.match(bad, RESULT_RE);
+  assert.ok(bad.endsWith('| handling standard none'), bad);
+  assert.doesNotMatch('RW d | 1x1 | handling sharp twitchy', RESULT_RE);
+});
+
+test('lab street: the nearest straight street of 120 m or more, no bridge, deterministic', () => {
+  const { city } = cityAndCollision();
+  const a = findLabStreet(city, 0, 0);
+  assert.ok(a && a.run >= 100, JSON.stringify(a));
+  assert.deepEqual(a, findLabStreet(city, 0, 0));
+  const e = city.edges[a.edge];
+  assert.ok(e.length >= 120 && !e.bridge && !e.causeway);
+  const n = city.nodes[e.a];
+  assert.ok(Math.hypot(a.x - n.x, a.z - n.z) <= 20.01);
+  assert.equal(findLabStreet({ nodes: [], edges: [] }, 0, 0), null);
+  assert.equal(findLabStreet(null, 0, 0), null);
+});
+
+test('lab test drive: sedan on the street, traffic near it removed, player put back', () => {
+  const game = checkGame();
+  const { city } = cityAndCollision();
+  game.player.x = game.player.walker.x = city.nodes[3].x;
+  game.player.z = game.player.walker.z = city.nodes[3].z;
+  const home = { x: game.player.walker.x, z: game.player.walker.z };
+  const lab = createLabDrive(game, null, {});
+  assert.equal(lab.start(), true, lab.error);
+  assert.equal(game.player.mode, 'car');
+  assert.equal(game.player.vehicle.kind, 'car');
+  const car = lab.car;
+  assert.equal(car, game.player.vehicle);
+  const st = findLabStreet(city, home.x, home.z);
+  assert.equal(car.x, st.x);
+  assert.equal(car.heading, st.heading);
+  // a traffic car near the street is cleared by the system step; a far one stays
+  const near = game.debug.spawnCar('sedan', car.x + 40, car.z, 0);
+  near.traffic = true;
+  const far = game.debug.spawnCar('sedan', car.x + 900, car.z, 0);
+  far.traffic = true;
+  for (const sys of game.systems || []) if (sys.name === 'handlinglab') sys.fixedUpdate(DT);
+  lab.finish();
+  assert.equal(game.player.vehicle, null, 'back on foot');
+  assert.equal(game.player.walker.x, home.x);
+  assert.equal(game.vehicles.includes(car), false);
+  assert.equal(lab.isActive(), false);
+  lab.finish(); // idempotent
 });
 
 test('the route is fixed: the same start gives the same points, and it is long enough', () => {
@@ -104,7 +160,7 @@ test('a short check runs: drives the route, fights, blasts, plays the eight soun
   const line = formatResult(run.result({ version: '0.5.0', w: 915, h: 412, insets: { l: 0, r: 0, t: 0, b: 0 }, scale: 1, startMs: 3200, map: 'miami-downtown', memMb: 160 }));
   assert.match(line, RESULT_RE);
   assert.ok(line.includes('| start 3.2 s | map miami-downtown | mem 160 MB | slowsys '), line);
-  assert.ok(line.endsWith('bad 3,7'), line);
+  assert.ok(line.endsWith('bad 3,7 | handling standard none'), line);
   assert.ok(/median 1\d\.\d ms worst 2\d\.\d ms \| over33 0/.test(line), line);
   run.finish();
   assert.equal(game.player.vehicle, null, 'back on foot');

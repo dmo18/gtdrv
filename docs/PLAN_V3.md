@@ -683,3 +683,8 @@ in route following, ground sampling or prop breaks.
 - Views, map, lots, sea edge, bridge: screenshots of the running game looked at.
 - Not measured: anything on a phone; GPU time; the fleet's look in motion; whether the new
   rules are fun. Those are the owner checks.
+
+
+## 12. Market reference additions (docs/MARKET.md)
+
+New row in 0.11.0: CUSTOM (Sonnet, Opus review, 150k to 220k): free vehicle paint, metallic finishes, wheels, tint, decals, saved looks, a few outfits and accessories; owns src/ui/garage screens, src/core/garage.js look fields (sanitised), carbody color hooks. No purchases, no ads, no currency.
