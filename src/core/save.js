@@ -221,7 +221,7 @@ export function migrateMapChoice(storage, key = MAP_CHOICE_KEY) {
     const progress = loadProgress(storage);
     const parked = progress.mapSessions;
     const ses = progress.session && progress.session.map === 'miami' ? progress.session : (own(parked, 'miami') ? parked.miami : null);
-    if (stored !== 'miami' && !(stored === null && ses)) return stored;
+    if (stored !== 'miami' && !(stored === null && ses)) return typeof stored === 'string' && stored.length < 40 && /^[a-z-]+$/.test(stored) ? stored : null;
     const placed = !!ses && ses.mode !== 'start';
     const id = placed ? regionOfPoint(ses.x, ses.z) : DEFAULT_REGION;
     const region = regionFor(id);
