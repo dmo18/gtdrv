@@ -8,6 +8,7 @@
 // Coordinates: x east, z south, meters. Heading 0 faces +x and grows
 // toward +z.
 import { createRng, firstNext } from '../core/rng.js';
+import { SERVICE_SPOTS } from '../entities/servicevehicles.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -38,9 +39,9 @@ export const CARPARK_BAYS = 36;
 export const CARPARK_BAYS_MAPPED = 72;
 // Caps (phone budget). A long feature (a bay row, a hedge, a path) counts
 // once here, however long (lotEmptiness counts its length).
-export const MAX_FEATURES = 64;
+export const MAX_FEATURES = 80;
 export const MAX_PER_HA = 120;
-export const MAX_SOLID = 64;
+export const MAX_SOLID = 80;
 // Downtown and midtown: a building's piece of free land this large is a
 // surface parking lot (the commonest use of open land downtown), unless
 // the building is a public one that keeps a forecourt.
@@ -411,12 +412,12 @@ export function lotTypeFor(b, district, free) {
   if (isMappedParking(b) && free >= CARPARK_MIN) return 'carpark';
   if (b && CARPARK_OSM.has(b.osm) && free >= CARPARK_BIG && oneInThree(b)) return 'carpark';
   if (b && (district === 'downtown' || district === 'midtown') && free >= CARPARK_LARGE && !PLAZA_OSM.has(b.osm) && !CARPARK_OSM.has(b.osm) && b.kind !== 'house') return 'carpark';
-  if (b && PLAZA_OSM.has(b.osm) && free >= FORECOURT_MAX) return 'carpark';
+  if (b && (PLAZA_OSM.has(b.osm) || b.h >= 30) && free >= FORECOURT_MAX) return 'carpark';
   if (b && (b.h >= 30 || PLAZA_OSM.has(b.osm))) return 'plaza';
   if (district === 'residential' || (b && (b.kind === 'house' || (b.h <= 8 && (b.x1 - b.x0) * (b.z1 - b.z0) <= 300)))) return free > YARD_MAX ? 'grass' : 'yard';
   if ((district === 'downtown' || district === 'midtown') && !b && free >= CARPARK_BIG) return 'carpark';
   if (district === 'downtown' || district === 'midtown') return b ? 'plaza' : 'grass';
-  return b ? 'yard' : 'grass';
+  return b && free <= YARD_MAX ? 'yard' : 'grass';
 }
 
 // Distance from segment ab to the axis-aligned rect (0 when they touch).
@@ -748,7 +749,7 @@ export const HEDGE_H = 0.95;
 export const SHRUB_H = 1.15;
 const MIN_CONTENT = { yard: 6, carpark: 9, plaza: 6, grass: 2, works: 8, beach: 5, park: 5, wateredge: 4, site: 8, verge: 0, airfield: 0 };
 const SIDE_HEADING = [Math.PI / 2, 0, Math.PI / 2, 0]; // a run along side s
-const ISLAND_EVERY = 10; // bays between two planted islands in a row
+const ISLAND_EVERY = 14; // bays between two planted islands in a row
 
 // The cap on features for one lot: LOT_CAP_PER_HA a hectare and
 // MAX_FEATURES a lot, but never below what the type's minimum content
@@ -760,6 +761,8 @@ export function featureCap(lot) {
 }
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
+const NEAR_S = []; // scratch: service homes round the lot being dressed
+const SERVICE_KEEP = 6.5; // m round a service home kept clear of lot features
 // Scratch per feature index of the lot being dressed (put fills it):
 // center and radius, 1 for a drive, bay or path, with the cosine and sine
 // of its heading and its half length and width.
@@ -794,7 +797,15 @@ export function dressLot(city, lot, out = []) {
     const c = cellOf(x, z);
     return c >= 0 && G.id[c] === id;
   };
-  const inGarage = (x, z) => {
+  // The hand-placed service homes (entities/servicevehicles.js
+  // SERVICE_SPOTS) near this lot: nothing stands within SERVICE_KEEP m.
+  NEAR_S.length = 0;
+  for (let k = 0; k < SERVICE_SPOTS.length; k++) {
+    const p = SERVICE_SPOTS[k];
+    if (!p.curb && p.x > lot.x0 - 20 && p.x < lot.x1 + 20 && p.z > lot.z0 - 20 && p.z < lot.z1 + 20) NEAR_S.push(p);
+  }
+  const inGarage = (x, z, reach = 0) => {
+    for (let k = 0; k < NEAR_S.length; k++) if (Math.hypot(x - NEAR_S[k].x, z - NEAR_S[k].z) < SERVICE_KEEP + reach) return true;
     if (!garages || !garages.length) return false;
     for (let k = 0; k < garages.length; k++) {
       const g = garages[k];
@@ -833,7 +844,7 @@ export function dressLot(city, lot, out = []) {
     if (out.length >= cap || (isSolid && solid >= MAX_SOLID)) return false;
     // Rounded to the centimeter first, so the stored point is the tested one.
     const x = Math.round(x0f * 100) / 100, z = Math.round(z0f * 100) / 100;
-    if (!inLot(x, z) || inGarage(x, z) || !offBuildings(x, z, heading, l, w, r)) return false;
+    if (!inLot(x, z) || inGarage(x, z, Math.max(l, w) / 2 + r) || !offBuildings(x, z, heading, l, w, r)) return false;
     const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays
@@ -916,6 +927,7 @@ export function dressLot(city, lot, out = []) {
   // (x, z) clear by gapM of the round features so far and off every flat
   // one (a drive, a bay, a path), r its radius; the whole disc on the lot.
   const clearAt = (x, z, r, gapM) => {
+    if (!inLot(x + r, z) || !inLot(x - r, z) || !inLot(x, z + r) || !inLot(x, z - r)) return false;
     for (let k = 0, n2 = out.length; k < n2; k++) {
       const fr = F_R[k];
       if (fr > 0 && nearer(F_X[k] - x, F_Z[k] - z, gapM + fr)) return false;
@@ -924,7 +936,7 @@ export function dressLot(city, lot, out = []) {
         if (Math.abs(dx * c + dz * s) < F_HL[k] + r && Math.abs(-dx * s + dz * c) < F_HW[k] + r) return false;
       }
     }
-    return inLot(x + r, z) && inLot(x - r, z) && inLot(x, z + r) && inLot(x, z - r);
+    return true;
   };
   const scatter = (count, kind, r, h, isSolid, gapM, vFn, margin = 1.5) => {
     let n = 0;
@@ -1124,7 +1136,11 @@ export function dressLot(city, lot, out = []) {
           const x = alongX ? a : d, z = alongX ? d : a;
           // The whole bay on the lot: its center and both ends.
           const ex = alongX ? 0 : 2.2, ez = alongX ? 2.2 : 0;
-          const ok = inLot(x, z) && inLot(x + ex, z + ez) && inLot(x - ex, z - ez) && (!inB || (!inB(x, z, 1.5) && !inB(x + ex, z + ez, 1.3) && !inB(x - ex, z - ez, 1.3)));
+          // ... and its four corners (a bay never pokes into the next lot).
+          const qx = alongX ? 1.15 : 2.3, qz = alongX ? 2.3 : 1.15;
+          const ok = inLot(x, z) && inLot(x + ex, z + ez) && inLot(x - ex, z - ez) &&
+            inLot(x + qx, z + qz) && inLot(x - qx, z + qz) && inLot(x + qx, z - qz) && inLot(x - qx, z - qz) &&
+            (!inB || (!inB(x, z, 1.5) && !inB(x + ex, z + ez, 1.3) && !inB(x - ex, z - ez, 1.3)));
           if (!ok) { flush(); slot = 0; continue; }
           slot++;
           if (slot > ISLAND_EVERY && runN >= ISLAND_EVERY) {
@@ -1221,9 +1237,17 @@ export function dressLot(city, lot, out = []) {
       // A small green: a path across a big one, trees in clusters, beds of
       // shrubs.
       if (area > 1500) {
+        // A path down the long axis: through the middle, else the first
+        // line a quarter or a third off it that holds one.
         const alongX = x1 - x0 >= z1 - z0;
-        const len = (alongX ? x1 - x0 : z1 - z0) - 4;
-        if (!putLong('path', cx, cz, alongX ? 0 : Math.PI / 2, len, 2, 0, false, set.furn)) put('path', cx, cz, alongX ? 0 : Math.PI / 2, Math.min(len, 10), 2, 0, 0, false, set.furn);
+        const len = (alongX ? x1 - x0 : z1 - z0) - 4, across = alongX ? z1 - z0 : x1 - x0;
+        const hd = alongX ? 0 : Math.PI / 2;
+        let ok = false;
+        for (const o of [0, -0.25, 0.25, -0.34, 0.34, -0.12, 0.12]) {
+          const px = alongX ? cx : cx + o * across, pz = alongX ? cz + o * across : cz;
+          if ((ok = putLong('path', px, pz, hd, len, 2, 0, false, set.furn) || putLong('path', px, pz, hd, len * 0.6, 2, 0, false, set.furn) || put('path', px, pz, hd, Math.min(len, 10), 2, 0, 0, false, set.furn))) break;
+        }
+        void ok;
       }
       if (area >= 1500) { boundary(front, 'hedge', 5, ''); for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 15) boundary(q, 'hedge', 4, ''); } }
       greens(area, 1);
@@ -1256,11 +1280,11 @@ export function dressLot(city, lot, out = []) {
       let used = 0;
       for (let t = 0; t < 60 && used < area * 0.3 && out.length < cap; t++) {
         const pick = rng.next();
-        if (pick < 0.55) {
+        if (pick < 0.7) {
           const hd = rng.chance(0.5) ? 0 : Math.PI / 2;
           const x = x0 + 4 + rng.next() * (x1 - x0 - 8), z = z0 + 4 + rng.next() * (z1 - z0 - 8);
           if (clearBox(out, x, z, 7.5)) if (putLong('stack', x, z, hd, 12.2, 2.5, 2.6 * rng.int(1, 3), true, rng.int(0, 5))) used += 30;
-        } else if (pick < 0.8) {
+        } else if (pick < 0.88) {
           const x = x0 + 2 + rng.next() * (x1 - x0 - 4), z = z0 + 2 + rng.next() * (z1 - z0 - 4);
           if (clearBox(out, x, z, 2) && put('pallet', x, z, rng.next() * 3, 1.2, 1.2, 1, 0, false, rng.int(0, 2))) used += 1.5;
         } else {
@@ -1380,7 +1404,7 @@ export function dressLot(city, lot, out = []) {
     default:
       break;
   }
-  fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tree, set, out);
+  fill(lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out);
   return out;
 }
 
@@ -1389,17 +1413,35 @@ export function dressLot(city, lot, out = []) {
 // gets more of what its type holds, at random points, while the cap
 // allows: trees in grates, planters and benches on paving; tree clusters
 // and shrub beds on a lawn; goods in a works yard or on a site.
-function fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tree, set, out) {
+function fill(lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out) {
   if (lot.area <= DENSITY_MIN_AREA || lot.type === 'beach') return;
   const need = lot.area / DENSITY_M2;
   let u = lotEmptiness(out);
   const { x0, z0, x1, z1 } = lot;
-  for (let t = 0; t < 320 && u < need && out.length < cap; t++) {
+  for (let t = 0, miss = 0; t < 240 && miss < 60 && u < need && out.length < cap; t++) {
     const x = x0 + 2 + rng.next() * (x1 - x0 - 4), z = z0 + 2 + rng.next() * (z1 - z0 - 4);
     const n0 = out.length;
     // Close to the cap: long things only (a bed or a seat wall of 12 m
     // is 2.4 units in one feature).
     const long = (need - u) / Math.max(1, cap - out.length) > 1.2;
+    if (miss > 24 && !long) {
+      // Little room left: short beds (one unit each) fit where long ones
+      // do not; on paving a planter.
+      const hd = rng.chance(0.5) ? 0 : Math.PI / 2;
+      const paved = lot.type === 'plaza' || lot.type === 'wateredge' || lot.type === 'carpark';
+      if (lot.type === 'works' || lot.type === 'site') { if (clearAt(x, z, 0.9, 0.8)) put('pallet', x, z, rng.next() * 3, 1.2, 1.2, 1, 0, false, rng.int(0, 2)); }
+      else if (bed(x, z, hd, 3.5, paved)) { /* a short bed */ }
+      else if (paved && clearAt(x, z, 0.7, 1)) put('planter', x, z, 0, 0, 0, 0.8, 0.7, true, set.furn);
+      else if (miss > 40) {
+        // A fragment of a lot: what fits in a cell.
+        if (paved) { if (clearAt(x, z, 0.2, 0.8)) put('bollard', x, z, 0, 0, 0, 0.9, 0.15, true, set.furn); }
+        else if (lot.type !== 'yard') { if (clearAt(x, z, 0.6, 0.6)) put('shrub', x, z, rng.next() * 6, 0, 0, 0.9, 0.6, false, tree()); }
+        else putLong('hedge', x, z, hd, 3, 0.7, HEDGE_H, true, set.furn);
+      }
+      for (let k = n0; k < out.length; k++) u += unitOf(out[k]);
+      miss = out.length > n0 ? 0 : miss + 1;
+      continue;
+    }
     switch (lot.type) {
       case 'plaza': case 'wateredge': case 'carpark': {
         const k = long ? 1 + (t % 2) : t % 4, hd = rng.chance(0.5) ? 0 : Math.PI / 2;
@@ -1410,8 +1452,8 @@ function fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tr
         break;
       }
       case 'works': case 'site':
-        if (long) { if (clearAt(x, z, 3.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 12.2, 2.5, 2.6, true, rng.int(0, 5)); }
-        else if (t % 2 && clearAt(x, z, 2.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6.1, 2.5, 2.6, true, rng.int(0, 5));
+        if (long) { if (clearAt(x, z, 3.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 12.2, 2.5, 2.6, 0, true, rng.int(0, 5)); }
+        else if (t % 2 && clearAt(x, z, 2.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6.1, 2.5, 2.6, 0, true, rng.int(0, 5));
         else if (clearAt(x, z, 0.9, 0.8)) put('pallet', x, z, rng.next() * 3, 1.2, 1.2, 1, 0, false, rng.int(0, 2));
         break;
       case 'yard':
@@ -1427,6 +1469,7 @@ function fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tr
         break;
     }
     for (let k = n0; k < out.length; k++) u += unitOf(out[k]);
+    miss = out.length > n0 ? 0 : miss + 1;
   }
 }
 

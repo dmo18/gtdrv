@@ -468,14 +468,20 @@ async function liveLayout(check) {
         if (m1 && el.some((q) => q.key === 'm2')) bad('with the nav pill on, row 1 and row 2 both show a message');
       }
       // The street label sits under the minimap (11 px text, 16 high), inside the safe edge, clear of everything (overlap check above).
+      // Left-handed the cell under the minimap is BOOST's: the label sits under the speed readout (no wider), and Full hides it.
       for (const k of el.filter((q) => q.key === 'street')) {
         const mm = el.find((q) => q.key === 'minimap');
-        if (Math.abs(k.x - (L + 8)) > 1 || Math.abs(k.h - 16) > 0.5 || (mm && (k.y < mm.b - 0.5 || k.y > mm.b + 30))) bad(`street label is ${k.x.toFixed(1)},${k.y.toFixed(1)},${k.w.toFixed(1)}x${k.h.toFixed(1)}, want under the minimap at x ${L + 8}, 16 high`);
+        const sp = el.find((q) => q.key === 'speed');
+        if (Math.abs(k.h - 16) > 0.5) bad(`street label is ${k.h.toFixed(1)} high, want 16`);
+        if (!hand && (Math.abs(k.x - (L + 8)) > 1 || (mm && (k.y < mm.b - 0.5 || k.y > mm.b + 30)))) bad(`street label is at ${k.x.toFixed(1)},${k.y.toFixed(1)}, want under the minimap at x ${L + 8}`);
+        if (hand && sp && (Math.abs(k.x - sp.x) > 1 || k.r > sp.r + 0.5 || k.y < sp.b - 0.5)) bad(`left-handed street label ${k.x.toFixed(1)},${k.y.toFixed(1)},${k.w.toFixed(1)} is not under the speed readout`);
       }
-      if (!el.some((q) => q.key === 'street')) bad('the street label is missing');
+      if (!el.some((q) => q.key === 'street') && !(hand && hud === 'full')) bad('the street label is missing');
       // SWAP while driving: one in a car or boat (the player carries a gun), none on foot
       const cs = el.filter((q) => q.key === 'cswap').length;
-      if ((m.mode === 'car' || m.mode === 'boat') && cs !== 1) bad(`SWAP count ${cs} in ${m.name}`);
+      // (on short screens left-handed in a service vehicle SWAP waits: its cell would be under the fan, docs/UI.md)
+      const swapWaits = grid.H <= 300 && hand && m.extraOn;
+      if ((m.mode === 'car' || m.mode === 'boat') && cs !== (swapWaits ? 0 : 1)) bad(`SWAP count ${cs} in ${m.name}`);
       if (m.mode !== 'car' && m.mode !== 'boat' && cs) bad(`SWAP shows in ${m.name}`);
       // a message pill is centered in its row
       for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
@@ -1389,7 +1395,7 @@ try {
   check('boat: same steering wheel', bw.vis);
   const bp = rimPt(bw, 0);
   await down(14, bp.x, bp.y);
-  await turn(14, bw, 0, 130);
+  await turn(14, bw, 0, 90); // 0.10.1: a quarter turn on the rim is past full lock (60 degrees)
   check('boat: steer right', (await read('rw.input.steer')) === 1);
   await shot('boat-active-915x412.png');
   await up(14);
@@ -1511,8 +1517,9 @@ try {
         await checkLayout(`minimal ${tag}`);
         const n = await buttonCount();
         counts[m] = Math.max(counts[m] || 0, n);
-        // 6.12 adds BOOST to the boat (7); a car with a siren or an extra shows up to 2 more, forced separately by the live layout test
-        check(`minimal ${tag}: at most 8 buttons at once on foot or in a car (HAND, SWAP, RUN are slots now), 7 in a boat, 6 elsewhere (${n})`, n <= (m === 'car' || m === 'foot' ? 8 : m === 'boat' ? 7 : 6), String(n));
+        // 6.12 adds BOOST to the boat (7); a car with a siren or an extra shows up to 2 more, forced separately by the live layout test.
+        // 0.10.1 (owner: "switch weapons when driving") adds the driving SWAP, one more in a car (9) and a boat (8) while armed; nothing else.
+        check(`minimal ${tag}: at most 8 buttons at once on foot, 9 in a car and 8 in a boat (with the driving SWAP), 6 elsewhere (${n})`, n <= (m === 'car' ? 9 : m === 'foot' || m === 'boat' ? 8 : 6), String(n));
         await shot(`min-${fileTag}-idle.png`);
         await tapMore();
         check(`minimal ${tag}: more button opens the fan`, await fanIsOpen());
@@ -1589,7 +1596,7 @@ try {
   await down(1, hb2.x, hb2.y);
   const ph = rimPt(wbh, 0);
   await down(2, ph.x, ph.y);
-  await turn(2, wbh, 0, 130);
+  await turn(2, wbh, 0, 90);
   await down(3, gs.x, gs.y);
   await page.waitForTimeout(4600);
   check('hold HAND + steer + gas together past 4 s: HAND is a main button, always visible', await page.locator('[aria-label="Handbrake"]').isVisible());
@@ -1772,7 +1779,7 @@ try {
   const wb3 = await wheelBox();
   p0 = rimPt(wb3, 0);
   await down(1, p0.x, p0.y);
-  await turn(1, wb3, 0, 130);
+  await turn(1, wb3, 0, 90);
   await down(2, g3.x, g3.y);
   await down(3, dbf.x, dbf.y);
   const three = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");
@@ -1796,7 +1803,7 @@ try {
   const bw2 = await wheelBox();
   p0 = rimPt(bw2, 0);
   await down(1, p0.x, p0.y);
-  await turn(1, bw2, 0, -130);
+  await turn(1, bw2, 0, -90);
   await down(2, bg.x, bg.y);
   await down(3, bf.x, bf.y);
   const bthree = await read("[rw.input.steer, rw.input.throttle, rw.input.held('fire')]");

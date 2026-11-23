@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { ChunkedBuilder, MeshBuilder } from '../src/render/meshbuilder.js';
-import { lotGround, lotEdges, drawLotFeatures, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT } from '../src/render/lotmesh.js';
+import { lotGround, lotEdges, drawLotFeatures, lotsByTile, lotJob, DRAWN_T, LOT_GROUND, LOT_TYPES as LT, EDGE_Y } from '../src/render/lotmesh.js';
 import { realLand } from '../src/render/citymesh.js';
 import { compactFar, farBuilding } from '../src/render/realcity.js';
 import { createCollisionWorld, addLotSolids, fillLotCollision } from '../src/world/collision.js';
@@ -68,7 +68,11 @@ test('lot ground covers exactly the lot cells, in the material of each type', ()
   assert.ok(kinds.size >= 5, [...kinds].join(' '));
 });
 
-test('lot edges: curbed lawns and bordered plazas, inside their own lots only', () => {
+// 0.11.0 (docs/PLAN_V3.md 13, LOTS): one ground per block. Lawns keep their
+// concrete edging and grass band, a parking lot gets a concrete curb where
+// its asphalt meets anything else, and paved lots meet with no border, no
+// inlay and no pattern of their own.
+test('lot edges: curbed lawns and curbed parking lots, no border between paved lots, inside their own lots only', () => {
   const city = makeLotsFixture();
   const G = city.lotGrid;
   const B = builders();
@@ -80,11 +84,14 @@ test('lot edges: curbed lawns and bordered plazas, inside their own lots only', 
   for (const [x, z, key] of all) {
     const lot = city.lotAt(x, z);
     assert.ok(lot, `edge at ${x.toFixed(1)}, ${z.toFixed(1)} is in a lot`);
-    assert.ok(['yard', 'park', 'plaza'].includes(lot.type), `${lot.type} gets no edge`);
-    kinds.add(`${lot.type === 'plaza' ? 'plaza' : 'lawn'} ${key}`);
+    assert.ok(['yard', 'park', 'grass', 'carpark'].includes(lot.type), `${lot.type} gets no edge`);
+    kinds.add(`${lot.type === 'carpark' ? 'carpark' : 'lawn'} ${key}`);
   }
-  // Lawns: a concrete edging (sidewalk) and a rough grass band (grass).
-  for (const k of ['lawn sidewalk', 'lawn grass', 'plaza sidewalk']) assert.ok(kinds.has(k), `${k} (${[...kinds].join(', ')})`);
+  // Lawns: a concrete edging (sidewalk) and a grass band (grass); parking
+  // lots: a concrete curb (sidewalk).
+  for (const k of ['lawn sidewalk', 'lawn grass', 'carpark sidewalk']) assert.ok(kinds.has(k), `${k} (${[...kinds].join(', ')})`);
+  // Every strip lies on the lot layer between the ground and the flats.
+  for (const k of ['grass', 'sidewalk']) for (const mb of B[k].map.values()) for (let v = 0; v < mb.count; v++) assert.ok(Math.abs(mb.pos[v * 3 + 1] - EDGE_Y) < 1e-6);
   // Same answer cut into row bands, as a streamed tile builds it.
   const B2 = builders();
   let n = 0;
@@ -365,4 +372,80 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
   let stamped = 0;
   for (const t of st.tiles) if (t.group && t.shown) stamped += t.meshes.filter((m) => m.name === 'trees-detail').length;
   assert.ok(stamped > 0, 'tree meshes in the rebuilt tiles');
+});
+
+// ---- 0.11.0 (docs/PLAN_V3.md 13, LOTS): no flicker, no primitives ----
+test('height steps: land, lot ground, edging and flats each 2 cm or more apart, all under the road; groundAt stays 0', async () => {
+  const { LOT_Y, EDGE_Y, FLAT_Y } = await import('../src/render/lotmesh.js');
+  const { LAND_Y } = await import('../src/render/citymesh.js');
+  assert.ok(LOT_Y - LAND_Y >= 0.02 - 1e-9, `lot ${LOT_Y} over land ${LAND_Y}`);
+  assert.ok(EDGE_Y - LOT_Y >= 0.02 - 1e-9 && FLAT_Y - EDGE_Y >= 0.02 - 1e-9, 'edging and flats');
+  assert.ok(FLAT_Y <= 0.006 && LOT_Y >= -0.04, 'within a few cm of groundAt (0 on a lot)');
+  // Drawn: every lot ground quad at LOT_Y; drives, paths, bay lines at FLAT_Y.
+  const city = makeLotsFixture();
+  const G = city.lotGrid;
+  const B = builders();
+  lotGround(city, B, 0, G.w, 0, G.h);
+  for (const k of ['grass', 'asphalt', 'sidewalk', 'ground', 'sand']) for (const mb of B[k].map.values()) for (let v = 0; v < mb.count; v++) assert.ok(Math.abs(mb.pos[v * 3 + 1] - LOT_Y) < 1e-6);
+  // No per-lot tone: one color per ground.
+  for (const k of ['grass', 'sidewalk']) {
+    const cols = new Set();
+    for (const mb of B[k].map.values()) for (let v = 0; v < mb.count; v++) cols.add(mb.col.slice(v * 3, v * 3 + 3).join());
+    assert.ok(cols.size <= 1, `${k}: ${cols.size} colors`);
+  }
+  const C = { city, R: {}, ...builders(), lotStats: { lots: 0, features: 0 } };
+  const stamps = { tree() {}, palm() {}, lamp() {}, bench() {}, bin() {}, bollard() {}, planter() {}, umbrella() {} };
+  for (const lot of city.lots) {
+    const feats = [];
+    fixtureDressLot(city, lot, feats);
+    drawLotFeatures(C, lot, feats.filter((f) => f.kind === 'drive' || f.kind === 'path' || f.kind === 'bay'), feats.filter((f) => f.kind === 'drive' || f.kind === 'path' || f.kind === 'bay').length, stamps);
+  }
+  let n = 0;
+  for (const k of ['sidewalk', 'paint']) for (const mb of C[k].map.values()) for (let v = 0; v < mb.count; v++) { n++; assert.ok(Math.abs(mb.pos[v * 3 + 1] - FLAT_Y) < 1e-6); }
+  assert.ok(n > 0);
+});
+
+test('far ground matches the near ground: the near color times its picture\'s mean color', async () => {
+  const { FAR_LOT_COL, farGroundColor, TEX_MEAN } = await import('../src/render/lotmesh.js');
+  for (let k = 0; k < LT.length; k++) {
+    const g = LOT_GROUND[LT[k]];
+    if (!g) { assert.equal(FAR_LOT_COL[k + 1], 0); continue; }
+    assert.ok(TEX_MEAN[g.key], g.key);
+    assert.equal(FAR_LOT_COL[k + 1], farGroundColor(g.col, g.key), LT[k]);
+  }
+  // One ground per block: paved lots share one color, lawns another.
+  assert.equal(LOT_GROUND.plaza.col, LOT_GROUND.wateredge.col);
+  assert.equal(LOT_GROUND.yard.col, LOT_GROUND.park.col);
+  assert.equal(LOT_GROUND.grass.col, LOT_GROUND.park.col);
+});
+
+test('hedges, beds and shrubs are low soft forms, not boxes or cones', () => {
+  const city = makeLotsFixture();
+  const lot = city.lots.find((l) => l.type === 'yard');
+  const stamps = { tree() {}, palm() {}, lamp() {}, bench() {}, bin() {}, bollard() {}, planter() {}, umbrella() {} };
+  const feats = [
+    { kind: 'hedge', x: lot.x0 + 5, z: lot.z0 + 5, heading: 0, l: 8, w: 0.7, h: 0.95, r: 0, solid: true, v: 1 },
+    { kind: 'bed', x: lot.x0 + 5, z: lot.z0 + 8, heading: 0, l: 8, w: 1.4, h: 0, r: 0, solid: true, v: 2 },
+    { kind: 'shrub', x: lot.x0 + 3, z: lot.z0 + 3, heading: 0, l: 0, w: 0, h: 1.15, r: 0.9, solid: false, v: 3 },
+  ];
+  for (const f of feats) {
+    const B = builders();
+    const C = { city, R: {}, ...B, lotStats: { lots: 0, features: 0 } };
+    drawLotFeatures(C, lot, [f], 1, stamps);
+    const mb = [...B.props.map.values()][0];
+    let top = -Infinity, ups = 0, slanted = 0;
+    for (let v = 0; v < mb.count; v++) {
+      top = Math.max(top, mb.pos[v * 3 + 1]);
+      const nx = Math.abs(mb.nor[v * 3]), ny = mb.nor[v * 3 + 1], nz = Math.abs(mb.nor[v * 3 + 2]);
+      if (ny > 0.99) ups++;
+      // Not along any axis (a box's normals all are).
+      else if (nx < 0.99 && Math.abs(ny) < 0.99 && nz < 0.99) slanted++;
+    }
+    const h = top - (-0.035);
+    assert.ok(h <= (f.kind === 'hedge' ? 1.0 : 1.2) + 1e-6 && h > 0.5, `${f.kind}: ${h.toFixed(2)} m tall`);
+    // A box has only straight-up and level normals; a soft top has many slanted ones.
+    assert.ok(slanted >= mb.count * 0.5 && ups <= mb.count * 0.25, `${f.kind}: ${slanted} slanted, ${ups} up of ${mb.count}`);
+    assert.ok(mb.idx.length / 3 <= (f.kind === 'shrub' ? 140 : 160), `${f.kind}: ${mb.idx.length / 3} triangles`);
+    for (let i = 0; i < mb.pos.length; i++) assert.ok(Number.isFinite(mb.pos[i]) && Number.isFinite(mb.nor[i]));
+  }
 });

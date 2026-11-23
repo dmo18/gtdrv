@@ -103,13 +103,15 @@ function isect(px, pz, ux, uz, qx, qz, vx, vz) {
 // An arm: one edge end at a junction, in its own frame: outward u, right r,
 // strip middle o right of the node line, half width h, sidewalks on its
 // right and left (seen outward).
+let EOFF = null;
 function makeArm(nodes, e, end) {
   const n = nodes[end ? e.b : e.a];
   const s = end ? -1 : 1;
+  const sh = EOFF ? EOFF[e.id] : 0;
   const ux = e.ux * s, uz = e.uz * s;
   return {
     q: 2 * e.id + end, e, end, node: n.id, nx: n.x, nz: n.z, ux, uz, rx: -uz, rz: ux,
-    o: (e.off || 0) * s, h: e.width / 2, wR: end ? walkL(e) : walkR(e), wL: end ? walkR(e) : walkL(e),
+    o: ((e.off || 0) + sh) * s, h: e.width / 2, wR: end ? walkL(e) : walkR(e), wL: end ? walkR(e) : walkL(e),
     len: e.length, ang: 0, trim: 0, want: 0, shift: 0, tl: 0, partner: -1,
   };
 }
@@ -170,6 +172,8 @@ function cornerOf(A, B, C) {
   const pax = A.nx + A.rx * (A.o + A.h), paz = A.nz + A.rz * (A.o + A.h);
   const pbx = B.nx + B.rx * (B.o - B.h), pbz = B.nz + B.rz * (B.o - B.h);
   C.pax = pax; C.paz = paz; C.pbx = pbx; C.pbz = pbz;
+  // (A pedestrian street meets the junction with a straight edge.)
+  if (A.e.ped || B.e.ped) return C;
   if (th > PAR && th < STRAIGHT) {
     if (!isect(pax, paz, A.ux, A.uz, pbx, pbz, B.ux, B.uz)) return C;
     if (ISX.s < -3 || ISX.t < -3 || ISX.s > TRIM_MAX || ISX.t > TRIM_MAX) return C;
@@ -315,8 +319,10 @@ export function ringDist(ring, x, z) {
 // The road geometry of a city graph: { junctions, nodeJ, trim, miter,
 // taper, tcl, tcr, nbr, flip, inner, jEnd, ctrl, stats }. End q = 2 * edge
 // id + (0 at node a, 1 at node b).
-export function buildRoadGeo(nodes, edges) {
+export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const NN = nodes.length, NE = edges.length;
+  const eoff = sideShifts(nodes, edges, edgesNear);
+  EOFF = eoff;
   const deg = (id) => nodes[id].edges.length;
   const uf = new Int32Array(NN);
   for (let i = 0; i < NN; i++) uf[i] = i;
@@ -352,6 +358,9 @@ export function buildRoadGeo(nodes, edges) {
   // than it has joins them (up to 3 passes).
   let groups, arms;
   const C = {};
+  // (A cluster that no pass changed keeps its arms: same root, same size.)
+  const want = new Float64Array(2 * NE);
+  let prev = new Map();
   for (let pass = 0; pass < 5; pass++) {
     groups = new Map();
     for (let i = 0; i < NN; i++) {
@@ -362,6 +371,8 @@ export function buildRoadGeo(nodes, edges) {
     }
     arms = new Map();
     for (const [r, g] of groups) {
+      const old = prev.get(r);
+      if (old && old.size === g.length) { arms.set(r, old.list); continue; }
       const isJ = g.length > 1 || deg(g[0]) >= 3 || (deg(g[0]) === 2 && bendIsJunction(nodes, edges, g[0]));
       if (!isJ) continue;
       const list = [];
@@ -375,15 +386,22 @@ export function buildRoadGeo(nodes, edges) {
       solveTrims(list, C);
       arms.set(r, list);
     }
+    prev = new Map();
+    want.fill(0);
+    for (const [r, list] of arms) {
+      prev.set(r, { size: groups.get(r).length, list });
+      for (const A of list) want[A.q] = A.want;
+    }
     let merged = 0;
     for (const e of edges) {
       const ra = find(uf, e.a), rb = find(uf, e.b);
-      if (ra === rb || e.causeway || (!arms.has(ra) && !arms.has(rb))) continue;
-      const ta = arms.has(ra) ? armWant(arms.get(ra), 2 * e.id) : 0, tb = arms.has(rb) ? armWant(arms.get(rb), 2 * e.id + 1) : 0;
+      const ha = arms.has(ra), hb = arms.has(rb);
+      if (ra === rb || e.causeway || (!ha && !hb)) continue;
+      const ta = want[2 * e.id], tb = want[2 * e.id + 1];
       // Two junctions that both want more than the edge between them has
       // are one; so is a junction and a bend its arm runs past.
-      const both = arms.has(ra) && arms.has(rb);
-      const bend = !both && deg(arms.has(ra) ? e.b : e.a) === 2;
+      const both = ha && hb;
+      const bend = !both && deg(ha ? e.b : e.a) === 2;
       if ((both && ta + tb > e.length - 1 && e.length < 30) || (bend && ta + tb > e.length - 1)) { union(uf, e.a, e.b); merged++; }
     }
     stats.merged += merged;
@@ -409,9 +427,9 @@ export function buildRoadGeo(nodes, edges) {
   // room the other end leaves.
   for (const A of armAt.values()) {
     if (!(A.tl > 0)) continue;
-    const sg = A.end ? -1 : 1, e = A.e, sh = A.shift * sg;
-    tcl[A.q] = (e.off || 0) - e.width / 2 + sh;
-    tcr[A.q] = (e.off || 0) + e.width / 2 + sh;
+    const sg = A.end ? -1 : 1, e = A.e, sh = A.shift * sg, o = (e.off || 0) + eoff[e.id];
+    tcl[A.q] = o - e.width / 2 + sh;
+    tcr[A.q] = o + e.width / 2 + sh;
     taper[A.q] = A.tl;
     tlin[A.q] = 1;
   }
@@ -437,9 +455,10 @@ export function buildRoadGeo(nodes, edges) {
     flip[q1] = flip[q2] = end1 === end2 ? 1 : 0;
     stats.bends++;
     // Curbs at the node in each edge's frame; a taper where they differ.
-    const lc1 = (e1.off || 0) - e1.width / 2, rc1 = (e1.off || 0) + e1.width / 2;
+    const o1 = (e1.off || 0) + eoff[e1.id], o2 = (e2.off || 0) + eoff[e2.id];
+    const lc1 = o1 - e1.width / 2, rc1 = o1 + e1.width / 2;
     const f = end1 === end2 ? -1 : 1;
-    let lc2 = (e2.off || 0) - e2.width / 2, rc2 = (e2.off || 0) + e2.width / 2;
+    let lc2 = o2 - e2.width / 2, rc2 = o2 + e2.width / 2;
     if (f < 0) { const t = lc2; lc2 = -rc2; rc2 = -t; }
     if (Math.abs(lc1 - lc2) > 0.05 || Math.abs(rc1 - rc2) > 0.05) {
       const ml = (lc1 + lc2) / 2, mr = (rc1 + rc2) / 2;
@@ -451,7 +470,7 @@ export function buildRoadGeo(nodes, edges) {
     }
   }
   // The rings read the curbs as the strips draw them (tapers included).
-  const PG = { taper, tcl, tcr, tlin };
+  const PG = { taper, tcl, tcr, tlin, eoff };
   const junctions = [];
   for (const [r, g] of groups) {
     const list = arms.get(r);
@@ -496,7 +515,38 @@ export function buildRoadGeo(nodes, edges) {
       }
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid };
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff };
+}
+
+// Two one-way ways in the same direction drawn over each other (a turn
+// roadway beside its street, a duplicated way): each is drawn moved away
+// from the other by half the overlap (per edge, m right of its node line;
+// the edge's own `off` is the contract's and stays). Needs the city's
+// edgesNear; none without it.
+function sideShifts(nodes, edges, edgesNear) {
+  const out = new Float64Array(edges.length);
+  if (!edgesNear) return out;
+  const near = [];
+  for (const e of edges) {
+    if (!e.oneway || e.causeway || e.pair >= 0 || e.bridge) continue;
+    const a = nodes[e.a], b = nodes[e.b];
+    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    edgesNear(mx, mz, 20, near);
+    let shift = 0;
+    for (let i = 0; i < near.length; i++) {
+      const o = edges[near[i]];
+      if (o === e || !o.oneway || o.pair >= 0 || o.bridge || e.ux * o.ux + e.uz * o.uz < 0.95) continue;
+      if (o.a === e.a && o.b === e.b) continue;
+      const oa = nodes[o.a];
+      const t = (mx - oa.x) * o.ux + (mz - oa.z) * o.uz;
+      if (t < 0 || t > o.length) continue;
+      const lat = (oa.x + o.ux * t - mx) * -e.uz + (oa.z + o.uz * t - mz) * e.ux;
+      const over = (e.width + o.width) / 2 - Math.abs(lat);
+      if (over > 0.3 && over / 2 > Math.abs(shift)) shift = lat > 0 ? -over / 2 : over / 2;
+    }
+    out[e.id] = shift;
+  }
+  return out;
 }
 
 // A node of two edges is a junction when the road turns sharply there or
@@ -518,10 +568,6 @@ function bendIsJunction(nodes, edges, id) {
   return reach(e1) > 0.4 * e1.length || reach(e2) > 0.4 * e2.length;
 }
 
-function armWant(list, q) {
-  for (const A of list) if (A.q === q) return A.want;
-  return 0;
-}
 
 // Arms in order round the junction, and their trims.
 function solveTrims(list, C) {
@@ -655,20 +701,22 @@ function buildJunction(id, nodes, g, list, C, PG) {
       const bax = ra[0] + A.rx * wa, baz = ra[1] + A.rz * wa;
       const bbx = lb[0] - B.rx * wb, bbz = lb[1] - B.rz * wb;
       tris = [];
-      const qOk = (fan === 'q' || fan === 'm') && isect(C.pax + A.rx * wa, C.paz + A.rz * wa, A.ux, A.uz, C.pbx - B.rx * wb, C.pbz - B.rz * wb, B.ux, B.uz) &&
+      const qOk = isect(C.pax + A.rx * wa, C.paz + A.rz * wa, A.ux, A.uz, C.pbx - B.rx * wb, C.pbz - B.rz * wb, B.ux, B.uz) &&
         ISX.s <= A.trim + 0.01 && ISX.t <= B.trim + 0.01 && ISX.s > -A.h - 10 && ISX.t > -B.h - 10;
+      const qx = C.pax + A.rx * wa + A.ux * ISX.s, qz = C.paz + A.rz * wa + A.uz * ISX.s;
       if (fan === 'q' && qOk) {
-        const qx = C.pax + A.rx * wa + A.ux * ISX.s, qz = C.paz + A.rz * wa + A.uz * ISX.s;
         const v = [bax, baz, ...curb, bbx, bbz];
         for (let k = 0; k + 3 < v.length; k += 2) tris.push(qx, qz, v[k], v[k + 1], v[k + 2], v[k + 3]);
       } else if (fan === 'm' && qOk) {
-        const qx = C.pax + A.rx * wa + A.ux * ISX.s, qz = C.paz + A.rz * wa + A.uz * ISX.s;
         const mx = curb[2], mz = curb[3];
         tris.push(ra[0], ra[1], mx, mz, qx, qz, ra[0], ra[1], qx, qz, bax, baz);
         tris.push(mx, mz, lb[0], lb[1], bbx, bbz, mx, mz, bbx, bbz, qx, qz);
-      } else if (C.th >= STRAIGHT) {
+      } else if (qOk && C.th < STRAIGHT) {
+        // A straight curb across the corner (no room for a return).
+        tris.push(qx, qz, bax, baz, ra[0], ra[1], qx, qz, ra[0], ra[1], lb[0], lb[1], qx, qz, lb[0], lb[1], bbx, bbz);
+      } else {
         tris.push(ra[0], ra[1], lb[0], lb[1], bbx, bbz, ra[0], ra[1], bbx, bbz, bax, baz);
-      } else tris = null;
+      }
     }
     if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null });
   }
@@ -719,7 +767,7 @@ const smooth = (t) => t * t * (3 - 2 * t);
 // Left and right curb offsets of edge k at d m from node a: CURBS.l, .r.
 export const CURBS = { l: 0, r: 0 };
 export function curbsAt(geo, e, d) {
-  const off = e.off || 0, h = e.width / 2;
+  const off = (e.off || 0) + (geo.eoff ? geo.eoff[e.id] : 0), h = e.width / 2;
   let l = off - h, r = off + h;
   const qa = 2 * e.id, qb = qa + 1;
   const ta = geo.taper[qa], tb = geo.taper[qb];
@@ -789,7 +837,7 @@ function matchAt(city, geo, q, o, fam) {
   let best = NaN, bd = 2;
   for (let i = 0; i < PN.length; i += 2) {
     if (familyOf(PN[i + 1]) !== fam) continue;
-    const v = PN[i] * f;
+    const v = (PN[i] + geo.eoff[k]) * f;
     const d = Math.abs(v - o);
     if (d < bd) { bd = d; best = v; }
   }
@@ -808,8 +856,10 @@ export function edgePaint(city, e, out) {
   const qa = 2 * e.id, qb = qa + 1;
   const sA = geo.trim[qa], sB = e.length - geo.trim[qb];
   if (sB - sA < 1) return out;
-  const div = divideOf(e);
+  const sh = geo.eoff[e.id];
+  const div = divideOf(e) + sh;
   paintLines(e, PL);
+  if (sh) for (let i = 0; i < PL.length; i += 2) PL[i] += sh;
   const span = sB - sA;
   const room = span >= 12;
   for (let i = 0; i < PL.length; i += 2) {
@@ -822,8 +872,8 @@ export function edgePaint(city, e, out) {
       const tl = geo.taper[qa];
       if (tl > dA + 0.3) {
         // A pair shift: the line eases from its shifted place at dA.
-        const sh = geo.tcl[qa] - ((e.off || 0) - e.width / 2);
-        zA0 = dA; oA = o + sh * (1 - dA / tl); dA = tl;
+        const ps = geo.tcl[qa] - ((e.off || 0) + sh - e.width / 2);
+        zA0 = dA; oA = o + ps * (1 - dA / tl); dA = tl;
       }
     } else if (geo.nbr[qa] >= 0) {
       const m = matchAt(city, geo, qa, o, fam);
@@ -837,8 +887,8 @@ export function edgePaint(city, e, out) {
       dB = sB - (geo.ctrl[qb] && room ? (inc ? STOP_BAR + STOP_HW : CW_FAR + CW_HW + 0.25) : LINE_GAP);
       const tl = geo.taper[qb];
       if (tl > e.length - dB + 0.3) {
-        const sh = geo.tcl[qb] - ((e.off || 0) - e.width / 2);
-        zB0 = dB; oB = o + sh * (1 - (e.length - dB) / tl); dB = e.length - tl;
+        const ps = geo.tcl[qb] - ((e.off || 0) + sh - e.width / 2);
+        zB0 = dB; oB = o + ps * (1 - (e.length - dB) / tl); dB = e.length - tl;
       }
     } else if (geo.nbr[qb] >= 0) {
       const m = matchAt(city, geo, qb, o, fam);

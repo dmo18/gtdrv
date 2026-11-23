@@ -11,8 +11,8 @@ import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 import { CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
-import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt } from '../world/junctions.js';
-import { groundFn } from '../world/ground.js';
+import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt, curbsAt } from '../world/junctions.js';
+import { groundFn, groundOf, FILL_STEP } from '../world/ground.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
 export const COL = {
@@ -853,7 +853,7 @@ function flatTris(bld, tris, y, color) {
 // lead node), pieces and per-edge paint whose point it accepts (a
 // streamed tile); null for all.
 export function realRoads(city, B, nodes, edges, own = null) {
-  if (!city.roadGeo) city.roadGeo = buildRoadGeo(city.nodes, city.edges);
+  if (!city.roadGeo) city.roadGeo = buildRoadGeo(city.nodes, city.edges, city.edgesNear);
   const geo = city.roadGeo;
   for (const n of nodes) {
     const J = geo.junctions[geo.nodeJ[n.id]];
@@ -933,6 +933,28 @@ export function realRoads(city, B, nodes, edges, own = null) {
           // The median's nose where it ends at a junction.
           if (i === 0 && geo.jEnd[2 * e.id] >= 0) wb.wall(wx(d0, l0 - m0), wz(d0, l0 - m0), wx(d0, l0), wz(d0, l0), -0.02, CURB_H, COL.curb, 0, 0, m0 / 4.8, 0.05, 1, 1);
           if (i + 8 >= ST.length && geo.jEnd[2 * e.id + 1] >= 0) wb.wall(wx(d1, l1), wz(d1, l1), wx(d1, l1 - m1), wz(d1, l1 - m1), -0.02, CURB_H, COL.curb, 0, 0, m1 / 4.8, 0.05, 1, 1);
+        }
+      }
+    }
+    // Sliver fills (world/ground.js fillOf): raised concrete over gaps
+    // under 1.5 m between this road's back of sidewalk and more road.
+    const fill = e.ped ? null : groundOf(city).fillOf(e.id);
+    if (fill && fill.length) {
+      const n = fill.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
+      const backAt = (d, side) => {
+        const C = curbsAt(geo, e, d);
+        return side ? C.l - (med > 0 ? medianAt(city, e, d, C.l) : wL) : C.r + wR;
+      };
+      for (let i = 0; i + 1 < n; i++) {
+        const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
+        for (let side = 0; side < 2; side++) {
+          const w0 = fill[2 * i + side], w1 = fill[2 * i + 2 + side];
+          if (!(w0 > 0 || w1 > 0)) continue;
+          const b0 = backAt(d0, side), b1 = backAt(d1, side);
+          const mx = wx((d0 + d1) / 2, b0), mz = wz((d0 + d1) / 2, b0);
+          if (own && !own(mx, mz)) continue;
+          const lo0 = side ? b0 - w0 : b0, hi0 = side ? b0 : b0 + w0, lo1 = side ? b1 - w1 : b1, hi1 = side ? b1 : b1 + w1;
+          orientedQuad(B.sidewalk.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, COL.sidewalk);
         }
       }
     }

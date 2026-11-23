@@ -41,7 +41,7 @@ const STICK_DEAD = 0.1;
 const SPRINT_AT = 0.85;
 const PAD_H = 56; // the slider pad is the steering slot wide (160, or 140 at 780x360; docs/REVAMP.md 6.5)
 const PAD_KNOB_RANGE = 56; // px of knob travel drawn inside the pad
-const STICK_W = 128;
+const STICK_W = 128; // 112 on short screens (300 px high or less), see stickW()
 const TILT_WAIT_MS = TILT_WAIT * 1000; // no orientation events by then: no sensor
 
 // Hand-drawn 24x24 line icons.
@@ -258,22 +258,24 @@ export function createTouchControls(root, input, opts = {}) {
     return parseFloat(getComputedStyle(insetProbe).paddingLeft) || 0;
   }
   // Rest positions (bottom corner) so the control is visible before touching.
-  const slotSize = (r) => (r.height < 380 ? 140 : 160);
+  // 120 on short screens (Chrome's bars showing), so MORE's fan clears it left-handed.
+  const slotSize = (r) => (r.height <= 300 ? 120 : r.height < 380 ? 140 : 160);
+  const stickW = (r) => (r.height <= 300 ? 112 : STICK_W);
   function restPosition() {
     const r = root.getBoundingClientRect();
     const slider = steerMode();
     // The steering slot (docs/REVAMP.md 6.5): 160 square at 915x412, 140 at 780x360.
     const slot = slotSize(r);
     const gap = r.height < 380 ? 16 : 12;
-    const h = slider ? PAD_H : STICK_W;
+    const h = slider ? PAD_H : stickW(r);
     const y = r.bottom - safeInset('--rw-sb') - gap - (slider ? h / 2 : slot / 2);
     if (leftHanded) return { x: r.right - safeInset('--rw-sr') - 16 - slot / 2, y };
     return { x: r.left + safeInset('--rw-sl') + 16 + slot / 2, y };
   }
   function placeBase(base, cx, cy) {
     const r = root.getBoundingClientRect();
-    const w = base === pad ? slotSize(r) : STICK_W;
-    const h = base === pad ? PAD_H : STICK_W;
+    const w = base === pad ? slotSize(r) : stickW(r);
+    const h = base === pad ? PAD_H : stickW(r);
     base.style.transform = `translate(${Math.round(cx - r.left - w / 2)}px, ${Math.round(cy - r.top - h / 2)}px)`;
   }
   function placeRest() {
@@ -329,7 +331,7 @@ export function createTouchControls(root, input, opts = {}) {
       const r = root.getBoundingClientRect();
       origin.x = e.clientX;
       origin.y = e.clientY;
-      const half = STICK_W / 2;
+      const half = stickW(r) / 2;
       const zl = leftHanded ? r.left + r.width * 0.6 : r.left;
       const zr = leftHanded ? r.right : r.left + r.width * 0.4;
       placeBase(stick,

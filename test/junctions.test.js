@@ -118,7 +118,7 @@ function metrics(city) {
           m.sliverProbes++;
           for (let g = 0.55; g < 1.5; g += 0.3) {
             const [x, z] = pt(d, o0 + dir * g);
-            if (ground.surfaceAt(x, z) !== 0) { m.slivers++; if (m.where.length < 18) m.where.push(['sliver', e.id, Math.round(x), Math.round(z), +g.toFixed(2)]); break; }
+            if (ground.surfaceAt(x, z) !== 0) { m.slivers++; if (m.where.length < 40) m.where.push(['sliver', e.id, Math.round(x), Math.round(z), +g.toFixed(2)]); break; }
           }
         }
       }
@@ -224,7 +224,7 @@ test('stop bars: on controlled approaches only, behind the strip end', () => {
 
 test('junction geometry is a pure function of the graph (same twice)', () => {
   const c = regionCity('miami-beach');
-  const g2 = buildRoadGeo(c.nodes, c.edges);
+  const g2 = buildRoadGeo(c.nodes, c.edges, c.edgesNear);
   assert.deepEqual(Array.from(g2.trim), Array.from(c.roadGeo.trim));
   assert.equal(g2.junctions.length, c.roadGeo.junctions.length);
   assert.deepEqual(Array.from(g2.junctions[7].ring), Array.from(c.roadGeo.junctions[7].ring));

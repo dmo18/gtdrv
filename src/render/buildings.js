@@ -6,6 +6,7 @@ import { createRng } from '../core/rng.js';
 import { SIDEWALK } from '../world/citygen.js';
 import { SHOP_NAMES } from './textures.js';
 import { lookOf } from './miamilook.js';
+import { softStrip } from './lotmesh.js';
 
 export function shade(hex, f) {
   const r = Math.min(255, ((hex >> 16) & 255) * f) | 0;
@@ -564,7 +565,9 @@ function house(C, b) {
     for (const [a0, a1] of runs) {
       if (a1 - a0 < 0.6) continue;
       if (hedge) {
-        frameBox(P, s, a0, a1, -0.5, 0, 0.16, 1.05 + (b.vseed % 5) * 0.06, hedgeCol, shade(hedgeCol, 1.18), 0.5, 1);
+        // A low hedge with a soft top (render/lotmesh.js softStrip), not a box.
+        const ax = px(s, a0, -0.25), az = pz(s, a0, -0.25), bx = px(s, a1, -0.25), bz = pz(s, a1, -0.25);
+        softStrip(P, (ax + bx) / 2, (az + bz) / 2, Math.atan2(bz - az, bx - ax), Math.hypot(bx - ax, bz - az), 0.55, 0.16, 0.8 + (b.vseed % 5) * 0.025, hedgeCol, 1.6, 0.35);
       } else {
         const r = C.R.fence;
         const n = Math.max(1, Math.round((a1 - a0) / 2));

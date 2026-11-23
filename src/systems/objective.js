@@ -290,7 +290,7 @@ export function createObjective(game) {
       if (hud.setNav) {
         const checking = !!game.phoneCheckRunning;
         const nt = on && routing && wantsTurnByTurn(goal.src, checking) ? tracker.next() : null;
-        const holdU = !!nt && nt.kind === 'uturn' && uturnT < UTURN_WAIT_S;
+        const holdU = !!nt && nt.kind === 'uturn' && uturnT < UTURN_WAIT_S && !!p && p.mode !== 'foot'; // a walker just turns round
         if (nt && !holdU) {
           const b = navBucket(tracker.toTurn);
           if (b !== navB || tracker.turn !== navTurn || tracker.rev !== navRev) {

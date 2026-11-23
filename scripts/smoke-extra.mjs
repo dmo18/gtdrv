@@ -80,7 +80,9 @@ export default async function extra(page, check) {
   check(await board('plane', 'prop'), 'a prop plane exists to board');
   await page.keyboard.down('KeyW');
   await page.keyboard.down('KeyI');
-  await sim(9);
+  // AIR (docs/PLAN_V3.md section 13): the trainer now rolls 250 to 400 m
+  // (about 15 s) before it lifts off; it was 55 m.
+  await sim(18);
   await page.waitForTimeout(300);
   await page.screenshot({ path: 'shots/plane.png' });
   const f = await page.evaluate(() => ({ y: window.__rw.player.y, mode: window.__rw.player.mode, sp: window.__rw.player.vehicle.speed }));

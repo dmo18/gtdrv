@@ -301,7 +301,10 @@ const CSS = `
    GARAGE and TALK offers) take a fourth column beside the LOCK rect, 48 wide, so it stays clear of the
    keep-out rect (x 64 percent) down to 690 wide. Checked with no side inset (the browser keeps the cut-out). */
 @media (max-height: 300px) {
-  .rw-touch { --pw: 56px; --ph: 56px; --fw: 56px; --mx: 8px; --my: 136px; }
+  /* the steering slot is 120 (wheel 116, arrow pads 56, stick 112); SIREN 8 px beside it */
+  .rw-touch { --pw: 56px; --ph: 56px; --fw: 56px; --mx: 8px; --my: 136px; --slot: 120px; --wsize: 116px; --sbtn: 56px; --sx: 144px; --sy: 48px; }
+  .rw-stick { width: 112px; height: 112px; }
+  .rw-stick .rw-knob { margin: -23px 0 0 -23px; width: 46px; height: 46px; }
   .rw-brake, .rw-slot-run { --x: calc(8px + var(--pw) + 8px); }
   .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 72px; }
   .rw-slot-hand, .rw-slot-bomb { --x: 72px; --y: 72px; }
@@ -311,6 +314,12 @@ const CSS = `
   .rw-more, .rw-extra, .rw-slot-boost { width: 48px; height: 48px; }
   .rw-extra, .rw-slot-boost { --x: 200px; --y: 72px; }
   .rw-sec { --x: calc(var(--mx) + 56px + var(--c, 0) * 56px); --y: calc(var(--my) + var(--r, 0) * 56px); }
+  /* left-handed: the top left holds the minimap, speed and street label, so MORE and its fan stay at the
+     top right (the rest of the cluster mirrors) */
+  .rw-lefty .rw-more, .rw-lefty .rw-sec { left: auto; right: calc(var(--rw-sr) + var(--x)); }
+  .rw-lefty .rw-sec { --dir: 1; }
+  /* left-handed in a service vehicle the SWAP cell above SIREN would sit under that fan: SWAP waits */
+  .rw-lefty.rw-extra-on .rw-slot-cswap { display: none; }
 }
 
 /* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
@@ -641,6 +650,8 @@ const CSS = `
   .rw-wanted { left: 0; margin-left: 0; }
   .rw-money { height: 24px; line-height: 24px; font-size: 16px; }
   .rw-combo, .rw-btn.rw-ammo { display: none !important; }
+  /* the prompt strip: 20 high under the keep-out rect (it ends at 90 percent of the height), 190 wide */
+  .rw-prompt { width: 190px; margin-left: -95px; height: 20px; line-height: 18px; font-size: 12px; }
 }
 `;
 

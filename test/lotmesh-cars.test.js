@@ -8,7 +8,7 @@ import { ChunkedBuilder } from '../src/render/meshbuilder.js';
 import {
   drawLotFeatures, createLotCarField, buildLotHull, lotCarAt, lotCarColor, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, LOT_CAR_MIX,
 } from '../src/render/lotmesh.js';
-import { lotFill, FILL_MIN, FILL_MAX, FILL_BY_DISTRICT, eachBay, dressLot, CARPARK_BAYS_MAPPED, isMappedParking } from '../src/world/lots.js';
+import { lotFill, FILL_MIN, FILL_MAX, FILL_BY_DISTRICT, eachBay, dressLot, CARPARK_BAYS_MAPPED, CARPARK_MIN, isMappedParking } from '../src/world/lots.js';
 import { createMiamiCity } from '../src/world/miami.js';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
 
@@ -39,19 +39,28 @@ test('a lot tile draws bay lines and no car of any kind (no three-box cars)', ()
   assert.ok(bayFeats > 20, `${bayFeats} bay rows checked`);
 });
 
-test('parking lots: mapped ones come first, the rest are rarer and smaller', () => {
+// 0.11.0 (docs/PLAN_V3.md 13, LOTS): surface parking is the commonest use of
+// a big piece of open land downtown, so parking lots are no longer rarer
+// than the mapped ones. What holds: every mapped one is a parking lot, a
+// lot's bays never take more than half its area (12.5 m2 a bay) nor stand
+// in more than 256 (the half of the largest lot), and the cars in view stay
+// capped (the field tests below).
+test('parking lots: every mapped one is a parking lot; bays take at most half a lot, 256 at most', () => {
   const mapped = parkingLots.filter((l) => l.building >= 0 && isMappedParking(city.buildings[l.building]));
   assert.ok(mapped.length > 50, `${mapped.length} mapped parking lots`);
-  assert.ok(parkingLots.length < mapped.length * 2.5, `${parkingLots.length} parking lots, ${mapped.length} mapped`);
+  for (const l of city.lots) {
+    if (l.building >= 0 && isMappedParking(city.buildings[l.building]) && l.area >= CARPARK_MIN && !['site', 'airfield', 'works', 'verge', 'beach', 'wateredge', 'park', 'grass'].includes(l.type)) assert.equal(l.type, 'carpark', `mapped lot ${l.id}`);
+  }
   let max = 0, total = 0;
   for (const l of parkingLots) {
     let n = 0;
     for (const f of dressLot(city, l, [])) if (f.kind === 'bay') eachBay(f, () => n++);
+    assert.ok(n * 12.5 <= l.area * 0.5 + 1e-6 || n <= CARPARK_BAYS_MAPPED, `lot ${l.id}: ${n} bays on ${l.area} m2`);
     max = Math.max(max, n);
     total += n;
   }
-  assert.ok(max <= CARPARK_BAYS_MAPPED, `largest lot ${max} bays`);
-  assert.ok(total / parkingLots.length < 45, `${(total / parkingLots.length).toFixed(1)} bays a lot`);
+  assert.ok(max <= 256, `largest lot ${max} bays`);
+  console.log(`# ${parkingLots.length} parking lots (${mapped.length} mapped), ${(total / parkingLots.length).toFixed(1)} bays a lot, the largest ${max}`);
 });
 
 test('fill: by lot type and hour, never empty and never full', () => {

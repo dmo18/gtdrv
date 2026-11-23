@@ -53,13 +53,18 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // lots, lot grids (and the North's infill buildings) after the lot band
 // keeps a cell exactly LOT_SETBACK from a junction box free (world-density's
 // two missed cells), and site gates move to a long side.
+// 0.11.0 ROADS re-pin (deliberate; nodes, edges, buildings only): edges
+// `median`, `off`, `divided`, `pair` (a median under 1.5 m is one surface,
+// MEDIAN_MIN 1.0 to 1.5), nodes `blade` (the name blades stand 1.6 m
+// into the corner, off the junction polygon), buildings (the road strips
+// they keep clear of moved). Lots and lot grids: the LOTS task re-pins.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '2396c3b4', edges: '5a266754', buildings: '1e4c554c', lots: 'd01f1a7f', lotGrid: '15923ee0' },
-  'miami-downtown': { nodes: '4ff513f1', edges: '88eaf928', buildings: '1043fe9b', lots: 'ee572ab3', lotGrid: '6f448a01' },
-  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: '2686c288', lots: 'ffc51318', lotGrid: '2f187719' },
-  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '519e29ef', lots: '248c5b55', lotGrid: '40de85d6' },
-  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'd768b63c', lots: 'dc63a084', lotGrid: 'd81ec6b2' },
-  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: '1baefd1e', lots: 'a1443502', lotGrid: 'c350c3bf' },
+[WHOLE_BOX]: { nodes: '9c5d6f60', edges: '733ec414', buildings: '48dee23c', lots: 'd01f1a7f', lotGrid: '15923ee0' },
+  'miami-downtown': { nodes: '2df589ce', edges: '42de42cb', buildings: '29b8852e', lots: 'ee572ab3', lotGrid: '6f448a01' },
+  'miami-beach': { nodes: 'd559277b', edges: 'f8ee2f15', buildings: 'b7236251', lots: 'ffc51318', lotGrid: '2f187719' },
+  'miami-north': { nodes: '14fc1aee', edges: '337da624', buildings: 'b0e601a9', lots: '248c5b55', lotGrid: '40de85d6' },
+  'miami-west': { nodes: 'bbdcff70', edges: 'e974bccf', buildings: 'a44fb8ea', lots: 'dc63a084', lotGrid: 'd81ec6b2' },
+  'miami-south': { nodes: '8584367c', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'a1443502', lotGrid: 'c350c3bf' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

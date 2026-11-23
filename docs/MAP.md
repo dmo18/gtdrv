@@ -844,9 +844,11 @@ direction of travel, (-uz, ux) for forward travel. Traffic keeps right.
 Optional, 0 or absent on most edges: `center` (m, a painted two-way left-turn
 lane in the middle of a two-way road with an odd tagged lane count; part of
 `width`), `off` (m, the whole cross section moved this far to the right of
-the node line: only on a paired one-way whose data gap is under 1.0 m, so
+the node line: only on a paired one-way whose data gap is under 1.5 m
+(`MEDIAN_MIN`, 1.0 m before 0.11.0), so
 the two left curbs meet on the middle line and the two yellow edge lines
-read as one double yellow; every strip, lane and curb is measured from
+read as one double yellow, or on a one-way drawn over another one-way of
+the same direction (each moves away from the other by half the overlap); every strip, lane and curb is measured from
 `node line + off`), `pair` (the partner edge id of a divided road).
 
 Also on every edge, derived (old callers): `avenue` = two or more lanes each
@@ -903,6 +905,55 @@ Nodes keep `signal` (traffic light) and gain `stop` (all-way or minor stop
 sign, from the data's `highway=stop` nodes) and `blade` (true: street-name
 blades stand at this junction). `city.streetNames.atlas` lists every name of
 the region in sign-atlas order; `plateIndex(name)` gives its slot.
+
+### Junctions and strip ends (0.11.0, ROADS)
+
+`world/junctions.js` (pure; `buildRoadGeo(nodes, edges)`, run once in
+`createMiamiCity` after the cross sections and pairs) decides what is
+drawn between the curbs; `city.roadGeo` holds it. Ids of nodes and edges
+are unchanged: everything is in side arrays indexed by end
+`q = 2 * edge id + (0 at node a, 1 at node b)`.
+
+- Junctions: nodes joined by an edge under 14 m (both of degree 3+), a
+  bend node within 8 m of one, the two nodes where a street crosses both
+  halves of a divided road, and two junctions (or a junction and a bend)
+  whose arms need more than the edge between them are one junction.
+  `roadGeo.junctions[j]`: `{ id, lead (lowest node id), nodes, x, z,
+  signal, stop, ring, tris, corners, arms, x0, z0, x1, z1, fan }`. `ring` is
+  the junction's one asphalt polygon (x, z pairs): every arm's strip end
+  (left curb, right curb) and between arms the curb return (radius 1.5 to
+  4.5 m from the sidewalk widths, 5 segments) or a straight curb. `tris`
+  its triangles. `fan` (about 2 % of junctions): the ring crosses itself
+  and its area is the union of `tris`, a fan round (x, z); use
+  `inJunctionArea(J, x, z)`. `corners[k]`: `{ curb, tris }`, the curb line
+  of the corner (x, z pairs, the road on its right) and the sidewalk
+  corner (triangles at `CURB_H`), whose back is where the two back of
+  sidewalk lines meet. `nodeJ[node]`: the junction of a node or -1.
+- Strip ends: `trim[q]` m from the node along the edge; the strip of an
+  edge runs from `trim[2k] + miter[2k] * o` to `length - trim[2k+1] +
+  miter[2k+1] * o` (o lateral, right of the node line). `jEnd[q]` the
+  junction at that end or -1; `inner[k]` 1: both ends in one junction, the
+  edge draws nothing. At a junction end the strip end lies on the ring;
+  no two strips overlap outside the rings (test/junctions.test.js).
+- Bends (a node of two edges that is not a junction): the two strips meet
+  on the bisector (`miter`, `nbr`, `flip`). Where the cross sections differ
+  the curbs taper over up to 10 m each side (`taper`, to `tcl`, `tcr` at
+  the node, smoothstep); lane lines that do not continue stop before it.
+  Two arms leaving a junction side by side whose lines converge (the halves
+  of a pair, a fork) are moved apart at the node and taper back linearly
+  (`tlin` 1). `curbsAt(geo, e, d)` gives both curbs anywhere.
+- Back of sidewalk (the LOTS seam): along a strip, the right curb plus
+  `walkOf(e)` and the left curb minus `walkLeftOf(e)` (0 on a divided
+  one-way) or minus the median band `medianAt(city, e, d, lc)` (half the
+  real gap to the partner, up to 4 m); at a junction, the corners' sidewalk
+  triangles. Where more road space lies within 1.5 m beyond it, the gap is
+  raised concrete too (`groundOf(city).fillOf(k)`, every 2 m, right then
+  left). `city.surfaceAt` answers all of it (1 road, 2 sidewalk, 3 median).
+- Paint (`edgePaint`): lines stop at the junction boundary (0.4 m short);
+  on approaches to a junction with a signal or stop sign (`ctrl[q]`) a
+  two-line crosswalk 0.65 and 3.65 m in and a stop bar at 4.65 m, and the
+  lines stop there; nothing is painted on a junction. Traffic stops at the
+  bar (`stopDistance`).
 
 ### 0.9.0 map truth: measured (2026-11-23)
 

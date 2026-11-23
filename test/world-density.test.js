@@ -8,7 +8,9 @@ import { createMiamiCity, MIAMI_CORE, MIAMI_SPOTS } from '../src/world/miami.js'
 import {
   LOT_TYPES, FEATURE_KINDS, TREE_VARIANTS, DRESS, DRESS_SETS, DRESS_DISTRICTS, dressLot, featureCap, lotSeed, lotShares,
   eachBay, lotTypeFor, hash32, MAX_FEATURES, MAX_SOLID,
+  lotEmptiness, DENSITY_MIN_AREA, DENSITY_M2, CARPARK_LARGE, FORECOURT_MAX, YARD_MAX, LOT_MAX_AREA, SHRUB_H, HEDGE_H,
 } from '../src/world/lots.js';
+import { SERVICE_SPOTS } from '../src/entities/servicevehicles.js';
 
 const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
 const cpu0 = process.cpuUsage();
@@ -533,4 +535,64 @@ test('infill: made boxes only on open built-up land, off the roads and the water
   }
   // The hand places keep their open ground.
   for (const h of MIAMI_SPOTS.helipads) assert.ok(!gen.some((b) => boxDist(b, h.x, h.z) < 30), h.label);
+});
+
+// ---- 0.11.0 "no wastelands" (docs/PLAN_V3.md 13, LOTS) ----
+// The density floor, region by region: every dressed lot over
+// DENSITY_MIN_AREA (400 m2) holds at least one feature unit per DENSITY_M2
+// (60 m2) of its area (lotEmptiness: a standing thing is one unit, a long
+// one one per 5 m, a bay one). A lot that covers under a quarter of its
+// bounding box is a scatter of cells round a building, not a place:
+// it keeps at least a third of the floor. Beaches (open sand), verges and
+// the airfield are left out.
+test('density floor: in every region, no lot over 400 m2 with fewer than one feature unit per 60 m2', async () => {
+  const { allRegionCities } = await import('./regionfixture.js');
+  const out = [];
+  for (const [id, c] of allRegionCities()) {
+    let n = 0, worst = Infinity, frag = Infinity, under = [];
+    for (const l of c.lots) {
+      if (l.area <= DENSITY_MIN_AREA || l.type === 'verge' || l.type === 'airfield' || l.type === 'beach') continue;
+      dressLot(c, l, out);
+      const r = lotEmptiness(out) / (l.area / DENSITY_M2);
+      const fill = l.area / ((l.x1 - l.x0) * (l.z1 - l.z0));
+      n++;
+      if (fill >= 0.25) { worst = Math.min(worst, r); if (r < 1) under.push(`${l.id} ${l.type} ${l.area} m2 ${r.toFixed(2)}`); } else frag = Math.min(frag, r);
+    }
+    console.log(`# ${id}: ${n} lots over 400 m2, the least dressed at ${worst.toFixed(2)} of the floor (fragments ${frag.toFixed(2)})`);
+    assert.ok(n > 1000, `${id}: ${n} lots`);
+    assert.deepEqual(under.slice(0, 5), [], `${id}: lots under the floor`);
+    assert.ok(frag >= 1 / 3, `${id}: a fragment at ${frag.toFixed(2)} of the floor`);
+  }
+});
+
+test('lot types: big pieces of open land downtown are parking lots; forecourts stay small; no yard past YARD_MAX', () => {
+  const b = (o) => ({ osm: '', style: 'office', h: 12, kind: 'building', x0: 0, z0: 0, x1: 30, z1: 30, ...o });
+  assert.equal(lotTypeFor(b({}), 'downtown', CARPARK_LARGE), 'carpark');
+  assert.equal(lotTypeFor(b({}), 'midtown', CARPARK_LARGE - 1), 'plaza');
+  assert.equal(lotTypeFor(b({ h: 40 }), 'downtown', FORECOURT_MAX), 'carpark', 'a tower keeps a forecourt, its back land parks cars');
+  assert.equal(lotTypeFor(b({ osm: 'church' }), 'downtown', FORECOURT_MAX - 1), 'plaza');
+  assert.equal(lotTypeFor(b({ kind: 'house' }), 'residential', YARD_MAX + 1), 'grass');
+  assert.equal(lotTypeFor(b({ kind: 'house' }), 'residential', YARD_MAX), 'yard');
+  // No lot of a building is bigger than LOT_MAX_AREA: big land is cut on the 80 m grid.
+  for (const l of city.lots) if (l.building >= 0) assert.ok(l.area <= LOT_MAX_AREA + 1e-6, `lot ${l.id}: ${l.area} m2`);
+  // Downtown's open land: parking lots are the commonest paved use.
+  const sh = lotShares(city.lots, (l) => l.core).share;
+  assert.ok(sh.carpark > sh.plaza, `carpark ${pct(sh.carpark)}, plaza ${pct(sh.plaza)}`);
+});
+
+test('planting is low and soft: shrubs at most 1.2 m, hedges at most 1 m, beds low; nothing on a service home', () => {
+  let shrubs = 0, hedges = 0, beds = 0;
+  for (const l of coreLots) {
+    for (const f of featuresOf(l)) {
+      if (f.kind === 'shrub') { shrubs++; assert.ok(f.h <= SHRUB_H + 1e-9 && f.h <= 1.2 && f.r <= 1.1, `shrub ${f.h} m by ${f.r} m`); }
+      if (f.kind === 'hedge') { hedges++; assert.ok(f.h <= HEDGE_H && f.h <= 1, `hedge ${f.h} m`); }
+      if (f.kind === 'bed') { beds++; assert.ok(f.h <= 0.5 && f.w <= 1.5, `bed curb ${f.h} m`); }
+    }
+  }
+  assert.ok(shrubs > 100 && hedges > 100 && beds > 100, `${shrubs} shrubs, ${hedges} hedges, ${beds} beds`);
+  // The hand-placed service homes keep 6.5 m clear of every lot feature.
+  for (const p of SERVICE_SPOTS) {
+    if (p.curb) continue;
+    for (const l of lotsNear(p.x, p.z, 20)) for (const f of featuresOf(l)) assert.ok(Math.hypot(f.x - p.x, f.z - p.z) >= 6.5 + Math.max(f.l, f.w) / 2 + f.r - 1e-6, `${f.kind} on ${p.name}`);
+  }
 });

@@ -181,7 +181,6 @@ export function paintLines(e, out = []) {
 //   lines read as a double yellow.
 // edgesNear(x, z, r, out) is the city's grid query. Mutates edges; returns
 // the count of paired edges.
-const LAT_OVER = 1.5;
 export function pairDivided(nodes, edges, edgesNear) {
   const near = [];
   let paired = 0;
@@ -202,10 +201,8 @@ export function pairDivided(nodes, edges, edgesNear) {
       const fx = oa.x + o.ux * t, fz = oa.z + o.uz * t;
       // Lateral position of the foot to the right of e (negative: left).
       const lat = (fx - mx) * -e.uz + (fz - mz) * e.ux;
-      // (Up to LAT_OVER m on the right: two ways drawn on top of each
-      // other, which converge or cross; each moves to its own right.)
-      if (lat > LAT_OVER) continue;
-      const d = Math.max(0, -lat);
+      if (lat >= 0) continue;
+      const d = -lat;
       if (d < bd && d <= PAIR_MAX) { bd = d; best = o; }
     }
     if (!best) continue;
@@ -221,28 +218,6 @@ export function pairDivided(nodes, edges, edgesNear) {
       e.off = round2((e.width - bd) / 2);
     }
     paired++;
-  }
-  // Two one-way ways in the same direction drawn over each other (a turn
-  // roadway beside its street, a duplicated way): each moves away from the
-  // other by half the overlap (`off`), so the two meet curb to curb.
-  for (const e of edges) {
-    if (!e.oneway || e.causeway || e.pair >= 0 || e.bridge) continue;
-    const a = nodes[e.a], b = nodes[e.b];
-    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-    edgesNear(mx, mz, PAIR_MAX, near);
-    let shift = 0;
-    for (let i = 0; i < near.length; i++) {
-      const o = edges[near[i]];
-      if (o === e || !o.oneway || o.pair >= 0 || o.bridge || e.ux * o.ux + e.uz * o.uz < 0.95) continue;
-      if (o.a === e.a && o.b === e.b) continue;
-      const oa = nodes[o.a];
-      const t = (mx - oa.x) * o.ux + (mz - oa.z) * o.uz;
-      if (t < 0 || t > o.length) continue;
-      const lat = (oa.x + o.ux * t - mx) * -e.uz + (oa.z + o.uz * t - mz) * e.ux;
-      const over = (e.width + o.width) / 2 - Math.abs(lat);
-      if (over > 0.3 && over / 2 > Math.abs(shift)) shift = lat > 0 ? -over / 2 : over / 2;
-    }
-    if (shift) e.off = round2(shift);
   }
   return paired;
 }

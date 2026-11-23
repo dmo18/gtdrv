@@ -9,7 +9,7 @@
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
 import { roadProfile, pairDivided, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
-import { buildRoadGeo } from './junctions.js';
+import { buildRoadGeo, onJunction } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
@@ -2138,7 +2138,10 @@ export function createMiamiCity(data, opts = {}) {
   // with a raised median as wide as the data gap leaves.
   graphStats.paired = pairDivided(nodes, edges, edgesNear);
   // Junction polygons, strip ends, bends and tapers (world/junctions.js).
-  const roadGeo = buildRoadGeo(nodes, edges);
+  const roadGeo = buildRoadGeo(nodes, edges, edgesNear);
+  // Where the strip of edge e starts, from node id: past the junction box
+  // and the junction polygon (props stand back from both).
+  const trimAt = (e, id) => Math.max(nodes[id].hx, roadGeo.trim[2 * e.id + (e.b === id ? 1 : 0)]);
   lap('junctions');
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
@@ -2195,7 +2198,9 @@ export function createMiamiCity(data, opts = {}) {
   const visual = land.data.slice(); // land as drawn: real land, islet and causeway
   for (const e of edges) {
     const g = stripOf(e);
-    stampCapsule(land, g[0], g[1], g[2], g[3], e.width / 2 + 3 + (e.median || 0) / 2, 1);
+    // (+1 m on a paired one-way: its strip sits `off` aside of the data
+    // line, and the 5 m raster must still hold its outer lane 2 m inland.)
+    stampCapsule(land, g[0], g[1], g[2], g[3], e.width / 2 + 3 + (e.median || 0) / 2 + (e.divided ? 1 : 0), 1);
   }
   lap('shore.stamp');
   const fieldAll = signedField(land);
@@ -2713,7 +2718,7 @@ export function createMiamiCity(data, opts = {}) {
         if (n.edges.length !== 2 && Math.abs(x - n.x) < n.hx + m && Math.abs(z - n.z) < n.hz + m) return true;
       }
     }
-    return false;
+    return onJunction(roadGeo, x, z);
   };
 
   // ---- 9. Spawn: on the named street, near the given point. ----
@@ -2753,10 +2758,10 @@ export function createMiamiCity(data, opts = {}) {
   const dr = createRng(seed ^ 0x5eed51);
   (function streetProps() {
     for (const e of edges) {
-      const a = nodes[e.a], b = nodes[e.b];
+      const a = nodes[e.a];
       const half = e.width / 2;
-      const startPad = a.hx + 6, endPad = b.hx + 6;
-      const usable = e.length - startPad - endPad;
+      const startPad = trimAt(e, e.a) + 6, endPad = trimAt(e, e.b) + 6;
+      const usable = e.length - a.hx - nodes[e.b].hx - 12; // (the old box pads: the seeded curb spots)
       const rx = -e.uz, rzv = e.ux; // right of a -> b
       if (!e.bridge && !e.causeway) {
         for (let d = startPad; d <= e.length - endPad; d += 34) {
@@ -2774,7 +2779,10 @@ export function createMiamiCity(data, opts = {}) {
         for (let side = -1; side <= 1; side += 2) {
           const park = side > 0 ? e.parkR : e.parkL;
           if (!(park > 0)) continue;
-          for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
+          // (The old box pads, so the seeded draws and the hand-placed
+          // service bays stay where they were; a spot on a junction's
+          // asphalt is dropped by inJunctionBox.)
+          for (let d = a.hx + 9; d < e.length - nodes[e.b].hx - 9; d += 6.5) {
             if (!rng.chance(0.22)) continue;
             const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
             const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rzv * off;
@@ -2793,7 +2801,7 @@ export function createMiamiCity(data, opts = {}) {
       const rx = -e.uz, rzv = e.ux;
       for (let side = -1; side <= 1; side += 2) {
         const treeP = TREE_P[districtOf(a.x, a.z)] ?? 0.3;
-        for (let d = a.hx + 10; d + 10 <= e.length - nodes[e.b].hx; d += 24) {
+        for (let d = trimAt(e, e.a) + 10; d + 10 <= e.length - trimAt(e, e.b); d += 24) {
           if (!dr.chance(treeP)) continue;
           const lo = (e.off || 0) + side * (half + 1.15);
           const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
@@ -2806,14 +2814,16 @@ export function createMiamiCity(data, opts = {}) {
       if (!n.signal || n.i < 0) continue;
       for (const eid of n.edges) {
         const e = edges[eid];
+        // (None inside a junction: on an edge between two of its nodes.)
+        if (roadGeo.inner[eid]) continue;
         const o = nodes[e.a === n.id ? e.b : e.a];
         const l = Math.hypot(n.x - o.x, n.z - o.z);
         const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
         const rx = -tz, rzv = tx;
         // The right curb of the approach (the strip may sit `off` aside).
         const rc = e.width / 2 + 0.9 + (e.b === n.id ? e.off || 0 : -(e.off || 0));
-        const x = n.x - tx * (n.hx + 0.9) + rx * rc;
-        const z = n.z - tz * (n.hx + 0.9) + rzv * rc;
+        const x = n.x - tx * (trimAt(e, n.id) + 0.9) + rx * rc;
+        const z = n.z - tz * (trimAt(e, n.id) + 0.9) + rzv * rc;
         if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
         signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
       }
@@ -2859,11 +2869,11 @@ export function createMiamiCity(data, opts = {}) {
       keep(furniture);
       for (const e of edges) {
         if (e.name !== S.spawn.street || e.bridge || e.causeway) continue;
-        const a = nodes[e.a], b = nodes[e.b];
+        const a = nodes[e.a];
         const half = e.width / 2;
         const rx = -e.uz, rzv = e.ux;
         let prevSlot = null;
-        for (let d = a.hx + 4; d <= e.length - b.hx - 4; d += 1) {
+        for (let d = trimAt(e, e.a) + 4; d <= e.length - trimAt(e, e.b) - 4; d += 1) {
           const px = a.x + e.ux * d, pz = a.z + e.uz * d;
           const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
           const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
@@ -3048,10 +3058,12 @@ export function createMiamiCity(data, opts = {}) {
         const ax = ea.ux * dir(ea), az = ea.uz * dir(ea), bx = eb.ux * dir(eb), bz = eb.uz * dir(eb);
         // The corner between them, clear of both carriageways; else the
         // other corners in turn.
+        // (1.6 m into the corner: past the round curb return, on the
+        // sidewalk corner; never on the junction's asphalt.)
         for (const [sa, sb] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-          const x = n.x + sa * ax * (eb.width / 2 + 1.0) + sb * bx * (ea.width / 2 + 1.0);
-          const z = n.z + sa * az * (eb.width / 2 + 1.0) + sb * bz * (ea.width / 2 + 1.0);
-          if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
+          const x = n.x + sa * ax * (eb.width / 2 + 1.6) + sb * bx * (ea.width / 2 + 1.6);
+          const z = n.z + sa * az * (eb.width / 2 + 1.6) + sb * bz * (ea.width / 2 + 1.6);
+          if (onRoad(x, z) || onJunction(roadGeo, x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
           // Each blade runs along its own road.
           furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
           n.blade = true;
@@ -3073,7 +3085,9 @@ export function createMiamiCity(data, opts = {}) {
         const fwd = e.b === n.id;
         // The right curb of the approach, seen driving toward n.
         const rc = fwd ? e.width / 2 + (e.off || 0) : e.width / 2 - (e.off || 0);
-        const x = n.x - tx * (n.hx + 1.5) - tz * (rc + 0.7), z = n.z - tz * (n.hx + 1.5) + tx * (rc + 0.7);
+        if (roadGeo.inner[eid]) continue;
+        const back = trimAt(e, n.id) + 1.5;
+        const x = n.x - tx * back - tz * (rc + 0.7), z = n.z - tz * back + tx * (rc + 0.7);
         if (onRoad(x, z) || inBuilding(x, z, 0.5)) continue;
         furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
         stopCount++;

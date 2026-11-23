@@ -16,6 +16,7 @@ import { exitPosition } from '../entities/onfoot.js';
 import { clamp, createRng } from '../core/rng.js';
 import { createYield, stepYield, curbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
 import { pickTrafficService, onCallDraw, TRAFFIC_RULES } from '../entities/servicevehicles.js';
+import { stopDistance } from '../world/junctions.js';
 
 const K = 12; // interior samples of the junction path
 const NPTS = K + 4; // A, B, K samples, C, D
@@ -242,6 +243,10 @@ function buildPath(dr) {
     dr.cum[i + 1] = dr.cum[i] + L;
   }
   dr.stopS = dr.cum[IB] + back - STOPLINE_BACK;
+  // On a real map, the painted stop bar (world/junctions.js): the car's
+  // front stops at it, however far the junction reaches.
+  const bar = stopDistance(city, dr.e0, dr.f1);
+  if (bar > 0) dr.stopS = Math.min(dr.stopS, dr.cum[IB] + back + extAt(T, e0) - bar);
   const ts = TURN_SPEED[t];
   dr.turnSpeed = t === STRAIGHT ? Math.min(laneSpeedOf(e0), laneSpeedOf(e1)) : ts;
 }

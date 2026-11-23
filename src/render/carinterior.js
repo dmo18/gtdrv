@@ -52,7 +52,7 @@ export const COCKPIT_FOV = 78;
 export const LOOKS = {
   low: { dash: -18, header: 36, wheelR: 0.185, rimR: 0.024, tilt: 22, wheelTop: -7, wheelBot: -36.5, spokes: 3, lip: 0.74, face: 0.2, fwd: 0.12 },
   tall: { dash: -17, header: 36, wheelR: 0.19, rimR: 0.025, tilt: 24, wheelTop: -6.5, wheelBot: -36.5, spokes: 3, lip: 0.74, face: 0.3, fwd: 0.1 },
-  big: { dash: -21, header: 36, wheelR: 0.245, rimR: 0.022, tilt: 56, wheelTop: -15, wheelBot: -35.5, spokes: 4, lip: 0.8, face: 0.32, fwd: 0 },
+  big: { dash: -21, header: 36, wheelR: 0.26, rimR: 0.024, tilt: 56, wheelTop: -12.5, wheelBot: -36.5, spokes: 4, lip: 0.8, face: 0.32, fwd: 0 },
 };
 const LOOK_OF = { suv: 'tall', crossover: 'tall', pickup: 'tall', van: 'tall', bus: 'big', truck: 'big' };
 export const lookOf = (spec) => LOOKS[LOOK_OF[spec && spec.body] || 'low'];
@@ -242,7 +242,8 @@ export function frameEye(spec, cab, e) {
   const lk = lookOf(spec);
   const t = Math.tan(-lk.dash * DEG);
   if (e.y - cab.wsY >= (cab.wsX - e.x) * t) return e;
-  const x1 = Math.min(e.x + lk.fwd, Math.max(e.x, cab.wsX - (e.y - cab.wsY) / t));
+  // Forward only while the dash, the wheel and the cluster still fit (0.95 m).
+  const x1 = Math.max(e.x, Math.min(e.x + lk.fwd, cab.wsX - 0.95, cab.wsX - (e.y - cab.wsY) / t));
   const y1 = Math.max(e.y, cab.wsY + (cab.wsX - x1) * t);
   const ok = (k) => {
     const p = { x: e.x + (x1 - e.x) * k, y: e.y + (y1 - e.y) * k, z: e.z };
@@ -483,7 +484,7 @@ const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 // Interior colors (original, no brand marks): a two-tone cabin, charcoal
 // upper and warm gray lower.
 const COL = {
-  top: 0x2a2b2e, upper: 0x323337, lower: 0x77726a, lowerDark: 0x5e5a53, seam: 0x1c1c1e, stitch: 0xd8d2c4,
+  top: 0x26272a, upper: 0x2e2f33, lower: 0x9a9285, lowerDark: 0x7a7468, seam: 0x1c1c1e, stitch: 0xd8d2c4,
   binnacle: 0x1d1e21, pillar: 0x4a4842, liner: 0xa8a399, door: 0x6f6a62, doorTop: 0x2c2d30, trim: 0x3d3e42,
   seat: 0x34312e, seatSide: 0x403c37, floor: 0x1e1e1e, console: 0x2b2c30, knob: 0x8d9095, chrome: 0xb9bcc0,
   mirror: 0xa8b8c6, mirrorFrame: 0x18191b, rim: 0x232325, spoke: 0x3a3b3f, hub: 0x26272a, mark: 0xc9b48a,
@@ -502,14 +503,25 @@ export function interiorLayout(cab, eye, spec = cab.spec) {
   const gY = Math.max(cab.wsY - 0.01, eye.y + (gX - eye.x) * tan(lk.dash));
   // Steering wheel: center and column tilt so the rim's outer top and
   // bottom edges sit at wheelTop and wheelBot.
-  const R = lk.wheelR, Re = R + lk.rimR, t = lk.tilt * DEG;
+  let R = lk.wheelR, Re = R + lk.rimR;
+  const t = lk.tilt * DEG;
   const A = tan(lk.wheelTop), B = tan(lk.wheelBot);
-  const wd = (2 * Re * Math.cos(t) - (A + B) * Re * Math.sin(t)) / (A - B);
-  const wheelX = eye.x + wd, wheelY = eye.y + A * (wd + Re * Math.sin(t)) - Re * Math.cos(t);
-  // Gauge cluster: behind the rim's top, seen through the wheel.
   const big = lk === LOOKS.big;
-  const clusterW = big ? 0.44 : 0.4, clusterH = clusterW * 0.4;
-  const cd = Math.min(wd + (big ? 0.22 : 0.15), gX - eye.x - 0.12);
+  let wd = (2 * Re * Math.cos(t) - (A + B) * Re * Math.sin(t)) / (A - B);
+  let wy = A * (wd + Re * Math.sin(t)) - Re * Math.cos(t);
+  // A short cab: the wheel comes nearer (and a little smaller), its
+  // bottom edge kept at wheelBot.
+  const room = gX - eye.x - (big ? 0.26 : 0.2);
+  if (wd > room) {
+    if (big) R *= Math.max(0.75, room / wd);
+    Re = R + lk.rimR;
+    wd = room;
+    wy = B * (wd - Re * Math.sin(t)) + Re * Math.cos(t);
+  }
+  const wheelX = eye.x + wd, wheelY = eye.y + wy;
+  // Gauge cluster: behind the rim's top, seen through the wheel.
+  const clusterW = big ? 0.52 : 0.43, clusterH = clusterW * 0.4;
+  const cd = Math.min(wd + (big ? 0.2 : 0.15), gX - eye.x - 0.06);
   const clusterX = eye.x + cd;
   const clusterY = eye.y + cd * tan(lk.wheelTop - 2.2) - clusterH / 2;
   // Dash lip: under the cluster in front of the driver, curving closer
@@ -674,12 +686,13 @@ function buildShell(cab, eye, lay) {
   }
   // Rear-view mirror: a small one on a stem from the header, angled to the driver.
   k.begin('mirror');
-  const mx = hx + 0.1, my = hy - 0.075;
+  const mx = Math.max(hx + 0.1, ex + 0.5), my = hy - 0.075 + (mx - hx - 0.1) * 0.25;
+  const ms = Math.max(1, (mx - ex) / 0.6); // a far header (buses) gets a bigger mirror
   k.bar([hx + 0.02, hy + 0.005, 0], [mx + 0.01, my + 0.02, 0], [0, 0, 1], 0.02, 0.018, COL.mirrorFrame);
   const yaw = Math.atan2(-ez, mx - ex) * 0.5;
   const u = [Math.sin(yaw), 0, Math.cos(yaw)], w = [Math.cos(yaw), 0, -Math.sin(yaw)];
-  k.obox(mx, my, 0, u, Y, w, 0.13, 0.042, 0.025, COL.mirrorFrame);
-  k.obox(mx - 0.013 * w[0], my, -0.013 * w[2], u, Y, w, 0.116, 0.03, 0.002, COL.mirror, 'uUvVW');
+  k.obox(mx, my, 0, u, Y, w, 0.13 * ms, 0.042 * ms, 0.025, COL.mirrorFrame);
+  k.obox(mx - 0.013 * w[0], my, -0.013 * w[2], u, Y, w, 0.116 * ms, 0.03 * ms, 0.002, COL.mirror, 'uUvVW');
   // ---- seats: the driver's cushion, the passenger's seat, a rear bench.
   k.begin('seats');
   const seat = (sx0, sz, sw, own) => {
@@ -858,7 +871,7 @@ function materials() {
   mats = {
     // One lit material for the cabin and the wheel (vertex colors times
     // the atlas), a little self light: the cabin is in the roof's shade.
-    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x161616, map: tex || null }),
+    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x2a2a2a, map: tex || null }),
     // Unlit for the dials, needles and screen (they glow).
     face: new THREE.MeshBasicMaterial(tex ? { map: tex, toneMapped: false } : { color: 0x15171a }),
     // Draws nothing, casts the car's shadow.

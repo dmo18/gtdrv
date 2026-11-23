@@ -51,12 +51,21 @@ const NAV_CSS = `
 }
 .rw-full .rw-street { top: calc(var(--rw-st) + 104px); }
 .rw-street.rw-none, .rw-mapbig .rw-street, .rw-nostreet .rw-street { display: none; }
+/* left-handed the cell under the minimap is BOOST's: the label goes under the speed readout (its width),
+   below the boost and health meters; in Full (the fan stays open there) it is not shown */
+.rw-touch.rw-lefty ~ .rw-hud .rw-street { left: calc(var(--rw-sl) + 16px + var(--map)); top: calc(var(--rw-st) + 66px); max-width: var(--spw); }
+.rw-touch.rw-lefty ~ .rw-hud .rw-hpmeter:not(.rw-none) ~ .rw-street,
+.rw-touch.rw-lefty ~ .rw-hud .rw-boostbar.rw-hp:not(.rw-none) ~ .rw-street { top: calc(var(--rw-st) + 82px); }
+.rw-touch.rw-lefty.rw-full ~ .rw-hud .rw-street { display: none; }
 .rw-prompt.rw-alert { background: #b3261e; border-color: #ffb4a8; color: #fff; font-size: 16px; font-weight: 900; letter-spacing: 0.04em; }
 .rw-prompt.rw-alert.rw-in { animation: rw-alert-in 0.5s ease-out 2; }
 @keyframes rw-alert-in { 0% { transform: scale(1.12); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .rw-prompt.rw-alert.rw-in { animation: none; } }
 @media (max-height: 380px) {
   .rw-full .rw-street { top: calc(var(--rw-st) + 96px); }
+  .rw-touch.rw-lefty ~ .rw-hud .rw-street { top: calc(var(--rw-st) + 62px); }
+  .rw-touch.rw-lefty ~ .rw-hud .rw-hpmeter:not(.rw-none) ~ .rw-street,
+  .rw-touch.rw-lefty ~ .rw-hud .rw-boostbar.rw-hp:not(.rw-none) ~ .rw-street { top: calc(var(--rw-st) + 78px); }
 }
 @media (max-height: 300px) {
   .rw-navon .rw-objcell { display: none; }

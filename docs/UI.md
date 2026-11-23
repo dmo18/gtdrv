@@ -27,7 +27,8 @@ where this file differs from 6.12 it says so under "Differences from
 - Settings: four groups, at most 6 rows each, none scrolls at 780x360.
   Controls (steering style, sensitivity, handling, left-handed, invert
   flying stick), Sound (master, mute all, music, sound effects, ambience,
-  car radio), Game (police chases, hard mode, map, new game), Display
+  car radio), Game (police chases, hard mode, blood, street names (0.10.1),
+  map, new game), Display
   (HUD, graphics quality, live day and night, time of day, Phone check).
 - Phone check (0.5.0, `src/ui/phonecheck.js`): Settings, Display, Start.
   The menu closes and the game drives a test car by itself for 60 s along
@@ -167,6 +168,54 @@ rows never move, and the stack never passes y = 100.
   `'objective'`, `'district'`, `'hint'`, `'score'` or `'info'`; nobody
   places their own text in the top center.
 
+## Out of the view (0.10.1)
+
+The owner: "OSD kills the display". The road ahead stays clear:
+- Turn by turn is one compact pill in the top center stack's second row
+  (y 40, 28 high): arrow icon, distance, street ("200 ft · SW 1st Ave";
+  "Turn right · SW 1st Ave" at the turn; "U-turn · S Miami Ave"). While it
+  shows, row 1's message (police, objective, district) uses row 2 and
+  row 2's own waits. It never reaches the middle half of the screen.
+- It shows only for a goal the player chose or accepted: a destination
+  set on the map, a running activity or mission. A merely tracked
+  adventure shows the small distance pill only (a map destination now
+  comes before it), and the Phone check never shows turn by turn. A route
+  that asks for a U-turn is searched again every second while the car
+  drives on; the pill asks for the U-turn only after 3 s of the route still
+  wanting one (`UTURN_WAIT_S`, `src/systems/objective.js`).
+- The street name is a small label under the minimap (11 px text, 16
+  high; hidden while the minimap is grown). Settings, Game, "Street names"
+  switches it (on by default; `settings.streetLabel`). The "next: cross
+  street" text is gone.
+- Short screens (300 px high or less: Chrome's bars showing, 748x285 and
+  690x280): pedals and FIRE are 56 high, EXIT, HAND and the LOCK rect sit
+  above them, MORE above EXIT with the fan in two rows of 48 px cells left
+  of it, and BOOST (with the GARAGE and TALK offers) moves to a fourth column
+  beside the LOCK rect, 48 wide, clear of the keep-out rect down to 690 wide.
+  The stack narrows to end 8 px left of the fan (`min(300px, 100vw - 464px)`),
+  the stars move to its left end, the objective distance merges into the turn
+  pill, the score is 24 high and the combo line and the Full ammo panel are
+  dropped, the prompt strip is 190 by 20 (it ends at 90 percent of the height)
+  and the steering slot is 120 (wheel 116, arrow pads 56, stick 112, SIREN 8 px
+  beside it). Left-handed, MORE and its fan stay at the top right (the top left
+  holds the minimap and speed), and in a service vehicle SWAP waits (its cell
+  above SIREN would be under that fan). Below 780 wide the score pill is 120
+  wide.
+- Left-handed (every size) the cell under the minimap is BOOST's, so the
+  street label sits under the speed readout (no wider than it, below the
+  boost and health meters); in Full, where the fan stays open there, it is
+  not shown.
+- The Phone check's bottom bar owns the bottom edge while it runs (the
+  prompt strip waits); the touch controls are hidden then, as before.
+- What was removed from the always-on display (Minimal): the two-line turn
+  strip in the middle of the view, the bottom center street line and its
+  "next:" cross street, turn by turn for adventures and during the Phone
+  check, the U-turn nag, and on short screens the combo line, the ammo
+  panel and the separate objective distance. Kept, each for a reason:
+  minimap (where am I), speed with the craft health bar, the boost meter
+  (only where BOOST shows), score and pause (top right), the street label
+  (small, switchable), and the controls of the mode.
+
 ## HUD modes
 
 Setting: Pause, Settings, Display, HUD (`settings.hud`: `'minimal'`
@@ -204,6 +253,46 @@ and the acceptance test for each style are in docs/REVAMP.md 6.3. The
 sensitivity setting changes how far the thumb or phone must move for
 full lock; it never changes the curve.
 
+0.10.1 (owner round 3, "still impossible to steer"): touch steering that
+a thumb can use.
+- The steering zone is the whole left 40 percent of the screen below the
+  minimap (from y 100; right 40 percent when left-handed). A thumb may start
+  anywhere in it; the drawn wheel, bar or arrow pads only show it.
+- Wheel: a RELATIVE drag (`createDragSteer` in `src/ui/wheel.js`). Touching
+  down never steers. Each move adds the larger of its horizontal travel
+  (55 px is full input at sensitivity 1, divided by the sensitivity 0.5 to
+  1.5) and its rotation about the drawn wheel's center (60 degrees is full,
+  counted only outside 40 px of the center). Rotation only counts when it
+  turns the same way as the travel, or when the move is mostly up or down,
+  so a thumb below the center that slides right steers right. The sum is
+  clamped at full input, so turning back answers at once. The drawn wheel
+  turns with the input (100 degrees at full) and springs back on release.
+- Slider: also relative: where the thumb lands is the center, 90 px of
+  travel from there is full input; the knob shows the value.
+- Buttons: the two arrow pads ramp as before; a thumb anywhere else in the
+  zone steers by its side of the slot center and may slide across.
+- Every control ends its finger on a pointerup or pointercancel seen
+  anywhere in the document (capture phase), so nothing stays held.
+- Bugs found in 0.10.0 with real two-finger touches
+  (`node scripts/touch-test.mjs`): the wheel read the thumb's angle about
+  the center, so a thumb below the center sliding right steered left; a
+  drag across the center flipped the angle by 180 degrees (a jump to the
+  other full lock); a drag sideways at 3 o'clock gave nothing, then jumped;
+  inside 16 px of the center nothing moved; 110 degrees of rotation was
+  full lock, so a thumb far from the wheel barely steered; the zone began
+  at 35 percent of the height (dead space under the minimap); the slider
+  was absolute (a touch at the bar's end was full lock at once); the
+  buttons style ignored the zone. A second finger (GAS, BRAKE, FIRE, the
+  look area, a third finger in the zone) never stole the steering finger,
+  and touchcancel already cleared everything.
+- `scripts/touch-test.mjs` (a gate step) holds GAS with one finger and
+  steers with another in all four styles (tilt falls back to the wheel in
+  headless Chromium), BRAKE plus steer, FIRE plus steer, a look drag and a
+  third finger beside the steering, a finger past the screen edge,
+  touchcancel, left-handed, the sensitivity range and SWAP while driving, at
+  748x360, 748x285 and 915x412. It fails on any lost, stolen, reversed,
+  jumping or stuck steer.
+
 ## Layout slots
 
 CSS custom properties `--x` (from the thumb-side edge) and `--y` (from the
@@ -227,6 +316,15 @@ thrown weapons FIRE aims on hold (arc preview) and throws on release;
 lifting the finger over the more button or SWAP cancels.
 
 ## Weapon wheel
+
+0.10.1: SWAP works while driving (car and boat). It takes the LOCK rect,
+the free cell above the drive-by FIRE (docs/REVAMP.md 6.12 "CONTROLS"); in
+a service vehicle EXTRA keeps that rect and SWAP sits 8 px above SIREN. Its
+wheel holds only the drive-by weapons (`WEAPONS[id].driveBy`: the pistol
+and the SMG), a tap switches to the next one, and the pick sets the gun the
+drive-by fires (`arms.lastGun`, `pickWeapon` in `src/ui/combathud.js`) with
+the same `weaponSwitch` event, so the name toasts. The weapon on foot is
+kept.
 
 Hold SWAP (about 250 ms) to open a ring of the seven weapons around the
 button; tapping SWAP under 250 ms still cycles. While the same finger stays

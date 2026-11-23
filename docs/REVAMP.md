@@ -864,10 +864,10 @@ A style may not add its own smoothing, except the two named below.
 
 | style | input mapping | acceptance (test/steering.test.js plus a slalom in test/handling-bands.test.js) |
 |---|---|---|
-| wheel | The thumb's angle about the wheel center is summed from one pointer event to the next (`angleDelta`), starting at 0 where the thumb lands, so a touch never jumps the wheel. raw = summed degrees / `steerTravel('wheel')`. Inside 16 px of the center the sum holds its value and tracking is kept. The pointer is tracked by id until it lifts, wherever it goes. On lift the target is 0. | 55 degrees gives raw 0.5 and a target of 0.40 to 0.55. A path through the center core changes the target by under 0.02. 110 degrees is full lock. Slalom (cones 18 m apart, 20 m/s, Arcade, sedan) passes with the thumb limited to 300 degrees per second; in Sim it passes at 17 m/s. |
+| wheel | 0.10.1 (CONTROLS, docs/UI.md "Steering styles"): replaced by a relative drag: each move adds the larger of its horizontal travel (55 px full at sensitivity 1) and its rotation about the wheel center (60 degrees full, outside 40 px of the center, only when it agrees with the travel or the move is mostly vertical); test/touch-steer.test.js and scripts/touch-test.mjs. Before: the thumb's angle about the wheel center is summed from one pointer event to the next (`angleDelta`), starting at 0 where the thumb lands, so a touch never jumps the wheel. raw = summed degrees / `steerTravel('wheel')`. Inside 16 px of the center the sum holds its value and tracking is kept. The pointer is tracked by id until it lifts, wherever it goes. On lift the target is 0. | 55 degrees gives raw 0.5 and a target of 0.40 to 0.55. A path through the center core changes the target by under 0.02. 110 degrees is full lock. Slalom (cones 18 m apart, 20 m/s, Arcade, sedan) passes with the thumb limited to 300 degrees per second; in Sim it passes at 17 m/s. |
 | buttons | LEFT and RIGHT. While one is held the target ramps from its current value toward -1 or 1 over `steerTravel('buttons')` seconds (this ramp is the one allowed input filter; it equals the car's own lock time so the two do not add up). Release: target 0. Both held: target 0. The keyboard uses the same mapping. | Hold to full lock takes 0.25 to 0.40 s measured at the car's wheels. A 0.10 s tap peaks between 0.25 and 0.40 of lock. Both held gives 0. The slalom passes with a scripted press and release driver. |
 | tilt | `tiltAngle(beta, gamma, screenAngle)` gives the roll of the phone like a steering wheel. Dead zone 1.5 degrees, then raw = (degrees - 1.5) / `steerTravel('tilt')`, then `wheelCurve`. A low-pass with a 0.08 s time constant is the one allowed filter. If no orientation event arrives within 1.0 s of choosing tilt, or permission is refused, the game shows a toast, uses the wheel for this run and keeps the saved setting. | 12.5 degrees gives raw 0.5. Both landscape ways give the same sign. Lying flat gives 0. Noise of 0.5 degrees at rest gives 0. The fallback fires in a test with no events. The slalom passes with the roll limited to 60 degrees per second. |
-| slider | A bar 180 px wide. raw = (pointer x - bar center x) / `steerTravel('slider')`, then `wheelCurve`. Absolute: where the thumb lands is the value. The pointer is tracked by id until it lifts, even off the bar. On lift the target is 0. | 45 px gives raw 0.5. A pointer that leaves the bar still steers. Ends clamp at 1. The slalom passes with the thumb limited to 400 px per second. |
+| slider | A bar 180 px wide. 0.10.1: relative, raw = (pointer x - x where the thumb landed) / `steerTravel('slider')`, then `wheelCurve` (no jump wherever the thumb lands in the zone; past full lock the anchor follows). Before: raw = (pointer x - bar center x) / `steerTravel('slider')`, absolute: where the thumb lands is the value. The pointer is tracked by id until it lifts, even off the bar. On lift the target is 0. | 45 px gives raw 0.5. A pointer that leaves the bar still steers. Ends clamp at 1. The slalom passes with the thumb limited to 400 px per second. |
 
 Slalom pass rule (all four styles, `SLALOM` in handlingbands.js): six cones on a straight line
 18 m apart, passed on alternate sides by the sedan at 20 m/s (Arcade) or 17 m/s (Sim). It
@@ -1732,6 +1732,23 @@ right and left handed, Minimal and Full, fan open and closed):
 - HG-4: a 200 character toast stays one line, inside its row, ending in an ellipsis.
 - HG-5: the stack box never overlaps the speed readout (minimap small or grown), the score,
   the open fan or the Full mode ammo panel.
+
+#### 0.10.1 additions (CONTROLS, docs/PLAN_V3.md 13)
+
+| item | 915x412 | 780x360 | modes | notes |
+|---|---|---|---|---|
+| SWAP (driving) | 675, 272, 56, 56 | 564, 224, 56, 56 | car, boat, while a drive-by gun is carried | The LOCK rect (free in a car without EXTRA). Hold: the wheel of the drive-by weapons; tap: the next one. Mirrors with the cluster. |
+| SWAP (driving), EXTRA showing | 184, 228, 56, 56 | 164, 182, 56, 56 | car (service vehicles) | 8 px above SIREN, beside the steering slot; moves by L and mirrors with the slot. |
+| Turn pill | centered in row 1, 28 high, at most the stack width | same | car, tank, on foot with a chosen or accepted goal | Replaces the two-line turn strip at y 104. One line: icon, "200 ft · SW 1st Ave". While it shows, row 1's message uses row 2 (row 2's own waits). Ends above 25 percent of the height. |
+| Street label | 8, 98, up to 168, 16 | 8, 86, up to 168, 16 | where `city.streetAt` names a street | Replaces the bottom center street line. 11 px text; under the clock in Full (y 104, 96); hidden while the minimap is grown or `settings.streetLabel` is false. |
+| Steering zone | 0, 100, 40 % of V, to the bottom | same | car, boat (and the sticks) | Was from 35 % of the height. |
+
+Short screens (H 300 or less, 748x285 and 690x280, L = 0; checked loosely like 748x360 by
+scripts/ui-test.mjs): bottom row GAS, BRAKE, FIRE (56 high); above it EXIT, HAND, the LOCK rect;
+MORE above EXIT; the fan's two 48 px rows left of MORE (y H - 184 and H - 240); BOOST and the
+offers in a fourth column (right offset 200, 48 square) beside the LOCK rect. The stack box is
+`min(300, V - 464)` wide; stars at its left end; the combo line and the Full ammo panel hide; the
+objective distance merges into the turn pill.
 
 ### 6.13 Car go or no-go bar (W5 slice 1, the sedan)
 
