@@ -6,7 +6,13 @@
 // high speed, a little look into turns and a small FOV kick under hard
 // acceleration. All capped; `setShake(0)` turns the shakes off. Cars
 // also lean and lag to show weight (LEAN).
+// Cars also have two first-person views (docs/PLAN_V3.md 2.8): Hood and
+// Cockpit, rigid on the car (no lag, no sideways turn look, level
+// horizon), with a drag look that springs back (LOOK) and a 3 cm head
+// lean into braking and bumps. The cockpit puts the interior kit of
+// carinterior.js into the car and hides the exterior.
 import { angleDiff, clamp } from '../core/rng.js';
+import { attachInterior, carGeometry, measureCabin, eyePoint, hoodPoint, frontShell } from './carinterior.js';
 
 // follow: position spring rate. turn: heading spring factor.
 // pitchShare / rollShare: how much of the craft's climb angle and bank the
@@ -23,13 +29,20 @@ const MODES = {
 };
 
 // Selectable views for the VIEW button. Each view overrides parts of the
-// mode above. A negative `dist` puts the camera AHEAD of the target (bumper
-// or cockpit view); those views skip the building pull-in.
+// mode above. A negative `dist` puts the camera AHEAD of the target
+// (bow or cockpit view); those views skip the building pull-in.
+// `fp` marks the car's first-person views: the camera sits at a point of
+// the car (FIRST), `near` is the near plane. Hood's FOV 80 is horizontal
+// (`fovH`, the vertical one follows the screen: 41 degrees at 915x412),
+// the only reading under which the hood fills 10 to 20 percent of the
+// frame from the driver's eye height; the cockpit's 78 is the camera's
+// own vertical FOV like every other view (122 horizontal at 915x412).
 const VIEWS = {
   car: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 12.5, height: 4.8, lookHeight: 1.0, lookAhead: 7, baseFov: 66 },
-    { name: 'Bumper', dist: -2.2, height: -0.55, lookHeight: -0.45, lookAhead: 40, baseFov: 74, follow: 40, turn: 2.4 },
+    { name: 'Hood', fp: 'hood', dist: -1, fovH: 80, near: 0.12 },
+    { name: 'Cockpit', fp: 'cockpit', dist: -1, baseFov: 78, near: 0.12 },
   ],
   foot: [
     { name: 'Chase' },
@@ -93,6 +106,16 @@ export const LEAN = {
   pitchMaxDeg: 1.5, pitchPerG: 1.6, // degrees of pitch per g of braking, capped
   ease: 0.15, // s, smoothing of the roll and pitch themselves
 };
+// First-person look (docs/PLAN_V3.md 2.8 item 2): the drag turns the head
+// up to yawMax each way and pitchMax up or down; released, it springs
+// back with time constant `ret` (s) after `hold` s without drag when the
+// input has no `lookHeld` flag (keyboard, tests). Radians per pixel.
+export const LOOK = { drag: 0.006, yawMax: (110 * Math.PI) / 180, pitchMax: (25 * Math.PI) / 180, ret: 0.06, hold: 0.08 };
+// First-person framing: the hood's front edge sits at `hoodShare` of the
+// frame height from the bottom (the plan's 10 to 20 percent) by a small
+// camera pitch within `hoodPitch` (degrees); the cockpit looks level.
+// The head leans up to `lean` m.
+export const FIRST = { hoodShare: 0.15, hoodPitch: [-12, 8], lean: 0.03 };
 const BOOST_FOV = 9; // degrees of extra field of view at full boost
 const RAD = Math.PI / 180;
 function prefersReducedMotion() {
@@ -114,10 +137,27 @@ export function createChaseCamera(camera) {
     const list = VIEWS[modeKey] || VIEWS.car;
     const view = list[viewIdx[modeKey] % list.length] || list[0];
     mode = Object.assign({}, base, view);
+    if (!view.fp) mode.fp = null;
     viewName = view.name;
     feel = FEEL[modeKey] || FEEL.car;
     curDist = mode.dist;
+    wantNear = view.near || baseNear;
+    fp.yaw = 0;
+    fp.pitch = 0;
+    if (!(mode.fp === 'cockpit' && modeKey === 'car') && fp.att) {
+      fp.att.detach();
+      fp.att = null;
+    }
   }
+  const baseNear = camera.near || 0.5;
+  let wantNear = baseNear;
+  // First-person state: look yaw / pitch (rad), seconds since the last
+  // drag, head lean (m, car frame), the car whose points are cached, the
+  // attached interior.
+  const fp = {
+    yaw: 0, pitch: 0, since: 99, headX: 0, headY: 0, headVY: 0, lastY: null, lastVY: 0,
+    veh: null, vmesh: null, cab: null, eye: null, hood: null, hoodDrop: 0.3, att: null, bias: 0,
+  };
   let camHeading = 0; // smoothed follow heading
   let camPitch = 0; // smoothed share of the target's climb angle
   let camRoll = 0; // smoothed share of the target's bank
@@ -360,8 +400,167 @@ export function createChaseCamera(camera) {
     if (instant) aim.k = next ? 1 : 0;
   }
 
+  // ---- first person (cars) ----
+  // Cache the car's camera points when the car (or its mesh) changes,
+  // and attach the interior in the cockpit.
+  function syncFirst(v) {
+    const mesh = v && v.mesh && v.mesh.userData && v.mesh.userData.rig ? v.mesh : null;
+    if (fp.veh !== v || fp.vmesh !== mesh || !fp.eye) {
+      fp.veh = v;
+      fp.vmesh = mesh;
+      const spec = (v && v.spec) || { id: '?', length: 4.6, width: 1.85, height: 1.45 };
+      if (mesh) {
+        const geo = carGeometry(mesh);
+        fp.cab = measureCabin(spec, geo.body, geo.glass);
+        fp.eye = eyePoint(spec, fp.cab);
+        fp.hood = hoodPoint(fp.cab, fp.eye);
+        // The hood's front edge as seen from the hood camera: the least
+        // steep drop to any front shell point, as a slope.
+        let drop = Infinity;
+        if (geo.body) {
+          const g = frontShell(geo.body, fp.cab);
+          const pa = g.attributes.position.array, ix = g.index.array;
+          for (let i = 0; i < ix.length; i++) {
+            const k = ix[i] * 3;
+            const dx = pa[k] - fp.hood.x;
+            if (dx < 0.3 || Math.abs(pa[k + 2]) > 0.5) continue;
+            const sl = (fp.hood.y - pa[k + 1]) / dx;
+            if (sl < drop) drop = sl;
+          }
+        }
+        fp.hoodDrop = Number.isFinite(drop) ? drop : 0.3;
+      } else {
+        // No mesh (tests, a car being swapped): points from the spec.
+        const e = spec.eye;
+        fp.cab = null;
+        fp.eye = e && Number.isFinite(e.x) ? { x: e.x, y: e.y, z: e.z } : { x: spec.length * 0.2 - 1.05, y: spec.height * 0.81, z: -spec.width * 0.215 };
+        fp.hood = { x: spec.length * 0.2, y: fp.eye.y, z: 0 };
+        fp.hoodDrop = 0.3;
+      }
+      fp.lastY = null;
+    }
+    const want = mode.fp === 'cockpit' && mesh ? v : null;
+    if (fp.att && (fp.att.vehicle !== want || fp.att.mesh !== mesh)) {
+      fp.att.detach();
+      fp.att = null;
+    }
+    if (want && !fp.att) fp.att = attachInterior(want);
+  }
+
+  // Vertical field of view (degrees) for a horizontal one at the
+  // camera's aspect.
+  const vfovOf = (h) => (2 * Math.atan(Math.tan((h * RAD) / 2) / Math.max(0.5, camera.aspect || 1))) / RAD;
+
+  function stepFirst(target, dt, input) {
+    const lx = input ? input.lookX || 0 : 0, ly = input ? input.lookY || 0 : 0;
+    if (lx || ly) {
+      fp.yaw = clamp(fp.yaw + lx * LOOK.drag, -LOOK.yawMax, LOOK.yawMax);
+      fp.pitch = clamp(fp.pitch - ly * LOOK.drag, -LOOK.pitchMax, LOOK.pitchMax);
+      input.lookX = 0;
+      input.lookY = 0;
+      fp.since = 0;
+    } else if (dt > 0) {
+      fp.since += dt;
+    }
+    const held = (input && input.lookHeld === true) || fp.since < LOOK.hold;
+    if (!held && dt > 0) {
+      const k = 1 - Math.exp(-dt / LOOK.ret);
+      fp.yaw -= fp.yaw * k;
+      fp.pitch -= fp.pitch * k;
+    }
+    // Head lean: forward into braking (car frame +x), a damped spring
+    // kicked by the car's vertical acceleration (bumps, curbs, landings).
+    if (dt > 0) {
+      const wantX = clamp(-accel / 9.81, 0, 1) * FIRST.lean;
+      fp.headX += (wantX - fp.headX) * (1 - Math.exp(-dt / 0.12));
+      const y = target.y || 0;
+      if (fp.lastY === null) { fp.lastY = y; fp.lastVY = 0; }
+      const vy = (y - fp.lastY) / dt;
+      const ay = clamp((vy - fp.lastVY) / dt, -80, 80);
+      fp.lastY = y;
+      fp.lastVY = vy;
+      fp.headVY += (-fp.headY * 300 - fp.headVY * 24 - ay * 0.9) * dt;
+      fp.headY = clamp(fp.headY + fp.headVY * dt, -FIRST.lean, FIRST.lean);
+      if (fp.headY === FIRST.lean || fp.headY === -FIRST.lean) fp.headVY *= 0.5;
+    }
+  }
+
+  // Camera at the car's eye (cockpit) or hood point, rigid on the car's
+  // ground frame: the yaw and slope of the car, never its body roll, so
+  // the horizon stays level.
+  function placeFirst(target) {
+    const p = mode.fp === 'cockpit' ? fp.eye : fp.hood;
+    const lxl = p.x + fp.headX, lyl = p.y + fp.headY, lzl = p.z;
+    let cx, cy, cz, yaw, slope;
+    const mesh = fp.vmesh;
+    if (mesh) {
+      const e = mesh.matrix.elements;
+      cx = e[0] * lxl + e[4] * lyl + e[8] * lzl + e[12];
+      cy = e[1] * lxl + e[5] * lyl + e[9] * lzl + e[13];
+      cz = e[2] * lxl + e[6] * lyl + e[10] * lzl + e[14];
+      yaw = Math.atan2(e[2], e[0]);
+      slope = Math.asin(clamp(e[1], -1, 1));
+    } else {
+      yaw = target.heading;
+      slope = 0;
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      cx = target.x + c * lxl - s * lzl;
+      cy = (target.y || 0) + lyl;
+      cz = target.z + s * lxl + c * lzl;
+    }
+    // Framing pitch: the hood edge or the gauge cluster where FIRST puts it.
+    let bias = 0;
+    if (mode.fp === 'hood') {
+      const vh = (fovOfFirst() / 2) * RAD;
+      bias = Math.atan((1 - 2 * FIRST.hoodShare) * Math.tan(vh)) - Math.atan(fp.hoodDrop);
+      bias = clamp(bias, FIRST.hoodPitch[0] * RAD, FIRST.hoodPitch[1] * RAD);
+    }
+    fp.bias = bias;
+    const a = yaw + fp.yaw, pt = slope + bias + fp.pitch;
+    const dx = Math.cos(a) * Math.cos(pt), dy = Math.sin(pt), dz = Math.sin(a) * Math.cos(pt);
+    camera.position.set(cx, cy, cz);
+    camera.lookAt(cx + dx * 10, cy + dy * 10, cz + dz * 10);
+    ray.x = cx; ray.y = cy; ray.z = cz;
+    ray.dx = dx; ray.dy = dy; ray.dz = dz;
+    px = cx; py = cy; pz = cz;
+    applyShake(Math.abs(target.speed || 0));
+  }
+
+  const fovOfFirst = () => (mode.fovH ? vfovOf(mode.fovH) : mode.baseFov);
+  function fovFirst() {
+    const fov = fovOfFirst();
+    curFov = fov;
+    if (Math.abs(fov - camera.fov) > 0.01) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  function syncNear() {
+    if (camera.near !== wantNear) {
+      camera.near = wantNear;
+      camera.updateProjectionMatrix();
+    }
+  }
+  const firstOn = () => !!mode.fp && modeKey === 'car';
+
   return {
     update(target, dt, input, collision) {
+      syncNear();
+      if (firstOn()) {
+        if (input && (input.lookX || input.lookY)) fx.touched = true;
+        aim.k = 0;
+        syncFirst(target.vehicle || null);
+        updateFeel(target, dt);
+        stepFirst(target, dt, input);
+        camHeading = target.heading;
+        orbitYaw = 0;
+        orbitPitch = 0;
+        placeFirst(target);
+        fovFirst();
+        if (fp.att) fp.att.update(target.vehicle);
+        return;
+      }
       // Ease the aim view in and out (AIM.ease seconds).
       if (input && (input.lookX || input.lookY)) fx.touched = true;
       if (dt > 0) aim.k = clamp(aim.k + (aim.on ? dt : -dt) / AIM.ease, 0, 1);
@@ -439,6 +638,15 @@ export function createChaseCamera(camera) {
       trauma = 0;
       aim.on = false;
       aim.k = 0;
+      syncNear();
+      if (firstOn()) {
+        syncFirst(target.vehicle || null);
+        fp.yaw = 0; fp.pitch = 0; fp.headX = 0; fp.headY = 0; fp.headVY = 0; fp.lastY = null;
+        placeFirst(target);
+        fovFirst();
+        if (fp.att) fp.att.update(target.vehicle);
+        return;
+      }
       place(target, 0, null, true);
       updateFov(Math.abs(target.speed || 0), 0, true, target.boost);
     },
@@ -468,6 +676,26 @@ export function createChaseCamera(camera) {
     },
     getView() {
       return viewName;
+    },
+    // First person (Hood or Cockpit in a car): true while it is the view.
+    isFirstPerson: firstOn,
+    // The first-person state for tests and the UI test: look (degrees),
+    // the eye and hood points (car local), the framing pitch (degrees),
+    // the attached interior (or null).
+    getFirst: () => ({
+      view: firstOn() ? mode.fp : null, yawDeg: fp.yaw / RAD, pitchDeg: fp.pitch / RAD, biasDeg: (fp.bias || 0) / RAD,
+      eye: fp.eye, hood: fp.hood, head: { x: fp.headX, y: fp.headY }, interior: fp.att, near: camera.near, cab: fp.cab,
+    }),
+    // Pick a view by name (tests, the UI test). Returns false if the kind has none.
+    setView(name) {
+      const list = VIEWS[modeKey] || VIEWS.car;
+      const i = list.findIndex((v) => v.name === name);
+      if (i < 0) return false;
+      viewIdx[modeKey] = i;
+      applyMode();
+      orbitYaw = 0;
+      orbitPitch = 0;
+      return true;
     },
     // Car lean (roll into turns, pitch under braking) on or off; the
     // limits are LEAN. Reduced motion starts it off.

@@ -28,17 +28,103 @@ test('VIEW cycles through distinct camera views for every kind', () => {
   }
 });
 
-test('bumper view puts the camera ahead of the target and low', () => {
-  const cam = new THREE.PerspectiveCamera(62, 2, 0.5, 1800);
+test('car views: Chase, Far chase, Hood, Cockpit; Bumper is gone; FOV and near plane per view (PLAN_V3 2.8)', async () => {
+  const { LOOK } = await import('../src/render/chasecam.js');
+  const cam = new THREE.PerspectiveCamera(62, 915 / 412, 0.5, 1800);
   const chase = createChaseCamera(cam);
   chase.setMode('car');
   chase.snap(target);
+  assert.equal(chase.isFirstPerson(), false);
   assert.equal(chase.cycleView(), 'Far chase');
-  assert.equal(chase.cycleView(), 'Bumper');
-  const pos = settle(cam, chase, 240);
-  assert.ok(pos.x > target.x, 'in front of the car center (heading 0 faces +x)');
-  assert.ok(pos.y < 1.2, 'low');
+  assert.equal(chase.cycleView(), 'Hood');
+  let pos = settle(cam, chase, 30);
+  assert.ok(chase.isFirstPerson());
+  assert.ok(pos.x > target.x, 'hood camera ahead of the car center (heading 0 faces +x)');
+  assert.ok(Math.abs(pos.z - target.z) < 1e-6, 'on the center line');
+  const hfov = (2 * Math.atan(Math.tan((cam.fov * Math.PI) / 360) * cam.aspect) * 180) / Math.PI;
+  assert.ok(Math.abs(hfov - 80) < 0.1, `hood FOV 80 horizontal (${hfov.toFixed(1)})`);
+  assert.equal(cam.near, 0.12);
+  assert.equal(chase.cycleView(), 'Cockpit');
+  pos = settle(cam, chase, 30);
+  assert.ok(Math.abs(cam.fov - 78) < 1e-6, `cockpit FOV 78 (${cam.fov})`);
+  assert.equal(cam.near, 0.12);
+  assert.ok(pos.z < target.z - 0.25, 'driver on the left (heading 0: left is -z)');
+  assert.ok(pos.y > 0.9 && pos.y < 1.6, `eye height ${pos.y.toFixed(2)}`);
   assert.equal(chase.cycleView(), 'Chase', 'wraps around');
+  settle(cam, chase, 2);
+  assert.equal(cam.near, 0.5, 'near plane back for the chase views');
+  assert.equal(chase.isFirstPerson(), false);
+  for (const k of ['plane', 'heli']) {
+    chase.setMode(k);
+    const names = [chase.getView(), chase.cycleView(), chase.cycleView()];
+    assert.deepEqual(names, ['Chase', 'Far chase', 'Cockpit'], `${k} keeps its views`);
+    chase.cycleView();
+  }
+  chase.setMode('boat');
+  assert.deepEqual([chase.getView(), chase.cycleView(), chase.cycleView()], ['Chase', 'Far chase', 'Bow']);
+  chase.setMode('tank');
+  assert.equal(chase.isFirstPerson(), false);
+  assert.ok(LOOK.yawMax > 1.9 && LOOK.pitchMax > 0.43);
+});
+
+test('first person: rigid on the car, no sideways shift in turns, level horizon, drag look springs back, head lean <= 3 cm', async () => {
+  const { LOOK, FIRST } = await import('../src/render/chasecam.js');
+  const cam = new THREE.PerspectiveCamera(62, 915 / 412, 0.5, 1800);
+  const chase = createChaseCamera(cam);
+  chase.setMode('car');
+  chase.setView('Cockpit');
+  const t = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 13.4, height: 1.2 };
+  chase.snap(t);
+  const eye = chase.getFirst().eye;
+  const up = new THREE.Vector3();
+  // A hard right turn: the camera stays at the eye point of the car (no
+  // lag, no turn look) and its horizon stays level.
+  for (let i = 0; i < 240; i++) {
+    t.heading += (0.7 * 13.4 / 9) / 60;
+    t.x += Math.cos(t.heading) * 13.4 / 60;
+    t.z += Math.sin(t.heading) * 13.4 / 60;
+    chase.update(t, 1 / 60, null, null);
+    const c = Math.cos(t.heading), s = Math.sin(t.heading);
+    const lx = (cam.position.x - t.x) * c + (cam.position.z - t.z) * s;
+    const lz = -(cam.position.x - t.x) * s + (cam.position.z - t.z) * c;
+    assert.ok(Math.abs(lz - eye.z) < 1e-6, `no sideways shift (${(lz - eye.z).toFixed(4)})`);
+    assert.ok(Math.abs(lx - eye.x) < FIRST.lean + 1e-6, 'at most the lean ahead');
+    up.set(0, 1, 0).applyQuaternion(cam.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    assert.ok(Math.abs(right.y) < 1e-6, `level horizon (${right.y})`);
+    assert.ok(Math.abs(chase.viewYaw() - t.heading) < 1e-6 || Math.abs(Math.abs(chase.viewYaw() - t.heading) - 2 * Math.PI) < 1e-6, 'looks along the car');
+  }
+  // Drag left far: reaches 110 degrees and holds while the finger is down.
+  const input = { lookX: -2000, lookY: 0, lookHeld: true };
+  chase.update(t, 1 / 60, input, null);
+  assert.equal(input.lookX, 0, 'drag consumed');
+  assert.ok(Math.abs(chase.getFirst().yawDeg + 110) < 1e-6, `yaw ${chase.getFirst().yawDeg}`);
+  for (let i = 0; i < 30; i++) chase.update(t, 1 / 60, input, null);
+  assert.ok(Math.abs(chase.getFirst().yawDeg + 110) < 1e-6, 'held');
+  input.lookY = 900;
+  chase.update(t, 1 / 60, input, null);
+  assert.ok(Math.abs(chase.getFirst().pitchDeg + 25) < 1e-6, 'pitch limit 25 down');
+  // Released: back within a degree in 0.4 s.
+  input.lookHeld = false;
+  for (let i = 0; i < 24; i++) chase.update(t, 1 / 60, input, null);
+  assert.ok(Math.abs(chase.getFirst().yawDeg) < 1 && Math.abs(chase.getFirst().pitchDeg) < 1, `back in 0.4 s (${chase.getFirst().yawDeg.toFixed(2)})`);
+  // Without a lookHeld flag (keyboard, mouse) the head springs back as soon as the drag stops.
+  chase.update(t, 1 / 60, { lookX: 300, lookY: 0 }, null);
+  assert.ok(chase.getFirst().yawDeg > 100);
+  for (let i = 0; i < Math.ceil((LOOK.hold + 0.4) * 60); i++) chase.update(t, 1 / 60, null, null);
+  assert.ok(Math.abs(chase.getFirst().yawDeg) < 1);
+  // Braking: the head leans forward up to 3 cm; a bump moves it up or down at most 3 cm.
+  let maxX = 0, maxY = 0;
+  for (let i = 0; i < 120; i++) {
+    t.speed = Math.max(0, t.speed - 9 / 60);
+    t.y = i === 60 ? 0.12 : i > 60 && i < 64 ? 0.06 : 0;
+    chase.update(t, 1 / 60, null, null);
+    maxX = Math.max(maxX, chase.getFirst().head.x);
+    maxY = Math.max(maxY, Math.abs(chase.getFirst().head.y));
+  }
+  assert.ok(maxX > 0.02 && maxX <= 0.03 + 1e-9, `lean ${maxX.toFixed(3)}`);
+  assert.ok(maxY > 0.005 && maxY <= 0.03 + 1e-9, `bump ${maxY.toFixed(3)}`);
+  for (const v of [cam.position.x, cam.position.y, cam.position.z, cam.quaternion.w]) assert.ok(Number.isFinite(v));
 });
 
 test('each kind remembers its own view', () => {

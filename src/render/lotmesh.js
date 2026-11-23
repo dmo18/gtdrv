@@ -468,14 +468,16 @@ export function* lotJob(C, lots, dress, over) {
 export const LOT_CAR_CAP = 40; // static parked cars in view, default
 export const LOT_CAR_CAP_MAX = 60; // the most a quality tier may ask for
 // Which cars stand in the lots of a district (spec ids of VEHICLE_SPECS).
+// The sedan and hatchback roles are the fleet bodies (docs/FLEET.md),
+// drawn as their L2 shell (systems/parked.js).
 export const LOT_CAR_MIX = {
-  downtown: ['sedan', 'sedan', 'taxi', 'compact', 'sports', 'van', 'sedan'],
-  midtown: ['sedan', 'compact', 'compact', 'pickup', 'van', 'muscle', 'sedan'],
-  residential: ['compact', 'sedan', 'pickup', 'sedan', 'muscle', 'compact'],
-  beach: ['sports', 'compact', 'muscle', 'sedan', 'pickup', 'compact'],
-  docks: ['pickup', 'van', 'sedan', 'compact'],
-  industrial: ['pickup', 'van', 'compact', 'sedan'],
-  park: ['compact', 'sedan', 'pickup'],
+  downtown: ['midsize', 'midsize', 'taxi', 'suv', 'sports', 'van', 'midsize'],
+  midtown: ['midsize', 'suv', 'crewcab', 'pickup', 'van', 'muscle', 'midsize'],
+  residential: ['suv', 'midsize', 'pickup', 'midsize', 'muscle', 'crewcab'],
+  beach: ['sports', 'suv', 'muscle', 'midsize', 'pickup', 'suv'],
+  docks: ['pickup', 'van', 'midsize', 'crewcab'],
+  industrial: ['pickup', 'van', 'crewcab', 'midsize'],
+  park: ['suv', 'midsize', 'pickup'],
 };
 // Every spec id a lot can show, in a fixed order (the index is stored per car).
 export const LOT_CAR_SPECS = [...new Set(Object.values(LOT_CAR_MIX).flat())];

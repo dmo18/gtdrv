@@ -207,15 +207,18 @@ export function createTouchControls(root, input, opts = {}) {
   // ----- camera drag (60% of the screen away from the stick, under the buttons) -----
   const look = el('div', 'rw-zone rw-look', layer);
   const lastLook = { x: 0, y: 0 };
+  // `lookHeld` tells the first-person views (chasecam.js) a finger is on
+  // the look area, so the head stays turned until it lifts, then springs back.
+  input.lookHeld = false;
   track(look, {
-    down(e) { lastLook.x = e.clientX; lastLook.y = e.clientY; },
+    down(e) { lastLook.x = e.clientX; lastLook.y = e.clientY; input.lookHeld = true; },
     move(e) {
       input.lookX += e.clientX - lastLook.x;
       input.lookY += e.clientY - lastLook.y;
       lastLook.x = e.clientX;
       lastLook.y = e.clientY;
     },
-    up() {},
+    up() { input.lookHeld = false; },
   });
 
   // ----- steering / stick zone: mode and style decide what it does -----

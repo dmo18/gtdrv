@@ -286,3 +286,218 @@ test('each other region: traffic and parked cars fill the start view', () => {
     assert.ok(near >= 4, `${id}: ${near} parked cars within 80 m`);
   }
 });
+
+// ---- First person (docs/PLAN_V3.md 2.8, check 13) ----
+// Every car class: the cockpit eye in the cabin box and clear of the body
+// shell; no body, interior or neighbor triangle inside the near-plane
+// pyramid in a full-lock turn at 30 mph beside a parked car, at every look
+// direction; the hood fills 10 to 20 percent of the frame in the Hood
+// view; the wheel follows steer; the drag look reaches 110 degrees and
+// returns in 0.4 s.
+const FP = await (async () => {
+  const THREE = await import('three');
+  const { VEHICLE_SPECS, createVehicle } = await import('../src/entities/vehicle.js');
+  const { createVehicleMesh, updateVehicleMesh } = await import('../src/render/vehiclemesh.js');
+  const ci = await import('../src/render/carinterior.js');
+  const { createChaseCamera } = await import('../src/render/chasecam.js');
+  return { THREE, VEHICLE_SPECS, createVehicle, createVehicleMesh, updateVehicleMesh, ci, createChaseCamera };
+})();
+const fpCars = Object.values(FP.VEHICLE_SPECS).filter((s) => !s.kind || s.kind === 'car');
+// Bodies with no hood in front of the windshield (one-box van, cab-over
+// trucks) and the steep-nosed hatchback, all three retired by PLAN_V3 2.6,
+// have nothing to fill the Hood view.
+const hasHood = (cab, spec) => cab.hoodLength >= 0.9 && cab.hoodY > 0.3 && spec.body !== 'hatch';
+
+function placed(id, x, z, heading) {
+  const v = FP.createVehicle(id, x, z, heading);
+  v.mesh = FP.createVehicleMesh(v.spec);
+  FP.updateVehicleMesh(v.mesh, v, 1);
+  return v;
+}
+// World-space triangles of every drawn mesh under a root (layer mask not 0).
+function worldTris(root) {
+  root.updateMatrixWorld(true);
+  const out = [];
+  const p = new FP.THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || o.layers.mask === 0 || o.material.colorWrite === false) return;
+    let vis = true;
+    for (let q = o; q; q = q.parent) if (!q.visible) vis = false;
+    if (!vis || o.isInstancedMesh) return;
+    const g = o.geometry, pa = g.attributes.position, ix = g.index ? g.index.array : null;
+    const n = ix ? ix.length : pa.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      p.fromBufferAttribute(pa, ix ? ix[i] : i).applyMatrix4(o.matrixWorld);
+      arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
+    }
+    out.push(arr);
+  });
+  return out;
+}
+// Does any triangle reach into the pyramid between the eye and the near
+// plane (what the near plane would cut away)? Sampled on each triangle.
+function nearHits(cam, lists) {
+  cam.updateMatrixWorld(true);
+  const inv = cam.matrixWorldInverse.elements;
+  const tv = Math.tan((cam.fov * Math.PI) / 360), th = tv * cam.aspect, n = cam.near;
+  const tx = (x, y, z, k) => inv[k] * x + inv[k + 4] * y + inv[k + 8] * z + inv[k + 12];
+  let hits = 0;
+  const S = 8;
+  for (const arr of lists) {
+    for (let t = 0; t < arr.length; t += 9) {
+      const az = tx(arr[t], arr[t + 1], arr[t + 2], 2), bz = tx(arr[t + 3], arr[t + 4], arr[t + 5], 2), cz = tx(arr[t + 6], arr[t + 7], arr[t + 8], 2);
+      if (Math.min(-az, -bz, -cz) > n || Math.max(-az, -bz, -cz) < 0) continue;
+      const ax = tx(arr[t], arr[t + 1], arr[t + 2], 0), bx = tx(arr[t + 3], arr[t + 4], arr[t + 5], 0), cx = tx(arr[t + 6], arr[t + 7], arr[t + 8], 0);
+      const ay = tx(arr[t], arr[t + 1], arr[t + 2], 1), by = tx(arr[t + 3], arr[t + 4], arr[t + 5], 1), cy = tx(arr[t + 6], arr[t + 7], arr[t + 8], 1);
+      for (let i = 0; i <= S; i++) {
+        for (let j = 0; j <= S - i; j++) {
+          const u = i / S, w = j / S, v = 1 - u - w;
+          const d = -(az * u + bz * w + cz * v);
+          if (d <= 1e-4 || d >= n) continue;
+          const x = ax * u + bx * w + cx * v, y = ay * u + by * w + cy * v;
+          if (Math.abs(x) <= d * th && Math.abs(y) <= d * tv) hits++;
+        }
+      }
+    }
+  }
+  return hits;
+}
+
+test('first person: every car eye is in the cabin box, >= 0.15 m from the body shell, on the left', () => {
+  for (const spec of fpCars) {
+    const mesh = FP.createVehicleMesh(spec);
+    const g = FP.ci.carGeometry(mesh);
+    const cab = FP.ci.measureCabin(spec, g.body, g.glass);
+    const eye = FP.ci.eyePoint(spec, cab);
+    const c = FP.ci.bodyClearance(g.body, eye.x, eye.y, eye.z, true);
+    if (spec.eye && !eye.fromSpec) console.log(`# ${spec.id}: spec eye ${JSON.stringify(spec.eye)} is outside the cabin, the default is used`);
+    assert.ok(FP.ci.inCabin(cab, eye), `${spec.id}: eye in the cabin box`);
+    assert.ok(c >= FP.ci.MIN_CLEAR, `${spec.id}: ${c.toFixed(3)} m from the body`);
+    assert.ok(eye.z < 0, `${spec.id}: left seat`);
+  }
+});
+
+test('first person: no own-body, interior or neighbor triangle nearer than the near plane in a full-lock turn at 30 mph beside a parked car', () => {
+  const ids = fpCars.map((s) => s.id);
+  let checked = 0;
+  for (const id of ids) {
+    const spec = FP.VEHICLE_SPECS[id];
+    // Our car pulls out beside a parked car on its left and turns right at full lock.
+    const v = placed(id, 0, 0, 0);
+    const parked = placed('sedan', 0.2, -(spec.width / 2 + FP.VEHICLE_SPECS.sedan.width / 2 + 0.35), 0.05);
+    const cam = new FP.THREE.PerspectiveCamera(62, 915 / 412, 0.5, 1800);
+    const chase = FP.createChaseCamera(cam);
+    chase.setMode('car');
+    const R = spec.wheelBase / Math.tan(spec.steerMax || 0.48);
+    const spd = 13.4;
+    for (const view of ['Cockpit', 'Hood']) {
+      chase.setView(view);
+      v.x = v.px = 0; v.z = v.pz = 0; v.heading = v.pheading = 0;
+      const t = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: spd, height: 1.2, vehicle: v };
+      FP.updateVehicleMesh(v.mesh, v, 1);
+      chase.snap(t);
+      for (let i = 0; i < 48; i++) {
+        v.px = v.x; v.pz = v.z; v.pheading = v.heading;
+        v.heading += (spd / R) / 60;
+        v.x += Math.cos(v.heading) * spd / 60;
+        v.z += Math.sin(v.heading) * spd / 60;
+        v.steer = 1;
+        v.speed = spd;
+        v.roll = 0.075; // body lean at its limit
+        v.pitch = 0.02;
+        FP.updateVehicleMesh(v.mesh, v, 1);
+        t.x = v.x; t.z = v.z; t.heading = v.heading;
+        // A look around on some frames: ahead, both sides, up and down.
+        const look = [[0, 0], [-110, 0], [110, 0], [-60, 25], [60, -25], [0, -25]][i % 6];
+        const input = { lookX: 0, lookY: 0, lookHeld: true };
+        const f = chase.getFirst();
+        input.lookX = (look[0] - f.yawDeg) / (0.006 * 180 / Math.PI);
+        input.lookY = -(look[1] - f.pitchDeg) / (0.006 * 180 / Math.PI);
+        chase.update(t, 1 / 60, input, null);
+        if (i % 4 !== 3) continue;
+        const own = worldTris(v.mesh);
+        const other = worldTris(parked.mesh);
+        const hits = nearHits(cam, own) + nearHits(cam, other);
+        assert.equal(hits, 0, `${id} ${view} frame ${i} look ${look}: ${hits} samples inside the near plane`);
+        // The horizon stays level while the body rolls.
+        const right = new FP.THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+        assert.ok(Math.abs(right.y) < 1e-6, `${id} ${view}: level horizon`);
+        checked++;
+      }
+    }
+    chase.setView('Chase');
+    chase.update({ x: v.x, z: v.z, y: 0, heading: v.heading, speed: 0, vehicle: v }, 1 / 60, null, null);
+  }
+  assert.ok(checked > fpCars.length * 10);
+  // The check itself sees clipping: the cockpit with a 0.8 m near plane cuts the dash and the wheel.
+  const v = placed('sedan', 0, 0, 0);
+  const cam = new FP.THREE.PerspectiveCamera(78, 915 / 412, 0.5, 1800);
+  const chase = FP.createChaseCamera(cam);
+  chase.setMode('car');
+  chase.setView('Cockpit');
+  chase.snap({ x: 0, z: 0, y: 0, heading: 0, speed: 0, vehicle: v });
+  cam.near = 0.8;
+  cam.updateProjectionMatrix();
+  assert.ok(nearHits(cam, worldTris(v.mesh)) > 50, 'the near-plane check finds a cut interior');
+});
+
+test('first person: the hood fills 10 to 20 percent of the frame in the Hood view at the three phone sizes', () => {
+  const p = new FP.THREE.Vector3();
+  for (const spec of fpCars) {
+    const v = placed(spec.id, 0, 0, 0);
+    const g = FP.ci.carGeometry(v.mesh);
+    const cab = FP.ci.measureCabin(spec, g.body, g.glass);
+    if (!hasHood(cab, spec)) continue;
+    const shell = FP.ci.frontShell(g.body, cab);
+    for (const [w, h] of [[915, 412], [780, 360], [748, 360]]) {
+      const cam = new FP.THREE.PerspectiveCamera(62, w / h, 0.5, 1800);
+      const chase = FP.createChaseCamera(cam);
+      chase.setMode('car');
+      chase.setView('Hood');
+      chase.snap({ x: 0, z: 0, y: 0, heading: 0, speed: 0, vehicle: v });
+      cam.updateMatrixWorld(true);
+      v.mesh.updateMatrixWorld(true);
+      const m = v.mesh.userData.body.matrixWorld;
+      // The highest screen row the hood reaches (rows are what the player sees).
+      let top = -1;
+      const pa = shell.attributes.position, ix = shell.index.array;
+      for (let i = 0; i < ix.length; i++) {
+        p.fromBufferAttribute(pa, ix[i]).applyMatrix4(m).project(cam);
+        if (p.z < 1 && p.z > -1 && Math.abs(p.x) <= 1 && p.y > top) top = p.y;
+      }
+      const share = (Math.min(1, top) + 1) / 2;
+      assert.ok(share >= 0.1 && share <= 0.2, `${spec.id} at ${w}x${h}: hood ${(share * 100).toFixed(1)} percent of the frame`);
+    }
+  }
+});
+
+test('first person: the cockpit wheel follows steer; look drag reaches 110 degrees and returns in 0.4 s', () => {
+  const v = placed('sedan', 0, 0, 0);
+  const cam = new FP.THREE.PerspectiveCamera(62, 915 / 412, 0.5, 1800);
+  const chase = FP.createChaseCamera(cam);
+  chase.setMode('car');
+  chase.setView('Cockpit');
+  const t = { x: 0, z: 0, y: 0, heading: 0, speed: 5, vehicle: v };
+  chase.snap(t);
+  const it = chase.getFirst().interior;
+  assert.ok(it, 'interior attached in the cockpit');
+  for (const s of [0, 0.3, -0.7, 1, -1]) {
+    v.steer = s;
+    chase.update(t, 1 / 60, null, null);
+    assert.equal(it.interior.state.wheelDeg, s * 90);
+  }
+  const input = { lookX: 4000, lookY: -4000, lookHeld: true };
+  chase.update(t, 1 / 60, input, null);
+  assert.equal(chase.getFirst().yawDeg, 110);
+  assert.equal(chase.getFirst().pitchDeg, 25);
+  input.lookHeld = false;
+  for (let i = 0; i < 24; i++) chase.update(t, 1 / 60, input, null);
+  assert.ok(Math.abs(chase.getFirst().yawDeg) < 1 && Math.abs(chase.getFirst().pitchDeg) < 1, `returned (${chase.getFirst().yawDeg.toFixed(2)})`);
+  // Leaving the cockpit puts the car back as it was.
+  chase.setView('Chase');
+  assert.equal(chase.getFirst().interior, null);
+  let hidden = 0;
+  v.mesh.traverse((o) => { if (o.isMesh && o.layers.mask === 0) hidden++; });
+  assert.equal(hidden, 0);
+});

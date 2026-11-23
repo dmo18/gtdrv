@@ -412,6 +412,32 @@ export function craftMaterial(kind = 'gloss') {
   return m;
 }
 
+// Static parked fleet shells (L2, docs/FLEET.md): one instanced mesh per
+// model, the paint color per instance. A cheap diffuse material (sun and
+// sky only, no reflections) where the instance color tints the paint
+// faces (class PAINT) only; glass, trim and wheels keep their vertex
+// color and the lamp dots (class GLOW) light up at night with the shared
+// lamp level.
+let shellMat = null;
+export function lotShellMaterial() {
+  if (shellMat) return shellMat;
+  shellMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  shellMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uLamp = shared.uLamp;
+    shader.vertexShader = 'attribute float aCls;\nvarying float vCls;\n' + shader.vertexShader.replace('#include <color_vertex>', `
+      vColor = vec4(1.0);
+      vColor.rgb *= color;
+      vCls = aCls;
+      #ifdef USE_INSTANCING_COLOR
+      if (aCls < 0.5) vColor.rgb *= instanceColor.rgb;
+      #endif`);
+    shader.fragmentShader = 'uniform float uLamp;\nvarying float vCls;\n' + shader.fragmentShader.replace('#include <emissivemap_fragment>',
+      '#include <emissivemap_fragment>\nif (vCls > 7.5 && vCls < 8.5) totalEmissiveRadiance += vColor.rgb * (0.15 + 1.6 * uLamp);');
+  };
+  shellMat.customProgramCacheKey = () => 'rwshell';
+  return shellMat;
+}
+
 // ---- lamps ------------------------------------------------------------------
 // One lamp mesh per car holds the head and the tail lamps. Its lit,
 // glossy material (lenses reflect the sky by day) has an emissive map that

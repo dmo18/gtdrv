@@ -126,6 +126,22 @@ function rewardCar(base, id, label, power, o) {
 VEHICLE_SPECS.sunchaser = rewardCar('muscle', 'sunchaser', 'Sunchaser', 1.08, { maxSpeed: 64.0, grip: 1.05, brake: 10.0, colors: [0xff5a1f] });
 VEHICLE_SPECS.tidewinder = rewardCar('pickup', 'tidewinder', 'Tidewinder', 1.15, { maxSpeed: 49.0, grip: 0.92, brake: 9.6, firstGear: 20, health: 1400, colors: [0x1f8a8a] });
 VEHICLE_SPECS.nightheron = rewardCar('sedan', 'nightheron', 'Night Heron', 1.4, { maxSpeed: 58.0, grip: 1.05, brake: 9.6, colors: [0x1a1a2e] });
+// The first three bodies of the American fleet (docs/FLEET.md, PLAN_V3
+// 2.6): their own size, body and driver's eye point (car frame: x ahead,
+// y up, z right; the driver sits on the left), handling of the base
+// chassis until the HANDLE task gives them their own (PLAN_V3 2.4).
+function fleetCar(base, id, label, body, size, eye, colors) {
+  return Object.assign({}, VEHICLE_SPECS[base], { id, label, body, colors, eye }, size);
+}
+VEHICLE_SPECS.midsize = fleetCar('sedan', 'midsize', 'Avenel', 'sedan',
+  { length: 4.9, width: 1.86, height: 1.45, wheelBase: 2.83, wheelRadius: 0.345 }, { x: -0.39, y: 1.17, z: -0.34 },
+  [0xeeeeec, 0x1b1c1f, 0xa9adb2, 0x5c6167, 0x1f3556, 0x8e1b1f, 0x6b5a4a]);
+VEHICLE_SPECS.suv = fleetCar('pickup', 'suv', 'Tallgrass', 'suv',
+  { length: 5.35, width: 2.06, height: 1.92, wheelBase: 3.07, wheelRadius: 0.41 }, { x: -0.17, y: 1.64, z: -0.4 },
+  [0x121315, 0xeeeeec, 0x6c7176, 0x2a3442, 0x4a1c20, 0xb3b6ba]);
+VEHICLE_SPECS.crewcab = fleetCar('pickup', 'crewcab', 'Ironbark', 'pickup',
+  { length: 5.9, width: 2.03, height: 1.95, wheelBase: 3.68, wheelRadius: 0.41 }, { x: -0.21, y: 1.68, z: -0.4 },
+  [0xf0f0ee, 0x15161a, 0x8f9499, 0x7a1416, 0x233a5c, 0x4f5546]);
 Object.assign(VEHICLE_SPECS, SERVICE_SPECS, { police: Object.assign(VEHICLE_SPECS.police, { siren: true }) });
 
 let nextId = 1;

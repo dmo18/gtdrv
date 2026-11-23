@@ -15,7 +15,8 @@ import { createPointIndex, beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } fr
 import { createLotCarField, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull } from '../render/lotmesh.js';
 import { groundFn } from '../world/ground.js';
 import { createVehicleMesh } from '../render/vehiclemesh.js';
-import { paintMaterial, carGlassMaterial, wheelMaterial } from '../render/vehiclemats.js';
+import { paintMaterial, carGlassMaterial, wheelMaterial, lotShellMaterial } from '../render/vehiclemats.js';
+import { buildCarL2, isFleetModel } from '../render/carbody.js';
 
 const SPAWN_R = 135;
 const DESPAWN_R = 185;
@@ -24,22 +25,26 @@ const FIRST_FILL_S = 1; // the start fill may use spots inside MIN_R for this lo
 // Room left under the live cap for moving traffic and the police.
 export const PARKED_RESERVE = 24;
 
+// The sedan and hatchback roles are the fleet bodies (docs/FLEET.md):
+// midsize sedan, full-size SUV, crew-cab pickup.
 const MIX = {
-  downtown: ['sedan', 'sedan', 'taxi', 'sports', 'compact', 'van'],
-  midtown: ['sedan', 'compact', 'compact', 'pickup', 'van', 'muscle'],
-  residential: ['compact', 'sedan', 'pickup', 'sedan', 'muscle'],
-  docks: ['pickup', 'van', 'truck', 'sedan'],
-  industrial: ['pickup', 'van', 'truck', 'compact'],
-  beach: ['sports', 'compact', 'muscle', 'sedan', 'sports'],
-  park: ['compact', 'sedan'],
+  downtown: ['midsize', 'midsize', 'taxi', 'sports', 'suv', 'van'],
+  midtown: ['midsize', 'suv', 'crewcab', 'pickup', 'van', 'muscle'],
+  residential: ['suv', 'midsize', 'pickup', 'crewcab', 'muscle'],
+  docks: ['pickup', 'van', 'truck', 'crewcab'],
+  industrial: ['pickup', 'van', 'truck', 'crewcab'],
+  beach: ['sports', 'suv', 'muscle', 'midsize', 'sports'],
+  park: ['suv', 'midsize'],
 };
 
 
 // ---- Static cars in the lot bays (drawn, not simulated) ----
 // Real car bodies up close (the mid-level body of vehiclemesh, one instanced
-// mesh per model and color, with its glass and wheels), a rounded low-poly
-// hull (lotmesh buildLotHull) for the rest, one instanced mesh per model
-// with the color per instance. No simulation: cars in bays are scenery
+// mesh per model and color, with its glass and wheels; a fleet body's L1,
+// one mesh with its glass and wheels in it), a rounded low-poly hull for
+// the rest, one instanced mesh per model with the color per instance: the
+// fleet bodies' L2 shell (carbody buildCarL2, docs/FLEET.md), the older
+// models' lotmesh buildLotHull. No simulation: cars in bays are scenery
 // until the player shoots or drives into them (their collision shapes are
 // the lot layer's). All made only when the game has a scene.
 export const LOT_NEAR_M = 24; // the real body inside this camera distance
@@ -60,13 +65,19 @@ function createLotCarView(game, field) {
   const hullMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   const hulls = LOT_CAR_SPECS.map((id) => {
     const spec = VEHICLE_SPECS[id];
-    const h = buildLotHull(spec);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(h.pos, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(h.nor, 3));
-    g.setAttribute('color', new THREE.BufferAttribute(h.col, 3));
-    g.setIndex(new THREE.BufferAttribute(h.idx, 1));
-    const m = new THREE.InstancedMesh(g, hullMat, MAXC);
+    let g, mat = hullMat;
+    if (isFleetModel(spec)) {
+      g = buildCarL2(spec);
+      mat = lotShellMaterial();
+    } else {
+      const h = buildLotHull(spec);
+      g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(h.pos, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(h.nor, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(h.col, 3));
+      g.setIndex(new THREE.BufferAttribute(h.idx, 1));
+    }
+    const m = new THREE.InstancedMesh(g, mat, MAXC);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.count = 0;
     m.frustumCulled = false;
@@ -91,14 +102,16 @@ function createLotCarView(game, field) {
       root.add(m);
       return m;
     };
+    // A fleet body's L1 holds its glass and wheels: one draw per color.
+    const own = !ud.fleet;
     r = {
       spec, bodyGeo: ud.bodyMid.geometry, byColor: new Map(),
-      glass: mk(ud.glassLevels[1].geometry, carGlassMaterial('clean'), LOT_NEAR_MAX),
-      wheels: mk(ud.wheelLevels[1].geometry, wheelMaterial(), LOT_NEAR_MAX * 4),
+      glass: own ? mk(ud.glassLevels[1].geometry, carGlassMaterial('clean'), LOT_NEAR_MAX) : null,
+      wheels: own ? mk(ud.wheelLevels[1].geometry, wheelMaterial(), LOT_NEAR_MAX * 4) : null,
       wheelLocal: Float32Array.from(ud.wheelMatrix.array),
       n: 0,
     };
-    r.glass.renderOrder = 1;
+    if (r.glass) r.glass.renderOrder = 1;
     real[si] = r;
     return r;
   };
@@ -141,10 +154,12 @@ function createLotCarView(game, field) {
           const r = realOf(si);
           const b = bodyOf(r, field.color[i]);
           b.setMatrixAt(b.userData.n++, tmp);
-          r.glass.setMatrixAt(r.n, tmp);
-          for (let w = 0; w < 4; w++) {
-            wm.fromArray(r.wheelLocal, w * 16).premultiply(tmp);
-            r.wheels.setMatrixAt(r.n * 4 + w, wm);
+          if (r.glass) {
+            r.glass.setMatrixAt(r.n, tmp);
+            for (let w = 0; w < 4; w++) {
+              wm.fromArray(r.wheelLocal, w * 16).premultiply(tmp);
+              r.wheels.setMatrixAt(r.n * 4 + w, wm);
+            }
           }
           r.n++;
           continue;
@@ -168,10 +183,12 @@ function createLotCarView(game, field) {
         }
         const r = real[si];
         if (!r) continue;
-        r.glass.count = r.n;
-        r.wheels.count = r.n * 4;
-        r.glass.visible = r.wheels.visible = r.n > 0;
-        if (r.n) { r.glass.instanceMatrix.needsUpdate = true; r.wheels.instanceMatrix.needsUpdate = true; draws += 2; }
+        if (r.glass) {
+          r.glass.count = r.n;
+          r.wheels.count = r.n * 4;
+          r.glass.visible = r.wheels.visible = r.n > 0;
+          if (r.n) { r.glass.instanceMatrix.needsUpdate = true; r.wheels.instanceMatrix.needsUpdate = true; draws += 2; }
+        }
         for (const b of r.byColor.values()) {
           b.count = b.userData.n;
           b.visible = b.count > 0;

@@ -157,6 +157,51 @@ const STYLES = {
 STYLES.hatch = STYLES.compact;
 STYLES.coupe = STYLES.sports;
 
+// ---- the American fleet (docs/FLEET.md) ------------------------------------------
+// Three bodies of the 0.10.0 fleet, at three levels each (buildCar near,
+// buildCarL1, buildCarL2). Long hoods, high belt lines, real trunks and
+// beds, wheels pushed to the corners. `fleet` lowers the near model's
+// station density so a whole near car stays near 6,000 triangles.
+const FLEET_STYLES = {
+  // Midsize sedan: long hood, fast windshield, a proper trunk, high
+  // shoulder, wide chrome grille.
+  midsize: {
+    fleet: true, pF: 6.5, pR: 7.5, flare: 0.03, q: 3.6, lean: [0.14, 0.08, 0.08, 0.11], hoodCrease: [0.2, 0.44, 0.01],
+    top: [[-0.5, 0.57], [-0.493, 0.645], [-0.478, 0.68], [-0.45, 0.69], [-0.38, 0.688], [-0.33, 0.684], [0.17, 0.64], [0.3, 0.615], [0.4, 0.585], [0.46, 0.56], [0.49, 0.525], [0.5, 0.46]],
+    belt: [[-0.5, 0.53], [-0.49, 0.615], [-0.468, 0.65], [-0.4, 0.662], [-0.3, 0.658], [0, 0.635], [0.17, 0.612], [0.38, 0.565], [0.46, 0.535], [0.49, 0.5], [0.5, 0.44]],
+    bottom: [[-0.5, 0.25], [-0.465, 0.13], [0.44, 0.12], [0.5, 0.21]],
+    gh: { xC: -0.345, xR0: -0.215, xR1: 0.0, xA: 0.175, roof: 1, base: 0.875, tumble: 0.4, crown: 0.03, side: [-0.3, 0.15], b: [-0.075, -0.05], rear: true },
+    seams: [0.17, -0.062, -0.215], hood: 0.2, boot: -0.352, lip: true, exhaust: { n: 2, z: 0.31 },
+  },
+  // Full-size SUV: tall flat hood, upright windshield, a long flat roof to
+  // an upright tailgate, three side windows, running boards, roof rails.
+  suv: {
+    fleet: true, pF: 9, pR: 12, flare: 0.032, q: 4.4, lean: [0.1, 0.1, 0.05, 0.08],
+    top: [[-0.5, 0.6], [-0.495, 0.635], [-0.48, 0.65], [-0.4, 0.656], [0.1, 0.66], [0.3, 0.655], [0.42, 0.645], [0.47, 0.628], [0.49, 0.605], [0.5, 0.56]],
+    belt: [[-0.5, 0.58], [-0.495, 0.62], [-0.48, 0.635], [-0.3, 0.64], [0.1, 0.64], [0.3, 0.632], [0.42, 0.622], [0.47, 0.605], [0.49, 0.585], [0.5, 0.54]],
+    bottom: [[-0.5, 0.27], [-0.47, 0.19], [0.44, 0.19], [0.5, 0.26]],
+    gh: { xC: -0.493, xR0: -0.481, xR1: 0.065, xA: 0.205, roof: 1, base: 0.94, tumble: 0.15, crown: 0.018, side: [-0.225, 0.18], b: [-0.03, -0.006], rear: true, rearSide: [-0.47, -0.25] },
+    seams: [0.19, -0.018, -0.24], hood: 0.21, boot: null, exhaust: { n: 2, z: 0.36 }, steps: true, rails: true,
+  },
+  // Full-size crew-cab pickup: the tallest hood of the three, a four-door
+  // cab and a short bed with a tailgate.
+  crewcab: {
+    fleet: true, pF: 9, pR: 14, flare: 0.036, q: 4.6, lean: [0.08, 0.1, 0.0, 0.04],
+    top: [[-0.5, 0.655], [-0.495, 0.672], [-0.48, 0.678], [-0.1, 0.678], [0.1, 0.675], [0.3, 0.668], [0.42, 0.656], [0.47, 0.638], [0.49, 0.615], [0.5, 0.57]],
+    belt: [[-0.5, 0.635], [-0.495, 0.655], [-0.48, 0.66], [-0.1, 0.66], [0.1, 0.655], [0.3, 0.648], [0.42, 0.636], [0.47, 0.618], [0.49, 0.595], [0.5, 0.55]],
+    bottom: [[-0.5, 0.29], [-0.47, 0.21], [0.44, 0.21], [0.5, 0.27]],
+    bed: [-0.484, -0.218], floor: 0.44,
+    gh: { xC: -0.212, xR0: -0.205, xR1: 0.045, xA: 0.18, roof: 1, base: 0.94, tumble: 0.13, crown: 0.016, side: [-0.2, 0.155], b: [-0.03, -0.01], rear: true },
+    seams: [0.165, -0.02, -0.2], hood: 0.19, boot: null, exhaust: { n: 1, z: 0.42 }, steps: true, tailgate: true,
+  },
+};
+Object.assign(STYLES, FLEET_STYLES);
+// Spec ids of the bodies built at three levels (L0, L1, L2).
+export const FLEET_MODELS = Object.keys(FLEET_STYLES);
+export function isFleetModel(spec) {
+  return !!(spec && FLEET_STYLES[spec.id]);
+}
+
 // Kit hook for other vehicle builders (service vehicles): register a body
 // style (same fields as STYLES above) and optionally its nose and tail
 // graphics (same fields as FACES below) under a spec id.
@@ -178,6 +223,7 @@ export function styleName(spec) {
 // Tire width per spec.
 export function tireWidth(spec) {
   if (spec.body === 'truck') return 0.4;
+  if (spec.id === 'suv' || spec.id === 'crewcab') return 0.29;
   if (spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'muscle') return 0.3;
   if (spec.body === 'pickup' || spec.body === 'van') return 0.28;
   return 0.25;
@@ -284,13 +330,15 @@ function shape(spec) {
 // to the shoulder. Old-style bodies keep their softer section.
 const SIDE = {
   near: [[0, 0.905], [0.06, 0.952], [0.2, 0.986], [0.44, 1], [0.52, 1], [0.56, 0.988], [0.78, 0.972], [1, 0.95]],
+  // The fleet's near section: the same shape with one point fewer.
+  fleet: [[0, 0.905], [0.07, 0.955], [0.24, 0.99], [0.5, 1], [0.55, 0.988], [0.78, 0.972], [1, 0.95]],
   mid: [[0, 0.93], [0.15, 0.982], [0.5, 1], [0.56, 0.988], [1, 0.95]],
   far: [[0, 0.95], [0.48, 1], [1, 0.96]],
   oldNear: [[0, 0.92], [0.07, 0.96], [0.18, 0.985], [0.36, 0.997], [0.54, 1], [0.7, 0.998], [0.735, 0.986], [0.86, 0.988], [1, 0.972]],
   oldFar: [[0, 0.96], [1, 0.985]],
 };
 function sideOf(sh, lod) {
-  if (sh.S.belt) return lod === 0 ? SIDE.near : lod === 1 ? SIDE.mid : SIDE.far;
+  if (sh.S.belt) return lod === 0 ? (sh.S.fleet ? SIDE.fleet : SIDE.near) : lod === 1 ? SIDE.mid : SIDE.far;
   return lod === 0 ? SIDE.oldNear : lod === 1 ? SIDE.mid : SIDE.oldFar;
 }
 const LOD_NEAR = 0, LOD_MID = 1, LOD_FAR = 2;
@@ -307,7 +355,7 @@ function lowerHalf(sh, x, lod, cut = 0) {
   const dz = cut === 1 ? 0.006 : 0;
   for (const [f, k] of side) out.push([w * k - (f > 0.03 && f < 0.99 ? dz : 0), y0 + (c - y0) * f]);
   const ws = w * sh.shoulder;
-  const K = lod === LOD_NEAR ? (sh.S.belt ? 6 : 8) : lod === LOD_MID ? 3 : 2;
+  const K = lod === LOD_NEAR ? (sh.S.fleet ? 5 : sh.S.belt ? 6 : 8) : lod === LOD_MID ? 3 : 2;
   if (sh.inBed(x)) {
     const floor = sh.S.floor * sh.H;
     const ww = Math.max(0.01, ws - 0.07);
@@ -361,12 +409,14 @@ function bandOf(r, J) {
 function lowerStations(sh, lod, cuts) {
   const xs = [];
   const near = lod === LOD_NEAR;
-  const tips = near ? [0, 0.22, 0.42, 0.6, 0.74, 0.85, 0.93, 0.975, 0.995] : lod === LOD_MID ? [0, 0.5, 0.8, 0.95] : [0, 0.45, 0.75, 0.93];
+  const econ = near && sh.S.fleet;
+  const tips = econ ? [0, 0.5, 0.8, 0.93, 0.985] : near ? [0, 0.22, 0.42, 0.6, 0.74, 0.85, 0.93, 0.975, 0.995]
+    : lod === LOD_MID ? [0, 0.5, 0.8, 0.95] : [0, 0.45, 0.75, 0.93];
   for (const f of tips) xs.push(sh.tipX(f, true), sh.tipX(f, false));
-  const fill = near ? 0.3 : 0.6;
+  const fill = econ ? 0.6 : near ? 0.3 : 0.6;
   const n = Math.max(2, Math.ceil((sh.x1 - sh.x0) / fill));
   for (let i = 1; i < n; i++) xs.push(sh.x0 + ((sh.x1 - sh.x0) * i) / n);
-  const ka = near ? 8 : 4;
+  const ka = econ ? 5 : near ? 8 : 4;
   for (const wx of sh.wheels) {
     if (near) xs.push(wx + sh.R + 0.004, wx + sh.R - 0.002, wx - sh.R + 0.002, wx - sh.R - 0.004);
     for (let k = near ? 1 : 0; k < (near ? ka : ka + 1); k++) xs.push(wx + sh.R * Math.cos((k / ka) * Math.PI));
@@ -392,7 +442,12 @@ function lowerStations(sh, lod, cuts) {
     if (sh.bed) xs.push(sh.bed[0], sh.bed[0] - 0.006, sh.bed[1], sh.bed[1] + 0.006);
   }
   const inside = xs.filter((x) => x >= sh.x0 - 1e-6 && x <= sh.x1 + 1e-6);
-  return uniqSorted(inside, 0.0012);
+  const out = uniqSorted(inside, 0.0012);
+  // The merge must not drop the closed tips (square plans put the next
+  // stations within a millimeter of them): the ends are the tips.
+  out[0] = sh.tipX(0, false);
+  out[out.length - 1] = sh.tipX(0, true);
+  return out;
 }
 
 // ---- greenhouse --------------------------------------------------------------
@@ -452,7 +507,7 @@ function ghStations(sh, gs, lod) {
   const g = gs.g, L = sh.L;
   const xs = [gs.xC, gs.xR0, gs.xR1, gs.xA];
   const near = lod === LOD_NEAR;
-  const n = near ? 14 : 4;
+  const n = near ? (sh.S.fleet ? 8 : 14) : 4;
   for (let i = 1; i < n; i++) xs.push(gs.xC + ((gs.xA - gs.xC) * i) / n);
   for (const v of g.side) xs.push(v * L);
   if (near) {
@@ -460,6 +515,8 @@ function ghStations(sh, gs, lod) {
     if (g.rearSide) xs.push(g.rearSide[0] * L, g.rearSide[1] * L);
     // Extra stations on the windshield and rear glass curves.
     for (const f of [0.25, 0.5, 0.75]) xs.push(gs.xR1 + (gs.xA - gs.xR1) * f, gs.xC + (gs.xR0 - gs.xC) * f);
+    // Fleet: the roof's front and rear edges round over two more stations.
+    if (sh.S.fleet) xs.push(gs.xR1 + 0.07, gs.xR1 + 0.15, gs.xR1 - 0.1, gs.xR1 - 0.22, gs.xR0 + 0.1, gs.xR0 + 0.22);
   } else if (lod === LOD_MID) {
     xs.push(gs.xR1 + (gs.xA - gs.xR1) * 0.5, gs.xC + (gs.xR0 - gs.xC) * 0.5);
   }
@@ -497,7 +554,9 @@ function archLiners(acc, sh, N = 10) {
   for (const wx of sh.wheels) {
     for (const s of [1, -1]) {
       const zi = (sh.hw - 0.42) * s;
-      const yb = Math.min(sh.wr * 0.5, sh.bottom(wx + R + 0.02));
+      // The fleet's liners stop at the body's own bottom (no flap below a
+      // high bumper).
+      const yb = sh.S.fleet ? Math.max(sh.wr * 0.5, Math.min(sh.bottom(wx + R + 0.02), sh.bottom(wx - R - 0.02))) : Math.min(sh.wr * 0.5, sh.bottom(wx + R + 0.02));
       // Profile around the arch, rear foot -> over the top -> front foot.
       const prof = [[wx - R, yb]];
       for (let k = 0; k <= N; k++) {
@@ -701,6 +760,29 @@ const FACES = {
   truck: { head: { q: [0.6, 0.94], f: [0.1, 0.25], e: 5, bulge: 0.01, lift: 0.008, ind: 0.88 }, grille: { q: [-0.5, 0.5], f: [0.32, 0.7], e: 8, lift: 0.006, bezel: CHROME }, intake: null, tail: null, plateF: 0.06 },
 };
 FACES.police = { ...FACES.sedan, fog: null, grille: { ...FACES.sedan.grille, bezel: 0x1a1c1f } };
+// The fleet: rear plate only (Florida), wide chrome grilles, wide lamps.
+FACES.midsize = {
+  head: { q: [0.46, 0.975], f: [0.6, 0.86], e: 4, slant: 0.06, taper: 0.4, bulge: 0.008, lift: 0.006, ind: 0.9, drl: 'L' },
+  grille: { q: [-0.47, 0.47], f: [0.3, 0.72], e: 6, lift: 0.005, bezel: CHROME, slats: 4 },
+  intake: { q: [-0.58, 0.58], f: [0.07, 0.22], e: 7, lift: 0.003 },
+  fog: { q: [0.74, 0.86], f: [0.12, 0.2], e: 3 },
+  tail: { q: [0.4, 0.985], f: [0.68, 0.9], e: 5, slant: 0.02, taper: 0.25, bulge: 0.006, lift: 0.006, rev: 0.52, bar: true },
+  plateF: null, plateR: 0.42,
+};
+FACES.suv = {
+  head: { q: [0.56, 0.97], f: [0.64, 0.86], e: 7, bulge: 0.008, lift: 0.006, ind: 0.9, drl: 'L' },
+  grille: { q: [-0.54, 0.54], f: [0.3, 0.88], e: 9, lift: 0.006, bezel: CHROME, slats: 3 },
+  intake: { q: [-0.6, 0.6], f: [0.06, 0.22], e: 7, lift: 0.003 },
+  tail: { q: [0.74, 0.985], f: [0.5, 0.95], e: 7, bulge: 0.004, lift: 0.006, rev: 0.76, bar: false },
+  plateF: null, plateR: 0.34,
+};
+FACES.crewcab = {
+  head: { q: [0.58, 0.97], f: [0.55, 0.88], e: 7, bulge: 0.008, lift: 0.006, ind: 0.9 },
+  grille: { q: [-0.56, 0.56], f: [0.3, 0.9], e: 9, lift: 0.006, bezel: CHROME, slats: 2 },
+  intake: { q: [-0.62, 0.62], f: [0.05, 0.2], e: 7, lift: 0.003 },
+  tail: { q: [0.82, 0.975], f: [0.5, 0.95], e: 7, bulge: 0.004, lift: 0.006, rev: 0.84, bar: false },
+  plateF: null, plateR: 0.3,
+};
 function faceFor(spec) {
   const n = styleName(spec);
   return { ...FACE_DEF, ...(FACES[n] || FACES[styleFor(spec).face] || {}) };
@@ -758,7 +840,7 @@ function fascia(acc, headAcc, tailAcc, sh, spec, lod) {
   const S = sh.S;
   const near = lod === LOD_NEAR;
   const dark = spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'police';
-  const N = near ? 18 : 10;
+  const N = near ? (S.fleet ? 12 : 18) : 10;
   if (F.head) {
     const h = F.head;
     const fr = h.f[1] - h.f[0], qr = h.q[1] - h.q[0];
@@ -788,6 +870,12 @@ function fascia(acc, headAcc, tailAcc, sh, spec, lod) {
         lens(headAcc, sh, ff, drl, side, () => 2, WHITE, 0, 16);
       }
     }
+  }
+  if (F.grille && !near && S.fleet) {
+    // The fleet's one-draw level keeps its grille (a chrome frame round a
+    // dark mesh): the face of an American car.
+    bezel(acc, sh, ff, F.grille, 1, 0.07, F.grille.bezel || 0x1a1c1f, CLS.CHROME, 10);
+    lens(acc, sh, ff, { ...F.grille, bulge: 0 }, 1, null, GRILLE, CLS.TRIM, 10);
   }
   if (F.grille && near) {
     const g = F.grille;
@@ -867,11 +955,17 @@ function archLips(acc, sh) {
 }
 
 // ---- cabin -------------------------------------------------------------------------
+// Front seat station: a little behind the roof's front edge; on the fleet
+// bodies 0.95 to 1.35 m behind the windshield base (long roofs).
+function seatX(sh, gs) {
+  const x = Math.min(gs.xR1 - (gs.xR1 - gs.xR0) * 0.45, gs.xA - 0.95);
+  return sh.S.fleet ? Math.max(x, gs.xA - 1.35) : x;
+}
 // Seats, dashboard, steering wheel and a headliner: seen dimly through the
 // tinted glass. The lower shell's top inside the greenhouse is the floor.
 function cabin(acc, sh, gs, spec) {
   const g = gs.g;
-  const xA = gs.xA, xR1 = gs.xR1, xR0 = gs.xR0, xC = gs.xC;
+  const xA = gs.xA, xC = gs.xC;
   const len = xA - xC;
   if (len < 0.6) return;
   const xm = (xA + xC) / 2;
@@ -882,7 +976,7 @@ function cabin(acc, sh, gs, spec) {
   box(acc, DASH, CLS.CABIN, dx, 0.16, zw * 2, xA - dx * 0.5 - 0.02, gs.baseY(xA - dx * 0.5) + 0.02, 0, 0, 0, 0.12);
   // Front seats sit a little behind the roof's front edge; a rear bench
   // under the rear glass when the cabin is long enough.
-  const fx = Math.min(xR1 - (xR1 - xR0) * 0.45, xA - 0.95);
+  const fx = seatX(sh, gs);
   // Seat backs and headrests fit under the roof line (chopped roofs).
   const room = (x) => Math.max(0.2, gs.roof(x) - belt - 0.08);
   const seat = (x, z, w) => {
@@ -1018,6 +1112,18 @@ function joinLamps(head, tail) {
 //   near = false (far): { body } with baked lamp blocks and tires.
 export function buildCar(spec, near = true, lite = false) {
   const lod = !near ? LOD_FAR : lite ? LOD_MID : LOD_NEAR;
+  const a = buildAccs(spec, lod);
+  const res = { body: a.acc.build(), shape: a.sh, gh: a.gs };
+  if (lod !== LOD_FAR) {
+    res.glass = a.glassAcc.build();
+    res.lamps = joinLamps(a.headAcc.count ? a.headAcc : null, a.tailAcc.count ? a.tailAcc : null);
+  }
+  return res;
+}
+
+// The builders' accumulators for one level: body, glass (with the contact
+// shadow), head and tail lamps (none on the far level).
+function buildAccs(spec, lod) {
   const sh = shape(spec);
   const S = sh.S;
   const L = sh.L, hw = sh.hw;
@@ -1146,13 +1252,7 @@ export function buildCar(spec, near = true, lite = false) {
   } else {
     farDetails(acc, sh, spec);
   }
-
-  const res = { body: acc.build(), shape: sh, gh: gs };
-  if (lod !== LOD_FAR) {
-    res.glass = glassAcc.build();
-    res.lamps = joinLamps(headAcc.count ? headAcc : null, tailAcc.count ? tailAcc : null);
-  }
-  return res;
+  return { acc, glassAcc, headAcc, tailAcc, sh, gs, xs };
 }
 
 function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
@@ -1213,8 +1313,10 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
     }
     if (id === 'van') box(acc, TRIM, CLS.TRIM, 2.6, 0.08, sh.hw * 1.45, -0.12 * L, gs.roofY + gs.crown + 0.07, 0);
     if (id === 'truck') truckParts(acc, tailAcc, sh, spec, false);
+    fleetParts(acc, sh, gs, spec, false);
     return;
   }
+  fleetParts(acc, sh, gs, spec, true);
   // Door handles: flush dark pulls with a chrome top.
   for (const s of S.seams || []) {
     const x = s * L - 0.12;
@@ -1357,6 +1459,36 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
   if (id === 'truck') truckParts(acc, tailAcc, sh, spec, true);
 }
 
+// Running boards, roof rails and a tailgate handle of the fleet bodies.
+function fleetParts(acc, sh, gs, spec, near) {
+  const S = sh.S;
+  if (S.steps) {
+    // A running board between the arches, on two short hangers.
+    const xa = -sh.wheels[0] + sh.R + 0.08, xb = sh.wheels[0] - sh.R - 0.08;
+    const len = xb - xa, y = sh.bottom((xa + xb) / 2) - 0.04;
+    for (const s of [1, -1]) {
+      const z = s * (sh.planW(0) - 0.08);
+      box(acc, near ? 0x2b2d31 : TRIM, CLS.TRIM, len, 0.045, 0.16, (xa + xb) / 2, y, z);
+      if (near) box(acc, CHROME, CLS.CHROME, len, 0.012, 0.02, (xa + xb) / 2, y + 0.022, s * (sh.planW(0) + 0.0));
+    }
+  }
+  if (S.rails) {
+    // Two roof rails along the roof edges, standing on short feet.
+    const x0 = gs.xR0 + 0.15, x1 = gs.xR1 - 0.12;
+    const y = gs.roofY + gs.crown * 0.4 + 0.045;
+    const zr = (gs.baseW(0) - S.gh.tumble * (gs.roofY - gs.baseY(0))) * 0.8;
+    for (const s of [1, -1]) {
+      box(acc, TRIM, CLS.TRIM, x1 - x0, 0.035, 0.045, (x0 + x1) / 2, y, s * zr);
+      if (near) for (const x of [x0 + 0.05, x1 - 0.05]) box(acc, TRIM, CLS.TRIM, 0.08, 0.05, 0.05, x, y - 0.03, s * zr);
+    }
+  }
+  if (S.tailgate && near) {
+    // Tailgate handle and the tailgate's top cap.
+    box(acc, TRIM, CLS.TRIM, 0.02, 0.05, 0.3, sh.x0 - 0.002, sh.top(sh.x0) - 0.13, 0);
+    box(acc, TRIM, CLS.TRIM, 0.07, 0.025, sh.W - 0.16, sh.x0 + 0.05, sh.top(sh.x0 + 0.05) + 0.012, 0);
+  }
+}
+
 function truckParts(acc, tailAcc, sh, spec, near) {
   const L = sh.L, W = sh.W, H = sh.H;
   const xb0 = -L / 2, xb1 = sh.x0 - 0.12;
@@ -1445,6 +1577,9 @@ const RIM = 0.72; // rim radius / tire radius
 export function wheelStyle(spec) {
   const id = spec.id;
   if (spec.body === 'truck') return { spokes: 10, kind: 'steel', rim: 0xb4b8be };
+  if (id === 'midsize') return { spokes: 5, kind: 'twin', rim: 0xc4c8cd };
+  if (id === 'suv') return { spokes: 6, kind: 'wide', rim: 0xb9bdc3 };
+  if (id === 'crewcab') return { spokes: 6, kind: 'wide', rim: 0x60646a };
   if (id === 'sports') return { spokes: 10, kind: 'thin', rim: 0x34373c };
   if (id === 'ghostwake') return { spokes: 10, kind: 'thin', rim: 0x1b2a2c };
   if (id === 'muscle') return { spokes: 5, kind: 'wide', rim: 0xd6d8dc };
@@ -1468,7 +1603,7 @@ export function tireProfile(wr, tw) {
 // concave spokes over a brake disc that shows through them. Axle along
 // local z; the outer face looks toward +z. lite: a plain tire and rim
 // face for the mid distance.
-export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain', lite = false) {
+export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain', lite = false, seg = 16) {
   const acc = new Acc();
   const rimR = wr * RIM;
   const h = tw / 2;
@@ -1481,23 +1616,27 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain'
     lathe(acc, [[rimR * 1.02, h * 0.96], [rimR * 0.55, h * 0.8], [0.001, h * 0.9]], 8, (i, r) => (r === 1 && i % 2 ? { col: lin(0x2a2b2e), cls: CLS.ALLOY } : rc), { crease: 0.2 });
     return acc.build();
   }
-  const seg = 16;
   const tread = [lin(0x1e1e1f), lin(0x0d0d0e)];
   const wall = lin(0x1b1b1d), wallHi = lin(0x2c2c2e);
   const o = { col: wall, cls: CLS.RUBBER };
-  lathe(acc, tireProfile(wr, tw), seg, (i, r) => {
-    if (r === 3) o.col = tread[i % 2];
-    else if (r === 2 || r === 4) o.col = tread[(i + 1) % 2];
-    else o.col = r === 5 && i % 6 < 3 ? wallHi : wall;
+  // The light wheel (seg under 16): the tire's shoulders merged.
+  const prof = tireProfile(wr, tw);
+  const tp = seg < 16 ? [prof[0], prof[1], prof[3], prof[4], prof[6], prof[7]] : prof;
+  const tr = seg < 16 ? 2 : 3;
+  lathe(acc, tp, seg, (i, r) => {
+    if (r === tr) o.col = tread[i % 2];
+    else if (r === tr - 1 || r === tr + 1) o.col = tread[(i + 1) % 2];
+    else o.col = r === tr + 2 && i % 6 < 3 ? wallHi : wall;
     return o;
   }, { crease: 0.5 });
   const dark = lin(0x1a1b1d), disc = lin(0x8a8d92), hat = lin(0x4a4c50);
   const rc = { col: rimC, cls: CLS.ALLOY };
   // Polished outer lip, then the dark barrel and back wall.
-  lathe(acc, [[rimR * 1.03, h * 0.84], [rimR * 1.0, h * 0.97], [rimR * 0.92, h * 0.93]], seg, () => rc, { crease: 0.4 });
-  lathe(acc, [[rimR * 0.92, h * 0.93], [rimR * 0.9, -h * 0.7], [rimR * 0.3, -h * 0.7]], 10, () => ({ col: dark, cls: CLS.ALLOY }), { crease: 0.4 });
+  lathe(acc, seg < 16 ? [[rimR * 1.03, h * 0.9], [rimR * 0.92, h * 0.93]] : [[rimR * 1.03, h * 0.84], [rimR * 1.0, h * 0.97], [rimR * 0.92, h * 0.93]], seg, () => rc, { crease: 0.4 });
+  const back = seg < 16 ? 8 : 10;
+  lathe(acc, [[rimR * 0.92, h * 0.93], [rimR * 0.9, -h * 0.7], [rimR * 0.3, -h * 0.7]], back, () => ({ col: dark, cls: CLS.ALLOY }), { crease: 0.4 });
   // Brake disc set well back from the spoke face, with a darker hat.
-  lathe(acc, [[rimR * 0.8, -h * 0.25], [rimR * 0.8, h * 0.02], [rimR * 0.42, h * 0.02], [rimR * 0.3, h * 0.12]], 10, (i, r) => ({ col: r === 2 ? hat : disc, cls: CLS.ALLOY }), { crease: 0.4 });
+  lathe(acc, seg < 16 ? [[rimR * 0.8, h * 0.02], [rimR * 0.42, h * 0.02], [rimR * 0.3, h * 0.12]] : [[rimR * 0.8, -h * 0.25], [rimR * 0.8, h * 0.02], [rimR * 0.42, h * 0.02], [rimR * 0.3, h * 0.12]], back, (i, r) => ({ col: r === (seg < 16 ? 1 : 2) ? hat : disc, cls: CLS.ALLOY }), { crease: 0.4 });
   // Spokes: tapered bars, concave from the lip down to a recessed hub.
   const rh = rimR * 0.22;
   const wide = kind === 'wide' ? 0.3 : kind === 'thin' ? 0.12 : kind === 'steel' ? 0.2 : 0.17;
@@ -1532,4 +1671,270 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain'
   const hubZ = kind === 'steel' ? h * 0.9 : h * 0.72;
   lathe(acc, [[rh * 1.2, hubZ - 0.01], [rh * 1.05, hubZ + 0.012], [rh * 0.6, hubZ + 0.018], [0.001, hubZ + 0.02]], 8, (i, r) => (r === 2 ? { col: lin(0x2a2b2e), cls: CLS.CHROME } : rc), { crease: 0.5 });
   return acc.build();
+}
+
+// ---- fleet levels L1 and L2 (docs/FLEET.md) ------------------------------------------
+// L1 (20 to 60 m): the mid-level body with its glass drawn opaque, the lamp
+// lenses and the plate recolored into vertex color bands (lamps in class
+// GLOW, lit at night by the shared lamp level) and four plain wheels, all
+// in one geometry: one draw with the car's paint material.
+const L1_HEAD = 0xe6ebf0, L1_TAIL = 0xb3161a, L1_REV = 0xc9c9c9, L1_IND = 0xd99a2a;
+export function buildCarL1(spec) {
+  const a = buildAccs(spec, LOD_MID);
+  const acc = a.acc;
+  // Windows as a dark blue-gray band: at range a window must read dark,
+  // whatever the sky it would mirror.
+  const gc = lin(0x1a222b);
+  for (let i = 0; i < acc.count; i++) {
+    if (acc.k[i] !== CLS.GLASS) continue;
+    acc.k[i] = CLS.TRIM;
+    acc.c[i * 3] = gc[0]; acc.c[i * 3 + 1] = gc[1]; acc.c[i * 3 + 2] = gc[2];
+  }
+  const add = (src, colorOf) => {
+    const base = acc.count;
+    const o = [0, 0];
+    for (let i = 0; i < src.count; i++) {
+      colorOf(src.uv[i * 2], o);
+      acc.vert(src.p[i * 3], src.p[i * 3 + 1], src.p[i * 3 + 2], src.n[i * 3], src.n[i * 3 + 1], src.n[i * 3 + 2], lin(o[0]), o[1]);
+    }
+    for (const j of src.i) acc.i.push(base + j);
+  };
+  // Atlas u: lens cells (cell + 0.5) / 8 below 0.625, the plate above.
+  add(a.headAcc, (u, o) => {
+    if (u >= 0.6) { o[0] = WHITE; o[1] = CLS.PLATE; } else if (u > 0.5) { o[0] = 0x16181b; o[1] = CLS.TRIM; } else { o[0] = L1_HEAD; o[1] = CLS.GLOW; }
+  });
+  add(a.tailAcc, (u, o) => {
+    const cell = Math.floor(u * 8);
+    if (u >= 0.6) { o[0] = WHITE; o[1] = CLS.PLATE; } else if (cell === 1) { o[0] = L1_REV; o[1] = CLS.TRIM; } else if (cell === 2) { o[0] = L1_IND; o[1] = CLS.GLOW; } else { o[0] = L1_TAIL; o[1] = CLS.GLOW; }
+  });
+  // Wheels: a ten-sided tire with a lighter rim face on the outside.
+  const { wr, tw, ax, az } = wheelLayout(spec);
+  const rim = wheelStyle(spec).rim;
+  for (const wx of [ax, -ax]) {
+    for (const s of [1, -1]) {
+      acc.geo(new THREE.CylinderGeometry(wr, wr, tw, 12, 1, true), 0x141415, CLS.RUBBER, place(wx, wr, s * az, Math.PI / 2, 0, 0));
+      // Outer face: black sidewall ring, then the rim dished to a darker hub.
+      const zf = s * (az + tw / 2), zr = s * (az + tw / 2 - 0.02);
+      const ring = (r, z, n) => {
+        const out = [];
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2;
+          out.push([wx + Math.cos(a) * r, wr + Math.sin(a) * r, z]);
+        }
+        return out;
+      };
+      const tireO = ring(wr, zf - s * 0.01, 12), rimO = ring(wr * RIM, zf, 12);
+      const tc = lin(0x161617), rc = lin(rim), hc = lin(0x3c3e42);
+      for (let k = 0; k < 12; k++) {
+        const k2 = (k + 1) % 12;
+        const q = [tireO[k], tireO[k2], rimO[k2], rimO[k]].map((p) => acc.vert(p[0], p[1], p[2], 0, 0, s, tc, CLS.RUBBER));
+        if (s > 0) { acc.tri(q[0], q[1], q[2]); acc.tri(q[0], q[2], q[3]); } else { acc.tri(q[0], q[2], q[1]); acc.tri(q[0], q[3], q[2]); }
+        const h = acc.vert(wx, wr, zr, 0, 0, s, hc, CLS.ALLOY);
+        const ra = acc.vert(rimO[k][0], rimO[k][1], rimO[k][2], 0, 0, s, rc, CLS.ALLOY), rb = acc.vert(rimO[k2][0], rimO[k2][1], rimO[k2][2], 0, 0, s, rc, CLS.ALLOY);
+        if (s > 0) acc.tri(h, ra, rb); else acc.tri(h, rb, ra);
+      }
+    }
+  }
+  return acc.build();
+}
+
+// L2 (60 to 170 m, and every static parked car): a lofted shell of 8
+// sections from the same style as the near body: hood, a cabin with
+// tumblehome, a dark glass band, the trunk deck or the bed, dark wheel
+// arcs, wheels as discs with a lighter hub, lamp dots in class GLOW. About
+// 260 triangles. Paint faces are class PAINT and white (the material or
+// the instance color tints them).
+const L2_GLASS = 0x18202a, L2_LINER = 0x1d1e20;
+export function shellStations(spec) {
+  const sh = shape(spec);
+  const gs = ghShape(sh);
+  const capR = sh.tipX(0.72, false), capF = sh.tipX(0.72, true);
+  const xs = [capR, gs.xC, gs.xR0, gs.xR1, gs.xA, capF];
+  const rear = sh.tipX(0.965, false), front = sh.tipX(0.965, true);
+  const extra = [];
+  if (rear < gs.xC - 0.12) extra.push(rear);
+  if (front > gs.xA + 0.12) extra.push(front);
+  extra.push((gs.xA + front) / 2, (gs.xR0 + gs.xR1) / 2);
+  for (const x of extra) if (xs.length < 8) xs.push(x);
+  return { sh, gs, xs: uniqSorted(xs, 0.02) };
+}
+
+// Half ring of the shell at x (bottom center outward, up to the top center).
+function shellHalf(sh, gs, x) {
+  const w = sh.planW(x);
+  const y0 = sh.bottom(x);
+  const c = sh.yc(x);
+  const ws = w * sh.shoulder;
+  const out = [[w * 0.88, y0], [w, y0 + Math.min(0.14, (c - y0) * 0.3)], [ws * 0.995, c]];
+  const g = gs.g;
+  if (x >= gs.xC - 1e-6 && x <= gs.xA + 1e-6) {
+    const wb = gs.baseW(x), gb = gs.baseY(x);
+    const R = Math.max(gb, gs.roof(x));
+    const hmax = gs.roofY - gb;
+    const h = R - gb;
+    const k = Math.max(0, Math.min(1, h / Math.max(0.05, hmax)));
+    const wt = Math.max(wb - g.tumble * k * hmax, wb * 0.5);
+    // Glass base, glass top, roof edge (a strip of paint over the side
+    // glass), crown.
+    const rail = Math.min(0.07, h * 0.15);
+    if (h > 0.05) out.push([wb, gb], [wb + (wt - wb) * 0.9, R - rail], [wt * 0.95, R], [0, R + gs.crown * k]);
+    else out.push([wb, gb], [wb * 0.8, gb + 0.004], [wb * 0.5, gb + 0.008], [0, gb + 0.012]);
+  } else if (sh.inBed(x)) {
+    const top = sh.top(x), floor = sh.S.floor * sh.H;
+    out.push([ws - 0.07, top], [ws - 0.08, floor + 0.05], [ws * 0.5, floor], [0, floor]);
+  } else {
+    out.push([ws * 0.86, surfY(sh, x, ws * 0.86)], [ws * 0.6, surfY(sh, x, ws * 0.6)], [ws * 0.3, surfY(sh, x, ws * 0.3)], [0, sh.top(x)]);
+  }
+  return out;
+}
+
+export function buildCarL2(spec) {
+  const { sh, gs, xs } = shellStations(spec);
+  const acc = new Acc();
+  const P = xs.map((x) => mirror(shellHalf(sh, gs, x), x));
+  // Ends round over: the nose and tail lean in at the top and the chin.
+  if (sh.S.lean) for (const ring of P) for (const p of ring) { const d = sh.lean(p[0], p[1]); p[0] += p[0] > sh.mid ? -d : d; }
+  const J = (P[0].length + 1) / 2;
+  const g = gs.g, L = sh.L;
+  const paint = { col: lin(WHITE), cls: CLS.PAINT };
+  const dark = { col: lin(TRIM), cls: CLS.TRIM };
+  // Glass as dark trim (no mirror shine: at range a window must read dark).
+  const glass = { col: lin(L2_GLASS), cls: CLS.TRIM };
+  const liner = { col: lin(L2_LINER), cls: CLS.TRIM };
+  const inSpan = (x, s) => s && x > s[0] * L && x < s[1] * L;
+  emitGrid(acc, P, (i, r, c) => {
+    const jj = bandOf(r, J);
+    const x = c[0];
+    if (jj === 0) return dark;
+    if (sh.inBed(x) && jj >= 3) return liner;
+    const cab = x > gs.xC && x < gs.xA;
+    if (cab && jj === 3) return inSpan(x, g.side) || inSpan(x, g.rearSide) || x > gs.xR1 ? glass : paint;
+    if (cab && jj >= 4) return x > gs.xR1 + 0.01 || (x < gs.xR0 - 0.01 && g.rear) ? glass : paint;
+    return paint;
+  }, { crease: 0.55 });
+  // End caps: a fan round each end ring, paint with a dark lower band.
+  for (const end of [0, 1]) {
+    const ring = P[end ? P.length - 1 : 0];
+    const nx = end ? 1 : -1;
+    let cx = 0, cy = 0;
+    for (const p of ring) { cx += p[0] / ring.length; cy += p[1] / ring.length; }
+    for (let k = 0; k < ring.length; k++) {
+      // The last triangle closes the ring along the bottom.
+      const a = ring[k], b = ring[(k + 1) % ring.length];
+      const col = paint;
+      const h = acc.vert(cx, cy, 0, nx, 0, 0, col.col, col.cls);
+      const ia = acc.vert(a[0], a[1], a[2], nx, 0, 0, col.col, col.cls);
+      const ib = acc.vert(b[0], b[1], b[2], nx, 0, 0, col.col, col.cls);
+      if (end) acc.tri(h, ib, ia); else acc.tri(h, ia, ib);
+    }
+  }
+  // Lamp dots, grille and plate: flat quads just off the end caps.
+  const quad = (x, ya, yb, za, zb, nx, hex, cls) => {
+    const col = lin(hex);
+    // Just off the end station (the cap's outermost plane).
+    const d = () => x;
+    const sx = Math.sign(nx);
+    const v = [[d(ya), ya, za], [d(ya), ya, zb], [d(yb), yb, zb], [d(yb), yb, za]].map((p) => acc.vert(p[0] + nx * 0.012, p[1], p[2], sx, 0, 0, col, cls));
+    const flip = (nx > 0) === (zb > za);
+    if (flip) { acc.tri(v[0], v[2], v[1]); acc.tri(v[0], v[3], v[2]); } else { acc.tri(v[0], v[1], v[2]); acc.tri(v[0], v[2], v[3]); }
+  };
+  const xf = xs[xs.length - 1], xr = xs[0];
+  const wf = sh.planW(xf), wrr = sh.planW(xr);
+  const F = faceFor(spec);
+  const ffr = { yb: sh.bottom(sh.x1 - 0.06), yt: sh.yc(sh.x1 - 0.22) };
+  const rfr = { yb: sh.bottom(sh.x0 + 0.06), yt: sh.yc(sh.x0 + 0.22) };
+  const fy = (fr, f) => fr.yb + f * (fr.yt - fr.yb);
+  const hd = F.head, tl = F.tail;
+  for (const s of [1, -1]) {
+    // Head lamp in a dark housing (reads on white paint too).
+    const ya = fy(ffr, hd.f[0] + (hd.f[1] - hd.f[0]) * 0.3), yb = fy(ffr, Math.min(0.98, hd.f[1])), q0 = Math.max(0.42, hd.q[0]);
+    quad(xf, ya - 0.03, yb + 0.02, s * wf * (q0 - 0.04), s * wf * 0.985, 0.6, 0x202326, CLS.TRIM);
+    quad(xf, ya, yb, s * wf * q0, s * wf * 0.96, 1, 0xdfe6ee, CLS.GLOW);
+    if (tl) quad(xr, fy(rfr, tl.f[0]), fy(rfr, Math.min(0.98, tl.f[1])), s * wrr * Math.max(0.42, tl.q[0]), s * wrr * 0.96, -1, 0xc01414, CLS.GLOW);
+  }
+  if (F.grille) quad(xf, fy(ffr, F.grille.f[0]), fy(ffr, Math.min(0.95, F.grille.f[1])), -wf * F.grille.q[1] * 0.85, wf * F.grille.q[1] * 0.85, 1, 0x1a1c1f, CLS.TRIM);
+  // Wheels: a dark arc in the side over each wheel, the tire face (a fan
+  // from a gray hub out to the black tread) and the lower half of the tread.
+  const { wr, tw, ax, az } = wheelLayout(spec);
+  const hub = lin(0x6a6e74), tire = lin(0x121213), arc = lin(ARCH);
+  for (const wx of [ax, -ax]) {
+    for (const s of [1, -1]) {
+      const zs = s * (sh.planW(wx) + 0.006);
+      const c0 = acc.vert(wx, wr, zs, 0, 0, s, arc, CLS.TRIM);
+      const ar = [];
+      for (let k = 0; k <= 4; k++) {
+        const a = (k / 4) * Math.PI;
+        ar.push(acc.vert(wx + Math.cos(a) * sh.R, wr + Math.sin(a) * sh.R, zs, 0, 0, s, arc, CLS.TRIM));
+      }
+      for (let k = 0; k < 4; k++) if (s > 0) acc.tri(c0, ar[k], ar[k + 1]); else acc.tri(c0, ar[k + 1], ar[k]);
+      const zf = s * Math.max(az + tw / 2, sh.planW(wx) + 0.012);
+      const h = acc.vert(wx, wr, zf, 0, 0, s, hub, CLS.ALLOY);
+      const rim = [];
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+        rim.push(acc.vert(wx + Math.cos(a) * wr, wr + Math.sin(a) * wr, zf, 0, 0, s, tire, CLS.RUBBER));
+      }
+      for (let k = 0; k < 8; k++) if (s > 0) acc.tri(h, rim[k], rim[(k + 1) % 8]); else acc.tri(h, rim[(k + 1) % 8], rim[k]);
+      // Tread: the lower half, seen from the front and the back.
+      const zi = zf - s * tw;
+      for (let k = 4; k < 8; k++) {
+        const a0 = (k / 8) * Math.PI * 2 + Math.PI / 8, a1 = ((k + 1) / 8) * Math.PI * 2 + Math.PI / 8;
+        const am = (a0 + a1) / 2;
+        const n = [Math.cos(am), Math.sin(am), 0];
+        const p = [[a0, zf], [a1, zf], [a1, zi], [a0, zi]].map(([a, z]) => acc.vert(wx + Math.cos(a) * wr, wr + Math.sin(a) * wr, z, n[0], n[1], 0, tire, CLS.RUBBER));
+        if (s > 0) { acc.tri(p[0], p[3], p[2]); acc.tri(p[0], p[2], p[1]); } else { acc.tri(p[0], p[1], p[2]); acc.tri(p[0], p[2], p[3]); }
+      }
+    }
+  }
+  return acc.build();
+}
+
+// The driver's eye in the car frame (x ahead, y up, z right; the driver
+// sits on the left, -z), from the cabin layout of the near body.
+export function eyePoint(spec) {
+  const sh = shape(spec);
+  const gs = ghShape(sh);
+  const fx = seatX(sh, gs);
+  const zw = gs.baseW((gs.xA + gs.xC) / 2) - 0.06;
+  const x = fx + 0.08;
+  const y = gs.roof(x) - 0.24;
+  const r = (v) => Math.round(v * 100) / 100;
+  return { x: r(x), y: r(y), z: r(-zw * 0.47) };
+}
+
+// ---- for tests and tools ------------------------------------------------------------
+// The body's shape functions (shape) and greenhouse (gh) of a spec.
+export function bodyShape(spec) {
+  const sh = shape(spec);
+  return { sh, gs: ghShape(sh) };
+}
+
+// The lofted rings of a level (0 near, 1 mid, 2 the L2 shell): `lower`
+// (stations by ring points, mirrored, leaned as built), `gh` (greenhouse
+// rings, none for L2: its rings hold the cabin), `creases` (x of the
+// stations where the surface is meant to turn sharply: shut-line cuts,
+// the greenhouse ends, the bed edges), `half` (points per half ring).
+export function loftRings(spec, level) {
+  const sh = shape(spec);
+  const gs = ghShape(sh);
+  const creases = [];
+  const lean = (P) => {
+    if (sh.S.lean) for (const ring of P) for (const p of ring) { const d = sh.lean(p[0], p[1]); p[0] += p[0] > sh.mid ? -d : d; }
+    return P;
+  };
+  if (level === 2) {
+    const { xs } = shellStations(spec);
+    return { sh, gs, lower: lean(xs.map((x) => mirror(shellHalf(sh, gs, x), x))), gh: null, creases: [gs.xC, gs.xR0, gs.xR1, gs.xA], half: shellHalf(sh, gs, 0).length };
+  }
+  const lod = level === 0 ? LOD_NEAR : LOD_MID;
+  const cuts = lod === LOD_NEAR && sh.S.belt ? new Map() : null;
+  const xs = lowerStations(sh, lod, cuts);
+  const lower = lean(xs.map((x) => mirror(lowerHalf(sh, x, lod, cuts ? cuts.get(Math.round(x * 1e4)) || 0 : 0), x)));
+  const L = sh.L, S = sh.S;
+  for (const s of S.seams || []) creases.push(s * L, s * L + 0.006, s * L + 0.012);
+  for (const s of [S.hood, S.boot]) if (s != null) creases.push(s * L - 0.012, s * L, s * L + 0.006, s * L + 0.012);
+  if (sh.bed) creases.push(sh.bed[0], sh.bed[0] - 0.006, sh.bed[1], sh.bed[1] + 0.006);
+  creases.push(gs.xC, gs.xA);
+  const gx = ghStations(sh, gs, lod);
+  return { sh, gs, lower, gh: gx.map((x) => mirror(ghHalf(sh, gs, x, lod), x)), creases, half: (lower[0].length + 1) / 2 };
 }

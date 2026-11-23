@@ -244,7 +244,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   // The title shot (6.8) and the blend from it to the chase camera.
   const titleCam = createTitleCam(camera, chase);
   game.titleCam = titleCam;
-  const camTarget = { x: car.x, z: car.z, y: 0, heading: car.heading, pitch: 0, roll: 0, speed: 0, height: 1.2 };
+  const camTarget = { x: car.x, z: car.z, y: 0, heading: car.heading, pitch: 0, roll: 0, speed: 0, height: 1.2, vehicle: null };
   game.camHeading = car.heading;
   game.camTarget = camTarget;
   chase.snap(camTarget);
@@ -663,6 +663,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       camTarget.roll = v.kind === 'car' ? 0 : v.roll;
       camTarget.speed = v.speed;
       camTarget.height = 1.2;
+      camTarget.vehicle = v; // first-person views sit on the car's own mesh (chasecam.js)
       camTarget.boost = game.progress.settings.reduceMotion === true ? 0 : v.boostLevel || 0; // FOV widening and speed lines
       if (v.kind === 'tank' && chase.tankAim) {
         // Behind the turret's wanted aim, not the hull (docs/ARMS.md).
@@ -692,6 +693,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       camTarget.roll = 0;
       camTarget.speed = w.speed;
       camTarget.height = 1.5;
+      camTarget.vehicle = null;
       camTarget.boost = 0;
       if (p.near !== promptFor) {
         promptFor = p.near;
@@ -704,7 +706,8 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     }
     chase.update(camTarget, dt, input, collision);
     if (titleCam.active) titleCam.apply(game.time, dt);
-    game.camHeading = Math.atan2(camTarget.z - camera.position.z, camTarget.x - camera.position.x);
+    // In the Hood and Cockpit views the camera sits ahead of the car's center: use where it looks.
+    game.camHeading = chase.isFirstPerson() ? chase.viewYaw() : Math.atan2(camTarget.z - camera.position.z, camTarget.x - camera.position.x);
 
     for (let i = 0; i < game.systems.length; i++) {
       const s = game.systems[i];

@@ -33,6 +33,11 @@ export const BANDS = { // [min, max]
   sunchaser: { r0: [5.0, 6.5], t60: [4.6, 5.6], top: [135, 150], stop: [34, 42] },
   tidewinder: { r0: [6.0, 7.5], t60: [8, 10], top: [102, 115], stop: [36, 44] },
   nightheron: { r0: [5.0, 6.5], t60: [5.5, 7], top: [122, 135], stop: [34, 42] },
+  // The first fleet bodies (docs/FLEET.md): the base chassis' bands until
+  // the HANDLE task gives them their own (PLAN_V3 2.4).
+  midsize: { r0: [5.0, 6.5], t60: [7.5, 9], top: [110, 120], stop: [34, 42] },
+  suv: { r0: [6.0, 7.5], t60: [9, 11], top: [95, 105], stop: [36, 44] },
+  crewcab: { r0: [6.5, 8.0], t60: [9, 11], top: [95, 105], stop: [36, 44] },
   ...SERVICE_BANDS,
 };
 // r0: radius (m) of the path of the car's center at 2 m/s on full lock.

@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
 import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
-import { vehicleStats, noteVehicleHit, setVehicleLod } from './vehiclemesh.js';
+import { vehicleStats, noteVehicleHit, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { BOAT_SPECS } from '../entities/boat.js';
 import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
@@ -258,19 +258,46 @@ export function createGraphics(game) {
   // car never.
   const FAR_RS = [32, 36, 75];
   let farR = FAR_RS[1];
+  // Fleet bodies (docs/FLEET.md) have three levels: L0 for at most
+  // FLEET_L0_MAX cars within FLEET_L0_M (the nearest; the player's own car
+  // always), L1 to FLEET_L2_M, the L2 shell beyond (fogCull hides them past
+  // FLEET_HIDE_M). L0 candidates: index and squared distance, no allocation.
+  const l0Car = new Int32Array(FLEET_L0_MAX), l0D = new Float64Array(FLEET_L0_MAX);
   function updateCarLod() {
     const vs = game.vehicles, cx = camera.position.x, cz = camera.position.z;
     const own = game.player && game.player.vehicle;
+    let nL0 = 0;
     for (let i = 0; i < vs.length; i++) {
       const v = vs[i], m = v.mesh;
       if (v.kind !== 'car' || !m || !m.userData.head || !m.userData.wheels) continue;
       const ud = m.userData;
       const dx = v.x - cx, dz = v.z - cz, d2 = dx * dx + dz * dz;
-      const r = ud.lodDist ? farR - 4 : farR;
+      const fr = ud.fleet ? Math.max(farR, FLEET_L2_M) : farR;
+      const r = ud.lodDist ? fr - 4 : fr;
       const far = v !== own && d2 > r * r;
       if (far !== (ud.lodDist === true)) ud.lodDist = far;
       const want = far || !!v.lodFar;
       if (want !== ud.lodFar) setVehicleLod(m, want);
+      if (!ud.fleet) continue;
+      // L0 candidates: the nearest FLEET_L0_MAX inside the radius (a little
+      // hysteresis for a car already at L0); the player's own car first.
+      const r0 = ud.nearLevel === 0 ? FLEET_L0_M + 3 : FLEET_L0_M;
+      const key = v === own ? -1 : d2;
+      if (want || key > r0 * r0) continue;
+      if (nL0 < FLEET_L0_MAX) {
+        l0Car[nL0] = i; l0D[nL0] = key; nL0++;
+      } else {
+        let worst = 0;
+        for (let k = 1; k < nL0; k++) if (l0D[k] > l0D[worst]) worst = k;
+        if (key < l0D[worst]) { l0Car[worst] = i; l0D[worst] = key; }
+      }
+    }
+    for (let i = 0; i < vs.length; i++) {
+      const m = vs[i].mesh;
+      if (!m || !m.userData.fleet) continue;
+      let lvl = 1;
+      for (let k = 0; k < nL0; k++) if (l0Car[k] === i) lvl = 0;
+      setVehicleNearLevel(m, lvl);
     }
   }
   // Vehicles deep in the fog are not drawn (the fleet keeps boats and
@@ -281,6 +308,7 @@ export function createGraphics(game) {
   // Only the root's visibility is ours (rwFogHid); nothing else switches
   // a vehicle's root.
   const fwd = new THREE.Vector3();
+  const FLEET_HIDE2 = FLEET_HIDE_M * FLEET_HIDE_M;
   function fogCull() {
     const fog = scene.fog, vs = game.vehicles;
     if (!vs) return;
@@ -294,7 +322,9 @@ export function createGraphics(game) {
       if (!m) continue;
       const air = v.kind === 'plane' || v.kind === 'heli';
       const dx = v.x - cx, dz = v.z - cz;
-      const hide = v !== own && (dx * fwd.x + ((v.y || 0) - cy) * fwd.y + dz * fwd.z > far || (!air && dx * dx + dz * dz > lim2));
+      // Fleet bodies are not drawn past FLEET_HIDE_M (their L2 range).
+      const l2 = m.userData.fleet ? Math.min(lim2, FLEET_HIDE2) : lim2;
+      const hide = v !== own && (dx * fwd.x + ((v.y || 0) - cy) * fwd.y + dz * fwd.z > far || (!air && dx * dx + dz * dz > l2));
       if (hide) {
         if (m.visible) { m.visible = false; m.userData.rwFogHid = true; }
       } else if (m.userData.rwFogHid) {

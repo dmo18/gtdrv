@@ -751,15 +751,17 @@ export function driveStep(dr, v, dt, ctx = {}) {
 
 // --- The game system. ---
 
+// The sedan and hatchback roles are the fleet bodies (docs/FLEET.md):
+// midsize sedan, full-size SUV, crew-cab pickup.
 const MIX = {
-  downtown: ['sedan', 'taxi', 'taxi', 'sedan', 'compact', 'sports', 'van'],
-  midtown: ['sedan', 'compact', 'taxi', 'van', 'pickup', 'compact', 'muscle'],
-  residential: ['compact', 'sedan', 'pickup', 'sedan', 'muscle', 'van'],
-  docks: ['pickup', 'truck', 'van', 'truck', 'pickup', 'sedan'],
-  industrial: ['truck', 'pickup', 'van', 'pickup', 'compact', 'truck'],
-  beach: ['sports', 'compact', 'muscle', 'sedan', 'compact'],
-  park: ['compact', 'sedan'],
-  airfield: ['van', 'pickup', 'sedan'],
+  downtown: ['midsize', 'taxi', 'taxi', 'midsize', 'suv', 'sports', 'van'],
+  midtown: ['midsize', 'suv', 'taxi', 'van', 'pickup', 'crewcab', 'muscle'],
+  residential: ['suv', 'midsize', 'pickup', 'midsize', 'muscle', 'van'],
+  docks: ['pickup', 'truck', 'van', 'truck', 'pickup', 'midsize'],
+  industrial: ['truck', 'pickup', 'van', 'pickup', 'crewcab', 'truck'],
+  beach: ['sports', 'suv', 'muscle', 'midsize', 'crewcab'],
+  park: ['suv', 'midsize'],
+  airfield: ['van', 'pickup', 'midsize'],
 };
 
 const SPAWN_MIN = 90, SPAWN_MAX = 220;

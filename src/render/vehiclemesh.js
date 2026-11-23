@@ -13,7 +13,7 @@
 // stay planted while the body leans over them.
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
-import { buildCar, buildWheel, wheelLayout, wheelStyle, styleFor } from './carbody.js';
+import { buildCar, buildCarL1, buildCarL2, buildWheel, wheelLayout, wheelStyle, styleFor, isFleetModel } from './carbody.js';
 import { paintMaterial, ownPaintMaterial, releaseMaterial, farMaterial, wheelMaterial, lampMaterial, carGlassMaterial, LAMP } from './vehiclemats.js';
 
 // ---- per-spec geometry cache ------------------------------------------------------
@@ -25,10 +25,12 @@ EMPTY.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 
 function wheelGeo(spec, lite = false) {
   const { wr, tw } = wheelLayout(spec);
   const ws = wheelStyle(spec);
-  const key = wr.toFixed(3) + ':' + tw.toFixed(3) + ':' + ws.spokes + ':' + ws.kind + ':' + ws.rim + (lite ? ':lite' : '');
+  // The fleet's near wheel is a little lighter (12 segments, docs/FLEET.md).
+  const seg = isFleetModel(spec) ? 12 : 16;
+  const key = wr.toFixed(3) + ':' + tw.toFixed(3) + ':' + ws.spokes + ':' + ws.kind + ':' + ws.rim + (lite ? ':lite' : '') + ':' + seg;
   let g = wheelCache.get(key);
   if (!g) {
-    g = buildWheel(wr, tw, ws.spokes, ws.rim, ws.kind, lite);
+    g = buildWheel(wr, tw, ws.spokes, ws.rim, ws.kind, lite, seg);
     wheelCache.set(key, g);
   }
   return g;
@@ -100,9 +102,12 @@ function lightBarGeometry() {
 function specEntry(spec) {
   let e = specCache.get(spec.id);
   if (e) return e;
+  const fleet = isFleetModel(spec);
   const near = buildCar(spec, true);
-  const mid = buildCar(spec, true, true);
-  const far = buildCar(spec, false);
+  // Fleet bodies: L1 is one merged geometry (no glass or lamp mesh), L2
+  // the 8-section shell.
+  const mid = fleet ? { body: buildCarL1(spec), glass: EMPTY, lamps: null } : buildCar(spec, true, true);
+  const far = fleet ? { body: buildCarL2(spec) } : buildCar(spec, false);
   const sh = near.shape, gs = near.gh;
   const S = styleFor(spec);
   const { wr, tw, ax, az } = wheelLayout(spec);
@@ -123,6 +128,7 @@ function specEntry(spec) {
     bodyTris: tris(near.body), midTris: tris(mid.body), farTris: tris(far.body),
   };
   e = {
+    fleet,
     body: near.body, mid: mid.body, far: far.body,
     glass: near.glass, glassMid: mid.glass,
     lamps: near.lamps || EMPTY, lampsMid: mid.lamps || EMPTY,
@@ -143,9 +149,10 @@ export function vehicleStats(spec) {
     body: e.anchors.bodyTris, mid: e.anchors.midTris, far: e.anchors.farTris,
     wheel: t(e.wheel), wheelMid: t(e.wheelMid),
     glass: t(e.glass), glassMid: t(e.glassMid), lamps: t(e.lamps), lampsMid: t(e.lampsMid),
-    // Whole near and mid car (four wheels).
+    // Whole near and mid car (four wheels; a fleet body's L1 holds its own).
     near: e.anchors.bodyTris + t(e.glass) + t(e.lamps) + 4 * t(e.wheel),
-    midAll: e.anchors.midTris + t(e.glassMid) + t(e.lampsMid) + 4 * t(e.wheelMid),
+    midAll: e.fleet ? e.anchors.midTris : e.anchors.midTris + t(e.glassMid) + t(e.lampsMid) + 4 * t(e.wheelMid),
+    fleet: e.fleet,
   };
 }
 
@@ -201,6 +208,7 @@ function lodPair(a, b, mat) {
 export function createVehicleMesh(spec, color) {
   const col = color == null ? spec.colors[0] : color;
   const e = specEntry(spec);
+  if (e.fleet) return createFleetMesh(spec, col, e);
   const group = new THREE.Group();
   const rig = new THREE.Group();
   group.add(rig);
@@ -267,6 +275,93 @@ export function createVehicleMesh(spec, color) {
   // 7): only the group and the rig move, and updateVehicleMesh updates
   // their matrices itself, so a parked car costs nothing. Parts added
   // later (service bodies) keep their own automatic matrices.
+  group.traverse((o) => {
+    o.matrixAutoUpdate = false;
+    o.updateMatrix();
+  });
+  return group;
+}
+
+// ---- fleet bodies: three levels (docs/FLEET.md) -----------------------------------
+// L0 (under FLEET_L0_M, at most FLEET_L0_MAX cars, graphics.js picks them):
+// body, glass, lamps and the four wheels, 4 draws. L1 (to FLEET_L2_M): one
+// merged mesh in the paint material. L2 (to FLEET_HIDE_M, then hidden by
+// graphics.js): the 8-section shell, the `far` mesh of the old models.
+// game.js and setVehicleLod switch far / not far through head.visible as
+// before; graphics.js sets the near level (0 or 1) with setVehicleNearLevel.
+export const FLEET_L0_M = 20, FLEET_L2_M = 60, FLEET_HIDE_M = 170, FLEET_L0_MAX = 4;
+
+function applyLevel(ud) {
+  const lvl = ud.lodFar ? 2 : ud.nearLevel;
+  ud.level = lvl;
+  ud.body.visible = lvl === 0;
+  ud.glass.visible = lvl === 0;
+  ud.bodyMid.visible = lvl === 1;
+  ud.far.visible = lvl === 2;
+}
+
+// Near level of a fleet car (0 full body, 1 one-draw body); false when the
+// mesh is not a fleet body.
+export function setVehicleNearLevel(mesh, lvl) {
+  const ud = mesh.userData;
+  if (!ud.fleet) return false;
+  if (ud.nearLevel !== lvl) {
+    ud.nearLevel = lvl;
+    applyLevel(ud);
+  }
+  return true;
+}
+
+function createFleetMesh(spec, col, e) {
+  const group = new THREE.Group();
+  const rig = new THREE.Group();
+  group.add(rig);
+  const paint = paintMaterial(col);
+  const body = new THREE.Mesh(e.body, paint);
+  const bodyMid = new THREE.Mesh(e.mid, paint);
+  const glass = new THREE.Mesh(e.glass, carGlassMaterial('clean'));
+  glass.renderOrder = 1;
+  const lamps = new THREE.Mesh(e.lamps, lampMaterial(false, 0));
+  const far = new THREE.Mesh(e.far, farMaterial(col));
+  rig.add(body, bodyMid, glass, far, lamps);
+  const wNear = new THREE.InstancedMesh(e.wheel, wheelMaterial(), 4);
+  wNear.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  wNear.boundingSphere = e.wheelSphere;
+  group.add(wNear);
+  group.rotation.order = 'YXZ';
+  const L = spec.length;
+  const ud = group.userData = {
+    spec, color: col, rig, body, bodyMid, bodyLod: body, far, glass, glassLevels: [glass],
+    head: lamps, tail: lamps, lamps, lampLevels: [lamps],
+    wheels: [wNear], wheelLevels: [wNear], wheelMatrix: wNear.instanceMatrix,
+    bar: null, barRed: null, barBlue: null, glowMesh: null,
+    anchors: e.anchors,
+    fleet: true, level: 0, nearLevel: 0, lodFar: false,
+    hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,
+    hits: [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(-1, 0, 0, 0)], hitN: 0, hitDirty: false,
+    crushF: 0, crushR: 0,
+    box: new THREE.Vector4(L / 2, spec.width / 2, spec.height, 0),
+    brakeOn: false, sirenOn: false, sirenPhase: -1, reverseOn: false, tailState: 0, headState: 'head',
+    seed: (Math.abs(col * 0.618) % 97) + 1,
+  };
+  // The lamps and the wheels draw at L0 only: their `visible` reads the
+  // level; writing the lamps' visible switches far / not far (game.js),
+  // writing the wheels' is ignored (they follow the level).
+  Object.defineProperty(lamps, 'visible', {
+    get() { return ud.level === 0; },
+    set(v) {
+      const far = !v;
+      if (far === ud.lodFar) return;
+      ud.lodFar = far;
+      applyLevel(ud);
+    },
+    configurable: true,
+  });
+  Object.defineProperty(wNear, 'visible', { get() { return ud.level === 0; }, set() {}, configurable: true });
+  applyLevel(ud);
+  writeWheels(ud, 0, 0, 0, 0);
+  body.castShadow = bodyMid.castShadow = far.castShadow = true;
+  ud.rwShadow = true;
   group.traverse((o) => {
     o.matrixAutoUpdate = false;
     o.updateMatrix();

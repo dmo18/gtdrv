@@ -222,7 +222,8 @@ async function liveLayout(check) {
     const problems = [];
     let states = 0, elements = 0;
     // [name, craft, armed]. 'car-garage' and 'foot-talk' have a GARAGE or TALK offer showing (docs/REVAMP.md 6.12 HG-2).
-    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-garage', 'car', null], ['boat', 'boat', null],
+    // 'car-hood' and 'car-cockpit': the first-person views (PLAN_V3 2.8) under the same HUD contract.
+    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-garage', 'car', null], ['car-hood', 'car', null], ['car-cockpit', 'car', null], ['boat', 'boat', null],
       ['plane-armed', 'plane', true], ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
     const setMode = (kind, armed, name) => pg.evaluate(([k, a, nm]) => {
       const g = window.__rw;
@@ -237,6 +238,7 @@ async function liveLayout(check) {
         const v = g.vehicles.find((x) => x.kind === k && (a === null || has(x) === a)) || g.vehicles.find((x) => x.kind === k);
         if (!v) return false;
         g.enterVehicle(v);
+        if (k === 'car') g.chase.setView(nm === 'car-hood' ? 'Hood' : nm === 'car-cockpit' ? 'Cockpit' : 'Chase');
       }
       g.touch.update(1 / 60);
       return true;
@@ -533,6 +535,46 @@ async function liveLayout(check) {
         }
       }
     }
+    // First person (PLAN_V3 2.8): at each phone size the Hood and Cockpit views draw with the HUD on top,
+    // the cockpit has its interior and a 0.12 m near plane, the look area covers the right half of the
+    // screen, and a drag there turns the head and lets go (lookHeld), with no page errors.
+    for (const grid of [GRID.A, GRID.B, GRID.C]) {
+      await pg.setViewportSize({ width: grid.V, height: grid.H });
+      await pg.evaluate(() => { document.documentElement.style.setProperty('--rw-test-sl', '0px'); window.dispatchEvent(new Event('resize')); window.__rw.touch.setLeftHanded(false); });
+      await setMode('car', null, 'car-cockpit');
+      const fpv = await pg.evaluate(() => {
+        const g = window.__rw;
+        const out = {};
+        for (const view of ['Hood', 'Cockpit']) {
+          g.chase.setView(view);
+          g.draw(1, 1 / 60);
+          const f = g.chase.getFirst();
+          const hf = (2 * Math.atan(Math.tan((g.camera.fov * Math.PI) / 360) * g.camera.aspect) * 180) / Math.PI;
+          out[view] = { name: g.chase.getView(), first: g.chase.isFirstPerson(), near: g.camera.near, fov: g.camera.fov, hfov: hf, interior: !!f.interior, tris: f.interior ? f.interior.interior.tris : 0 };
+        }
+        const r = document.querySelector('.rw-look').getBoundingClientRect();
+        out.look = { x: r.left, r: r.right, y: r.top, b: r.bottom };
+        return out;
+      });
+      const tag = `first person ${grid.V}x${grid.H}`;
+      check(`${tag}: Hood view, FOV 80 across, near 0.12, exterior kept`, fpv.Hood.name === 'Hood' && fpv.Hood.first && Math.abs(fpv.Hood.hfov - 80) < 0.5 && fpv.Hood.near === 0.12 && !fpv.Hood.interior, JSON.stringify(fpv.Hood));
+      check(`${tag}: Cockpit view, FOV 78, near 0.12, interior of 1,200 to 1,800 triangles`, fpv.Cockpit.name === 'Cockpit' && fpv.Cockpit.first && Math.abs(fpv.Cockpit.fov - 78) < 0.01 && fpv.Cockpit.near === 0.12 && fpv.Cockpit.interior && fpv.Cockpit.tris >= 1200 && fpv.Cockpit.tris <= 1800, JSON.stringify(fpv.Cockpit));
+      check(`${tag}: the look area covers the right half of the screen`, fpv.look.x <= grid.V / 2 + 0.5 && fpv.look.r >= grid.V - 0.5 && fpv.look.y <= 0.5 && fpv.look.b >= grid.H - 0.5, JSON.stringify(fpv.look));
+      // A real touch drag on the empty right side turns the head; lifting the finger clears lookHeld.
+      const x0 = Math.round(grid.V * 0.62), y0 = Math.round(grid.H * 0.3);
+      const cdp = await pg.context().newCDPSession(pg);
+      const tp = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 9 }] });
+      await tp('touchStart', x0, y0);
+      for (let i = 1; i <= 6; i++) await tp('touchMove', x0 - i * 20, y0);
+      const held = await pg.evaluate(() => { const g = window.__rw; const h = g.input.lookHeld; g.chase.update(g.camTarget, 1 / 60, g.input, null); return { h, yaw: g.chase.getFirst().yawDeg }; });
+      await tp('touchEnd', 0, 0);
+      const after = await pg.evaluate(() => { const g = window.__rw; for (let i = 0; i < 30; i++) g.chase.update(g.camTarget, 1 / 60, g.input, null); return { h: g.input.lookHeld, yaw: g.chase.getFirst().yawDeg }; });
+      await cdp.detach();
+      check(`${tag}: a drag on the right half turns the head (held), and it springs back on release`, held.h === true && held.yaw < -30 && after.h === false && Math.abs(after.yaw) < 1, JSON.stringify([held, after]));
+      await pg.evaluate(() => window.__rw.chase.setView('Chase'));
+    }
+    check('first person: no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+
     // HG-3 to HG-5 (docs/REVAMP.md 6.12): the top center stack with every item forced on in the same frame,
     // a 200 character toast, and the stack against the speed readout with the minimap grown.
     let hgStates = 0;

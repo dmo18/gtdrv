@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
-import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile } from '../src/render/carbody.js';
-import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M } from '../src/render/vehiclemesh.js';
+import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile, FLEET_MODELS, buildCarL1, buildCarL2, loftRings, eyePoint } from '../src/render/carbody.js';
+import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from '../src/render/vehiclemesh.js';
 import { lampAtlasPixels, PLATE_TEXT, CLS } from '../src/render/vehiclemats.js';
 import * as THREE from 'three';
 import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTES, PERSON_LOD_M } from '../src/render/personmesh.js';
@@ -16,6 +16,8 @@ const ROAD = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwa
 
 test('car LOD triangle budgets: near 6k..9k, mid under 1.5k, far light', () => {
   for (const id of Object.keys(VEHICLE_SPECS)) {
+    // The fleet bodies have their own levels (the fleet tests below).
+    if (FLEET_MODELS.includes(id)) continue;
     const s = vehicleStats(VEHICLE_SPECS[id]);
     // Whole near car: body, glass with contact shadow, lamps, four wheels.
     assert.ok(s.near >= 6000 && s.near <= 9000, `${id} near total ${s.near}`);
@@ -304,4 +306,232 @@ test('walk pose: legs swing opposite, knees only fold backward', () => {
   walkPose(1, 0, o);
   assert.equal(o.legL, 0);
   assert.ok(Math.abs(o.kneeL) < 1e-9);
+});
+
+// ---- the fleet bodies (docs/FLEET.md): three levels, smooth, American --------------
+test('fleet: the three bodies, each with a spec, an invented name and US paint', () => {
+  assert.deepEqual(FLEET_MODELS, ['midsize', 'suv', 'crewcab']);
+  for (const id of FLEET_MODELS) {
+    const s = VEHICLE_SPECS[id];
+    assert.ok(s && s.id === id && /^[A-Z][a-z]+$/.test(s.label), id);
+    assert.ok(s.colors.length >= 5, id + ' palette');
+  }
+  // American proportions: long, wide, the SUV and the pickup tall.
+  const m = VEHICLE_SPECS.midsize, u = VEHICLE_SPECS.suv, p = VEHICLE_SPECS.crewcab;
+  assert.ok(m.length >= 4.8 && m.wheelBase >= 2.8 && m.width >= 1.84);
+  assert.ok(u.length >= 5.2 && u.height >= 1.85 && u.width >= 2.0);
+  assert.ok(p.length >= 5.8 && p.wheelBase >= 3.6 && p.height >= 1.9);
+});
+
+test('fleet: triangles per level (L0 about 6,000 with 4 draws, L1 about 1,200 in 1, L2 about 260 in 1)', () => {
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const s = vehicleStats(spec);
+    assert.ok(s.fleet, id);
+    assert.ok(s.near >= 5500 && s.near <= 6800, `${id} L0 ${s.near}`);
+    assert.ok(s.midAll >= 1000 && s.midAll <= 1400, `${id} L1 ${s.midAll}`);
+    assert.ok(s.far >= 220 && s.far <= 300, `${id} L2 ${s.far}`);
+    assert.equal(tris(buildCarL1(spec)), s.midAll);
+    assert.equal(tris(buildCarL2(spec)), s.far);
+  }
+  assert.ok(FLEET_L0_M === 20 && FLEET_L2_M === 60 && FLEET_HIDE_M === 170 && FLEET_L0_MAX === 4);
+});
+
+test('fleet: draw calls per level (4, 1, 1) and the level switches', () => {
+  const drawn = (m) => {
+    let n = 0;
+    m.updateMatrixWorld(true);
+    m.traverseVisible((o) => { if (o.isMesh) n++; });
+    return n;
+  };
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const m = createVehicleMesh(spec, spec.colors[0]);
+    const ud = m.userData;
+    assert.equal(drawn(m), 4, id + ' L0');
+    assert.ok(ud.body.visible && ud.glass.visible && ud.lamps.visible && ud.wheels[0].visible);
+    setVehicleNearLevel(m, 1);
+    assert.equal(drawn(m), 1, id + ' L1');
+    assert.ok(ud.bodyMid.visible && !ud.body.visible && !ud.glass.visible && !ud.lamps.visible && !ud.wheels[0].visible);
+    setVehicleLod(m, true);
+    assert.equal(drawn(m), 1, id + ' L2');
+    assert.ok(ud.far.visible && !ud.bodyMid.visible);
+    // game.js writes the wheels' and lamps' visibility for its 75 m rule.
+    for (const w of ud.wheels) w.visible = true;
+    ud.head.visible = true;
+    assert.equal(ud.level, 1);
+    assert.equal(drawn(m), 1, id + ' back to L1');
+    setVehicleNearLevel(m, 0);
+    assert.equal(drawn(m), 4, id + ' back to L0');
+    // Only the body levels cast sun shadows.
+    assert.ok(ud.body.castShadow && ud.bodyMid.castShadow && ud.far.castShadow && !ud.glass.castShadow);
+  }
+});
+
+// Unit normal of face (i, r) of a ring grid P[i][r] (outward for these grids).
+function faceN(P, i, r) {
+  const a = P[i][r], b = P[i + 1][r], c = P[i + 1][r + 1], d = P[i][r + 1];
+  const ux = c[0] - a[0], uy = c[1] - a[1], uz = c[2] - a[2];
+  const vx = d[0] - b[0], vy = d[1] - b[1], vz = d[2] - b[2];
+  const n = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const l = Math.hypot(...n);
+  return l < 1e-9 ? null : n.map((v) => v / l);
+}
+const angle = (a, b) => (Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180) / Math.PI;
+
+// Largest turn between faces next to each other along the length, over the
+// bands `bands` of grid P, between x0 and x1, skipping faces that touch a
+// crease station.
+function worstTurn(P, bands, x0, x1, creases) {
+  const near = (x) => creases.some((c) => Math.abs(x - c) < 0.02);
+  let worst = 0, at = null;
+  for (const r of bands) {
+    for (let i = 0; i + 2 < P.length; i++) {
+      const xa = P[i][r][0], xb = P[i + 1][r][0], xc = P[i + 2][r][0];
+      if (xa < x0 || xc > x1 || near(xa) || near(xb) || near(xc)) continue;
+      const n0 = faceN(P, i, r), n1 = faceN(P, i + 1, r);
+      if (!n0 || !n1) continue;
+      const t = angle(n0, n1);
+      if (t > worst) { worst = t; at = [r, xb.toFixed(2)]; }
+    }
+  }
+  return { worst, at };
+}
+
+test('fleet: smooth lofts, the turn between neighboring sections stays small except at creases', () => {
+  // Per level: the largest turn between neighbors along the length (deg).
+  const LIMIT = [14, 30, 50];
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    for (const level of [0, 1, 2]) {
+      const R = loftRings(spec, level);
+      const { sh, gs } = R;
+      const J = R.half;
+      // Upper side, shoulder and deck bands of the right half (ring index
+      // from J - 1 at the top center down), the nose and tail rounding
+      // (0.45 m at each end) left out.
+      const bands = [];
+      for (let r = Math.floor(J / 2); r < J - 1; r++) bands.push(r);
+      const lo = worstTurn(R.lower, bands, sh.x0 + 0.45, sh.x1 - 0.45, R.creases);
+      assert.ok(lo.worst < LIMIT[level], `${id} L${level} body turns ${lo.worst.toFixed(1)} deg at ${lo.at}`);
+      if (R.gh) {
+        // Over the roof: windshield to roof to rear glass, the center band.
+        const G = R.gh, GJ = (G[0].length + 1) / 2;
+        const g = worstTurn(G, [GJ - 2], gs.xC + 0.05, gs.xA - 0.05, [gs.xC, gs.xA]);
+        assert.ok(g.worst < LIMIT[level] * 1.6, `${id} L${level} roof turns ${g.worst.toFixed(1)} deg at ${g.at}`);
+      }
+    }
+  }
+});
+
+test('fleet: not a box: sloped windshield, rounded hood falling to the nose, roof highest, wheel arches', () => {
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const { sh, gs } = loftRings(spec, 0);
+    // Windshield raked: run over rise at least 0.9 (about 42 degrees from vertical).
+    const rise = gs.roofY - gs.baseY(gs.xA), run = gs.xA - gs.xR1;
+    assert.ok(run / rise > 0.9, `${id} windshield run ${run.toFixed(2)} rise ${rise.toFixed(2)}`);
+    // Hood: from the windshield base the deck never rises toward the nose and drops
+    // at least 6 cm over its last 40 cm; it crowns (center over edge).
+    let prev = Infinity;
+    for (let x = gs.xA; x <= sh.x1; x += 0.05) {
+      const y = sh.top(x);
+      assert.ok(y <= prev + 1e-6, `${id} hood rises at ${x.toFixed(2)}`);
+      prev = y;
+    }
+    assert.ok(sh.top(sh.x1 - 0.4) - sh.top(sh.x1) > 0.06, `${id} nose rounds down`);
+    const hx = (gs.xA + sh.x1) / 2;
+    assert.ok(sh.top(hx) > sh.yc(hx) + 0.012, `${id} hood crown`);
+    // Long hood: the windshield base at least 1.25 m behind the nose (an American
+    // proportion), and the roof is the highest point.
+    assert.ok(sh.x1 - gs.xA >= 1.25, `${id} hood ${(sh.x1 - gs.xA).toFixed(2)} m`);
+    for (let x = sh.x0; x <= sh.x1; x += 0.1) assert.ok(sh.top(x) <= gs.roofY + gs.crown + 1e-6, `${id} deck over the roof at ${x.toFixed(1)}`);
+    // Windshield: the glass climbs from its base to the roof without a dip.
+    prev = -Infinity;
+    for (let x = gs.xA; x >= gs.xR1; x -= 0.04) {
+      const y = gs.roof(x);
+      assert.ok(y >= prev - 1e-6, `${id} windshield dips at ${x.toFixed(2)}`);
+      prev = y;
+    }
+    // Tumblehome: the roof is narrower than the glass base.
+    const mx = (gs.xR0 + gs.xR1) / 2;
+    const G = loftRings(spec, 0).gh;
+    let gi = 0;
+    for (let i = 0; i < G.length; i++) if (Math.abs(G[i][0][0] - mx) < Math.abs(G[gi][0][0] - mx)) gi = i;
+    const ring = G[gi], top = ring[(ring.length - 1) / 2];
+    const edge = ring.reduce((w, p) => (p[1] > top[1] - 0.06 ? Math.max(w, Math.abs(p[2])) : w), 0);
+    assert.ok(edge < gs.baseW(mx) - 0.06, `${id} roof ${edge.toFixed(2)} vs base ${gs.baseW(mx).toFixed(2)}`);
+    // Wheel arches: the sill lifts over each wheel to clear the tire.
+    for (const wx of sh.wheels) {
+      assert.ok(sh.bottom(wx) >= sh.wr + sh.R - 0.01, `${id} arch over ${wx}`);
+      assert.ok(sh.bottom((sh.wheels[0] + sh.wheels[1]) / 2) < sh.bottom(wx) - 0.3, `${id} sill between the wheels`);
+    }
+    // Trunk or bed behind the cabin (no hatchback): a sedan's deck behind
+    // the rear glass, a pickup's bed, an SUV's upright tailgate.
+    if (id === 'midsize') assert.ok(gs.xC - sh.x0 > 0.75, 'sedan trunk');
+    if (id === 'crewcab') assert.ok(sh.bed && sh.bed[1] - sh.bed[0] > 1.5, 'pickup bed');
+    if (id === 'suv') assert.ok(gs.xR0 - gs.xC < 0.12, 'SUV upright tailgate');
+  }
+});
+
+// Points of a geometry by class (aCls).
+function classPts(g, cls) {
+  const P = g.attributes.position, K = g.attributes.aCls, out = [];
+  for (let i = 0; i < K.count; i++) if (K.getX(i) === cls) out.push([P.getX(i), P.getY(i), P.getZ(i)]);
+  return out;
+}
+
+test('fleet: four wheels, rear plate only, head and tail lamps at every level', () => {
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const { wr, ax, az } = wheelLayout(spec);
+    const near = buildCar(spec, true);
+    // L0: four wheel instances; lamps: head (u < 0.5) and tail (u >= 0.5)
+    // halves; the plate cells (u over 0.625 of a half) in the tail only.
+    const m = createVehicleMesh(spec, spec.colors[0]);
+    assert.equal(m.userData.wheelLevels[0].count, 4);
+    const uv = near.lamps.attributes.uv, P = near.lamps.attributes.position;
+    let head = 0, tail = 0, plateF = 0, plateR = 0;
+    for (let i = 0; i < uv.count; i++) {
+      const u = uv.getX(i);
+      if (u < 0.5) { if (u >= 0.3125) plateF++; else head++; } else if (u >= 0.8125) plateR++; else tail++;
+      if (u >= 0.8125) assert.ok(P.getX(i) < 0, id + ' plate at the rear');
+    }
+    assert.ok(head > 50 && tail > 50 && plateR >= 4 && plateF === 0, `${id} lamps ${head}/${tail}, plates ${plateF}/${plateR}`);
+    // L1 and L2: rubber around each of the four wheel centers, lamps (GLOW)
+    // front and rear; the L1 plate (class PLATE) at the rear only.
+    for (const g of [buildCarL1(spec), buildCarL2(spec)]) {
+      const rub = classPts(g, CLS.RUBBER);
+      for (const [wx, wz] of [[ax, az], [ax, -az], [-ax, az], [-ax, -az]]) {
+        assert.ok(rub.some((p) => Math.abs(p[0] - wx) < wr + 0.01 && Math.sign(p[2]) === Math.sign(wz) && Math.abs(p[1] - wr) <= wr + 0.01), `${id} wheel at ${wx}, ${wz}`);
+      }
+      const glow = classPts(g, CLS.GLOW);
+      assert.ok(glow.some((p) => p[0] > spec.length * 0.4) && glow.some((p) => p[0] < -spec.length * 0.4), id + ' lamps front and rear');
+    }
+    const plates = classPts(buildCarL1(spec), CLS.PLATE);
+    assert.ok(plates.length >= 4 && plates.every((p) => p[0] < -spec.length * 0.4), id + ' L1 rear plate only');
+  }
+});
+
+test('fleet: the driver sits on the left; the eye point in the spec is in the cabin', () => {
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const e = spec.eye;
+    assert.ok(e && Number.isFinite(e.x) && Number.isFinite(e.y) && Number.isFinite(e.z), id);
+    // Matches the cabin the near body is built with.
+    const p = eyePoint(spec);
+    assert.ok(Math.abs(p.x - e.x) < 0.02 && Math.abs(p.y - e.y) < 0.02 && Math.abs(p.z - e.z) < 0.02, `${id} eye ${JSON.stringify(e)} vs ${JSON.stringify(p)}`);
+    // Left of the center line (-z), inside the body, under the roof, over the belt.
+    const { gs } = loftRings(spec, 0);
+    assert.ok(e.z < -0.25 && e.z > -spec.width / 2 + 0.2, `${id} eye z ${e.z}`);
+    assert.ok(e.x > gs.xC && e.x < gs.xA - 0.6, `${id} eye x ${e.x}`);
+    assert.ok(e.y > gs.baseY(e.x) + 0.15 && e.y < gs.roof(e.x) - 0.1, `${id} eye y ${e.y}`);
+    // The steering wheel is in front of the left seat: the near body has
+    // cabin parts at the eye's side ahead of the eye.
+    const cab = classPts(buildCar(spec, true).body, CLS.CABIN).filter((q) => q[0] > e.x + 0.3 && q[0] < gs.xA && q[1] > gs.baseY(q[0]));
+    const left = cab.filter((q) => q[2] < -0.15).length, right = cab.filter((q) => q[2] > 0.15).length;
+    assert.ok(left > right, `${id} steering wheel side ${left} left, ${right} right`);
+  }
+  // Sedan eye lowest, the SUV and pickup high.
+  assert.ok(VEHICLE_SPECS.midsize.eye.y < 1.3 && VEHICLE_SPECS.suv.eye.y > 1.5 && VEHICLE_SPECS.crewcab.eye.y > 1.5);
 });
