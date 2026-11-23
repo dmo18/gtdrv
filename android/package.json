@@ -1,6 +1,6 @@
 {
   "name": "rustwater-android",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Capacitor wrapper that packages the built Rustwater game (build/web) as an Android app",
   "license": "UNLICENSED",

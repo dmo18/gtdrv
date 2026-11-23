@@ -79,9 +79,19 @@ const reg = await page.evaluate(() => {
   const v0 = g.debug.spawnCar('sedan', p.x, p.z, p.heading);
   v0.home = null;
   if (p.vehicle) { const o = p.vehicle; o.driver = null; o.speed = o.vx = o.vz = 0; p.vehicle = null; g.setPlayerMode('foot'); }
-  const car = g.debug.spawnCar('sedan', v0.x + 400, v0.z, 0);
+  // The player's car goes on a road node 450-900 m from v0 (a bare +400 m
+  // offset can land off-road, where the car is pushed back toward v0 and
+  // ends within the 300 m sweep radius).
+  let spot = null;
+  for (const n of g.city.nodes) {
+    const d = Math.hypot(n.x - v0.x, n.z - v0.z);
+    if (d >= 450 && d <= 900) { spot = n; break; }
+  }
+  if (!spot) return ['no road node 450-900 m from the start'];
+  const car = g.debug.spawnCar('sedan', spot.x, spot.z, 0);
   g.enterVehicle(car);
   window.__soakRun(300); // the 3 s sweep clears v0 (over 300 m away)
+  if (Math.hypot(car.x - v0.x, car.z - v0.z) <= 300) out.push('harness: the player car ended within 300 m of the left car');
   if (!v0.removed) out.push('the left car was not swept');
   if (g.enterVehicle(v0) !== false) out.push('entered a removed car');
   window.__soakRun(12);
