@@ -785,3 +785,13 @@ None critical or high.
 - 18 smooth American vehicle bodies at three detail levels (about 6,300 / 1,300 / 290 triangles), left-hand driver, rear Florida-style plates; retired hatchback, one-box van and cab-over truck. Hood and cockpit first-person views (Bumper removed). Real handling per class from US reference figures (circle, 0-60, 60-0, skidpad g, handbrake, understeer, U-turns), Arcade and Sim brake identically.
 - Gates: lint, 916 tests, smoke --extra, five region smoke, ui-test 744/744. Normal street view Beach 130 calls / 216k, Downtown 188 / 262k.
 - Open: shader programs 73 to 76 (target 60); L1 and L2 noses faceted up close; semi without trailer; closed-lot test loop in the Handling lab not built.
+
+## 2026-11-23: version 0.11.0 What you saw (owner round 3)
+
+- Roads: one asphalt area per junction, strips trimmed, no paint through, round curb corners, medians only where the gap is 6 m or more, facing-curb gaps and a narrow-gap net in ground.js (test/junctions.test.js a to e, all five regions).
+- Touch steering: the wheel was absolute (a slide right below its center steered left); now a relative drag anywhere on the left 40 percent; scripts/touch-test.mjs (240 two-finger checks) is a gate step. SWAP in cars and boats. Turn prompt is a small pill in the top row; street name under the minimap.
+- Car response: speed shaping of the player's input, no push past grip in Arcade, calm damper for the player only (AI unchanged), quicker chase camera.
+- Planes: arcade model (rotation speed, coordinated turns, hands-off level, landing assist); cockpit interior rebuilt.
+- Lots: surface parking, forecourts, parks and yards by rule; low shrubs and hedges; one ground per block.
+- Gates: lint, 966 tests, smoke --extra, touch-test, five region smoke, ui-test 747/747. Security review: 0 critical, high, medium.
+- Open: Phone check showed 20 frames over 33 ms on 0.10.0 (PERF not started); net-filled road gaps are flat in physics but not drawn as asphalt; shader programs 73 to 77; owner screenshots (with metadata) remain in three earlier commits.
