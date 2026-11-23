@@ -2,7 +2,7 @@
 // region, from its own data file), stage by stage, each run in a fresh
 // (cold) node process like the unit test, and prints the median of the
 // runs, with the heap and buffers held after a forced collection.
-// usage: node scripts/city-build-bench.mjs [--runs 3] [--slow] [--json] [--region miami-downtown]
+// usage: node scripts/city-build-bench.mjs [--runs 3] [--slow] [--json] [--stages] [--region miami-downtown]
 //   --slow   mimic a slow shared CI runner: every run and a busy node loop
 //            share one CPU (taskset -c 0), so the build gets about half a core.
 //   --child  one cold run, prints its stage times as JSON (used by the parent;
@@ -11,6 +11,9 @@
 //            test/fixtures/build-budget-run.mjs), prints wall, cpu, main-
 //            thread cpu (thread) and the calibration times as JSON
 //            (test/build-budget.test.js, regions).
+//   --stages the stage table of test/build-budget.test.js: --runs cold
+//            --ratio builds (with --slow: pinned beside the busy loop),
+//            each stage's best ratio and its main-thread CPU ms.
 import fs from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +143,33 @@ function runChild(pin) {
   return JSON.parse(r.stdout.trim().split('\n').pop());
 }
 
+// The stages of test/build-budget.test.js (createMiamiCity laps).
+const BUDGET_STAGES = {
+  land: ['land.coast', 'land.fill', 'land.votes', 'land.walls', 'land.water', 'land'],
+  roads: ['graph', 'network'],
+  shore: ['shore.stamp', 'shore.field', 'shore'],
+  buildings: ['blocks', 'buildings'],
+  infill: ['infill.stamp', 'infill.masks', 'infill.plan', 'infill'],
+  lots: ['lots.build', 'lots'],
+  places: ['places.ramps', 'places.secrets', 'places.courses', 'places'],
+};
+function stages(runs, slow) {
+  const tail = [self, '--ratio', ...(region ? ['--region', region] : [])];
+  const best = {}, cpu = {};
+  for (let k = 0; k < runs; k++) {
+    const r = spawnSync(slow ? 'taskset' : process.execPath, slow ? ['-c', '0', process.execPath, ...tail] : tail, { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(r.stderr || 'child failed');
+    const o = JSON.parse(r.stdout.trim().split('\n').pop());
+    for (const [name, keys] of Object.entries(BUDGET_STAGES)) {
+      const wall = keys.reduce((a, x) => a + (o.timings[x] || 0), 0), th = keys.reduce((a, x) => a + (o.cpuTimings[x] || 0), 0);
+      best[name] = Math.min(best[name] ?? Infinity, wall / o.calWall, th / o.calThread);
+      cpu[name] = Math.min(cpu[name] ?? Infinity, th);
+    }
+  }
+  console.log(`build budget stages${slow ? ' (slow)' : ''}: best of ${runs} cold runs, ratio to the calibration (main-thread CPU ms)`);
+  for (const name of Object.keys(BUDGET_STAGES)) console.log(`${name.padEnd(10)} ${best[name].toFixed(2).padStart(6)}  (${cpu[name].toFixed(0)} ms)`);
+}
+
 async function main() {
   const runs = Number(opt('--runs', 3));
   const slow = args.includes('--slow');
@@ -147,6 +177,14 @@ async function main() {
   if (slow) {
     // A second busy node loop on the same CPU as the build.
     busy = spawn('taskset', ['-c', '0', process.execPath, '-e', 'for(;;){}'], { stdio: 'ignore' });
+  }
+  if (args.includes('--stages')) {
+    try {
+      stages(runs, slow);
+    } finally {
+      if (busy) busy.kill('SIGKILL');
+    }
+    return;
   }
   const res = [];
   try {

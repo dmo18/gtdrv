@@ -768,92 +768,1031 @@ function blockStats(W, ci0, ci1, cj0, cj1, park, lab, runs, nr) {
   return out.subarray(0, n);
 }
 
-// Junctions the simplified data lost: a vertex lying on another road, or
-// two streets crossing with no shared vertex. Splits the segments
-// (segA, segB, segW) there; returns the new [segA, segB, segW], or null
-// when nothing was split. vertexOf(x, z, flag) adds a vertex.
-function splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf) {
-  const SG = 40;
-  const gx0 = crop.x0 - 10, gz0 = crop.z0 - 10;
-  const gw = Math.ceil((crop.x1 - crop.x0 + 20) / SG) + 1, gh = Math.ceil((crop.z1 - crop.z0 + 20) / SG) + 1;
-  const cells = Array.from({ length: gw * gh }, () => []);
-  const ns = segA.length;
-  for (let s = 0; s < ns; s++) {
-    const ax = vx[segA[s]], az = vz[segA[s]], bx = vx[segB[s]], bz = vz[segB[s]];
-    const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - SNAP - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, bx) + SNAP - gx0) / SG));
-    const j0 = Math.max(0, Math.floor((Math.min(az, bz) - SNAP - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, bz) + SNAP - gz0) / SG));
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cells[j * gw + i].push(s);
-  }
-  const splits = new Map(); // seg -> [{t, v}]
-  const addSplit = (s, t, v) => {
-    let l = splits.get(s);
-    if (!l) splits.set(s, (l = []));
-    if (!l.some((q) => q.v === v)) l.push({ t, v });
+// ---------------------------------------------------------------------
+// The road graph (createMiamiCity stage 2), as small module functions:
+// typed arrays and index lists instead of maps keyed by large numbers,
+// so every loop runs optimized and the stage allocates little.
+// ---------------------------------------------------------------------
+const GROW_I32 = (a, n) => {
+  if (n <= a.length) return a;
+  const b = new Int32Array(Math.max(n, a.length * 2));
+  b.set(a);
+  return b;
+};
+const GROW_F64 = (a, n) => {
+  if (n <= a.length) return a;
+  const b = new Float64Array(Math.max(n, a.length * 2));
+  b.set(a);
+  return b;
+};
+
+// Reads the drivable ways of the data inside the crop into R: R.ways
+// (one info object per data way, shared by its runs), R.wayS / R.wayE
+// (each run's coordinate range in R.P, of R.np used), R.cuts (where a
+// run leaves the crop: x, z, unit direction out, run index).
+function readWays(data, S, crop, landCell, coastLand, baseLand) {
+  const R = {
+    crop, landCell, coastLand, baseLand, districts: S.districts, curb: S.curbParking || [],
+    popts: { district: '', curbParking: false }, classIds: new Map(), profiles: new Map(),
+    ways: [], wayS: [], wayE: [], P: new Float64Array(1 << 16), np: 0, cuts: [],
+    // decodePolyline's output for one road, reused (pts[0, m)).
+    pts: new Float64Array(4096),
   };
-  // Vertex on a segment.
-  const nv = vx.length;
-  for (let v = 0; v < nv; v++) {
-    const i = Math.floor((vx[v] - gx0) / SG), j = Math.floor((vz[v] - gz0) / SG);
-    if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
-    for (const s of cells[j * gw + i]) {
-      const a = segA[s], b = segB[s];
-      if (a === v || b === v) continue;
-      const sb = ways[segW[s]].bridge;
-      const f = vflag[v];
-      if (!(f & 4) && !(sb ? f & 2 : f & 1)) continue;
-      const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
-      const L = Math.hypot(dx, dz);
-      const t = ((vx[v] - ax) * dx + (vz[v] - az) * dz) / L;
-      if (t < 1 || t > L - 1) continue;
-      const ox = ax + (dx * t) / L - vx[v], oz = az + (dz * t) / L - vz[v];
-      if (ox * ox + oz * oz < SNAP * SNAP) addSplit(s, t, v);
+  const roads = data.roads;
+  for (let k = 0; k < roads.length; k++) readRoad(R, roads[k]);
+  return R;
+}
+// The district key at a point straight from the hand table (the raster
+// comes later): for the sidewalk width of a road. (The last rect holding
+// the point wins: read from the end.)
+function districtKeyAt(districts, x, z) {
+  for (let i = districts.length - 1; i >= 0; i--) {
+    const d = districts[i];
+    if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) return d.key;
+  }
+  return 'midtown';
+}
+// roadProfile(r, { district, curbParking }) shared by every way with the
+// same inputs (it reads class, name, oneway, lanes, lf, lb, mall, bridge,
+// and of the options only whether the district is downtown and whether
+// the street parks on its curbs): one frozen profile per key. Lane tags
+// other than whole numbers 0 to 15 (or none) are not cached.
+const laneKey = (v) => (v === undefined || v === null || v === 0 ? 0 : Number.isInteger(v) && v > 0 && v < 16 ? v : -1);
+function cachedProfile(R, r, downtown, curb) {
+  const lanes = laneKey(r.lanes), lf = laneKey(r.lf), lb = laneKey(r.lb);
+  let ci = R.classIds.get(r.class);
+  if (ci === undefined) R.classIds.set(r.class, (ci = R.classIds.size));
+  const popts = R.popts;
+  popts.district = downtown ? 'downtown' : '';
+  popts.curbParking = curb;
+  if (lanes < 0 || lf < 0 || lb < 0 || ci > 63) return roadProfile(r, popts);
+  const name = r.name || '';
+  let key = ci;
+  key = key * 16 + lanes;
+  key = key * 16 + lf;
+  key = key * 16 + lb;
+  key = key * 2 + (r.oneway ? 1 : 0);
+  key = key * 2 + (r.mall ? 1 : 0);
+  key = key * 2 + (r.bridge ? 1 : 0);
+  key = key * 2 + (PED_STREETS.has(name) ? 1 : 0);
+  key = key * 2 + (name === 'Lincoln Road' ? 1 : 0);
+  key = key * 2 + (downtown ? 1 : 0);
+  key = key * 2 + (curb ? 1 : 0);
+  let prof = R.profiles.get(key);
+  if (!prof) R.profiles.set(key, (prof = Object.freeze(roadProfile(r, popts))));
+  return prof;
+}
+function nearWater(landCell, coastLand, x, z) {
+  for (let k = 0; k < 8; k++) {
+    const c = landCell(x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
+    if (c < 0 || !coastLand[c]) return true;
+  }
+  return false;
+}
+// A long bridge over land is a flyover (more than 0.6 of it, sampled
+// every 5 m, over the base land, and longer than 50 m).
+function flyoverOverLand(landCell, baseLand, pts, m) {
+  let on = 0, n = 0, L = 0;
+  for (let k = 0; k + 3 < m; k += 2) {
+    const sl = Math.hypot(pts[k + 2] - pts[k], pts[k + 3] - pts[k + 1]);
+    L += sl;
+    for (let t = 0; t < sl; t += 5) {
+      n++;
+      const c = landCell(pts[k] + ((pts[k + 2] - pts[k]) * t) / sl, pts[k + 1] + ((pts[k + 3] - pts[k + 1]) * t) / sl);
+      if (c >= 0 && baseLand[c] === 1) on++;
     }
   }
-  // Street crossings without a shared vertex (never with a bridge).
+  return n && on / n > 0.6 && L > 50;
+}
+// One way of the data.
+const TUNNEL = /tunnel/i;
+function readRoad(R, r) {
+  // Pedestrian streets: only the named malls (2.1 item 8), drivable.
+  if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) return;
+  if (r.name && TUNNEL.test(r.name)) return;
+  const crop = R.crop;
+  const p = r.p, m = p.length;
+  if (m > R.pts.length) R.pts = new Float64Array(m * 2);
+  const pts = R.pts;
+  // Decoded, with the bounds in whole decimeters (x / 10 keeps the order).
+  let x = 0, z = 0, ix0 = Infinity, ix1 = -Infinity, iz0 = Infinity, iz1 = -Infinity;
+  for (let i = 0; i < m; i += 2) {
+    x += p[i];
+    z += p[i + 1];
+    if (x < ix0) ix0 = x;
+    if (x > ix1) ix1 = x;
+    if (z < iz0) iz0 = z;
+    if (z > iz1) iz1 = z;
+    pts[i] = x / 10;
+    pts[i + 1] = z / 10;
+  }
+  if (r.oneway === -1) {
+    // Stored against the traffic: reverse, so every one-way runs along its points.
+    for (let i = 0, j = m - 2; i < j; i += 2, j -= 2) {
+      const tx = pts[i], tz = pts[i + 1];
+      pts[i] = pts[j]; pts[i + 1] = pts[j + 1];
+      pts[j] = tx; pts[j + 1] = tz;
+    }
+  }
+  const bx0 = ix0 / 10, bx1 = ix1 / 10, bz0 = iz0 / 10, bz1 = iz1 / 10;
+  if (bx1 < crop.x0 || bx0 > crop.x1 || bz1 < crop.z0 || bz0 > crop.z1) return;
+  const landCell = R.landCell, coastLand = R.coastLand;
+  // Freeway pieces at grade between the dropped flyovers are islands of
+  // ramps; only the ones that run out to a water crossing are kept.
+  if (!r.bridge && r.class.startsWith('motorway') && !nearWater(landCell, coastLand, pts[0], pts[1]) && !nearWater(landCell, coastLand, pts[m - 2], pts[m - 1])) return;
+  // A long bridge over land is a flyover: the flat world would make it
+  // cross the streets below at grade, so it is left out. Bridges that
+  // land near the water are approaches to a crossing: kept.
+  if (r.bridge && flyoverOverLand(landCell, R.baseLand, pts, m) && !nearWater(landCell, coastLand, pts[0], pts[1]) && !nearWater(landCell, coastLand, pts[m - 2], pts[m - 1])) return;
+  // The cross section (world/roadprofile.js; docs/MAP.md "Edge contract").
+  const prof = cachedProfile(R, r, districtKeyAt(R.districts, pts[0], pts[1]) === 'downtown', !!r.name && R.curb.includes(r.name));
+  const oneway = prof.oneway;
+  const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue: isAvenue(prof), width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || (r.lf || 0) + (r.lb || 0) };
+  // Split at the crop edge: only runs of vertices inside it; where a
+  // segment leaves the crop, it is cut at the edge.
+  let run = R.np;
+  // (Room for every point and a cut point on every segment.)
+  if (run + 2 * m > R.P.length) R.P = GROW_F64(R.P, run + 2 * m);
+  const P = R.P;
+  const CX0 = crop.x0, CX1 = crop.x1, CZ0 = crop.z0, CZ1 = crop.z1;
+  if (bx0 >= CX0 && bx1 <= CX1 && bz0 >= CZ0 && bz1 <= CZ1) {
+    // All inside: one run of every vertex.
+    for (let k = 0; k < m; k++) P[run + k] = pts[k];
+    R.np = run + m;
+    flushRun(R, run, info);
+    return;
+  }
+  let prevIn = false;
+  for (let k = 0; k < m; k += 2) {
+    const x = pts[k], z = pts[k + 1];
+    const inside = x >= CX0 && x <= CX1 && z >= CZ0 && z <= CZ1;
+    if (inside) {
+      if (k > 0 && !prevIn) edgePoint(R, x, z, pts[k - 2], pts[k - 1]);
+      P[R.np++] = x;
+      P[R.np++] = z;
+    } else if (prevIn) {
+      edgePoint(R, pts[k - 2], pts[k - 1], x, z);
+      run = flushRun(R, run, info);
+    }
+    prevIn = inside;
+  }
+  flushRun(R, run, info);
+}
+// The run from P[run] on becomes a way when it has two vertices or more.
+function flushRun(R, run, info) {
+  if (R.np - run >= 4) {
+    R.ways.push(info);
+    R.wayS.push(run);
+    R.wayE.push(R.np);
+  } else R.np = run;
+  return R.np;
+}
+function edgePoint(R, ax, az, bx, bz) {
+  const crop = R.crop;
+  let t = 1;
+  const dx = bx - ax, dz = bz - az;
+  if (bx < crop.x0) t = Math.min(t, (crop.x0 - ax) / dx);
+  if (bx > crop.x1) t = Math.min(t, (crop.x1 - ax) / dx);
+  if (bz < crop.z0) t = Math.min(t, (crop.z0 - az) / dz);
+  if (bz > crop.z1) t = Math.min(t, (crop.z1 - az) / dz);
+  const cx = Math.round((ax + dx * t) * 10) / 10, cz = Math.round((az + dz * t) * 10) / 10;
+  R.P[R.np++] = cx;
+  R.P[R.np++] = cz;
+  const dl = Math.hypot(dx, dz) || 1;
+  R.cuts.push(cx, cz, dx / dl, dz / dl, R.ways.length);
+}
+
+// Vertices, shared where the data shares them (same decimeter): an open
+// addressing table on the decimeter pair. flag: 1 street, 2 bridge, 4 way
+// end. ix, iz: the vertex in whole decimeters plus 100000 (Math.round),
+// within 0.05 m of it: the cheap first tests of splitJunctions.
+// (The decimeter key of the data, Math.round(x * 10 + 100000) * 400000 +
+// Math.round(z * 10 + 100000), is the pair: z is within 10 km of 0.)
+function makeVertices(cap) {
+  let hs = 1024;
+  while (hs < cap * 2) hs *= 2;
+  return {
+    n: 0, vx: new Float64Array(cap), vz: new Float64Array(cap), ix: new Int32Array(cap), iz: new Int32Array(cap), vflag: new Uint8Array(cap),
+    hid: new Int32Array(hs).fill(-1), hmask: hs - 1,
+  };
+}
+function vertexOf(V, x, z, flag) {
+  const ix = Math.round(x * 10 + 100000), iz = Math.round(z * 10 + 100000);
+  const mask = V.hmask, hid = V.hid, vix = V.ix, viz = V.iz;
+  let h = (Math.imul(ix, 73856093) ^ Math.imul(iz, 19349663)) & mask;
+  let id;
+  for (;;) {
+    id = hid[h];
+    if (id < 0 || (vix[id] === ix && viz[id] === iz)) break;
+    h = (h + 1) & mask;
+  }
+  if (id < 0) {
+    id = V.n++;
+    if (id >= V.vx.length) growVertices(V, id + 1);
+    hid[h] = id;
+    V.vx[id] = x;
+    V.vz[id] = z;
+    V.ix[id] = ix;
+    V.iz[id] = iz;
+    if (V.n * 2 > mask) rehashVertices(V);
+  }
+  V.vflag[id] |= flag;
+  return id;
+}
+function growVertices(V, n) {
+  V.vx = GROW_F64(V.vx, n);
+  V.vz = GROW_F64(V.vz, n);
+  V.ix = GROW_I32(V.ix, V.vx.length);
+  V.iz = GROW_I32(V.iz, V.vx.length);
+  const f = new Uint8Array(V.vx.length);
+  f.set(V.vflag);
+  V.vflag = f;
+}
+function rehashVertices(V) {
+  const hs = (V.hmask + 1) * 2, mask = hs - 1;
+  const hid = new Int32Array(hs).fill(-1);
+  for (let v = 0; v < V.n; v++) {
+    let h = (Math.imul(V.ix[v], 73856093) ^ Math.imul(V.iz[v], 19349663)) & mask;
+    while (hid[h] >= 0) h = (h + 1) & mask;
+    hid[h] = v;
+  }
+  V.hid = hid;
+  V.hmask = mask;
+}
+// Segments of every run between its vertices: seg { n, a, b, w } plus,
+// for splitJunctions, per segment: on a bridge, its length (Math.hypot),
+// its bounds in the vertices' whole decimeters (box: x0, x1, z0, z1); the
+// segments of each SPLIT_GRID m cell over their bounds plus SNAP (cells:
+// head per cell, then next and seg per entry, in segment order); and the
+// degree of each vertex (deg; the vertices made here are at most the
+// points).
+const SPLIT_GRID = 40;
+function waySegments(R, V, crop) {
+  const P = R.P, wayS = R.wayS, wayE = R.wayE, ways = R.ways;
+  const SG = SPLIT_GRID;
+  const gx0 = crop.x0 - 10, gz0 = crop.z0 - 10;
+  const gw = Math.ceil((crop.x1 - crop.x0 + 20) / SG) + 1, gh = Math.ceil((crop.z1 - crop.z0 + 20) / SG) + 1;
+  const cap = (R.np >> 1) + 1;
+  const seg = {
+    n: 0, a: new Int32Array(cap), b: new Int32Array(cap), w: new Int32Array(cap),
+    bridge: new Uint8Array(cap), len: new Float64Array(cap), box: new Int32Array(4 * cap), deg: new Int32Array(cap),
+    cells: { gx0, gz0, gw, gh, n: 0, head: new Int32Array(gw * gh).fill(-1), tail: new Int32Array(gw * gh), next: new Int32Array(6 * cap), seg: new Int32Array(6 * cap) },
+  };
+  for (let wi = 0; wi < ways.length; wi++) {
+    const s0 = wayS[wi], n = (wayE[wi] - s0) >> 1, br = ways[wi].bridge;
+    const base = br ? 2 : 1;
+    let prev = -1;
+    for (let k = 0; k < n; k++) {
+      const id = vertexOf(V, P[s0 + 2 * k], P[s0 + 2 * k + 1], base | (k === 0 || k === n - 1 ? 4 : 0));
+      if (prev >= 0 && prev !== id) addSegment(V, seg, prev, id, wi, br);
+      prev = id;
+    }
+  }
+  return seg;
+}
+function addSegment(V, seg, a, b, wi, br) {
+  const s = seg.n++;
+  seg.a[s] = a;
+  seg.b[s] = b;
+  seg.w[s] = wi;
+  seg.deg[a]++;
+  seg.deg[b]++;
+  const vx = V.vx, vz = V.vz, vix = V.ix, viz = V.iz;
+  const ax = vx[a], az = vz[a], bx = vx[b], bz = vz[b];
+  seg.bridge[s] = br ? 1 : 0;
+  seg.len[s] = Math.hypot(bx - ax, bz - az);
+  const k = 4 * s, box = seg.box;
+  box[k] = vix[a] < vix[b] ? vix[a] : vix[b];
+  box[k + 1] = vix[a] < vix[b] ? vix[b] : vix[a];
+  box[k + 2] = viz[a] < viz[b] ? viz[a] : viz[b];
+  box[k + 3] = viz[a] < viz[b] ? viz[b] : viz[a];
+  const C = seg.cells, SG = SPLIT_GRID, gw = C.gw;
+  // The cells Math.max(0, Math.floor(lo / SG)) to Math.min(n - 1,
+  // Math.floor(hi / SG)) (from 0 up to 2^31, | 0 truncates as it floors).
+  const xl = (ax < bx ? ax : bx) - SNAP - C.gx0, xh = (ax < bx ? bx : ax) + SNAP - C.gx0;
+  const zl = (az < bz ? az : bz) - SNAP - C.gz0, zh = (az < bz ? bz : az) + SNAP - C.gz0;
+  const i0 = xl >= 0 && xl < 2e9 ? (xl / SG) | 0 : Math.max(0, Math.floor(xl / SG));
+  const j0 = zl >= 0 && zl < 2e9 ? (zl / SG) | 0 : Math.max(0, Math.floor(zl / SG));
+  let i1 = xh >= 0 && xh < 2e9 ? (xh / SG) | 0 : Math.floor(xh / SG), j1 = zh >= 0 && zh < 2e9 ? (zh / SG) | 0 : Math.floor(zh / SG);
+  if (i1 > gw - 1) i1 = gw - 1;
+  if (j1 > C.gh - 1) j1 = C.gh - 1;
+  let n = C.n;
+  if (n + (i1 - i0 + 1) * (j1 - j0 + 1) > C.next.length) {
+    C.next = GROW_I32(C.next, n + (i1 - i0 + 1) * (j1 - j0 + 1));
+    C.seg = GROW_I32(C.seg, C.next.length);
+  }
+  const head = C.head, tail = C.tail, next = C.next, cseg = C.seg;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const c = j * gw + i;
+      next[n] = -1;
+      cseg[n] = s;
+      if (head[c] < 0) head[c] = n;
+      else next[tail[c]] = n;
+      tail[c] = n++;
+    }
+  }
+  C.n = n;
+}
+
+// Junctions the simplified data lost: a vertex lying on another road, or
+// two streets crossing with no shared vertex. Returns the split segments
+// (or seg itself when nothing splits).
+function splitJunctions(V, seg) {
+  const C = seg.cells, ns = seg.n;
+  // Splits per segment: linked lists in insertion order (count in n[0]).
+  const cap = ns + 256;
+  const SP = { head: new Int32Array(ns).fill(-1), tail: new Int32Array(ns), n: new Int32Array(1), t: new Float64Array(cap), v: new Int32Array(cap), next: new Int32Array(cap) };
+  splitOnVertices(V, seg, C.gx0, C.gz0, C.gw, C.gh, C.head, C.next, C.seg, SP);
+  splitCrossings(V, seg, C.gx0, C.gz0, C.gw, C.gh, C.head, C.next, C.seg, SP);
+  if (!SP.n[0]) return seg;
+  return applySplits(V, seg, SP);
+}
+function addSplit(SP, s, t, v) {
+  let q = SP.head[s];
+  while (q >= 0) {
+    if (SP.v[q] === v) return;
+    q = SP.next[q];
+  }
+  const k = SP.n[0]++;
+  if (k >= SP.t.length) {
+    SP.t = GROW_F64(SP.t, k + 1);
+    SP.v = GROW_I32(SP.v, k + 1);
+    SP.next = GROW_I32(SP.next, k + 1);
+  }
+  SP.t[k] = t;
+  SP.v[k] = v;
+  SP.next[k] = -1;
+  if (SP.head[s] < 0) SP.head[s] = k;
+  else SP.next[SP.tail[s]] = k;
+  SP.tail[s] = k;
+}
+// Vertex on a segment. (A vertex more than SNAP_DM decimeters outside a
+// segment's decimeter bounds is skipped first: with the rounding of both,
+// it is over 2.4 m from the segment, farther than SNAP.)
+const SNAP_DM = 24;
+function splitOnVertices(V, seg, gx0, gz0, gw, gh, head, next, cseg, SP) {
+  const bridge = seg.bridge, len = seg.len, box = seg.box;
+  const SG = SPLIT_GRID, vx = V.vx, vz = V.vz, vix = V.ix, viz = V.iz, vflag = V.vflag, segA = seg.a, segB = seg.b;
+  const nv = V.n;
+  for (let v = 0; v < nv; v++) {
+    const x = vx[v], z = vz[v];
+    const xr = x - gx0, zr = z - gz0;
+    const i = xr >= 0 && xr < 2e9 ? (xr / SG) | 0 : Math.floor(xr / SG), j = zr >= 0 && zr < 2e9 ? (zr / SG) | 0 : Math.floor(zr / SG);
+    if (i < 0 || j < 0 || i >= gw || j >= gh) continue;
+    const f = vflag[v], ix = vix[v], iz = viz[v];
+    const c = j * gw + i;
+    for (let q = head[c]; q >= 0; q = next[q]) {
+      const s = cseg[q], k = 4 * s;
+      if (ix < box[k] - SNAP_DM || ix > box[k + 1] + SNAP_DM || iz < box[k + 2] - SNAP_DM || iz > box[k + 3] + SNAP_DM) continue;
+      const a = segA[s], b = segB[s];
+      if (a === v || b === v) continue;
+      if (!(f & 4) && !(bridge[s] ? f & 2 : f & 1)) continue;
+      const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
+      const L = len[s];
+      const t = ((x - ax) * dx + (z - az) * dz) / L;
+      if (t < 1 || t > L - 1) continue;
+      const ox = ax + (dx * t) / L - x, oz = az + (dz * t) / L - z;
+      if (ox * ox + oz * oz < SNAP * SNAP) addSplit(SP, s, t, v);
+    }
+  }
+}
+// Street crossings without a shared vertex (never with a bridge). Each
+// cell's list is read from a cursor past the segments up to s (they come
+// in order, and only later ones pair with s); two segments whose
+// decimeter bounds lie more than 2 dm apart are skipped first (over 0.2 m
+// apart: they cannot cross).
+function splitCrossings(V, seg, gx0, gz0, gw, gh, head, next, cseg, SP) {
+  const bridge = seg.bridge, len = seg.len, box = seg.box;
+  const SG = SPLIT_GRID, segA = seg.a, segB = seg.b, ns = seg.n;
   const seen = new Int32Array(ns).fill(-1);
+  const cur = head.slice();
+  // (vertexOf may grow the vertex arrays: the segments' ends are read
+  // from the arrays as they were, which keep their values.)
+  const vx = V.vx, vz = V.vz;
   for (let s = 0; s < ns; s++) {
-    if (ways[segW[s]].bridge) continue;
+    if (bridge[s]) continue;
     const a = segA[s], b = segB[s];
-    const ax = vx[a], az = vz[a], dx = vx[b] - ax, dz = vz[b] - az;
-    const i0 = Math.max(0, Math.floor((Math.min(ax, vx[b]) - gx0) / SG)), i1 = Math.min(gw - 1, Math.floor((Math.max(ax, vx[b]) - gx0) / SG));
-    const j0 = Math.max(0, Math.floor((Math.min(az, vz[b]) - gz0) / SG)), j1 = Math.min(gh - 1, Math.floor((Math.max(az, vz[b]) - gz0) / SG));
+    const ax = vx[a], az = vz[a], bx = vx[b], bz = vz[b], dx = bx - ax, dz = bz - az;
+    const La = len[s];
+    const sx0 = box[4 * s] - 2, sx1 = box[4 * s + 1] + 2, sz0 = box[4 * s + 2] - 2, sz1 = box[4 * s + 3] + 2;
+    // (Cells as in addSegment, the bounds without SNAP.)
+    const xl = (ax < bx ? ax : bx) - gx0, xh = (ax < bx ? bx : ax) - gx0, zl = (az < bz ? az : bz) - gz0, zh = (az < bz ? bz : az) - gz0;
+    const i0 = xl >= 0 && xl < 2e9 ? (xl / SG) | 0 : Math.max(0, Math.floor(xl / SG));
+    const j0 = zl >= 0 && zl < 2e9 ? (zl / SG) | 0 : Math.max(0, Math.floor(zl / SG));
+    let i1 = xh >= 0 && xh < 2e9 ? (xh / SG) | 0 : Math.floor(xh / SG), j1 = zh >= 0 && zh < 2e9 ? (zh / SG) | 0 : Math.floor(zh / SG);
+    if (i1 > gw - 1) i1 = gw - 1;
+    if (j1 > gh - 1) j1 = gh - 1;
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
-        for (const u of cells[j * gw + i]) {
-          if (u <= s || seen[u] === s || ways[segW[u]].bridge) continue;
+        const c = j * gw + i;
+        let q = cur[c];
+        while (q >= 0 && cseg[q] <= s) q = next[q];
+        cur[c] = q;
+        for (; q >= 0; q = next[q]) {
+          const u = cseg[q], k = 4 * u;
+          if (seen[u] === s || bridge[u]) continue;
           seen[u] = s;
-          const c = segA[u], d = segB[u];
-          if (c === a || c === b || d === a || d === b) continue;
-          const ex = vx[d] - vx[c], ez = vz[d] - vz[c];
+          if (box[k + 1] < sx0 || box[k] > sx1 || box[k + 3] < sz0 || box[k + 2] > sz1) continue;
+          const cc = segA[u], d = segB[u];
+          if (cc === a || cc === b || d === a || d === b) continue;
+          const cx = vx[cc], cz = vz[cc];
+          const ex = vx[d] - cx, ez = vz[d] - cz;
           const den = dx * ez - dz * ex;
           if (Math.abs(den) < 1e-9) continue;
-          const wx = vx[c] - ax, wz = vz[c] - az;
-          const p = (wx * ez - wz * ex) / den, q = (wx * dz - wz * dx) / den;
-          const La = Math.hypot(dx, dz), Lb = Math.hypot(ex, ez);
-          if (p * La < 0.5 || p * La > La - 0.5 || q * Lb < 0.5 || q * Lb > Lb - 0.5) continue;
-          const v = vertexOf(ax + dx * p, az + dz * p, 1);
-          addSplit(s, p * La, v);
-          addSplit(u, q * Lb, v);
+          const wx = cx - ax, wz = cz - az;
+          const p = (wx * ez - wz * ex) / den, qq = (wx * dz - wz * dx) / den;
+          const Lb = len[u];
+          if (p * La < 0.5 || p * La > La - 0.5 || qq * Lb < 0.5 || qq * Lb > Lb - 0.5) continue;
+          const v = vertexOf(V, ax + dx * p, az + dz * p, 1);
+          addSplit(SP, s, p * La, v);
+          addSplit(SP, u, qq * Lb, v);
         }
       }
     }
   }
-  if (splits.size) {
-    const A = [], B = [], Wd = [];
-    for (let s = 0; s < ns; s++) {
-      const l = splits.get(s);
-      if (!l) { A.push(segA[s]); B.push(segB[s]); Wd.push(segW[s]); continue; }
-      l.sort((p, q) => p.t - q.t);
-      let prev = segA[s];
-      for (const q of l) {
-        if (q.v !== prev) { A.push(prev); B.push(q.v); Wd.push(segW[s]); }
-        prev = q.v;
-      }
-      if (prev !== segB[s]) { A.push(prev); B.push(segB[s]); Wd.push(segW[s]); }
+}
+// Each split segment as its pieces, the splits in order along it (a
+// stable insertion sort by distance: equal ones keep their order).
+// Returns { n, a, b, w, deg }.
+function applySplits(V, seg, SP) {
+  const ns = seg.n, segA = seg.a, segB = seg.b, segW = seg.w;
+  // (A segment with k splits makes k + 1 pieces at most.)
+  const cap = ns + SP.n[0];
+  const A = new Int32Array(cap), B = new Int32Array(cap), Wd = new Int32Array(cap);
+  const deg = new Int32Array(V.n);
+  let n = 0;
+  let st = new Float64Array(16), sv = new Int32Array(16);
+  for (let s = 0; s < ns; s++) {
+    let q = SP.head[s];
+    if (q < 0) { A[n] = segA[s]; B[n] = segB[s]; Wd[n] = segW[s]; n++; deg[segA[s]]++; deg[segB[s]]++; continue; }
+    let m = 0;
+    for (; q >= 0; q = SP.next[q]) {
+      if (m >= st.length) { st = GROW_F64(st, m + 1); sv = GROW_I32(sv, m + 1); }
+      const t = SP.t[q], v = SP.v[q];
+      let k = m++;
+      while (k > 0 && st[k - 1] > t) { st[k] = st[k - 1]; sv[k] = sv[k - 1]; k--; }
+      st[k] = t;
+      sv[k] = v;
     }
-    return [A, B, Wd];
+    let prev = segA[s];
+    for (let k = 0; k < m; k++) {
+      if (sv[k] !== prev) { A[n] = prev; B[n] = sv[k]; Wd[n] = segW[s]; n++; deg[prev]++; deg[sv[k]]++; }
+      prev = sv[k];
+    }
+    if (prev !== segB[s]) { A[n] = prev; B[n] = segB[s]; Wd[n] = segW[s]; n++; deg[prev]++; deg[segB[s]]++; }
   }
-  return null;
+  return { n, a: A, b: B, w: Wd, deg };
+}
+
+function findRoot(parent, v) {
+  while (parent[v] !== v) v = parent[v] = parent[parent[v]];
+  return v;
+}
+// Merge junction vertices closer than MERGE m (dual carriageways, ramps):
+// union-find parents over the vertices. The junctions (degree 1 or 3+)
+// sit in a MERGE m grid of linked lists, in vertex order in each cell.
+// Also the representative positions (rx, rz): the mean of each merged
+// group, summed in vertex order from 0 (a vertex on its own: 0 + its x).
+// Returns { parent, rx, rz } (rx, rz set for the representatives).
+function mergeJunctions(V, seg) {
+  const nv = V.n, vx = V.vx, vz = V.vz;
+  const parent = new Int32Array(nv), deg = seg.deg;
+  const rx = new Float64Array(nv), rz = new Float64Array(nv);
+  const MG = MERGE;
+  const junc = new Int32Array(nv), jci = new Int32Array(nv), jcj = new Int32Array(nv);
+  let nj = 0, ci0 = Infinity, ci1 = -Infinity, cj0 = Infinity, cj1 = -Infinity;
+  for (let v = 0; v < nv; v++) {
+    parent[v] = v;
+    rx[v] = 0 + vx[v];
+    rz[v] = 0 + vz[v];
+    if (deg[v] === 0 || deg[v] === 2) continue;
+    const ci = Math.floor(vx[v] / MG), cj = Math.floor(vz[v] / MG);
+    junc[nj] = v;
+    jci[nj] = ci;
+    jcj[nj] = cj;
+    nj++;
+    if (ci < ci0) ci0 = ci;
+    if (ci > ci1) ci1 = ci;
+    if (cj < cj0) cj0 = cj;
+    if (cj > cj1) cj1 = cj;
+  }
+  if (!nj) return { parent, rx, rz };
+  // One empty cell of margin all round (the neighbors of every junction).
+  const gw = ci1 - ci0 + 3, gh = cj1 - cj0 + 3;
+  const head = new Int32Array(gw * gh).fill(-1), next = new Int32Array(nj);
+  for (let q = nj - 1; q >= 0; q--) {
+    const c = (jcj[q] - cj0 + 1) * gw + jci[q] - ci0 + 1;
+    next[q] = head[c];
+    head[c] = q;
+  }
+  mergeNear(vx, vz, parent, junc, jci, jcj, nj, head, next, gw, ci0 - 1, cj0 - 1);
+  groupMeans(vx, vz, parent, junc, nj, rx, rz);
+  return { parent, rx, rz };
+}
+// Only junctions merge: each group's mean from its members in order (the
+// mean set again as each adds in, so the last one leaves the mean of all).
+function groupMeans(vx, vz, parent, junc, nj, rx, rz) {
+  const nv = parent.length;
+  const px = new Float64Array(nv), pz = new Float64Array(nv), pn = new Int32Array(nv);
+  for (let q = 0; q < nj; q++) {
+    const v = junc[q];
+    const r = parent[v] === v ? v : findRoot(parent, v);
+    px[r] += vx[v];
+    pz[r] += vz[v];
+    pn[r]++;
+    rx[r] = px[r] / pn[r];
+    rz[r] = pz[r] / pn[r];
+  }
+}
+function mergeNear(vx, vz, parent, junc, jci, jcj, nj, head, next, gw, oi, oj) {
+  const MG = MERGE;
+  for (let q = 0; q < nj; q++) {
+    const v = junc[q];
+    for (let dj = -1; dj <= 1; dj++) {
+      for (let di = -1; di <= 1; di++) {
+        for (let r = head[(jcj[q] + dj - oj) * gw + jci[q] + di - oi]; r >= 0; r = next[r]) {
+          const u = junc[r];
+          if (u <= v) continue;
+          if ((vx[u] - vx[v]) ** 2 + (vz[u] - vz[v]) ** 2 > MG * MG) continue;
+          const ra = findRoot(parent, u), rb = findRoot(parent, v);
+          if (ra !== rb) parent[ra] = rb;
+        }
+      }
+    }
+  }
+}
+
+// Adjacency on representatives (one entry per directed pair, the wider
+// way wins), as linked lists in insertion order: G.head / G.tail per rep,
+// per entry to, way, next, mate (the reverse entry), legal (a one-way runs
+// along it), seen (walked). G.order: the reps in order of first link.
+function makeAdjacency(nv, cap) {
+  return {
+    nv, nOrder: 0, order: new Int32Array(nv), head: new Int32Array(nv).fill(-1), tail: new Int32Array(nv), deg: new Int32Array(nv),
+    n: 0, to: new Int32Array(cap), way: new Int32Array(cap), next: new Int32Array(cap), mate: new Int32Array(cap), legal: new Uint8Array(cap), seen: new Uint8Array(cap),
+  };
+}
+function adjEntry(G, a, b) {
+  for (let e = G.head[a]; e >= 0; e = G.next[e]) if (G.to[e] === b) return e;
+  return -1;
+}
+function adjAppend(G, a, b, wi) {
+  const e = G.n++;
+  if (e >= G.to.length) {
+    const c = Math.max(e + 1, G.to.length * 2);
+    G.to = GROW_I32(G.to, c); G.way = GROW_I32(G.way, c); G.next = GROW_I32(G.next, c); G.mate = GROW_I32(G.mate, c);
+    const l = new Uint8Array(c); l.set(G.legal); G.legal = l;
+    const s = new Uint8Array(c); s.set(G.seen); G.seen = s;
+  }
+  G.to[e] = b;
+  G.way[e] = wi;
+  G.next[e] = -1;
+  if (G.head[a] < 0) { G.head[a] = e; G.order[G.nOrder++] = a; }
+  else G.next[G.tail[a]] = e;
+  G.tail[a] = e;
+  G.deg[a]++;
+  return e;
+}
+// link(a, b) and link(b, a): returns the entry a -> b.
+function adjLink(G, ways, a, b, wi) {
+  let e = adjEntry(G, a, b);
+  if (e < 0) {
+    e = adjAppend(G, a, b, wi);
+    const r = adjAppend(G, b, a, wi);
+    G.mate[e] = r;
+    G.mate[r] = e;
+  } else if (ways[wi].width > ways[G.way[e]].width) {
+    G.way[e] = wi;
+    G.way[G.mate[e]] = wi;
+  }
+  return e;
+}
+function linkReps(seg, parent, ways, links, rx, rz) {
+  const G = makeAdjacency(parent.length, 2 * seg.n + 2 * links.length + 2);
+  for (let s = 0; s < seg.n; s++) {
+    const a = findRoot(parent, seg.a[s]), b = findRoot(parent, seg.b[s]);
+    if (a === b) continue;
+    const e = adjLink(G, ways, a, b, seg.w[s]);
+    if (ways[seg.w[s]].oneway) G.legal[e] = 1;
+  }
+  for (let k = 0; k < links.length; k++) {
+    // Hand-made links: nearest representative to each end.
+    const s = links[k];
+    const a = nearestRep(G, rx, rz, s[0], s[1]), b = nearestRep(G, rx, rz, s[2], s[3]);
+    if (a >= 0 && b >= 0 && a !== b) {
+      const prof = roadProfile({ class: 'unclassified' });
+      ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: prof.width, prof, mph: 0, lanesTag: 0 });
+      adjLink(G, ways, a, b, ways.length - 1);
+    }
+  }
+  return G;
+}
+function nearestRep(G, rx, rz, x, z) {
+  let best = -1, bd = Infinity;
+  for (let k = 0; k < G.nOrder; k++) {
+    const r = G.order[k];
+    const d = (rx[r] - x) ** 2 + (rz[r] - z) ** 2;
+    if (d < bd) { bd = d; best = r; }
+  }
+  return best;
+}
+
+const sameKind = (ways, w1, w2) => w1 === w2 || (ways[w1].width === ways[w2].width && ways[w1].bridge === ways[w2].bridge && ways[w1].cls === ways[w2].cls && ways[w1].name === ways[w2].name &&
+  ways[w1].oneway === ways[w2].oneway && ways[w1].prof.lanesF === ways[w2].prof.lanesF);
+// A rep where a chain ends: not two neighbors, or two of different ways.
+function isBreak(G, ways, r) {
+  if (G.deg[r] !== 2) return true;
+  const e = G.head[r];
+  return !sameKind(ways, G.way[e], G.way[G.next[e]]);
+}
+
+// Chains between junctions, simplified (Douglas-Peucker) into edges.
+// Returns { nodes, edges } (node.edges filled, in edge order: addEdge
+// adds each new edge to its two nodes).
+function walkChains(G, ways, rx, rz) {
+  const W = {
+    G, ways, rx, rz, nodes: [], edges: [],
+    nodeOfRep: new Int32Array(G.nv).fill(-1),
+    chain: new Int32Array(G.nv + 2), chainE: new Int32Array(G.nv + 2), keep: new Uint8Array(G.nv + 2), stack: new Int32Array(2 * G.nv + 8),
+    // Edges by their smaller node: head per node, next and other end per edge.
+    ekHead: new Int32Array(G.nv).fill(-1), ekNext: [], ekOther: [],
+    // Union-find over the nodes, joined along every edge (keepMainNetwork).
+    uf: new Int32Array(G.nv + 1),
+  };
+  // From every break, then (k past nOrder) the loops with no junction on
+  // them (a traffic circle on its own): one loop over the reps twice.
+  const nr = G.nOrder;
+  for (let k = 0; k < 2 * nr; k++) {
+    const r = G.order[k < nr ? k : k - nr];
+    if (k < nr && !isBreak(G, ways, r)) continue;
+    for (let e = G.head[r]; e >= 0; e = G.next[e]) if (!G.seen[e]) walkFrom(W, r, e);
+  }
+  return { nodes: W.nodes, edges: W.edges, uf: W.uf };
+}
+function walkFrom(W, start, e0) {
+  const G = W.G, ways = W.ways, chain = W.chain, chainE = W.chainE;
+  const next = G.to[e0];
+  chain[0] = start;
+  chain[1] = next;
+  chainE[0] = e0;
+  let len = 2;
+  const wi = G.way[e0];
+  G.seen[e0] = G.seen[G.mate[e0]] = 1;
+  let prev = start, cur = next;
+  while (!isBreak(G, ways, cur) && cur !== start) {
+    let nxt = -1, ne = -1;
+    for (let e = G.head[cur]; e >= 0; e = G.next[e]) if (G.to[e] !== prev) { nxt = G.to[e]; ne = e; }
+    if (nxt < 0 || G.seen[ne]) break;
+    G.seen[ne] = G.seen[G.mate[ne]] = 1;
+    chainE[len - 1] = ne;
+    chain[len++] = nxt;
+    prev = cur;
+    cur = nxt;
+  }
+  simplifyChain(W, len, wi);
+}
+// Douglas-Peucker over chain[0, len): marks the kept points in keep (the
+// pieces on an explicit stack; each piece's split point does not depend
+// on the order they are taken in).
+function chainDP(chain, keep, stack, rx, rz, len) {
+  let sp = 0;
+  stack[sp++] = 0;
+  stack[sp++] = len - 1;
+  const tol2 = CHAIN_TOL * CHAIN_TOL;
+  while (sp) {
+    const i1 = stack[--sp], i0 = stack[--sp];
+    let best = -1, bd = tol2;
+    const ax = rx[chain[i0]], az = rz[chain[i0]], bx = rx[chain[i1]], bz = rz[chain[i1]];
+    for (let i = i0 + 1; i < i1; i++) {
+      const d = segDist2(rx[chain[i]], rz[chain[i]], ax, az, bx, bz);
+      if (d > bd) { bd = d; best = i; }
+    }
+    if (best >= 0) {
+      keep[best] = 1;
+      stack[sp++] = i0;
+      stack[sp++] = best;
+      stack[sp++] = best;
+      stack[sp++] = i1;
+    }
+  }
+}
+function simplifyChain(W, len, wi) {
+  // chain: reps from break to break.
+  const G = W.G, chain = W.chain, chainE = W.chainE, keep = W.keep;
+  keep[0] = keep[len - 1] = 1;
+  if (len > 2) {
+    // (Two reps: nothing between them to keep or drop.)
+    keep.fill(0, 1, len - 1);
+    chainDP(chain, keep, W.stack, W.rx, W.rz, len);
+  }
+  let prev = nodeFor(W, chain[0]), prevI = 0;
+  const oneway = W.ways[wi].oneway;
+  for (let i = 1; i < len; i++) {
+    if (!keep[i]) continue;
+    const n = nodeFor(W, chain[i]);
+    // A one-way edge runs the way its way runs (first step of the piece);
+    // legal both ways: the two carriageways of a pair on one line.
+    const e = chainE[prevI];
+    const fw = G.legal[e] === 1, bw = G.legal[G.mate[e]] === 1;
+    if (oneway && fw && bw) addEdge(W, prev, n, wi, true);
+    else if (oneway && !fw && bw) addEdge(W, n, prev, wi, false);
+    else addEdge(W, prev, n, wi, false);
+    prev = n;
+    prevI = i;
+  }
+}
+function nodeFor(W, r) {
+  let n = W.nodeOfRep[r];
+  if (n < 0) {
+    n = W.nodes.length;
+    W.nodeOfRep[r] = n;
+    W.uf[n] = n;
+    // (stop, blade, signalSrc: set by keepNodes on every kept node, in
+    // the literal so the node is made with room for them. hx, hz made
+    // fractional, then 2: their fields hold any number from the start,
+    // so the boxes keepNodes writes do not move every node to a new map.)
+    const nd = { id: n, i: 0, j: 0, x: W.rx[r], z: W.rz[r], hx: 0.5, hz: 0.5, edges: [], signal: false, stop: false, blade: false, signalSrc: '' };
+    nd.hx = 2;
+    nd.hz = 2;
+    W.nodes.push(nd);
+  }
+  return n;
+}
+// both: the two carriageways of a one-way pair collapsed onto the same
+// junctions (closer than MERGE): one two-way road (2.1 item 4).
+function addEdge(W, na, nb, wi, both) {
+  if (na === nb) return;
+  const lo = na < nb ? na : nb, hi = na < nb ? nb : na;
+  const w = W.ways[wi], edges = W.edges;
+  let old = W.ekHead[lo];
+  while (old >= 0 && W.ekOther[old] !== hi) old = W.ekNext[old];
+  if (old >= 0) {
+    // Both carriageways of a tight one-way pair between the same two
+    // junctions: one two-way road (2.1 item 4, gap under 1 m).
+    const e = edges[old];
+    if (e.oneway && w.oneway && e.a === nb && e.name === w.name) {
+      e.oneway = false;
+      e.lanesB = w.prof.lanesF;
+      e.parkL = w.prof.parkR;
+      e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
+      e.avenue = isAvenue(e);
+      e.merged = true;
+    }
+    return;
+  }
+  const A = W.nodes[na], Bn = W.nodes[nb];
+  const dx = Bn.x - A.x, dz = Bn.z - A.z, length = Math.hypot(dx, dz);
+  if (length < 0.5) return;
+  W.ekNext.push(W.ekHead[lo]);
+  W.ekOther.push(hi);
+  W.ekHead[lo] = edges.length;
+  const P = w.prof;
+  const ed = {
+    id: edges.length, a: na, b: nb, horizontal: Math.abs(dx) >= Math.abs(dz), width: P.width, avenue: w.avenue, length,
+    ux: dx / length, uz: dz / length, bridge: w.bridge, oneway: w.oneway, cls: w.cls, name: w.name,
+    // The edge contract (docs/MAP.md), from world/roadprofile.js.
+    lanesF: P.lanesF, lanesB: P.lanesB, laneW: P.laneW, parkL: P.parkL, parkR: P.parkR, median: 0.5, center: P.center,
+    off: 0.5, sidewalk: P.sidewalk, ped: P.ped, divided: false, pair: -1, mph: w.mph, lanesTag: w.lanesTag || 0,
+  };
+  // (median, off made fractional, then 0: their fields hold any number
+  // from the start, so pairDivided's do not move every edge to a new map.)
+  ed.median = 0;
+  ed.off = 0;
+  edges.push(ed);
+  A.edges.push(edges.length - 1);
+  Bn.edges.push(edges.length - 1);
+  const ra = findRoot(W.uf, na), rb = findRoot(W.uf, nb);
+  if (ra !== rb) W.uf[ra] = rb;
+  if (both && w.oneway) {
+    const e = edges[edges.length - 1];
+    e.oneway = false;
+    e.lanesB = e.lanesF;
+    e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
+    e.avenue = isAvenue(e);
+    e.merged = true;
+  }
+}
+
+// The node with edges nearest (x, z) (the first of equals), or null.
+function nearestLinkedNode(nodes, x, z) {
+  let bd = Infinity, best = null;
+  for (let k = 0; k < nodes.length; k++) {
+    const n = nodes[k];
+    if (!n.edges.length) continue;
+    const d = Math.hypot(n.x - x, n.z - z);
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+// Keeps the largest connected road network only: renumbers the nodes
+// and edges (in order) and their edge lists (a kept node keeps all its
+// edges: their other ends are in its component). On the way, the kept
+// nodes' junction boxes: half the widest road, kept short of the edges.
+// Returns { stats, juncGrid } (the junctions, degree 3+ and not the
+// airfield gate, in a JUNC_GRID m grid, for signalsAndStops).
+const JUNC_GRID = 32;
+// (One loop per function: a function optimized in its first loop would
+// meet the later ones with no type feedback and drop back.)
+// J: buildRoadGraph's union-find of its J.nodes nodes (J.uf), joined
+// along its J.edges edges; the nodes and edges added since (the airfield
+// gate and causeway) join here.
+function keepMainNetwork(nodes, edges, J) {
+  const N = nodes.length;
+  const uf = J.uf.length < N ? GROW_I32(J.uf, N) : J.uf;
+  for (let v = J.nodes; v < N; v++) uf[v] = v;
+  for (let k = J.edges; k < edges.length; k++) {
+    const ra = findRoot(uf, edges[k].a), rb = findRoot(uf, edges[k].b);
+    if (ra !== rb) uf[ra] = rb;
+  }
+  const comp = new Int32Array(N), cc = new Int32Array(2);
+  componentsOf(N, uf, comp, cc);
+  const c = cc[0], best = cc[1];
+  // Junctions (degree 1 or 3+) per component, for the connectivity check;
+  // the first node of each component (where a lost one is).
+  const jc = new Int32Array(c), first = new Array(c).fill(null), remap = new Int32Array(N).fill(-1);
+  const juncGrid = new Map(), juncs = [];
+  const kn = keepNodes(nodes, edges, comp, best, jc, first, remap, juncGrid, juncs);
+  let jAll = 0;
+  for (let k = 0; k < c; k++) jAll += jc[k];
+  const stats = { components: c, junctions: jAll, mainJunctions: jc[best], nodesBefore: N, nodesKept: kn, lost: [] };
+  for (let k = 0; k < c; k++) {
+    if (k === best || jc[k] < 3) continue;
+    stats.lost.push({ junctions: jc[k], x: Math.round(first[k].x), z: Math.round(first[k].z) });
+  }
+  keepEdges(nodes, edges, remap, kn);
+  return { stats, juncGrid, juncs };
+}
+// Connected components (the union-find's groups), numbered from the
+// lowest node up (comp); cc[0] the count, cc[1] the first of the largest.
+function componentsOf(N, uf, comp, cc) {
+  const label = new Int32Array(N).fill(-1), size = new Int32Array(N);
+  let c = 0;
+  for (let k = 0; k < N; k++) {
+    const r = uf[k] === k ? k : findRoot(uf, k);
+    if (label[r] < 0) label[r] = c++;
+    comp[k] = label[r];
+    size[label[r]]++;
+  }
+  let best = -1, bestN = 0;
+  for (let k = 0; k < c; k++) if (size[k] > bestN) { bestN = size[k]; best = k; }
+  cc[0] = c;
+  cc[1] = best;
+}
+// The kept nodes renumbered in place, with their boxes; returns their count.
+function keepNodes(nodes, edges, comp, best, jc, first, remap, juncGrid, juncs) {
+  const N = nodes.length, JG = JUNC_GRID;
+  let kn = 0;
+  for (let k = 0; k < N; k++) {
+    const n = nodes[k], ck = comp[k];
+    const l = n.edges, deg = l.length;
+    if (deg !== 2) jc[ck]++;
+    if (!first[ck]) first[ck] = n;
+    if (ck !== best) continue;
+    remap[k] = kn;
+    n.id = kn;
+    nodes[kn++] = n;
+    n.stop = false;
+    n.blade = false;
+    n.signalSrc = '';
+    if (n.i < 0) continue;
+    let half = 0, minLen = Infinity;
+    for (let q = 0; q < deg; q++) {
+      const e = edges[l[q]];
+      half = Math.max(half, e.width / 2);
+      minLen = Math.min(minLen, e.length);
+    }
+    const want = deg === 2 ? 2 : half;
+    n.hx = n.hz = Math.max(1, Math.min(want, minLen * 0.4));
+    if (deg === 2) n.bend = true;
+    if (deg < 3) continue;
+    const key = Math.floor(n.x / JG) * 100000 + Math.floor(n.z / JG);
+    let g = juncGrid.get(key);
+    if (!g) juncGrid.set(key, (g = []));
+    g.push(n);
+    juncs.push(n);
+  }
+  nodes.length = kn;
+  return kn;
+}
+// The kept edges renumbered; each node's list (in edge order) takes the
+// new ids in turn (fill: the next entry of each node to set).
+function keepEdges(nodes, edges, remap, kn) {
+  const fill = new Int32Array(kn);
+  let ke = 0;
+  for (let k = 0, NE = edges.length; k < NE; k++) {
+    const e = edges[k];
+    if (remap[e.a] < 0 || remap[e.b] < 0) continue;
+    const a = remap[e.a], b = remap[e.b];
+    e.a = a;
+    e.b = b;
+    e.id = ke;
+    nodes[a].edges[fill[a]++] = ke;
+    nodes[b].edges[fill[b]++] = ke;
+    edges[ke++] = e;
+  }
+  edges.length = ke;
+}
+// Signals and stop signs where the data has them (2.1 item 6): each data
+// point goes to the nearest junction within SIGNAL_SNAP m.
+// juncs: the junctions of juncGrid in node order.
+function signalsAndStops(edges, data, juncGrid, juncs) {
+  const sig = data.signals || [], stp = data.stops || [];
+  // The signals, then the stops (one loop).
+  const nS = sig.length >> 1, nT = stp.length >> 1;
+  for (let q = 0; q < nS + nT; q++) {
+    const isSig = q < nS, L = isSig ? sig : stp, k = isSig ? 2 * q : 2 * (q - nS);
+    const n = nearestJunction(juncGrid, L[k] / 10, L[k + 1] / 10);
+    if (!n) continue;
+    if (isSig) { n.signal = true; n.signalSrc = 'data'; }
+    else if (!n.signal) n.stop = true;
+  }
+  // Generated only where the data has none at a junction of two named
+  // streets: a signal where a road of two lanes each way meets another
+  // named street (the old rule), with no data signal or stop sign within
+  // 60 m (dual carriageways put several nodes on one crossing).
+  const hasData = sig.length + stp.length > 0;
+  let near = null;
+  for (let k = 0; k < juncs.length; k++) {
+    const n = juncs[k];
+    if (n.signal || n.stop) continue;
+    let avenue = false, n1 = '', two = false;
+    const l = n.edges;
+    for (let q = 0; q < l.length; q++) {
+      const e = edges[l[q]];
+      if (e.avenue) avenue = true;
+      if (e.name && !n1) n1 = e.name;
+      else if (e.name && e.name !== n1) two = true;
+    }
+    if (!avenue || !two) continue;
+    if (hasData && !near) near = dataPointGrid(sig, stp);
+    if (!hasData || !dataNear(near, sig, stp, n.x, n.z)) { n.signal = true; n.signalSrc = 'gen'; }
+  }
+}
+function nearestJunction(juncGrid, x, z) {
+  const JG = JUNC_GRID;
+  let best = null, bd = SIGNAL_SNAP * SIGNAL_SNAP;
+  const ci = Math.floor(x / JG), cj = Math.floor(z / JG);
+  for (let dj = -1; dj <= 1; dj++) {
+    for (let di = -1; di <= 1; di++) {
+      const l = juncGrid.get((ci + di) * 100000 + cj + dj);
+      if (!l) continue;
+      for (let q = 0; q < l.length; q++) {
+        const n = l[q];
+        const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+        if (d < bd) { bd = d; best = n; }
+      }
+    }
+  }
+  return best;
+}
+// The data signals and stops in a 64 m grid (point index lists; stops
+// after the signals, offset by the signal count): for dataNear.
+const DATA_GRID = 64;
+function dataPointGrid(sig, stp) {
+  const grid = new Map();
+  const add = (list, off) => {
+    for (let k = 0; k + 1 < list.length; k += 2) {
+      const key = Math.floor(list[k] / 10 / DATA_GRID) * 100000 + Math.floor(list[k + 1] / 10 / DATA_GRID);
+      let l = grid.get(key);
+      if (!l) grid.set(key, (l = []));
+      l.push(off + k);
+    }
+  };
+  add(sig, 0);
+  add(stp, sig.length);
+  return grid;
+}
+// A data signal or stop sign within 60 m of (x, z) (squared distance
+// under 3600, the cells within 64 m checked).
+function dataNear(grid, sig, stp, x, z) {
+  const ci = Math.floor(x / DATA_GRID), cj = Math.floor(z / DATA_GRID);
+  for (let dj = -1; dj <= 1; dj++) {
+    for (let di = -1; di <= 1; di++) {
+      const l = grid.get((ci + di) * 100000 + cj + dj);
+      if (!l) continue;
+      for (let q = 0; q < l.length; q++) {
+        const k = l[q];
+        if (k < sig.length) {
+          if ((sig[k] / 10 - x) ** 2 + (sig[k + 1] / 10 - z) ** 2 < 3600) return true;
+        } else if ((stp[k - sig.length] / 10 - x) ** 2 + (stp[k - sig.length + 1] / 10 - z) ** 2 < 3600) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// The whole stage: { nodes, edges, cuts }.
+function buildRoadGraph(data, S, crop, landCell, coastLand, baseLand) {
+  const R = readWays(data, S, crop, landCell, coastLand, baseLand);
+  const ways = R.ways;
+  const V = makeVertices((R.np >> 1) + 1024);
+  const seg = splitJunctions(V, waySegments(R, V, crop));
+  const M = mergeJunctions(V, seg);
+  const parent = M.parent, rx = M.rx, rz = M.rz;
+  const G = linkReps(seg, parent, ways, S.links || [], rx, rz);
+  const g = walkChains(G, ways, rx, rz);
+  return { nodes: g.nodes, edges: g.edges, joined: { uf: g.uf, nodes: g.nodes.length, edges: g.edges.length }, cuts: R.cuts };
 }
 
 // True when some item of list (x, z fields) has Math.hypot(dx, dz) < r
@@ -1100,365 +2039,14 @@ export function createMiamiCity(data, opts = {}) {
   // Hot lookups read the raster bounds from constants, not the raster
   // object (whose shape the optimizer may see change during the build).
   const landCell = cellLookup(land);
-  const baseAt = (x, z) => {
-    const c = landCell(x, z);
-    return c >= 0 && baseLand[c] === 1;
-  };
   lap('land');
 
   // ---- 2. Roads: drivable ways inside the crop. ----
   const CX0 = crop.x0, CX1 = crop.x1, CZ0 = crop.z0, CZ1 = crop.z1;
   const inCrop = (x, z) => x >= CX0 && x <= CX1 && z >= CZ0 && z <= CZ1;
-  const ways = [];
-  // Where a road leaves the crop: x, z on the crop line, then the unit
-  // direction out of it (for the generated road ends, 3.4).
-  const cuts = [];
-  // The district key at a point straight from the hand table (the raster
-  // comes later): for the sidewalk width of a road.
-  const districtKeyAt = (x, z) => {
-    let k = 'midtown';
-    for (const d of S.districts) if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) k = d.key;
-    return k;
-  };
-  // One way of the data (a function: createMiamiCity itself is too large
-  // for the optimizing compiler, so its own loops run unoptimized).
-  const readRoad = (r) => {
-    // Pedestrian streets: only the named malls (2.1 item 8), drivable.
-    if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) return;
-    if (r.name && /tunnel/i.test(r.name)) return;
-    const pts = decodePolyline(r.p);
-    if (r.oneway === -1) {
-      // Stored against the traffic: reverse, so every one-way runs along its points.
-      for (let i = 0, j = pts.length - 2; i < j; i += 2, j -= 2) {
-        const tx = pts[i], tz = pts[i + 1];
-        pts[i] = pts[j]; pts[i + 1] = pts[j + 1];
-        pts[j] = tx; pts[j + 1] = tz;
-      }
-    }
-    {
-      let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
-      for (let k = 0; k < pts.length; k += 2) { if (pts[k] < bx0) bx0 = pts[k]; if (pts[k] > bx1) bx1 = pts[k]; if (pts[k + 1] < bz0) bz0 = pts[k + 1]; if (pts[k + 1] > bz1) bz1 = pts[k + 1]; }
-      if (bx1 < crop.x0 || bx0 > crop.x1 || bz1 < crop.z0 || bz0 > crop.z1) return;
-    }
-    const nearWater = (x, z) => {
-      for (let k = 0; k < 8; k++) {
-        const c = landCell(x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
-        if (c < 0 || !coastLand[c]) return true;
-      }
-      return false;
-    };
-    const m = pts.length;
-    // Freeway pieces at grade between the dropped flyovers are islands of
-    // ramps; only the ones that run out to a water crossing are kept.
-    if (!r.bridge && r.class.startsWith('motorway') && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) return;
-    if (r.bridge) {
-      // A long bridge over land is a flyover: the flat world would make
-      // it cross the streets below at grade, so it is left out.
-      let on = 0, n = 0, L = 0;
-      for (let k = 0; k + 3 < pts.length; k += 2) {
-        const sl = Math.hypot(pts[k + 2] - pts[k], pts[k + 3] - pts[k + 1]);
-        L += sl;
-        for (let t = 0; t < sl; t += 5) {
-          n++;
-          if (baseAt(pts[k] + ((pts[k + 2] - pts[k]) * t) / sl, pts[k + 1] + ((pts[k + 3] - pts[k + 1]) * t) / sl)) on++;
-        }
-      }
-      // Bridges that land near the water are approaches to a crossing: kept.
-      if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) return;
-    }
-    // The cross section (world/roadprofile.js; docs/MAP.md "Edge contract").
-    const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]), curbParking: !!r.name && (S.curbParking || []).includes(r.name) });
-    const oneway = prof.oneway;
-    const avenue = isAvenue(prof);
-    const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || (r.lf || 0) + (r.lb || 0) };
-    // Split at the crop edge: only runs of vertices inside it.
-    let run = [];
-    const flush = () => {
-      if (run.length >= 4) ways.push({ ...info, pts: run });
-      run = [];
-    };
-    // Where a segment leaves the crop, it is cut at the edge.
-    const edgePoint = (ax, az, bx, bz) => {
-      let t = 1;
-      const dx = bx - ax, dz = bz - az;
-      if (bx < crop.x0) t = Math.min(t, (crop.x0 - ax) / dx);
-      if (bx > crop.x1) t = Math.min(t, (crop.x1 - ax) / dx);
-      if (bz < crop.z0) t = Math.min(t, (crop.z0 - az) / dz);
-      if (bz > crop.z1) t = Math.min(t, (crop.z1 - az) / dz);
-      const cx = Math.round((ax + dx * t) * 10) / 10, cz = Math.round((az + dz * t) * 10) / 10;
-      run.push(cx, cz);
-      const dl = Math.hypot(dx, dz) || 1;
-      cuts.push(cx, cz, dx / dl, dz / dl, ways.length);
-    };
-    for (let k = 0; k < pts.length; k += 2) {
-      const x = pts[k], z = pts[k + 1];
-      const inside = inCrop(x, z);
-      const prevIn = k > 0 && inCrop(pts[k - 2], pts[k - 1]);
-      if (inside) {
-        if (k > 0 && !prevIn) edgePoint(x, z, pts[k - 2], pts[k - 1]);
-        run.push(x, z);
-      } else if (prevIn) {
-        edgePoint(pts[k - 2], pts[k - 1], x, z);
-        flush();
-      }
-    }
-    flush();
-  };
-  for (let k = 0; k < data.roads.length; k++) readRoad(data.roads[k]);
-
-  // Vertices are shared where the data shares them (same decimeter).
-  const vx = [], vz = [], vflag = []; // flag: 1 street, 2 bridge, 4 way end
-  const vkey = new Map();
-  const vertexOf = (x, z, flag) => {
-    const key = Math.round(x * 10 + 100000) * 400000 + Math.round(z * 10 + 100000);
-    let id = vkey.get(key);
-    if (id === undefined) {
-      id = vx.length;
-      vkey.set(key, id);
-      vx.push(x);
-      vz.push(z);
-      vflag.push(0);
-    }
-    vflag[id] |= flag;
-    return id;
-  };
-  let segA = [], segB = [], segW = [];
-  ways.forEach((w, wi) => {
-    const n = w.pts.length / 2;
-    let prev = -1;
-    for (let k = 0; k < n; k++) {
-      const id = vertexOf(w.pts[2 * k], w.pts[2 * k + 1], (w.bridge ? 2 : 1) | (k === 0 || k === n - 1 ? 4 : 0));
-      if (prev >= 0 && prev !== id) {
-        segA.push(prev);
-        segB.push(id);
-        segW.push(wi);
-      }
-      prev = id;
-    }
-  });
-
-  // Junctions the simplified data lost: a vertex lying on another road,
-  // or two streets crossing with no shared vertex.
-  {
-    const split = splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf);
-    if (split) [segA, segB, segW] = split;
-  }
-
-  // Merge junction vertices closer than MERGE m (dual carriageways, ramps).
-  const nv = vx.length;
-  const parent = new Int32Array(nv);
-  for (let v = 0; v < nv; v++) parent[v] = v;
-  const find = (v) => {
-    while (parent[v] !== v) v = parent[v] = parent[parent[v]];
-    return v;
-  };
-  (function mergeJunctions() {
-    const deg = new Int32Array(nv);
-    for (let s = 0; s < segA.length; s++) { deg[segA[s]]++; deg[segB[s]]++; }
-    const grid = new Map();
-    const MG = MERGE;
-    const junc = [];
-    for (let v = 0; v < nv; v++) {
-      if (deg[v] === 0 || deg[v] === 2) continue;
-      junc.push(v);
-      const k = Math.floor(vx[v] / MG) * 100000 + Math.floor(vz[v] / MG);
-      let l = grid.get(k);
-      if (!l) grid.set(k, (l = []));
-      l.push(v);
-    }
-    for (const v of junc) {
-      const ci = Math.floor(vx[v] / MG), cj = Math.floor(vz[v] / MG);
-      for (let dj = -1; dj <= 1; dj++) {
-        for (let di = -1; di <= 1; di++) {
-          const l = grid.get((ci + di) * 100000 + cj + dj);
-          if (!l) continue;
-          for (const u of l) {
-            if (u <= v) continue;
-            if ((vx[u] - vx[v]) ** 2 + (vz[u] - vz[v]) ** 2 > MG * MG) continue;
-            const ra = find(u), rb = find(v);
-            if (ra !== rb) parent[ra] = rb;
-          }
-        }
-      }
-    }
-  })();
-  // Representative positions: the mean of each merged group.
-  const px = new Float64Array(nv), pz = new Float64Array(nv), pn = new Int32Array(nv);
-  (function repPositions() {
-    for (let v = 0; v < nv; v++) {
-      const r = find(v);
-      px[r] += vx[v];
-      pz[r] += vz[v];
-      pn[r]++;
-    }
-  })();
-  // Adjacency on representatives (one segment per pair, the wider wins).
-  const adj = new Map(); // rep -> Map(rep -> way index)
-  const link = (a, b, wi) => {
-    let m = adj.get(a);
-    if (!m) adj.set(a, (m = new Map()));
-    const old = m.get(b);
-    if (old === undefined || ways[wi].width > ways[old].width) m.set(b, wi);
-  };
-  // One-way ways: the directed rep pairs they run along (the edges are
-  // stored in their legal direction, docs/MAP.md "Edge contract").
-  const legal = new Set();
-  (function linkReps() {
-    for (let s = 0; s < segA.length; s++) {
-      const a = find(segA[s]), b = find(segB[s]);
-      if (a === b) continue;
-      link(a, b, segW[s]);
-      link(b, a, segW[s]);
-      if (ways[segW[s]].oneway) legal.add(a * 1e7 + b);
-    }
-    for (const s of S.links || []) {
-      // Hand-made links: nearest representative to each end.
-      const near = (x, z) => {
-        let best = -1, bd = Infinity;
-        for (const r of adj.keys()) {
-          const d = (px[r] / pn[r] - x) ** 2 + (pz[r] / pn[r] - z) ** 2;
-          if (d < bd) { bd = d; best = r; }
-        }
-        return best;
-      };
-      const a = near(s[0], s[1]), b = near(s[2], s[3]);
-      if (a >= 0 && b >= 0 && a !== b) {
-        const prof = roadProfile({ class: 'unclassified' });
-        ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: prof.width, prof, mph: 0, lanesTag: 0, pts: [] });
-        link(a, b, ways.length - 1);
-        link(b, a, ways.length - 1);
-      }
-    }
-  })();
-  const posX = (r) => px[r] / pn[r], posZ = (r) => pz[r] / pn[r];
-  const sameKind = (w1, w2) => w1 === w2 || (ways[w1].width === ways[w2].width && ways[w1].bridge === ways[w2].bridge && ways[w1].cls === ways[w2].cls && ways[w1].name === ways[w2].name &&
-    ways[w1].oneway === ways[w2].oneway && ways[w1].prof.lanesF === ways[w2].prof.lanesF);
-  // Chains between junctions, simplified (Douglas-Peucker) into edges.
-  const isBreak = (r) => {
-    const m = adj.get(r);
-    if (!m || m.size !== 2) return true;
-    const [w1, w2] = [...m.values()];
-    return !sameKind(w1, w2);
-  };
-  const nodes = [], edges = [];
-  const nodeOfRep = new Map();
-  const nodeFor = (r) => {
-    let n = nodeOfRep.get(r);
-    if (n === undefined) {
-      n = nodes.length;
-      nodeOfRep.set(r, n);
-      nodes.push({ id: n, i: 0, j: 0, x: posX(r), z: posZ(r), hx: 2, hz: 2, edges: [], signal: false });
-    }
-    return n;
-  };
-  const edgeKey = new Map();
-  // both: the two carriageways of a one-way pair collapsed onto the same
-  // junctions (closer than MERGE): one two-way road (2.1 item 4).
-  const addEdge = (na, nb, wi, both = false) => {
-    if (na === nb) return;
-    const k = na < nb ? na * 1e6 + nb : nb * 1e6 + na;
-    const w = ways[wi];
-    const old = edgeKey.get(k);
-    if (old !== undefined) {
-      // Both carriageways of a tight one-way pair between the same two
-      // junctions: one two-way road (2.1 item 4, gap under 1 m).
-      const e = edges[old];
-      if (e.oneway && w.oneway && e.a === nb && e.name === w.name) {
-        e.oneway = false;
-        e.lanesB = w.prof.lanesF;
-        e.parkL = w.prof.parkR;
-        e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
-        e.avenue = isAvenue(e);
-        e.merged = true;
-      }
-      return;
-    }
-    const A = nodes[na], Bn = nodes[nb];
-    const dx = Bn.x - A.x, dz = Bn.z - A.z, length = Math.hypot(dx, dz);
-    if (length < 0.5) return;
-    edgeKey.set(k, edges.length);
-    const P = w.prof;
-    edges.push({
-      id: edges.length, a: na, b: nb, horizontal: Math.abs(dx) >= Math.abs(dz), width: P.width, avenue: w.avenue, length,
-      ux: dx / length, uz: dz / length, bridge: w.bridge, oneway: w.oneway, cls: w.cls, name: w.name,
-      // The edge contract (docs/MAP.md), from world/roadprofile.js.
-      lanesF: P.lanesF, lanesB: P.lanesB, laneW: P.laneW, parkL: P.parkL, parkR: P.parkR, median: 0, center: P.center,
-      off: 0, sidewalk: P.sidewalk, ped: P.ped, divided: false, pair: -1, mph: w.mph, lanesTag: w.lanesTag || 0,
-    });
-    if (both && w.oneway) {
-      const e = edges[edges.length - 1];
-      e.oneway = false;
-      e.lanesB = e.lanesF;
-      e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
-      e.avenue = isAvenue(e);
-      e.merged = true;
-    }
-  };
-  const visited = new Set();
-  const pairKey = (a, b) => (a < b ? a * 1e7 + b : b * 1e7 + a);
-  const simplify = (chain, wi) => {
-    // chain: reps from break to break.
-    const keep = new Uint8Array(chain.length);
-    keep[0] = keep[chain.length - 1] = 1;
-    const dp = (i0, i1) => {
-      let best = -1, bd = CHAIN_TOL * CHAIN_TOL;
-      const ax = posX(chain[i0]), az = posZ(chain[i0]), bx = posX(chain[i1]), bz = posZ(chain[i1]);
-      for (let i = i0 + 1; i < i1; i++) {
-        const d = segDist2(posX(chain[i]), posZ(chain[i]), ax, az, bx, bz);
-        if (d > bd) { bd = d; best = i; }
-      }
-      if (best >= 0) {
-        keep[best] = 1;
-        dp(i0, best);
-        dp(best, i1);
-      }
-    };
-    dp(0, chain.length - 1);
-    let prev = nodeFor(chain[0]), prevI = 0;
-    const oneway = ways[wi].oneway;
-    for (let i = 1; i < chain.length; i++) {
-      if (!keep[i]) continue;
-      const n = nodeFor(chain[i]);
-      // A one-way edge runs the way its way runs (first step of the piece);
-      // legal both ways: the two carriageways of a pair on one line.
-      const fw = legal.has(chain[prevI] * 1e7 + chain[prevI + 1]), bw = legal.has(chain[prevI + 1] * 1e7 + chain[prevI]);
-      if (oneway && fw && bw) addEdge(prev, n, wi, true);
-      else if (oneway && !fw && bw) addEdge(n, prev, wi);
-      else addEdge(prev, n, wi);
-      prev = n;
-      prevI = i;
-    }
-  };
-  const walkFrom = (start, next) => {
-    const chain = [start, next];
-    const wi = adj.get(start).get(next);
-    visited.add(pairKey(start, next));
-    let prev = start, cur = next;
-    while (!isBreak(cur) && cur !== start) {
-      let nxt = -1;
-      for (const o of adj.get(cur).keys()) if (o !== prev) nxt = o;
-      if (nxt < 0 || visited.has(pairKey(cur, nxt))) break;
-      visited.add(pairKey(cur, nxt));
-      chain.push(nxt);
-      prev = cur;
-      cur = nxt;
-    }
-    simplify(chain, wi);
-  };
-  (function walkChains() {
-    for (const r of adj.keys()) {
-      if (!isBreak(r)) continue;
-      for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
-    }
-    for (const r of adj.keys()) {
-      // Loops with no junction on them (a traffic circle on its own).
-      for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
-    }
-    for (const e of edges) {
-      nodes[e.a].edges.push(e.id);
-      nodes[e.b].edges.push(e.id);
-    }
-  })();
+  // The road graph (buildRoadGraph: module functions, so every loop of
+  // the stage runs optimized).
+  const { nodes, edges, cuts, joined } = buildRoadGraph(data, S, crop, landCell, coastLand, baseLand);
   lap('graph');
 
   // ---- 3. Airfield islet and causeway (citygen's layout, placed here). ----
@@ -1468,22 +2056,14 @@ export function createMiamiCity(data, opts = {}) {
   const IW = 300;
   const hasAirfield = !!AF && inRegion(region, AF.x, AF.z) && inRegion(region, AF.isletX0, AF.z - 205) && inRegion(region, AF.isletX1, AF.z - 205 + IW);
   // Anchor: the shore end of the street the causeway leaves from.
-  let anchor = null;
-  if (hasAirfield) {
-    let bd = Infinity;
-    for (const n of nodes) {
-      if (!n.edges.length) continue;
-      const d = Math.hypot(n.x - AF.x, n.z - AF.z);
-      if (d < bd) { bd = d; anchor = n; }
-    }
-  }
+  const anchor = hasAirfield ? nearestLinkedNode(nodes, AF.x, AF.z) : null;
   const islet = anchor ? { x0: AF.isletX0, z0: anchor.z - 205, x1: AF.isletX1, z1: anchor.z - 205 + IW } : null;
   const roadHalf = STREET_W / 2;
   const causewayProf = roadProfile({ class: 'tertiary', bridge: 1 });
   let gate = null;
   const extraLand = [];
   if (islet) {
-    gate = { id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z, hx: roadHalf, hz: roadHalf, edges: [], signal: false };
+    gate = { id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z, hx: roadHalf, hz: roadHalf, edges: [], signal: false, stop: false, blade: false, signalSrc: '' };
     nodes.push(gate);
     const L = gate.x - anchor.x;
     const P = causewayProf;
@@ -1498,145 +2078,10 @@ export function createMiamiCity(data, opts = {}) {
   }
 
   // Keep the largest connected road network only.
-  const graphStats = {};
-  (function keepMainNetwork() {
-    const comp = new Int32Array(nodes.length).fill(-1);
-    let best = -1, bestN = 0, c = 0;
-    for (const n of nodes) {
-      if (comp[n.id] >= 0) continue;
-      const stack = [n.id];
-      comp[n.id] = c;
-      let cnt = 0;
-      while (stack.length) {
-        const k = stack.pop();
-        cnt++;
-        for (const eid of nodes[k].edges) {
-          const e = edges[eid];
-          const o = e.a === k ? e.b : e.a;
-          if (comp[o] < 0) { comp[o] = c; stack.push(o); }
-        }
-      }
-      if (cnt > bestN) { bestN = cnt; best = c; }
-      c++;
-    }
-    // Junctions (degree 1 or 3+) per component, for the connectivity check.
-    const jc = new Int32Array(c);
-    for (const n of nodes) if (n.edges.length !== 2) jc[comp[n.id]]++;
-    let jAll = 0;
-    for (let k = 0; k < c; k++) jAll += jc[k];
-    graphStats.components = c;
-    graphStats.junctions = jAll;
-    graphStats.mainJunctions = jc[best];
-    graphStats.nodesBefore = nodes.length;
-    graphStats.nodesKept = bestN;
-    graphStats.lost = [];
-    for (let k = 0; k < c; k++) {
-      if (k === best || jc[k] < 3) continue;
-      const n = nodes.find((q) => comp[q.id] === k);
-      graphStats.lost.push({ junctions: jc[k], x: Math.round(n.x), z: Math.round(n.z) });
-    }
-    const remap = new Int32Array(nodes.length).fill(-1);
-    const keptNodes = [];
-    for (const n of nodes) {
-      if (comp[n.id] !== best) continue;
-      remap[n.id] = keptNodes.length;
-      n.id = keptNodes.length;
-      n.edges = [];
-      keptNodes.push(n);
-    }
-    const keptEdges = [];
-    for (const e of edges) {
-      if (remap[e.a] < 0 || remap[e.b] < 0) continue;
-      e.a = remap[e.a];
-      e.b = remap[e.b];
-      e.id = keptEdges.length;
-      keptEdges.push(e);
-      keptNodes[e.a].edges.push(e.id);
-      keptNodes[e.b].edges.push(e.id);
-    }
-    nodes.length = 0;
-    nodes.push(...keptNodes);
-    edges.length = 0;
-    edges.push(...keptEdges);
-  })();
+  const kept = keepMainNetwork(nodes, edges, joined);
+  const graphStats = kept.stats;
   if (gate && (gate.id >= nodes.length || nodes[gate.id] !== gate)) throw new Error('miami: the airfield causeway is not on the main road network');
-  // Junction boxes: half the widest road, kept short of the edges.
-  (function junctionBoxes() {
-    for (const n of nodes) {
-      n.stop = false;
-      n.blade = false;
-      n.signalSrc = '';
-      if (n.i < 0) continue;
-      let half = 0, minLen = Infinity;
-      for (const eid of n.edges) {
-        const e = edges[eid];
-        half = Math.max(half, e.width / 2);
-        minLen = Math.min(minLen, e.length);
-      }
-      const deg = n.edges.length;
-      const want = deg === 2 ? 2 : half;
-      n.hx = n.hz = Math.max(1, Math.min(want, minLen * 0.4));
-      if (deg === 2) n.bend = true;
-    }
-  })();
-  // Signals and stop signs where the data has them (2.1 item 6): each
-  // data point goes to the nearest junction within SIGNAL_SNAP m.
-  (function signalsAndStops() {
-    const juncGrid = new Map();
-    const JG = 32;
-    for (const n of nodes) {
-      if (n.i < 0 || n.edges.length < 3) continue;
-      const k = Math.floor(n.x / JG) * 100000 + Math.floor(n.z / JG);
-      let l = juncGrid.get(k);
-      if (!l) juncGrid.set(k, (l = []));
-      l.push(n);
-    }
-    const nearestJunction = (x, z) => {
-      let best = null, bd = SIGNAL_SNAP * SIGNAL_SNAP;
-      const ci = Math.floor(x / JG), cj = Math.floor(z / JG);
-      for (let dj = -1; dj <= 1; dj++) {
-        for (let di = -1; di <= 1; di++) {
-          const l = juncGrid.get((ci + di) * 100000 + cj + dj);
-          if (!l) continue;
-          for (const n of l) {
-            const d = (n.x - x) ** 2 + (n.z - z) ** 2;
-            if (d < bd) { bd = d; best = n; }
-          }
-        }
-      }
-      return best;
-    };
-    const sig = data.signals || [], stp = data.stops || [];
-    for (let k = 0; k + 1 < sig.length; k += 2) {
-      const n = nearestJunction(sig[k] / 10, sig[k + 1] / 10);
-      if (n) { n.signal = true; n.signalSrc = 'data'; }
-    }
-    for (let k = 0; k + 1 < stp.length; k += 2) {
-      const n = nearestJunction(stp[k] / 10, stp[k + 1] / 10);
-      if (n && !n.signal) n.stop = true;
-    }
-    // Generated only where the data has none at a junction of two named
-    // streets: a signal where a road of two lanes each way meets another
-    // named street (the old rule), with no data signal or stop sign
-    // within 60 m (dual carriageways put several nodes on one crossing).
-    const hasData = sig.length + stp.length > 0;
-    const dataNear = (x, z) => {
-      for (let k = 0; k + 1 < sig.length; k += 2) if ((sig[k] / 10 - x) ** 2 + (sig[k + 1] / 10 - z) ** 2 < 3600) return true;
-      for (let k = 0; k + 1 < stp.length; k += 2) if ((stp[k] / 10 - x) ** 2 + (stp[k + 1] / 10 - z) ** 2 < 3600) return true;
-      return false;
-    };
-    for (const n of nodes) {
-      if (n.i < 0 || n.edges.length < 3 || n.signal || n.stop) continue;
-      let avenue = false, n1 = '', two = false;
-      for (const eid of n.edges) {
-        const e = edges[eid];
-        if (e.avenue) avenue = true;
-        if (e.name && !n1) n1 = e.name;
-        else if (e.name && e.name !== n1) two = true;
-      }
-      if (avenue && two && (!hasData || !dataNear(n.x, n.z))) { n.signal = true; n.signalSrc = 'gen'; }
-    }
-  })();
+  signalsAndStops(edges, data, kept.juncGrid, kept.juncs);
   lap('network');
 
   // ---- 4. Spatial index of edges; shoreDist with every road on land. ----
