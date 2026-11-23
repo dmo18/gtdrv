@@ -3,7 +3,9 @@
 // junctions: (a) no lane paint inside a junction polygon; (b) two
 // different road strips overlap outside junction polygons in under 0.5 %
 // of samples; (c) every strip end lies on its junction boundary within
-// 0.3 m; (d) no road-space sliver under 1.5 m; (e) no lane count step
+// 0.3 m; (d) no road-space sliver under 1.5 m (a bridge or causeway passing
+// over a road with no shared node is grade separated, not a sliver); (e)
+// no lane count step
 // without a taper (the curbs of the two edges at a bend meet).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,6 +53,21 @@ function onStrip(city, e, x, z, inset) {
   if (d < geo.trim[qa] + geo.miter[qa] * s + inset || d > e.length - geo.trim[qb] + geo.miter[qb] * s - inset) return false;
   const C = curbsAt(geo, e, d);
   return s > C.l + inset && s < C.r - inset;
+}
+
+// Is (x, z) within reach of a bridge or causeway strip (with its deck
+// sides) that shares no node with edge e?
+const nearB = [];
+function overBridge(city, e, x, z) {
+  city.edgesNear(x, z, 4, nearB);
+  for (const k of nearB) {
+    const o = city.edges[k];
+    if (!(o.bridge || o.causeway) || o.a === e.a || o.a === e.b || o.b === e.a || o.b === e.b) continue;
+    const a = city.nodes[o.a];
+    const d = (x - a.x) * o.ux + (z - a.z) * o.uz, s = -(x - a.x) * o.uz + (z - a.z) * o.ux;
+    if (d > -2 && d < o.length + 2 && Math.abs(s - (o.off || 0)) < o.width / 2 + 2) return true;
+  }
+  return false;
 }
 
 const PAINT = [], ST = [], near = [];
@@ -118,7 +135,11 @@ function metrics(city) {
           m.sliverProbes++;
           for (let g = 0.55; g < 1.5; g += 0.3) {
             const [x, z] = pt(d, o0 + dir * g);
-            if (ground.surfaceAt(x, z) !== 0) { m.slivers++; if (m.where.length < 40) m.where.push(['sliver', e.id, Math.round(x), Math.round(z), +g.toFixed(2)]); break; }
+            if (ground.surfaceAt(x, z) === 0) continue;
+            // A bridge or causeway that crosses this road with no node in
+            // common passes over it: grade separated, not a sliver.
+            if (overBridge(city, e, x, z)) break;
+            { m.slivers++; if (m.where.length < 40) m.where.push(['sliver', e.id, Math.round(x), Math.round(z), +g.toFixed(2)]); break; }
           }
         }
       }

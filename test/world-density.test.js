@@ -543,7 +543,7 @@ test('infill: made boxes only on open built-up land, off the roads and the water
 // (60 m2) of its area (lotEmptiness: a standing thing is one unit, a long
 // one one per 5 m, a bay one). A lot that covers under a quarter of its
 // bounding box is a scatter of cells round a building, not a place:
-// it keeps at least a third of the floor. Beaches (open sand), verges and
+// it keeps at least 0.6 of the floor. Beaches (open sand), verges and
 // the airfield are left out.
 test('density floor: in every region, no lot over 400 m2 with fewer than one feature unit per 60 m2', async () => {
   const { allRegionCities } = await import('./regionfixture.js');
@@ -561,7 +561,7 @@ test('density floor: in every region, no lot over 400 m2 with fewer than one fea
     console.log(`# ${id}: ${n} lots over 400 m2, the least dressed at ${worst.toFixed(2)} of the floor (fragments ${frag.toFixed(2)})`);
     assert.ok(n > 1000, `${id}: ${n} lots`);
     assert.deepEqual(under.slice(0, 5), [], `${id}: lots under the floor`);
-    assert.ok(frag >= 1 / 3, `${id}: a fragment at ${frag.toFixed(2)} of the floor`);
+    assert.ok(frag >= 0.6, `${id}: a fragment at ${frag.toFixed(2)} of the floor`);
   }
 });
 

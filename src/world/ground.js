@@ -10,7 +10,7 @@
 // The answer is a pure function of the city and the point.
 
 import { divideOf, GUTTER } from './roadprofile.js';
-import { inJunctionArea, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
+import { inJunctionArea, pointInRing, supAt, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
 
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
@@ -143,6 +143,7 @@ export function createGround(city) {
     for (let q = 0; q < js.length; q++) {
       const J = geo.junctions[js[q]];
       if (inJunctionArea(J, x, z)) return 1;
+      for (let gq = 0; gq < J.gores.length; gq++) if (pointInRing(J.gores[gq].poly, x, z)) return 1;
     }
     const es = cellE[c];
     let side = false, median = false;
@@ -163,9 +164,11 @@ export function createGround(city) {
       if (s >= cl && s <= cr) return 1;
       if (s > cr) {
         const back = cr + walkOf(e);
+        if (supAt(geo, e, 0, d)) continue;
         if (s <= back || (fills && s <= back + fillAt(k, 0, d))) side = true;
         continue;
       }
+      if (supAt(geo, e, 1, d)) continue;
       const m = medianBand(e) > 0;
       const back = cl - (m ? medianAt(city, e, d, cl) : walkLeftOf(e));
       if (s >= back) { if (m) median = true; else side = true; } else if (fills && s >= back - fillAt(k, 1, d)) side = true;
@@ -181,22 +184,36 @@ export function createGround(city) {
   // right side then left; computed the first time it is asked for.
   const fillCache = new Map();
   const NOFILL = new Float32Array(0);
-  function fillOf(k) {
+  // (Samples are worked out one at a time when first needed, so no call
+  // costs more than a couple of samples; fillOf, for the meshes, works
+  // out all of an edge's in its tile's build slice.)
+  function fillArr(k) {
     let f = fillCache.get(k);
     if (f) return f;
     const e = edges[k];
     if (geo.inner[k] || e.bridge || e.causeway || e.ped) { fillCache.set(k, NOFILL); return NOFILL; }
+    const n = Math.max(1, Math.ceil((len[k] - geo.trim[2 * k + 1] - geo.trim[2 * k]) / FILL_STEP)) + 1;
+    f = new Float32Array(2 * n).fill(NaN);
+    fillCache.set(k, f);
+    return f;
+  }
+  function fillOf(k) {
+    const f = fillArr(k);
+    for (let i = 0; i < f.length / 2; i++) if (Number.isNaN(f[2 * i])) station(k, f, i);
+    return f;
+  }
+  function station(k, f, i) {
+    const e = edges[k];
     const qa = 2 * k, qb = qa + 1;
     const d0 = geo.trim[qa], d1 = len[k] - geo.trim[qb];
-    const n = Math.max(1, Math.ceil((d1 - d0) / FILL_STEP)) + 1;
-    f = new Float32Array(2 * n);
-    let any = false;
-    for (let i = 0; i < n; i++) {
+    f[2 * i] = f[2 * i + 1] = 0;
+    {
       const d = Math.min(d1, d0 + i * FILL_STEP);
       const C = curbsAt(geo, e, d);
       const cl = C.l, cr = C.r;
       const backR = cr + walkOf(e), backL = cl - (medianBand(e) > 0 ? medianAt(city, e, d, cl) : walkLeftOf(e));
       for (let side = 0; side < 2; side++) {
+        if (supAt(geo, e, side, d)) continue;
         const b = side ? backL : backR, dir = side ? -1 : 1;
         const bx = ax[k] + ux[k] * d - uz[k] * b, bz = az[k] + uz[k] * d + ux[k] * b;
         // (None where the back of sidewalk is already on road space.)
@@ -213,17 +230,14 @@ export function createGround(city) {
             else if (open) { gap = t; break; }
           }
         }
-        if (gap > 0) { f[2 * i + side] = gap + 0.1; any = true; }
+        if (gap > 0) f[2 * i + side] = gap + 0.1;
       }
     }
-    if (!any) f = NOFILL;
-    fillCache.set(k, f);
-    return f;
   }
   // Fill width at d m along edge k on side 0 (right) or 1 (left), linear
   // between samples.
   function fillAt(k, side, d) {
-    const f = fillOf(k);
+    const f = fillArr(k);
     if (!f.length) return 0;
     const d0 = geo.trim[2 * k];
     const u = (d - d0) / FILL_STEP;
@@ -237,7 +251,11 @@ export function createGround(city) {
     // The last sample sits at the strip end, less than a step after the one before.
     const di = d0 + i * FILL_STEP, dj = j === n - 1 ? len[k] - geo.trim[2 * k + 1] : d0 + j * FILL_STEP;
     const w = dj > di ? Math.max(0, Math.min(1, (d - di) / (dj - di))) : 0;
-    return f[2 * i + side] * (1 - w) + f[2 * j + side] * w;
+    if (Number.isNaN(f[2 * i])) station(k, f, i);
+    if (Number.isNaN(f[2 * j])) station(k, f, j);
+    // (The wider of the two samples, over the whole step: a gap that
+    // opens between two samples is still covered.)
+    return w > 0 || i === j ? Math.max(f[2 * i + side], f[2 * j + side]) : f[2 * i + side];
   }
   // The open gap (m, along the outward normal nx, nz) from (x, z) to the
   // nearest other road space, when under FILL_MAX; else 0. Analytic: the

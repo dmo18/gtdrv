@@ -9,7 +9,7 @@
 // edge it is on (A -> B), a curve through the next junction (B -> C) and
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
-import { lanePoint, lanesPerDirection, laneOffset, signalState, canDrive } from '../world/citygen.js';
+import { lanePoint as lanePointBase, lanesPerDirection, laneOffset, signalState, canDrive } from '../world/citygen.js';
 import { createVehicle, steerLock, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
 import { exitPosition } from '../entities/onfoot.js';
@@ -17,6 +17,15 @@ import { clamp, createRng } from '../core/rng.js';
 import { createYield, stepYield, curbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
 import { pickTrafficService, onCallDraw, TRAFFIC_RULES } from '../entities/servicevehicles.js';
 import { stopDistance } from '../world/junctions.js';
+
+// A lane point, on a real map moved with its edge's drawn strip (a one-way
+// drawn over another is drawn aside: world/junctions.js `eoff`).
+function lanePoint(city, e, from, d, lane, out) {
+  lanePointBase(city, e, from, d, lane, out);
+  const sh = city.roadGeo ? city.roadGeo.eoff[e.id] : 0;
+  if (sh) { out.x -= e.uz * sh; out.z += e.ux * sh; }
+  return out;
+}
 
 const K = 12; // interior samples of the junction path
 const NPTS = K + 4; // A, B, K samples, C, D

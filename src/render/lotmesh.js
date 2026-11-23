@@ -378,7 +378,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 1.7, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
+        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 2.4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
         break;
       }
       case 'wall': {

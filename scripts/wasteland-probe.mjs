@@ -127,7 +127,7 @@ function treeEvents(f) {
   for (const [k, e] of trees.tiles) {
     if (!e.shown) continue;
     let prev = lastLod.get(k);
-    if (!prev || prev.length !== e.n) { lastLod.set(k, (prev = Uint8Array.from(e.lod))); continue; }
+    if (!prev || prev.length !== e.n) { lastLod.set(k, Uint8Array.from(e.lod)); continue; }
     for (let i = 0; i < e.n; i++) {
       if (e.lod[i] !== prev[i]) {
         const d = Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z);

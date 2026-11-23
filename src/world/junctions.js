@@ -72,7 +72,9 @@ export function medianAt(city, e, d, lc) {
   const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
   const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
   const dist = Math.abs(lat - ((p.off || 0) - p.width / 2));
-  return Math.max(0, Math.min(4, dist / 2 + 0.02));
+  // (+0.3 m: the two halves overlap a little, so no ground shows between
+  // them where the pair is not parallel.)
+  return Math.max(0, Math.min(4, dist / 2 + 0.3));
 }
 const walkR = (e) => walkOf(e);
 const walkL = walkLeftOf;
@@ -264,6 +266,70 @@ export function triangulate(ring) {
   }
   if (idx.length === 3 && Math.abs(crossAt(idx[0], idx[1], idx[2])) > 1e-9) out.push(X(idx[0]), Z(idx[0]), X(idx[1]), Z(idx[1]), X(idx[2]), Z(idx[2]));
   return out;
+}
+
+// Convex hull (x, z pairs), counterclockwise in x, z.
+function hullOf(pts) {
+  const P = [];
+  for (let k = 0; k < pts.length; k += 2) P.push([pts[k], pts[k + 1]]);
+  P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let k = P.length - 1; k >= 0; k--) { const p = P[k]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const out = [];
+  for (const p of lo.slice(0, -1).concat(up.slice(0, -1))) out.push(p[0], p[1]);
+  return out;
+}
+// An arm's curb (arm frame lateral) and its point at the arm's trim.
+function mouthLat(PG, A, right, s = A.trim) {
+  const c = curbsAt(PG, A.e, A.end ? A.e.length - s : s);
+  return A.end ? (right ? -c.l : -c.r) : right ? c.r : c.l;
+}
+function mouth(PG, A, right, s = A.trim) {
+  const o = mouthLat(PG, A, right, s);
+  return [A.nx + A.ux * s + A.rx * o, A.nz + A.uz * s + A.rz * o];
+}
+// A fork or merge: arm B leaves just to the right of arm A (under
+// GORE_TH apart). The gap between A's right curb and B's left curb is
+// asphalt with a painted chevron gore out to where it is GORE_W wide;
+// no sidewalk, median or fill on those two sides before that.
+export const GORE_TH = (25 * Math.PI) / 180, GORE_W = 6;
+function goreOf(PG, A, B) {
+  const pa = [], pb = [];
+  let k = 0;
+  for (; k < 40; k++) {
+    const sa = A.trim + 2 * k, sb = B.trim + 2 * k;
+    if (sa > A.len * 0.9 || sb > B.len * 0.9) break;
+    const a = mouth(PG, A, true, sa), b = mouth(PG, B, false, sb);
+    pa.push(a[0], a[1]);
+    pb.push(b[0], b[1]);
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) >= GORE_W) break;
+  }
+  if (pa.length < 4) return null;
+  if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) >= GORE_W) return null;
+  const m = pa.length / 2;
+  const poly = pa.slice();
+  for (let i = m - 1; i >= 0; i--) poly.push(pb[2 * i], pb[2 * i + 1]);
+  if (!isSimple(poly)) return null;
+  // White edge lines along both curbs, a chevron (apex toward the node)
+  // every 4 m: [x0, z0, x1, z1, half width, ...].
+  const paint = [];
+  for (let i = 0; i + 1 < m; i++) {
+    paint.push(pa[2 * i], pa[2 * i + 1], pa[2 * i + 2], pa[2 * i + 3], 0.1, pb[2 * i], pb[2 * i + 1], pb[2 * i + 2], pb[2 * i + 3], 0.1);
+    if (i % 2 === 0) {
+      const mx = (pa[2 * i] + pb[2 * i]) / 2, mz = (pa[2 * i + 1] + pb[2 * i + 1]) / 2;
+      const f = 0.75;
+      for (const q of [pa, pb]) {
+        const ex = q[2 * i] + (q[2 * i + 2] - q[2 * i]) * f, ez = q[2 * i + 1] + (q[2 * i + 3] - q[2 * i + 1]) * f;
+        paint.push(mx, mz, mx + (ex - mx) * 0.88, mz + (ez - mz) * 0.88, 0.15);
+      }
+    }
+  }
+  return {
+    poly: Float64Array.from(poly), tris: Float64Array.from(triangulate(poly)), paint: Float64Array.from(paint),
+    qa: A.q, sideA: A.end ? 1 : 0, la: A.trim + 2 * (m - 1), qb: B.q, sideB: B.end ? 0 : 1, lb: B.trim + 2 * (m - 1),
+  };
 }
 
 // Fan triangles round (cx, cz) over a ring (x, z triples).
@@ -471,6 +537,9 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   }
   // The rings read the curbs as the strips draw them (tapers included).
   const PG = { taper, tcl, tcr, tlin, eoff };
+  // Per end and side (q * 2 + 0 right, 1 left, edge frame): no sidewalk,
+  // median or fill within this many m of that end's node (gores, noses).
+  const sup = new Float64Array(4 * NE);
   const junctions = [];
   for (const [r, g] of groups) {
     const list = arms.get(r);
@@ -485,6 +554,50 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       }
       J = buildJunction(junctions.length, nodes, g, list, C, PG);
     }
+    if (J.hull) {
+      // Still crossing itself: the ring is the convex hull of the arm
+      // mouths, each arm drawn out until both its curbs reach the hull.
+      const keep = list.map((A) => A.trim);
+      for (let it = 0; it < 4; it++) {
+        const pts = [];
+        for (const A of list) pts.push(...mouth(PG, A, false), ...mouth(PG, A, true));
+        const H = hullOf(pts), nh = H.length / 2;
+        let moved = false;
+        for (const A of list) {
+          const O = armAt.get(A.q ^ 1), cap = Math.min(TRIM_MAX + 10, A.len - 1 - (O ? O.trim : 0));
+          let need = A.trim;
+          for (const right of [false, true]) {
+            const p = mouth(PG, A, right);
+            if (ringDist(H, p[0], p[1]) <= 0.2) continue;
+            const o = mouthLat(PG, A, right);
+            const px = A.nx + A.rx * o, pz = A.nz + A.rz * o;
+            for (let h = 0; h < nh; h++) {
+              const h2 = (h + 1) % nh;
+              if (!isect(px, pz, A.ux, A.uz, H[2 * h], H[2 * h + 1], H[2 * h2] - H[2 * h], H[2 * h2 + 1] - H[2 * h + 1])) continue;
+              if (ISX.t >= -1e-6 && ISX.t <= 1 + 1e-6 && ISX.s + 0.02 > need) need = ISX.s + 0.02;
+            }
+          }
+          need = Math.min(need, cap);
+          if (need > A.trim + 0.01) { A.trim = need; moved = true; }
+        }
+        if (!moved) break;
+      }
+      const H = buildJunction(junctions.length, nodes, g, list, C, PG, true);
+      // (Kept only when every mouth reached the hull; else the fan stays.)
+      let onHull = true;
+      for (const A of list) for (const right of [false, true]) { const p = mouth(PG, A, right); if (ringDist(H.ring, p[0], p[1]) > 0.25) onHull = false; }
+      if (onHull) J = H;
+      else {
+        list.forEach((A, i) => { A.trim = keep[i]; });
+        stats.fanKept = (stats.fanKept || 0) + 1;
+      }
+    }
+    for (const G of J.gores) {
+      sup[2 * G.qa + G.sideA] = Math.max(sup[2 * G.qa + G.sideA], G.la);
+      sup[2 * G.qb + G.sideB] = Math.max(sup[2 * G.qb + G.sideB], G.lb);
+    }
+    // Median noses stop 2 m short of the junction.
+    for (const A of list) if (medianBand(A.e) > 0) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
     for (const id of g) nodeJ[id] = J.id;
     for (const A of list) {
       trim[A.q] = A.trim;
@@ -515,7 +628,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       }
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff };
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup };
 }
 
 // Two one-way ways in the same direction drawn over each other (a turn
@@ -641,11 +754,11 @@ function pairShifts(list) {
     }
   }
 }
-function buildJunction(id, nodes, g, list, C, PG) {
+function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   let x = 0, z = 0, signal = false, stop = false;
   for (const k of g) { x += nodes[k].x; z += nodes[k].z; signal = signal || !!nodes[k].signal; stop = stop || !!nodes[k].stop; }
   x /= g.length; z /= g.length;
-  const ring = [], corners = [];
+  const ring = [], corners = [], gores = [];
   const n = list.length;
   // Arm curbs at its trim, as the strip draws them (arm frame).
   const lat = (A, right) => {
@@ -660,6 +773,10 @@ function buildJunction(id, nodes, g, list, C, PG) {
     ring.push(la[0], la[1], ra[0], ra[1]);
     if (n < 2) break;
     cornerOf(A, B, C);
+    if (C.th < GORE_TH && !A.e.ped && !B.e.ped && !A.e.bridge && !B.e.bridge) {
+      const G = goreOf(PG, A, B);
+      if (G) gores.push(G);
+    }
     const curb = [ra[0], ra[1]];
     let fan = null;
     if (C.kind === 1 && C.sa + C.T <= A.trim + 0.01 && C.sb + C.T <= B.trim + 0.01) {
@@ -731,6 +848,14 @@ function buildJunction(id, nodes, g, list, C, PG) {
     if (isSimple(plain)) poly = plain;
     else hull = true;
   }
+  if (forceHull) {
+    // The convex hull of the arm mouths (the arms drawn out onto it).
+    const plain = [];
+    for (const A of list) plain.push(...L(A), ...R(A));
+    poly = hullOf(plain);
+    hull = false;
+    corners.length = 0;
+  }
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   const grow = (p) => {
     for (let k = 0; k < p.length; k += 2) {
@@ -740,11 +865,12 @@ function buildJunction(id, nodes, g, list, C, PG) {
   };
   grow(poly);
   for (const c of corners) if (c.tris) grow(c.tris);
+  for (const G of gores) grow(G.poly);
   const lead = Math.min(...g);
   return {
     id, lead, nodes: Int32Array.from(g), x, z, signal, stop, hull, fan: hull,
     ring: Float64Array.from(poly), tris: n < 2 ? new Float64Array(0) : Float64Array.from(hull ? fanOf(poly, x, z) : triangulate(poly)),
-    corners, arms: Int32Array.from(list.map((A) => A.q)), x0, z0, x1, z1,
+    corners, gores, arms: Int32Array.from(list.map((A) => A.q)), x0, z0, x1, z1, hullRing: forceHull,
   };
 }
 
@@ -785,6 +911,12 @@ export function curbsAt(geo, e, d) {
   CURBS.r = r;
   return CURBS;
 }
+// Is side (0 right, 1 left, edge frame) of edge e bare at d (a gore, a
+// median nose)?
+export function supAt(geo, e, side, d) {
+  const q = 4 * e.id + side;
+  return d < geo.sup[q] || d > e.length - geo.sup[q + 2];
+}
 // Along distance of the strip start and end at lateral o.
 export const startAt = (geo, e, o) => geo.trim[2 * e.id] + geo.miter[2 * e.id] * o;
 export const endAt = (geo, e, o) => e.length - geo.trim[2 * e.id + 1] + geo.miter[2 * e.id + 1] * o;
@@ -808,6 +940,11 @@ export function edgeStations(geo, e, piece, out) {
   const cuts = [];
   if (geo.taper[qa] > 0) for (let m = 1; m <= 2; m++) cuts.push(d0 + ((ta - d0) * m) / 2);
   if (geo.taper[qb] > 0) for (let m = 0; m < 2; m++) cuts.push(tb + ((d1 - tb) * m) / 2);
+  for (let side = 0; side < 2; side++) {
+    const sa = geo.sup[4 * e.id + side], sb = geo.sup[4 * e.id + 2 + side];
+    if (sa > d0 && sa < d1) cuts.push(sa);
+    if (sb > 0 && e.length - sb > d0 && e.length - sb < d1) cuts.push(e.length - sb);
+  }
   cuts.push(d1);
   cuts.sort((a, b) => a - b);
   let last = d0;
@@ -827,21 +964,27 @@ export function edgeStations(geo, e, piece, out) {
 
 const PL = [], PN = [];
 const familyOf = (kind) => (kind === 'yellow2' || kind === 'yellow' || kind === 'turn' ? 1 : 0);
-// The neighbor's paint line matching (o, family) at the bend of end q, in
-// this edge's frame; NaN when none within 2 m.
-function matchAt(city, geo, q, o, fam) {
+const DS = [];
+// Where a paint line at lateral o (the untapered strip) lies at d: at the
+// same fraction of the way across the tapered strip.
+function mapAt(geo, e, d, o) {
+  const base = (e.off || 0) + geo.eoff[e.id] - e.width / 2;
+  const C = curbsAt(geo, e, d);
+  return C.l + ((o - base) * (C.r - C.l)) / e.width;
+}
+// Does the next edge at the bend of end q have a line of this family at
+// the node within 0.3 m of p (this edge's frame)?
+function continues(city, geo, q, p, fam) {
   const k = geo.nbr[q];
-  if (k < 0) return NaN;
-  paintLines(city.edges[k], PN);
-  const f = geo.flip[q] ? -1 : 1;
-  let best = NaN, bd = 2;
+  if (k < 0) return false;
+  const e = city.edges[q >> 1], nb = city.edges[k], node = q & 1 ? e.b : e.a;
+  const dn = nb.b === node ? nb.length : 0, f = geo.flip[q] ? -1 : 1;
+  paintLines(nb, PN);
   for (let i = 0; i < PN.length; i += 2) {
     if (familyOf(PN[i + 1]) !== fam) continue;
-    const v = (PN[i] + geo.eoff[k]) * f;
-    const d = Math.abs(v - o);
-    if (d < bd) { bd = d; best = v; }
+    if (Math.abs(mapAt(geo, nb, dn, PN[i] + geo.eoff[k]) * f - p) < 0.3) return true;
   }
-  return best;
+  return false;
 }
 
 // Paint of edge e into out (cleared): [d0, o0, d1, o1, hw, color, ...]: a
@@ -864,46 +1007,37 @@ export function edgePaint(city, e, out) {
   const room = span >= 12;
   for (let i = 0; i < PL.length; i += 2) {
     const o = PL[i], kind = PL[i + 1], fam = familyOf(kind);
-    // Start (end a).
-    let zA0 = NaN, oA = o, dA;
+    // A line keeps its place across the road while the curbs taper (it
+    // moves with them, never across a lane). Start and end: the junction
+    // boundary (stop bar, crosswalk); at a bend the node when the next
+    // edge has the same line there, else before the taper; a dead end.
+    let dA, dB;
     if (geo.jEnd[qa] >= 0) {
       const inc = e.oneway ? false : o <= div + 0.01;
       dA = sA + (geo.ctrl[qa] && room ? (inc ? STOP_BAR + STOP_HW : CW_FAR + CW_HW + 0.25) : LINE_GAP);
-      const tl = geo.taper[qa];
-      if (tl > dA + 0.3) {
-        // A pair shift: the line eases from its shifted place at dA.
-        const ps = geo.tcl[qa] - ((e.off || 0) + sh - e.width / 2);
-        zA0 = dA; oA = o + ps * (1 - dA / tl); dA = tl;
-      }
     } else if (geo.nbr[qa] >= 0) {
-      const m = matchAt(city, geo, qa, o, fam);
-      const tl = geo.taper[qa];
-      if (Number.isNaN(m)) dA = Math.max(tl, 2);
-      else { oA = (o + m) / 2; zA0 = geo.miter[qa] * oA; dA = tl; }
+      const p = mapAt(geo, e, 0, o);
+      dA = continues(city, geo, qa, p, fam) ? geo.miter[qa] * p : Math.max(geo.taper[qa], 2);
     } else dA = 0.5;
-    let zB0 = NaN, oB = o, dB;
     if (geo.jEnd[qb] >= 0) {
       const inc = e.oneway ? true : o >= div - 0.01;
       dB = sB - (geo.ctrl[qb] && room ? (inc ? STOP_BAR + STOP_HW : CW_FAR + CW_HW + 0.25) : LINE_GAP);
-      const tl = geo.taper[qb];
-      if (tl > e.length - dB + 0.3) {
-        const ps = geo.tcl[qb] - ((e.off || 0) + sh - e.width / 2);
-        zB0 = dB; oB = o + ps * (1 - (e.length - dB) / tl); dB = e.length - tl;
-      }
     } else if (geo.nbr[qb] >= 0) {
-      const m = matchAt(city, geo, qb, o, fam);
-      const tl = geo.taper[qb];
-      if (Number.isNaN(m)) dB = e.length - Math.max(tl, 2);
-      else { oB = (o + m) / 2; zB0 = e.length + geo.miter[qb] * oB; dB = e.length - tl; }
+      const p = mapAt(geo, e, e.length, o);
+      dB = continues(city, geo, qb, p, fam) ? e.length + geo.miter[qb] * p : e.length - Math.max(geo.taper[qb], 2);
     } else dB = e.length - 0.5;
-    if (dB <= dA + 0.3) {
-      // Too short for its middle: a matched line still joins its ends.
-      if (!Number.isNaN(zA0) && !Number.isNaN(zB0)) emitLine(out, kind, o, zA0, oA, zB0, oB, div);
-      continue;
+    if (dB <= dA + 0.3) continue;
+    // Samples: the ends and the taper steps between them.
+    DS.length = 0;
+    DS.push(dA);
+    const ta = geo.taper[qa], tb = geo.taper[qb];
+    if (ta > 0) for (const d of [ta / 3, (2 * ta) / 3, ta]) if (d > dA + 0.2 && d < dB - 0.2) DS.push(d);
+    if (tb > 0) for (const d of [e.length - tb, e.length - (2 * tb) / 3, e.length - tb / 3]) if (d > DS[DS.length - 1] + 0.2 && d < dB - 0.2) DS.push(d);
+    DS.push(dB);
+    for (let k = 0; k + 1 < DS.length; k++) {
+      const d0 = DS[k], d1 = DS[k + 1];
+      emitLine(out, kind, o, d0, mapAt(geo, e, Math.max(0, Math.min(e.length, d0)), o), d1, mapAt(geo, e, Math.max(0, Math.min(e.length, d1)), o), div);
     }
-    if (!Number.isNaN(zA0) && dA > zA0 + 0.05) emitLine(out, kind, o, zA0, oA, dA, o, div);
-    emitLine(out, kind, o, dA, o, dB, o, div);
-    if (!Number.isNaN(zB0) && zB0 > dB + 0.05) emitLine(out, kind, o, dB, o, zB0, oB, div);
   }
   // Crosswalks and stop bars.
   for (let end = 0; end < 2; end++) {

@@ -949,7 +949,17 @@ are unchanged: everything is in side arrays indexed by end
   triangles. Where more road space lies within 1.5 m beyond it, the gap is
   raised concrete too (`groundOf(city).fillOf(k)`, every 2 m, right then
   left). `city.surfaceAt` answers all of it (1 road, 2 sidewalk, 3 median).
+- Forks and merges: two arms under 25 degrees apart get a gore
+  (`J.gores[k]`: `{ poly, tris, paint }`): asphalt with white edge lines
+  and chevrons out to where the gap is 6 m wide; `sup[4k + 2 * end +
+  side]` (side 0 right, 1 left) keeps sidewalk, median and fill off that
+  side within that many m of the node (`supAt`). Medians stop 2 m short of
+  every junction with a round nose. A ring that still crosses itself after
+  longer trims becomes the convex hull of the arm mouths (the arms drawn
+  out onto it); only where that cannot reach every mouth does it stay a fan.
 - Paint (`edgePaint`): lines stop at the junction boundary (0.4 m short);
+  through a taper a line keeps its fraction of the way across the strip
+  (`mapAt`), so it never crosses a lane;
   on approaches to a junction with a signal or stop sign (`ctrl[q]`) a
   two-line crosswalk 0.65 and 3.65 m in and a stop bar at 4.65 m, and the
   lines stop there; nothing is painted on a junction. Traffic stops at the
