@@ -773,3 +773,9 @@ None critical or high.
 - scripts/smoke-extra.mjs: the fighter take-off check holds BOOST (the
   afterburner has been on the BOOST button since b902efd) and reads the
   afterburner at lift-off; it failed on every run before this.
+
+## 2026-11-23: version 0.9.0 Real streets, solid world
+
+- Map to the ocean, real lane widths and street names, Beach default start (Ocean Drive, facing south because the street is one way), solid props and sea walls, ground following, fair damage rules, parking lots without box cars, GPS with turn prompts, American English, Handling lab, lighter rendering (Normal street view Beach 135 calls / 237k triangles, Downtown 200 / 283k).
+- Gates: lint, 887 tests, smoke --extra, five region smoke, full ui-test 731/731. Security review: 0 critical, high, medium.
+- Open: shader programs 73 to 75 (target 60); heat 5 tank not on the Beach; handling model per class (0.10.0).
