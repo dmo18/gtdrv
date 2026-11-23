@@ -1,6 +1,6 @@
 // Screenshots of the Miami map's places (docs/MAP.md milestone 2) at
 // 915 x 412: a race start marker with the minimap, the full map with the
-// race starts, a secret found, the HUD neighbourhood name and the
+// race starts, a secret found, the HUD neighborhood name and the
 // OpenStreetMap credit in the menu.
 // usage: node scripts/miami-m2-shots.mjs [outDir]
 import { createRequire } from 'node:module';

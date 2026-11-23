@@ -7,7 +7,7 @@ import { createRng } from '../src/core/rng.js';
 import { createDriver, placeDriver, driveStep } from '../src/systems/traffic.js';
 import { createPed, stepPed } from '../src/systems/peds.js';
 import {
-  hasSiren, yieldTarget, wantsYield, createYield, stepYield, resumeDelay, kerbShift, collectSirens, isSirenCar,
+  hasSiren, yieldTarget, wantsYield, createYield, stepYield, resumeDelay, curbShift, collectSirens, isSirenCar,
   asideNeed, MAX_YIELD, COOLDOWN, START_SPEED,
 } from '../src/core/yield.js';
 
@@ -30,9 +30,9 @@ test('hasSiren reads the police flag and the emergency flag', () => {
   assert.equal(hasSiren(null), false);
 });
 
-test('yieldTarget: a car ahead in the same or the neighbouring lane gives way', () => {
+test('yieldTarget: a car ahead in the same or the neighboring lane gives way', () => {
   assert.equal(yieldTarget(car(), siren(), T).yield, true);
-  // Neighbouring lane (3.5 m to the right) and the lane to the left.
+  // Neighboring lane (3.5 m to the right) and the lane to the left.
   assert.equal(yieldTarget(car({ z: 3.5 }), siren(), T).yield, true);
   assert.equal(yieldTarget(car({ z: -3.5 }), siren(), T).yield, true);
   // Two lanes over is not in the way.
@@ -129,11 +129,11 @@ test('collectSirens lists cars with siren on only, not aircraft, wrecks or remov
   assert.equal(wantsYield(car(), [], false), false);
 });
 
-test('kerbShift keeps the car on the road with a margin', () => {
-  assert.ok(kerbShift(11, 2, 0.95, false) > 1 && kerbShift(11, 2, 0.95, false) <= 2.2);
-  assert.ok(kerbShift(18, 6.1, 0.95, false) <= 18 / 2 - 6.1 - 0.95 - 0.5 + 1e-9);
-  assert.ok(kerbShift(18, 2.6, 0.95, true) <= 1.2);
-  assert.equal(kerbShift(6, 2, 1.2, false), 0);
+test('curbShift keeps the car on the road with a margin', () => {
+  assert.ok(curbShift(11, 2, 0.95, false) > 1 && curbShift(11, 2, 0.95, false) <= 2.2);
+  assert.ok(curbShift(18, 6.1, 0.95, false) <= 18 / 2 - 6.1 - 0.95 - 0.5 + 1e-9);
+  assert.ok(curbShift(18, 2.6, 0.95, true) <= 1.2);
+  assert.equal(curbShift(6, 2, 1.2, false), 0);
 });
 
 // --- Pedestrians. ---
@@ -148,11 +148,11 @@ test('asideNeed: only people in front of a fast siren car, on its line, are aske
   assert.ok(o.dz < -0.99);
   assert.equal(asideNeed(ped(40, 1), siren(), o), false, 'beyond 25 m');
   assert.equal(asideNeed(ped(-10, 1), siren(), o), false, 'behind');
-  assert.equal(asideNeed(ped(15, 9), siren(), o), false, 'already on the pavement');
+  assert.equal(asideNeed(ped(15, 9), siren(), o), false, 'already on the sidewalk');
   assert.equal(asideNeed(ped(15, 1), siren({ speed: 4 }), o), false, 'siren car too slow');
 });
 
-test('a pedestrian on the road steps to the kerb side and waits, no panic, then walks on', () => {
+test('a pedestrian on the road steps to the curb side and waits, no panic, then walks on', () => {
   const rng = createRng(5);
   const e = city.edges.find((q) => !q.avenue && !q.causeway && q.length > 90);
   const a = city.nodes[e.a], b = city.nodes[e.b];
@@ -240,7 +240,7 @@ function run({ edge, withSiren, seed, offWhenStopped = false }) {
   sv.police = true;
   sv.siren = withSiren;
   sv.traffic = false;
-  // Parked cars on the kerbs of this road: asleep until touched.
+  // Parked cars on the curbs of this road: asleep until touched.
   const a = city.nodes[edge.a], b = city.nodes[edge.b];
   const parked = city.parkingSpots
     .filter((s) => !s.lot && Math.abs(s.x - (a.x + b.x) / 2) < edge.length / 2 + 20 && Math.abs(s.z - (a.z + b.z) / 2) < edge.length / 2 + 20 &&
@@ -268,7 +268,7 @@ function run({ edge, withSiren, seed, offWhenStopped = false }) {
     if (offStep === Infinity && k > 60) {
       let clear = true;
       for (const c of cars) if ((sv.x - c.x) * Math.cos(c.heading) + (sv.z - c.z) * Math.sin(c.heading) < 12) clear = false;
-      // Or: the driver turns the siren off while the first car sits at the kerb.
+      // Or: the driver turns the siren off while the first car sits at the curb.
       if (offWhenStopped) clear = cars.some((c) => c.ai.yld.on && Math.abs(c.speed) < 0.2);
       if (clear || k >= 1500) offStep = k;
     }
@@ -319,7 +319,7 @@ function run({ edge, withSiren, seed, offWhenStopped = false }) {
       sctx.time = ((24 - ((Tn.id * 7) % 24)) % 24 + (hz ? 0 : 12) + 1) % 24;
     }
     driveStep(sv.ai, sv, DT, sctx);
-    sv.ai.offset = edge.avenue ? -2.2 : -1.5; // keeps to the centre line, like a driver overtaking
+    sv.ai.offset = edge.avenue ? -2.2 : -1.5; // keeps to the center line, like a driver overtaking
   }
   return { offStep, cars, sv, st, parked, nan, wet, inBuilding, stuck, yieldEvents, maxYieldHold };
 }
@@ -334,7 +334,7 @@ for (const [label, filter] of [['street', (e) => !e.avenue && e.length > 95], ['
     assert.equal(r.inBuilding, 0, 'a car inside a building');
     assert.ok(r.yieldEvents >= 3, `cars that pulled over: ${r.yieldEvents}`);
     assert.equal(base.yieldEvents, 0, 'without a siren nobody yields');
-    // Nobody is hit by it or hits the kerb at speed.
+    // Nobody is hit by it or hits the curb at speed.
     for (const s of r.st) assert.ok(s.maxImpact <= 2, `impact ${s.maxImpact.toFixed(2)} m/s`);
     // The parked cars were not touched.
     assert.equal(r.parked.filter((p) => !p.asleep).length, 0, 'a parked car woke up');
@@ -359,7 +359,7 @@ for (const [label, filter] of [['street', (e) => !e.avenue && e.length > 95], ['
   });
 }
 
-test('siren turned off while a car waits at the kerb: it drives on within 0.8 to 4 s', () => {
+test('siren turned off while a car waits at the curb: it drives on within 0.8 to 4 s', () => {
   const edge = edgeSorted((e) => !e.avenue && e.length > 95)[0];
   const r = run({ edge, withSiren: true, seed: 300, offWhenStopped: true });
   assert.ok(r.offStep < 1500, 'a car came to a stop');
@@ -373,7 +373,7 @@ test('siren turned off while a car waits at the kerb: it drives on within 0.8 to
   assert.ok(first >= 0.7, `drove on after ${first.toFixed(2)} s: too eager`);
   const last = Math.max(...r.st.filter((s) => s.waitedAtOff).map((s) => s.resumed));
   assert.ok(last <= 12, `last car drove on after ${last.toFixed(1)} s`);
-  console.log(`# siren off at the kerb: first car drove on after ${first.toFixed(1)} s, last after ${last.toFixed(1)} s`);
+  console.log(`# siren off at the curb: first car drove on after ${first.toFixed(1)} s, last after ${last.toFixed(1)} s`);
 });
 
 test('the siren run is deterministic', () => {

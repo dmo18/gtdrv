@@ -2,11 +2,11 @@
 //
 // A vehicle with `siren` on (the player's stolen police car, an AI police
 // car in a chase, later a fire truck or an ambulance) clears the road:
-//  - AI cars ahead of it in the same or the neighbouring lane, and oncoming
-//    ones close by, slow down, pull to the kerb on the right, stop, and
+//  - AI cars ahead of it in the same or the neighboring lane, and oncoming
+//    ones close by, slow down, pull to the curb on the right, stop, and
 //    start again a moment after it has passed or its siren goes off
 //    (yieldTarget, stepYield, used by driveStep in src/systems/traffic.js);
-//  - pedestrians on the road in front of it step to the kerb side and wait
+//  - pedestrians on the road in front of it step to the curb side and wait
 //    (asideNeed, used by stepPed in src/systems/peds.js).
 // Nothing here allocates per call: results go into caller-owned objects.
 
@@ -16,12 +16,12 @@ export const hasSiren = (spec) => !!(spec && (spec.police || spec.emergency));
 
 export const YIELD_RANGE = 60; // m ahead of the siren vehicle (same direction)
 export const YIELD_ONCOMING = 40; // m (oncoming cars close by, they are on the other side)
-export const YIELD_LATERAL = 6.5; // m: the same or the neighbouring lane
+export const YIELD_LATERAL = 6.5; // m: the same or the neighboring lane
 export const START_SPEED = 4; // m/s: a parked car with its siren on moves nobody
 export const KEEP_SPEED = 1.5; // m/s: once pulled over, cars wait until it really stops
 export const MAX_YIELD = 25; // s: no car is held longer than this in one go
 export const COOLDOWN = 8; // s: after a maximum hold a car drives on before it may yield again
-export const PULL_SPEED = 6; // m/s: speed cap while moving to the kerb
+export const PULL_SPEED = 6; // m/s: speed cap while moving to the curb
 
 // Is this vehicle a siren vehicle that traffic should react to?
 export function isSirenCar(v) {
@@ -38,7 +38,7 @@ export function collectSirens(vehicles, out) {
 
 const halfLen = (v) => (v.spec && v.spec.length ? v.spec.length / 2 : 2.4);
 
-// Should `car` give way to `siren`? Fills out.yield (bool), out.along (metres
+// Should `car` give way to `siren`? Fills out.yield (bool), out.along (meters
 // of the car ahead of the siren vehicle, negative once passed) and out.lat
 // (to the right of the siren vehicle). `engaged` is true when the car is
 // already pulling over: the speed bar is lower then, so a siren car that
@@ -75,7 +75,7 @@ export function wantsYield(car, sirens, engaged) {
   return false;
 }
 
-// Per-driver state. on: pulling over or waiting at the kerb; hold: seconds
+// Per-driver state. on: pulling over or waiting at the curb; hold: seconds
 // left before it drives off again; total: seconds in this yield; cool:
 // seconds before it may yield again after a maximum hold.
 export function createYield() {
@@ -111,10 +111,10 @@ export function stepYield(y, car, sirens, dt, id) {
   return y.on;
 }
 
-// How far from the kerb-side edge of the lane a pulled-over car goes: the
+// How far from the curb-side edge of the lane a pulled-over car goes: the
 // room between its side and the road edge, with a margin, capped so a car
 // in the inner lane of an avenue only shifts within its own lane.
-export function kerbShift(roadWidth, laneOff, halfW, innerLane) {
+export function curbShift(roadWidth, laneOff, halfW, innerLane) {
   const room = roadWidth / 2 - laneOff - halfW - 0.5;
   const cap = innerLane ? 1.2 : 1.8;
   return room < 0 ? 0 : room > cap ? cap : room;
@@ -128,7 +128,7 @@ export const ASIDE_LAT = 5.2; // m from the siren vehicle's line: further than t
 export const ASIDE_WALK = 3; // m/s
 export const ASIDE_HOLD = 1.2; // s they wait after the last siren vehicle has gone by
 
-// Is `ped` in the way of `siren`? Fills out.need (metres still to walk to
+// Is `ped` in the way of `siren`? Fills out.need (meters still to walk to
 // be clear, 0 when clear but still close) and the unit direction out.dx,
 // out.dz away from the siren vehicle's line, on the ped's own side.
 export function asideNeed(ped, siren, out) {

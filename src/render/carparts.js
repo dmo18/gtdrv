@@ -1,6 +1,6 @@
 // Thrown parts of a blown-up vehicle (docs/REVAMP.md 6.7 layer 7): 14 to
 // 18 per car from a pool of 96, always four that read as what they are (a
-// door, a wheel, the bonnet, a bumper; a second door and wheel when the
+// door, a wheel, the hood, a bumper; a second door and wheel when the
 // pool has room), launched at 6 to 16 m/s, 35 to 75 degrees up, spinning;
 // one bounce that keeps 0.3 of the speed, then they lie flat for 20 s and
 // shrink away over 1 s. Seeded from the vehicle id, so the same car always
@@ -18,7 +18,7 @@ export const PART_EL0 = 35 * Math.PI / 180, PART_EL1 = 75 * Math.PI / 180; // la
 export const PARTS_MIN = 14, PARTS_MAXPER = 18;
 // Kinds. Every size has its thin axis on local y, so a part lies flat with
 // its rotation about x and z back at 0.
-export const PART = { chunk: 0, door: 1, wheel: 2, bonnet: 3, bumper: 4, panel: 5 };
+export const PART = { chunk: 0, door: 1, wheel: 2, hood: 3, bumper: 4, panel: 5 };
 const G = 9.8;
 const DRAG_GROUND = 6; // 1/s sliding to a stop
 const LAY_K = 10; // 1/s easing to lie flat
@@ -33,7 +33,7 @@ export function createParts(max = PARTS_MAX) {
     sx: f(), sy: f(), sz: f(),
     age: new Float32Array(max).fill(-1), // < 0: free
     hits: new Uint8Array(max), // ground contacts so far (0, 1 = bounced, 2 = lying)
-    gen: new Uint16Array(max), // bumped each time the slot is reused (the drawer recolours)
+    gen: new Uint16Array(max), // bumped each time the slot is reused (the drawer recolors)
   };
 }
 
@@ -80,7 +80,7 @@ export function addPart(P, kind, x, y, z, sp, el, az, sx, sy, sz, hex, rng, blas
   return i;
 }
 
-// Darken a hex colour by k (scorched paint).
+// Darken a hex color by k (scorched paint).
 export function burnt(hex, k) {
   const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
   return ((Math.round(r * k) << 16) | (Math.round(g * k) << 8) | Math.round(b * k)) >>> 0;
@@ -103,9 +103,9 @@ export function launchCarParts(P, c, x, y, z, out = null) {
   const room = freeParts(P) >= PARTS_MAXPER;
   const y0 = Math.max(0.5, y);
   const wr = Math.max(0.3, Math.min(0.42, H * 0.24)), tw = 0.22;
-  // Doors, wheels, a bonnet and a bumper only come off cars.
+  // Doors, wheels, a hood and a bumper only come off cars.
   const car = !c || !c.kind || c.kind === 'car';
-  if (out) out.door = out.wheel = out.bonnet = out.bumper = out.n = 0;
+  if (out) out.door = out.wheel = out.hood = out.bumper = out.n = 0;
   for (let k = 0; k < n; k++) {
     const az = (k / n) * 6.283 + rng.next() * 0.9;
     const v = PART_V0 + rng.next() * (PART_V1 - PART_V0);
@@ -119,7 +119,7 @@ export function launchCarParts(P, c, x, y, z, out = null) {
     } else if (k === 1 || (k === 5 && room)) {
       kind = PART.wheel; sx = sz = wr * 2; sy = tw; hex = 0xffffff;
     } else if (k === 2) {
-      kind = PART.bonnet; sx = L * 0.3; sy = 0.06; sz = W * 0.82; hex = skin;
+      kind = PART.hood; sx = L * 0.3; sy = 0.06; sz = W * 0.82; hex = skin;
     } else if (k === 3) {
       kind = PART.bumper; sx = W * 0.95; sy = 0.22; sz = 0.26; hex = rng.next() < 0.5 ? 0x26272a : skin;
     } else if (k % 3 === 0) {
@@ -134,7 +134,7 @@ export function launchCarParts(P, c, x, y, z, out = null) {
       out.n++;
       if (kind === PART.door) out.door++;
       else if (kind === PART.wheel) out.wheel++;
-      else if (kind === PART.bonnet) out.bonnet++;
+      else if (kind === PART.hood) out.hood++;
       else if (kind === PART.bumper) out.bumper++;
     }
   }

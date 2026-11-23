@@ -139,7 +139,7 @@ test('boat gates are at sea with clear water between them', () => {
       pz = cp.z;
     }
   }
-  // The island lap goes right round: every direction from the centre, and
+  // The island lap goes right round: every direction from the center, and
   // round the far (east) side of the airfield islet.
   const lap = byId['boat-island'];
   const isl = city.airfield.islet;

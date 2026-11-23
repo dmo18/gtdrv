@@ -27,7 +27,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = path.join(ROOT, 'src', 'world', 'data');
 export const regionFile = (id) => path.join(DATA, id + '.json');
 
-// Bounding box of a delta-encoded polyline (decimetres), in metres.
+// Bounding box of a delta-encoded polyline (decimeters), in meters.
 function boxOf(p) {
   let x = 0, z = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (let i = 0; i < p.length; i += 2) {

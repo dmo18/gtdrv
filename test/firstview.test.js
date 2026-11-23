@@ -77,7 +77,7 @@ test('traffic places the start cars on the street ahead, within the 6.8 counts',
   assert.deepEqual(g2.vehicles.map((v) => [Math.round(v.x * 10), Math.round(v.z * 10)]), g.vehicles.map((v) => [Math.round(v.x * 10), Math.round(v.z * 10)]));
 });
 
-test('parked cars fill the start kerb spots first, at least 6 in the cone', () => {
+test('parked cars fill the start curb spots first, at least 6 in the cone', () => {
   const g = fakeGame();
   const p = createParkedCars(g);
   const firstOther = p.spots.findIndex((s) => !s.start);
@@ -91,7 +91,7 @@ test('parked cars fill the start kerb spots first, at least 6 in the cone', () =
     filled++;
     if (s.start) start++;
   }
-  console.log(`# parked cars in the cone within 80 m: ${filled} (${start} on start kerb spots), start spots total ${p.spots.filter((s) => s.start).length}`);
+  console.log(`# parked cars in the cone within 80 m: ${filled} (${start} on start curb spots), start spots total ${p.spots.filter((s) => s.start).length}`);
   assert.ok(filled >= 6 && filled <= 40 && start >= 1, `${filled} parked cars in the cone, ${start} on start spots`);
 });
 
@@ -132,13 +132,13 @@ test('a new start is at 17:30 clear; Continue and a fixed Settings time keep the
   assert.ok(g.timeLocked);
 });
 
-test('title shot: behind the spawn, toward the south kerb, dolly eases and returns', () => {
+test('title shot: behind the spawn, toward the south curb, dolly eases and returns', () => {
   const out = {};
   titlePose(sv, 0, false, out);
   const c = sv.camera, sp = sv.spawn;
   const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
   assert.ok(Math.abs(out.x - (sp.x - fx * c.back - fz * c.side)) < 1e-9 && Math.abs(out.z - (sp.z - fz * c.back + fx * c.side)) < 1e-9);
-  assert.ok(out.z > sp.z, 'toward the south kerb');
+  assert.ok(out.z > sp.z, 'toward the south curb');
   assert.equal(out.y, c.height);
   assert.ok(Math.abs(out.lx - (sp.x + fx * c.lookAhead)) < 1e-9 && out.ly === c.lookHeight);
   const period = (2 * c.dolly) / c.dollySpeed;
@@ -178,7 +178,7 @@ test('title camera blends to the chase camera in 1.2 s', () => {
 // frame. No prop (street furniture, lamp, tree, signal, lot dressing other
 // than flat ground marks) within 40 m of the title camera inside a cone of
 // 8 degrees round its view line, at any point of the dolly; and no trunk or
-// post on the near pavement in front of the chase camera at the start
+// post on the near sidewalk in front of the chase camera at the start
 // (within 12 m, inside the 49 degree half width of the 915 by 412 view).
 test('title and start frames: no prop in the 8 degree cone within 40 m; no post right in front of the start camera', () => {
   const sp = sv.spawn;
@@ -213,7 +213,7 @@ test('title and start frames: no prop in the 8 degree cone within 40 m; no post 
       if (along > 0 && Math.hypot(dx, dz) <= 40 && lat < along * tan8) hits.push(`${name} at ${along.toFixed(1)} m, ${lat.toFixed(1)} m off the line (dolly ${k}/8)`);
     }
   }
-  assert.deepEqual(hits, [], 'title frame centre is clear');
+  assert.deepEqual(hits, [], 'title frame center is clear');
   // Start frame: the chase camera 7.5 m behind the spawn.
   const cx = sp.x - fx * 7.5, cz = sp.z - fz * 7.5;
   const cos49 = Math.cos((49 * Math.PI) / 180);
@@ -230,7 +230,7 @@ test('title and start frames: no prop in the 8 degree cone within 40 m; no post 
 // ---- Every region has a start view (docs/PLAN_V2.md 3.3) ----
 // Built like Downtown's: the spawn on a named street 300 m or more from
 // every crop edge, the same camera and 17:30 clear sky, moving cars on the
-// street ahead and parked cars on the kerb.
+// street ahead and parked cars on the curb.
 import { regionCity, NEW_REGIONS } from './regionfixture.js';
 import { regionFor, START_EDGE } from '../src/world/regions.js';
 import { REGION_STARTS } from '../src/world/regioncontent.js';

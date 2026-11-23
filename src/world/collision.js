@@ -97,7 +97,7 @@ export function createCollisionWorld() {
                 nz = dz / d;
                 depth = r - d;
               } else {
-                // Centre is inside the box: leave by the nearest face.
+                // Center is inside the box: leave by the nearest face.
                 const l = out.x - it.x0, rr = it.x1 - out.x;
                 const t = out.z - it.z0, b = it.z1 - out.z;
                 const m = Math.min(l, rr, t, b);
@@ -192,7 +192,7 @@ export function createCollisionWorld() {
     }
     if (lotLayer) {
       // Lot cells: only those the ray passes through (column by column,
-      // the z span of the ray in the column, padded by a millimetre), so
+      // the z span of the ray in the column, padded by a millimeter), so
       // a long ray fills few cells. A shape the ray hits is in the cell
       // of the hit point, which is one of them.
       for (let cx = cx0; cx <= cx1; cx++) {
@@ -292,7 +292,7 @@ export function fillRoadEndCollision(city, collision) {
 
 // ---- Lot solids (docs/REVAMP.md 6.2) ----
 // Every solid feature that dressLot lists for a lot, and the static cars
-// the renderer parks in car park bays, as collision shapes for the whole
+// the renderer parks in parking lot bays, as collision shapes for the whole
 // map at city build: the simulation never waits on a tile being drawn.
 
 function cellHash(i, j) {
@@ -302,7 +302,7 @@ function cellHash(i, j) {
 }
 
 // Bays the parked-car system fills (city.parkingSpots entries with
-// lot: true), keyed by the bay centre on a 0.5 m grid.
+// lot: true), keyed by the bay center on a 0.5 m grid.
 const listedCache = new WeakMap();
 function listedBays(city) {
   let s = listedCache.get(city);
@@ -313,9 +313,9 @@ function listedBays(city) {
   return s;
 }
 
-// The static car of one bay (centre bx, bz of a row feature with variant
+// The static car of one bay (center bx, bz of a row feature with variant
 // v): -1 when the bay stays empty (a listed spot, or the other half of
-// the bays), else a number in 0..0.55 that picks its colour and facing.
+// the bays), else a number in 0..0.55 that picks its color and facing.
 // The renderer draws exactly the cars this says are there.
 export function bayCar(city, bx, bz, v) {
   const key = Math.round(bx * 2) * 65536 + Math.round(bz * 2);

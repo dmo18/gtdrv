@@ -1,7 +1,7 @@
 // How a building on the real Miami map should look, worked out from its
-// neighbourhood (city.placeOf), its height and a seeded hash of the
-// building: a facade style, a wall colour from a Miami palette (pastel
-// stucco, white, sand, coral, teal glass, grey concrete), a trim colour
+// neighborhood (city.placeOf), its height and a seeded hash of the
+// building: a facade style, a wall color from a Miami palette (pastel
+// stucco, white, sand, coral, teal glass, gray concrete), a trim color
 // and the extra structure buildings.js adds (fins, balconies, deco
 // eyebrows, tile copings). Pure: no three.js, runs in node tests. The
 // city data is never changed; the result is cached per building.
@@ -9,7 +9,7 @@
 // The procedural island (city.map unset) keeps its own look: lookOf
 // returns null there.
 
-// Neighbourhoods by character.
+// Neighborhoods by character.
 const TOWERS = new Set(['Downtown Miami', 'Brickell', 'Brickell Key', 'Park West', 'Edgewater', 'Margaret Pace Park', 'Bayfront Park', 'Museum Park', 'Midtown', 'Miami']);
 const DECO = new Set(['Miami Beach', 'Venetian Islands', 'Hibiscus Island', 'Palm Island', 'Fisher Island']);
 const LOWRISE = new Set(['Little Havana', 'Shenandoah', 'Bay Heights', 'The Roads', 'Brickell Hammock', 'Overtown', 'Civic Center', 'Allapattah', 'Wynwood', 'Design District', 'Virginia Key', 'Watson Island']);

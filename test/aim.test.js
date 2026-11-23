@@ -41,8 +41,8 @@ test('assist cone: 8 deg far, 14 deg near, nothing outside', () => {
 test('assist picks the nearest of several targets in the cone; ignores down, faded and self', () => {
   const far = at(30, 1), near = at(12, 3);
   assert.equal(pickAssist(ctxOf([far, near]), eye, fwdX, eye, { range: 45 }), near);
-  const centred = at(14, 0.2), offAxis = at(13, 7);
-  assert.equal(pickAssist(ctxOf([offAxis, centred]), eye, fwdX, eye, { range: 45 }), centred);
+  const centered = at(14, 0.2), offAxis = at(13, 7);
+  assert.equal(pickAssist(ctxOf([offAxis, centered]), eye, fwdX, eye, { range: 45 }), centered);
   const down = at(10, 0, 'crew', { life: 'down' }), gone = at(9, 0, 'crew', { fade: 0.5 });
   assert.equal(pickAssist(ctxOf([down, gone]), eye, fwdX, eye, { range: 45 }), null);
 });
@@ -206,7 +206,7 @@ test('controller: lock-on follows a moving target with the camera', () => {
   }
   const ray = chase.ray;
   const ang = angleTo(ray.x, ray.y, ray.z, ray.dx, ray.dy, ray.dz, t.x, 1.1, t.z);
-  assert.ok(ang < 6 * DEG, `camera keeps the target near the centre (${(ang / DEG).toFixed(2)} deg)`);
+  assert.ok(ang < 6 * DEG, `camera keeps the target near the center (${(ang / DEG).toFixed(2)} deg)`);
   assert.equal(hud.lock, t);
   // Tap again to release.
   input.press('lock');

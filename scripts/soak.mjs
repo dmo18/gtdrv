@@ -220,7 +220,7 @@ while (simDone < simSeconds) {
         const d = Math.hypot(v.x - p.x, v.z - p.z);
         if (d < 120 && n < 3) { g.combat.explode(v.x, 1, v.z, 8); n++; }
       }
-      // Also one by a person on the pavement, if any.
+      // Also one by a person on the sidewalk, if any.
       const a = g.actors.find((x) => x !== p.walker && x.life === 'ok' && Math.hypot(x.x - p.x, x.z - p.z) < 80);
       if (a) g.combat.explode(a.x, 1, a.z, 6);
       return n;

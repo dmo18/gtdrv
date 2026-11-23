@@ -1,6 +1,6 @@
 # Plan
 
-Stack: plain JavaScript modules + three.js (3D library, MIT licence),
+Stack: plain JavaScript modules + three.js (3D library, MIT license),
 bundled by esbuild into one HTML file. Tests: node:test for game logic,
 Playwright (already installed) for a load-and-drive smoke test at phone
 size. Lint: eslint. Dependencies pinned to exact versions.
@@ -64,10 +64,10 @@ The owner played the first build on the phone and found steering,
 sound, graphics and realism poor. Four tasks, all with on-screen or
 measured proof:
 19. Steering and driving feel: steering wheel, buttons, tilt and
-    slider styles with sensitivity; tyre model, gears, weight
+    slider styles with sensitivity; tire model, gears, weight
     transfer, body motion. Model: Opus
 20. Sound rebuilt from generated samples: firing-pulse engines,
-    tyres, wind, impacts, reverb, ambience, siren. Model: Opus
+    tires, wind, impacts, reverb, ambience, siren. Model: Opus
 21. City graphics: shadows, tone mapping, reflections, textured
     roads and facades, street props, traffic lights. Model: Fable
 22. Vehicle looks and effects: smooth car bodies, glossy paint,
@@ -75,7 +75,7 @@ measured proof:
 
 Run cap: 27 tasks, 3.5M delegated tokens.
 Security items that apply: no secrets, no personal data, no network
-calls at runtime, pinned and audited dependencies, licence check,
+calls at runtime, pinned and audited dependencies, license check,
 save data validated on load, review at each milestone.
 
 Change log: user redirected the game toward fun driving, boating and
@@ -253,7 +253,7 @@ police heli spotlight beam in 33 (10k).
 
 Later (parked): tuning garage and car upgrades; championships with AI
 rivals; missions 4 to 8; AI fighters; ejection seat; knocking over
-lamps and trees; pickups and armour.
+lamps and trees; pickups and armor.
 
 Change log: owner asked for "more GTA and Gran Turismo combined":
 full sandbox combat (blood allowed, no dismemberment), story missions, and scores in

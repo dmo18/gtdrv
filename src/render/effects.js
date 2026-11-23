@@ -1,4 +1,4 @@
-// Vehicle effects: tyre smoke, skid marks, sparks, dust, exhaust puffs,
+// Vehicle effects: tire smoke, skid marks, sparks, dust, exhaust puffs,
 // rain spray, damage smoke and flames, lamp glows, the player's headlight
 // beams, contact shadows, boat spray / rooster tails / landing rings and
 // aircraft vapour, prop wash, rotor downwash and touchdown puffs.
@@ -16,7 +16,7 @@ const MAX_ALPHA = 1400;
 const MAX_ADD = 700;
 const MAX_SKID = 600;
 const MAX_SHADOW = 96;
-const FX_RANGE = 95; // metres from the camera where craft emit effects
+const FX_RANGE = 95; // meters from the camera where craft emit effects
 
 function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
@@ -233,7 +233,7 @@ export function createPool(max, additive, atlas, scene) {
     s0: new Float32Array(max), s1: new Float32Array(max), a0: new Float32Array(max),
     rot: new Float32Array(max), rotV: new Float32Array(max),
     r: new Float32Array(max), g: new Float32Array(max), b: new Float32Array(max),
-    er: new Float32Array(max), eg: new Float32Array(max), eb: new Float32Array(max), // colour at the end of life
+    er: new Float32Array(max), eg: new Float32Array(max), eb: new Float32Array(max), // color at the end of life
     cell: new Float32Array(max), grav: new Float32Array(max), drag: new Float32Array(max),
     fadeIn: new Float32Array(max), floor: new Float32Array(max),
     depth: new Float32Array(max), order: new Uint16Array(max), bucketCount: new Uint16Array(65), cap: max,
@@ -257,7 +257,7 @@ export function emitP(P, x, y, z, vx, vy, vz, life, s0, s1, a0, r, g, b, cell, g
   return i;
 }
 
-// Fade particle i's colour to (r, g, b) over its life (fire to smoke).
+// Fade particle i's color to (r, g, b) over its life (fire to smoke).
 export function tintP(P, i, r, g, b) {
   if (i < 0) return;
   P.er[i] = r; P.eg[i] = g; P.eb[i] = b;
@@ -780,7 +780,7 @@ export function createEffects(game) {
       } else {
         m.on = false;
       }
-      // Tyre smoke from sliding / burnouts on tarmac, dust off it.
+      // Tire smoke from sliding / burnouts on asphalt, dust off it.
       if (d2 < FX_RANGE * FX_RANGE) {
         if (road && (sliding || hand) && rnd() < (slip * 1.3 + (hand ? 0.4 : 0)) * qq * 0.9) {
           smoke(p.x + rs() * 0.2, 0.3, p.z + rs() * 0.2, (v.vx || 0) * 0.25 + rs() * 0.7, 0.9 + rnd() * 1.1, (v.vz || 0) * 0.25 + rs() * 0.7,
@@ -829,22 +829,22 @@ export function createEffects(game) {
         }
       }
     }
-    // Damage smoke and fire from the bonnet.
+    // Damage smoke and fire from the hood.
     const hf = Math.max(0, (v.health || 0) / (spec.health || 1));
     if (hf < 0.35 || v.wrecked) {
       const heavy = v.wrecked || hf < 0.12;
       s.smoke += dt * (heavy ? 16 : 5 + (0.35 - hf) * 30) * qq;
       while (s.smoke > 1) {
         s.smoke -= 1;
-        const p = toWorld(v, an.bonnet[0] + rs() * 0.3, rs() * 0.3);
-        const grey = heavy ? 0.07 + rnd() * 0.05 : 0.42 + hf * 0.8;
-        smoke(p.x, an.bonnet[1], p.z, (v.vx || 0) * 0.3 + rs() * 0.3, 1.2 + rnd() * (heavy ? 1.6 : 0.8), (v.vz || 0) * 0.3 + rs() * 0.3,
-          heavy ? 2.6 + rnd() * 1.4 : 1.8 + rnd(), 0.5, heavy ? 3.6 : 2.4, heavy ? 0.6 : 0.4, grey, grey, grey * 1.02, heavy ? 1.3 : 0.9, 0.9);
+        const p = toWorld(v, an.hood[0] + rs() * 0.3, rs() * 0.3);
+        const gray = heavy ? 0.07 + rnd() * 0.05 : 0.42 + hf * 0.8;
+        smoke(p.x, an.hood[1], p.z, (v.vx || 0) * 0.3 + rs() * 0.3, 1.2 + rnd() * (heavy ? 1.6 : 0.8), (v.vz || 0) * 0.3 + rs() * 0.3,
+          heavy ? 2.6 + rnd() * 1.4 : 1.8 + rnd(), 0.5, heavy ? 3.6 : 2.4, heavy ? 0.6 : 0.4, gray, gray, gray * 1.02, heavy ? 1.3 : 0.9, 0.9);
       }
       if (v.wrecked || v.onFire) {
         if (rnd() < 0.7 * qq) {
-          const p = toWorld(v, an.bonnet[0] + rs() * 0.4, rs() * 0.5);
-          const j = emitP(B, p.x, an.bonnet[1] + 0.05, p.z, rs() * 0.2, 1.4 + rnd(), rs() * 0.2, 0.35 + rnd() * 0.3, 0.5 + rnd() * 0.3, 0.12, 0.8, 1, 0.45 + rnd() * 0.2, 0.12, 3, -1.5, 0.5);
+          const p = toWorld(v, an.hood[0] + rs() * 0.4, rs() * 0.5);
+          const j = emitP(B, p.x, an.hood[1] + 0.05, p.z, rs() * 0.2, 1.4 + rnd(), rs() * 0.2, 0.35 + rnd() * 0.3, 0.5 + rnd() * 0.3, 0.12, 0.8, 1, 0.45 + rnd() * 0.2, 0.12, 3, -1.5, 0.5);
           if (j >= 0) B.fadeIn[j] = 0.15;
         }
       }
@@ -917,8 +917,8 @@ export function createEffects(game) {
       while (s.smoke > 1) {
         s.smoke -= 1;
         const p = toWorld(v, -L * 0.2, 0);
-        const grey = v.wrecked ? 0.08 : 0.45;
-        smoke(p.x, wy + (spec.height || 1.5) * 0.7, p.z, rs() * 0.3, 1.4 + rnd(), rs() * 0.3, 2.4, 0.6, 3.2, 0.5, grey, grey, grey, 1.2, 0.9);
+        const gray = v.wrecked ? 0.08 : 0.45;
+        smoke(p.x, wy + (spec.height || 1.5) * 0.7, p.z, rs() * 0.3, 1.4 + rnd(), rs() * 0.3, 2.4, 0.6, 3.2, 0.5, gray, gray, gray, 1.2, 0.9);
       }
     }
   }
@@ -1002,8 +1002,8 @@ export function createEffects(game) {
       while (s.smoke > 1) {
         s.smoke -= 1;
         const p = toWorld(v, (spec.length || 7) * 0.2, 0);
-        const grey = v.wrecked ? 0.08 : 0.45;
-        smoke(p.x, (v.mesh ? v.mesh.position.y : y) + 1.6, p.z, -fwdx * spd * 0.1 + rs() * 0.3, 1 + rnd(), -fwdz * spd * 0.1 + rs() * 0.3, 2.2, 0.5, 3, 0.5, grey, grey, grey, 1.1, 0.9);
+        const gray = v.wrecked ? 0.08 : 0.45;
+        smoke(p.x, (v.mesh ? v.mesh.position.y : y) + 1.6, p.z, -fwdx * spd * 0.1 + rs() * 0.3, 1 + rnd(), -fwdz * spd * 0.1 + rs() * 0.3, 2.2, 0.5, 3, 0.5, gray, gray, gray, 1.1, 0.9);
       }
       // A shot-down craft burns on the way down (until its blast).
       if (v.wrecked && !v.scorched && !v.onWater && rnd() < 0.8 * qq) {

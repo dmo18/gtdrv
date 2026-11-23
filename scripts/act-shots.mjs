@@ -93,7 +93,7 @@ for (const [w, h] of [[915, 412], [780, 360]]) {
     });
     check(geo.panel.y >= geo.toastBottom, `timer panel (y ${geo.panel.y.toFixed(0)}) is below the toast stack (${geo.toastBottom.toFixed(0)})`);
     check(geo.quit.w >= 44 && geo.quit.h >= 44 && geo.label === 'Abandon race', `Quit is ${geo.quit.w}x${geo.quit.h} (${geo.label})`);
-    check(geo.quit.r <= w && geo.quit.b < h * 0.5, 'Quit is on screen, top centre');
+    check(geo.quit.r <= w && geo.quit.b < h * 0.5, 'Quit is on screen, top center');
 
     // 5. Quit abandons the race.
     await page.touchscreen.tap(geo.quit.x + geo.quit.w / 2, geo.quit.y + geo.quit.h / 2);

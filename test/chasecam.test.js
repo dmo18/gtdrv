@@ -36,7 +36,7 @@ test('bumper view puts the camera ahead of the target and low', () => {
   assert.equal(chase.cycleView(), 'Far chase');
   assert.equal(chase.cycleView(), 'Bumper');
   const pos = settle(cam, chase, 240);
-  assert.ok(pos.x > target.x, 'in front of the car centre (heading 0 faces +x)');
+  assert.ok(pos.x > target.x, 'in front of the car center (heading 0 faces +x)');
   assert.ok(pos.y < 1.2, 'low');
   assert.equal(chase.cycleView(), 'Chase', 'wraps around');
 });

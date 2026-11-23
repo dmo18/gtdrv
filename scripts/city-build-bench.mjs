@@ -32,9 +32,9 @@ const CITY_STAGES = [
   ['landmark infill', ['infill.stamp', 'infill.masks', 'infill.plan', 'infill']],
   ['extras (props, spots)', ['extras']],
   ['lot grid and classes', ['lots.classes', 'lots.pieces', 'lots.objects', 'lots.grid']],
-  // lots.build is the whole buildLots call plus the car park bays; the
+  // lots.build is the whole buildLots call plus the parking lot bays; the
   // lots.* laps inside buildLots are subtracted (see the child).
-  ['car park bays', ['lots.build', 'lots']],
+  ['parking lot bays', ['lots.build', 'lots']],
   ['stunts (ramps)', ['places.ramps']],
   ['secrets', ['places.secrets']],
   ['courses', ['places.courses']],
@@ -69,7 +69,7 @@ async function child() {
   out['createMiamiCity cpu'] = process.cpuUsage(c0).user / 1000;
   t = now();
   for (const [name, keys] of CITY_STAGES) out[name] = keys.reduce((s, k) => s + (city.timings[k] || 0), 0);
-  out['car park bays'] -= out['lot grid and classes'];
+  out['parking lot bays'] -= out['lot grid and classes'];
   // What the game does next (game.js): explore, then the renderer's
   // whole-map collision. Garages and adventures timed on their own first.
   // (attachExplore does these three plus the clean-up of spots and props.)

@@ -133,7 +133,7 @@ test('blast look: contract numbers, smoke seen 12 m out by 0.5 s for a car, fart
   assert.ok(tank > car && jet > car, `tank ${tank.toFixed(1)} m, jet ${jet.toFixed(1)} m`);
   assert.equal(smokeReach(1, 0.05), 0, 'the roll starts at 0.08 s');
   assert.ok(ROLL_V.length >= BLAST.roll.n1);
-  // Shake: 1 at the centre, straight line to 0 at 60 m.
+  // Shake: 1 at the center, straight line to 0 at 60 m.
   assert.equal(shakeAt(1, 0), 1);
   assert.ok(Math.abs(shakeAt(1, 30) - 0.5) < 1e-9);
   assert.equal(shakeAt(1, 60), 0);

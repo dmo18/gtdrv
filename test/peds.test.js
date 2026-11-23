@@ -22,7 +22,7 @@ const biggest = plain.reduce((a, b) => ((a.x1 - a.x0) * (a.z1 - a.z0) > (b.x1 - 
 const makeCtx = (vehicles = []) => ({ city, collision, vehicles, player: { x: 1e5, z: 1e5, y: 0, vehicle: null } });
 const inBlock = (b, p) => p.x > b.x0 && p.x < b.x1 && p.z > b.z0 && p.z < b.z1;
 
-test('a ped strolls a block loop, stays on the pavement and comes back', () => {
+test('a ped strolls a block loop, stays on the sidewalk and comes back', () => {
   const rng = createRng(5);
   const ped = createPed(rng);
   ped.dir = 1;
@@ -68,11 +68,11 @@ function driveAt(angle, withReturn) {
   assert.ok(minD >= lim, `angle ${angle.toFixed(2)}: closest ${minD.toFixed(2)} < ${lim.toFixed(2)}`);
   assert.ok(startled >= 1, 'ped reacted');
   if (withReturn) {
-    // Car has long gone; the ped should get back onto the pavement.
+    // Car has long gone; the ped should get back onto the sidewalk.
     car.vx = car.vz = 0;
     car.x = car.z = 1e5;
     for (let i = 0; i < 60 * 15; i++) stepPed(ped, DT, ctx);
-    assert.ok(inBlock(biggest, ped) && !city.onRoad(ped.x, ped.z), `angle ${angle.toFixed(2)} not back on pavement`);
+    assert.ok(inBlock(biggest, ped) && !city.onRoad(ped.x, ped.z), `angle ${angle.toFixed(2)} not back on sidewalk`);
     assert.notEqual(ped.state, 'fleeing');
   }
 }
@@ -81,7 +81,7 @@ test('peds dodge a car driven straight at them from 8 directions', () => {
   for (let k = 0; k < 8; k++) driveAt((k * Math.PI) / 4, false);
 });
 
-test('after dodging a ped is back on the pavement within 15 s', () => {
+test('after dodging a ped is back on the sidewalk within 15 s', () => {
   for (let k = 0; k < 8; k++) driveAt((k * Math.PI) / 4 + 0.2, true);
 });
 
@@ -212,7 +212,7 @@ test('hijack: entering a traffic car with its driver pulls them out; they flee f
 });
 
 // ---------------------------------------------------------------------
-// Street life (docs/PLAN_V1.md W8): people on pavements and plazas by
+// Street life (docs/PLAN_V1.md W8): people on sidewalks and plazas by
 // district and hour, on the real Miami map.
 // ---------------------------------------------------------------------
 const miami = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8')));
@@ -239,7 +239,7 @@ function walkersNear(g, peds, r) {
   return n;
 }
 
-test('crowd by hour: centres peak at lunch, the beach in the afternoon, nobody at night', () => {
+test('crowd by hour: centers peak at lunch, the beach in the afternoon, nobody at night', () => {
   assert.ok(crowdAt('downtown', 13) > crowdAt('downtown', 3) * 5);
   assert.ok(crowdAt('beach', 14) > crowdAt('beach', 22) * 4);
   assert.ok(crowdAt('residential', 7) > crowdAt('residential', 14) * 1.2, 'homes busiest in the morning rush');
@@ -271,7 +271,7 @@ test('street life is deterministic and thins out at night', () => {
   assert.ok(night.n * 2 <= day.n, `night ${night.n} vs day ${day.n}`);
 });
 
-test('pavement walkers keep off the road and out of buildings, and a teleport refills the crowd', () => {
+test('sidewalk walkers keep off the road and out of buildings, and a teleport refills the crowd', () => {
   const g = crowdGame(FIVE_SPOTS['Opal Opera House'], 14);
   const peds = createPeds(g);
   let bad = 0, seen = 0;

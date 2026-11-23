@@ -24,7 +24,7 @@ numbers explain much of it:
   96 %, door slam 95 %, helicopter rotor 79 %, shotgun 96 %. On a phone
   those sounds were close to silent apart from small clicks.
 - **Gunshots had no crack.** Pistol spectral centroid 206 Hz (real
-  reports are centred around 1 to 3 kHz), half its power under 100 Hz.
+  reports are centered around 1 to 3 kHz), half its power under 100 Hz.
 - **Engines had no top end and repeated.** 1 to 3 kHz held only 1 to 4 %
   of engine power (real recordings: exhaust rasp and mechanical noise
   there), and each loop was only 0.22 to 0.4 s long, so the
@@ -38,7 +38,7 @@ numbers explain much of it:
 ## Signal chain (src/systems/audio.js)
 
 ```
-sources -> per-bus gain (engine, tyres, world, effects, ui) -> master
+sources -> per-bus gain (engine, tires, world, effects, ui) -> master
 music   -> music bus -> explosion duck -> master
 all buses -> sends -> one shared ConvolverNode (generated 1.1 s street IR
              with building slap-back echoes) -> master
@@ -71,7 +71,7 @@ master -> phone bass helper: low-pass 140 Hz -> harmonic curve ->
   `setVolume({ master, music, musicOn, sfx, ambience, muteAll })`.
 - **Volume model** (src/audio/levels.js, pure): effective level = master
   times category. Master is the master gain node; music, effects
-  (engine, tyres, effects and ui buses) and ambience (the world bus: city,
+  (engine, tires, effects and ui buses) and ambience (the world bus: city,
   birds, wind, surf, rain, cabin wind) are the category buses under it.
   Mute all sets the master to 0 (fast 12 ms constant, silent inside 0.1 s)
   and keeps every slider. Routing audit: every source ends in a bus, every
@@ -97,13 +97,13 @@ inline four (buzzy, rasp 2.7 kHz), V6 (round, light turbo), cross-plane
 V8 (uneven bank pattern, burble, low rasp), sports flat six (high rev,
 3.2 kHz rasp, turbo), diesel (knock, turbo), outboard and inboard boat
 engines (exhaust through water), aircraft flat six with blade thumps.
-Behaviour: gear shifts drop rpm and cut the load layer, with a body
+Behavior: gear shifts drop rpm and cut the load layer, with a body
 clunk; a rev limiter cuts ignition about 14 times a second at redline;
 lift-off pops for the V8 and sports car; turbo whistle rising with boost
 and a fluttering blow-off valve on lift (V6, sports, diesel). There is no
 electric car in the game, so no electric whine.
 
-**Tyres, road, wind, impacts.** Road roar, gravel, wet hiss and squeal
+**Tires, road, wind, impacts.** Road roar, gravel, wet hiss and squeal
 loops scale with speed and slip; wind grows with the square of speed.
 Crashes layer a body thud (now with a panel knock at 320 Hz and
 harmonics), a metal crunch through three random resonances, and glass
@@ -119,7 +119,7 @@ and helicopters use the four engine slots with doppler, distance
 low-pass and occlusion.
 
 **Boats.** Outboard and inboard engines, bow wash by speed, hull slaps
-from the boat's bounce, splashes, harbour lapping and surf on shore.
+from the boat's bounce, splashes, harbor lapping and surf on shore.
 
 **Tank.** Diesel rumble with track-link clanks (louder now, plus a
 high-passed link rattle and injector knock with every firing), pivot
@@ -180,7 +180,7 @@ never repeats exactly and costs about 0.4 MB. On by default at half
 volume; switch it off in settings.
 
 **Footsteps.** On foot, a step every 0.75 m walking (1.3 m running):
-heel tap and scuff on pavement, a soft rustle in parks and on the beach.
+heel tap and scuff on sidewalk, a soft rustle in parks and on the beach.
 
 **Spatial.** Stereo pan from the camera's right vector, distance
 attenuation, doppler for other vehicles and the siren
@@ -192,14 +192,14 @@ siren; a wall in between closes their low-pass.
 ## Radio (src/audio/radioplayer.js, radio.js, radiosounds.js, core/radio.js)
 
 In a car or boat the RADIO button in the "more" fan (or Settings, "Car
-radio") steps through Off, **Lagoon Drive**, **Pulse Harbour**, **Lamplight
+radio") steps through Off, **Lagoon Drive**, **Pulse Harbor**, **Lamplight
 Keys** and **Gullspeak** (station names are invented). On foot, or in a
 plane, tank or helicopter, the station stops and the background score
 returns. Everything is generated from the seeded rng; no audio files.
 
 - **Lagoon Drive**: the existing composer (music.js) with its own seed and
   a slower 82 to 93 BPM.
-- **Pulse Harbour**: dance pop at 118 to 124 BPM. Four-on-the-floor kick,
+- **Pulse Harbor**: dance pop at 118 to 124 BPM. Four-on-the-floor kick,
   claps, offbeat hats, a rolling offbeat sub bass, syncopated chord stabs
   and a sixteenth-note lead; intro, full, breakdown with a clap build.
 - **Lamplight Keys**: slow jazz-like, 72 to 81 BPM, swung eighths. Chord
@@ -450,7 +450,7 @@ Chromium (OfflineAudioContext, suspended every 1/60 s), the causes were:
   blast and gun saturation 1.3 instead of 2.2 to 2.4.
 - **Siren was a soft-clipped square** (-5 dBFS RMS buffer): now a
   near-sine (2nd/3rd harmonics at -18 and -20 dB) through a gentle band.
-- **Tyre squeal** was three Q 24..36 band-passes soft-clipped into a
+- **Tire squeal** was three Q 24..36 band-passes soft-clipped into a
   dense block whose pitch jittered randomly every update; now wider bands,
   no saturation, pitch follows the slip smoothly.
 - **Gunshot was a click**: the 0.5 ms crack alone set the peak (crest
@@ -461,7 +461,7 @@ Chromium (OfflineAudioContext, suspended every 1/60 s), the causes were:
   (-1 dBFS), 4x oversampled; limiter -4 dBFS; trim 0.75 -> 1.
 
 Measured (isolated, master 0.8, peak / RMS dBFS at the output, before ->
-after): Engine -9.3/-22.2 -> -6.7/-19.4; Tyre squeal -7.0/-19.8 ->
+after): Engine -9.3/-22.2 -> -6.7/-19.4; Tire squeal -7.0/-19.8 ->
 -5.3/-17.2; Gunshot -6.4/-30.0 (loudest 400 ms -25.7) -> -2.9/-27.3 (-22.0);
 Blast -2.8/-23.6 -> -1.6/-22.9; Siren silent -> -6.0/-17.1; Music
 -12.4/-28.0 -> -7.7/-23.5; Radio -14.3/-28.7 -> -11.0/-24.6; Boost

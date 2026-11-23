@@ -1,6 +1,6 @@
 // World markers for races and deliveries: glowing start pillars, ground
 // checkpoints, buoy gates and sky rings. Everything is built once and
-// pooled; showing a marker only moves and recolours an existing mesh, and
+// pooled; showing a marker only moves and recolors an existing mesh, and
 // update() animates without allocating.
 import * as THREE from 'three';
 
@@ -349,8 +349,8 @@ export function createMarkers(scene, opts = {}) {
 
 // ---- Travel pads (docs/PLAN_V2.md 3.4) -------------------------------------
 // The glow and the words of each city.travelPads entry: a faint tube over
-// the pad in the destination's colour and a floating "To Miami Beach"
-// label that shows within TRAVEL_SHOW m. The paving, arrows and kerb sign
+// the pad in the destination's color and a floating "To Miami Beach"
+// label that shows within TRAVEL_SHOW m. The paving, arrows and curb sign
 // are static props (render/props.js). Built once; update() only moves
 // opacity and visibility. Browser only: returns null without a scene, a
 // document or pads, so node tests and the island are unaffected.

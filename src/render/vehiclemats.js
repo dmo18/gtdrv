@@ -1,10 +1,10 @@
 // Shared vehicle materials. One patched PBR material draws a whole car
 // body: a per-vertex class attribute (`aCls`) picks paint, glass, chrome,
-// plastic trim, rubber, alloy or plate behaviour, so body + glass + trim
+// plastic trim, rubber, alloy or plate behavior, so body + glass + trim
 // is a single draw call. Damage (wear, scuffs on the struck side, soot,
 // dirt, front/rear crumple) is done in the shader from a few uniforms, so
 // it costs nothing per frame and needs no per-car geometry.
-// Undamaged cars of one colour share one material; a car gets its own
+// Undamaged cars of one color share one material; a car gets its own
 // clone only once it is damaged (released again when it is removed).
 import * as THREE from 'three';
 
@@ -111,7 +111,7 @@ vec3 rwStreet(vec3 r, vec3 w, float night, out float m) {
 #endif
 `;
 
-// Runs after metalnessmap_fragment: sets colour, roughness, metalness and
+// Runs after metalnessmap_fragment: sets color, roughness, metalness and
 // a clearcoat weight per class, then applies damage.
 const FRAG_BODY = /* glsl */`
 float rwC = floor(vCls + 0.5);
@@ -304,7 +304,7 @@ const tmp = new THREE.Color();
 function paintParams(hex) {
   tmp.setHex(hex);
   const lum = tmp.r * 0.3 + tmp.g * 0.6 + tmp.b * 0.1;
-  // Dark and mid colours read best as metallic; pale ones as solid gloss.
+  // Dark and mid colors read best as metallic; pale ones as solid gloss.
   return { metalness: lum < 0.05 ? 0.55 : lum < 0.3 ? 0.4 : 0.12, roughness: lum < 0.05 ? 0.32 : 0.38 };
 }
 
@@ -420,7 +420,7 @@ export function craftMaterial(kind = 'gloss') {
 // extra, 3 indicator, 4 housing, 5..7 plate), cells 8..15 the rear half
 // (8 red left, 9 reverse, 10 indicator, 11 red right, 12 housing, 13..15
 // plate). Swapping the material switches the lamp state of one car only.
-// The colour map is a matching atlas: lens base colours and an invented
+// The color map is a matching atlas: lens base colors and an invented
 // number plate per half. The police light bar keeps its own 8-cell strip.
 function strip(cells) {
   const n = cells.length <= 4 ? 8 : 16;
@@ -450,7 +450,7 @@ const GLYPHS = {
   R: [30, 17, 17, 30, 20, 18, 17], W: [17, 17, 17, 21, 21, 21, 10], '-': [0, 0, 0, 31, 0, 0, 0],
   4: [2, 6, 10, 18, 31, 2, 2], 8: [14, 17, 17, 14, 17, 17, 14], 2: [14, 17, 1, 2, 4, 8, 31], 1: [4, 12, 4, 4, 4, 4, 14],
 };
-export const PLATE_TEXT = 'RW-4821';
+export const PLATE_TEXT = 'RWT H82';
 // RGBA pixels of one half of the lamp atlas (128 x 32), one 16 px column
 // per strip cell: lens cells 0..3, housing cell 4, then the plate in
 // cells 5..7 (x 80..127, rows 8..23). Pure, so tests can read it.
@@ -511,7 +511,7 @@ function atlasFor(kind) {
 }
 
 // ColorManagement converts hex to linear; the strip is stored linear and
-// read without conversion, so colours here are as authored.
+// read without conversion, so colors here are as authored.
 const HEAD_DAY = [0x24282c, 0x24282c, 0xd8e4f0, 0x5a3408];
 const HEAD_NIGHT = [0xffffff, 0xffffff, 0xffffff, 0x8a4a0a];
 const TAIL_DIM_DAY = 0x3a0405, TAIL_DIM_NIGHT = 0x5a0303, TAIL_BRAKE = 0xb00604;
@@ -640,9 +640,9 @@ export function carGlassMaterial(state = 'clean') {
 
 export { LAMP };
 
-// Give a merged vertex-coloured geometry an `aCls` attribute by matching
-// each vertex colour against a table of { hex: class } (boats, aircraft).
-// Unmatched colours stay paint-like gloss (class 1: own colour, clearcoat).
+// Give a merged vertex-colored geometry an `aCls` attribute by matching
+// each vertex color against a table of { hex: class } (boats, aircraft).
+// Unmatched colors stay paint-like gloss (class 1: own color, clearcoat).
 export function classifyByColor(geo, table) {
   const col = geo.attributes.color;
   const n = col.count;

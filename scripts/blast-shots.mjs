@@ -145,7 +145,7 @@ if (only === 'all' || only === 'cop') {
       o = pol.officers.find((q) => q.active && q.life === 'ok');
     }
     window.__o = o;
-    // Put the officer a few metres ahead of the player on the street and shoot him.
+    // Put the officer a few meters ahead of the player on the street and shoot him.
     o.x = o.px = w.x + 6;
     o.z = o.pz = w.z - 1;
     o.state = 'return';

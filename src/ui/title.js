@@ -33,10 +33,10 @@ export function fillAbout(doc, parent, opts = {}) {
   add('div', 'rw-about-h', 'Rustwater');
   add('p', 'rw-about-p', 'Version ' + (opts.version || 'dev'), 'about-version');
   add('div', 'rw-about-h', 'Credits');
-  add('p', 'rw-about-p', 'Rustwater is an original game: its names, characters and art are its own. It is drawn with three.js (MIT licence).', 'about-credits');
+  add('p', 'rw-about-p', 'Rustwater is an original game: its names, characters and art are its own. It is drawn with three.js (MIT license).', 'about-credits');
   add('div', 'rw-about-h', 'Map');
   add('p', 'rw-about-p', MAP_CREDIT, 'about-map');
-  add('p', 'rw-about-p rw-about-dim', 'The map is built from OpenStreetMap data, used under the Open Database Licence (ODbL).');
+  add('p', 'rw-about-p rw-about-dim', 'The map is built from OpenStreetMap data, used under the Open Database License (ODbL).');
   add('div', 'rw-about-h', 'Names');
   add('p', 'rw-about-p', 'Venue, shop and business names in the game are invented. Any likeness to a real place is chance.', 'about-names');
   add('div', 'rw-about-h', 'Privacy');

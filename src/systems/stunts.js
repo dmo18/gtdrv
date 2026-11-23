@@ -20,7 +20,7 @@ import { createGridIndex } from '../core/spatial.js';
 export const LAUNCH_VY = 1.6; // m/s climb rate at the crest that throws a craft into the air (about 23 km/h)
 export const BAD_LANDING_DAMAGE = 0.3; // share of full health
 const MAX_FLIGHT = 12; // s: safety net
-const CENTRE_Y = 0.7; // m: the craft turns about this height in the air
+const CENTER_Y = 0.7; // m: the craft turns about this height in the air
 const MAP_COLOR = '#b48cff';
 
 const cap = (m) => m.charAt(0).toUpperCase() + m.slice(1);
@@ -240,8 +240,8 @@ export function createStunts(game, opts = {}) {
     v.stuntRamp = true;
     let tilt = 0;
     if (aNow > t2 && h > 0) {
-      const toCentre = uNow < 0 ? 1 : -1;
-      tilt = spot.angle * toCentre * (Math.cos(v.heading) * spot.ax + Math.sin(v.heading) * spot.az);
+      const toCenter = uNow < 0 ? 1 : -1;
+      tilt = spot.angle * toCenter * (Math.cos(v.heading) * spot.ax + Math.sin(v.heading) * spot.az);
     }
     v.airPitch = tilt;
     v.airRoll = 0;
@@ -264,7 +264,7 @@ export function createStunts(game, opts = {}) {
       }
     },
     // After the vehicle meshes are placed (game.js draws them first):
-    // turn a flying craft about its centre by its air pitch and roll.
+    // turn a flying craft about its center by its air pitch and roll.
     render() {
       if (markers) markers.update(game.time || 0, game.camera ? game.camera.position : null);
       const vs = game.vehicles;
@@ -286,7 +286,7 @@ export function createStunts(game, opts = {}) {
 }
 
 // Mesh rotation R = Ry(-heading) Rz(pitch) Rx(roll) (order 'YZX'), and
-// the position shifted so it turns about a point CENTRE_Y up.
+// the position shifted so it turns about a point CENTER_Y up.
 export function tiltMesh(m, heading, pitch, roll) {
   if (m.rotation.order !== 'YZX') m.rotation.order = 'YZX';
   m.rotation.set(roll, -heading, pitch);
@@ -294,9 +294,9 @@ export function tiltMesh(m, heading, pitch, roll) {
   // Up vector after Rz(pitch) Rx(roll): (-cr sp, cr cp, sr), then yaw.
   const lx = -cr * sp, ly = cr * cp, lz = sr;
   const ch = Math.cos(heading), sh = Math.sin(heading);
-  m.position.x -= (lx * ch - lz * sh) * CENTRE_Y;
-  m.position.y += CENTRE_Y - ly * CENTRE_Y;
-  m.position.z -= (lx * sh + lz * ch) * CENTRE_Y;
+  m.position.x -= (lx * ch - lz * sh) * CENTER_Y;
+  m.position.y += CENTER_Y - ly * CENTER_Y;
+  m.position.z -= (lx * sh + lz * ch) * CENTER_Y;
 }
 
 // Tabletop ramp meshes: one shared geometry per shape, rust-orange deck

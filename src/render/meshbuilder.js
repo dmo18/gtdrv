@@ -1,7 +1,7 @@
-// Collects coloured, optionally textured quads/boxes into one big
-// geometry so thousands of objects draw in a single call. Vertex colours
+// Collects colored, optionally textured quads/boxes into one big
+// geometry so thousands of objects draw in a single call. Vertex colors
 // double as baked ambient occlusion: every corner takes a brightness
-// factor, so walls can darken toward the pavement at no runtime cost.
+// factor, so walls can darken toward the sidewalk at no runtime cost.
 import * as THREE from 'three';
 
 const _c = new THREE.Color();
@@ -66,7 +66,7 @@ const cellU = (r, c) => ((c + 1) & 2 ? r.u1 : r.u0);
 const cellV = (r, c) => (c & 2 ? r.v1 : r.v0);
 
 export class MeshBuilder {
-  // uvScale: metres per texture repeat for ground quads made by flat().
+  // uvScale: meters per texture repeat for ground quads made by flat().
   // The data lives in typed arrays (P, C, N, U: 3, 3, 3 and 2 numbers a
   // vertex; I: indices), `count` vertices and `ni` indices long; pos,
   // col, nor, uv and idx are views of exactly the written part.
@@ -185,7 +185,7 @@ export class MeshBuilder {
     U[o] = ua; U[o + 1] = va; U[o + 2] = ub; U[o + 3] = vb; U[o + 4] = uc; U[o + 5] = vc; U[o + 6] = ud; U[o + 7] = vd;
   }
 
-  // Flat rectangle facing up, textured in world space so neighbouring
+  // Flat rectangle facing up, textured in world space so neighboring
   // pieces line up and nothing stretches. s = brightness.
   flat(x0, z0, x1, z1, y, color, s = 1) {
     const k = 1 / this.uvScale;
@@ -219,7 +219,7 @@ export class MeshBuilder {
     this.quad(ax, y0, az, bx, y0, bz, bx, y1, bz, ax, y1, az, color, -dz / l, 0, dx / l, u0, v0, u1, v1, s0, s0, s1, s1);
   }
 
-  // The four walls of an upright box. uScale/vScale are metres per
+  // The four walls of an upright box. uScale/vScale are meters per
   // texture repeat (only used when this builder has UVs).
   walls(x0, z0, x1, z1, y0, y1, color, uScale = 1, vScale = 1, s0 = 1, s1 = s0) {
     const w = (x1 - x0) / uScale, d = (z1 - z0) / uScale, v0 = y0 / vScale, v1 = y1 / vScale;
@@ -389,7 +389,7 @@ export class MeshBuilder {
   }
 
   // Dark frame on the ground around a rectangle: `dark` at the wall,
-  // white `w` metres out.
+  // white `w` meters out.
   aoSkirt(x0, z0, x1, z1, w, y, dark) {
     this.ensure(8, 24);
     const n0 = this.count, U = this.U, I = this.I;

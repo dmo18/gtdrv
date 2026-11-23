@@ -37,7 +37,7 @@ const VIEWS = {
   'rain-night': ['spawn', 22.5, 'rain', 0],
   residential: ['residential', 10.5, 'clear', 0],
   docks: ['docks', 15, 'clear', 0],
-  'harbour-dusk': [[58, 596, 1.35], 19.3, 'clear', 0],
+  'harbor-dusk': [[58, 596, 1.35], 19.3, 'clear', 0],
   beach: ['beach', 16.5, 'clear', 0],
   midtown: ['midtown', 11.5, 'clear', 0],
   airfield: ['airfield', 12, 'clear', 0],
@@ -68,7 +68,7 @@ for (const [name, [where, hour, weather, lift]] of Object.entries(VIEWS)) {
     } else if (where === 'airfield') {
       x = c.airfield.runway.x0 + 120; z = (c.airfield.runway.z0 + c.airfield.runway.z1) / 2 + 30; heading = -0.5;
     } else if (where !== 'spawn') {
-      // A street in the asked-for district, nearest its typical centre.
+      // A street in the asked-for district, nearest its typical center.
       const aim = { residential: [0, -420], docks: [150, 420], beach: [-470, 60], midtown: [260, -60] }[where];
       let best = null, bd = 1e9;
       for (const e of c.edges) {

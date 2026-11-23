@@ -1,4 +1,4 @@
-// Armour system (docs/ARMS.md section 3): everything around the tank that
+// Armor system (docs/ARMS.md section 3): everything around the tank that
 // is not its physics. Pure logic at import time (node-testable); the HUD
 // overlay is only built when there is a DOM.
 // - Player turret aim: the camera ray (or a LOCK target) sets the tank's
@@ -47,7 +47,7 @@ export function tankAimAt(t, x, y, z) {
   return true;
 }
 
-// Extra rise (m) a shell needs to land on a point d metres away.
+// Extra rise (m) a shell needs to land on a point d meters away.
 export function shellDrop(m, d) {
   if (!m || m.type !== 'shell') return 0;
   const tf = d / (m.speed || 90);
@@ -229,7 +229,7 @@ export function createArmor(game, uiRoot = null) {
     }
     if (ta) ta.holdDrag = false;
     if (!(ta || (g.aim && g.aim.manual))) return; // nothing to aim with: hold
-    // The turret aims at what the camera's centre ray reaches.
+    // The turret aims at what the camera's center ray reaches.
     const tr = g.combat && g.combat.trace;
     let px = eye.x + fwd.x * TANK_LOCK_RANGE, py = eye.y + fwd.y * TANK_LOCK_RANGE, pz = eye.z + fwd.z * TANK_LOCK_RANGE;
     if (tr) {

@@ -14,7 +14,7 @@ import { createVehicle, steerLock, VEHICLE_SPECS } from '../entities/vehicle.js'
 import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
 import { exitPosition } from '../entities/onfoot.js';
 import { clamp, createRng } from '../core/rng.js';
-import { createYield, stepYield, kerbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
+import { createYield, stepYield, curbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
 import { pickTrafficService, onCallDraw, TRAFFIC_RULES } from '../entities/servicevehicles.js';
 
 const K = 12; // interior samples of the junction path
@@ -239,7 +239,7 @@ function tangentAngle(px, pz, qx, qz, R, hx, hz, side) {
 }
 
 // Put the driver on edge `edgeId`, driving away from node `from`, `d`
-// metres along, in `lane` (-1 = choose). Places `v` there if given.
+// meters along, in `lane` (-1 = choose). Places `v` there if given.
 export function placeDriver(dr, v, edgeId, from, d = 0, lane = -1) {
   const city = dr.city;
   if (v) {
@@ -323,7 +323,7 @@ function project(dr, x, z) {
   dr.latAbs = Math.sqrt(best);
 }
 
-// Point `sa` metres along the path (extrapolates past the end).
+// Point `sa` meters along the path (extrapolates past the end).
 function pointAt(dr, sa, out) {
   let j = dr.seg;
   while (j < NSEG - 1 && dr.cum[j + 1] < sa) j++;
@@ -336,7 +336,7 @@ function pointAt(dr, sa, out) {
 }
 
 // Project an arbitrary point onto the path ahead of the car, within
-// `range` metres. Returns false when it is not near the path ahead.
+// `range` meters. Returns false when it is not near the path ahead.
 function projectAhead(dr, x, z, range, out) {
   let best = Infinity;
   const sMax = dr.s + range;
@@ -592,7 +592,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   const yFree = dr.mode === 0 && !dr.inJunction;
   const yOn = yl.on && yFree;
   const yStop = yFree && !(sp > 1 && s < dr.cum[IB] && dr.cum[IB] - s - halfL < 14);
-  if (yOn) dr.yShift = kerbShift(e0.width || 9, laneOffset(e0, dr.l0), v.spec.width / 2, !!e0.avenue && dr.l0 === 0);
+  if (yOn) dr.yShift = curbShift(e0.width || 9, laneOffset(e0, dr.l0), v.spec.width / 2, !!e0.avenue && dr.l0 === 0);
 
   // Car (or anything) ahead on the path.
   let obsLimited = false;
@@ -607,7 +607,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   }
   if (dr.override > 0) vt = Math.max(Math.min(vt, 1.5), Math.min(1.5, laneSpeedOf(e0)));
 
-  // Pulling over: slow to a walk, stop once at the kerb; then wait out the delay.
+  // Pulling over: slow to a walk, stop once at the curb; then wait out the delay.
   const yHold = !yl.on && yl.hold > 0 && yStop;
   if ((yOn && yStop) || yHold) {
     vt = yHold || dr.lat > dr.yShift - 0.35 ? 0 : Math.min(vt, PULL_SPEED);
@@ -647,7 +647,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
       dr.modeTime = 0;
     } else reverse = true;
   }
-  // Wide vehicles keep a little left of the lane centre.
+  // Wide vehicles keep a little left of the lane center.
   let offTarget = -Math.max(0, v.spec.width / 2 - 0.95) + clamp(dr.nudge, -0.6, 0.6);
   if (yOn) offTarget = Math.max(offTarget, dr.yShift);
   if (dr.mode === 2 || (dr.mode === 1 && dr.tries > 0)) offTarget = -3.5;

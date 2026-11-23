@@ -106,7 +106,7 @@ function roofAt(game, x, z) {
   const h = col.heightAt(x, z);
   return h > 0 ? h : 0;
 }
-// Highest roof within r of (x, z): the centre and 8 points around it.
+// Highest roof within r of (x, z): the center and 8 points around it.
 function roofNear(game, x, z, r) {
   let m = roofAt(game, x, z);
   for (let k = 0; k < 8; k++) {
@@ -194,7 +194,7 @@ function fly(game, p, wvx, wvz, wy, face, landing = false) {
   const still = ws < 3 && sp < 3;
   const look = still ? 3 : 14 + Math.max(sp, ws) * 2.6, lat = still ? 2.5 : 5;
   // Near the craft too (a wall within the rotor's reach), then every few
-  // metres out, so a narrow tower between samples is not missed.
+  // meters out, so a narrow tower between samples is not missed.
   let ahead = Math.max(roofAt(game, a.x, a.z), pathRoof(game, a.x, a.z, hx, hz, look, lat));
   // The way the craft is actually drifting (it turns slower than the
   // wanted path does): far enough to stop in.

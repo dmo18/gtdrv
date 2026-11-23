@@ -30,13 +30,13 @@ const SEAM = 0x060607;
 const GLASS = 0x0d141a;
 
 // ---- cab styles (the kit's range style, as the truck's cab) ---------------------
-// Lengths in metres along the vehicle from the cab's rear wall (m = 0) to
+// Lengths in meters along the vehicle from the cab's rear wall (m = 0) to
 // the nose (m = len); heights as shares of the spec height.
 function cabStyle(L, len, o) {
   const x0 = L / 2 - len;
   const t = (m) => (x0 + m) / L;
   const sh = o.shell, nose = o.nose, drop = o.drop;
-  const ws = o.ws; // windscreen base, metres behind the nose
+  const ws = o.ws; // windshield base, meters behind the nose
   return {
     range: [t(0), 0.5], pF: o.pF || 12, pR: 14, flare: 0.02, q: 5, lean: o.lean || [0.06, 0.03, 0, 0], face: o.face || 'truck',
     top: [[t(0), sh], [t(len - nose), sh], [t(len - nose * 0.35), sh - drop * 0.55], [t(len), sh - drop]],
@@ -74,7 +74,7 @@ function placeS(x, y, z, rx, ry, rz, sx, sy, sz) {
   return M.compose(P, Q, S);
 }
 const box = (a, hex, cls, sx, sy, sz, x, y, z, rx = 0, ry = 0, rz = 0) => a.geo(new THREE.BoxGeometry(sx, sy, sz), hex, cls, place(x, y, z, rx, ry, rz));
-// Box from x0 to x1, y0 to y1, full width w centred on z.
+// Box from x0 to x1, y0 to y1, full width w centered on z.
 const slab = (a, hex, cls, x0, x1, y0, y1, w, z = 0) => box(a, hex, cls, x1 - x0, y1 - y0, w, (x0 + x1) / 2, (y0 + y1) / 2, z);
 const cylX = (a, hex, cls, r, len, x, y, z, seg = 10) => a.geo(new THREE.CylinderGeometry(r, r, len, seg, 1), hex, cls, place(x, y, z, 0, 0, -Math.PI / 2));
 const cylY = (a, hex, cls, r, h, x, y, z, seg = 10) => a.geo(new THREE.CylinderGeometry(r, r, h, seg, 1), hex, cls, place(x, y, z));
@@ -188,7 +188,7 @@ function workBody(spec, lod) {
       // Corner posts.
       for (const x of [xr + 0.06, xb1 - 0.02]) box(a, 0xe2e2de, CLS.LIVERY, 0.06, y1 - y0, 0.06, x, (y0 + y1) / 2, s * (W / 2 - 0.02));
     }
-    // Kerb-side door with a window, a small window on the other side.
+    // Curb-side door with a window, a small window on the other side.
     box(a, GLASS, CLS.GLASS, 0.6, 0.45, 0.014, -0.15, 2.12, W / 2 + 0.008);
     box(a, SEAM, CLS.TRIM, 0.012, y1 - y0 - 0.3, 0.016, 0.35, (y0 + y1) / 2 + 0.05, W / 2 + 0.008);
     box(a, SEAM, CLS.TRIM, 0.012, y1 - y0 - 0.3, 0.016, -0.65, (y0 + y1) / 2 + 0.05, W / 2 + 0.008);
@@ -240,7 +240,7 @@ function workBody(spec, lod) {
       box(a, DARK, CLS.TRIM, 0.06, 0.9, W * 0.8, xr + 0.08, 1.1, 0, 0, 0, -0.16);
       for (const s of [1, -1]) box(a, CHROME, CLS.CHROME, 0.1, 1.6, 0.1, xr + 0.35, 1.9, s * (W / 2 - 0.1), 0, 0, -0.16);
     }
-    // Side loader on the kerb side (+z) behind the cab: its mast and the
+    // Side loader on the curb side (+z) behind the cab: its mast and the
     // hopper mouth above it (the arm with the bin is drawn while it runs).
     const lx = cab0 - 0.75;
     box(a, DARK, CLS.TRIM, 0.5, 1.6, 0.18, lx, 1.55, W / 2 + 0.08);
@@ -312,7 +312,7 @@ function workBody(spec, lod) {
   return a;
 }
 
-// Far model: a few boxes and simple tyres, baked lamp blocks (one call).
+// Far model: a few boxes and simple tires, baked lamp blocks (one call).
 function farBody(spec) {
   const a = new Acc();
   const L = spec.length, W = spec.width, H = spec.height, wr = spec.wheelRadius;

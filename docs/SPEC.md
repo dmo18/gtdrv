@@ -16,7 +16,7 @@ section 6; where this file and that section differ, that section wins.
 - Maps: the default map is Miami, built from real street data
   (OpenStreetMap, ODbL; the credit "Map data (c) OpenStreetMap
   contributors" must stay visible in the menu and on the title screen).
-  Street and neighbourhood names are real. Landmarks and venues have
+  Street and neighborhood names are real. Landmarks and venues have
   invented names wherever a real venue brand would appear; no real brand
   names anywhere. The whole 9.0 by 7.8 km data box is playable. A core of
   5.15 by 4.6 km (Downtown, Brickell, Wynwood, Edgewater, the near bay
@@ -32,7 +32,7 @@ section 6; where this file and that section differ, that section wins.
   the map store, swap and repaint cars for free, and adventures (short
   discovery quests) pay score and unlock new garages, three reward cars
   and three extra routes.
-- Every open piece of land is a lot with a type (yard, car park, plaza,
+- Every open piece of land is a lot with a type (yard, parking lot, plaza,
   grass, works yard, beach, park, water edge, building site) and is
   dressed for it; no bare paving plains (0.4.0).
 - Art: stylised shapes built in code (no downloaded art).
@@ -66,7 +66,7 @@ Contract: docs/REVAMP.md section 6.6. In short:
   three revealed only by adventures. A garage shows on the map once the
   player has been within 400 m of it. At a garage: store the car, take
   out any car in the collection (up to 24, shared by all garages),
-  repaint, mark one favourite (the car you start in), release a car.
+  repaint, mark one favorite (the car you start in), release a car.
   Everything is free.
 - Sixteen adventures: lookouts, clue trails, hidden spots and tours.
   They are found by exploring (a "?" on the map within 300 m), from
@@ -86,7 +86,7 @@ Contract: docs/REVAMP.md section 6.6. In short:
   cells pays 50 points each without a toast. The three locked routes
   are built apart from the 14 courses (`city.routes`, world/courses.js
   `buildRoutes`) so the course list and its order never change. Where a
-  neighbourhood has no works yard, car park, grass or site lot within
+  neighborhood has no works yard, parking lot, grass or site lot within
   300 m (The Roads, Little Havana, Virginia Key) a garage may stand on a
   garden, plaza or park lot; Virginia Key has no road in the data, so its
   shed is reached by boat or air. The Miami River has low bridges, so the
@@ -169,7 +169,7 @@ Thick fog cuts the distance police can spot you to 45 percent.
 ## Stunt jumps
 Six ramps: four on quiet streets (picked from the seeded city, at least
 240 m apart, never downtown or on avenues) and two at the airfield dock (a
-quay ramp for cars and a floating ramp for boats). Each is a tabletop
+pier ramp for cars and a floating ramp for boats). Each is a tabletop
 (slope up, flat top, slope down) so it works both ways, and shows as a
 violet ramp icon on the map. A car or boat that crests the slope faster
 than about 23 km/h flies. In the air, brake pulls the nose up into a
@@ -178,7 +178,7 @@ and the wings level, so a plain jump lands on its wheels. On landing a
 toast shows the ramp name, the medal, the air time and any flips and the
 points, which go straight into the score:
 
-    points = 400 per second of air + 10 per metre + 40 per metre of height
+    points = 400 per second of air + 10 per meter + 40 per meter of height
              + 700 per flip + 500 per roll   (no score under 0.35 s)
     bronze 450, silver 900, gold 1500
 

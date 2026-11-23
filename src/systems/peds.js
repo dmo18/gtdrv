@@ -1,4 +1,4 @@
-// Pedestrians: townsfolk who stroll the pavements, chat, jog in parks
+// Pedestrians: townsfolk who stroll the sidewalks, chat, jog in parks
 // and try to jump clear of anything coming their way. They are combat
 // actors (team 'civ'): a hit or a car at speed knocks them down
 // (cartoon style, no gore), and they run from gunfire and blasts.
@@ -12,16 +12,16 @@ import { asideNeed, collectSirens, ASIDE_WALK, ASIDE_HOLD } from '../core/yield.
 import { initActor, resetActor, addActor, removeActor, layDown } from './combat.js';
 import { createGridIndex, beginSpawnStep, takeSpawn, spawnsLeft, SPAWNER } from '../core/spatial.js';
 
-// Pavement lines checked against the buildings and the road in one step at
+// Sidewalk lines checked against the buildings and the road in one step at
 // most (each is checked once; the rest wait for a later step).
 export const LINE_CHECKS_PER_STEP = 6;
 
-const INSET = 2; // walking line, metres inside the block edge
+const INSET = 2; // walking line, meters inside the block edge
 const RADIUS = 0.35;
 const STRIDE_LEN = 1.5;
 const FLEE_SPEED = 7;
 const LOOKAHEAD_T = 1.2; // seconds
-const THREAT_DIST = 3.5; // metres (plus a share of the craft's size)
+const THREAT_DIST = 3.5; // meters (plus a share of the craft's size)
 const HYSTERESIS = 1.5;
 const MOVING = 3; // m/s: faster craft are dodged, slower ones sidestepped
 
@@ -44,7 +44,7 @@ function loopDims(b) {
 // map with x east, z south). Writes to PT.
 function pointAt(b, s) {
   if (b.seg) {
-    // A pavement line: out along it and back (a loop of 2 x its length).
+    // A sidewalk line: out along it and back (a loop of 2 x its length).
     const p2 = 2 * b.len;
     s %= p2;
     if (s < 0) s += p2;
@@ -83,7 +83,7 @@ function nearestS(b, x, z) {
 // Creation and placement
 // ---------------------------------------------------------------------
 export const PANIC_T = 6; // seconds a ped runs from gunfire or a blast
-export const SHOT_SCARE = 40, DOWN_SCARE = 25; // metres
+export const SHOT_SCARE = 40, DOWN_SCARE = 25; // meters
 
 export function createPed(rng) {
   const ped = {
@@ -185,7 +185,7 @@ export function pairWith(a, b) {
   const q = pointAt(block, a.s + 0.5);
   const dx = q.x - a.x, dz = q.z - a.z;
   const l = Math.hypot(dx, dz) || 1;
-  const ux = dx / l, uz = dz / l; // along the pavement
+  const ux = dx / l, uz = dz / l; // along the sidewalk
   b.s = a.s;
   b.timer = a.timer;
   setPos(b, a.x + ux * 0.9, a.z + uz * 0.9);
@@ -236,7 +236,7 @@ function scanThreat(ped, vehicles, extra) {
 function startFlee(ped, ctx) {
   const { city, collision } = ctx;
   // Choose the side to jump: natural side of the path, not into a wall,
-  // not onto the road if the pavement is free.
+  // not onto the road if the sidewalk is free.
   let bestSide = 1, bestScore = -Infinity;
   for (let k = 0; k < 2; k++) {
     const side = k === 0 ? 1 : -1;
@@ -300,7 +300,7 @@ export function stepPed(ped, dt, ctx) {
     if (TH.found) startFlee(ped, ctx);
   }
 
-  // A siren vehicle coming up the road: step to the kerb side and wait.
+  // A siren vehicle coming up the road: step to the curb side and wait.
   // This is not a scare: no panic, no heat, nobody runs into traffic.
   if (ped.asideT > 0) ped.asideT -= dt;
   const sirens = ctx.sirens;
@@ -492,7 +492,7 @@ export function stepPed(ped, dt, ctx) {
 // System
 // ---------------------------------------------------------------------
 // How busy each kind of place is through the day (hour 0..23, linear
-// between hours): town centres peak at lunch and in the evening, beach
+// between hours): town centers peak at lunch and in the evening, beach
 // and parks in the afternoon, homes in the morning and evening, docks
 // and works in working hours (docs/PLAN_V1.md W8).
 const PROFILES = {
@@ -505,7 +505,7 @@ const PROFILE_OF = {
   downtown: PROFILES.city, midtown: PROFILES.city, beach: PROFILES.leisure, park: PROFILES.leisure,
   residential: PROFILES.home, docks: PROFILES.work, industrial: PROFILES.work,
 };
-// Walkers per 100 m of pavement loop at the busiest hour.
+// Walkers per 100 m of sidewalk loop at the busiest hour.
 export const DENSITY = {
   downtown: 2.4, midtown: 1.8, beach: 2.2, park: 1.6, residential: 0.9, docks: 0.4, industrial: 0.3, airfield: 0,
 };
@@ -530,10 +530,10 @@ const JUMP = 150; // m moved between two scans that counts as a teleport
 const SKY = 120; // above this altitude nobody is simulated
 const SEA = -150; // this far out at sea nobody is simulated
 const CELL = 128;
-const SIDE_GAP = 2.4; // walking line, metres beyond the kerb
-const SEG_MIN = 20; // shortest pavement line worth using
+const SIDE_GAP = 2.4; // walking line, meters beyond the curb
+const SEG_MIN = 20; // shortest sidewalk line worth using
 
-// Walkable places: the city blocks plus the pavement on both sides of
+// Walkable places: the city blocks plus the sidewalk on both sides of
 // every street in the core, as lines walked out and back (real maps).
 // Each has the id / district / x0..z1 fields a block has. Indexed by a
 // coarse grid so a scan only looks near.
@@ -582,7 +582,7 @@ function buildAreas(city) {
   return { areas, grid };
 }
 
-// A pavement line is used once checked clear of buildings and the road
+// A sidewalk line is used once checked clear of buildings and the road
 // (done on first use, so the city start pays nothing).
 function lineUsable(city, b) {
   if (b.ok) return b.ok === 1;
@@ -610,13 +610,13 @@ export function createPeds(game, { max = 30 } = {}) {
   let active = 0;
   let first = true;
   let hidden = false;
-  let lineChecks = 0; // pavement lines checked this step
+  let lineChecks = 0; // sidewalk lines checked this step
   let lineSkipped = false; // a pick passed over lines left for a later step
   let fillLeft = 0; // spawns the last scan asked for, made a couple a step
   let firstLeft = 1; // s: the start fill may place people anywhere for this long
   let misses = 0;
   let warmTick = 0, warmNext = 0; // body geometry of every look, built ahead
-  // Blocks with a pavement loop, in a grid (nearestBlock no longer walks
+  // Blocks with a sidewalk loop, in a grid (nearestBlock no longer walks
   // every block).
   const loopIds = [];
   for (let i = 0; i < blocks.length; i++) {
@@ -832,7 +832,7 @@ export function createPeds(game, { max = 30 } = {}) {
     if (fillLeft <= 0 && firstLeft <= 0) first = false;
   }
 
-  // Nearest block that has a pavement loop (for a ped placed off-loop).
+  // Nearest block that has a sidewalk loop (for a ped placed off-loop).
   function nearestBlock(x, z) {
     const k = loopIndex.nearest(x, z, 4000);
     if (k >= 0) return blocks[loopIds[k]];

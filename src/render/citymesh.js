@@ -22,7 +22,7 @@ export const COL = {
   line: 0xf0eee4,
   yellow: 0xe8b23a,
   sidewalk: 0xb4b1aa,
-  kerb: 0xc6c3bc,
+  curb: 0xc6c3bc,
   plaza: 0xc2bdb2,
   yard: 0x85878a,
   grass: 0x7ea85a,
@@ -32,11 +32,11 @@ export const COL = {
   water: 0x2a7c9e,
 };
 
-// Brightness across a road: dark gutters, oil-darkened lane centres.
+// Brightness across a road: dark gutters, oil-darkened lane centers.
 const PROFILE_STREET = [[-5.5, 0.66], [-5.1, 0.9], [-3.5, 1], [-2, 0.86], [-0.5, 0.97], [0.5, 0.97], [2, 0.86], [3.5, 1], [5.1, 0.9], [5.5, 0.66]];
 const PROFILE_AVENUE = [[-9, 0.66], [-8.6, 0.92], [-6.1, 0.86], [-4.35, 1], [-2.6, 0.86], [-0.7, 0.97], [0.7, 0.97], [2.6, 0.86], [4.35, 1], [6.1, 0.86], [8.6, 0.92], [9, 0.66]];
 
-// Multiply-blended contact shadows: vertex colour is the darkening
+// Multiply-blended contact shadows: vertex color is the darkening
 // factor, faded out with the fog so distant ground is not smudged.
 function makeAoMaterial() {
   return new THREE.ShaderMaterial({
@@ -78,7 +78,7 @@ export function makeMaterials(T) {
   const ns = (v) => new THREE.Vector2(v, v);
   const M = {
     asphaltMat: std({ map: T.asphalt.map, normalMap: T.asphalt.normalMap, normalScale: ns(0.7), roughnessMap: T.asphalt.wetMap, roughness: 0.93 }),
-    pavementMat: std({ map: T.pavement.map, normalMap: T.pavement.normalMap, normalScale: ns(0.6), roughness: 0.88 }),
+    sidewalkMat: std({ map: T.sidewalk.map, normalMap: T.sidewalk.normalMap, normalScale: ns(0.6), roughness: 0.88 }),
     grassMat: std({ map: T.grass.map, roughness: 1 }),
     woodMat: std({ map: T.wood.map, roughness: 0.85 }),
     paintMat: std({ map: T.paint.map, roughness: 0.6, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
@@ -101,7 +101,7 @@ export function makeMaterials(T) {
   // Land under everything: pushed back a touch so roads sit on top.
   M.landMat = std({ map: T.grass.map, roughness: 1, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
   M.landRimMat = std({ map: T.grass.map, roughness: 1, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  M.groundMat = std({ map: T.pavement.map, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
+  M.groundMat = std({ map: T.sidewalk.map, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 });
   M.sandMat = std({ map: T.sand.map, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3 });
 
   // Wet roads: in the rain the asphalt goes dark and glossy, with
@@ -126,8 +126,8 @@ export function makeMaterials(T) {
   };
   M.wet = wet;
   // Grass and open land: slow patches of lusher and drier, yellower
-  // grass over tens of metres, so a park or a verge is never one flat
-  // colour field (the texture only varies within its 10 m repeat).
+  // grass over tens of meters, so a park or a verge is never one flat
+  // color field (the texture only varies within its 10 m repeat).
   for (const m of [M.grassMat, M.landMat, M.landRimMat]) {
     m.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
@@ -162,7 +162,7 @@ function facadeShade(mat) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vRwY;\nvarying vec3 vRwP;')
       .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwP = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRwY = vRwP.y;');
-    // Wear: a darker, dirtier band near the pavement, rain streaks
+    // Wear: a darker, dirtier band near the sidewalk, rain streaks
     // running down from each floor line in a few columns, and a slow
     // patchy tone change over the wall. The streaks fade out with
     // distance (no shimmer far off).
@@ -184,7 +184,7 @@ function facadeShade(mat) {
 }
 
 // Piers, runway and aprons, helipads. own(x, z): only the pieces whose
-// centre it accepts (a streamed tile); null for all.
+// center it accepts (a streamed tile); null for all.
 export function addSurfaces(city, B, DR, own = null) {
   const LY = 0.015, DY = 0.02;
   for (const r of city.piers || []) {
@@ -210,7 +210,7 @@ export function addSurfaces(city, B, DR, own = null) {
     const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
     if (own && !own(cx, cz)) continue;
     if (r.type === 'runway') {
-      // Runway: darker down the middle where the tyres land.
+      // Runway: darker down the middle where the tires land.
       const a = B.asphalt.at(cx, cz);
       const zs = [r.z0, r.z0 + 4, cz - 5, cz + 5, r.z1 - 4, r.z1], sh = [0.95, 1, 0.82, 0.82, 1, 0.95];
       for (let x = r.x0; x < r.x1 - 1; x += 71) {
@@ -235,7 +235,7 @@ export function addSurfaces(city, B, DR, own = null) {
       // Concrete apron in poured panels (docs/PLAN_V1.md W2b): each
       // panel its own tone, a few patched or oil-darkened, sealed joints
       // between them, and a painted taxi line.
-      const pv = B.pavement.at(cx, cz);
+      const pv = B.sidewalk.at(cx, cz);
       const P = 15, m = B.paint.at(cx, cz);
       for (let x = r.x0; x < r.x1 - 1; x += P) {
         const xe = Math.min(r.x1, x + P);
@@ -252,7 +252,7 @@ export function addSurfaces(city, B, DR, own = null) {
       }
       for (let z = r.z0 + P; z < r.z1 - 1; z += P) m.flat(r.x0, z - 0.06, r.x1, z + 0.06, LY, COL.joint);
       m.flat(r.x0 + 20, r.z0 + 14.9, r.x1 - 20, r.z0 + 15.2, LY, COL.yellow);
-      // Oil and tyre stains where aircraft stand and turn.
+      // Oil and tire stains where aircraft stand and turn.
       const d = B.decal.at(cx, cz);
       for (let x = r.x0 + 24; x < r.x1 - 24; x += 37) {
         const hsh = edgeHash(Math.round(x) * 31 + Math.round(r.z0));
@@ -275,13 +275,13 @@ export function addSurfaces(city, B, DR, own = null) {
   }
 }
 
-// A city block: kerb, pavement and whatever fills the middle.
+// A city block: curb, sidewalk and whatever fills the middle.
 export function addBlock(B, b, DR) {
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
-  const pv = B.pavement.at(cx, cz);
+  const pv = B.sidewalk.at(cx, cz);
   const Y = 0.16, KW = 0.3;
-  pv.walls(b.x0, b.z0, b.x1, b.z1, -0.05, Y, COL.kerb, 4.8, 4.8, 0.6, 0.95);
-  pv.ring(b.x0, b.z0, b.x1, b.z1, KW, Y, COL.kerb);
+  pv.walls(b.x0, b.z0, b.x1, b.z1, -0.05, Y, COL.curb, 4.8, 4.8, 0.6, 0.95);
+  pv.ring(b.x0, b.z0, b.x1, b.z1, KW, Y, COL.curb);
   const tone = shade(COL.sidewalk, 0.94 + ((b.id * 37) % 10) * 0.012);
   pv.ring(b.x0 + KW, b.z0 + KW, b.x1 - KW, b.z1 - KW, SIDEWALK - KW, Y, tone, 0.97, 1);
   const ix0 = b.x0 + SIDEWALK, iz0 = b.z0 + SIDEWALK, ix1 = b.x1 - SIDEWALK, iz1 = b.z1 - SIDEWALK;
@@ -371,7 +371,7 @@ export function buildCityMesh(city, collision) {
       return m;
     };
     // Sand: wet and dark at the waterline, dry further up. Rows run
-    // from the sea bed inward to the island centre.
+    // from the sea bed inward to the island center.
     add(ring([-22, -9, -3, 4, 30, 700], [-2.2, -0.75, -0.3, -0.12, -0.12, -0.12], [0x8a7a58, 0xb8a47a, 0xd9c698, COL.sand, COL.sand, COL.sand], null, 6), M.sandMat);
     add(ring([33, 60, 700], [-0.06, -0.06, -0.06], [COL.grass, COL.grass, COL.grass], null, 10), M.landMat);
     add(ring([23, 28, 33], [-0.06, -0.06, -0.06], [0xa8b070, 0x98b068, COL.grass], [0, 0.7, 1], 10), M.landRimMat, 1);
@@ -383,7 +383,7 @@ export function buildCityMesh(city, collision) {
     asphalt: new ChunkedBuilder(S, GT, true, 8),
     ground: new ChunkedBuilder(S, GT, true, 6),
     land: new ChunkedBuilder(S, GT, true, 10),
-    pavement: new ChunkedBuilder(S, GT, true, 4.8),
+    sidewalk: new ChunkedBuilder(S, GT, true, 4.8),
     grass: new ChunkedBuilder(S, GT, true, 10),
     wood: new ChunkedBuilder(S, GT, true, 2),
     paint: new ChunkedBuilder(S, GT, true, 2),
@@ -423,7 +423,7 @@ export function buildCityMesh(city, collision) {
   // (Already part of a real map's land raster.)
   for (const r of city.landGrid ? [] : city.extraLand || []) {
     const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
-    B.pavement.at(cx, cz).walls(r.x0, r.z0, r.x1, r.z1, -3, -0.06, 0x9a968c, 4.8, 4.8, 0.45, 1);
+    B.sidewalk.at(cx, cz).walls(r.x0, r.z0, r.x1, r.z1, -3, -0.06, 0x9a968c, 4.8, 4.8, 0.45, 1);
     B.grass.at(cx, cz).flat(r.x0, r.z0, r.x1, r.z1, -0.06, COL.grass);
   }
   addSurfaces(city, B, DR);
@@ -433,7 +433,7 @@ export function buildCityMesh(city, collision) {
     const hx = n.hx, hz = n.hz;
     B.asphalt.at(n.x, n.z).flat(n.x - hx, n.z - hz, n.x + hx, n.z + hz, 0, COL.junction, 0.94);
     if (n.edges.length < 3 || n.i < 0) continue;
-    // Crossings: a pair of lines round the box, zebra bars at signals.
+    // Crossings: a pair of lines round the box, crosswalk bars at signals.
     const lb = B.paint.at(n.x, n.z);
     for (const eid of n.edges) {
       const e = city.edges[eid];
@@ -505,7 +505,7 @@ export function buildCityMesh(city, collision) {
       // Lane arrows on the way in to each junction.
       if (!e.causeway && s1 - s0 > 50) {
         for (const lane of [2.6, 6.1]) {
-          // Travelling toward b on the +across side (keep right), toward a on the other.
+          // Traveling toward b on the +across side (keep right), toward a on the other.
           if (H) {
             db.flatRect(s1 - 16, c0 + lane - 0.7, s1 - 12.4, c0 + lane + 0.7, DY, 0xffffff, DR.arrow, 1);
             db.flatRect(s0 + 12.4, c0 - lane - 0.7, s0 + 16, c0 - lane + 0.7, DY, 0xffffff, DR.arrow, 3);
@@ -517,7 +517,7 @@ export function buildCityMesh(city, collision) {
       }
     } else {
       for (let d = s0 + 4; d < s1 - 6; d += 9) rect(lb, d, d + 3, -0.08, 0.08, LY, COL.yellow);
-      // Kerbside parking bays.
+      // Curbside parking bays.
       const startPad = (H ? a.x : a.z) + (H ? a.hx : a.hz) + 6, endPad = (H ? b.x : b.z) - (H ? b.hx : b.hz) - 6;
       if (!e.causeway && endPad - startPad > 14) {
         for (const side of [-1, 1]) {
@@ -555,7 +555,7 @@ export function buildCityMesh(city, collision) {
     }
   }
 
-  // --- City blocks: kerb, pavement and whatever fills the middle. ---
+  // --- City blocks: curb, sidewalk and whatever fills the middle. ---
   for (const b of city.blocks) addBlock(B, b, DR);
 
   // --- Buildings (their collision boxes come from world/collision.js). ---
@@ -571,7 +571,7 @@ export function buildCityMesh(city, collision) {
   B.asphalt.buildInto(group, M.asphaltMat, ground);
   B.ground.buildInto(group, M.groundMat, ground);
   B.land.buildInto(group, M.landMat, ground);
-  B.pavement.buildInto(group, M.pavementMat, ground);
+  B.sidewalk.buildInto(group, M.sidewalkMat, ground);
   B.grass.buildInto(group, M.grassMat, ground);
   B.wood.buildInto(group, M.woodMat, ground);
   B.paint.buildInto(group, M.paintMat, { order: 1, receive: true });
@@ -581,7 +581,7 @@ export function buildCityMesh(city, collision) {
   B.glow.buildInto(group, M.glowMat, {});
   for (const k of ['glass', 'brick', 'office', 'stucco', 'siding', 'corrugated', 'roofing', 'shopfront']) B[k].buildInto(group, M[k], { ...solid, name: 'facade-' + k });
 
-  // --- Traffic-light lamps: one instanced mesh, coloured per lamp. ---
+  // --- Traffic-light lamps: one instanced mesh, colored per lamp. ---
   let signalMesh = null;
   if (bulbs.length) {
     const g = new THREE.CircleGeometry(0.115, 8).rotateY(Math.PI / 2);
@@ -672,7 +672,7 @@ function buildRealGround(city, B) {
   realRoads(city, B, city.nodes, city.edges);
 }
 
-// Land from the raster: dual cells between four raster centres, over
+// Land from the raster: dual cells between four raster centers, over
 // the dual-cell range i0..i1 x j0..j1 (end exclusive), every `s`-th
 // raster cell (s > 1: the coarse far copy). Full cells merge into runs
 // (never past the range, so a streamed tile owns exactly its cells).
@@ -688,7 +688,7 @@ export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = tru
   const parkAt = (x, z) => { const d = city.districtOf(x, z); return d === 'park' || d === 'airfield'; };
   // Lots (docs/REVAMP.md 6.2): near, a cell whose four corners are all
   // lot ground is left to lotmesh.js (no land drawn under it); far, the
-  // land takes the colour of the lot under each coarse cell.
+  // land takes the color of the lot under each coarse cell.
   const LG = city.lots && city.lotGrid ? city.lotGrid.type : null;
   const lotOwns = (i, j) => {
     const k = j * w + i;
@@ -761,7 +761,7 @@ export function realLand(city, B, i0, i1, j0, j1, s = 1, y = LAND_Y, walls = tru
         const m = mids.filter(Boolean);
         if (m.length === 2) lines.push(m);
       }
-      const wb = B.pavement.at((xa + xb) / 2, za);
+      const wb = B.sidewalk.at((xa + xb) / 2, za);
       for (const [s0, s1] of lines) {
         // A wall is seen from its right; water must be on that side.
         const mx = (s0[0] + s1[0]) / 2, mz = (s0[1] + s1[1]) / 2;
@@ -841,10 +841,10 @@ export function realRoads(city, B, nodes, edges, own = null) {
       for (let d = s0 + 4; d < s1 - 6; d += 9) line(d, d + 3, -0.08, 0.08, COL.line);
     }
     if (city.map === 'miami' && s1 - s0 > 14 && !e.causeway) {
-      // Edge lines along the kerbs.
+      // Edge lines along the curbs.
       line(s0 + 1, s1 - 1, half - 0.62, half - 0.48, COL.line);
       line(s0 + 1, s1 - 1, -half + 0.48, -half + 0.62, COL.line);
-      // Zebra crossing and a stop line at each end that meets a junction.
+      // Crosswalk crossing and a stop line at each end that meets a junction.
       const ends = [[a, s0 + 0.8, 1, -1], [b, s1 - 0.8, -1, 1]];
       for (const [n, d, dir, lane] of ends) {
         if (!n.edges || n.edges.length < 3) continue;
@@ -856,7 +856,7 @@ export function realRoads(city, B, nodes, edges, own = null) {
     }
     // Bridges and the causeway over water: concrete deck sides.
     if (e.bridge || e.causeway) {
-      const wb = B.pavement.at((a.x + b.x) / 2, (a.z + b.z) / 2);
+      const wb = B.sidewalk.at((a.x + b.x) / 2, (a.z + b.z) / 2);
       const L = e.length;
       wb.wall(a.x + rx * half, a.z + rz * half, b.x + rx * half, b.z + rz * half, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
       wb.wall(b.x - rx * half, b.z - rz * half, a.x - rx * half, a.z - rz * half, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);

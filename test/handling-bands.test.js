@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  VEHICLE_SPECS, createVehicle, stepVehicle, setHandlingMode, steerLock, fullLockCurvature, lateralGrip, tyreCurve, handlingParams,
+  VEHICLE_SPECS, createVehicle, stepVehicle, setHandlingMode, steerLock, fullLockCurvature, lateralGrip, tireCurve, handlingParams,
   brakePedal,
 } from '../src/entities/vehicle.js';
 import {
@@ -185,7 +185,7 @@ test('bands: turning radius at walking pace, the same in both modes', () => {
     const ra = inMode('arcade', () => r0(id)), rs = inMode('sim', () => r0(id));
     assert.ok(inBand(ra, BANDS[id].r0), `${id} r0 ${ra.toFixed(2)} m, band ${BANDS[id].r0}`);
     assert.ok(Math.abs(ra / rs - 1) < 0.01, `${id} r0 arcade ${ra.toFixed(2)} sim ${rs.toFixed(2)}`);
-    // steerMax is the true wheel angle: the kinematic radius of the centre.
+    // steerMax is the true wheel angle: the kinematic radius of the center.
     const s = VEHICLE_SPECS[id], b = s.wheelBase * (s.cgFront || 0.55);
     const kin = Math.hypot(s.wheelBase / Math.tan(s.steerMax), b);
     assert.ok(Math.abs(ra / kin - 1) < 0.1, `${id} r0 ${ra.toFixed(2)} vs geometry ${kin.toFixed(2)}`);
@@ -214,7 +214,7 @@ test('bands: steady lateral grip on full lock at 15 and 30 m/s, per mode', () =>
   inMode('sim', () => assert.ok(Math.abs(lateralGrip(VEHICLE_SPECS.sedan) / VEHICLE_SPECS.sedan.grip - handlingParams('sim').latK) < 1e-12));
 });
 
-test('bands: centre to full lock and back at the wheels, the same in both modes', () => {
+test('bands: center to full lock and back at the wheels, the same in both modes', () => {
   const lockTime = (id, u, from, to) => {
     const { v } = moving(id, u);
     const c = ctl({ steer: from });
@@ -420,13 +420,13 @@ test('B4 turn-in under brake keeps at least 60 % of the curvature', () => {
   }
 });
 
-test('mode rows: tyre sag, steering ask, squeal onset, assists', () => {
+test('mode rows: tire sag, steering ask, squeal onset, assists', () => {
   for (const mode of MODES) {
     const p = handlingParams(mode);
     inMode(mode, () => {
-      const sag = 1 - tyreCurve(8);
+      const sag = 1 - tireCurve(8);
       assert.ok(inBand(sag, SAG[mode]), `${mode} sag ${sag.toFixed(3)}`);
-      assert.ok(Math.abs(tyreCurve(1) - 1) < 1e-12 && tyreCurve(-1) === -tyreCurve(1));
+      assert.ok(Math.abs(tireCurve(1) - 1) < 1e-12 && tireCurve(-1) === -tireCurve(1));
     });
     assert.equal(p.ask, ASK[mode]);
     assert.equal(p.squeal, SQUEAL[mode]);
@@ -511,7 +511,7 @@ function invCurve(t) {
 // Slalom: cones on the x axis 18 m apart, passed on alternate sides
 // (first on the +z side). The scripted driver follows a weave of
 // amplitude `amp` through the style's own input, rate limited like a
-// thumb or a phone. Returns the car centre's side offset at each cone.
+// thumb or a phone. Returns the car center's side offset at each cone.
 // One driver for every style (the contract rule, K9): preview time,
 // lateral and heading gains and the weave amplitude asked for are the
 // same; only the input device and its rate limit differ.
@@ -525,7 +525,7 @@ function slalom(id, u, style) {
   v.vx = u;
   const c = ctl({});
   const wheel = createWheelTracker();
-  const R = 60; // px from the wheel centre
+  const R = 60; // px from the wheel center
   wheel.down(R, 0, 0, 0);
   let thumb = 0, roll = 0, rollF = 0, px = 0, btn = 0;
   const offs = [];
@@ -565,7 +565,7 @@ function slalom(id, u, style) {
   }
   return { offs, minSp };
 }
-// SLALOM.clear (m): the car's centre passes each cone on its own side by
+// SLALOM.clear (m): the car's center passes each cone on its own side by
 // at least this much (docs/REVAMP.md 6.3, the slalom pass rule). Full body
 // clearance (half the width) is out of reach within the contract's lock
 // and return times: at 20 m/s an 18 m weave gives 0.9 s per side, of which
@@ -749,8 +749,8 @@ test('owner check: 60 to 0 mph on dry ground is the same distance in Arcade and 
   }
 });
 
-test('owner check: steering at the wheel centre is near linear, at the curve and at the car', () => {
-  // The touch curve: within 1.2 % of its centre slope over the first quarter of the travel.
+test('owner check: steering at the wheel center is near linear, at the curve and at the car', () => {
+  // The touch curve: within 1.2 % of its center slope over the first quarter of the travel.
   for (let i = 1; i <= 25; i++) {
     const x = i / 100;
     assert.ok(Math.abs(wheelCurve(x) / (0.85 * x) - 1) <= 0.012, `wheelCurve(${x}) ${wheelCurve(x)}`);

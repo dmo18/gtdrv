@@ -65,7 +65,7 @@ export function craftBlast(c, out) {
   else { out.r = CRAFT_BLAST_R; out.scale = 1; }
   return out;
 }
-// Shove on craft at the centre: 12 m/s for a car blast up to 14 for a tank.
+// Shove on craft at the center: 12 m/s for a car blast up to 14 for a tank.
 export const craftPush = (scale) => Math.min(CRAFT_PUSH_MAX, CRAFT_PUSH + Math.max(0, (scale || 1) - 1) * 4);
 const CB = { r: CRAFT_BLAST_R, scale: 1 };
 // Blast throw: cars are launched (and flipped), people ragdoll.
@@ -99,7 +99,7 @@ export const SIM_DT = 1 / 60;
 export const explosionSize = (r) => (r < 7 ? 'small' : r < 10 ? 'big' : 'huge');
 
 // Craft-specific weapon hooks, looked up by spec id, then craft kind.
-// Every function is optional (null = the default behaviour):
+// Every function is optional (null = the default behavior):
 //   controls(game, craft, input, dt)  each step the player is aboard, before firing
 //                                     (e.g. tank turret aim from the camera)
 //   aim(game, craft, slot, mountId, out) -> true when it wrote the unit fire
@@ -233,8 +233,8 @@ export function setPush(x, z) {
 let curDepth = -1;
 
 // Falls (REVAMP 6.7 "Body fall direction rule"). Every killing hit has
-// one unit ground vector d: a gunshot the way the shot travelled, a blast
-// from its centre to the victim, a vehicle the way it was moving. The body
+// one unit ground vector d: a gunshot the way the shot traveled, a blast
+// from its center to the victim, a vehicle the way it was moving. The body
 // is thrown along d (a ragdoll from a pool of RAGDOLL_MAX) and ends lying
 // along it: on the back when hit from the front, on the face from behind,
 // on that side from the side (core/ragdoll.js directRagdoll). Start speed
@@ -243,7 +243,7 @@ let curDepth = -1;
 export const FALL_BULLET = 1.5, FALL_SHOTGUN = 4, FALL_MELEE = 2;
 export const FALL_RAM_K = 0.6, FALL_RAM_MAX = 14;
 export const FALL_BLAST_V0 = 6, FALL_BLAST_V1 = 10, FALL_BLAST_UP0 = 3, FALL_BLAST_UP1 = 3;
-// A car at speed also throws them up over the bonnet.
+// A car at speed also throws them up over the hood.
 export const RAM_THROW_UP = 1.2, RAM_THROW_PER = 0.32, RAM_THROW_MAX = 8; // m/s up: base + per m/s of car speed
 export const RAM_CARRY = FALL_RAM_K; // share of the car's speed the body keeps
 // The fall for the next damage() call (cleared by it), like PUSH.
@@ -670,7 +670,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
   for (let i = 0; i < CAPS.projectiles; i++) {
     projectiles.push({
       active: false, weapon: null, def: null, type: null, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
-      travelled: 0, fuse: 0, source: null, craft: null, rest: false, target: null, index: i,
+      traveled: 0, fuse: 0, source: null, craft: null, rest: false, target: null, index: i,
     });
   }
   // Placed sticky charges (docs/ARMS.md section 1).
@@ -853,7 +853,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const k = 1 - d / r;
       const hd = Math.sqrt(ex * ex + ez * ez);
       const push = 3 + 9 * k;
-      // Fall away from the centre (a seeded direction when right on top of it).
+      // Fall away from the center (a seeded direction when right on top of it).
       let fx = ex, fz = ez;
       if (hd < 0.2) {
         const an = tossRng.next() * Math.PI * 2;
@@ -868,7 +868,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     }
     const pv = game.player && game.player.vehicle;
     const own = !!pv && isPlayerSource(game, source);
-    // Craft: damage x1.5, a shove away from the centre.
+    // Craft: damage x1.5, a shove away from the center.
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {
       const c = vs[i];
@@ -1154,7 +1154,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     pr.x = mx;
     pr.y = my;
     pr.z = mz;
-    pr.travelled = 0;
+    pr.traveled = 0;
     pr.source = actor;
     pr.craft = craft;
     pr.rest = false;
@@ -1353,7 +1353,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       pr.x = mx;
       pr.y = my;
       pr.z = mz;
-      pr.travelled = 0;
+      pr.traveled = 0;
       pr.source = src;
       pr.craft = c;
       pr.rest = false;
@@ -1647,7 +1647,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     if (isCraft(t)) return !t.wrecked;
     return canBeHit(t) && !(t.fade > 0);
   }
-  function targetCentre(t, out) {
+  function targetCenter(t, out) {
     out.x = t.x;
     out.z = t.z;
     out.y = isCraft(t) ? craftBase(game, t) + ((t.spec && t.spec.height) || 1.5) * 0.5 : (t.y || 0) + 1;
@@ -1661,7 +1661,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       pr.target = null;
       return;
     }
-    targetCentre(t, TGT);
+    targetCenter(t, TGT);
     const sp = Math.sqrt(pr.vx * pr.vx + pr.vy * pr.vy + pr.vz * pr.vz);
     if (!(sp > 1e-6)) return;
     let ex = TGT.x - pr.x, ey = TGT.y - pr.y, ez = TGT.z - pr.z;
@@ -1734,7 +1734,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         continue;
       }
       if (type === 'rocket' || type === 'shell' || type === 'missile' || type === 'bomb') {
-        pr.travelled += TR.t;
+        pr.traveled += TR.t;
         if (TR.kind !== 'none') {
           detonateProjectile(pr, TR.x, TR.y, TR.z, TR.actor || TR.craft);
           continue;
@@ -1743,7 +1743,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
         pr.y = TR.y;
         pr.z = TR.z;
         if (type === 'missile' && pr.target) {
-          targetCentre(pr.target, TGT);
+          targetCenter(pr.target, TGT);
           const ex = TGT.x - pr.x, ey = TGT.y - pr.y, ez = TGT.z - pr.z;
           if (ex * ex + ey * ey + ez * ez < MISSILE_PROX * MISSILE_PROX) {
             detonateProjectile(pr, pr.x, pr.y, pr.z, pr.target);
@@ -1754,7 +1754,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
           if (!Number.isFinite(pr.y) || pr.fuse <= 0) detonateProjectile(pr, pr.x, Math.max(0, pr.y), pr.z, null);
           continue;
         }
-        if (pr.travelled >= w.range || pr.fuse <= 0) detonateProjectile(pr, pr.x, pr.y, pr.z, null);
+        if (pr.traveled >= w.range || pr.fuse <= 0) detonateProjectile(pr, pr.x, pr.y, pr.z, null);
         continue;
       }
       // Thrown can or charge in flight.
@@ -2205,7 +2205,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     const t = seeker.target;
     if (!m || !m.bend || !t || !targetAlive(t)) return out;
     mountMuzzle(v, slot, id, m, MZ2);
-    targetCentre(t, TGT);
+    targetCenter(t, TGT);
     let ex = TGT.x - MZ2.x, ey = TGT.y - MZ2.y, ez = TGT.z - MZ2.z;
     const el = Math.sqrt(ex * ex + ey * ey + ez * ez);
     if (!(el > 1e-6)) return out;
@@ -2414,7 +2414,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
     armsOf: ensureArms,
     get throwAiming() { return throwAim; },
     // The touch weapon wheel: pick a weapon by id on foot. Same event as a
-    // SWAP tap (the HUD toasts the name); a throw being aimed is cancelled.
+    // SWAP tap (the HUD toasts the name); a throw being aimed is canceled.
     pickWeapon(id) {
       const w = game.player && game.player.walker;
       if (!w || !w.arms || !WEAPONS[id] || game.player.vehicle) return false;

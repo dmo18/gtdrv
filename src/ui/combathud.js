@@ -4,7 +4,7 @@
 // Controller (fixedUpdate, after the combat system has fired this step):
 // works out where the next shot goes and writes it to `game.aim`
 // (dx, dy, dz unit vector, manual = true). On foot the crosshair is the
-// camera's centre: the aim view (chasecam `setAim`) turns with the drag,
+// camera's center: the aim view (chasecam `setAim`) turns with the drag,
 // shots bend toward the best target in the assist cone, LOCK tracks a
 // target with a soft camera follow and a swipe flicks to the next one.
 // In cars and boats (drive-by) shots follow the camera's look direction
@@ -175,7 +175,7 @@ export function createCombatHud(game, uiRoot) {
     }
 
     if (st.lock && c && c.aim) {
-      // Soft follow keeps the target near the centre.
+      // Soft follow keeps the target near the center.
       targetPoint(st.lock, ctx.seaY, tp);
       yawPitchTo(view ? eye : muzzle, tp.x, tp.y, tp.z, yp);
       if (c.aim.on) {

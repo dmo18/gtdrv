@@ -52,7 +52,7 @@ import { createWater, createWakeTrail } from './render/water.js';
 import { stepAircraft, collideAircraft } from './entities/aircraft.js';
 import { createAircraftMesh, updateAircraftMesh } from './render/aircraftmesh.js';
 import { createWalker, stepWalker, findEnterable, exitPosition } from './entities/onfoot.js';
-// Tank (task 32): tracked craft, its mesh and the armour system.
+// Tank (task 32): tracked craft, its mesh and the armor system.
 import { stepTank, collideTank } from './entities/tank.js';
 import { createTankMesh, updateTankMesh } from './render/tankmesh.js';
 import { createArmor } from './systems/armor.js';
@@ -69,7 +69,7 @@ import { createSecrets } from './systems/secrets.js';
 // Garages, adventures and exploring on the Miami map (docs/REVAMP.md 6.6).
 import { attachExplore } from './world/adventures.js';
 import { createAdventures } from './systems/adventures.js';
-import { createGarages, favouriteCar } from './systems/garages.js';
+import { createGarages, favoriteCar } from './systems/garages.js';
 import { registerExploreScreens } from './ui/explore.js';
 
 const SKY = 0x9fc8e8;
@@ -425,7 +425,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   yield { label: 'Setting the scene', pct: 80 };
   game.adventures = game.addSystem(createAdventures(game, storage));
   game.garages = game.addSystem(createGarages(game));
-  game.favouriteCar = () => favouriteCar(game);
+  game.favoriteCar = () => favoriteCar(game);
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
   game.snapCam = () => { snapCam = true; };

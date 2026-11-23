@@ -9,7 +9,7 @@ const TURN = 10; // 1/s, how quickly the body faces the travel direction
 const DRAIN = 1 / 8; // stamina per second of sprint (about 8 s from full)
 const REGEN = 1 / 5; // stamina per second while not sprinting
 const WINDED_UNTIL = 0.25; // after running dry, sprint again above this
-const STRIDE_LEN = 1.5; // metres per full walk cycle (two steps)
+const STRIDE_LEN = 1.5; // meters per full walk cycle (two steps)
 
 export function createWalker(x, z, heading = 0) {
   return {

@@ -874,10 +874,10 @@ export default async function extra(page, check) {
   check(blastToss.peak > 0.4 && blastToss.y === 0, `a blast throws a nearby car into the air and it lands again (${JSON.stringify(blastToss)})`);
 
   // --- Carjacking: ENTER on an occupied car (docs/STATUS.md) -------------
-  // A civilian sits in a damaged coloured muscle car. The player on foot
+  // A civilian sits in a damaged colored muscle car. The player on foot
   // taps ENTER: runs to the door, the driver is dragged out and thrown, the
   // player takes the seat. Then: the driver lies on the ground, gets up and
-  // runs, and is removed cleanly; the stolen car keeps colour and damage.
+  // runs, and is removed cleanly; the stolen car keeps color and damage.
   const jackRun = await page.evaluate(() => {
     const g = window.__rw;
     const p = g.player;
@@ -928,7 +928,7 @@ export default async function extra(page, check) {
   check(jackRun.steps > 20 && jackRun.steps < 200 && jackRun.mode === 'car' && jackRun.inCar && jackRun.driver === 'player', `the player ends up driving the jacked car (mode ${jackRun.mode}, ${jackRun.steps} steps)`);
   check(jackRun.events === 1 && jackRun.downEv >= 1, `'carjack' and 'down' events fired (${jackRun.events}, ${jackRun.downEv})`);
   check(jackRun.victim && jackRun.victim.actor && jackRun.victim.life === 'down' && jackRun.victim.d > 0.5, `the driver is out, a real actor, on the ground (${JSON.stringify(jackRun.victim)})`);
-  check(jackRun.color === jackRun.want.color && jackRun.health === jackRun.want.health, 'the stolen car keeps its colour and damage');
+  check(jackRun.color === jackRun.want.color && jackRun.health === jackRun.want.health, 'the stolen car keeps its color and damage');
   const after = await page.evaluate(() => {
     const g = window.__rw;
     const v = g.carjack.victims[0];

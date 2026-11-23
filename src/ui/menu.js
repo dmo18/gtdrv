@@ -1,4 +1,4 @@
-import { formatDistance, formatMiles } from '../core/units.js';
+import { formatDistance, formatMiles, formatClock12 } from '../core/units.js';
 import { createPhoneCheck, SOUNDS, SOUND_NOTES, DRIVE_SECONDS, SOUND_SECONDS } from './phonecheck.js';
 import { fillAbout } from './title.js';
 // The pause menu (docs/REVAMP.md 6.4): four sections (Resume, Stats,
@@ -436,7 +436,7 @@ export function createMenu(root, game, economy) {
     min: 0, max: 100, step: 1, dflt, toUi: (v) => Math.round(v * 100), fromUi: (v) => v / 100,
     text: (v) => v + '%', aria: label + ' volume',
   });
-  const hourText = (x) => { const hh = Math.floor(x), mm = Math.round((x - hh) * 60); return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); };
+  const hourText = (x) => formatClock12(Math.floor(x) * 60 + Math.round((x - Math.floor(x)) * 60));
   // A row that opens another screen (shows an arrow).
   function goRow(label, valueText, role, id) {
     const row = h('div', 'rw-menu-setting');
@@ -541,7 +541,7 @@ export function createMenu(root, game, economy) {
     body.appendChild(go1);
   }
 
-  // ---------- About: version, credits, map licence, names, privacy ----------
+  // ---------- About: version, credits, map license, names, privacy ----------
   function renderAbout() {
     const box = h('div');
     fillAbout(document, box, { version: version || 'dev' });
@@ -555,7 +555,7 @@ export function createMenu(root, game, economy) {
       if (ses && ses.newGame) ses.newGame();
       else if (game.newSession) game.newSession();
       close();
-    }, { id: 'newgame', role: 'newgame', text: 'New game: back to the start street in your favourite car (the sedan if none is set). Parked cars are cleared. Score, medals and found garages are kept.' }));
+    }, { id: 'newgame', role: 'newgame', text: 'New game: back to the start street in your favorite car (the sedan if none is set). Parked cars are cleared. Score, medals and found garages are kept.' }));
     body.appendChild(confirmRow('Erase all progress', 'Yes, erase everything', () => {
       economy.reset();
       render();

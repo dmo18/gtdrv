@@ -14,15 +14,15 @@ export const STUNT_G = 9.81;
 const TAU = Math.PI * 2;
 
 // ---- Medal thresholds (points for one jump) ---------------------------
-// Points = air time * PER_AIR + distance * PER_METRE + height * PER_HEIGHT
+// Points = air time * PER_AIR + distance * PER_METER + height * PER_HEIGHT
 //          + full flips * PER_FLIP + full rolls * PER_ROLL.
 // A fast run off a street ramp (about 1.4 s, 35 m) is silver; add a flip
 // or a roll for gold. Bronze needs a real jump (about 0.9 s, 15 m).
 export const STUNT_MEDALS = { gold: 1500, silver: 900, bronze: 450 };
 export const STUNT_SCORE = {
   perAirSecond: 400,
-  perMetre: 10,
-  perHeightMetre: 40,
+  perMeter: 10,
+  perHeightMeter: 40,
   perFlip: 700,
   perRoll: 500,
 };
@@ -97,7 +97,7 @@ export const upright = (pitch, roll) => Math.cos(pitch) * Math.cos(roll);
 export function stuntPoints(air, dist, height, flips, rolls) {
   if (!(air >= MIN_AIR)) return 0;
   const S = STUNT_SCORE;
-  return Math.round(air * S.perAirSecond + Math.max(0, dist) * S.perMetre + Math.max(0, height) * S.perHeightMetre
+  return Math.round(air * S.perAirSecond + Math.max(0, dist) * S.perMeter + Math.max(0, height) * S.perHeightMeter
     + flips * S.perFlip + rolls * S.perRoll);
 }
 

@@ -2,7 +2,7 @@
 // A body is a lower shell (plan-view superellipse, side profile curves,
 // wheel arches cut into the sill line, a section with a tucked sill, a
 // character line and a crisp shoulder, a flat crowned deck) and a
-// greenhouse lofted on top of it (windscreen, roof, rear glass, side
+// greenhouse lofted on top of it (windshield, roof, rear glass, side
 // glass between pillars, with tumblehome). Panel details (lamps, grille,
 // shut lines with depth, livery) are picked per face from the same grid,
 // so nothing floats or cracks.
@@ -10,7 +10,7 @@
 // Near model: body (paint, trim, cabin), glass (tinted, see-through, plus
 // the contact shadow), lamps (head and tail in one mesh). Mid model: a
 // light body with opaque glass, light lamps, the contact shadow. Far
-// model: one light body with baked lamp blocks and tyres.
+// model: one light body with baked lamp blocks and tires.
 // All styles are invented; none copies a real vehicle.
 import * as THREE from 'three';
 import { Acc, emitGrid, curve, uniqSorted, lin, spow, lathe } from './loft.js';
@@ -25,7 +25,7 @@ const TINT = 0x141c24;
 const LINER = 0x262626;
 const CHROME = 0xd8dade;
 const ARCH = 0x0b0b0b;
-// Cabin colours (dark but not black: they show through the tint).
+// Cabin colors (dark but not black: they show through the tint).
 const SEAT = 0x3c3935;
 const DASH = 0x1e1f21;
 const HEADLINER = 0x55514c;
@@ -33,9 +33,9 @@ const FLOOR = 0x242321;
 
 // ---- styles -------------------------------------------------------------------
 // Curves are over t = x / L (rear -0.5 .. front 0.5); heights are
-// fractions of H. top: deck centre line; belt (optional): the shoulder
+// fractions of H. top: deck center line; belt (optional): the shoulder
 // line (else top minus drop). gh: greenhouse stations (t) xC rear base,
-// xR0 roof rear, xR1 roof front, xA windscreen base; side: side-glass
+// xR0 roof rear, xR1 roof front, xA windshield base; side: side-glass
 // span; b: B-pillar span; base: glass base width share; tumble: inward
 // lean of the glass (m per m of height). seams: door shut lines (t).
 // q: deck superellipse exponent (higher is flatter with a tighter edge).
@@ -57,7 +57,7 @@ const STYLES = {
     gh: { xC: -0.425, xR0: -0.13, xR1: -0.01, xA: 0.2, roof: 0.96, base: 0.86, tumble: 0.5, crown: 0.035, side: [-0.33, 0.165], b: [-0.088, -0.062], rear: true },
     boot: -0.45, wingLip: true,
   },
-  // Classic cab: a squarer three-box body, upright glass, flat bonnet.
+  // Classic cab: a squarer three-box body, upright glass, flat hood.
   taxi: {
     pF: 10, pR: 11, flare: 0.012, q: 4.6, lean: [0.05, 0.05, 0.03, 0.05],
     top: [[-0.5, 0.6], [-0.495, 0.645], [-0.48, 0.66], [-0.35, 0.665], [-0.3, 0.665], [0.2, 0.63], [0.42, 0.61], [0.48, 0.598], [0.5, 0.56]],
@@ -99,7 +99,7 @@ const STYLES = {
     gh: { xC: -0.36, xR0: -0.17, xR1: -0.06, xA: 0.09, roof: 1, base: 0.86, tumble: 0.42, crown: 0.025, side: [-0.27, 0.06], b: null, rear: true },
     seams: [0.085, -0.225], hood: 0.09, boot: -0.37, exhaust: { n: 2, z: 0.36 }, scoop: true, ducktail: true,
   },
-  // Speedster: a long bonnet and a low chopped cabin set far back.
+  // Speedster: a long hood and a low chopped cabin set far back.
   sunchaser: {
     pF: 6, pR: 6, flare: 0.055, q: 3.2, lean: [0.08, 0.05, 0.06, 0.08], face: 'muscle',
     top: [[-0.5, 0.56], [-0.49, 0.62], [-0.47, 0.645], [-0.42, 0.65], [-0.3, 0.645], [-0.1, 0.63], [0.1, 0.6], [0.3, 0.58], [0.44, 0.55], [0.48, 0.52], [0.5, 0.47]],
@@ -175,8 +175,8 @@ export function styleName(spec) {
   return 'sedan';
 }
 
-// Tyre width per spec.
-export function tyreWidth(spec) {
+// Tire width per spec.
+export function tireWidth(spec) {
   if (spec.body === 'truck') return 0.4;
   if (spec.id === 'sports' || spec.id === 'ghostwake' || spec.id === 'muscle') return 0.3;
   if (spec.body === 'pickup' || spec.body === 'van') return 0.28;
@@ -185,7 +185,7 @@ export function tyreWidth(spec) {
 
 export function wheelLayout(spec) {
   const wr = spec.wheelRadius || 0.33;
-  const tw = tyreWidth(spec);
+  const tw = tireWidth(spec);
   const ax = spec.wheelBase / 2;
   const az = spec.width / 2 - tw / 2 - 0.03;
   return { wr, tw, ax, az };
@@ -203,7 +203,7 @@ function shape(spec) {
   const hf = x1 - mid, hr = mid - x0;
   const topC = curve(S.top), botC = curve(S.bottom);
   const beltC = S.belt ? curve(S.belt) : null;
-  const R = wr * 1.04 + 0.025; // arch radius: hugs the tyre
+  const R = wr * 1.04 + 0.025; // arch radius: hugs the tire
   const wheels = [ax, -ax].filter((wx) => wx - R > x0 + 0.05 && wx + R < x1 - 0.05);
   const bed = S.bed ? [S.bed[0] * L, S.bed[1] * L] : null;
   const planW = (x) => {
@@ -234,7 +234,7 @@ function shape(spec) {
   const ycBase = beltC ? (x) => beltC(x / L) * H
     : (x) => topC(x / L) * H - drop * Math.min(1, 0.4 + 0.6 * Math.min(1, planW(x) / (hw * 0.5)));
   const yc = (x) => Math.max(ycBase(x), need(x));
-  // S.valley: the bonnet may sit below the fender peaks (a dip between
+  // S.valley: the hood may sit below the fender peaks (a dip between
   // raised wheel arches) instead of being lifted with them.
   const top = beltC ? (S.valley ? (x) => Math.max(topC(x / L) * H, ycBase(x) + 0.012, yc(x) - 0.2) : (x) => Math.max(topC(x / L) * H, yc(x) + 0.012))
     : (x) => Math.max(topC(x / L) * H, yc(x) - 0.1);
@@ -255,9 +255,9 @@ function shape(spec) {
   const q = S.q || 2.6;
   const shoulder = S.belt ? 0.95 : 0.985;
   // Nose and tail lean (S.lean = [nose top, chin, tail top, tail chin],
-  // metres): near the ends the upper and lower edges are pulled in toward
+  // meters): near the ends the upper and lower edges are pulled in toward
   // the middle, so the fascias round over in side view instead of
-  // standing as vertical walls. Returns the x shift toward the centre.
+  // standing as vertical walls. Returns the x shift toward the center.
   const ln = S.lean;
   const zone = 0.6;
   const ends = ln ? [[x1, bottom(x1 - 0.06), top(x1 - 0.08), ln[0], ln[1]], [x0, bottom(x0 + 0.06), top(x0 + 0.08), ln[2], ln[3]]] : [];
@@ -295,8 +295,8 @@ function sideOf(sh, lod) {
 }
 const LOD_NEAR = 0, LOD_MID = 1, LOD_FAR = 2;
 
-// Half ring of the lower body at x: [[z, y], ...] bottom to top centre.
-// cut: 1 dents the side (door shut line), 2 the deck (bonnet / boot line).
+// Half ring of the lower body at x: [[z, y], ...] bottom to top center.
+// cut: 1 dents the side (door shut line), 2 the deck (hood / boot line).
 function lowerHalf(sh, x, lod, cut = 0) {
   const w = sh.planW(x);
   const top = sh.top(x);
@@ -321,7 +321,7 @@ function lowerHalf(sh, x, lod, cut = 0) {
   }
   const Q = sh.q;
   const dy = cut === 2 ? 0.006 : 0;
-  // Two raised creases along the bonnet (near model, new styles).
+  // Two raised creases along the hood (near model, new styles).
   const hc = lod === LOD_NEAR && sh.S.hoodCrease && x > sh.S.hoodCrease[0] * sh.L && x < sh.S.hoodCrease[1] * sh.L ? sh.S.hoodCrease[2] : 0;
   for (let k = 1; k <= K; k++) {
     const a = (k / K) * Math.PI / 2;
@@ -403,8 +403,8 @@ function ghShape(sh) {
   const crown = g.crown * sh.H;
   const roofY = g.roof * sh.H - crown;
   const baseW = (x) => sh.planW(x) * sh.shoulder * g.base;
-  // On a valley bonnet the deck dips toward the middle: the glass starts
-  // at the lower of the two so no gap opens under the windscreen.
+  // On a valley hood the deck dips toward the middle: the glass starts
+  // at the lower of the two so no gap opens under the windshield.
   const baseY = (x) => Math.min(surfY(sh, x, baseW(x)), sh.top(x)) - 0.03;
   const yA = baseY(xA), yC = baseY(xC);
   const roofC = curve([
@@ -415,7 +415,7 @@ function ghShape(sh) {
 }
 
 // Greenhouse half section. Bands (near): 0 seal, 1..3 side glass, 4 roof
-// rail, 5.. roof (windscreen / rear glass). Mid and far: 0 side glass,
+// rail, 5.. roof (windshield / rear glass). Mid and far: 0 side glass,
 // 1 rail, 2.. roof.
 function ghHalf(sh, gs, x, lod) {
   const wb = gs.baseW(x);
@@ -458,7 +458,7 @@ function ghStations(sh, gs, lod) {
   if (near) {
     if (g.b) xs.push(g.b[0] * L, g.b[1] * L);
     if (g.rearSide) xs.push(g.rearSide[0] * L, g.rearSide[1] * L);
-    // Extra stations on the windscreen and rear glass curves.
+    // Extra stations on the windshield and rear glass curves.
     for (const f of [0.25, 0.5, 0.75]) xs.push(gs.xR1 + (gs.xA - gs.xR1) * f, gs.xC + (gs.xR0 - gs.xC) * f);
   } else if (lod === LOD_MID) {
     xs.push(gs.xR1 + (gs.xA - gs.xR1) * 0.5, gs.xC + (gs.xR0 - gs.xC) * 0.5);
@@ -508,7 +508,7 @@ function archLiners(acc, sh, N = 10) {
       // Inner tube faces point toward the wheel (down / inward).
       for (let k = 0; k < prof.length - 1; k++) {
         const [ax_, ay] = prof[k], [bx, by] = prof[k + 1];
-        let nx = -(by - ay), ny = bx - ax_; // left normal of the path (points to arch centre)
+        let nx = -(by - ay), ny = bx - ax_; // left normal of the path (points to arch center)
         const l = Math.hypot(nx, ny) || 1;
         nx /= l; ny /= l;
         const za = s * (sh.planW(ax_) * 0.965), zb = s * (sh.planW(bx) * 0.965);
@@ -548,7 +548,7 @@ function underside(acc, sh, xs) {
 // are smooth curves instead of steps of the body grid.
 
 // Half width of the lower body at (x, y), or -1 outside its height span.
-// Sections are cached per millimetre while one car is built.
+// Sections are cached per millimeter while one car is built.
 function halfWidthAt(sh, x, y) {
   if (x < sh.x0 || x > sh.x1) return -1;
   const d = sh.lean(x, y);
@@ -637,7 +637,7 @@ export function patchGrid(sh, fr, o, side, levels, N = 24) {
 }
 
 // Emit a grid with its faces turned toward `out(c)` (a rough outward
-// direction at a face centre).
+// direction at a face center).
 function emitOut(acc, P, fn, out, opts = {}) {
   let flip = false;
   search: for (let i = 0; i < P.length - 1; i++) {
@@ -840,7 +840,7 @@ function fascia(acc, headAcc, tailAcc, sh, spec, lod) {
 }
 
 // Fender lips: a rolled edge around each wheel arch, so the fenders read
-// as pressed panels that hug the tyres.
+// as pressed panels that hug the tires.
 function archLips(acc, sh) {
   const col = lin(WHITE);
   const res = { col, cls: CLS.PAINT };
@@ -877,7 +877,7 @@ function cabin(acc, sh, gs, spec) {
   const xm = (xA + xC) / 2;
   const belt = gs.baseY(xm);
   const zw = gs.baseW(xm) - 0.06;
-  // Dashboard under the windscreen with a dark top.
+  // Dashboard under the windshield with a dark top.
   const dx = Math.min(0.42, len * 0.25);
   box(acc, DASH, CLS.CABIN, dx, 0.16, zw * 2, xA - dx * 0.5 - 0.02, gs.baseY(xA - dx * 0.5) + 0.02, 0, 0, 0, 0.12);
   // Front seats sit a little behind the roof's front edge; a rear bench
@@ -935,7 +935,7 @@ function headliner(acc, G, isGlass, GJ) {
 // ---- contact shadow ---------------------------------------------------------------
 // Rounded-rectangle rings under the car: darkest just inside the sills,
 // lighter in the middle, fading to nothing 0.3 m outside the body; and a
-// darker patch under each tyre. Drawn by the glass material (class SHADOW,
+// darker patch under each tire. Drawn by the glass material (class SHADOW,
 // u = opacity), pressed onto the ground there.
 function contactShadow(acc, sh, spec, near) {
   const hl = spec.length / 2 + 0.02, hw = spec.width / 2 + 0.01;
@@ -965,7 +965,7 @@ function contactShadow(acc, sh, spec, near) {
       acc.tri(ids[k][r], ids[k + 1][r + 1], ids[k][r + 1]);
     }
   }
-  // Tyre contact patches.
+  // Tire contact patches.
   if (!near) return;
   const { wr, tw, ax, az } = wheelLayout(spec);
   for (const wx of [ax, -ax]) {
@@ -1015,7 +1015,7 @@ function joinLamps(head, tail) {
 //   near (default): { body, glass, lamps } of the near model;
 //   lite (mid distance): { body (opaque glass), glass (contact shadow
 //   only), lamps (light) };
-//   near = false (far): { body } with baked lamp blocks and tyres.
+//   near = false (far): { body } with baked lamp blocks and tires.
 export function buildCar(spec, near = true, lite = false) {
   const lod = !near ? LOD_FAR : lite ? LOD_MID : LOD_NEAR;
   const sh = shape(spec);
@@ -1225,7 +1225,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
       box(acc, CHROME, CLS.CHROME, 0.14, 0.022, 0.016, x, y, ((w > 0 ? w : sh.planW(x)) + 0.002) * side);
     }
   }
-  // Wipers at the windscreen base.
+  // Wipers at the windshield base.
   if (!S.range || id === 'truck') {
     const wx = gs.xA - 0.06;
     const y = gs.baseY(wx) + 0.05;
@@ -1260,7 +1260,7 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
   }
   if (id === 'ghostwake') {
     // The black half of the teal-and-black livery: two stripes down the
-    // bonnet and the boot, a black roof, in short flat pieces that follow the curve.
+    // hood and the boot, a black roof, in short flat pieces that follow the curve.
     const stripe = (xa, xb, top) => {
       for (let x = xa; x < xb; x += 0.28) {
         const y = top(x + 0.14) + 0.004;
@@ -1420,7 +1420,7 @@ function truckParts(acc, tailAcc, sh, spec, near) {
 
 function farDetails(acc, sh, spec) {
   const { wr, tw, ax, az } = wheelLayout(spec);
-  // Simple tyres with a grey rim face.
+  // Simple tires with a gray rim face.
   for (const wx of [ax, -ax]) {
     for (const s of [1, -1]) {
       acc.geo(new THREE.CylinderGeometry(wr, wr, tw, 10, 1, false), 0x151516, CLS.RUBBER, place(wx, wr, s * az, Math.PI / 2, 0, 0));
@@ -1439,9 +1439,9 @@ function farDetails(acc, sh, spec) {
 }
 
 // ---- wheels -----------------------------------------------------------------------
-const RIM = 0.72; // rim radius / tyre radius
+const RIM = 0.72; // rim radius / tire radius
 
-// Wheel look per spec: spoke count, spoke style and rim colour.
+// Wheel look per spec: spoke count, spoke style and rim color.
 export function wheelStyle(spec) {
   const id = spec.id;
   if (spec.body === 'truck') return { spokes: 10, kind: 'steel', rim: 0xb4b8be };
@@ -1456,17 +1456,17 @@ export function wheelStyle(spec) {
   return { spokes: 5, kind: 'twin', rim: 0xc9cdd2 };
 }
 
-// Tyre half profile [[radius, z], ...] from the inner bead round the
+// Tire half profile [[radius, z], ...] from the inner bead round the
 // tread to the outer bead: bulging sidewalls and rounded shoulders.
-export function tyreProfile(wr, tw) {
+export function tireProfile(wr, tw) {
   const h = tw / 2, rb = wr * RIM;
   return [[rb * 0.99, -h * 0.86], [wr * 0.9, -h * 1.0], [wr * 0.985, -h * 0.74], [wr, -h * 0.32],
     [wr, h * 0.32], [wr * 0.985, h * 0.74], [wr * 0.9, h * 1.0], [rb * 0.99, h * 0.86]];
 }
 
-// Tyre (tread blocks alternate shade so spin is visible), alloy rim with
+// Tire (tread blocks alternate shade so spin is visible), alloy rim with
 // concave spokes over a brake disc that shows through them. Axle along
-// local z; the outer face looks toward +z. lite: a plain tyre and rim
+// local z; the outer face looks toward +z. lite: a plain tire and rim
 // face for the mid distance.
 export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain', lite = false) {
   const acc = new Acc();
@@ -1476,7 +1476,7 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain'
   if (lite) {
     const o = { col: lin(0x161617), cls: CLS.RUBBER };
     lathe(acc, [[rimR, -h * 0.9], [wr, -h * 0.7], [wr, h * 0.7], [rimR * 1.02, h * 0.96]], 8, () => o, { crease: 0.5 });
-    // Rim face: a dished disc with a darker centre.
+    // Rim face: a dished disc with a darker center.
     const rc = { col: rimC, cls: CLS.ALLOY };
     lathe(acc, [[rimR * 1.02, h * 0.96], [rimR * 0.55, h * 0.8], [0.001, h * 0.9]], 8, (i, r) => (r === 1 && i % 2 ? { col: lin(0x2a2b2e), cls: CLS.ALLOY } : rc), { crease: 0.2 });
     return acc.build();
@@ -1485,7 +1485,7 @@ export function buildWheel(wr, tw, spokes = 5, rimHex = 0xc9cdd2, kind = 'plain'
   const tread = [lin(0x1e1e1f), lin(0x0d0d0e)];
   const wall = lin(0x1b1b1d), wallHi = lin(0x2c2c2e);
   const o = { col: wall, cls: CLS.RUBBER };
-  lathe(acc, tyreProfile(wr, tw), seg, (i, r) => {
+  lathe(acc, tireProfile(wr, tw), seg, (i, r) => {
     if (r === 3) o.col = tread[i % 2];
     else if (r === 2 || r === 4) o.col = tread[(i + 1) % 2];
     else o.col = r === 5 && i % 6 < 3 ? wallHi : wall;

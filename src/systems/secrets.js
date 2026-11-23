@@ -45,7 +45,7 @@ export function createSecrets(game) {
   const meshes = game.scene ? createSecretsMeshes(game.scene, spots, garage, game.seaY) : null;
 
   // ---- the map hint -----------------------------------------------------------
-  // One faint dot, only after the first find, pointing at a neighbourhood;
+  // One faint dot, only after the first find, pointing at a neighborhood;
   // once everything is found, a teal dot marks the garage.
   const hintMarker = { x: 0, z: 0, type: 'secret', color: 'rgba(255, 255, 255, 0.35)' };
   const garageMarker = { x: garage ? garage.ox : 0, z: garage ? garage.oz : 0, type: 'secret', color: '#3ff0dc' };

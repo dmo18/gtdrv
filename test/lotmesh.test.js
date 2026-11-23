@@ -13,7 +13,7 @@ import { makeLotsFixture, fixtureDressLot, LOT_TYPES } from './fixtures/lots-fix
 import { createMiamiCity } from '../src/world/miami.js';
 import { dressLot } from '../src/world/lots.js';
 
-const KEYS = ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand', 'paint', 'ao', 'props', 'solid', 'detail', 'glow', 'trees', 'treesDetail', 'plain'];
+const KEYS = ['grass', 'asphalt', 'sidewalk', 'land', 'ground', 'sand', 'paint', 'ao', 'props', 'solid', 'detail', 'glow', 'trees', 'treesDetail', 'plain'];
 const builders = () => {
   const B = {};
   for (const k of KEYS) B[k] = new ChunkedBuilder(1e7, 1, true, 4);
@@ -47,9 +47,9 @@ test('lot ground covers exactly the lot cells, in the material of each type', ()
   const G = city.lotGrid;
   const B = builders();
   lotGround(city, B, 0, G.w, 0, G.h);
-  const ground = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  const ground = quads(B, ['grass', 'asphalt', 'sidewalk', 'land', 'ground', 'sand']);
   let area = 0;
-  for (const mb of ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand'].flatMap((k) => [...B[k].map.values()])) {
+  for (const mb of ['grass', 'asphalt', 'sidewalk', 'land', 'ground', 'sand'].flatMap((k) => [...B[k].map.values()])) {
     for (let v = 0; v + 3 < mb.count; v += 4) area += Math.abs(mb.pos[(v + 1) * 3] - mb.pos[v * 3]) * Math.abs(mb.pos[(v + 2) * 3 + 2] - mb.pos[(v + 1) * 3 + 2]);
   }
   let cells = 0;
@@ -68,12 +68,12 @@ test('lot ground covers exactly the lot cells, in the material of each type', ()
   assert.ok(kinds.size >= 5, [...kinds].join(' '));
 });
 
-test('lot edges: kerbed lawns and bordered plazas, inside their own lots only', () => {
+test('lot edges: curbed lawns and bordered plazas, inside their own lots only', () => {
   const city = makeLotsFixture();
   const G = city.lotGrid;
   const B = builders();
   const strips = lotEdges(city, B, 0, G.w, 0, G.h);
-  const all = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  const all = quads(B, ['grass', 'asphalt', 'sidewalk', 'land', 'ground', 'sand']);
   assert.ok(strips > 0, 'some edges');
   assert.equal(all.length, strips, 'one quad a strip');
   const kinds = new Set();
@@ -83,8 +83,8 @@ test('lot edges: kerbed lawns and bordered plazas, inside their own lots only', 
     assert.ok(['yard', 'park', 'plaza'].includes(lot.type), `${lot.type} gets no edge`);
     kinds.add(`${lot.type === 'plaza' ? 'plaza' : 'lawn'} ${key}`);
   }
-  // Lawns: a concrete edging (pavement) and a rough grass band (grass).
-  for (const k of ['lawn pavement', 'lawn grass', 'plaza pavement']) assert.ok(kinds.has(k), `${k} (${[...kinds].join(', ')})`);
+  // Lawns: a concrete edging (sidewalk) and a rough grass band (grass).
+  for (const k of ['lawn sidewalk', 'lawn grass', 'plaza sidewalk']) assert.ok(kinds.has(k), `${k} (${[...kinds].join(', ')})`);
   // Same answer cut into row bands, as a streamed tile builds it.
   const B2 = builders();
   let n = 0;
@@ -171,7 +171,7 @@ test('solid shapes: circles, axis boxes and rows of circles for turned walls', (
   assert.ok(!col.resolveCircle(30, 0, 0.3).hit, 'not solid: no shape');
 });
 
-test('lots go to the tile of their centre; verge and airfield are skipped', () => {
+test('lots go to the tile of their center; verge and airfield are skipped', () => {
   const city = makeLotsFixture();
   const tileOf = (x, z) => (x < 100 ? 0 : 1) + (z < 75 ? 0 : 2);
   const by = lotsByTile(city, tileOf, 4);
@@ -227,7 +227,7 @@ test('the real map: the spawn street lots are dressed, fast enough to stream', (
   const i0 = Math.floor((s.x - 150 - G.x0) / G.cell), j0 = Math.floor((s.z - 150 - G.z0) / G.cell);
   const B = builders();
   lotGround(city, B, i0, i0 + 60, j0, j0 + 60);
-  const ground = quads(B, ['grass', 'asphalt', 'pavement', 'land', 'ground', 'sand']);
+  const ground = quads(B, ['grass', 'asphalt', 'sidewalk', 'land', 'ground', 'sand']);
   assert.ok(ground.length > 20);
   for (const [x, z] of ground) assert.ok(city.lotAt(x, z) && !city.onRoad(x, z), 'lot ground is never on a road');
   // Dressing the lots of that square, slice by slice.

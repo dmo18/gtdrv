@@ -12,7 +12,7 @@ export const WHEEL_CANCEL = -2; // past the outer ring
 // Tap or hold, from how long the finger has been down (ms).
 export const isHold = (ms) => ms >= HOLD_MS;
 
-// Slice for a drag offset (dx, dy) from the ring centre, n slices.
+// Slice for a drag offset (dx, dy) from the ring center, n slices.
 // Returns 0..n-1, WHEEL_KEEP in the dead zone, WHEEL_CANCEL past the ring.
 export function wheelIndex(dx, dy, n, dead = DEAD_PX, cancel = CANCEL_PX) {
   if (!(n > 0) || !Number.isFinite(dx) || !Number.isFinite(dy)) return WHEEL_KEEP;
@@ -25,7 +25,7 @@ export function wheelIndex(dx, dy, n, dead = DEAD_PX, cancel = CANCEL_PX) {
   return Math.floor((a + step / 2) / step) % n;
 }
 
-// Place the ring: wanted centre (cx, cy), radius r, screen w x h, and
+// Place the ring: wanted center (cx, cy), radius r, screen w x h, and
 // rectangles to keep clear of (FIRE, pause): { l, t, r, b } each.
 // Writes the result into out.x / out.y and returns out.
 export function placeWheel(cx, cy, r, w, h, rects, out, margin = 6) {

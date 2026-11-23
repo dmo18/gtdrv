@@ -105,10 +105,10 @@ try {
     const n = city.nodes.find((q) => Math.abs(q.x) < 120 && Math.abs(q.z) < 120) || city.nodes[0];
     const res = [];
     const cases = [
-      { x: city.spawn.x, z: city.spawn.z, heading: 0, zoomMetres: 180 },
-      { x: n.x, z: n.z, heading: Math.PI / 2, zoomMetres: 120 },
-      { x: n.x + 200, z: n.z + 60, heading: 2.3, zoomMetres: 500 },
-      { x: 1000, z: -40, heading: -1, zoomMetres: 500 },
+      { x: city.spawn.x, z: city.spawn.z, heading: 0, zoomMeters: 180 },
+      { x: n.x, z: n.z, heading: Math.PI / 2, zoomMeters: 120 },
+      { x: n.x + 200, z: n.z + 60, heading: 2.3, zoomMeters: 500 },
+      { x: 1000, z: -40, heading: -1, zoomMeters: 500 },
     ];
     const canvas = document.querySelector('canvas');
     const g = canvas.getContext('2d');
@@ -118,20 +118,20 @@ try {
       let road = 0, opaque = 0;
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] > 200) opaque++;
-        // road greys #3b3a3c / #4a484a
+        // road grays #3b3a3c / #4a484a
         if (Math.abs(d[i] - 0x3b) < 6 && Math.abs(d[i + 1] - 0x3a) < 6 && Math.abs(d[i + 2] - 0x3c) < 6) road++;
         else if (Math.abs(d[i] - 0x4a) < 6 && Math.abs(d[i + 1] - 0x48) < 6 && Math.abs(d[i + 2] - 0x4a) < 6) road++;
       }
       const p = g.getImageData(88, 88, 1, 1).data;
-      res.push({ road, opaque, centre: [p[0], p[1], p[2]] });
+      res.push({ road, opaque, center: [p[0], p[1], p[2]] });
     }
     return res;
   });
   poses.forEach((p, i) => {
     if (i < 3) check(p.road > 150, `minimap pose ${i}: road pixels present (${p.road})`);
     check(p.opaque > 15000, `minimap pose ${i}: not blank (${p.opaque} opaque px)`);
-    const d = Math.hypot(p.centre[0] - 0x5f, p.centre[1] - 0xe0, p.centre[2] - 0xff);
-    check(d < 12, `minimap pose ${i}: centre pixel is player arrow colour (${p.centre})`);
+    const d = Math.hypot(p.center[0] - 0x5f, p.center[1] - 0xe0, p.center[2] - 0xff);
+    check(d < 12, `minimap pose ${i}: center pixel is player arrow color (${p.center})`);
   });
 
   // Redraw skipping: an identical state must not touch the canvas.
@@ -139,7 +139,7 @@ try {
     const { mini } = window.t;
     const canvas = document.querySelector('canvas');
     const g = canvas.getContext('2d');
-    const s = { x: 50, z: 50, heading: 1, zoomMetres: 180, blips: window.t.blips, blipCount: 2, waypoint: null };
+    const s = { x: 50, z: 50, heading: 1, zoomMeters: 180, blips: window.t.blips, blipCount: 2, waypoint: null };
     mini.draw(s);
     g.fillStyle = '#ff00ff'; g.fillRect(0, 0, 4, 4);
     mini.draw(s); // should skip, leaving the magenta marker
@@ -153,7 +153,7 @@ try {
 
   await page.evaluate(() => {
     const { city, mini } = window.t;
-    mini.draw({ x: city.spawn.x, z: city.spawn.z, heading: 0.6, zoomMetres: 180, blips: window.t.blips, blipCount: 2, waypoint: { x: city.spawn.x + 120, z: city.spawn.z - 60 } });
+    mini.draw({ x: city.spawn.x, z: city.spawn.z, heading: 0.6, zoomMeters: 180, blips: window.t.blips, blipCount: 2, waypoint: { x: city.spawn.x + 120, z: city.spawn.z - 60 } });
   });
   await page.screenshot({ path: path.join(out, 'minimap.png'), clip: { x: 0, y: 0, width: 260, height: 240 } });
 
@@ -170,7 +170,7 @@ try {
   const fit = Math.min(v.width, v.height) / (size * 0.95 * 2);
   check(Math.abs(v.ppm - fit) < 1e-9, 'full map opens at fit zoom');
 
-  // Activity markers are drawn: their icon colour appears at the marker
+  // Activity markers are drawn: their icon color appears at the marker
   // position, and the same spot is plain map without markers.
   async function markerPixels() {
     return page.evaluate(() => {
@@ -208,7 +208,7 @@ try {
     await page.waitForTimeout(80);
   }
   const lastCall = () => page.evaluate(() => window.t.calls[window.t.calls.length - 1]);
-  const spots = [[0, 0], [150, -80], [-220, 120]]; // screen px offsets from centre
+  const spots = [[0, 0], [150, -80], [-220, 120]]; // screen px offsets from center
   for (const [ox, oy] of spots) {
     await tapAt(v.width / 2 + ox, v.height / 2 + oy);
     const c = await lastCall();

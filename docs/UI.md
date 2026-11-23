@@ -11,7 +11,7 @@ tests are in docs/REVAMP.md sections 6.4 (menus), 6.5 (HUD grid) and 6.8
 layout.
 
 Version 0.5.0 adds BOOST and its meter, SIREN, the EXTRA button of the
-service vehicles and the top centre stack: docs/REVAMP.md 6.12 (rects,
+service vehicles and the top center stack: docs/REVAMP.md 6.12 (rects,
 the one-line rule, tests HG-1 to HG-5) and 6.11 (what each EXTRA does).
 U1 has built all of it (the lines marked "0.5.0" below are in the game);
 where this file differs from 6.12 it says so under "Differences from
@@ -35,7 +35,7 @@ where this file differs from 6.12 it says so under "Differences from
   that turns least) with a fight (a parked crew car shot with the car's
   own gun) and a real blast (`combat.explode`). A scripted input source
   steers; no game rule changes. Then eight numbered test sounds play, 3.2 s
-  each, through the existing audio events: 1 engine, 2 tyre squeal, 3
+  each, through the existing audio events: 1 engine, 2 tire squeal, 3
   gunshot, 4 blast, 5 siren, 6 music, 7 radio (station changed and put
   back), 8 boost whoosh. Numbered buttons (48 px) mark any that sound bad.
   The result card shows one line in a selectable box and a "Copy result"
@@ -58,7 +58,7 @@ where this file differs from 6.12 it says so under "Differences from
   numbered sounds of the Phone check, taken from `SOUNDS` in
   `src/ui/phonecheck.js` with a one-line note each (`SOUND_NOTES`) and a
   "Start the Phone check" button. It does not play sounds by itself:
-  engine, tyre squeal, boost and siren need the test car.
+  engine, tire squeal, boost and siren need the test car.
 - Blood (0.6.0, U2): Settings, Game, "Blood", On by default (owner
   decision). `settings.blood` (boolean; anything else reads as On).
   `src/render/combatfx.js` should return early from `bloodHit` and
@@ -66,7 +66,7 @@ where this file differs from 6.12 it says so under "Differences from
   must keep the boolean (add `blood` to the boolean list and default).
   Both are outside U2's files and are reported to the coordinator.
 - Menu text check (0.6.0, U2): New game said the starter car and that
-  garages are kept; it now says favourite car (sedan if none), parked cars
+  garages are kept; it now says favorite car (sedan if none), parked cars
   cleared, score, medals and found garages kept (`session.newSession`).
   The Phone check, Sound test and About texts take their numbers from
   `DRIVE_SECONDS`, `SOUND_SECONDS` and `SOUNDS`. Rows per Settings group
@@ -89,7 +89,7 @@ edges only.
   Only HUD items move in by the safe-area insets.
 - Top left: minimap, with the speed readout (in craft only) to its
   right, the health meter (hard mode) under the speed and the boost
-  meter (6 px high) under those. Top centre: the stack (below). Top
+  meter (6 px high) under those. Top center: the stack (below). Top
   right: score and combo, then pause in the corner.
 - Bottom left: the steering slot (wheel, arrow buttons, slider bar or
   tilt bar; the foot and flight sticks use it too). Bottom right: GAS
@@ -97,7 +97,7 @@ edges only.
   LOCK in a third column, MORE above EXIT, BOOST above MORE (car, boat,
   plane, heli). LOCK is a foot-only button. 0.5.0: in a service vehicle
   EXTRA takes the LOCK rect; in a vehicle with a siren SIREN sits 8 px
-  beside the steering slot, on the side toward the screen centre. The
+  beside the steering slot, on the side toward the screen center. The
   cluster never grows a fourth column and nothing ever sits above BOOST
   (GARAGE and TALK take the BOOST cell; BOOST hides while they are
   offered, which in a craft is only under 3 m/s).
@@ -118,12 +118,12 @@ edges only.
 
 Differences from 6.12 (U1 decisions, reported to the coordinator):
 - The objective distance uses the game's units (`formatDistance`:
-  "820 ft", "0.4 mi"), not metres and kilometres.
+  "820 ft", "0.4 mi"), not meters and kilometers.
 - 6.12 says the stack box never overlaps the speed readout with the
   minimap grown. With a 40 px inset the grown readout ends at x 314
   (276 at 780x360) and the box starts at 290 (240), so the box itself
   cannot clear it. Instead the message pills
-  get a `max-width` that keeps them centred and clear of the readout
+  get a `max-width` that keeps them centered and clear of the readout
   (`.rw-mapbig .rw-msg`); the test checks the pills, and the box only at
   inset 0.
 - Left-handed at 780x360 the BOOST cell (x 8, y 88) is 4 px under the
@@ -144,14 +144,14 @@ Differences from 6.12 (U1 decisions, reported to the coordinator):
   cluster; the minimap, speed, score, stack and pause stay where they
   are.
 
-## Top centre stack (0.5.0)
+## Top center stack (0.5.0)
 
-One box, 335 by 92 px at 915x412 and 300 by 92 at 780x360, centred, top
+One box, 335 by 92 px at 915x412 and 300 by 92 at 780x360, centered, top
 at 8 px. The one-line rule: every item is one line in one pill of fixed
 height, nothing wraps (ellipsis), each row shows one item at a time,
 rows never move, and the stack never passes y = 100.
 
-- Status row (24 px): wanted stars in the centre (150 px, only while
+- Status row (24 px): wanted stars in the center (150 px, only while
   wanted) and, to their right, the objective arrow and distance (only
   while an objective is tracked). The escape bar (150 by 4) is right
   under the stars.
@@ -165,7 +165,7 @@ rows never move, and the stack never passes y = 100.
   toasts wait (one, the newest). No hint starts while wanted.
 - Callers use `hud.toast(text, seconds, kind)` with kind `'police'`,
   `'objective'`, `'district'`, `'hint'`, `'score'` or `'info'`; nobody
-  places their own text in the top centre.
+  places their own text in the top center.
 
 ## HUD modes
 
@@ -233,9 +233,9 @@ button; tapping SWAP under 250 ms still cycles. While the same finger stays
 down, dragging highlights the slice nearest the drag angle (slice 0 is up,
 clockwise) and shows its name in the middle; lifting picks it
 (`game.combat.pickWeapon`, the same `weaponSwitch` event as a tap, so the
-name toasts). Inside 24 px of the centre or past 128 px the lift changes
+name toasts). Inside 24 px of the center or past 128 px the lift changes
 nothing. The ring (216 px) is clamped on screen and slid clear of FIRE and
-pause. A throw being aimed is cancelled when the wheel opens. `releaseAll`
+pause. A throw being aimed is canceled when the wheel opens. `releaseAll`
 (blur, hidden, mode change, pause) closes it without a change. Maths in
 `src/ui/wheel.js`, tests in `test/wheel.test.js`, check with
 `node scripts/wheel-shots.mjs`. The slices carry aria-labels and the ring is
@@ -263,5 +263,5 @@ at least 8 px, a 48 px floor, nothing permanent in the keep-out rect, in
 every mode at 915x412 and 780x360, left inset 0 and 40 px, fan open and
 closed, Minimal and Full, right and left handed. From 0.5.0 it also runs
 HG-1 to HG-5 of docs/REVAMP.md 6.12: BOOST, the meter, SIREN and EXTRA
-in place, GARAGE never over pause, and the top centre stack with every
+in place, GARAGE never over pause, and the top center stack with every
 item forced on at once.

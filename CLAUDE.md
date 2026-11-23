@@ -13,7 +13,7 @@ Commands:
 - `npm run smoke` build, load in headless Chromium at phone size, fail on errors
 
 Conventions:
-- Coordinates: x east, z south, metres, flat ground at y = 0.
+- Coordinates: x east, z south, meters, flat ground at y = 0.
   Heading 0 faces +x; heading increases turning toward +z.
 - Pure game logic (`src/core`, `src/world`, `src/entities`, and the
   rule/AI cores inside `src/systems`) must run in node tests: no

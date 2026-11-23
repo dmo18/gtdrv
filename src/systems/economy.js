@@ -1,5 +1,5 @@
 // Saving and the small bits of bookkeeping that go with it (distance
-// travelled, first-visit flags). There is no money, shop or purchase any
+// traveled, first-visit flags). There is no money, shop or purchase any
 // more: everything is available from the start and the only progression
 // is score (src/systems/score.js).
 import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';

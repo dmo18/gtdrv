@@ -61,7 +61,7 @@ function simulate(vehicles, seconds, { t0 = 0, onStep = null } = {}) {
 
 const inJunctionZone = (x, z, m = 8) => city.nodes.some((n) => Math.abs(x - n.x) < n.hx + m && Math.abs(z - n.z) < n.hz + m);
 
-// Distance to the nearest lane centre line of any edge.
+// Distance to the nearest lane center line of any edge.
 function laneDist(x, z) {
   let best = Infinity;
   const p = { x: 0, z: 0, heading: 0 };
@@ -110,7 +110,7 @@ test('an AI car follows its lane through junctions without hitting anything', ()
 });
 
 test('stops for a red light and goes on green', () => {
-  // A signalled junction approached along a long edge.
+  // A signaled junction approached along a long edge.
   let T = null, E = null;
   for (const n of city.nodes) {
     if (!n.signal) continue;
@@ -120,7 +120,7 @@ test('stops for a red light and goes on green', () => {
       break;
     }
   }
-  assert.ok(T, 'found a signalled junction');
+  assert.ok(T, 'found a signaled junction');
   const F = city.nodes[otherEnd(E, T.id)];
   // Start just as the light turns red for this approach.
   let t0 = 0;
@@ -181,7 +181,7 @@ function crowd(seed) {
     if (cars.some((o) => Math.hypot(o.x - v.x, o.z - v.z) < 12)) continue;
     cars.push(v);
   }
-  // Parked cars along the kerbs nearby, asleep until touched.
+  // Parked cars along the curbs nearby, asleep until touched.
   const parked = city.parkingSpots
     .filter((s) => !s.lot && Math.hypot(s.x, s.z) < 320)
     .map((s, i) => {
@@ -262,7 +262,7 @@ test('traffic system spawns around the player and despawns far cars', () => {
 
 // ---------------------------------------------------------------------
 // Street life on the Miami map (docs/PLAN_V1.md W8): the first view's
-// moving cars, parked cars in car parks, service vehicles in traffic.
+// moving cars, parked cars in parking lots, service vehicles in traffic.
 // ---------------------------------------------------------------------
 const miami = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8')));
 const miamiCol = createCollisionWorld();
@@ -325,21 +325,21 @@ test('first view: at least 6 moving cars, none closer than 8 m, still moving and
   }
 });
 
-test('parked cars fill the car parks near the player (6 in the first view)', () => {
+test('parked cars fill the parking lots near the player (6 in the first view)', () => {
   const g = miamiGame(3);
   const parked = createParkedCars(g);
   // The start fill is spread over the first second (two spawns a step).
   for (let i = 0; i < 60; i++) parked.fixedUpdate(DT);
   const inView = parked.spots.filter((s) => s.vehicle && inFirstView(s.x, s.z, 80)).length;
   assert.ok(inView >= 6, `${inView} parked cars in the first view`);
-  // A car park: its listed bays take cars when the player is close.
+  // A parking lot: its listed bays take cars when the player is close.
   const bay = parked.spots.find((s) => s.lot);
-  assert.ok(bay, 'the map lists car park bays');
+  assert.ok(bay, 'the map lists parking lot bays');
   g.player.x = bay.x + 70;
   g.player.z = bay.z;
   for (let i = 0; i < 40; i++) parked.fixedUpdate(0.5);
   const lotCars = parked.spots.filter((s) => s.lot && s.vehicle && Math.hypot(s.x - g.player.x, s.z - g.player.z) < 135).length;
-  assert.ok(lotCars >= 3, `${lotCars} cars in car parks`);
+  assert.ok(lotCars >= 3, `${lotCars} cars in parking lots`);
 });
 
 test('service vehicles turn up in traffic now and then, never more than two at once', () => {

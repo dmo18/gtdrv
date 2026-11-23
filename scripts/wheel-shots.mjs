@@ -95,14 +95,14 @@ check(ring.x >= 0 && ring.y >= 0 && ring.x + ring.w <= W && ring.y + ring.h <= H
 void hit;
 await page.screenshot({ path: `docs/preview/weapon-wheel-open${tag}.png` });
 const slices = await page.evaluate(() => [...document.querySelectorAll('.rw-ww-slice')].map((s) => s.getAttribute('aria-label')));
-check(slices.length === 7 && slices.every(Boolean), `7 labelled slices (${slices.join(', ')})`);
+check(slices.length === 7 && slices.every(Boolean), `7 labeled slices (${slices.join(', ')})`);
 const target = 3; // Barnyard Thumper
 const a = (target * 2 * Math.PI) / 7;
 const tx = c.x + Math.sin(a) * 74, ty = c.y - Math.cos(a) * 74;
 for (let i = 1; i <= 6; i++) await touch('touchMove', sw.x + ((tx - sw.x) * i) / 6, sw.y + ((ty - sw.y) * i) / 6);
 await page.waitForTimeout(150);
 const sel = await page.evaluate(() => ({ s: document.querySelector('.rw-ww-slice.rw-sel')?.getAttribute('aria-label'), l: document.querySelector('.rw-ww-label').textContent }));
-check(sel.s === 'Barnyard Thumper' && sel.l === 'Barnyard Thumper', `highlighted slice and centre name (${JSON.stringify(sel)})`);
+check(sel.s === 'Barnyard Thumper' && sel.l === 'Barnyard Thumper', `highlighted slice and center name (${JSON.stringify(sel)})`);
 await page.screenshot({ path: `docs/preview/weapon-wheel-selected${tag}.png` });
 await touch('touchEnd', tx, ty);
 await page.waitForTimeout(400);

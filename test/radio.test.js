@@ -75,7 +75,7 @@ test('captions: 40 DJ lines, original text, no dashes, no repeats in a row', () 
 
 test('syllable counter', () => {
   assert.equal(syllables('gull'), 1);
-  assert.equal(syllables('harbour'), 2);
+  assert.equal(syllables('harbor'), 2);
   assert.equal(syllables('lighthouse'), 2);
   assert.equal(syllables('table'), 2);
   assert.equal(syllables('...'), 0);

@@ -7,7 +7,7 @@
 // muzzle brake, commander cupola with an MG, smoke dischargers, bustle
 // basket. One camo skin per tank (hullkit.js), 3 draw calls near: hull
 // (with tracks), turret, gun. Far away the hull drops to a coarse LOD.
-// Origin at the ground centre, nose along local +x, up +y (docs/CRAFT.md).
+// Origin at the ground center, nose along local +x, up +y (docs/CRAFT.md).
 // Hierarchy: group (position, yaw, sway) -> hull, turret (yaw) -> gun
 // (pitch) -> barrel (recoil).
 import * as THREE from 'three';

@@ -11,7 +11,7 @@ const SUB = {
   'miami-downtown': 'The start: towers, the bay and the airfield',
   'miami-beach': 'The causeways, the beach and the keys',
   'miami-north': 'Wynwood, warehouses and the north roads',
-  'miami-west': 'Little Havana, the river and the civic centre',
+  'miami-west': 'Little Havana, the river and the civic center',
   'miami-south': 'The long roads and the south shore',
   [ISLAND]: 'The original island, no garages or adventures',
 };

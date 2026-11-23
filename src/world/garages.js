@@ -4,7 +4,7 @@
 // every build puts them in the same places. systems/garages.js runs them,
 // render/exploremesh.js draws them. The island has none.
 //
-// Coordinates: x east, z south, metres. Heading 0 faces +x.
+// Coordinates: x east, z south, meters. Heading 0 faces +x.
 import { createRng } from '../core/rng.js';
 import { inRegion, GARAGE_MARGIN } from './regions.js';
 
@@ -17,7 +17,7 @@ export const GARAGE_CARS_MAX = 24;
 export const GARAGE_BONUS = 500; // points for the first visit to each garage
 export const GARAGE_MOVE_MAX = 300; // m an anchor may move to find a legal spot
 export const GARAGE_APART = 900; // m between any two garages
-const REGION_EDGE = 40; // m: a garage's centre keeps this far inside a region's crop
+const REGION_EDGE = 40; // m: a garage's center keeps this far inside a region's crop
 
 // Shed and forecourt sizes (the 16 by 22 m rect: shed 10 by 14 at the
 // back, forecourt the front 8 m).
@@ -30,14 +30,14 @@ export const FORECOURT = 8;
 const WALL = 0.4;
 const DOOR_H = 3.6;
 // m from the door, straight out, to the carriageway: the 8 m forecourt and
-// the 4 m pavement plus a little for a road that is not square to it.
+// the 4 m sidewalk plus a little for a road that is not square to it.
 export const DOOR_ROAD = 15;
 
 const LOT_OK = new Set(['works', 'carpark', 'grass', 'site']);
 const LOT_FALLBACK = new Set(['works', 'carpark', 'grass', 'site', 'yard', 'plaza', 'park']);
 const FAST_ROADS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link']);
 
-// Ids, invented names, neighbourhoods and anchors (the 6.6 table).
+// Ids, invented names, neighborhoods and anchors (the 6.6 table).
 export const GARAGE_DEFS = [
   { id: 'g-downtown', name: 'First Street Lock-up', hood: 'Downtown', x: -1300, z: 560, known: true, locked: null, nearStart: 350 },
   { id: 'g-brickell', name: 'Keyside Garage', hood: 'Brickell', x: -1300, z: 1650, known: false, locked: null },
@@ -55,8 +55,8 @@ export const GARAGE_DEFS = [
 export const GARAGE_IDS = GARAGE_DEFS.map((d) => d.id);
 export const LOCKED_GARAGES = GARAGE_DEFS.filter((d) => d.locked).map((d) => d.id);
 
-// Sixteen paint colours for the repaint grid, taken from the car palettes
-// in entities/vehicle.js (the colours cars already come in).
+// Sixteen paint colors for the repaint grid, taken from the car palettes
+// in entities/vehicle.js (the colors cars already come in).
 export const PAINT_COLORS = [
   0xc8402e, 0xd81e2a, 0x8c1c13, 0xff7a1a, 0xf0a030, 0xf2d21b,
   0x6bbf59, 0x2d6a4f, 0x0f9e92, 0x3a7bd5, 0x1e6fd8, 0x14213d,
@@ -124,7 +124,7 @@ function clearOfBuildings(city, r, m) {
 
 // Every 2 m inside the shed: a lot of an allowed type (so land, not road,
 // not a building). Every 2 m of the forecourt: land, off the road, outside
-// buildings (it may take in a strip of pavement). All of it 12 m inland.
+// buildings (it may take in a strip of sidewalk). All of it 12 m inland.
 function inRect(r, x, z) {
   return x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
 }
@@ -181,7 +181,7 @@ function keepOuts(city) {
 // Candidate door spots for one anchor: along every road edge within
 // reach (not a bridge, causeway or motorway class) that runs close to a
 // cardinal direction, on both sides, every 4 m, with the rect's front just
-// past the 4 m pavement. Sorted by distance to the anchor; ties broken by
+// past the 4 m sidewalk. Sorted by distance to the anchor; ties broken by
 // the seeded rng.
 export function candidates(city, def, rng) {
   const out = [];
@@ -206,7 +206,7 @@ export function candidates(city, def, rng) {
         const nx = -uz * side, nz = ux * side;
         const front = Math.abs(nx) > Math.abs(nz) ? (nx > 0 ? 2 : 0) : (nz > 0 ? 3 : 1);
         const hx = Math.round(Math.cos(HEAD[front])), hz = Math.round(Math.sin(HEAD[front]));
-        // Door: off the centre line along the cardinal away from the road
+        // Door: off the center line along the cardinal away from the road
         // (farther when the road runs at a slant to it), and a little more.
         const dot = Math.max(0.5, Math.abs(nx * hx + nz * hz));
         for (let extra = -4; extra <= 4; extra += 2) {
@@ -242,8 +242,8 @@ function offRoadCandidates(def, rng) {
   return out;
 }
 
-// The shed centre garageShape gives for a door (its x and z), into out.
-function shapeCentre(doorX, doorZ, front, out) {
+// The shed center garageShape gives for a door (its x and z), into out.
+function shapeCenter(doorX, doorZ, front, out) {
   const heading = HEAD[front];
   const ux = Math.round(Math.cos(heading)), uz = Math.round(Math.sin(heading));
   const px = -uz, pz = ux, f = -SHED_D / 2, s = 0;
@@ -251,16 +251,16 @@ function shapeCentre(doorX, doorZ, front, out) {
   out[1] = r1(doorZ + uz * f + pz * s);
   return out;
 }
-const CENTRE = [0, 0];
+const CENTER = [0, 0];
 
 export function tryAt(city, def, c, taken, keep, types) {
-  // The distance tests need only the centre: the shape is made after them.
-  const [gx, gz] = shapeCentre(c.x, c.z, c.front, CENTRE);
+  // The distance tests need only the center: the shape is made after them.
+  const [gx, gz] = shapeCenter(c.x, c.z, c.front, CENTER);
   if (!farFromAll(def, gx, gz, taken, keep, city)) return null;
   return groundTests(city, def, c.x, c.z, c.front, c.road, types);
 }
 
-// The tests on the centre alone (keep-outs, the start, other garages).
+// The tests on the center alone (keep-outs, the start, other garages).
 // nearer(dx, dz, r) is Math.hypot(dx, dz) < r, with hypot only where the
 // squared sum is within rounding of r squared.
 function nearer(dx, dz, r) {
@@ -332,7 +332,7 @@ function groundTests(city, def, x, z, front, road, types) {
 }
 
 // The candidates of one anchor (the same spots, ties and order as
-// candidates()) in flat arrays, without the ones whose centre fails
+// candidates()) in flat arrays, without the ones whose center fails
 // farFromAll; walked in (d, tie, index) order, one 1 m band of d sorted at
 // a time, so most of the list is never sorted.
 const C = { n: 0, x: new Float64Array(1024), z: new Float64Array(1024), d: new Float64Array(1024), tie: new Float64Array(1024), front: new Uint8Array(1024) };
@@ -386,13 +386,13 @@ function gatherCandidates(city, def) {
 function placeOne(city, def, rng, taken, keep) {
   const total = gatherCandidates(city, def);
   for (let i = 0; i < total; i++) C.tie[i] = rng.next();
-  // Survivors of the centre tests, by 1 m band of d.
+  // Survivors of the center tests, by 1 m band of d.
   const R = GARAGE_MOVE_MAX;
   const bands = [];
   for (let k = 0; k <= R; k++) bands.push([]);
   for (let i = 0; i < total; i++) {
-    shapeCentre(C.x[i], C.z[i], C.front[i], CENTRE);
-    if (!farFromAll(def, CENTRE[0], CENTRE[1], taken, keep, city)) continue;
+    shapeCenter(C.x[i], C.z[i], C.front[i], CENTER);
+    if (!farFromAll(def, CENTER[0], CENTER[1], taken, keep, city)) continue;
     bands[Math.floor(C.d[i])].push(i);
   }
   const cmp = (p, q) => C.d[p] - C.d[q] || C.tie[p] - C.tie[q] || p - q;

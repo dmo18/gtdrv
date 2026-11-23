@@ -60,7 +60,7 @@ test('sixteen adventures: ids, kinds, core split and the fixed ten', () => {
   }
   for (const a of advs) assert.equal(a.reward.score, KIND_SCORE[a.kind], a.id);
   assert.deepEqual(Object.values(REWARD_CARS).filter((c) => VEHICLE_SPECS[c]).length, 3);
-  // Every garage neighbourhood has one.
+  // Every garage neighborhood has one.
   const places = new Set();
   for (const a of advs) {
     places.add(city.placeOf(a.giver.x, a.giver.z));
@@ -83,7 +83,7 @@ test('step shapes: 1 to 3 steps, clues under 90 characters, radii and rings in r
       assert.ok(s.r >= 10 && s.r <= 25, a.id);
       assert.ok(s.hint >= 60 && s.hint <= 200, a.id);
       if (a.kind === 'hidden') { assert.equal(s.r, 10, a.id); assert.ok(s.hint >= 150, a.id); }
-      assert.ok(Math.hypot(s.rx - s.x, s.rz - s.z) <= s.hint / 2 + 0.2, a.id + ' ring centre within half the radius');
+      assert.ok(Math.hypot(s.rx - s.x, s.rz - s.z) <= s.hint / 2 + 0.2, a.id + ' ring center within half the radius');
     }
   }
 });
@@ -214,7 +214,7 @@ test('discovery fires once: rumours within 300 m, cells once each, quietly', () 
   go(game, sys, city.spawn.x, city.spawn.z);
   assert.ok(game.explore.state.adventures.seen.includes('a-first-light'), 'known from the first launch');
   assert.equal(game.explore.state.adventures.tracked, 'a-first-light');
-  const a = byId['a-port-quay'];
+  const a = byId['a-port-pier'];
   go(game, sys, a.giver.x + ADV_SEEN_R + 50, a.giver.z);
   assert.ok(!game.explore.state.adventures.seen.includes(a.id));
   go(game, sys, a.giver.x + ADV_SEEN_R - 20, a.giver.z);
@@ -352,7 +352,7 @@ import { regionFor, inRegion, PLACE_MARGIN } from '../src/world/regions.js';
 import { ADVENTURE_DEFS, adventurePoints, adventureInRegion } from '../src/world/adventures.js';
 
 const OFFERED = {
-  'miami-downtown': ['a-first-light', 'a-river-run', 'a-keys-dash', 'a-nightheron', 'a-watson-wings', 'a-edgewater-hush', 'a-brickell-crawl', 'a-port-quay'],
+  'miami-downtown': ['a-first-light', 'a-river-run', 'a-keys-dash', 'a-nightheron', 'a-watson-wings', 'a-edgewater-hush', 'a-brickell-crawl', 'a-port-pier'],
   'miami-beach': ['a-sandbar', 'a-far-key', 'a-beach-mile'],
   'miami-north': ['a-sunchaser', 'a-tidewinder'],
   'miami-west': ['a-civic-ledger'],

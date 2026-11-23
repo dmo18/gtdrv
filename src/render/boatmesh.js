@@ -2,9 +2,9 @@
 // flats, flared topsides, raked stem, boot stripe, rubbing strake), open
 // cockpits with inner walls and sole, deck furniture, chrome rails and
 // cleats, outboards with a spinning prop, nav lights. One rigged skin
-// draw call (hullkit.js) plus windscreen glass and, under way, one
+// draw call (hullkit.js) plus windshield glass and, under way, one
 // additive bow spray / stern wash mesh. Past LOD_FAR a coarse hull only.
-// Origin is the waterline centre; the bow points along local +x, up +y.
+// Origin is the waterline center; the bow points along local +x, up +y.
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
 import { Kit, RIG, CLS, createSkin, skinLook, glassMaterial, buildKit } from './hullkit.js';
@@ -195,7 +195,7 @@ function buildRunabout(k, gk, spec, color) {
   hull(k, o);
   const fy = o.fb - 0.42;
   const sa = station(o, 0.6);
-  // Wrap-round windscreen with a chrome top rail.
+  // Wrap-round windshield with a chrome top rail.
   const ws = (t, up) => {
     const a = (t - 0.5) * 2;
     const z = a * sa.hb * 0.9;
@@ -387,7 +387,7 @@ function buildInflatable(k, gk, spec, color) {
 
 const BUILDERS = { runabout: buildRunabout, jetski: buildJetski, fisher: buildFisher, yacht: buildYacht, inflatable: buildInflatable };
 
-// ---- spray: bow sheets and a stern wash, additive, vertex colour = strength
+// ---- spray: bow sheets and a stern wash, additive, vertex color = strength
 function sprayGeometry(sp) {
   const pos = [], col = [], idx = [];
   const quadStrip = (rows, c0, c1) => {

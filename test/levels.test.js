@@ -54,7 +54,7 @@ test('junk input falls back to defaults and stays in range', () => {
 });
 
 test('every bus belongs to a category', () => {
-  for (const k of ['music', 'world', 'engine', 'tyres', 'effects', 'ui']) assert.ok(cats.includes(BUS_CATEGORY[k]), k);
+  for (const k of ['music', 'world', 'engine', 'tires', 'effects', 'ui']) assert.ok(cats.includes(BUS_CATEGORY[k]), k);
   assert.equal(BUS_CATEGORY.world, 'ambience');
   assert.equal(BUS_CATEGORY.music, 'music');
 });

@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
 import { buildPerson, HIP_Y, SHOULDER_Y, NECK_Y, KNEE_DY, ELBOW_DY, LEG_Z, armZ } from './personbody.js';
 
-// Clothing colour sets for the player and pedestrians. `outfit`: tee,
+// Clothing color sets for the player and pedestrians. `outfit`: tee,
 // long (long sleeves), jacket (open jacket over a shirt), hoodie, dress
 // shirt; `hairStyle`: short, long, bun, bald, cap; `build`: 0 slim .. 1
 // broad.
@@ -31,7 +31,7 @@ export const PERSON_PALETTES = [
 ];
 
 // Looks the systems pass without an outfit (police officers, the rival
-// crew) are recognised by their colours.
+// crew) are recognized by their colors.
 const POLICE_SHIRT = 0x26406b;
 const CREW_SHIRTS = new Set([0x6e1f4f, 0x7a2a5e, 0x5b1a45]);
 

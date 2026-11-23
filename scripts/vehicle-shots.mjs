@@ -189,7 +189,7 @@ async function gameShots() {
         } else {
           const v = window.__show[0];
           const L = v.spec.length;
-          // Car centre, its own forward (heading) and the view direction.
+          // Car center, its own forward (heading) and the view direction.
           const cx = v.x, cz = v.z, ch = v.heading;
           const az = view === 'side' ? Math.PI / 2 : view === 'rear' ? Math.PI + 0.62 : view === 'top' ? -0.5 : 0.62;
           const a = ch + az;

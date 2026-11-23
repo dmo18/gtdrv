@@ -207,7 +207,7 @@ test('phone-check sounds: peaks under -1 dBFS, sane RMS, no harsh top, right cha
     assert.ok(above(d, sr, 4500) < 0.01, `${n} above 4.5 kHz ${above(d, sr, 4500)}`);
     assert.ok(between(d, sr, 300, 4000) > 0.25, `${n} carries on a phone (${between(d, sr, 300, 4000).toFixed(2)})`);
   }
-  // tyre squeal: band noise around 1 to 3 kHz, not saturated into a dense block
+  // tire squeal: band noise around 1 to 3 kHz, not saturated into a dense block
   {
     const { d, sr } = get('squeal');
     const m = measure(d, sr, true);

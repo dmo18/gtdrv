@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createRagdolls, startRagdoll, kickRagdoll, stepRagdolls, ragOrigin, ragReach, flatPitch, headDir,
-  RAGDOLL_MAX, RAG_T, RAG_MAX_T, RAG_THICK, RAG_CENTRE, LIMB_REST, LIMB_COUNT,
+  RAGDOLL_MAX, RAG_T, RAG_MAX_T, RAG_THICK, RAG_CENTER, LIMB_REST, LIMB_COUNT,
 } from '../src/core/ragdoll.js';
 import { createRng } from '../src/core/rng.js';
 import { poseRagdoll } from '../src/render/ragdoll.js';
@@ -123,13 +123,13 @@ test('a reset actor gives its slot back at once', () => {
   assert.equal(pool.active, 0);
 });
 
-test('mesh origin keeps the body centre fixed while it rotates', () => {
+test('mesh origin keeps the body center fixed while it rotates', () => {
   const o = { x: 0, y: 0, z: 0 };
-  ragOrigin(5, RAG_CENTRE, 7, 0.3, 0, 0, o);
+  ragOrigin(5, RAG_CENTER, 7, 0.3, 0, 0, o);
   assert.deepEqual([o.x, o.y, o.z].map((v) => +v.toFixed(9)), [5, 0, 7]);
-  // On its back facing +x: the feet are RAG_CENTRE in front of the centre.
+  // On its back facing +x: the feet are RAG_CENTER in front of the center.
   ragOrigin(0, RAG_THICK, 0, 0, Math.PI / 2, 0, o);
-  assert.ok(Math.abs(o.x - RAG_CENTRE) < 1e-9 && Math.abs(o.y - RAG_THICK) < 1e-9);
+  assert.ok(Math.abs(o.x - RAG_CENTER) < 1e-9 && Math.abs(o.y - RAG_THICK) < 1e-9);
   assert.equal(flatPitch(0.2), Math.PI / 2);
   assert.equal(flatPitch(-0.2), -Math.PI / 2);
   assert.equal(LIMB_REST.length, LIMB_COUNT);
@@ -149,7 +149,7 @@ function arena() {
   return makeFightGame({ city, collision, seed: 9, px: -60, pz: 0 });
 }
 
-test('combat: a car at speed throws a person up over the bonnet in an arc', () => {
+test('combat: a car at speed throws a person up over the hood in an arc', () => {
   const g = arena();
   const ped = initActor({ x: 0, z: 0, y: 0, heading: Math.PI, radius: 0.35, px: 0, pz: 0, vx: 0, vz: 0 }, 'civ');
   addActor(g, ped);

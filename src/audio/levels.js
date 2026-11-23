@@ -12,7 +12,7 @@ export const BUS_CATEGORY = {
   music: 'music',
   world: 'ambience', // city, birds, wind, surf, rain, cabin wind
   engine: 'effects',
-  tyres: 'effects',
+  tires: 'effects',
   effects: 'effects',
   ui: 'effects',
 };

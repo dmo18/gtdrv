@@ -147,8 +147,8 @@ export function attachKeyboard(input, target = window) {
 export const STEER_STYLES = ['wheel', 'buttons', 'tilt', 'slider'];
 export const CURVE_LINEAR = 0.85;
 // Travel for full lock at sensitivity 1: wheel degrees, slider CSS px from
-// the bar centre, tilt degrees of phone roll past the dead zone, buttons
-// seconds from centre to a full target.
+// the bar center, tilt degrees of phone roll past the dead zone, buttons
+// seconds from center to a full target.
 export const STEER_TRAVEL = { wheel: 110, slider: 90, tilt: 22, buttons: 0.3 };
 export const WHEEL_CORE_PX = 16; // inside this radius the wheel holds its angle
 export const SLIDER_W = 180; // CSS px, the slider bar width
@@ -165,7 +165,7 @@ const clamp1 = (x) => (x > 1 ? 1 : x < -1 ? -1 : x);
 
 // Raw input x in -1..1 to the steering target in -1..1: odd, strictly
 // rising, wheelCurve(0) = 0, wheelCurve(1) = 1, wheelCurve(0.5) = 0.44375,
-// slope 0.85 at the centre (a gentle curve, nearly linear).
+// slope 0.85 at the center (a gentle curve, nearly linear).
 export function wheelCurve(x) {
   const a = clamp1(+x || 0);
   return CURVE_LINEAR * a + (1 - CURVE_LINEAR) * a * a * a;
@@ -202,15 +202,15 @@ export function rampSteer(cur, target, dt, sensitivity = 1) {
 }
 
 // Touch wheel tracking (one per control, no allocation per event). The
-// thumb's angle about the wheel centre is summed from one pointer event to
+// thumb's angle about the wheel center is summed from one pointer event to
 // the next, starting at 0 where the thumb lands, so a touch never jumps the
-// wheel. Inside WHEEL_CORE_PX of the centre the sum holds and tracking is
+// wheel. Inside WHEEL_CORE_PX of the center the sum holds and tracking is
 // kept; the first point outside the core again starts a fresh angle. The
 // sum is clamped to full lock, so winding past it does not need unwinding.
 export function createWheelTracker() {
   const w = {
     cx: 0, cy: 0, last: 0, have: false, active: false, deg: 0, sensitivity: 1,
-    // Thumb down at (x, y) on a wheel centred at (cx, cy).
+    // Thumb down at (x, y) on a wheel centered at (cx, cy).
     down(x, y, cx, cy, sensitivity = 1) {
       w.cx = cx; w.cy = cy; w.deg = 0; w.have = false; w.active = true;
       w.sensitivity = clampSensitivity(+sensitivity);
@@ -247,10 +247,10 @@ export function createWheelTracker() {
   return w;
 }
 
-// Slider: absolute, raw from the pointer's distance to the bar centre (the
+// Slider: absolute, raw from the pointer's distance to the bar center (the
 // pointer is tracked by id until it lifts, even off the bar).
-export function sliderRaw(pointerX, centreX, sensitivity = 1) {
-  return rawFromTravel('slider', (+pointerX || 0) - (+centreX || 0), sensitivity);
+export function sliderRaw(pointerX, centerX, sensitivity = 1) {
+  return rawFromTravel('slider', (+pointerX || 0) - (+centerX || 0), sensitivity);
 }
 
 // Shortest signed difference a - b of two angles in radians.

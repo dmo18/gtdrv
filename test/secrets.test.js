@@ -102,7 +102,7 @@ test('the map hint appears only after a find, is off the spot, and ends with the
   const h = hintFor(st, layout.spots);
   assert.ok(h && h.id === layout.spots[1].id);
   const d = Math.hypot(h.x - layout.spots[1].x, h.z - layout.spots[1].z);
-  assert.ok(d > DISCOVER_R && d < 100, 'a neighbourhood, not the spot');
+  assert.ok(d > DISCOVER_R && d < 100, 'a neighborhood, not the spot');
   st.found = SECRET_IDS.slice();
   assert.equal(hintFor(st, layout.spots), null);
 });

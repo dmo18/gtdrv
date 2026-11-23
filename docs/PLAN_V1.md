@@ -42,7 +42,7 @@ Game and tone
 | 20 | Radio stations (generated) | Done | four stations, test/radio.test.js |
 | 21 | Carjacking, driver dragged out and thrown | Done | test/carjack.test.js |
 | 22 | Saved car and place | Done | session.js, Continue on the title; test/garage.test.js, save.test.js |
-| 23 | Garages and adventures | Partial | 12 and 16 built and tested; favourite loses its star on reload; reward cars can be duplicated; no cars shown inside a garage |
+| 23 | Garages and adventures | Partial | 12 and 16 built and tested; favorite loses its star on reload; reward cars can be duplicated; no cars shown inside a garage |
 | 24 | Hidden secrets and the Ghostwake | Done | test/secrets.test.js, test/miami-places.test.js |
 | 25 | Respawn button | Done | src/ui/touch.js:781 |
 | 26 | Weapon wheel (hold SWAP, drag) | Done | src/ui/wheel.js, test/wheel.test.js |
@@ -68,7 +68,7 @@ Open requests
 | O5 | Killing and blasts feel satisfying | Missing | W6 not started; see rows 5, 6, 17 and section 1.2 |
 | O6 | Sound | Partial | measured only (docs/AUDIO.md, "Still weak, honestly"); never heard |
 | O7 | Map and buildings no longer "CGA and alpha" | Partial | buildings and shop fronts pass; trees, ground, sky and people on the street do not (1.2) |
-| O8 | No stutter, steady frame rate, nothing overlapping | Partial | over budget (K1 to K3); a real overlap found at top centre of the HUD (1.3 item 2) |
+| O8 | No stutter, steady frame rate, nothing overlapping | Partial | over budget (K1 to K3); a real overlap found at top center of the HUD (1.3 item 2) |
 | O9 | A 1.0 that could go to the Play Store | Partial | android project, store pictures and docs/STORE.md exist; privacy email, security review and phone test are open |
 
 Known open issues from 0.4.0 (all still open; none was worked on since)
@@ -81,7 +81,7 @@ Known open issues from 0.4.0 (all still open; none was worked on since)
 | K4 | A tree blocks the title frame | Open (visible in docs/preview/m1-first-view-title.png) |
 | K5 | 4 start parking spots and 4 moving cars in the first view, target 6 and 6 | Open |
 | K6 | Adventure map markers are plain dots | Open |
-| K7 | Favourite car loses its star after a reload | Open |
+| K7 | Favorite car loses its star after a reload | Open |
 | K8 | Reward cars can be duplicated from two garages | Open |
 | K9 | Slalom accuracy test uses a weaker pass rule than the contract | Open |
 | K10 | Sim grip slightly under the section 2 line | Open |
@@ -105,13 +105,13 @@ Taken today with scripts/m1-render-shots.mjs and a scratch script, 915x412.
 
 - Downtown street, day: the best view in the game. Glass towers, a stucco block with arched
   windows and shutters, readable invented shop signs, awnings, lane lines. It reads as a city
-  street in a mid-range mobile game. Weak: nobody on the pavement, the pavement is one large
+  street in a mid-range mobile game. Weak: nobody on the sidewalk, the sidewalk is one large
   flat slab pattern, the car shadow is a hard dark blob.
 - Downtown street, night: good. Lit windows vary, shop windows glow, headlight cones and tail
   lamps work. Weak: shop windows are the same flat orange panel repeated; no street reflections.
 - Little Havana: recognisably low-rise and pastel, with tile roofs. Weak: lawns are one flat
-  bright green with no edge to the pavement, trees are dark faceted lumps on a stick, the sky
-  is a flat grey-blue with three blob clouds. This view still looks like a prototype.
+  bright green with no edge to the sidewalk, trees are dark faceted lumps on a stick, the sky
+  is a flat gray-blue with three blob clouds. This view still looks like a prototype.
 - Waterfront: palms, bay water and far towers give the right idea. Weak: grass is one flat
   green, tree canopies are the same dark lumps, the tower on the right is a plain blue wall
   with no ground floor.
@@ -135,13 +135,13 @@ Taken today with scripts/m1-render-shots.mjs and a scratch script, 915x412.
   0.3 s an orange disc and about five brown boxes; at 2 s thin smoke; at 6 s nothing at all: no
   hull, no scorch, no smoke, no parts. This is the "fake" the owner describes. The blast itself
   costs nothing in draw calls (274 to 285), so there is room to do it properly.
-- HUD: clean layout, buttons on a grid, clear of the car. One real fault: the top centre.
+- HUD: clean layout, buttons on a grid, clear of the car. One real fault: the top center.
 
 ### 1.3 Top defects, ranked by how much a player notices
 
 1. Destruction leaves no trace. Wrecks vanish after 3 s, bodies after 4 s, no scorch stays, the
    fireball is a flat disc, parts are plain boxes (rows 5, 6, O5).
-2. The top centre of the HUD piles up. The objective arrow and "First Light 0.4 mi", the
+2. The top center of the HUD piles up. The objective arrow and "First Light 0.4 mi", the
    district banner, the wanted stars, the "Wrecked +250" toast, "The police want a word!" and
    the tutorial hint all draw in the same place and cover each other (seen in six shots today).
    scripts/ui-test.mjs does not catch it.
@@ -150,11 +150,11 @@ Taken today with scripts/m1-render-shots.mjs and a scratch script, 915x412.
    blocks the title (K4).
 5. Cars read as soap bars with black glass and blob shadows (O4).
 6. The three asked-for features are absent: boost, siren yield, service vehicles (O1 to O3).
-7. Ground and sky: flat single-colour lawns, huge uniform paving on plazas and the airfield
+7. Ground and sky: flat single-color lawns, huge uniform paving on plazas and the airfield
    apron, a flat sky with blob clouds and no sun.
 8. Stutter risk on the phone: over the draw and triangle limits, build over 3 s, collection
    pauses over 5 ms in tile slices (K1 to K3). Not seen on the test machine; likely on a phone.
-9. Garage faults a player will hit within an hour: the favourite star is lost on reload, reward
+9. Garage faults a player will hit within an hour: the favorite star is lost on reload, reward
    cars can be copied, adventure markers are plain dots, garages look empty (K6 to K8).
 10. Sound is unproven. It may be fine or may still be "garbage": no one knows (O6).
 11. Wanted level 5 shows a fifth star but sends nothing new (row 14).
@@ -197,7 +197,7 @@ B1, B2 and the first W5 car have landed: V1, U1. Then R2.
 D0. Design brief (Fable, 40k to 70k; reviewed by the owner through section 3)
 - Goal: the decisions wave B needs: what each service vehicle does (extras, controls, light
   bar pattern), where the boost meter and siren button sit in the HUD grid, the one-line rule
-  for the top centre stack, the go or no-go bar for the first W5 car.
+  for the top center stack, the go or no-go bar for the first W5 car.
 - Owns: docs/REVAMP.md (new sections 6.11 to 6.13), docs/UI.md.
 - Done when: V1 and U1 briefs can be cut without questions.
 
@@ -213,7 +213,7 @@ B1. Boost (running now as a helper; Sonnet, 120k to 180k; reviewed by Opus)
   shot of a car, a boat and the fighter with the meter visible and flame or spray on.
 
 B2. Siren and yield (running now as a helper; Opus, 150k to 220k; reviewed by R2)
-- Goal: with the siren on, traffic ahead pulls to the kerb and stops, pedestrians step off the
+- Goal: with the siren on, traffic ahead pulls to the curb and stops, pedestrians step off the
   road; works in any vehicle that has a siren.
 - Owns: src/systems/traffic.js, src/systems/peds.js, src/systems/police.js (siren state),
   test/traffic.test.js, test/peds.test.js, test/police.test.js. The SIREN button line in
@@ -239,7 +239,7 @@ W5. Cars (Opus, 350k to 500k; first car judged by Fable in D0 terms, the rest by
 
 W6. Combat feel (Opus, 350k to 500k; reviewed by R2)
 - Goal: contract 6.7 in full: layered blast with light on the street, 14 to 18 parts with four
-  that can be recognised, hulls that stay 60 s (at most 6) and smoke, scorch 120 s, bodies that
+  that can be recognized, hulls that stay 60 s (at most 6) and smoke, scorch 120 s, bodies that
   fall away from the hit and stay 30 s, kill freeze, hit and kill cues, three layer blast sound.
 - Owns: src/systems/combat.js, cinematic.js, src/systems/audio.js, src/render/combatfx.js,
   effects.js, ragdoll.js, src/core/ragdoll.js, src/core/loop.js (hit stop only),
@@ -253,7 +253,7 @@ W6. Combat feel (Opus, 350k to 500k; reviewed by R2)
   under 2 ms; blast shots at 0.1 s, 0.5 s, 5 s and 30 s (the hull must be in the last one).
 
 W7. Sky, light and water (Sonnet, 150k to 220k; reviewed by Opus)
-- Goal: layered clouds, a sun disc with haze, softer shadow edge, sea colour and foam line at
+- Goal: layered clouds, a sun disc with haze, softer shadow edge, sea color and foam line at
   the seawall, night glow.
 - Owns: src/systems/daynight.js, src/render/water.js, nightlights.js, scripts/sky-preview.mjs,
   scripts/night-shots.mjs, test/daynight.test.js.
@@ -275,7 +275,7 @@ V1. Service vehicles (Opus, 350k to 500k; reviewed by R2). Starts after B1, B2 a
 - Goal: steal and drive a fire truck, an ambulance, a garbage truck and a tow truck; the
   police car, ambulance and fire truck have a working siren and flashing lights; each has one
   working extra: fire truck water cannon (knocks people over, puts out burning hulls), garbage
-  truck bin lift (lifts and empties a kerb bin, crushes a small wreck part), tow truck hook
+  truck bin lift (lifts and empties a curb bin, crushes a small wreck part), tow truck hook
   (tows one car), ambulance (heals the player in hard mode). They appear parked at set places
   and now and then in traffic.
 - Owns: src/entities/servicevehicles.js (new: specs, merged into `VEHICLE_SPECS` by one import
@@ -293,13 +293,13 @@ V1. Service vehicles (Opus, 350k to 500k; reviewed by R2). Starts after B1, B2 a
   and with lights at night.
 
 U1. HUD stack, map markers, phone check (Sonnet, 150k to 220k; reviewed by Opus). After B1.
-- Goal: (a) one top centre stack with fixed rows so the arrow, objective text, district banner,
+- Goal: (a) one top center stack with fixed rows so the arrow, objective text, district banner,
   stars, toasts and hints never overlap; (b) adventure markers with a "?" glyph and a ring
   (K6); (c) the EXTRA button for V1; (d) a "Phone check" screen (section 4.2).
 - Owns: src/ui/hud.js, styles.js, touch.js (after B1 lands), minimap.js, combathud.js,
   src/ui/menu.js, src/systems/mapui.js, objective.js, tutorial.js, new src/ui/phonecheck.js,
   scripts/ui-test.mjs, scripts/menu-test.mjs, docs/UI.md (after D0).
-- Acceptance and check: ui-test extended to the running game with every top centre item forced
+- Acceptance and check: ui-test extended to the running game with every top center item forced
   on at once (objective, banner, 5 stars, two toasts, a hint) at 780x360 and 915x412, insets 0
   and 40: zero overlaps, zero targets under 48 px; map shot with markers; phone check runs in
   headless and prints a result string.
@@ -319,12 +319,12 @@ W2b. World look and speed (Opus, 300k to 450k; reviewed by R3)
   lotmesh.test.js, world-density.test.js, firstview.test.js, docs/MAP.md.
 - Acceptance and check: perf.mjs street view at most 342 draw calls and 585k triangles by day
   and night; city build plus renderer build under 3 s; tile-bench: no slice over 5 ms in three
-  runs; firstview test: 6 parking spots, clear centre of the title frame (no prop inside a
+  runs; firstview test: 6 parking spots, clear center of the title frame (no prop inside a
   cone of 8 degrees within 40 m); the five view shots.
 
 W8. Street life (Sonnet, 150k to 250k; reviewed by Opus)
-- Goal: people on the pavements and plazas by district and hour; 6 moving cars in the first
-  view without a queue; cars in the car parks; service vehicles in traffic; the heat 5 police
+- Goal: people on the sidewalks and plazas by district and hour; 6 moving cars in the first
+  view without a queue; cars in the parking lots; service vehicles in traffic; the heat 5 police
   tank if the owner says yes (decision 6).
 - Owns: src/systems/peds.js, parked.js, traffic.js, police.js, armor.js, test/traffic.test.js,
   peds.test.js, police.test.js (B2 has finished with these).
@@ -351,7 +351,7 @@ H1. Handling contract clean-up (Opus, 60k to 100k; reviewed by R3)
 - Acceptance and check: `npm test`; traffic and police lap tests unchanged.
 
 U2. Menu and title polish (Sonnet, 100k to 160k; reviewed by Opus)
-- Goal: an About screen (version, credits, map licence, privacy link), the sound test list,
+- Goal: an About screen (version, credits, map license, privacy link), the sound test list,
   a Blood switch if the owner says yes (decision 5), all menu texts checked against the game.
 - Owns: src/ui/menu.js, title.js, hud.js, styles.js, touch.js, wheel.js, phonecheck.js,
   src/index.html, scripts/ui-test.mjs, menu-test.mjs, ui-harness.html, docs/UI.md.
@@ -383,7 +383,7 @@ W10. Phone test fixes (Opus or Sonnet by item, 200k to 300k reserve)
 P1. Store and documents (Sonnet, with Haiku for text sync; 60k to 100k; Opus review)
 - Goal: docs/SPEC.md, STATUS.md and PLAN.md match the game (K16); privacy page with the
   owner's contact address (K15); store pictures retaken from 1.0 (scripts/store-shots.mjs);
-  listing text, content rating answers and the licence credit in docs/STORE.md; the manifest
+  listing text, content rating answers and the license credit in docs/STORE.md; the manifest
   and icons checked. No APK or bundle is built (owner's instruction) unless decision 1 says so.
 - Owns: docs/*.md except this file, public/privacy.html, public/manifest.webmanifest, store/,
   scripts/store-shots.mjs, README.md.
@@ -403,7 +403,7 @@ Run in this order; any failure stops the publish. After W9 lands this is `npm ru
    release/last.json, the splash shows the version.
 4. `node scripts/smoke.mjs --extra`: loads at phone size, no page errors, no outside requests.
 5. `node scripts/ui-test.mjs`: no overlap, no target under 48 px, 780x360 and 915x412, insets
-   0 and 40, with the top centre items forced on (from U1).
+   0 and 40, with the top center items forced on (from U1).
 6. `node scripts/perf.mjs`: street view within the limits (342 and 585k from 0.6.0; no worse
    than 0.4.0 for 0.5.0), heavy fight under 520 draw calls, step under 2 ms.
 7. An independent security review: a different session from the builders, read only. Light
@@ -413,7 +413,7 @@ Run in this order; any failure stops the publish. After W9 lands this is `npm ru
    title; car close-up day and night; fighter; tank; boat; a person at 3 m; a street with
    people; a car blast at 0.1 s, 0.5 s, 5 s and 30 s; each service vehicle with lights; boost
    on in a car, a boat and the jet; the HUD in car, on foot, boat, plane and tank with the top
-   centre forced on; every menu screen; the full map with markers. Any overlap, bare ground,
+   center forced on; every menu screen; the full map with markers. Any overlap, bare ground,
    missing hull or blocked frame fails.
 9. Publish, wait for the deploy, open the live site, read the version, then
    `npm run release:record`.
@@ -427,7 +427,7 @@ Run in this order; any failure stops the publish. After W9 lands this is `npm ru
 | Rows 5, 6, 17, O5 (destruction that stays, directional falls) | 0.5.0, W6 |
 | O1 boost, O2 siren yield, O3 service vehicles | 0.5.0, B1, B2, V1 |
 | O4 cars | 0.5.0, W5 |
-| Top centre HUD overlap, K6 markers | 0.5.0, U1 |
+| Top center HUD overlap, K6 markers | 0.5.0, U1 |
 | K7, K8, empty garages | 0.5.0, G1 |
 | K1 to K5, trees, ground | 0.6.0, W2b |
 | People on streets, start traffic, row 14 (if yes) | 0.6.0, W8 |
@@ -451,7 +451,7 @@ Run in this order; any failure stops the publish. After W9 lands this is `npm ru
 - [ ] Offline: the installed page starts with the network off (scripts/offline-test.mjs).
 - [ ] No outside request at runtime; no secret in the repository; dependencies pinned exactly.
 - [ ] Security: zero critical, high or medium open; low findings listed with a reason.
-- [ ] Privacy page has a real contact address; the map licence credit shows in Settings, on
+- [ ] Privacy page has a real contact address; the map license credit shows in Settings, on
       the title and in the store text.
 - [ ] No name, character, map or art from another game; venue names invented (a text scan of
       src/ and public/ against a list of real venue brands).
@@ -477,7 +477,7 @@ costs or exposes.
    add a tow truck now, a city bus later. Reason: the tow hook is a toy with real play in it;
    a bus is only a big van.
 4. What each extra does. Recommend: water cannon that knocks people down and puts out burning
-   wrecks, a bin lift that works on kerb bins, a tow hook, an ambulance that heals in hard mode.
+   wrecks, a bin lift that works on curb bins, a tow hook, an ambulance that heals in hard mode.
    Reason: each is a thing to play with, cheap to build on systems that exist.
 5. Blood switch. Add a "Blood" setting (on by default)? Recommend: yes. Reason: one switch
    costs little and makes the store rating conversation easier; with blood on the game will
@@ -488,7 +488,7 @@ costs or exposes.
    for 1.0. Reason: your rule is fun before stakes; hard mode stays one switch away.
 8. Real place names. Streets and districts stay real. Rename "PortMiami" to "the Port" and
    check every park and marina name? Recommend: yes. Reason: district names are geography, but
-   named public venues are the legal grey area and renaming is a text change.
+   named public venues are the legal gray area and renaming is a text change.
 9. Scope of 1.0. Story missions, tuning garage and championships stay out? Recommend: yes,
    out, listed as "after 1.0". Reason: they are whole products, and the complaint is unfinished
    work, not missing modes.
@@ -515,7 +515,7 @@ costs or exposes.
 | 7 | Hulls block roads, garages, races and spawn points | hulls never spawn inside a marker or garage radius; race start clears hulls; traffic steers round or waits; tests for each |
 | 8 | A phone that cached an old version keeps it | cache keyed by version (exists); offline test in the checklist; the title shows the version |
 | 9 | Store rules: adult rating, a target API level that rises each year, and tester requirements for new developer accounts | P1 writes the rating answers; targetSdk is 36 today; check the current Play rules before decision 1 |
-| 10 | Map licence: the credit must stay visible | a smoke check for the credit text; credit in the store text |
+| 10 | Map license: the credit must stay visible | a smoke check for the credit text; credit in the store text |
 | 11 | Old saves break as hulls, boost and service cars enter the save | save version bump with loader tests for every published version |
 | 12 | Sound work is done blind | A1 waits for the phone check where it can; the numbered list turns "garbage" into "sounds 3 and 7 are bad" |
 

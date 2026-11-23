@@ -172,8 +172,8 @@ export function updateHeat(heat, dt, facts) {
   return null;
 }
 
-// Pulled over? facts: { playerSpeed, copDist (nearest police car centre,
-// metres), onFoot, inCar }. Returns true on the step the bust happens.
+// Pulled over? facts: { playerSpeed, copDist (nearest police car center,
+// meters), onFoot, inCar }. Returns true on the step the bust happens.
 export function updateBust(heat, dt, facts) {
   if (heat.level <= 0 || !facts) {
     heat.bustTime = 0;
@@ -680,7 +680,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   ], 6, 5);
   const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '', tanks: 0, tankShells: 0 };
 
-  // --- The heat 5 police tank (existing tank, armour and combat code). ---
+  // --- The heat 5 police tank (existing tank, armor and combat code). ---
   let tankWait = TANK_DELAY, tankUnit = null, tankLeave = 0;
   const tankBR = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, px: 0, py: 0, pz: 0 };
   const tankCtx = { collision: null, onFoot: false, hurtBy: false, seaY: -0.6 };

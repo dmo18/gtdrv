@@ -75,7 +75,7 @@ const LOOPS = {
     const n = len(1.6);
     const m = smoothRandom(n, 21, rng);
     // Filtered band noise around 1.2 and 1.8 kHz (the rubber's stick-slip
-    // note), wide enough to read as a tyre, not a whistle; no saturation.
+    // note), wide enough to read as a tire, not a whistle; no saturation.
     // The audio system moves its pitch with the slip.
     return spec(n, [{ x: white(n, rng), bands: [['bp', 1185, 11, 3], ['bp', 1793, 9, 2.2], ['bp', 2716, 6, 0.6], ['bp', 700, 2, 0.25]] }], (out) => {
       for (let i = 0; i < n; i++) out[i] *= 0.72 + 0.16 * Math.sin((TAU * 5 * i) / n) + 0.12 * m[i];
@@ -1059,7 +1059,7 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
     };
   }
 
-  // Engines: 6 rpm points x 2 loads per character, normalised together.
+  // Engines: 6 rpm points x 2 loads per character, normalized together.
   const requested = new Set();
   function engineMakers(ch) {
     const pts = pointsFor(ch);

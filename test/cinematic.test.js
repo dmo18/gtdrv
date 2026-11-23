@@ -132,7 +132,7 @@ test('pull-back curve starts and ends at zero, peaks in between and is smooth', 
   p.update(0.4);
   assert.ok(p.yaw < 0, 'swings to the chosen side');
   p.update(0.1, true);
-  assert.ok(!p.active && p.dist === 0, 'cancelled at once');
+  assert.ok(!p.active && p.dist === 0, 'canceled at once');
 });
 
 test('chase camera honours the fx hook and reports a drag', () => {
@@ -172,7 +172,7 @@ test('cinematic system: events drive slow motion and pull-back, reduce motion tu
   assert.ok(fx.dist > 0, 'camera pulled back');
   fx.touched = true;
   cin.render(0, 1 / 60);
-  assert.equal(fx.dist, 0, 'cancelled by the player moving the camera');
+  assert.equal(fx.dist, 0, 'canceled by the player moving the camera');
   events.emit('explosion', { x: 90, y: 0, z: 0, radius: 8, craft, puff: false });
   assert.equal(cin.pull.active, false, 'too far away');
   game.progress.settings.reduceMotion = true;

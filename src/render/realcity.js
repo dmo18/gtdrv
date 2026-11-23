@@ -18,7 +18,7 @@
 // buffers (compactFar), so the two never overlap; past FAR_DETAIL a far
 // tile also drops its small buildings, parapets and roof plant. Lots
 // (docs/REVAMP.md 6.2): their ground and dressing are part of a near
-// tile (lotmesh.js); far off the land takes the lots' colours.
+// tile (lotmesh.js); far off the land takes the lots' colors.
 // Collision (buildings and every lot's solid features), street lamps and
 // traffic-light bulbs are set up once for the whole map at build,
 // whatever is drawn: only meshes stream, never collision shapes, so the
@@ -227,7 +227,7 @@ const NOOP = () => undefined;
 const NULL_MB = new Proxy({}, { get: () => NOOP });
 const NULL_B = { at: () => NULL_MB };
 
-// Material for the far blocks: vertex colours, windows (darker glass by day, some lit at night)
+// Material for the far blocks: vertex colors, windows (darker glass by day, some lit at night)
 // from the world position in the fragment shader. emissiveIntensity is
 // driven by the day/night system like the facade materials.
 // aWin: 0 no windows, 1 a tower or block grid (3.1 by 3.4 m), 2 small
@@ -279,7 +279,7 @@ varying float vRwWin;`)
 }
 
 // Grows typed arrays for one far block. Packed to keep memory down
-// (docs/PLAN_V2.md 1.2): normals as signed bytes, colours as bytes, the
+// (docs/PLAN_V2.md 1.2): normals as signed bytes, colors as bytes, the
 // window kind as a byte; the vertex arrays are dropped from the CPU once
 // on the GPU (nothing reads them back: bounds are worked out first). The
 // index stays: compactFar rewrites it.
@@ -439,7 +439,7 @@ function shadeHexF(hex, f) {
 // One tile's builders, the same set citymesh uses for the whole map,
 // plus street props on their own (hidden at the middle level).
 const TILE_KEYS = [
-  ['asphalt', true, 8], ['ground', true, 6], ['land', true, 10], ['pavement', true, 4.8], ['grass', true, 10], ['wood', true, 2],
+  ['asphalt', true, 8], ['ground', true, 6], ['land', true, 10], ['sidewalk', true, 4.8], ['grass', true, 10], ['wood', true, 2],
   ['paint', true, 2], ['decal', true, 1], ['ao', false, 1], ['plain', false, 1], ['detail', true, 1], ['glow', false, 1],
   ['glass', true, 1], ['brick', true, 1], ['office', true, 1], ['stucco', true, 1], ['siding', true, 1], ['corrugated', true, 1],
   ['roofing', true, 1], ['shopfront', true, 1], ['props', false, 1], ['propsDetail', true, 1], ['havana', true, 1], ['treeDetail', true, 1],
@@ -449,7 +449,7 @@ const TILE_KEYS = [
 function tileMeshPlan(M) {
   const ground = { receive: true }, solid = { cast: true, receive: true };
   return [
-    ['asphalt', M.asphaltMat, ground], ['ground', M.groundMat, ground], ['land', M.landMat, ground], ['pavement', M.pavementMat, ground],
+    ['asphalt', M.asphaltMat, ground], ['ground', M.groundMat, ground], ['land', M.landMat, ground], ['sidewalk', M.sidewalkMat, ground],
     ['grass', M.grassMat, ground], ['wood', M.woodMat, ground],
     ['paint', M.paintMat, { order: 1, receive: true }, true], ['decal', M.decalMat, { order: 2, receive: true }, true], ['ao', M.aoMat, { order: 3 }, true],
     ['plain', M.plainMat, solid], ['detail', M.detailMat, solid, true], ['glow', M.glowMat, {}, true],
@@ -593,7 +593,7 @@ export function buildRealCity(city, collision, opts = {}) {
     const plainD = new MeshBuilder(false), winD = new MeshBuilder(false), smallD = new MeshBuilder(false);
     const all = [plain, win, small, plainD, winD, smallD];
     const one = { at: () => plain };
-    const LB = { land: one, ground: one, pavement: one };
+    const LB = { land: one, ground: one, sidewalk: one };
     const nI = Math.floor((G.w - 1) / s), nJ = Math.floor((G.h - 1) / s);
     const coarse = (v, o) => Math.ceil(((v - o) / G.cell - 0.5) / s);
     for (const t of tiles) {
@@ -652,7 +652,7 @@ export function buildRealCity(city, collision, opts = {}) {
   lap('far');
 
   // ---- Traffic-light lamps: one instanced mesh holding the bulbs of the
-  // near tiles only (graphics.js colours them; `version` tells it the
+  // near tiles only (graphics.js colors them; `version` tells it the
   // list changed). ----
   const CAP = 4096;
   const sigGeo = new THREE.CircleGeometry(0.115, 6).rotateY(Math.PI / 2);
@@ -786,7 +786,7 @@ export function buildRealCity(city, collision, opts = {}) {
     // Meshes only: the collision shapes are the lazy lot layer's.
     const LC = {
       city, R, DR, groundY, lotStats,
-      props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, pavement: B.pavement, ao: B.ao, glow: B.glow,
+      props: B.props, solid: B.lotSolid, detail: B.propsDetail, paint: B.paint, sidewalk: B.sidewalk, ao: B.ao, glow: B.glow,
       plain: B.props, trees: B.plain, treesDetail: B.treeDetail,
     };
     const idxOf = (k) => { let n = 0; for (const mb of B[k].map.values()) n += mb.ni; return n; };

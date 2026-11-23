@@ -13,7 +13,7 @@ User-Agent `rustwater-map-build/0.1 (dev tool)`. Raw responses are cached
 gzipped in `build/osm-cache` (git ignored), so re-runs do not download again.
 Delete that folder to refresh. `scripts/fetch-map.mjs` is never imported by `src/`.
 
-## Source and licence
+## Source and license
 
 Map data (c) OpenStreetMap contributors, ODbL
 (https://www.openstreetmap.org/copyright). The string is stored in the
@@ -23,21 +23,21 @@ is used in the game.
 ## Area and projection
 
 Box: lat 25.745 to 25.815, lon -80.225 to -80.135 (downtown, Brickell, Little
-Havana, part of Biscayne Bay). Origin is the box centre, lat 25.78, lon -80.18.
+Havana, part of Biscayne Bay). Origin is the box center, lat 25.78, lon -80.18.
 Equirectangular: x = (lon - lon0) * R * cos(lat0), z = -(lat - lat0) * R, with
-R = 6371008.8 m. x east, z south, metres, flat ground y = 0. Bounds are about
+R = 6371008.8 m. x east, z south, meters, flat ground y = 0. Bounds are about
 x +-4506 m, z +-3892 m (9.0 km by 7.8 km).
 
 ## Contents
 
-`roads` (class, name, oneway, bridge, lanes, p), `buildings` (h metres, kind,
+`roads` (class, name, oneway, bridge, lanes, p), `buildings` (h meters, kind,
 name, p; height from `height`, then `building:levels` * 3.2, then a default by
 class), `water` (polygons, or `line: 1` waterways), `coastline`, `parks`,
 `labels` (name, kind, x, z). Footways, steps, paths, tracks and cycleways are
 dropped. Polylines are simplified with Douglas-Peucker at 1.5 m.
 
-Polyline field `p` is delta-encoded integer decimetres: `[x0, z0, dx1, dz1,
-...]`; decode by running sum, then divide by 10. Label x, z are plain metres.
+Polyline field `p` is delta-encoded integer decimeters: `[x0, z0, dx1, dz1,
+...]`; decode by running sum, then divide by 10. Label x, z are plain meters.
 
 ## Size
 
@@ -55,7 +55,7 @@ this section is the plan as written before it, from a read of
 (src/systems, src/render, src/ui, src/world, src/entities, src/game.js,
 test/). The data format is described above; this section is about
 plugging that data into the game. Polylines (`p`, delta-encoded
-decimetres) carry no OSM node ids. The origin (lat 25.78, lon -80.18) is in
+decimeters) carry no OSM node ids. The origin (lat 25.78, lon -80.18) is in
 the bay between Bayfront Park and Watson Island, not on land.
 
 ### 1. What the game uses from the city object
@@ -68,13 +68,13 @@ buildings.
 
 | Field / function | Used by | What it needs |
 |---|---|---|
-| `nodes[] {id, x, z, hx, hz, edges[], signal, i, j}` | traffic, police, crew, combat, session, courses, stunts, citymesh, minimap, graphics, tests | junction centre; `hx/hz` half size of the junction box (traffic and police `extAt`, citymesh, courses `groundR`); `i < 0` marks the airfield gate (citymesh signals skip it); minimap reads `wx[n.i]`, `wz[n.j]` |
-| `edges[] {id, a, b, horizontal, width, avenue, length, causeway}` | traffic, police, crew, session, courses, stunts, citymesh, minimap, props, tests | straight segment between two nodes. `horizontal` is assumed to mean "exactly along x" in citymesh road meshes, `onRoad`, kerb parking, furniture, `avenueAt`, stunt heading; `signalState` only uses it to pick a phase |
+| `nodes[] {id, x, z, hx, hz, edges[], signal, i, j}` | traffic, police, crew, combat, session, courses, stunts, citymesh, minimap, graphics, tests | junction center; `hx/hz` half size of the junction box (traffic and police `extAt`, citymesh, courses `groundR`); `i < 0` marks the airfield gate (citymesh signals skip it); minimap reads `wx[n.i]`, `wz[n.j]` |
+| `edges[] {id, a, b, horizontal, width, avenue, length, causeway}` | traffic, police, crew, session, courses, stunts, citymesh, minimap, props, tests | straight segment between two nodes. `horizontal` is assumed to mean "exactly along x" in citymesh road meshes, `onRoad`, curb parking, furniture, `avenueAt`, stunt heading; `signalState` only uses it to pick a phase |
 | `laneOffset`, `lanePoint`, `lanesPerDirection`, `signalState` (exports) | traffic, crew, police, graphics, tests | work for any straight edge direction already; `signalState` needs a two-way phase key |
-| `blocks[] {id, i, j, x0, z0, x1, z1, district}` | peds (pavement loops around the rect), crew (hangout corners), audio (park test), buildings.js (yards), props, citymesh (pavement ring), minimap, secrets (playground) | axis-aligned rectangles with a 4 m `SIDEWALK` ring, roads on all four sides |
+| `blocks[] {id, i, j, x0, z0, x1, z1, district}` | peds (sidewalk loops around the rect), crew (hangout corners), audio (park test), buildings.js (yards), props, citymesh (sidewalk ring), minimap, secrets (playground) | axis-aligned rectangles with a 4 m `SIDEWALK` ring, roads on all four sides |
 | `buildings[] {x0, z0, x1, z1, h, district, kind, style, tint, vseed, block, street, billboard, depot}` | citymesh (draws them and adds the collision boxes), buildings.js, minimap, courses (`tallestNear`, `roofNear`), secrets (alley, roof, openGround), stunts, tests, fightgame | axis-aligned boxes; `kind` in building/house/warehouse/container; `street` bitmask of sides facing a road |
 | `props`, `furniture`, `signals`, `landmarks {lighthouse, cranes, billboards, windsock, runwayLights}`, `streetNames {x[], z[]}` | props.js (also adds tree, crane and lighthouse collision), citymesh, textures, combatfx, armor, secrets, tests | points with type; `namesign` furniture indexes `streetNames.x/z` by `nx/nz` (0..15) |
-| `parkingSpots [{x, z, heading, lot}]` | parked.js, secrets (`lot` industrial seeds the garage search), citygen (Cinder tank), traffic test | kerb spots along non-avenue edges, `lot` spots in car parks |
+| `parkingSpots [{x, z, heading, lot}]` | parked.js, secrets (`lot` industrial seeds the garage search), citygen (Cinder tank), traffic test | curb spots along non-avenue edges, `lot` spots in parking lots |
 | `spawn {x, z, heading}` | game.js, session, combat respawn, tests | on a road, clear of collision |
 | `piers [{x0, z0, x1, z1}]` (order matters) | game.js (waterCollision), courses (`mainPiers[0..2]`, last pier = airfield dock), stunts (last pier), secrets, props, citymesh, minimap | axis-aligned rects sticking out to sea |
 | `pois [{type, x, z, label}]` | minimap legend and icons | types airfield, marina, depot |
@@ -83,7 +83,7 @@ buildings.
 | `roofPads`, `depot {x0, z0, x1, z1, gate}` | fleet (via aircraftSpots), tests | roof pad: midtown roof nearest the origin |
 | `airfield {islet, runway, apron, gate}` | courses (all sky courses and island boat lap are placed relative to `islet`/`runway`), stunts (dock ramps), game.js `findRescueSpot`, tests | `gate` is a node joined by one `causeway` edge |
 | `extraLand [rect]`, `surfaces [rect]` | citymesh, minimap, secrets | islet and causeway rects; runway, apron, depot apron |
-| `shoreDist(x, z)` | vehicle, tank, boat, aircraft (keep on land / in water, gradient by +-1 m samples), traffic, police, crew, peds, audio, combat, session, courses, stunts, game.js | metres inside land (+) or out at sea (-), smooth, called many times per craft per step |
+| `shoreDist(x, z)` | vehicle, tank, boat, aircraft (keep on land / in water, gradient by +-1 m samples), traffic, police, crew, peds, audio, combat, session, courses, stunts, game.js | meters inside land (+) or out at sea (-), smooth, called many times per craft per step |
 | `mainShore(x, z)` | secrets (`openGround`, `shorePoint`), courses (`mainPiers` filter), citymesh `groundY` | as shoreDist but without the islet and causeway |
 | `radiusAt(theta)` | minimap outline, citymesh beach rings, secrets `shorePoint` and headland sort, courses `coastPoint` | the island is one star-shaped polygon around the origin |
 | `isLand`, `isGround` (land or pier) | session, stunts, onfoot, aircraft, carjack, combat, peds, effects | boolean |
@@ -101,8 +101,8 @@ buildings.
 | Ironbank Depot (citygen) | east end of the islet | Derived (relative to islet), keep the name |
 | Piers (citygen `addPier`) | march along grid lines `xs[9]`, `zs[8]`, `xs[7]`; order Saltyard, Pale Shore, Northpoint, Airfield Dock | Hand-placed list, same order contract (3 main piers, then the airfield dock last) |
 | Docks helipad, roof pad (citygen) | `xs[11]`, `zs[N-3]`; roof nearest the origin | Docks pad: hand-place. Roof pad: derive, but measure from a named downtown anchor, not the origin |
-| Cinder Row tank (citygen) | easternmost industrial `lot` spot | Hand-place (OSM data has no car parks) |
-| Spawn (citygen) | street next to the node nearest the origin, uses `wz[centre.j]` | Hand-place on a named street |
+| Cinder Row tank (citygen) | easternmost industrial `lot` spot | Hand-place (OSM data has no parking lots) |
+| Spawn (citygen) | street next to the node nearest the origin, uses `wz[center.j]` | Hand-place on a named street |
 | Secrets finder (world/secrets.js) | `shorePoint` marches in from `radiusAt`; headlands sorted by radius; garage scans `x 330..700`, then `-600..600` | Hand-place drowned box, cave, lighthouse, playground, garage. Roof Garden and Tag Alley can be derived with a region filter |
 | Stunt ramps (world/stunts.js) | quiet-street pick by district; heading from `horizontal`; dock ramps from the last pier | Hand-place the four street ramps (names below); dock ramps derive as today |
 | Courses (world/courses.js) | `ringNodes(mainNodes, 0, 0, 16)` rim loop; delivery points like `(-420, -420)`, `(300, 520)`, `(60, -150)`; Threader from `xs/zs` grid; boat routes from `radiusAt` and radial `pushOut` from the origin; sky routes relative to islet | Replace with a per-map course spec (waypoints by road name or point, buoy lists). Keep the generic helpers (`roadPath`, `pickAlongWalk`, `refineSea`, `skyCheckpoints`, medal maths) |
@@ -110,7 +110,7 @@ buildings.
 | `MAP_LIMIT = 3000` (core/garage.js) | saved coordinates clamped to +-3000 m | Raise to 6000. Silent today: a car saved at x 4000 (Miami Beach) comes back at 3000, in the bay |
 | Sea plane 9000 x 9000 (citymesh), chunk builders sized by `city.size` with 5 and 3 tiles | sized for a 1.6 km map | Sea at least 12 km; chunk count from map size (about 500 m tiles) |
 | Place names in text: tutorial.js, menu.js, courses names and blurbs, stunts labels, minimap legend, economy `'The Strand'` | procedural names | New names per map (see 3.4) |
-| Parked-car rules (citygen) | kerb spots on axis-aligned non-avenue edges, both sides, 6.5 m pitch | Derive with the edge direction; skip bridges, oneway one-lane streets and spots inside a building box |
+| Parked-car rules (citygen) | curb spots on axis-aligned non-avenue edges, both sides, 6.5 m pitch | Derive with the edge direction; skip bridges, oneway one-lane streets and spots inside a building box |
 
 ### 3. The adapter
 
@@ -154,7 +154,7 @@ where a choice is random):
    component only. Oneway is ignored in milestone 1 (all two-way).
 4. Land. Stitch `coastline` ways into rings (land on the left of an OSM
    coastline way), close them along the box edge, subtract `water`
-   polygons. Bake a signed distance raster: 4 m cells, Int16 decimetres,
+   polygons. Bake a signed distance raster: 4 m cells, Int16 decimeters,
    clamped to +-250 m (all thresholds in the code are inside that: boats
    -1.5, gates -25, peds -150, traffic -120). `shoreDist` = bilinear
    sample, then `max` with analytic rects for the islet, the causeway and
@@ -173,11 +173,11 @@ where a choice is random):
    least 85 percent of its axis-aligned bounding box becomes a block rect
    (the Miami grid is north-south, so most downtown, Wynwood and Little
    Havana blocks qualify). Others get no block (no peds loop, no
-   pavement ring). Parks become `park` blocks the same way.
+   sidewalk ring). Parks become `park` blocks the same way.
 7. Districts. Hand table in `miami-spots.js`: rects and polygons by
-   neighbourhood mapped to the existing keys, baked into a 32 m Uint8
+   neighborhood mapped to the existing keys, baked into a 32 m Uint8
    raster so `districtOf` is O(1). Add `placeOf(x, z)` for the real
-   neighbourhood name shown on the HUD.
+   neighborhood name shown on the HUD.
 
    | Key | Miami areas |
    |---|---|
@@ -194,7 +194,7 @@ where a choice is random):
    `edgesNear(x, z, r, out)` and `buildingsNear(x0, z0, x1, z1, out)`.
    `onRoad` uses the edge grid (today it loops every edge). The secrets,
    stunts and courses searches must use `buildingsNear` (see risk 3).
-9. Extras: kerb parking, lamps, furniture, signals, palms along the
+9. Extras: curb parking, lamps, furniture, signals, palms along the
    coast, generated from edge directions with the same rules and rng
    order as citygen. `streetNames`: the 32 most frequent road names; name
    signs only at junctions of those roads.
@@ -221,7 +221,7 @@ where a choice is random):
 | render/props.js, buildings.js | none if blocks, furniture and buildings keep the shape; check yard code with `b.block = -1` |
 | traffic, police, crew | none in milestone 1 (they use `lanePoint`); later: oneway, and replace the full-edge scans at traffic.js 363 and 723 and police.js 262 with `edgesNear` |
 | systems/tutorial.js, ui/menu.js | place names in text from the map |
-| menu credits | "Map data (c) OpenStreetMap contributors, ODbL" (licence condition) |
+| menu credits | "Map data (c) OpenStreetMap contributors, ODbL" (license condition) |
 
 #### 3.3 Miami locations (positions are first estimates; check each against the data)
 
@@ -241,7 +241,7 @@ Converted with the fetch script's projection (x east, z south).
   in the raw data before the islet is added.
 - Piers, in contract order: (0) Bayfront Marina, by Bayfront Park,
   pier east at about (-680, 170); (1) Miami Beach Marina, Alton Road,
-  pier west at about (4000, 1000); (2) Sunset Harbour Jetty, Miami Beach
+  pier west at about (4000, 1000); (2) Sunset Harbor Jetty, Miami Beach
   bay side, pier west at about (3650, -1500); (3) Airfield Dock (derived).
   Seaplane: one at the islet dock as today, and one by the real seaplane
   base on Watson Island's south shore at about (800, 110).
@@ -253,10 +253,10 @@ Converted with the fetch script's projection (x east, z south).
   (-1100, 600), likely Edgewater or Park West).
 - Spawn: SE 1st Street in Downtown, facing east, about (-1100, 780).
 - Cinder tank: an Allapattah industrial yard, about (-3200, -2550).
-- Cranes: the gantry cranes on the PortMiami south quay, about
+- Cranes: the gantry cranes on the PortMiami south pier, about
   (2000, 1110).
 - Secrets (keep ids and names, so saves stay valid):
-  - drowned-box: in Fisherman's Channel off the PortMiami south quay, about (2000, 1180).
+  - drowned-box: in Fisherman's Channel off the PortMiami south pier, about (2000, 1180).
   - roof-garden: derived, a 9 to 20 m roof in Wynwood or Edgewater.
   - the-gullet: a storm culvert in the Brickell Key seawall, about (-550, 1400); the cave mesh is re-dressed as a culvert (render only).
   - rustlamp: east tip of Dodge Island facing Government Cut, about (3200, 1220); if the box is widened east, the South Pointe jetty instead.
@@ -265,7 +265,7 @@ Converted with the fetch script's projection (x east, z south).
   - Ghostwake garage: a lock-up off North River Drive by the Miami River boatyards, about (-3500, 60), checked with `openGround`.
 - Stunt ramps (original names, quiet streets): Wynwood Kicker (a
   warehouse street off NW 2nd Avenue), Little Havana Hop (SW 4th Street),
-  Edgewater Launch (a side street by Margaret Pace Park), Sunset Harbour
+  Edgewater Launch (a side street by Margaret Pace Park), Sunset Harbor
   Skip (Purdy Avenue); Dock Kicker and Dock Splash derived at the islet.
 - Course spec (ids kept, names new): street-glasswell -> Downtown Loop;
   street-fernside -> Calle Ocho Loop; street-rim -> Bay Bridges Rally
@@ -276,7 +276,7 @@ Converted with the fetch script's projection (x east, z south).
   sky-threader -> Brickell Threader (canyon rings down Brickell Avenue);
   sky-gull, sky-rooftop, deliver-airmail stay islet-relative; deliveries
   re-pointed at Little Havana, Wynwood, the port gate and Miami Beach.
-- Names: real streets and neighbourhoods are fine. Invented names must
+- Names: real streets and neighborhoods are fine. Invented names must
   stay original and must not echo the well-known 2002 game set in a
   fictional Miami (no "Vice", "Ocean Beach", "Starfish Island", "Leaf
   Links", "Prawn Island"). No brand names (marina operators, malls).
@@ -312,7 +312,7 @@ Converted with the fetch script's projection (x east, z south).
    that overlap roads, collision filled in render code. Test: no building
    box overlaps a road strip (sampled), spawn and every spot clear,
    `fillCollision` used by both game and tests.
-6. Parked-car spawn. Kerb spots computed from real widths can land inside
+6. Parked-car spawn. Curb spots computed from real widths can land inside
    buildings, on bridges or in junction boxes. Test: every spot on land,
    off junction boxes, not in a building box, not on a bridge.
 7. Courses generator. Hard-coded coordinates and `radiusAt` produce
@@ -408,13 +408,13 @@ What is where:
 - `src/core/garage.js`: `MAP_LIMIT` 6000.
 
 Numbers (this machine): about 1750 nodes, 2300 edges, 285 blocks, 6400
-building boxes, 7100 kerb spots; 96 % of the junctions in the main
+building boxes, 7100 curb spots; 96 % of the junctions in the main
 network; build about 0.9 s CPU in node (wall time doubles when other
 jobs share the machine).
 
 Tests: `test/miami.test.js` (build time, shape, graph and airfield link,
 shoreDist probes and smoothness, every lane 2 m inside land, spawn and
-kerb spots, hand spots, buildings off the roads and collision, a 600
+curb spots, hand spots, buildings off the roads and collision, a 600
 step traffic + parked + peds run, helper cost, map choice, determinism);
 `test/garage.test.js` (6 km limit, strict sanitiser). Smoke:
 `scripts/smoke-extra.mjs` opens `?map=miami`, drives 300 steps, checks
@@ -437,7 +437,7 @@ Deviations from the plan:
    seam anywhere a car can drive. `mainShore` is the drawn land only and
    is not a distance out at sea (-1 there). Boats cannot pass under
    bridges yet (milestone 4).
-4. The Miami River is only a centre line in the data: it is carved as
+4. The Miami River is only a center line in the data: it is carved as
    water 38 m wide. Ponds narrower than 12 m are ignored.
 5. Roads: freeway pieces at grade and bridges over land are dropped
    unless an end is within 40 m of water (that keeps the causeway
@@ -449,11 +449,11 @@ Deviations from the plan:
    merge radius 12 m; chains simplified at 2.5 m.
 6. Blocks come from a flood fill of road-free land on the raster (not
    planar faces): regions at least 85 % of their bounding box, 20 to
-   320 m, trimmed clear of the kerb. Buildings in a block are clipped to
-   keep the 4 m pavement ring; others are trimmed 1.5 m clear of the
-   kerb. Every footprint (not only rotated ones) is covered by up to 6
+   320 m, trimmed clear of the curb. Buildings in a block are clipped to
+   keep the 4 m sidewalk ring; others are trimmed 1.5 m clear of the
+   curb. Every footprint (not only rotated ones) is covered by up to 6
    boxes, largest rectangle first, on a 2 m grid.
-7. Piers: Miami Beach Marina and Sunset Harbour are outside the crop, so
+7. Piers: Miami Beach Marina and Sunset Harbor are outside the crop, so
    the three main piers are Bayfront Marina, Watson Island Marina and
    Brickell Key Landing (then the Airfield Dock). Seaplanes: the islet
    dock and Watson Island. Watson Island Helipad at (640, -640).
@@ -468,7 +468,7 @@ Deviations from the plan:
 ### Milestone 2: done (2026-11-20)
 
 On `?map=miami` the activities, secrets, stunt ramps and the other hand
-places work; the HUD shows real neighbourhood names; the tutorial and
+places work; the HUD shows real neighborhood names; the tutorial and
 menu texts name Miami places; Settings shows "Map data (c) OpenStreetMap
 contributors, ODbL" on any map built from the data (`city.attribution`).
 
@@ -481,7 +481,7 @@ What changed:
   place texts (`texts`) and secret notes (`secretNotes`).
 - `src/world/miami.js`: step 12 at the end of `createMiamiCity` fills
   `courses` (`buildCourses`, through `city.courseSpec`), `secretSpots`
-  and `secretGarage` (`placeSecrets`), `rampSpots` (`placeRamps`, kerb
+  and `secretGarage` (`placeSecrets`), `rampSpots` (`placeRamps`, curb
   cars cleared off them); also `placeOf(x, z)` (land and water names
   baked at 16 m, a bridge's own street name on a bridge, Gullwing Airfield
   on the islet, "Miami" where no entry covers), `placeNames`, `texts`,
@@ -491,7 +491,7 @@ What changed:
   `buildCourses` when the city has a `courseSpec`); street waypoints are
   points snapped to junctions and checkpoints are picked at junctions
   (not bends); boat gates are pushed down the shore field (`pushToSea`)
-  instead of out from an island centre; canyon rings are found on a named
+  instead of out from an island center; canyon rings are found on a named
   avenue where the ring's full width is clear. The islet courses (First
   Feathers, Rooftop Hopper, the Causeway Dash walk, Air Mail) are shared
   functions used by both maps. `roadPath` uses a binary heap on graphs of
@@ -526,7 +526,7 @@ Places (checked against the data by `test/miami-places.test.js`):
   gate), Fare and Square (Downtown to Little Havana, Brickell and
   Edgewater), Brickell Key Parcel (boat, Bayfront Marina to Brickell
   Key), Gullwing Air Mail (to the Watson Island helipad).
-- Secrets: drowned box off the PortMiami south quay, roof garden on a
+- Secrets: drowned box off the PortMiami south pier, roof garden on a
   Wynwood roof, The Gullet in the Brickell Key seawall, Rustlamp Rock on
   the east tip of Palm Island, Tag Alley in Wynwood, The Lone Ride in
   Margaret Pace Park; the Ghostwake lock-up by the Miami River.
@@ -534,7 +534,7 @@ Places (checked against the data by `test/miami-places.test.js`):
   (Southwest 4th Street), Edgewater Launch (Northeast 19th Street), Palm
   Island Skip (Palm Avenue); Dock Kicker and Dock Splash at the islet.
 - Roof pad on a 20 m Park West roof; Cinder tank on open ground in a
-  Wynwood yard; three gantry cranes on the PortMiami south quay.
+  Wynwood yard; three gantry cranes on the PortMiami south pier.
 
 Tests: `test/miami-places.test.js` runs the course, secret and stunt
 assertions of the island tests on Miami (plus a teleport run of every
@@ -552,7 +552,7 @@ Deviations from the plan:
 1. Bridges are solid to boats until milestone 4, and the Port Boulevard
    bridge and the MacArthur Causeway close the water round Dodge Island,
    so there is no "Dodge Island Round": boat-island is Fisherman's Channel
-   Round, an open-water lap of the south bay along the port's south quay.
+   Round, an open-water lap of the south bay along the port's south pier.
    The Main Channel narrows to nothing inside the crop and Government Cut
    is outside it, so boat-saltyard is the Palm Island Sprint (north of
    Hibiscus Island). The slalom runs north of the Venetian Causeway.
@@ -565,15 +565,15 @@ Deviations from the plan:
 4. Miami Beach is outside the crop: the deliveries go to the PortMiami
    gate, Little Havana, Brickell, Edgewater and Brickell Key instead.
 5. Several first estimates in 3.3 were inland or outside the crop: the
-   drowned box is at the south quay near (1300, 1160), the cranes near
-   x 1700 to 1860 on the same quay, Rustlamp Rock on Palm Island (Dodge
+   drowned box is at the south pier near (1300, 1160), the cranes near
+   x 1700 to 1860 on the same pier, Rustlamp Rock on Palm Island (Dodge
    Island's east tip is past the crop), the garage by the river near
    (-2350, 420), the Cinder tank in Wynwood (Allapattah is outside), and
-   Sunset Harbour Skip (Purdy Avenue, outside) is the Palm Island Skip.
+   Sunset Harbor Skip (Purdy Avenue, outside) is the Palm Island Skip.
    The roof pad anchor moved to Park West (-1150, -350).
 6. HUD names come from a hand table of rects and capsules (each naming
    the data feature it is taken from), not from nearest labels: the data
-   has neighbourhood labels for only a few areas. Some names come from
+   has neighborhood labels for only a few areas. Some names come from
    street, park, building or water names (Palm Island from Palm Avenue,
    Hibiscus Island from the Hibiscus drives, Little Havana from building
    names, Dodge Island from Dodge Island Cut). On Miami the 'shore' key
@@ -628,7 +628,7 @@ What changed:
   glow list are made once for the whole map without drawing anything.
   Traffic-light bulbs: one instanced mesh holding only the bulbs of the
   near tiles (refilled when the near set changes; `graphics.js` resets
-  its colour cache by `signals.version`).
+  its color cache by `signals.version`).
 - `src/render/citymesh.js`: the ground pieces are shared functions
   (`realLand` over a cell range and stride, `realRoads` with an owner
   test, `addBlock`, `addSurfaces`); road tones come from the edge id. The
@@ -640,7 +640,7 @@ What changed:
   along each road.
 - `src/render/nightlights.js`: the baked lamp light map is 2048 px when
   the lamps span more than 4 km (the island keeps 1024).
-- `src/systems/traffic.js`, `src/systems/police.js`: the neighbour scans
+- `src/systems/traffic.js`, `src/systems/police.js`: the neighbor scans
   (`refreshNear`, `attachNearest`, police `attach`) use the city's edge
   grid (`edgesAround`, ids in ascending order, so the result is the one a
   full scan gives) when the city has one; the island still scans every
@@ -750,7 +750,7 @@ view). What is where:
   footprint), `gen` (an infill box) and `landmark` (a landmark id or '').
   Step 8b stamps the lot rasters, stands the open landmarks on free
   ground and adds the infill boxes; step 10b dresses the start street;
-  step 11b builds the lots and lists car park bays as parking spots. The
+  step 11b builds the lots and lists parking lot bays as parking spots. The
   city gets `core`, `inCore`, `lots`, `lotGrid`, `lotAt`, `lotTypeAt`,
   `dressLot(lot, out)`, `startView` (spawn snapped) and `landmarkSites`
   (`{ id, name, shape, x, z, l, w, h, heading, buildings }`);
@@ -768,18 +768,18 @@ Rules beyond the contract (each is the same everywhere in the box):
    10 to 40 % of parcels stay open. 2,925 boxes (1,283 in the core).
 2. A `bay` feature is a row of bays (heading along the row, `l` = 2.5 m a
    bay, `w` = 5 m), as the W2 renderer draws it; the car faces across
-   the row. `eachBay` lists the single bays. At most 3 bays a car park
+   the row. `eachBay` lists the single bays. At most 3 bays a parking lot
    (never over 60 %) are parking spots: every listed spot spawns a real
    car near the player in parked.js.
 3. The feature cap is `featureCap(lot)`: 120 a hectare and 24 a lot, but
    never below the type's minimum content (a 150 m2 yard needs its
    boundary, drive and tree). The core averages 75 features a hectare.
 4. The start street (core hand content): street trees every 7 m on both
-   kerbs and kerb spots marked `start: true` along Southeast 1st Street
+   curbs and curb spots marked `start: true` along Southeast 1st Street
    ahead of the title camera. The framed views stay clear (W2b): no tall
    prop (tree, lamp, sign, shelter) within 42 m of the title camera's
    view line inside 9.5 degrees, along the whole dolly, nor within
-   16.5 m in front of the title camera or the start chase camera; a kerb
+   16.5 m in front of the title camera or the start chase camera; a curb
    tree in that cone moves 4.8 m back into the plaza instead.
    `test/firstview.test.js` checks the 8 degree, 40 m cone. The title
    camera sits 0.5 m south of the spawn line (over the lane), not 6 m.

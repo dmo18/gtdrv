@@ -99,7 +99,7 @@ export function fixtureDressLot(city, lot, out = []) {
   const { x0, z0, x1, z1 } = lot;
   const W = x1 - x0, D = z1 - z0;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  // The four sides: centre, heading along, length. 0 +x, 1 +z, 2 -x, 3 -z.
+  // The four sides: center, heading along, length. 0 +x, 1 +z, 2 -x, 3 -z.
   const side = (s, inset = 0.4) => s === 0 ? [x1 - inset, cz, Math.PI / 2, D] : s === 1 ? [cx, z1 - inset, 0, W] : s === 2 ? [x0 + inset, cz, Math.PI / 2, D] : [cx, z0 + inset, 0, W];
   // The road side: the side whose outside is not lot or building land.
   let front = lot.front ?? 1;

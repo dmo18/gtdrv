@@ -46,7 +46,7 @@ test('sun is up by day and light never comes from below', () => {
   for (const h of [8, 10, 12, 14, 16, 18]) assert.ok(skyAt(h).sunY > 0, `sun at ${h}`);
   for (let h = 0; h < 24; h += 0.05) {
     const s = skyAt(h);
-    assert.ok(Math.abs(Math.hypot(s.sunDirX, s.sunDirY, s.sunDirZ) - 1) < 1e-9, `normalised at ${h}`);
+    assert.ok(Math.abs(Math.hypot(s.sunDirX, s.sunDirY, s.sunDirZ) - 1) < 1e-9, `normalized at ${h}`);
     assert.ok(s.sunDirY > 0, `light from above at ${h}`);
   }
   // At night the light follows the moon, not the sun under the ground.

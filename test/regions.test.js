@@ -38,10 +38,11 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // buildings differed from the whole box's (North was already aligned and
 // kept its pin). Downtown is still today's core crop, value for value,
 // and now also the whole box inside it (test below).
+// The landmark id harbour-wheel became harbor-wheel (American pass): two buildings hashes re-pinned.
 // A change here means the build changed: find out why before re-pinning.
 const PINNED = {
-  [WHOLE_BOX]: { nodes: '9168e9b8', edges: '4a77a31e', buildings: 'd0bf1051', lots: 'a7ce2dc2', lotGrid: '241d865f' },
-  'miami-downtown': { nodes: '77fe93be', edges: 'f0b79fce', buildings: '694f9c1a', lots: 'cc6516a8', lotGrid: '999d69bc' },
+  [WHOLE_BOX]: { nodes: '9168e9b8', edges: '4a77a31e', buildings: '074ef515', lots: 'a7ce2dc2', lotGrid: '241d865f' },
+  'miami-downtown': { nodes: '77fe93be', edges: 'f0b79fce', buildings: '45e7b156', lots: 'cc6516a8', lotGrid: '999d69bc' },
   'miami-beach': { nodes: '18926d49', edges: 'be23bdba', buildings: '23dfeea4', lots: 'c957d7ae', lotGrid: '1fb74d76' },
   'miami-north': { nodes: '7acdc0b7', edges: 'daa23eea', buildings: '37b29085', lots: 'e46ec52d', lotGrid: 'c06840ed' },
   'miami-west': { nodes: '549d16b8', edges: 'e4348533', buildings: '03c0d066', lots: '1165f417', lotGrid: 'b03ebe39' },

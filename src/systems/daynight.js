@@ -9,7 +9,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { createRng, clamp, TAU } from '../core/rng.js';
 
 // ---- keyframes --------------------------------------------------------------
-// sky = zenith, horizon = sky just above the horizon, fog = fog colour
+// sky = zenith, horizon = sky just above the horizon, fog = fog color
 // (close to horizon so far terrain melts into the sky). sunColor and
 // sunIntensity describe the directional light (the moon at night).
 const KEYS = [
@@ -172,12 +172,12 @@ void main() {
   col = mix(col, vec3(1.0, 0.97, 0.86) * 1.6, uSun * smoothstep(0.9995, 0.99975, s));
   // The city's own light scattered low in the night haze.
   col += uCity * (exp(-max(y, 0.0) * 9.0) + 0.25 * exp(-max(y, 0.0) * 2.5)) * smoothstep(-0.06, 0.01, y);
-  // Horizon haze: the sky meets the fog colour in a soft band, so the far
-  // towers (which the scene fog turns the same colour) sink into it.
+  // Horizon haze: the sky meets the fog color in a soft band, so the far
+  // towers (which the scene fog turns the same color) sink into it.
   col = mix(col, uFog, exp(-max(y, 0.0) * 11.0) * 0.55 * smoothstep(-0.04, 0.0, y));
   // Cloud layers: a low, thick deck and a thin high veil, each a noise
   // field on a sky plane (perspective squeezes it toward the horizon).
-  // Thick parts are greyer underneath; thin edges catch the sun colour.
+  // Thick parts are grayer underneath; thin edges catch the sun color.
   if (y > 0.015 && uCloud.x > 0.01) {
     vec2 pl = d.xz / (y + 0.09);
     float night = uCloud.w;
@@ -187,7 +187,7 @@ void main() {
     float high = rwFbm(pl * vec2(1.3, 3.4) + uDrift.zw + 40.0);
     float dh = smoothstep(0.55 - 0.22 * uCloud.x, 0.95 - 0.2 * uCloud.x, high) * 0.55;
     float edge = smoothstep(0.0, 0.5, dl) * (1.0 - smoothstep(0.5, 1.0, dl));
-    // Day: white lit by the sun; dusk: takes the sun colour on the sun's
+    // Day: white lit by the sun; dusk: takes the sun color on the sun's
     // side; night: dark blue lit from below by the city.
     vec3 dayLit = mix(vec3(1.0, 1.0, 1.02), uSunCol * 1.15 + uHorizon * 0.35, clamp(uAway * (0.35 + 0.65 * face), 0.0, 1.0));
     vec3 dayDark = mix(uZenith * 1.25 + vec3(0.18, 0.2, 0.25), uHorizon * 0.8, uAway * 0.6);
@@ -376,7 +376,7 @@ function makeCloudGeometry(rng) {
   const geo = mergeGeometries(parts);
   for (const p of parts) p.dispose();
   geo.computeVertexNormals();
-  // Lighter tops, greyer bellies.
+  // Lighter tops, grayer bellies.
   const pos = geo.attributes.position;
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
@@ -398,8 +398,8 @@ function quadGeometry() {
 }
 
 // Lights the ground under it: the picture below times (1 + light), so a
-// warm pool takes the colour of the asphalt or paving it falls on, and
-// dark ground stays dark instead of turning a flat milky grey.
+// warm pool takes the color of the asphalt or paving it falls on, and
+// dark ground stays dark instead of turning a flat milky gray.
 function poolMaterial(color, fs = POOL_FS) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -568,7 +568,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     vis.glowMats = ud.glowMats || [];
     vis.wet = ud.wet || null;
     vis.mats = mats;
-    vis.dimMats = [mats.plainMat, mats.pavementMat, mats.grassMat, mats.landMat].filter(Boolean);
+    vis.dimMats = [mats.plainMat, mats.sidewalkMat, mats.grassMat, mats.landMat].filter(Boolean);
     vis.dimBase = vis.dimMats.map((m) => m.color.clone());
 
     // Street lamps, other fixed lights (beacons, runway edge lights) and
@@ -794,8 +794,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     }
   }
 
-  // Desaturate and darken a colour toward grey by k.
-  function greyed(c, k, dark) {
+  // Desaturate and darken a color toward gray by k.
+  function grayed(c, k, dark) {
     const l = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) * dark;
     c.r += (l - c.r) * k;
     c.g += (l - c.g) * k;
@@ -814,13 +814,13 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     lastKey = key;
     forceApply = false;
     skyAt(game.clock, S);
-    const grey = clamp(ov * 0.8 + fg * 0.4, 0, 0.9);
+    const gray = clamp(ov * 0.8 + fg * 0.4, 0, 0.9);
     const dark = 1 - 0.18 * ov - 0.12 * rn;
     const U = V.domeU;
-    greyed(setLin(U.uZenith.value, S.sky), grey, 1.05).multiplyScalar(dark);
-    greyed(setLin(U.uHorizon.value, S.horizon), grey, 1).multiplyScalar(dark);
-    const fogC = greyed(setLin(U.uFog.value, S.fog), grey * 0.9, 1).multiplyScalar(dark);
-    // Thick fog: the whole sky turns to fog colour.
+    grayed(setLin(U.uZenith.value, S.sky), gray, 1.05).multiplyScalar(dark);
+    grayed(setLin(U.uHorizon.value, S.horizon), gray, 1).multiplyScalar(dark);
+    const fogC = grayed(setLin(U.uFog.value, S.fog), gray * 0.9, 1).multiplyScalar(dark);
+    // Thick fog: the whole sky turns to fog color.
     const haze = fg * 0.85;
     U.uZenith.value.lerp(fogC, haze);
     U.uHorizon.value.lerp(fogC, Math.min(1, haze * 1.15));
@@ -830,11 +830,11 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const clearSky = 1 - clamp(ov * 0.9 + fg * 0.9, 0, 1);
     U.uSun.value = clearSky * smoothstep(-0.04, 0.02, S.sunY);
     U.uGlow.value = (0.35 + 0.65 * clearSky) * smoothstep(-0.15, 0.05, S.sunY);
-    U.uAway.value = 0.75 * (1 - smoothstep(0.08, 0.45, S.sunY)) * (1 - S.night) * (1 - 0.7 * grey);
+    U.uAway.value = 0.75 * (1 - smoothstep(0.08, 0.45, S.sunY)) * (1 - S.night) * (1 - 0.7 * gray);
     U.uMoon.value = clearSky * S.night * smoothstep(-0.02, 0.05, S.moonY);
     // City glow on the night horizon (stronger under cloud, which bounces
     // it back), and the same glow in the haze so the far city sinks into
-    // a lit night sky rather than into grey.
+    // a lit night sky rather than into gray.
     const cityK = smoothstep(0.3, 1, S.night) * (1 + 0.6 * ov - 0.5 * fg) * dark;
     U.uCity.value.setRGB(0.05, 0.03, 0.026).multiplyScalar(cityK);
     fogC.r += U.uCity.value.r * 0.7;
@@ -858,12 +858,12 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const L = game.lights;
     if (L && L.sun) {
       setLin(L.sun.color, S.sunColor);
-      if (S.night > 0.5) greyed(L.sun.color, ov * 0.5, 1);
+      if (S.night > 0.5) grayed(L.sun.color, ov * 0.5, 1);
       L.sun.intensity = S.sunIntensity * sunK * (1 - 0.68 * ov - 0.1 * rn - 0.2 * fg);
       L.sun.position.set(S.sunDirX * 100, S.sunDirY * 100, S.sunDirZ * 100);
     }
     if (L && L.hemi) {
-      greyed(setLin(L.hemi.color, S.hemiSky), ov * 0.6, 1);
+      grayed(setLin(L.hemi.color, S.hemiSky), ov * 0.6, 1);
       setLin(L.hemi.groundColor, S.hemiGround);
       L.hemi.intensity = S.hemiIntensity * hemiK * (1 + 0.1 * ov - 0.12 * rn);
     }
@@ -878,12 +878,12 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       const m = V.glowMats[i];
       m.emissiveIntensity = glow * (m === V.mats.detailMat ? signK : m === V.mats.shopfront ? shopK : 1);
     }
-    // Rain: everything darkens a little, roads and pavements go glossy.
+    // Rain: everything darkens a little, roads and sidewalks go glossy.
     for (let i = 0; i < V.dimMats.length; i++) V.dimMats[i].color.copy(V.dimBase[i]).multiplyScalar((1 - 0.16 * rn) * (1 - 0.2 * night));
     // Night dew: streets keep a damp sheen after dark, so lamps and the
     // glowing sky show in them (rain makes them fully wet).
     if (V.wet) V.wet.value = Math.max(rn, 0.5 * smoothstep(0.3, 0.9, night));
-    if (V.mats.pavementMat) V.mats.pavementMat.roughness = 0.88 - 0.42 * rn;
+    if (V.mats.sidewalkMat) V.mats.sidewalkMat.roughness = 0.88 - 0.42 * rn;
     if (V.mats.asphaltMat) V.mats.asphaltMat.roughness = 0.93;
 
     // Shared sky state for the graphics module (reflections, shadows).
@@ -912,7 +912,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     want(0, starA > 0.02);
 
     // Clouds: lit by the scene lights; a little self-glow so nights are
-    // not black blobs, greyer and denser when overcast.
+    // not black blobs, grayer and denser when overcast.
     const cm = V.clouds.material;
     cm.opacity = (0.5 + 0.3 * ov) * (1 - 0.85 * fg);
     U.uCloud.value.set(clamp(0.4 + 0.6 * ov + 0.15 * rn, 0, 1), clamp(0.25 + 0.75 * ov, 0, 1), clamp(fg * 0.8, 0, 0.9), night);
@@ -1237,8 +1237,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     get weather() {
       return W.name;
     },
-    // Current sky colours and light state, refreshed whenever they change
-    // (version counts the changes). Colours are linear.
+    // Current sky colors and light state, refreshed whenever they change
+    // (version counts the changes). Colors are linear.
     sky: {
       zenith: new THREE.Color(), horizon: new THREE.Color(), fog: new THREE.Color(), sunColor: new THREE.Color(),
       sunDir: new THREE.Vector3(0, 1, 0), lightDir: new THREE.Vector3(0, 1, 0),

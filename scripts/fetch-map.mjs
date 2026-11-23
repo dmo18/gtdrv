@@ -125,7 +125,7 @@ function simplify(pts, tol) {
   return pts.filter((_, i) => keep[i]);
 }
 const r1 = (v) => Math.round(v * 10) / 10;
-// Delta-encoded integer decimetres: [x0, z0, dx1, dz1, ...] (first pair absolute).
+// Delta-encoded integer decimeters: [x0, z0, dx1, dz1, ...] (first pair absolute).
 const flat = (pts) => {
   const o = []; let px = 0, pz = 0;
   for (const p of pts) {
@@ -244,9 +244,9 @@ async function main() {
 
   const out = {
     attribution: ATTRIBUTION,
-    encoding: 'Polyline field p is delta-encoded integer decimetres [x0,z0,dx,dz,...]; decode: x=sum(dx)/10 metres. Label x,z are plain metres.',
+    encoding: 'Polyline field p is delta-encoded integer decimeters [x0,z0,dx,dz,...]; decode: x=sum(dx)/10 meters. Label x,z are plain meters.',
     source: 'OpenStreetMap API 0.6',
-    origin: { lat: lat0, lon: lon0, note: 'x east, z south, metres; equirectangular, x=(lon-lon0)*R*cos(lat0), z=-(lat-lat0)*R' },
+    origin: { lat: lat0, lon: lon0, note: 'x east, z south, meters; equirectangular, x=(lon-lon0)*R*cos(lat0), z=-(lat-lat0)*R' },
     bounds: { minX: r1(bounds.minX), maxX: r1(bounds.maxX), minZ: r1(bounds.minZ), maxZ: r1(bounds.maxZ) },
     latLonBox: BOX,
     roads, buildings, water, coastline: coast, parks, labels,

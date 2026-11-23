@@ -120,11 +120,11 @@ test('lots: every free land cell is in a lot; no lot cell is on a road or in a b
       }
       assert.equal(G.type[c], 0);
       if (!land || roadNear || inBox) continue;
-      // Junction boxes count as road (their pavement too).
+      // Junction boxes count as road (their sidewalk too).
       if (city.nodes.some((n) => Math.abs(n.x - x) <= n.hx + 4 && Math.abs(n.z - z) <= n.hz + 4)) continue;
       free++;
-      // The only free cells left out hold the centre of a building box too
-      // small to cover a cell centre (the cell is the box's own).
+      // The only free cells left out hold the center of a building box too
+      // small to cover a cell center (the cell is the box's own).
       const own = city.buildingsNear(x - 2.5, z - 2.5, x + 2.5, z + 2.5, []).some((k) => {
         const b = city.buildings[k];
         return Math.abs((b.x0 + b.x1) / 2 - x) <= 2.5 && Math.abs((b.z0 + b.z1) / 2 - z) <= 2.5;
@@ -287,7 +287,7 @@ test('dressLot: the minimum content per type (6.2)', () => {
   console.log('# ' + lines.join(', '));
 });
 
-test('car parks: their bays are parking spots, at most 60 % of each lot, clear of buildings', () => {
+test('parking lots: their bays are parking spots, at most 60 % of each lot, clear of buildings', () => {
   let listed = 0, bays = 0;
   const spots = new Map();
   for (const p of city.parkingSpots) if (p.lot) spots.set(Math.round(p.x * 2) * 65536 + Math.round(p.z * 2), p);
@@ -397,7 +397,7 @@ test('start view: the designed street (6.8): 40 buildings in 150 m, 12 trees and
   assert.equal(sp.street, 'Southeast 1st Street');
   assert.ok(sp.x === city.spawn.x && sp.z === city.spawn.z && sp.heading === city.spawn.heading, 'snapped to the city spawn');
   assert.ok(city.inCore(sp.x, sp.z));
-  // The camera: `back` m behind, `side` m toward the south kerb (right of
+  // The camera: `back` m behind, `side` m toward the south curb (right of
   // an east heading); the cone is the 915 by 412 view (half width 49
   // degrees at fov 55), taken as 45 degrees here.
   const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
@@ -421,7 +421,7 @@ test('start view: the designed street (6.8): 40 buildings in 150 m, 12 trees and
     const a = city.nodes[e.a];
     for (let t = 1; t < e.length; t += 2) if (inCone(a.x + e.ux * t, a.z + e.uz * t, 120)) lane += 2;
   }
-  console.log(`# start view: ${b150} buildings within 150 m, ${trees} trees and ${parked} parked spots (${start} start kerb spots) in the cone within 80 m, ${lane} m of road within 120 m`);
+  console.log(`# start view: ${b150} buildings within 150 m, ${trees} trees and ${parked} parked spots (${start} start curb spots) in the cone within 80 m, ${lane} m of road within 120 m`);
   assert.ok(b150 >= 40, `${b150} buildings`);
   assert.ok(trees >= 12, `${trees} trees`);
   assert.ok(parked >= 6 && start >= 1, `${parked} parked spots, ${start} start spots`);

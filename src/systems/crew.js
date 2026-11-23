@@ -136,7 +136,7 @@ export function playerUp(game) {
   const w = p && p.walker;
   return !!p && (!w || !w.life || canBeHit(w)) && !(w && w.fade > 0);
 }
-// Height of the player's centre (a craft: its middle).
+// Height of the player's center (a craft: its middle).
 function playerAimY(game) {
   const p = game.player, v = p.vehicle;
   if (v) return craftBase(game, v) + ((v.spec && v.spec.height) || 1.5) * 0.5;
@@ -719,7 +719,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
     return REF.length;
   }
 
-  // --- Behaviour helpers ---
+  // --- Behavior helpers ---
   function startFlee(m, why = 'order') {
     if (m.inCar) return;
     m.fleeWhy = why;
@@ -1353,7 +1353,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       const t = d && d.target;
       if (!t || t.team !== 'crew' || !t.group || t.hp > 0) return;
       t.group.allyDowns++;
-      // Neighbours feel it too.
+      // Neighbors feel it too.
       for (let i = 0; i < groups.length; i++) {
         const h = groups[i];
         if (h === t.group || !h.members.length) continue;

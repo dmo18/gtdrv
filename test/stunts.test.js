@@ -104,7 +104,7 @@ test('medal thresholds are clear and ordered; bad landings and short hops score 
   assert.equal(medalFor(STUNT_MEDALS.silver - 1), 'bronze');
   assert.equal(medalFor(STUNT_MEDALS.bronze), 'bronze');
   assert.equal(medalFor(STUNT_MEDALS.bronze - 1), null);
-  assert.equal(stuntPoints(1, 10, 1, 1, 0), STUNT_SCORE.perAirSecond + 10 * STUNT_SCORE.perMetre + STUNT_SCORE.perHeightMetre + STUNT_SCORE.perFlip);
+  assert.equal(stuntPoints(1, 10, 1, 1, 0), STUNT_SCORE.perAirSecond + 10 * STUNT_SCORE.perMeter + STUNT_SCORE.perHeightMeter + STUNT_SCORE.perFlip);
   assert.equal(stuntPoints(MIN_AIR - 0.01, 30, 2, 1, 1), 0);
   assert.ok(medalRank('gold') > medalRank('silver') && medalRank('silver') > medalRank('bronze') && medalRank('bronze') > medalRank(null));
   const st = createAirState();

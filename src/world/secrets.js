@@ -4,7 +4,7 @@
 // always hides them in the same places. systems/secrets.js watches the
 // player and draws them; docs/SPEC.md "Secrets" describes the rules.
 //
-// Coordinates: x east, z south, metres. Heading 0 faces +x.
+// Coordinates: x east, z south, meters. Heading 0 faces +x.
 import { createRng, TAU } from '../core/rng.js';
 
 export const SECRETS_SEED = 4417;
@@ -36,7 +36,7 @@ function rectDist(r, x, z) {
 const nearList = (list, x, z, d) => list.some((r) => rectDist(r, x, z) < d);
 
 // True when a disc of radius r around (x, z) is open ground: no building,
-// tree, bench, road or airfield inside it, and at least `shore` metres of
+// tree, bench, road or airfield inside it, and at least `shore` meters of
 // land to the sea.
 function openGround(city, x, z, r, shore = 0) {
   if (city.districtOf(x, z) === 'airfield') return false;
@@ -61,8 +61,8 @@ function openGround(city, x, z, r, shore = 0) {
   return true;
 }
 
-// A point on the coast, `want` metres inside the shoreline, at angle theta
-// from the island centre. `heading` points out to sea.
+// A point on the coast, `want` meters inside the shoreline, at angle theta
+// from the island center. `heading` points out to sea.
 function shorePoint(city, theta, want) {
   const c = Math.cos(theta), s = Math.sin(theta);
   let r = city.radiusAt(theta);
@@ -87,7 +87,7 @@ function shoreCandidates(city, rng, want) {
   return out;
 }
 
-// Pick from `list` something at least `sep` metres from every spot in
+// Pick from `list` something at least `sep` meters from every spot in
 // `taken`, easing the separation if nothing fits.
 function pickApart(rng, list, taken, seps = [260, 160, 80, 0]) {
   for (const sep of seps) {
@@ -279,7 +279,7 @@ function nearestWhere(x, z, maxR, ok) {
   return null;
 }
 
-// A spot on open ground `want` metres in from the shore, facing the sea.
+// A spot on open ground `want` meters in from the shore, facing the sea.
 function shoreSpot(city, x, z, want, extra = null) {
   const p = nearestWhere(x, z, 220, (px, pz) => {
     const s = city.mainShore(px, pz);
@@ -289,7 +289,7 @@ function shoreSpot(city, x, z, want, extra = null) {
   return p ? { x: p.x, z: p.z, heading: seaward(city, p.x, p.z) } : null;
 }
 
-// Buildings whose centre is inside `region` (a rect), by the grid.
+// Buildings whose center is inside `region` (a rect), by the grid.
 function buildingsIn(city, region) {
   city.buildingsNear(region.x0, region.z0, region.x1, region.z1, NEAR);
   const out = [];
@@ -340,7 +340,7 @@ function alleyIn(city, region) {
 }
 
 // A 9 to 20 m flat roof in the region, nearest 12 m high, then nearest
-// the region's centre.
+// the region's center.
 function roofIn(city, region, rng) {
   const cx = (region.x0 + region.x1) / 2, cz = (region.z0 + region.z1) / 2;
   const pool = buildingsIn(city, region).filter((b) => b.kind === 'building' && b.h >= 9 && b.h <= 20 && b.x1 - b.x0 >= 14 && b.z1 - b.z0 >= 14);
@@ -472,7 +472,7 @@ export function discover(state, spots, x, y, z) {
 }
 
 // Where the faint map hint sits: the first secret not yet found, nudged by
-// a fixed amount so it points at a neighbourhood, not at the spot. Null
+// a fixed amount so it points at a neighborhood, not at the spot. Null
 // until the first secret is found, and again when all are.
 export function hintFor(state, spots) {
   if (!state.found.length || secretsDone(state)) return null;

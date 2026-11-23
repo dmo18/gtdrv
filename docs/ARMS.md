@@ -57,7 +57,7 @@ API (src/systems/combat.js):
   missiles and bombs.
 - Projectile types added to the pool of 24: `shell` (rocket with drop),
   `missile` (homes on `pr.target`: turns its velocity toward the target's
-  centre at most `turn` rad/s; flies straight if no target or the target is
+  center at most `turn` rad/s; flies straight if no target or the target is
   wrecked; detonates on hit, proximity 2.5 m, or life end), `bomb` (starts
   with the craft's velocity, gravity, detonates on any contact; sea =
   `splash` plus a small water burst, no damage). Per-type live caps:
@@ -164,7 +164,7 @@ police tank whose health falls under 35% stops, its crew bail out as two
 officers, and it becomes enterable (steal it). Missions may spawn crew
 tanks (`SPAWN what: 'tank'`, task 28).
 Places (src/world/citygen.js, appended after all rng use, explicit
-colours, so the rest of the seeded city is unchanged):
+colors, so the rest of the seeded city is unchanged):
 - Ironbank Depot: east end of the Gullwing airfield islet, x from
   islet.x0 + 520 to islet.x1 - 40, z from runway.z1 + 12 to islet.z1 - 24
   (clear of the tower and the Airfield Dock lane). Concrete `apron`
@@ -173,7 +173,7 @@ colours, so the rest of the seeded city is unchanged):
   (`city.tankSpots`), 2 fighters and 1 police heli (`aircraftSpots`, spec
   'fighter' and 'patrolheli'). POI `{ type: 'depot', label: 'Ironbank
   Depot' }`; `city.depot` = rect.
-- One Rustback in the easternmost Cinder Row open car park (a `lot: true`
+- One Rustback in the easternmost Cinder Row open parking lot (a `lot: true`
   parking spot in the industrial district, chosen by position, not rng);
   parking spots within 6 m of it are removed.
 - Police roof pad: `city.roofPads` gets the midtown building with a
@@ -189,12 +189,12 @@ icon. Audio: rig `tracks`, `shot` cannon boom, `crush`.
   health 700, maxSpeed 130, stallSpeed 30, thrust 14, maxBank 85 deg,
   maxClimb 70 deg, rollRate 4.6, pitchRate 3.1, turnGain 3.4, hitRadius
   1.9, mounts ['nosegun', 'missile', 'bomb'], armor { bullet: 0.3 },
-  `engine: 'turbine'`, colors gull grey 0x9aa3ab, sea blue 0x2f4d6b, sand
+  `engine: 'turbine'`, colors gull gray 0x9aa3ab, sea blue 0x2f4d6b, sand
   0xc8b88a, night 0x2a2d33. Arcade assists, flags read by stepPlane:
   `noStall: true` (never sets `stalled`; below 1.1 x stallSpeed the nose
   eases down and thrust rises to hold it), `cruise: 0.45` (airborne
   throttle floor when THRUST is released; BRAKE still slows to 1.1 x
-  stall), roll levels itself at 1.5 rad/s with the stick centred. Takes off
+  stall), roll levels itself at 1.5 rad/s with the stick centered. Takes off
   in about 3 s on the runway. No ejection (land or crash; a crash downs the
   player, who respawns with nothing lost).
 - `patrolheli` "Lampwatch" (heli): length 10.2, rotor 9.6, height 3.2,
@@ -374,7 +374,7 @@ spotlight cone under the nose. No real-world shapes, markings or names.
   `src/audio/tanksounds.js` + `src/audio/tankrig.js`.
 - Aim: the camera owns `chase.tankAim` {yaw, pitch, holdDrag}; game.js passes
   it as the camera target heading in tank mode. The turret aims at the point
-  the camera's centre ray reaches (with shell drop), or at the LOCK target
+  the camera's center ray reaches (with shell drop), or at the LOCK target
   (the camera follows the lock). Fire bends to any craft or person in a 6 deg
   cone of the barrel (parked cars too).
 - Crush: `collideTank` records `other.crushedBy` / `other.ramBy, ramV`; the

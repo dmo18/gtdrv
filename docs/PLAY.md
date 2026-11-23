@@ -128,7 +128,7 @@ keytool -genkeypair -v -keystore rustwater-upload.jks -alias rustwater-upload \
    second copy somewhere safe (not in this repository, never email it).
 3. NEVER put the keystore or passwords into git. The repository ignores
    `*.jks` and `keystore.properties` to help, but you are the last line of
-   defence.
+   defense.
 
 ## Part 4. Build the release bundle (the .aab file)
 

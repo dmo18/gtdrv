@@ -59,7 +59,7 @@ const VIEWS = {
 
 const MIN_CLEAR = 0.6; // camera never gets closer than this to ground/sea
 const SAMPLES = 10;
-// Feel tuning per mode: turn look (metres of look shift per rad/s at
+// Feel tuning per mode: turn look (meters of look shift per rad/s at
 // speed), accel FOV kick (degrees per m/s^2), speed buzz on or off.
 const FEEL = {
   car: { turnLook: 0.9, fovKick: 0.32, buzz: 1 },
@@ -70,7 +70,7 @@ const FEEL = {
   tank: { turnLook: 0, fovKick: 0, buzz: 0 },
 };
 const MAX_SHAKE_ROT = 0.022; // radians at full trauma
-const MAX_SHAKE_POS = 0.06; // metres at full trauma
+const MAX_SHAKE_POS = 0.06; // meters at full trauma
 const MAX_BUZZ = 0.0035; // radians at very high speed
 // Aim view (on foot, FIRE held or locked): over the right shoulder.
 // The view turns only with the drag (or a lock), never by itself.
@@ -122,7 +122,7 @@ export function createChaseCamera(camera) {
   let camPitch = 0; // smoothed share of the target's climb angle
   let camRoll = 0; // smoothed share of the target's bank
   let orbitYaw = 0; // drag offset around the target
-  let orbitPitch = 0; // drag offset in height (metres)
+  let orbitPitch = 0; // drag offset in height (meters)
   let sinceDrag = 99;
   let curDist = mode.dist;
   let curFov = camera.fov || mode.baseFov;

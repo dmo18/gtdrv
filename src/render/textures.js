@@ -106,7 +106,7 @@ function heightOf(c) {
   return out;
 }
 
-const grey = (v, a = 1) => `rgba(${v | 0},${v | 0},${v | 0},${a})`;
+const gray = (v, a = 1) => `rgba(${v | 0},${v | 0},${v | 0},${a})`;
 const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
 
 // Draw something at every wrapped copy so it tiles across the edges.
@@ -136,12 +136,12 @@ function makeAsphalt(rng, N) {
   const S = 512;
   const c = canvas(S);
   const g = c.getContext('2d');
-  g.fillStyle = grey(206);
+  g.fillStyle = gray(206);
   g.fillRect(0, 0, S, S);
   // Aggregate: small pale and dark stones.
   for (let i = 0; i < 5200; i++) {
     const v = rng.chance(0.55) ? rng.range(215, 255) : rng.range(120, 180);
-    g.fillStyle = grey(v, rng.range(0.25, 0.7));
+    g.fillStyle = gray(v, rng.range(0.25, 0.7));
     const x = rng.range(0, S), y = rng.range(0, S), r = rng.range(0.5, 1.5);
     g.fillRect(x, y, r, r);
   }
@@ -149,7 +149,7 @@ function makeAsphalt(rng, N) {
   const pts = [];
   for (let i = 0; i < 6; i++) pts.push([rng.range(0, S), rng.range(0, S), rng.int(8, 26), rng.int(1, 1000000)]);
   wrapDraw(S, (ox, oy) => {
-    for (const p of pts) crack(g, createRng(p[3]), p[0] + ox, p[1] + oy, p[2], 1.1, grey(70, 0.55));
+    for (const p of pts) crack(g, createRng(p[3]), p[0] + ox, p[1] + oy, p[2], 1.1, gray(70, 0.55));
   });
   grain(c, N.fine, 512, 0.34, rng, 0.2);
   grain(c, N.coarse, 512, 0.16, rng);
@@ -172,19 +172,19 @@ function makeAsphalt(rng, N) {
   return { map, normalMap, wetMap };
 }
 
-function makePavement(rng, N) {
+function makeSidewalk(rng, N) {
   const S = 512, n = 4, cell = S / n;
   const c = canvas(S);
   const g = c.getContext('2d');
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
-      g.fillStyle = grey(rng.range(196, 226));
+      g.fillStyle = gray(rng.range(196, 226));
       g.fillRect(x * cell, y * cell, cell, cell);
     }
   }
   // Stains and old gum.
   for (let i = 0; i < 26; i++) {
-    g.fillStyle = grey(rng.range(90, 150), rng.range(0.12, 0.3));
+    g.fillStyle = gray(rng.range(90, 150), rng.range(0.12, 0.3));
     g.beginPath();
     g.ellipse(rng.range(0, S), rng.range(0, S), rng.range(2, 9), rng.range(2, 7), rng.range(0, 3), 0, TAU);
     g.fill();
@@ -194,7 +194,7 @@ function makePavement(rng, N) {
   const hc = canvas(S);
   const hg = hc.getContext('2d');
   hg.drawImage(c, 0, 0);
-  for (const [ctx, col, w] of [[g, grey(96), 2.5], [hg, grey(0), 4]]) {
+  for (const [ctx, col, w] of [[g, gray(96), 2.5], [hg, gray(0), 4]]) {
     ctx.strokeStyle = col;
     ctx.lineWidth = w;
     for (let i = 0; i <= n; i++) {
@@ -260,9 +260,9 @@ function makeWood(rng, N) {
   const c = canvas(S);
   const g = c.getContext('2d');
   for (let i = 0; i < n; i++) {
-    g.fillStyle = grey(rng.range(170, 230));
+    g.fillStyle = gray(rng.range(170, 230));
     g.fillRect(i * w, 0, w, S);
-    g.strokeStyle = grey(90, 0.25);
+    g.strokeStyle = gray(90, 0.25);
     g.lineWidth = 1;
     for (let k = 0; k < 5; k++) {
       const x = i * w + rng.range(3, w - 3);
@@ -271,9 +271,9 @@ function makeWood(rng, N) {
       g.bezierCurveTo(x + rng.range(-3, 3), S / 3, x + rng.range(-3, 3), (S * 2) / 3, x, S);
       g.stroke();
     }
-    g.fillStyle = grey(40);
+    g.fillStyle = gray(40);
     g.fillRect(i * w, 0, 2, S);
-    g.fillStyle = grey(60);
+    g.fillStyle = gray(60);
     g.fillRect(i * w + w / 2 - 1, 20, 2, 2);
     g.fillRect(i * w + w / 2 - 1, S - 22, 2, 2);
   }
@@ -336,7 +336,7 @@ function createAtlas(size) {
       draw(g, ge, w, h);
       g.restore();
       ge.restore();
-      const p = 0.75; // keep clear of the neighbours when mipmapped
+      const p = 0.75; // keep clear of the neighbors when mipmapped
       rects[name] = { u0: (x + p) / size, u1: (x + w - p) / size, v0: 1 - (y + h - p) / size, v1: 1 - (y + p) / size, w, h };
       x += w;
       rowH = Math.max(rowH, h);
@@ -362,24 +362,24 @@ function makeDecals(rng) {
   A.add('manhole', C, C, (g) => {
     g.fillStyle = 'rgba(30,30,32,0.9)';
     g.beginPath(); g.arc(128, 128, 118, 0, TAU); g.fill();
-    g.fillStyle = grey(88);
+    g.fillStyle = gray(88);
     g.beginPath(); g.arc(128, 128, 108, 0, TAU); g.fill();
-    g.strokeStyle = grey(50);
+    g.strokeStyle = gray(50);
     g.lineWidth = 6;
     for (let r = 22; r < 105; r += 20) { g.beginPath(); g.arc(128, 128, r, 0, TAU); g.stroke(); }
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * TAU;
       g.beginPath(); g.moveTo(128 + Math.cos(a) * 24, 128 + Math.sin(a) * 24); g.lineTo(128 + Math.cos(a) * 100, 128 + Math.sin(a) * 100); g.stroke();
     }
-    g.fillStyle = grey(120, 0.5);
+    g.fillStyle = gray(120, 0.5);
     for (let i = 0; i < 300; i++) g.fillRect(rng.range(30, 226), rng.range(30, 226), 2, 2);
   });
   A.add('grate', C, C, (g) => {
     g.fillStyle = 'rgba(28,28,30,0.92)';
     g.fillRect(20, 50, 216, 156);
-    g.fillStyle = grey(84);
+    g.fillStyle = gray(84);
     g.fillRect(30, 60, 196, 136);
-    g.fillStyle = grey(12);
+    g.fillStyle = gray(12);
     for (let x = 44; x < 216; x += 22) g.fillRect(x, 70, 11, 116);
   });
   A.add('stain1', C, C, (g) => blot(g, 16, 'rgba(12,12,14,0.34)', 14, 52, 62));
@@ -464,7 +464,7 @@ function makeDecals(rng) {
     g.fillRect(6, 0, C - 12, C);
     g.fillStyle = 'rgba(90,90,90,0.5)';
     for (let y = 0; y < C; y += 64) g.fillRect(6, y, C - 12, 3);
-    for (let i = 0; i < 500; i++) { g.fillStyle = grey(rng.range(150, 240), 0.5); g.fillRect(rng.range(6, C - 8), rng.range(0, C), 2, 2); }
+    for (let i = 0; i < 500; i++) { g.fillStyle = gray(rng.range(150, 240), 0.5); g.fillRect(rng.range(6, C - 8), rng.range(0, C), 2, 2); }
   });
   const map = toTexture(A.c, { repeat: false });
   return { map, rects: A.rects };
@@ -608,15 +608,15 @@ function makeGlassFacade(rng, N) {
       const px = x * cw, py = y * cw;
       const v = rng.range(168, 214);
       const gr = g.createLinearGradient(0, py + sp, 0, py + cw);
-      gr.addColorStop(0, grey(v + 28));
-      gr.addColorStop(1, grey(v - 26));
+      gr.addColorStop(0, gray(v + 28));
+      gr.addColorStop(1, gray(v - 26));
       g.fillStyle = gr;
       g.fillRect(px, py + sp, cw, cw - sp);
       if (rng.chance(0.22)) {
-        g.fillStyle = grey(236, 0.5);
+        g.fillStyle = gray(236, 0.5);
         g.fillRect(px + 4, py + sp, cw - 8, rng.range(14, 60));
       }
-      g.fillStyle = grey(rng.range(96, 122));
+      g.fillStyle = gray(rng.range(96, 122));
       g.fillRect(px, py, cw, sp);
       rm.set(0.07, 1);
       rm.g.fillRect(px * k, (py + sp) * k, cw * k, (cw - sp) * k);
@@ -624,7 +624,7 @@ function makeGlassFacade(rng, N) {
       rm.g.fillRect(px * k, py * k, cw * k, sp * k);
     }
   }
-  g.fillStyle = grey(236);
+  g.fillStyle = gray(236);
   rm.set(0.45, 0.6);
   for (let i = 0; i < n; i++) {
     g.fillRect(i * cw - 2.5, 0, 5, S);
@@ -640,7 +640,7 @@ function makeGlassFacade(rng, N) {
 }
 
 function brickPattern(g, S, rng, bw, bh) {
-  g.fillStyle = grey(150);
+  g.fillStyle = gray(150);
   g.fillRect(0, 0, S, S);
   for (let y = 0, row = 0; y < S; y += bh, row++) {
     const off = row % 2 ? bw / 2 : 0;
@@ -663,13 +663,13 @@ function makeBrickFacade(rng, N) {
     for (let x = 0; x < n; x++) {
       const px = x * cw + win[0] * cw, py = y * cw + win[1] * cw, w = win[2] * cw, h = win[3] * cw;
       // Stone lintel and sill.
-      g.fillStyle = grey(244);
+      g.fillStyle = gray(244);
       g.fillRect(px - 6, py - 10, w + 12, 10);
       g.fillRect(px - 8, py + h, w + 16, 7);
-      g.fillStyle = grey(110, 0.5);
+      g.fillStyle = gray(110, 0.5);
       g.fillRect(px - 8, py + h + 7, w + 16, 3);
       // Frame and glass.
-      g.fillStyle = grey(250);
+      g.fillStyle = gray(250);
       g.fillRect(px, py, w, h);
       const v = rng.range(46, 86);
       const gr = g.createLinearGradient(0, py, 0, py + h);
@@ -681,7 +681,7 @@ function makeBrickFacade(rng, N) {
         g.fillStyle = rgb(226, 220, 204, 0.85);
         g.fillRect(px + 4, py + 4, w - 8, rng.range(8, h * 0.6));
       }
-      g.fillStyle = grey(250);
+      g.fillStyle = gray(250);
       g.fillRect(px + w / 2 - 1.5, py, 3, h);
       g.fillRect(px, py + h * 0.48, w, 3);
     }
@@ -705,7 +705,7 @@ function makeConcreteFacade(rng, N) {
   const S = 512, n = 4, cw = S / n;
   const c = canvas(S);
   const g = c.getContext('2d');
-  g.fillStyle = grey(226);
+  g.fillStyle = gray(226);
   g.fillRect(0, 0, S, S);
   for (let i = 0; i < 30; i++) {
     const x = rng.range(0, S), y = rng.range(0, S);
@@ -722,7 +722,7 @@ function makeConcreteFacade(rng, N) {
   const band = [0.2, 0.52]; // ribbon window: top offset and height
   for (let y = 0; y < n; y++) {
     const py = y * cw + band[0] * cw, h = band[1] * cw;
-    g.fillStyle = grey(120);
+    g.fillStyle = gray(120);
     g.fillRect(0, py - 3, S, h + 6);
     for (let x = 0; x < n; x++) {
       const v = rng.range(52, 92);
@@ -735,18 +735,18 @@ function makeConcreteFacade(rng, N) {
         g.fillStyle = rgb(222, 222, 214, 0.8);
         g.fillRect(x * cw + 3, py, cw - 6, rng.range(8, h * 0.7));
       }
-      g.fillStyle = grey(150);
+      g.fillStyle = gray(150);
       g.fillRect(x * cw + cw / 2 - 1, py, 2, h);
     }
     rm.set(0.12, 0.7);
     rm.g.fillRect(0, py * k, 256, h * k);
     // Panel joint and drip shadow under the ribbon.
-    g.fillStyle = grey(120, 0.45);
+    g.fillStyle = gray(120, 0.45);
     g.fillRect(0, y * cw, S, 2);
-    g.fillStyle = grey(60, 0.2);
+    g.fillStyle = gray(60, 0.2);
     g.fillRect(0, py + h + 3, S, 6);
   }
-  g.fillStyle = grey(140, 0.5);
+  g.fillStyle = gray(140, 0.5);
   for (let x = 0; x < n; x++) g.fillRect(x * cw, 0, 2, S);
   const emissiveMap = windowMask(rng, 8, 8, () => [0.03, band[0] + 0.01, 0.94, band[1] - 0.02], 0.42, true, 1);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
@@ -757,7 +757,7 @@ function makeStuccoFacade(rng, N) {
   const S = 512, n = 4, cw = S / n;
   const c = canvas(S);
   const g = c.getContext('2d');
-  g.fillStyle = grey(240);
+  g.fillStyle = gray(240);
   g.fillRect(0, 0, S, S);
   grain(c, N.fine, 512, 0.1, rng, 0.05);
   grain(c, N.coarse, 512, 0.1, rng);
@@ -765,7 +765,7 @@ function makeStuccoFacade(rng, N) {
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
       const px = x * cw + win[0] * cw, py = y * cw + win[1] * cw, w = win[2] * cw, h = win[3] * cw;
-      g.fillStyle = grey(252);
+      g.fillStyle = gray(252);
       g.fillRect(px - 3, py - 3, w + 6, h + 3);
       const v = rng.range(56, 96);
       const gr = g.createLinearGradient(0, py, 0, py + h);
@@ -780,22 +780,22 @@ function makeStuccoFacade(rng, N) {
         g.fillRect(px, py, w * k, h);
         if (rng.chance(0.5)) g.fillRect(px + w * (1 - k), py, w * k, h);
       }
-      g.fillStyle = grey(250);
+      g.fillStyle = gray(250);
       g.fillRect(px + w / 2 - 1.5, py, 3, h);
       // Recessed: the reveal throws a shadow at the top and one side;
       // a sill stands out below with its own shadow.
-      g.fillStyle = grey(20, 0.42);
+      g.fillStyle = gray(20, 0.42);
       g.fillRect(px, py, w, 6);
       g.fillRect(px, py + 6, 4, h - 6);
-      g.fillStyle = grey(255);
+      g.fillStyle = gray(255);
       g.fillRect(px - 7, py + h, w + 14, 6);
-      g.fillStyle = grey(40, 0.32);
+      g.fillStyle = gray(40, 0.32);
       g.fillRect(px - 7, py + h + 6, w + 14, 5);
     }
     // Floor slab line with a soft shadow below it.
-    g.fillStyle = grey(255);
+    g.fillStyle = gray(255);
     g.fillRect(0, y * cw + 0.9 * cw, S, 0.1 * cw);
-    g.fillStyle = grey(40, 0.22);
+    g.fillStyle = gray(40, 0.22);
     g.fillRect(0, y * cw, S, 8);
   }
   const emissiveMap = windowMask(rng, 8, 8, () => [win[0] + 0.01, win[1] + 0.01, win[2] - 0.02, win[3] - 0.03], 0.38, false, 1);
@@ -809,7 +809,7 @@ function makeHavanaFacade(rng, N) {
   const S = 512, n = 4, cw = S / n;
   const c = canvas(S), e = canvas(S);
   const g = c.getContext('2d'), ge = e.getContext('2d');
-  g.fillStyle = grey(238);
+  g.fillStyle = gray(238);
   g.fillRect(0, 0, S, S);
   ge.fillStyle = '#000';
   ge.fillRect(0, 0, S, S);
@@ -829,7 +829,7 @@ function makeHavanaFacade(rng, N) {
       const mx = x * cw + cw / 2, y0 = y * cw + top, y1 = y * cw + bot;
       const closed = rng.chance(0.18);
       // Moulded surround.
-      g.fillStyle = grey(252);
+      g.fillStyle = gray(252);
       arch(g, mx, y0 - 6, y1, r + 6);
       g.fill();
       // Glass, darker at the top of the arch.
@@ -847,11 +847,11 @@ function makeHavanaFacade(rng, N) {
         ge.fill();
       }
       // Reveal shadow, glazing bars.
-      g.strokeStyle = grey(20, 0.45);
+      g.strokeStyle = gray(20, 0.45);
       g.lineWidth = 5;
       arch(g, mx, y0 + 2, y1 + 3, r - 2.5);
       g.stroke();
-      g.fillStyle = grey(245);
+      g.fillStyle = gray(245);
       g.fillRect(mx - 1.5, y0 + r, 3, y1 - y0 - r);
       g.fillRect(mx - r, y0 + r, w, 3);
       g.fillRect(mx - r, y0 + r + (y1 - y0 - r) * 0.5, w, 2.5);
@@ -860,9 +860,9 @@ function makeHavanaFacade(rng, N) {
       const shut = (sx, sy, ww, hh) => {
         g.fillStyle = rgb(tone * 0.8, tone, tone * 0.94);
         g.fillRect(sx, sy, ww, hh);
-        g.fillStyle = grey(30, 0.4);
+        g.fillStyle = gray(30, 0.4);
         for (let k = sy + 3; k < sy + hh; k += 4) g.fillRect(sx + 2, k, ww - 4, 1.5);
-        g.strokeStyle = grey(40, 0.5);
+        g.strokeStyle = gray(40, 0.5);
         g.lineWidth = 1.5;
         g.strokeRect(sx + 0.75, sy + 0.75, ww - 1.5, hh - 1.5);
       };
@@ -874,13 +874,13 @@ function makeHavanaFacade(rng, N) {
         shut(mx + r + 8, y0 + r * 0.6, sw, y1 - y0 - r * 0.6);
       }
       // Sill and its shadow.
-      g.fillStyle = grey(255);
+      g.fillStyle = gray(255);
       g.fillRect(mx - r - 9, y1, w + 18, 6);
-      g.fillStyle = grey(40, 0.3);
+      g.fillStyle = gray(40, 0.3);
       g.fillRect(mx - r - 9, y1 + 6, w + 18, 6);
       if (rng.chance(0.35)) {
         // Iron balconette over the lower part of the window.
-        g.fillStyle = grey(34);
+        g.fillStyle = gray(34);
         const bt = y1 - (y1 - y0) * 0.3;
         g.fillRect(mx - r - 4, bt, w + 8, 2.5);
         g.fillRect(mx - r - 4, y1 - 2, w + 8, 2);
@@ -888,9 +888,9 @@ function makeHavanaFacade(rng, N) {
       }
     }
     // Floor band with a soft shadow below it, and grime from the band.
-    g.fillStyle = grey(250);
+    g.fillStyle = gray(250);
     g.fillRect(0, y * cw + 0.93 * cw, S, 0.07 * cw);
-    g.fillStyle = grey(40, 0.2);
+    g.fillStyle = gray(40, 0.2);
     g.fillRect(0, y * cw, S, 7);
   }
   for (let i = 0; i < 22; i++) {
@@ -911,13 +911,13 @@ function makeSiding(rng, N) {
   for (let i = 0; i < boards; i++) {
     const v = rng.range(226, 246);
     const gr = g.createLinearGradient(0, i * bh, 0, (i + 1) * bh);
-    gr.addColorStop(0, grey(v + 8));
-    gr.addColorStop(0.82, grey(v - 12));
-    gr.addColorStop(0.86, grey(120));
-    gr.addColorStop(1, grey(96));
+    gr.addColorStop(0, gray(v + 8));
+    gr.addColorStop(0.82, gray(v - 12));
+    gr.addColorStop(0.86, gray(120));
+    gr.addColorStop(1, gray(96));
     g.fillStyle = gr;
     g.fillRect(0, i * bh, S, bh);
-    g.fillStyle = grey(150, 0.5);
+    g.fillStyle = gray(150, 0.5);
     g.fillRect(rng.range(0, S), i * bh, 1.5, bh - 3);
   }
   grain(c, N.fine, 512, 0.1, rng, 0.05);
@@ -930,10 +930,10 @@ function makeCorrugated(rng, N) {
   const g = c.getContext('2d');
   for (let i = 0; i < ribs; i++) {
     const gr = g.createLinearGradient(i * rw, 0, (i + 1) * rw, 0);
-    gr.addColorStop(0, grey(150));
-    gr.addColorStop(0.35, grey(250));
-    gr.addColorStop(0.7, grey(206));
-    gr.addColorStop(1, grey(150));
+    gr.addColorStop(0, gray(150));
+    gr.addColorStop(0.35, gray(250));
+    gr.addColorStop(0.7, gray(206));
+    gr.addColorStop(1, gray(150));
     g.fillStyle = gr;
     g.fillRect(i * rw, 0, rw, S);
   }
@@ -946,10 +946,10 @@ function makeCorrugated(rng, N) {
     g.fillStyle = gr;
     g.fillRect(x, 0, rng.range(2, 9), len);
   }
-  g.fillStyle = grey(70, 0.55);
+  g.fillStyle = gray(70, 0.55);
   g.fillRect(0, 0, S, 3);
   g.fillRect(0, S - 2, S, 2);
-  g.fillStyle = grey(90, 0.4);
+  g.fillStyle = gray(90, 0.4);
   g.fillRect(0, 0, 2, S);
   g.fillRect(S / 2, 0, 2, S);
   grain(c, N.coarse, 512, 0.2, rng, 0.05);
@@ -965,9 +965,9 @@ function makeRoofing(rng, N) {
       const px = x + (r % 2 ? sw / 2 : 0);
       const v = rng.range(180, 246);
       const gr = g.createLinearGradient(0, r * rh, 0, (r + 1) * rh);
-      gr.addColorStop(0, grey(v * 0.7));
-      gr.addColorStop(0.25, grey(v));
-      gr.addColorStop(1, grey(v * 0.92));
+      gr.addColorStop(0, gray(v * 0.7));
+      gr.addColorStop(0.25, gray(v));
+      gr.addColorStop(1, gray(v * 0.92));
       g.fillStyle = gr;
       g.fillRect(px + 0.5, r * rh, sw - 1, rh);
       if (px < 0) g.fillRect(px + S + 0.5, r * rh, sw - 1, rh);
@@ -984,7 +984,7 @@ function makeShopfront(rng, N) {
   const g = c.getContext('2d'), ge = e.getContext('2d');
   ge.fillStyle = '#000';
   ge.fillRect(0, 0, W, H);
-  g.fillStyle = grey(232);
+  g.fillStyle = gray(232);
   g.fillRect(0, 0, W, H);
   const rm = rmCanvas(256, 0.85, 0);
   const kx = 256 / W, ky = 256 / H;
@@ -1011,7 +1011,7 @@ function makeShopfront(rng, N) {
       // Shelves and goods seen through the glass.
       for (let i = 0; i < 3; i++) {
         const sy = y + h * (0.3 + i * 0.22);
-        g.fillStyle = grey(30, 0.45);
+        g.fillStyle = gray(30, 0.45);
         g.fillRect(x + 6, sy, w - 12, 3);
         for (let px = x + 8; px < x + w - 16; px += rng.range(9, 20)) {
           const col = rgb(rng.range(60, 230), rng.range(60, 210), rng.range(60, 200), 0.55);
@@ -1027,45 +1027,45 @@ function makeShopfront(rng, N) {
     const x0 = b * bw;
     const lit = b !== 2;
     // Pilaster between shops.
-    g.fillStyle = grey(206);
+    g.fillStyle = gray(206);
     g.fillRect(x0, 0, 12, H);
     g.fillRect(x0 + bw - 12, 0, 12, H);
     if (b === 1) {
       // Recessed door with side lights and a transom.
       glass(x0 + 18, fascia + 6, 70, H - fascia - plinth - 6, lit, true);
       glass(x0 + bw - 88, fascia + 6, 70, H - fascia - plinth - 6, lit, true);
-      g.fillStyle = grey(70);
+      g.fillStyle = gray(70);
       g.fillRect(x0 + 94, fascia + 4, 68, H - fascia - 4);
       glass(x0 + 100, fascia + 40, 56, H - fascia - 62, lit, false);
       glass(x0 + 100, fascia + 8, 56, 26, lit, false);
-      g.fillStyle = grey(220);
+      g.fillStyle = gray(220);
       g.fillRect(x0 + 146, fascia + 120, 5, 26);
     } else {
       glass(x0 + 18, fascia + 6, bw - 36, H - fascia - plinth - 6, lit, b !== 3);
-      g.fillStyle = grey(90);
+      g.fillStyle = gray(90);
       g.fillRect(x0 + bw / 2 - 2, fascia + 6, 4, H - fascia - plinth - 6);
       if (b === 3) {
         // Roller shutter half down.
-        g.fillStyle = grey(176);
+        g.fillStyle = gray(176);
         g.fillRect(x0 + 18, fascia + 6, bw - 36, 70);
-        g.fillStyle = grey(120, 0.6);
+        g.fillStyle = gray(120, 0.6);
         for (let y = fascia + 10; y < fascia + 76; y += 7) g.fillRect(x0 + 18, y, bw - 36, 2);
         ge.fillStyle = '#000';
         ge.fillRect(x0 + 18, fascia + 6, bw - 36, 70);
       }
     }
     // Frame, plinth and fascia.
-    g.strokeStyle = grey(60);
+    g.strokeStyle = gray(60);
     g.lineWidth = 4;
     g.strokeRect(x0 + 16, fascia + 4, bw - 32, H - fascia - plinth - 2);
-    g.fillStyle = grey(110);
+    g.fillStyle = gray(110);
     g.fillRect(x0 + 12, H - plinth, bw - 24, plinth);
-    g.fillStyle = grey(150);
+    g.fillStyle = gray(150);
     g.fillRect(x0, 0, bw, fascia);
-    g.fillStyle = grey(70, 0.5);
+    g.fillStyle = gray(70, 0.5);
     g.fillRect(x0, fascia - 3, bw, 3);
   }
-  g.fillStyle = grey(40, 0.35);
+  g.fillStyle = gray(40, 0.35);
   g.fillRect(0, H - 6, W, 6);
   grain(c, N.fine, 512, 0.1, rng, 0.04);
   const rmTex = toTexture(rm.c, { srgb: false, aniso: 4 });
@@ -1081,13 +1081,13 @@ export const SHOP_NAMES = [
   ['FERNSIDE FLORIST', '#2f6b3f', '#fbe9ef', 'serif'], ['SALTYARD FISH CO', '#e8eef2', '#1d4f7a', 'sans-serif'],
   ['MARROW ST DELI', '#7c1f2b', '#f8e8c8', 'serif'], ['GLASSWELL OPTICS', '#f4f6f8', '#22303c', 'sans-serif'],
   ['BRINE & BARREL', '#3a2a1c', '#e8c27a', 'serif'], ['LANTERN NOODLES', '#c8321e', '#ffe9a8', 'sans-serif'],
-  ['COPPER KETTLE', '#b0683a', '#fff3e0', 'serif'], ['HARBOUR PAWN', '#f2c230', '#1c1c1c', 'sans-serif'],
+  ['COPPER KETTLE', '#b0683a', '#fff3e0', 'serif'], ['HARBOR PAWN', '#f2c230', '#1c1c1c', 'sans-serif'],
   ['NIGHTJAR RECORDS', '#1b1b2c', '#f25fa8', 'sans-serif'], ['VELA PHARMACY', '#ffffff', '#1e8a4c', 'sans-serif'],
   ['OTTER LAUNDRY', '#5aa9d6', '#ffffff', 'sans-serif'], ['DRIFT DINER', '#f6e9d0', '#c2372b', 'serif'],
   ['QUILL STATIONERS', '#2c3e2e', '#e9dfc0', 'serif'], ['HALYARD OUTFITTERS', '#d8d2c0', '#2d3a2a', 'sans-serif'],
   ['PICO TACOS', '#f08a24', '#3a1808', 'sans-serif'], ['EMBERLINE GRILL', '#201814', '#ff7a2e', 'serif'],
   ['MOTH & MOON TAILOR', '#2a2440', '#e6dcb8', 'serif'], ['ZEPHYR CYCLES', '#eaf2f0', '#d2452c', 'sans-serif'],
-  ['KELP SUSHI', '#18332c', '#eaf6e2', 'sans-serif'], ['TIN WHISTLE PUB', '#3c2414', '#f0d48a', 'serif'],
+  ['KELP SUSHI', '#18332c', '#eaf6e2', 'sans-serif'], ['COPPER KETTLE BAR', '#3c2414', '#f0d48a', 'serif'],
   ['HERON SAVINGS', '#0f3050', '#dfe9f2', 'serif'], ['SUNDIAL WATCHES', '#f0ead8', '#6a4a1c', 'serif'],
   ['JUNIPER MARKET', '#3f7a3a', '#ffffff', 'sans-serif'], ['ANCHOR BARBER', '#ffffff', '#b02a2a', 'sans-serif'],
   ['MIRELA SHOES', '#f2d8de', '#5a2038', 'serif'], ['FOXGLOVE TEA', '#6a3f7a', '#f6ecd8', 'serif'],
@@ -1384,18 +1384,18 @@ function makeDetails(rng, streetNames) {
     g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
   });
   // Foliage for round canopies: overlapping leaf dabs, light on top of
-  // dark, grey so the vertex colour sets the green. Its own number
+  // dark, gray so the vertex color sets the green. Its own number
   // stream (the shared one is left alone).
   A.add('leaves', 64, 32, (g, ge, w, h) => {
     let q = 12345;
     const rnd = () => ((q = (Math.imul(q, 1103515245) + 12345) >>> 0) / 4294967296);
-    // Light overall (the vertex colour carries the green and the shade):
+    // Light overall (the vertex color carries the green and the shade):
     // the leaf dabs only break the surface up.
-    g.fillStyle = grey(178);
+    g.fillStyle = gray(178);
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < 300; i++) {
       const x = rnd() * w, y = rnd() * h, v = 135 + rnd() * 120 * (0.6 + 0.4 * (1 - y / h));
-      g.fillStyle = grey(v);
+      g.fillStyle = gray(v);
       g.beginPath();
       g.ellipse(x, y, 1 + rnd() * 1.6, 0.7 + rnd() * 1, rnd() * TAU, 0, TAU);
       g.fill();
@@ -1424,7 +1424,7 @@ export function createTextures(seed, streetNames = []) {
   const N = { fine: noiseField(512, 32, 4, rng, 0.6), coarse: noiseField(512, 4, 4, rng) };
   return {
     asphalt: makeAsphalt(rng, N),
-    pavement: makePavement(rng, N),
+    sidewalk: makeSidewalk(rng, N),
     grass: makeGrass(rng, N),
     sand: makeSand(rng, N),
     wood: makeWood(rng, N),

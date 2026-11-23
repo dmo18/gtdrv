@@ -1,7 +1,7 @@
 // Lots on the real map (docs/REVAMP.md 6.2): the ground of every lot in
 // its own material (lawn, asphalt, paving slabs, rough grass, concrete
 // and dirt, sand), clipped to city.lotGrid cell by cell, and the dressing
-// that dressLot lists for a lot (fences, hedges, drives, car park bays
+// that dressLot lists for a lot (fences, hedges, drives, parking lot bays
 // with parked cars, trees, bins, plaza furniture, works yard stacks),
 // merged into the tile's builders per material. Their collision shapes
 // are not made here: the simulation makes them itself, cell by cell (the
@@ -27,18 +27,18 @@ export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach',
 // Ground height of a lot: over the land (-0.06), under the roads (0).
 export const LOT_Y = -0.035;
 
-// Ground per lot type: builder key, base colour, tone spread, patchy
-// (a second colour mixed in per 10 m cell: dirt in a works yard).
+// Ground per lot type: builder key, base color, tone spread, patchy
+// (a second color mixed in per 10 m cell: dirt in a works yard).
 // verge and airfield keep the land they stand on.
 export const LOT_GROUND = {
   yard: { key: 'grass', col: 0x84a85c, spread: 0.18 },
   carpark: { key: 'asphalt', col: 0x5d6064, spread: 0.08 },
-  plaza: { key: 'pavement', col: 0xcac3b5, spread: 0.06 },
+  plaza: { key: 'sidewalk', col: 0xcac3b5, spread: 0.06 },
   grass: { key: 'land', col: 0x93ad62, spread: 0.12 },
   works: { key: 'ground', col: 0xa29d92, spread: 0.08, patch: 0x8c7a62 },
   beach: { key: 'sand', col: 0xf0e0b4, spread: 0.04 },
   park: { key: 'grass', col: 0x7aa856, spread: 0.12 },
-  wateredge: { key: 'pavement', col: 0xb0ada4, spread: 0.05 },
+  wateredge: { key: 'sidewalk', col: 0xb0ada4, spread: 0.05 },
   site: { key: 'sand', col: 0x9e8460, spread: 0.08, patch: 0x7e6a50 },
 };
 // By type index + 1 (the lotGrid.type value), for the hot loops.
@@ -46,7 +46,7 @@ const GROUND_BY_T = [null, ...LOT_TYPES.map((t) => LOT_GROUND[t] || null)];
 
 // True where lotGrid.type t gets its own ground (land under it can go).
 export const DRAWN_T = Uint8Array.from({ length: 256 }, (_, t) => (GROUND_BY_T[t] ? 1 : 0));
-// Far land colour by lotGrid.type (0: keep the land colour).
+// Far land color by lotGrid.type (0: keep the land color).
 export const FAR_LOT_COL = Uint32Array.from({ length: 256 }, (_, t) => {
   const g = GROUND_BY_T[t];
   return g ? (g.patch ? mixHexEarly(g.col, g.patch, 0.3) : g.col) : 0;
@@ -83,7 +83,7 @@ function lotTone(lot, g) {
 // The ground of every lot cell in the cell range i0..i1 x j0..j1 (end
 // exclusive): rows of cells of one lot merge into one quad (at most
 // RUN cells long, so a quad never spans far). Patchy types break the
-// run every two cells and mix in their second colour by a cell hash.
+// run every two cells and mix in their second color by a cell hash.
 const RUN = 24;
 export function lotGround(city, B, i0, i1, j0, j1) {
   const G = city.lotGrid;
@@ -107,7 +107,7 @@ export function lotGround(city, B, i0, i1, j0, j1) {
       if (g.patch) col = mixHex(col, g.patch, Math.max(0, cellHash(i >> 1, j >> 1) * 1.6 - 0.6));
       const xa = x0 + i * cell, xb = x0 + e * cell;
       const bld = B[g.key].at((xa + xb) / 2, (za + zb) / 2);
-      if (g.key === 'pavement' && lot) {
+      if (g.key === 'sidewalk' && lot) {
         // Paving of its own per plaza: stone tone, slab size and lay.
         const pv = PAVING[(lot.seed >>> 4) % PAVING.length];
         col = shadeHex(PAVE_TONES[(lot.seed >>> 12) % PAVE_TONES.length], 1 - g.spread / 2 + g.spread * (((lot.seed >>> 8) & 255) / 255));
@@ -125,7 +125,7 @@ export function lotGround(city, B, i0, i1, j0, j1) {
 }
 
 // Plaza paving (by lot seed): slab picture scale (1: the 1.2 m slabs of
-// the pavement texture) and turn (a diagonal lay), and stone tones.
+// the sidewalk texture) and turn (a diagonal lay), and stone tones.
 const PAVING = [
   { s: 1, c: 1, n: 0 }, { s: 0.5, c: 1, n: 0 }, { s: 0.5, c: 0.7071, n: 0.7071 }, { s: 1.5, c: 1, n: 0 },
   { s: 0.75, c: 0.7071, n: 0.7071 }, { s: 0.35, c: 1, n: 0 },
@@ -133,7 +133,7 @@ const PAVING = [
 const PAVE_TONES = [0xcac3b5, 0xd8c3a8, 0xbebcb6, 0xddd3bc, 0xcdb79c, 0xc4c8c6, 0xe0d6c6];
 // Texture coordinates of the last flat quad (x0, z1), (x1, z1), (x1, z0),
 // (x0, z0) for the paving pv: turned and scaled in world space, so
-// neighbouring quads of one lot still line up.
+// neighboring quads of one lot still line up.
 function pavedUv(bld, x0, z0, x1, z1, pv) {
   if (!bld.lastQuadUv || !bld.uvScale) return;
   const k = 1 / (bld.uvScale * pv.s), c = pv.c * k, n = pv.n * k;
@@ -146,15 +146,15 @@ function pavedUv(bld, x0, z0, x1, z1, pv) {
 // lawn, a border course of darker stone round every plaza and, on most
 // plazas, courses of it across the paving in 15 m squares. Runs of
 // cells along one side merge into one strip. Returns the strips drawn.
-const EDGE_Y = LOT_Y + 0.008, KERB = 0.25, VERGE = 0.6, BORDER = 0.55, INLAY = 0.45;
-const KERB_COL = 0xd4d0c6, VERGE_COL = 0x6f7a3e;
+const EDGE_Y = LOT_Y + 0.008, CURB = 0.25, VERGE = 0.6, BORDER = 0.55, INLAY = 0.45;
+const CURB_COL = 0xd4d0c6, VERGE_COL = 0x6f7a3e;
 export function lotEdges(city, B, i0, i1, j0, j1) {
   const G = city.lotGrid;
   if (!G || !city.lots) return 0;
   const { x0, z0, cell, w, h, id, type } = G;
   const lots = city.lots;
   let strips = 0;
-  // Which edge cell k shows toward neighbour cell n (-1 off the grid):
+  // Which edge cell k shows toward neighbor cell n (-1 off the grid):
   // 1 lawn edge, 2 plaza border, 0 none.
   const edgeOf = (k, n) => {
     const g = GROUND_BY_T[type[k]];
@@ -176,18 +176,18 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
   const strip = (kind, lid, side, a0, a1, line) => {
     const lot = lots[lid];
     for (let layer = 0; layer < (kind === 1 ? 2 : 1); layer++) {
-      const d0 = kind === 1 ? (layer ? KERB : 0) : kind === 3 ? -INLAY / 2 : 0, d1 = kind === 1 ? (layer ? KERB + VERGE : KERB) : kind === 3 ? INLAY / 2 : BORDER;
+      const d0 = kind === 1 ? (layer ? CURB : 0) : kind === 3 ? -INLAY / 2 : 0, d1 = kind === 1 ? (layer ? CURB + VERGE : CURB) : kind === 3 ? INLAY / 2 : BORDER;
       let col;
       let bld;
       if (kind === 1 && layer === 1) {
         col = lot ? mixHex(lotTone(lot, LOT_GROUND[lot.type] || LOT_GROUND.yard), VERGE_COL, 0.5) : VERGE_COL;
         bld = B.grass;
       } else if (kind === 1) {
-        col = KERB_COL;
-        bld = B.pavement;
+        col = CURB_COL;
+        bld = B.sidewalk;
       } else {
         col = shadeHex(lot ? PAVE_TONES[((lot.seed >>> 12) + 3) % PAVE_TONES.length] : 0xb8b0a0, 0.8);
-        bld = B.pavement;
+        bld = B.sidewalk;
       }
       let xa, xb, za, zb;
       if (side < 2) {
@@ -260,7 +260,7 @@ const CARS = [0xe8e8e6, 0x2a2c30, 0x8a9096, 0xb8bcc0, 0x7a1e22, 0x1e3a6a, 0x3c5a
 const HEDGE = 0x3f6e34, WALLS = [0xe6dccb, 0xd4d0c8, 0xf0e8da, 0xc4b8a4], CONTAINERS = [0xb4442c, 0x2c5a8a, 0x3a7a4a, 0xd89a2a, 0x8a8e92, 0x6a3a6a];
 const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 
-// One parked car, about 4.4 by 1.8 m, centred at (x, z), facing h.
+// One parked car, about 4.4 by 1.8 m, centered at (x, z), facing h.
 function parkedCar(P, x, z, y, h, col) {
   P.obox(x, z, 2.2, 0.88, y + 0.18, y + 0.95, h, col, col, 0.55, 1);
   P.obox(x - Math.cos(h) * 0.25, z - Math.sin(h) * 0.25, 1.15, 0.78, y + 0.95, y + 1.42, h, 0x2a3036, shadeHex(col, 0.92), 0.8, 1);
@@ -281,7 +281,7 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 }
 
 // Draws the features of one lot into the builders of C (props, detail,
-// paint, pavement, ao, glow, trees, treesDetail) and returns how many it
+// paint, sidewalk, ao, glow, trees, treesDetail) and returns how many it
 // drew. stamps: lotStamps(C), made once per tile.
 export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
   const city = C.city;
@@ -322,7 +322,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
       }
       case 'drive':
       case 'path': {
-        const pv = C.pavement.at(x, z);
+        const pv = C.sidewalk.at(x, z);
         const col = f.kind === 'drive' ? (f.v % 2 ? 0xb4aea2 : 0x9a9690) : lot.type === 'beach' ? 0xc8b48a : 0xd6cdb8;
         orientedQuad(pv, x - ca * hl - sa * hw, z - sa * hl + ca * hw, x + ca * hl - sa * hw, z + sa * hl + ca * hw,
           x + ca * hl + sa * hw, z + sa * hl - ca * hw, x - ca * hl + sa * hw, z - sa * hl - ca * hw, y + 0.012, col);
@@ -429,7 +429,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
   return drawn;
 }
 
-// Lots by the tile that owns them (the tile of the lot rect's centre).
+// Lots by the tile that owns them (the tile of the lot rect's center).
 export function lotsByTile(city, tileOf, nTiles) {
   const out = [];
   for (let k = 0; k < nTiles; k++) out.push([]);
@@ -442,7 +442,7 @@ export function lotsByTile(city, tileOf, nTiles) {
 
 // Everything for one tile's lots, a slice at a time: a generator that
 // yields when `over()` says the slice is used up. C holds the tile's
-// builders (props, solid, detail, paint, pavement, ao, glow, trees,
+// builders (props, solid, detail, paint, sidewalk, ao, glow, trees,
 // treesDetail). Drawing only: no collision shapes.
 export function* lotJob(C, lots, dress, over) {
   if (!lots.length || !dress) return;

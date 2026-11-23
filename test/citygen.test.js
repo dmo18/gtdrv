@@ -172,7 +172,7 @@ test('task 32: the city before the military places is unchanged (buildings, road
   // Fingerprint of the city as generated before task 32 (same seed).
   assert.equal(cityPrint(city, cinder), 'e0ac5ff1:249312');
   assert.ok(city.parkingSpots.length >= 960, 'only a couple of parking spaces cleared');
-  for (const s of city.parkingSpots) assert.ok(Math.hypot(s.x - cinder.x, s.z - cinder.z) >= 6, 'no car parked on the Cinder Row tank');
+  for (const s of city.parkingSpots) assert.ok(Math.hypot(s.x - cinder.x, s.z - cinder.z) >= 6, 'no parking loted on the Cinder Row tank');
 });
 
 test('task 32: Ironbank Depot on the islet, clear of roads and buildings, reachable through its gate', () => {

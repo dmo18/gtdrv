@@ -4,7 +4,7 @@
 // is one rigged mesh (hullkit.js: the skin's vertex shader moves the
 // tagged parts) plus see-through canopy glass and a blur disc, so a
 // near aircraft is 2..4 draw calls; past LOD_FAR a coarse body only.
-// Origin is the ground-contact centre; the nose points along local +x.
+// Origin is the ground-contact center; the nose points along local +x.
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
 import { Kit, RIG, CLS, shade, createSkin, skinDepth, skinLook, glassMaterial, discMaterial, buildKit, discGeometry, loftSurface, surfacePatch, V } from './hullkit.js';
@@ -12,7 +12,7 @@ import { stepAircraftRig, wrapAngle, storesLeft } from './craftmath.js';
 
 const GLASS = 0x18222c;
 const DARK = 0x2a2d31;
-const TYRE = 0x161719;
+const TIRE = 0x161719;
 const METAL = 0x8d9399;
 const STEEL = 0x5f646b;
 const WHITE = 0xf2f1ea;
@@ -36,7 +36,7 @@ function trimFor(color) {
 function wheel(k, x, y, z, r, w) {
   k.lathe([
     { pts: [[0, 0], [0, r * 0.58]], hex: METAL, cls: A },
-    { pts: [[0, r * 0.58], [0, r * 0.8], [w * 0.12, r * 0.97], [w * 0.5, r], [w * 0.88, r * 0.97], [w, r * 0.8], [w, r * 0.58]], hex: TYRE, cls: R },
+    { pts: [[0, r * 0.58], [0, r * 0.8], [w * 0.12, r * 0.97], [w * 0.5, r], [w * 0.88, r * 0.97], [w, r * 0.8], [w, r * 0.58]], hex: TIRE, cls: R },
     { pts: [[w, r * 0.58], [w, 0]], hex: METAL, cls: A },
   ], 14, [x, y, z - w / 2], [0, 0, 1]);
 }
@@ -151,7 +151,7 @@ function blades(k, o, d, n, r, chord, code, hex, tipHex, cone = 0, r0 = 0.18) {
   k.noRig();
 }
 
-// Missile on a rail / pylon: body along x centred at c, length len.
+// Missile on a rail / pylon: body along x centered at c, length len.
 function missile(k, c, len, r, slot) {
   k.setRig(RIG.MISSILE + slot, c);
   const o = [c[0] - len / 2, c[1], c[2]];
@@ -278,7 +278,7 @@ function buildFighter(k, gk, color, trim) {
       { pts: [[0.5, 0], [0.5, 0.27]], hex: 0x7a3414, cls: GL },
     ], 20, [-6.9, 1.78, 0.48 * s], [1, 0, 0]);
   }
-  // Pylons, wingtip missiles, bombs on inner pylons and the centreline.
+  // Pylons, wingtip missiles, bombs on inner pylons and the centerline.
   const mt = [-3.25, 1.52, 4.85];
   for (const s of [1, -1]) {
     k.box(mt[0] - 0.4, 1.56, mt[2] * s, 1.5, 0.06, 0.07, DARK, T);
@@ -393,7 +393,7 @@ function buildSeaplane(k, gk, color, trim) {
     [-0.6, 2.04, 0.58, 0.66, 0.56, 2.8], [-2.4, 2.18, 0.3, 0.36, 0.28, 2.2], [-4.2, 2.3, 0.07, 0.12, 0.07, 2]];
   k.loft(keys, color, L, { steps: 24, seg: 22, capEnds: true, col: (x, a, p) => (x > 2.65 ? [trim, L] : Math.abs(p[1] - 1.82) < 0.06 ? [trim, L] : [color, L]) });
   const surf = loftSurface(keys);
-  // Cabin windows (dark glass patches), windscreen glass.
+  // Cabin windows (dark glass patches), windshield glass.
   for (const s of [1, -1]) {
     const a0 = s > 0 ? 0.25 : Math.PI - 0.25, a1 = s > 0 ? 0.95 : Math.PI - 0.95;
     surfacePatch(k, surf, 1.75, 2.45, a0, a1, GLASS, G, 0.01, 2, 2);
@@ -431,7 +431,7 @@ function buildJet(k, gk, color, trim) {
     [-5.9, 2.1, 0.22, 0.28, 0.18, 2], [-6.4, 2.16, 0.06, 0.08, 0.05, 2]];
   k.loft(keys, color, L, { steps: 34, seg: 26, capEnds: true, col: (x, a, p) => (Math.abs(p[1] - 1.55) < 0.08 && x < 4.8 ? [trim, L] : p[1] < 1.2 ? [shade(color, 0.9), L] : [color, L]) });
   const surf = loftSurface(keys);
-  // Windscreen and cabin windows (dark glass on the skin).
+  // Windshield and cabin windows (dark glass on the skin).
   surfacePatch(k, surf, 4.35, 4.95, 0.55, Math.PI - 0.55, GLASS, G, 0.012, 2, 4);
   for (const s of [1, -1]) {
     surfacePatch(k, surf, 4.0, 4.45, s > 0 ? 0.35 : Math.PI - 0.35, s > 0 ? 0.75 : Math.PI - 0.75, GLASS, G, 0.012, 1, 1);
@@ -465,7 +465,7 @@ function buildJet(k, gk, color, trim) {
   return { discs: [] };
 }
 
-// Frame bars over a glass loft: a centre bar and side bars, plus a door
+// Frame bars over a glass loft: a center bar and side bars, plus a door
 // pillar ring at the rear of the glass.
 function canopyFrame(k, gkeys, x0, x1) {
   if (k.q < 0.8) return;
@@ -726,7 +726,7 @@ function glowSprite(hex, size) {
 }
 let extraGeo = null;
 // Unit afterburner plume along -x: an outer orange cone, an inner white
-// core and shock diamonds, vertex colours fading to black (additive).
+// core and shock diamonds, vertex colors fading to black (additive).
 function plumeGeometry() {
   const pos = [], col = [], idx = [];
   const seg = 14;
@@ -775,7 +775,7 @@ const V1 = new THREE.Vector3();
 const V2 = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
 const BEAM_TILT = 0.55; // rad forward of straight down when not aimed
-const BEAM_MAX = 170; // metres
+const BEAM_MAX = 170; // meters
 
 // Light bar flash pattern at 6 Hz: red side, off, blue side, off.
 export function lightbarPhase(time) {
@@ -784,7 +784,7 @@ export function lightbarPhase(time) {
 }
 // Flash levels 0..1 of the red and blue sides at `time`: each side
 // double-flashes in its half of a 0.8 s cycle, with soft edges (no
-// one-frame pops), so the two colours read clearly and never mix.
+// one-frame pops), so the two colors read clearly and never mix.
 const FLASH = { r: 0, b: 0 };
 export function lightbarLevels(time, out = FLASH) {
   const u = (((Number.isFinite(time) ? time : 0) / 0.8) % 1 + 1) % 1;

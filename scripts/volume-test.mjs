@@ -51,7 +51,7 @@ try {
     while (!audio.debug.ready && performance.now() - t0 < 240000) await sleep(100);
     check('bank ready', audio.debug.ready, ((performance.now() - t0) / 1000).toFixed(0) + ' s');
     const d = audio.debug;
-    const g = () => ({ master: d.master.gain.value, music: d.buses.music.gain.value, effects: d.buses.effects.gain.value, engine: d.buses.engine.gain.value, tyres: d.buses.tyres.gain.value, ui: d.buses.ui.gain.value, world: d.buses.world.gain.value });
+    const g = () => ({ master: d.master.gain.value, music: d.buses.music.gain.value, effects: d.buses.effects.gain.value, engine: d.buses.engine.gain.value, tires: d.buses.tires.gain.value, ui: d.buses.ui.gain.value, world: d.buses.world.gain.value });
     const settle = () => sleep(600);
     const near = (a, b) => Math.abs(a - b) < 1e-3;
     await settle();
@@ -74,12 +74,12 @@ try {
     audio.setVolume({ music: 0 }); await settle();
     let a = g();
     check('music 0: music bus 0', a.music < 1e-4, a.music);
-    check('music 0: others untouched', near(a.master, base.master) && near(a.effects, base.effects) && near(a.engine, base.engine) && near(a.world, base.world) && near(a.ui, base.ui) && near(a.tyres, base.tyres), JSON.stringify(a));
+    check('music 0: others untouched', near(a.master, base.master) && near(a.effects, base.effects) && near(a.engine, base.engine) && near(a.world, base.world) && near(a.ui, base.ui) && near(a.tires, base.tires), JSON.stringify(a));
     audio.setVolume({ music: 0.5 }); await settle();
-    // effects 0 affects only effects (engines, tyres, ui, effects), not music or ambience
+    // effects 0 affects only effects (engines, tires, ui, effects), not music or ambience
     audio.setVolume({ sfx: 0 }); await settle();
     a = g();
-    check('effects 0: effects buses 0', a.effects < 1e-4 && a.engine < 1e-4 && a.tyres < 1e-4 && a.ui < 1e-4, JSON.stringify(a));
+    check('effects 0: effects buses 0', a.effects < 1e-4 && a.engine < 1e-4 && a.tires < 1e-4 && a.ui < 1e-4, JSON.stringify(a));
     check('effects 0: music, ambience, master untouched', near(a.music, base.music) && near(a.world, base.world) && near(a.master, base.master), JSON.stringify(a));
     audio.setVolume({ sfx: 1 }); await settle();
     // ambience 0 affects only the world bus

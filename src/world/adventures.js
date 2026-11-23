@@ -5,7 +5,7 @@
 // ground or water, so every build puts them in the same places.
 // systems/adventures.js runs them; core/explore.js keeps the progress.
 //
-// Coordinates: x east, z south, metres. Heading 0 faces +x.
+// Coordinates: x east, z south, meters. Heading 0 faces +x.
 import { createRng, TAU } from '../core/rng.js';
 import { placeGarages, GARAGE_DEFS } from './garages.js';
 import { buildRoutes } from './courses.js';
@@ -117,10 +117,10 @@ export const ADVENTURE_DEFS = [
   },
   {
     id: 'a-sunchaser', name: 'Chasing the Sun', kind: 'clue', order: 'seq', needs: [],
-    giver: { type: 'talker', x: -2050, z: -2350, garage: null, line: 'A painter left a car for whoever follows her colours. Start at the water tank.' },
+    giver: { type: 'talker', x: -2050, z: -2350, garage: null, line: 'A painter left a car for whoever follows her colors. Start at the water tank.' },
     steps: [
       S('Start under the old water tank above the warehouses.', { landmark: 'wynwood-tank' }, { r: 20, hint: 120 }),
-      S('Her colours lead north to the shops with the big glass fronts.', { anchor: { x: -1150, z: -3500 } }, { r: 20, hint: 160 }),
+      S('Her colors lead north to the shops with the big glass fronts.', { anchor: { x: -1150, z: -3500 } }, { r: 20, hint: 160 }),
       S('The last mark is on a quiet corner at the top of the design blocks.', { anchor: { x: -1300, z: -3850 } }, { r: 18, hint: 140 }),
     ],
     reward: R(KIND_SCORE.clue, { car: 'sunchaser' }),
@@ -149,8 +149,8 @@ export const ADVENTURE_DEFS = [
   },
   {
     id: 'a-edgewater-hush', name: 'Edgewater Hush', kind: 'hidden', order: 'seq', needs: [],
-    giver: { type: 'sign', x: -630, z: -1500, garage: null, line: 'Notice: something is kept at the back of an Edgewater car park. Quietly.' },
-    steps: [S('At the back of a car park, a few blocks in from the bay.', { lot: ['carpark'], near: { x: -900, z: -2100 }, within: 220 }, { r: 10, hint: 170 })],
+    giver: { type: 'sign', x: -630, z: -1500, garage: null, line: 'Notice: something is kept at the back of an Edgewater parking lot. Quietly.' },
+    steps: [S('At the back of a parking lot, a few blocks in from the bay.', { lot: ['carpark'], near: { x: -900, z: -2100 }, within: 220 }, { r: 10, hint: 170 })],
     reward: R(KIND_SCORE.hidden),
   },
   {
@@ -164,9 +164,9 @@ export const ADVENTURE_DEFS = [
     reward: R(KIND_SCORE.clue),
   },
   {
-    id: 'a-port-quay', name: 'End of the Quay', kind: 'lookout', order: 'seq', needs: [],
+    id: 'a-port-pier', name: 'End of the Pier', kind: 'lookout', order: 'seq', needs: [],
     giver: { type: 'sign', x: -620, z: 120, garage: null, line: 'Notice: the far end of the port is the best place in town to watch the ships come in.' },
-    steps: [S('The far end of the port quays, past the last of the terminals.', { anchor: { x: 2380, z: 760 } }, { r: 20, hint: 150 })],
+    steps: [S('The far end of the port piers, past the last of the terminals.', { anchor: { x: 2380, z: 760 } }, { r: 20, hint: 150 })],
     reward: R(KIND_SCORE.lookout),
   },
   {
@@ -177,7 +177,7 @@ export const ADVENTURE_DEFS = [
   },
   {
     id: 'a-hammock-trail', name: 'Hammock Trail', kind: 'tour', order: 'any', needs: [],
-    giver: { type: 'sign', x: -2600, z: 3000, garage: null, line: 'Notice: walk the hammock trail. Three old trees, one each in three neighbourhoods.' },
+    giver: { type: 'sign', x: -2600, z: 3000, garage: null, line: 'Notice: walk the hammock trail. Three old trees, one each in three neighborhoods.' },
     steps: [
       S('The old tree in Shenandoah.', { anchor: { x: -3500, z: 2350 } }, { r: 18, hint: 150 }),
       S('The old tree in Bay Heights.', { anchor: { x: -3700, z: 3250 } }, { r: 18, hint: 150 }),
@@ -242,7 +242,7 @@ export function deepWater(city, x, z, R = 40) {
 
 const NEAR = [];
 // A flat roof near (x, z): a building 30 to 120 m high, at least 20 m on
-// each side, nearest the point. The pad is its centre, minY its roof.
+// each side, nearest the point. The pad is its center, minY its roof.
 function roofNear(city, x, z, R = 200) {
   city.buildingsNear(x - R, z - R, x + R, z + R, NEAR);
   let best = null, bd = Infinity;
@@ -257,7 +257,7 @@ function roofNear(city, x, z, R = 200) {
 }
 
 // A tucked-away point inside the nearest lot of one of `types` whose
-// centre is within `within` of `near`: the lot cell farthest from its
+// center is within `within` of `near`: the lot cell farthest from its
 // road side. Same lot every build (lots are sorted by distance, then id).
 function lotSpot(city, types, near, within) {
   const pool = [];
@@ -327,7 +327,7 @@ export function resolveStep(city, step, garages = []) {
   return { x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10, minY };
 }
 
-// Where a giver stands. Signs go on the nearest plaza, park, car park or
+// Where a giver stands. Signs go on the nearest plaza, park, parking lot or
 // water-edge lot; talkers and the start on open land near the point.
 const SIGN_LOTS = ['plaza', 'park', 'carpark', 'wateredge'];
 function resolveGiver(city, g, garages) {
@@ -386,7 +386,7 @@ export function adventureInRegion(def, region) {
 
 // city.adventures: the sixteen, resolved. Each is the definition plus
 // `index`, `place`, `core`, the giver's x, z and every step's x, z, minY
-// and its map ring centre (rx, rz). Throws when a step cannot be placed
+// and its map ring center (rx, rz). Throws when a step cannot be placed
 // (a data change the tests must catch). [] on a map without lots. A region
 // build (city.region) resolves only the adventures it holds
 // (adventureInRegion); one that cannot be placed inside the crop, or whose
@@ -461,7 +461,7 @@ export function stepReached(s, x, y, z, pmode, stunt = null) {
 }
 
 // Puts garages, adventures and the locked routes on a real map (the
-// island has no lots: nothing is added). Car park spots inside a garage's
+// island has no lots: nothing is added). Parking lot spots inside a garage's
 // rect are dropped so no parked car spawns in a shed, and street props
 // in front of a door are removed. Call once, after
 // the city is built and before its tiles are drawn (dressLot then skips
@@ -478,7 +478,7 @@ export function attachExplore(city) {
   const inside = (x, z, m) => city.garages.some((g) => x > g.x0 - m && x < g.x1 + m && z > g.z0 - m && z < g.z1 + m);
   const P = city.parkingSpots || [];
   for (let i = P.length - 1; i >= 0; i--) if (inside(P[i].x, P[i].z, 3)) P.splice(i, 1);
-  // Street lamps and trees on the pavement in front of a door would stand
+  // Street lamps and trees on the sidewalk in front of a door would stand
   // in the way in and out: they go.
   const Q = city.props || [];
   for (let i = Q.length - 1; i >= 0; i--) if (inside(Q[i].x, Q[i].z, 5)) Q.splice(i, 1);

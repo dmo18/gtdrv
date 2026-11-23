@@ -91,7 +91,7 @@ function patchShaderChunks() {
     'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n\t\tfogFactor *= mix( exp( - max( vFogH, 0.0 ) * 0.006 ), 1.0, fogFactor * fogFactor );');
   SC.shadowmap_pars_fragment = SC.shadowmap_pars_fragment.replace('return mix( 1.0, shadow, shadowIntensity );',
     'vec2 rwEdge = abs( shadowCoord.xy - 0.5 ) * 2.0;\n\t\t\treturn mix( 1.0, shadow, shadowIntensity * ( 1.0 - smoothstep( 0.75, 0.98, max( rwEdge.x, rwEdge.y ) ) ) );');
-  // Colour grade folded into the tone curve (no extra pass): ACES filmic,
+  // Color grade folded into the tone curve (no extra pass): ACES filmic,
   // a little more saturation, cool shadows and warm highlights.
   SC.tonemapping_pars_fragment = SC.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `vec3 CustomToneMapping( vec3 color ) {
 	vec3 c = ACESFilmicToneMapping( color );
@@ -136,7 +136,7 @@ export function createGraphics(game) {
   renderer.toneMappingExposure = 1.0;
   // A stronger sun against weaker fill light, so shade reads as shade.
   // At night the fill drops further, so lamps, windows and headlights
-  // carry the picture and shade is a deep blue, not a flat grey.
+  // carry the picture and shade is a deep blue, not a flat gray.
   game.lightScale = { sun: 2.9, moon: 1.3, hemi: 0.26, hemiNight: 0.36, glow: 1.0 };
 
   // ---- shadows ----
@@ -206,7 +206,7 @@ export function createGraphics(game) {
     sc.right = 0; // force a refresh of the bias
   }
   // Vehicles cast shadows only near the camera (CAST_R, with a few
-  // metres of hysteresis): a car is the dearest thing in the shadow map
+  // meters of hysteresis): a car is the dearest thing in the shadow map
   // pass, and past that distance its shadow is a few pixels (the contact
   // shadow under it stays).
   // By quality tier (Low, Normal, High): the Normal tier keeps to its
@@ -311,7 +311,7 @@ export function createGraphics(game) {
   // ---- sea tone (docs/PLAN_V1.md W2b) ----
   // Under a high sun the bright, pale sky mirrored at a glancing angle
   // turned the whole bay milky. By day the sea reflects less of the sky
-  // and its own colour is a deeper, clearer blue-green; toward dusk and at
+  // and its own color is a deeper, clearer blue-green; toward dusk and at
   // night both return to the water's own settings (sunset glints stay).
   const seaMats = [];
   for (const name of ['sea-near', 'sea-far']) {
@@ -394,7 +394,7 @@ export function createGraphics(game) {
   let lampU = null;
   if (baked) {
     const M = ud.materials;
-    lampU = patchLampLight([M.asphaltMat, M.pavementMat, M.grassMat, M.landMat, M.sandMat, ...(M.lotSandMat ? [M.lotSandMat] : []), M.groundMat, M.paintMat, M.decalMat, M.plainMat, M.woodMat, M.shopfront], baked);
+    lampU = patchLampLight([M.asphaltMat, M.sidewalkMat, M.grassMat, M.landMat, M.sandMat, ...(M.lotSandMat ? [M.lotSandMat] : []), M.groundMat, M.paintMat, M.decalMat, M.plainMat, M.woodMat, M.shopfront], baked);
     ud.lampLightBaked = true; // the day/night system drops its pool decals
   }
 

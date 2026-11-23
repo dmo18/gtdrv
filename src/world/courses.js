@@ -142,7 +142,7 @@ function heapPath(city, from, to, cost, avoid, dist, prev, done) {
   return path.reverse();
 }
 
-// Length in metres of the shortest road path between two nodes.
+// Length in meters of the shortest road path between two nodes.
 export function roadDistance(city, from, to) {
   const p = roadPath(city, from, to);
   if (!p) return Infinity;
@@ -193,7 +193,7 @@ function closedWalk(city, waypoints, baseCost, avoid) {
 }
 
 // Picks checkpoint positions along a closed walk: walk[0] always, nodes in
-// `forced`, and otherwise a node each time `spacing` metres have passed.
+// `forced`, and otherwise a node each time `spacing` meters have passed.
 // The count is tuned into [minN, maxN]. Returns indices into the walk.
 // `ok(node)`, when given, limits the picks (not walk[0]) to the nodes it
 // accepts (a real map: junctions rather than bends in the road).
@@ -236,7 +236,7 @@ function pickAlongWalk(city, walk, minN, maxN, forced = new Set(), ok = null) {
 
 const groundR = (node) => r1(Math.max(node.hx, node.hz) + 6);
 
-// A start spot `d` metres from node a toward node b, facing b.
+// A start spot `d` meters from node a toward node b, facing b.
 function startOnEdge(a, b, d) {
   const L = hyp(b.x - a.x, b.z - a.z);
   const t = Math.min(0.45, d / L);
@@ -310,7 +310,7 @@ const coastPoint = (city, theta, off) => {
   return { x: Math.cos(theta) * r, z: Math.sin(theta) * r };
 };
 
-// Moves a gate straight out from the island centre until it is clear.
+// Moves a gate straight out from the island center until it is clear.
 function pushOut(city, p, extra = 0) {
   let { x, z } = p;
   const th = Math.atan2(z, x);
@@ -322,7 +322,7 @@ function pushOut(city, p, extra = 0) {
 }
 
 // Inserts extra gates wherever a straight leg would touch land or run long.
-// A real map has no island centre: move a gate down the shore field
+// A real map has no island center: move a gate down the shore field
 // (away from the nearest land) until it is clear.
 function pushToSea(city, p, extra = 0) {
   let { x, z } = p;
@@ -339,7 +339,7 @@ function pushToSea(city, p, extra = 0) {
 
 // `push` moves a gate out to sea (pushOut on the island, pushToSea on a
 // real map, which also picks the side to push a blocked leg's midpoint
-// by the water depth instead of by the island centre).
+// by the water depth instead of by the island center).
 function refineSea(city, pts, closed, maxLeg = 320, push = pushOut) {
   const out = [pts[0]];
   const legs = closed ? pts.length : pts.length - 1;
@@ -385,7 +385,7 @@ function buoyCheckpoints(pts, r, closed, startPos) {
 // Sky helpers
 // ---------------------------------------------------------------------------
 
-// Tallest building whose footprint comes within `R` metres of (x,z).
+// Tallest building whose footprint comes within `R` meters of (x,z).
 const NEAR = [];
 export function tallestNear(city, x, z, R = RING_CLEAR_RADIUS) {
   let h = 0;
@@ -408,7 +408,7 @@ export function tallestNear(city, x, z, R = RING_CLEAR_RADIUS) {
   return h;
 }
 
-// Ring centre height that keeps the ring's bottom well above any roof
+// Ring center height that keeps the ring's bottom well above any roof
 // nearby (or 12 m above open ground and sea).
 function ringY(city, x, z, r, wantY) {
   const tall = tallestNear(city, x, z);
@@ -422,7 +422,7 @@ export function avenueAt(city, x, z) {
     if (!e.avenue || e.causeway) continue;
     const a = city.nodes[e.a], b = city.nodes[e.b];
     if (e.ux !== undefined) {
-      // A real map: edges run any way. On the centre line (within 1 m),
+      // A real map: edges run any way. On the center line (within 1 m),
       // clear of the junction box at either end.
       const t = (x - a.x) * e.ux + (z - a.z) * e.uz;
       const s = -(x - a.x) * e.uz + (z - a.z) * e.ux;
@@ -487,8 +487,8 @@ function roofNear(city, x, z, used) {
 // Medal times and prizes
 // ---------------------------------------------------------------------------
 
-export function medalTimesFor(kind, metres, pads = 0) {
-  const gold = Math.ceil(START_OVERHEAD[kind] + metres / REF_SPEED[kind] + pads * PAD_TIME);
+export function medalTimesFor(kind, meters, pads = 0) {
+  const gold = Math.ceil(START_OVERHEAD[kind] + meters / REF_SPEED[kind] + pads * PAD_TIME);
   return {
     gold,
     silver: Math.ceil(gold * MEDAL_FACTOR.silver),
@@ -512,10 +512,10 @@ function pathLength3(start, cps) {
   return d;
 }
 
-function finish(a, metres, pads = 0) {
-  a.medalTimes = medalTimesFor(a.kinds[0], metres, pads);
+function finish(a, meters, pads = 0) {
+  a.medalTimes = medalTimesFor(a.kinds[0], meters, pads);
   a.reward = rewardFor(a.medalTimes);
-  a.length = Math.round(metres);
+  a.length = Math.round(meters);
   return a;
 }
 
@@ -553,7 +553,7 @@ export function buildCourses(city) {
 
   const downtown = mainNodes.filter((n) => city.districtOf(n.x, n.z) === 'downtown');
   const dc = centroid(downtown);
-  street('street-glasswell', 'Glasswell Glide', 'Two laps between the glass towers of the city centre.',
+  street('street-glasswell', 'Glasswell Glide', 'Two laps between the glass towers of the city center.',
     ringNodes(downtown, dc.x, dc.z, 8), 2);
 
   const north = mainNodes.filter((n) => city.districtOf(n.x, n.z) === 'residential' && n.z < 0);
@@ -616,19 +616,19 @@ function causewayCourse(city, mainNodes, avoidGate, pa, pb, pc, name, blurb, ok 
 
 function boatCourse(list, id, name, blurb, start, pts, r, closed = false) {
   const cps = buoyCheckpoints(pts, r, closed, start);
-  const metres = pathLength3(start, cps) + (closed ? hyp(cps[0].x - cps[cps.length - 1].x, cps[0].z - cps[cps.length - 1].z) : 0);
-  list.push(finish({ id, name, type: 'boat', kinds: ['boat'], start, checkpoints: cps, laps: 1, blurb }, metres));
+  const meters = pathLength3(start, cps) + (closed ? hyp(cps[0].x - cps[cps.length - 1].x, cps[0].z - cps[cps.length - 1].z) : 0);
+  list.push(finish({ id, name, type: 'boat', kinds: ['boat'], start, checkpoints: cps, laps: 1, blurb }, meters));
 }
 
 function skyCourse(city, list, id, name, kinds, blurb, start, spec, extra = 0) {
   const cps = skyCheckpoints(city, spec, start);
   const pads = cps.filter((c) => c.kind === 'pad').length;
-  const metres = pathLength3(start, cps) * SKY_TURN_FACTOR + extra;
-  list.push(finish({ id, name, type: 'sky', kinds, start, checkpoints: cps, laps: 1, blurb }, metres, pads));
+  const meters = pathLength3(start, cps) * SKY_TURN_FACTOR + extra;
+  list.push(finish({ id, name, type: 'sky', kinds, start, checkpoints: cps, laps: 1, blurb }, meters, pads));
 }
 
-function deliveryCourse(list, id, name, kinds, blurb, start, cps, metres, pads = 0) {
-  const a = finish({ id, name, type: 'delivery', kinds, start, checkpoints: cps, laps: 1, blurb }, metres, pads);
+function deliveryCourse(list, id, name, kinds, blurb, start, cps, meters, pads = 0) {
+  const a = finish({ id, name, type: 'delivery', kinds, start, checkpoints: cps, laps: 1, blurb }, meters, pads);
   a.timeLimit = a.medalTimes.bronze;
   list.push(a);
 }
@@ -663,7 +663,7 @@ function boatCourses(city, list) {
     const start = seaStart(th + 0.08, 55, th + 0.2);
     const pts = [];
     for (let k = 1; k <= 6; k++) pts.push(pushOut(city, coastPoint(city, th + 0.08 + k * 0.13, 70 + (k % 2) * 15)));
-    boat('boat-saltyard', 'Saltyard Sprint', 'A short dash along the harbour wall from Saltyard Marina.', start,
+    boat('boat-saltyard', 'Saltyard Sprint', 'A short dash along the harbor wall from Saltyard Marina.', start,
       refineSea(city, [start, ...pts], false).slice(1), 16);
   }
   {
@@ -810,7 +810,7 @@ function deliveries(city, list, mainNodes) {
     const q = coastPoint(city, towardTheta, off);
     return { x: r1(p.x), z: r1(p.z), y: 0, heading: headingOf(p.x, p.z, q.x, q.z) };
   };
-  const delivery = (id, name, kinds, blurb, start, cps, metres, pads = 0) => deliveryCourse(list, id, name, kinds, blurb, start, cps, metres, pads);
+  const delivery = (id, name, kinds, blurb, start, cps, meters, pads = 0) => deliveryCourse(list, id, name, kinds, blurb, start, cps, meters, pads);
   {
     // Courier: north-west Fernside to the Saltyard docks.
     const from = nearestNode(mainNodes, -420, -420);
@@ -854,7 +854,7 @@ function deliveries(city, list, mainNodes) {
 // when every helipad is on the airfield itself).
 function airmailCourse(city, list, northPier, name = 'Gullwing Air Mail', blurbAway = 'Fly the mail bag to the helipad before the post closes.') {
   const { islet, runway } = city.airfield;
-  const delivery = (id, nm, kinds, blurb, start, cps, metres, pads = 0) => deliveryCourse(list, id, nm, kinds, blurb, start, cps, metres, pads);
+  const delivery = (id, nm, kinds, blurb, start, cps, meters, pads = 0) => deliveryCourse(list, id, nm, kinds, blurb, start, cps, meters, pads);
   {
     const start = { x: r1(islet.x0 + 300), z: r1(runway.z1 + 90), y: 0, heading: Math.PI };
     const onIslet = (p) => p.x > islet.x0 && p.x < islet.x1 && p.z > islet.z0 && p.z < islet.z1;
@@ -886,7 +886,7 @@ function centroid(nodes) {
 // A real map: courses from a hand-made spec (world/miami-spots.js)
 // ---------------------------------------------------------------------------
 
-// The point on an avenue's centre line nearest (x, z) where a canyon ring
+// The point on an avenue's center line nearest (x, z) where a canyon ring
 // of radius r fits: road under it, no building across its full width.
 function canyonPoint(city, street, x, z, r) {
   let best = null, bd = Infinity;

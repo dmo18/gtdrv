@@ -31,9 +31,9 @@ const BLOOD = BLOOD_POOLS + BLOOD_SPLATS;
 export const POOL_LIFE = 31, POOL_GROW = 1.6, POOL_FADE = 1.5;
 const SPLAT_LIFE = 12, SPLAT_FADE = 4;
 // Wreck parts (carparts.js): a pool of 96, drawn as three instanced meshes
-// (boxes for chunks, bonnets, bumpers and panels; doors; wheels).
+// (boxes for chunks, hoods, bumpers and panels; doors; wheels).
 export const DEBRIS_MAX = PARTS_MAX;
-const NEAR = 170; // metres from the camera where small effects are made
+const NEAR = 170; // meters from the camera where small effects are made
 
 // Atlas cells: 0 puff, 1 ring, 2 streak, 3 glow. +4 flat on the ground, +8 stretched.
 const PUFF = 0, RING = 1, STREAK = 2, GLOW = 3;
@@ -97,7 +97,7 @@ function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
 }
 
-// Merge boxes and cylinders into one geometry with a vertex colour per piece.
+// Merge boxes and cylinders into one geometry with a vertex color per piece.
 function mergeShaded(pieces) {
   let nv = 0, ni = 0;
   for (const [g] of pieces) {
@@ -135,12 +135,12 @@ function doorGeometry() {
   const handle = new THREE.BoxGeometry(0.16, 1.5, 0.05).translate(0.3, 0, 0.02);
   return mergeShaded([[lower, 1], [pillarA, 0.9], [pillarB, 0.9], [top, 0.9], [glass, 0.06], [handle, 0.25]]);
 }
-// A wheel (axis on y, so it lies on its side): tyre, rim, hub.
+// A wheel (axis on y, so it lies on its side): tire, rim, hub.
 function wheelGeometry() {
-  const tyre = new THREE.CylinderGeometry(0.5, 0.5, 1, 16);
+  const tire = new THREE.CylinderGeometry(0.5, 0.5, 1, 16);
   const rim = new THREE.CylinderGeometry(0.33, 0.33, 1.04, 12);
   const hub = new THREE.CylinderGeometry(0.1, 0.1, 1.08, 8);
-  return mergeShaded([[tyre, 0.08], [rim, 0.72], [hub, 0.35]]);
+  return mergeShaded([[tire, 0.08], [rim, 0.72], [hub, 0.35]]);
 }
 
 export function createCombatFx(game) {
@@ -219,8 +219,8 @@ export function createCombatFx(game) {
     for (let i = 0; i < BLOOD; i++) bloodMesh.setMatrixAt(i, zero2);
     scene.add(bloodMesh);
 
-    // Parts: boxes (plain colour), doors (a window band) and wheels (a dark
-    // tyre round a light hub), the last two shaded by vertex colour.
+    // Parts: boxes (plain color), doors (a window band) and wheels (a dark
+    // tire round a light hub), the last two shaded by vertex color.
     const mk = (geo, vc, name) => {
       const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: vc }), DEBRIS_MAX);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -279,7 +279,7 @@ export function createCombatFx(game) {
       P.rotV[i] = 0;
     }
   };
-  // A star: two crossed streaks and a glow, white, no colour cast.
+  // A star: two crossed streaks and a glow, white, no color cast.
   function star(x, y, z, size, life, r = 1, g = 1, b = 1) {
     add(x, y, z, 0, 0, 0, life * 0.8, size * 0.5, size * 0.9, 1.6, r, g, b, GLOW);
     const k = rnd() * 3.14;
@@ -467,7 +467,7 @@ export function createCombatFx(game) {
     droplets(t.x, (t.y || 0) + 1.0, t.z, n, big ? 5 : 3.2, big ? 7 : 4);
   }
 
-  // ---- wreck parts (carparts.js): doors, wheels, bonnet, bumper, chunks ----
+  // ---- wreck parts (carparts.js): doors, wheels, hood, bumper, chunks ----
   const parts = createParts(DEBRIS_MAX);
   const partShown = new Uint8Array(DEBRIS_MAX); // 0 none, 1 box, 2 door, 3 wheel: which mesh holds slot i
   const partSeen = new Int32Array(DEBRIS_MAX).fill(-1);
@@ -485,7 +485,7 @@ export function createCombatFx(game) {
   }
   // First ground hit: sparks and dust; at most 4 clatters per blast for audio.
   const LAND = { x: 0, z: 0, part: 'chunk', speed: 0 };
-  const PART_NAME = ['chunk', 'door', 'wheel', 'bonnet', 'bumper', 'panel'];
+  const PART_NAME = ['chunk', 'door', 'wheel', 'hood', 'bumper', 'panel'];
   const landsPer = new Uint8Array(64);
   function onPartLand(i, sp) {
     const x = parts.x[i], z = parts.z[i];
@@ -631,7 +631,7 @@ export function createCombatFx(game) {
     }
   }
 
-  // A hit on a person (stars, no colour) or a craft (sparks).
+  // A hit on a person (stars, no color) or a craft (sparks).
   function onHit(e) {
     const t = e.target;
     const k = e.kind;
@@ -709,7 +709,7 @@ export function createCombatFx(game) {
     return !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion) || reduced;
   }
   // Shake kick for a blast at visual scale vs seen from d m: chasecam trauma
-  // 1 at the centre, a straight line to 0 at 60 m (REVAMP 6.7 layer 10).
+  // 1 at the center, a straight line to 0 at 60 m (REVAMP 6.7 layer 10).
   // kick(strength) adds (strength - 1.5) / 18 trauma.
   function shakeFor(vs, d) {
     const t = shakeAt(vs, d);
@@ -802,7 +802,7 @@ export function createCombatFx(game) {
       if (j >= 0) S.rotV[j] = rs() * 0.5;
     }
     // 4. Pressure ring (0 to 16 m in 0.3 s) and a slower dusty one; 5. the dust
-    // skirt along the ground, coloured by what lies under the blast.
+    // skirt along the ground, colored by what lies under the blast.
     n = 0;
     if (!air) {
       n += add(x, 0.3, z, 0, 0, 0, BLAST.ring.life, 1, BLAST.ring.r * 2 * vs, 1.1, 1, 0.9, 0.66, RING + 4) >= 0;
@@ -875,7 +875,7 @@ export function createCombatFx(game) {
     }
   }
   // The smoke roll: 8 to 12 dark puffs from 0.08 s, rising 3 m/s and thrown
-  // out so smoke is seen 12 m from the centre by 0.5 s; each lives 2.5 s.
+  // out so smoke is seen 12 m from the center by 0.5 s; each lives 2.5 s.
   function stepBlasts(dt, qq) {
     const RL = BLAST.roll;
     for (let i = 0; i < MAX_BLASTS; i++) {
@@ -1003,7 +1003,7 @@ export function createCombatFx(game) {
       const top = (c.y || 0) + h * 0.75;
       const hot = t < HULL_FLAME_T && !c.doused ? 1 - t / HULL_FLAME_T : 0;
       // Put out by a fire truck (src/systems/service.js): white steam for
-      // STEAM_T s, then the thin grey column.
+      // STEAM_T s, then the thin gray column.
       const steam = c.doused && t - (c.dousedWreck || 0) < STEAM_T ? 1 - (t - (c.dousedWreck || 0)) / STEAM_T : 0;
       if (hot > 0) {
         // Flames licking out of the cabin and engine bay, a warm glow under them.
@@ -1020,7 +1020,7 @@ export function createCombatFx(game) {
         // Firelight on the road round the hull.
         if ((tick & 7) === 4) add(c.x, 0.12, c.z, 0, 0, 0, 0.3, 8 + 6 * hot, 9 + 6 * hot, 0.45 * hot + 0.12, 1, 0.5, 0.18, GLOW + 4);
       }
-      // Smoke: thick and black while it burns, then a grey column that
+      // Smoke: thick and black while it burns, then a gray column that
       // thins as the hull cools and sinks away.
       const rate = (c.doused ? 1.2 + 7 * steam : 2.6 + 6 * hot) * (1 - fade * 0.8) * (0.4 + 0.6 * qq);
       c.fxSmoke = (c.fxSmoke || 0) + dt * rate;
@@ -1052,7 +1052,7 @@ export function createCombatFx(game) {
         add(p.x, p.y, p.z, 0, 0, 0, 0.07, 2.2, 1.2, 2, 1, 0.8, 0.45, GLOW);
         add(p.x - p.vx * 0.006, p.y - p.vy * 0.006, p.z - p.vz * 0.006, 0, 0, 0, 0.12, 1.1, 0.4, 1.2, 1, 0.55, 0.2, PUFF);
         // Two puffs per step (one half a step back) so the trail is unbroken;
-        // white at the nozzle, grey as it ages, lingering about 2.4 s.
+        // white at the nozzle, gray as it ages, lingering about 2.4 s.
         const g = 0.88 + rnd() * 0.1;
         let j = alpha(p.x - p.vx * 0.004, p.y - p.vy * 0.004, p.z - p.vz * 0.004, rs() * 0.5, 0.3, rs() * 0.5, 2.4, 0.8, 3.2, 0.6, g, g, g, PUFF, -0.1, 0.8, 0);
         tintP(S, j, 0.5, 0.5, 0.52);

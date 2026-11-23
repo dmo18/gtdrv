@@ -1,6 +1,6 @@
 // Shared kit for the boat, aircraft and tank meshes: a geometry builder
 // (smooth lofts, lathes, swept tubes, airfoil panels, flat plates) that
-// writes position, normal, colour, surface class (aCls, see vehiclemats)
+// writes position, normal, color, surface class (aCls, see vehiclemats)
 // and a small rig attribute, plus one PBR skin material per craft.
 //
 // Rig: every vertex carries aHng = (code, pivot xyz) and aHax (axis whose
@@ -35,7 +35,7 @@ function lin(hex) {
   return c;
 }
 
-// Scale an sRGB hex colour's brightness.
+// Scale an sRGB hex color's brightness.
 export function shade(hex, k) {
   tc.setHex(hex);
   tc.r = Math.min(1, tc.r * k);
@@ -138,7 +138,7 @@ export class Kit {
   }
 
   // Smooth grid P[i][j] (stations i, ring j). opts: wrap (ring closed),
-  // expect(i, j, c) -> wanted outward direction of face (i, j) at centre c
+  // expect(i, j, c) -> wanted outward direction of face (i, j) at center c
   // (default: away from the centroid of rings i and i + 1), col(i, j) ->
   // [hex, cls] per vertex (default hex, cls).
   grid(P, hex, cls, opts = {}) {
@@ -557,7 +557,7 @@ const DETAIL_BODY = /* glsl */`
 `;
 
 // Presets: physical (clearcoat), roughness / metalness of paint, detail
-// (seams, grime, texture scale per metre, fade distance), bump height,
+// (seams, grime, texture scale per meter, fade distance), bump height,
 // camo (scale, two thresholds) and its tints.
 const PRESETS = {
   air: { rough: 0.38, metal: 0.18, cc: 0.35, detail: [1, 0.22, 0.42, 60], bump: 0.0035 },
@@ -640,7 +640,7 @@ export function skinLook(m, wear, wrecked, hit) {
   m.emissive.setRGB(f * 0.55, f * 0.22, f * 0.12);
 }
 
-// Shared see-through canopy / windscreen glass.
+// Shared see-through canopy / windshield glass.
 let glassMat = null;
 export function glassMaterial() {
   if (!glassMat) {
@@ -682,7 +682,7 @@ export function buildKit(k) {
   return g;
 }
 
-// A disc in the plane normal to axis d (unit), centre o, radius r, for
+// A disc in the plane normal to axis d (unit), center o, radius r, for
 // the blur material (uv from the plane).
 export function discGeometry(list) {
   const pos = [], uv = [], idx = [];

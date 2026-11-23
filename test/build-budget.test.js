@@ -63,7 +63,7 @@ const STAGES = {
   shore: [['shore.stamp', 'shore.field', 'shore'], 3.2],
   buildings: [['blocks', 'buildings'], 5.4],
   infill: [['infill.stamp', 'infill.masks', 'infill.plan', 'infill'], 4.6],
-  // the whole buildLots call plus the car park bays
+  // the whole buildLots call plus the parking lot bays
   lots: [['lots.build', 'lots'], 5.4],
   places: [['places.ramps', 'places.secrets', 'places.courses', 'places'], 1.4],
 };

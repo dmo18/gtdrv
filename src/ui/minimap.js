@@ -1,7 +1,7 @@
 // Minimap (round HUD canvas) and full-screen map. The island is drawn once
 // into an offscreen canvas; both views just blit it with a transform.
 //
-// Coordinates: x east, z south, metres. Heading 0 faces +x and grows toward +z.
+// Coordinates: x east, z south, meters. Heading 0 faces +x and grows toward +z.
 import { fillMapPicker } from './mappicker.js';
 
 const MAP_PX = 2048;
@@ -21,8 +21,8 @@ const COL = {
   text: '#f6efe6',
   panel: 'rgba(24, 18, 15, 0.82)',
 };
-// Minimap colour of each lot type (docs/REVAMP.md 6.2 table).
-export const LOT_COLOURS = {
+// Minimap color of each lot type (docs/REVAMP.md 6.2 table).
+export const LOT_COLORS = {
   yard: '#7d8f62', carpark: '#6a6d72', plaza: '#b8b0a2', grass: '#86965f', works: '#8a8378',
   beach: '#d9c9a0', park: '#6f8f55', wateredge: '#9a9a94', site: '#a08a66', verge: '#8f8f8a',
 };
@@ -38,7 +38,7 @@ const POI_STYLE = {
   depot: { color: '#c9b98a', name: 'Military depot' },
   landmark: { color: '#ffd24a', name: 'Landmark' },
 };
-const LANDMARK_NAME_ZOOM = 330; // minimap zoom (metres) at which landmark names show
+const LANDMARK_NAME_ZOOM = 330; // minimap zoom (meters) at which landmark names show
 const LANDMARK_TAP_PX = 30; // a tap this close to a landmark names it
 // Activity markers passed in `state.markers` (races, sky courses, deliveries).
 const ACT_STYLE = {
@@ -83,11 +83,11 @@ function drawQuest(g, color, s, done) {
     g.fill();
   }
 }
-// One explore marker centred at (0, 0) of the current transform; ringPx is the ring's radius in px.
+// One explore marker centered at (0, 0) of the current transform; ringPx is the ring's radius in px.
 function drawExplore(g, m, s, ringPx) {
   if (m.type === 'explore-rumour') drawQuest(g, m.color || EXPLORE_ADV_COLOR, s, isDone(m));
   else if (m.type === 'explore-garage') drawIcon(g, 'garage', m.color || '#9aa0a6', s);
-  else if (ringPx > 0) { // the tracked step: a dashed ring, off centre by design
+  else if (ringPx > 0) { // the tracked step: a dashed ring, off center by design
     g.lineWidth = 3;
     g.strokeStyle = m.color || '#ff8a3d';
     g.setLineDash([7, 5]);
@@ -106,7 +106,7 @@ export function createMapRenderer(city) {
   canvas.width = MAP_PX;
   canvas.height = MAP_PX;
   const half = city.mapHalf || city.size * 1.6;
-  const scale = MAP_PX / (half * 2); // map pixels per metre
+  const scale = MAP_PX / (half * 2); // map pixels per meter
 
   function worldToMap(x, z, out) {
     out.x = (x + half) * scale;
@@ -158,16 +158,16 @@ export function createMapRenderer(city) {
     }
 
     // Blocks. On the real map the ground is mostly paving, not grass, so the
-    // block colour is a neutral grey until the lots (below) paint over it.
+    // block color is a neutral gray until the lots (below) paint over it.
     for (const b of city.blocks) {
       g.fillStyle = b.district === 'park' ? COL.park : (city.map ? COL.paved : COL.block);
       g.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0);
     }
-    // Lots (docs/REVAMP.md 6.2, W1): each lot in the colour of its type. With
-    // no lots (the island, or W1 not landed) the block colours above stay.
+    // Lots (docs/REVAMP.md 6.2, W1): each lot in the color of its type. With
+    // no lots (the island, or W1 not landed) the block colors above stay.
     if (Array.isArray(city.lots)) {
       for (const lot of city.lots) {
-        const c = LOT_COLOURS[lot.type];
+        const c = LOT_COLORS[lot.type];
         if (!c) continue;
         g.fillStyle = c;
         g.fillRect(lot.x0, lot.z0, lot.x1 - lot.x0, lot.z1 - lot.z0);
@@ -195,7 +195,7 @@ export function createMapRenderer(city) {
       g.fillStyle = w > 12 ? COL.avenue : COL.road;
       g.fillRect(n.x - wX / 2, n.z - wZ / 2, wX, wZ);
     }
-    // Avenue centre lines.
+    // Avenue center lines.
     g.strokeStyle = COL.avenueLine;
     g.globalAlpha = 0.55;
     g.lineWidth = 1.2;
@@ -262,15 +262,15 @@ export function createMinimap(canvas, mapRenderer) {
   function draw(s) {
     const sig = signature(s);
     const dh = Math.abs(Math.atan2(Math.sin(s.heading - last.heading), Math.cos(s.heading - last.heading)));
-    const thr = s.zoomMetres * 0.004; // ~0.35 px on screen
+    const thr = s.zoomMeters * 0.004; // ~0.35 px on screen
     if (
       Math.abs(s.x - last.x) < thr && Math.abs(s.z - last.z) < thr && dh < 0.004 &&
-      s.zoomMetres === last.zoom && sig === last.sig && s.blipCount === last.count
+      s.zoomMeters === last.zoom && sig === last.sig && s.blipCount === last.count
     ) return;
-    last.x = s.x; last.z = s.z; last.heading = s.heading; last.zoom = s.zoomMetres;
+    last.x = s.x; last.z = s.z; last.heading = s.heading; last.zoom = s.zoomMeters;
     last.sig = sig; last.count = s.blipCount;
 
-    const pxPerM = R / s.zoomMetres; // screen px per metre
+    const pxPerM = R / s.zoomMeters; // screen px per meter
     const k = pxPerM / mapScale; // map px -> screen px
     const rot = -Math.PI / 2 - s.heading;
     const cos = Math.cos(rot) * k, sin = Math.sin(rot) * k;
@@ -304,7 +304,7 @@ export function createMinimap(canvas, mapRenderer) {
     const lms = mapRenderer.city.mapLandmarks;
     if (lms) {
       // Dots for every landmark in view; the name of the one nearest the
-      // centre (inside 60% of the radius) when zoomed in enough to read.
+      // center (inside 60% of the radius) when zoomed in enough to read.
       let best = -1, bestD = (R * 0.6) ** 2;
       for (let i = 0; i < lms.length; i++) {
         const lm = lms[i];
@@ -320,7 +320,7 @@ export function createMinimap(canvas, mapRenderer) {
         const d = (px - cx) ** 2 + (py - cy) ** 2;
         if (d < bestD) { bestD = d; best = i; }
       }
-      if (best >= 0 && s.zoomMetres <= LANDMARK_NAME_ZOOM) {
+      if (best >= 0 && s.zoomMeters <= LANDMARK_NAME_ZOOM) {
         project(lms[best].x - s.x, lms[best].z - s.z);
         ctx.font = '700 9px system-ui, sans-serif';
         ctx.textAlign = 'center';
@@ -426,7 +426,7 @@ export function createMinimap(canvas, mapRenderer) {
   return {
     draw(s) {
       curRot = -Math.PI / 2 - s.heading;
-      curK = R / s.zoomMetres;
+      curK = R / s.zoomMeters;
       draw(s);
     },
     invalidate() { last.sig = 1e9; },
@@ -490,7 +490,7 @@ function injectCss() {
   document.head.appendChild(st);
 }
 
-// Icon drawn centred at (0,0) in a box of roughly +-s.
+// Icon drawn centered at (0,0) in a box of roughly +-s.
 function drawIcon(g, type, color, s) {
   g.fillStyle = color;
   g.strokeStyle = '#1a120d';
@@ -669,7 +669,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   root.appendChild(el);
 
   const g = canvas.getContext('2d');
-  const view = { cx: 0, cz: 0, ppm: 1, zoom: 1 }; // ppm: css px per metre
+  const view = { cx: 0, cz: 0, ppm: 1, zoom: 1 }; // ppm: css px per meter
   let fitPpm = 1;
   let cw = 1, ch = 1, dpr = 1;
   let opened = false;
@@ -1015,10 +1015,10 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
       }
     }
   });
-  function endPointer(e, cancelled) {
+  function endPointer(e, canceled) {
     if (!pointers.has(e.pointerId)) return;
     const p = pointers.get(e.pointerId);
-    const wasTap = !cancelled && pointers.size === 1 && gesture && !gesture.moved && performance.now() - gesture.t < 600;
+    const wasTap = !canceled && pointers.size === 1 && gesture && !gesture.moved && performance.now() - gesture.t < 600;
     pointers.delete(e.pointerId);
     if (wasTap) tap(p.x, p.y);
     startGesture();

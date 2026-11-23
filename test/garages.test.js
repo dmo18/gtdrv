@@ -16,7 +16,7 @@ import { createRng } from '../src/core/rng.js';
 import { defaultProgress } from '../src/core/save.js';
 import { createScore } from '../src/systems/score.js';
 import { createAdventures } from '../src/systems/adventures.js';
-import { createGarages, favouriteCar } from '../src/systems/garages.js';
+import { createGarages, favoriteCar } from '../src/systems/garages.js';
 import { createVehicle } from '../src/entities/vehicle.js';
 import { EXPLORE_KEY, defaultExplore, deriveExplore, saveExplore, storeCar } from '../src/core/explore.js';
 import { createExploreMeshes } from '../src/render/exploremesh.js';
@@ -44,7 +44,7 @@ test('twelve garages, ids and names as the contract, the same on every build', (
   assert.equal(GARAGE_BONUS, 500);
 });
 
-test('each garage is in its neighbourhood, within 300 m of its anchor; the Downtown one near the start', () => {
+test('each garage is in its neighborhood, within 300 m of its anchor; the Downtown one near the start', () => {
   for (const g of garages) {
     const d = GARAGE_DEFS.find((q) => q.id === g.id);
     assert.ok(Math.hypot(g.x - d.x, g.z - d.z) <= GARAGE_MOVE_MAX + RECT_D, `${g.id} moved ${Math.round(Math.hypot(g.x - d.x, g.z - d.z))} m`);
@@ -84,7 +84,7 @@ test('every rect is on land, off roads, 6 m clear of buildings, 12 m inland; the
       assert.ok(Math.hypot(dx, dz) >= 6, `${g.id} ${Math.hypot(dx, dz).toFixed(1)} m from a building`);
     }
     // Reachable: the door looks out at a road within reach (the forecourt
-    // and the 4 m pavement). Virginia Key has no road in the data.
+    // and the 4 m sidewalk). Virginia Key has no road in the data.
     if (g.id === 'g-key') {
       assert.equal(g.road, false);
       continue;
@@ -185,10 +185,10 @@ test('system: door opens within 15 m, GARAGE offered at the door when slow, firs
   assert.equal(game.player.mode, 'foot');
   assert.ok(car.removed);
   assert.equal(game.explore.state.garages.cars.length, 1);
-  // Repaint and favourite it, then take it out: it comes out on the bay.
+  // Repaint and favorite it, then take it out: it comes out on the bay.
   assert.equal(game.garages.repaint(0, PAINT_COLORS[5]).ok, true);
-  assert.equal(game.garages.favourite(0).fav, true);
-  assert.equal(favouriteCar(game).spec, 'muscle');
+  assert.equal(game.garages.favorite(0).fav, true);
+  assert.equal(favoriteCar(game).spec, 'muscle');
   const r = game.garages.takeOut(0);
   assert.equal(r.ok, true);
   assert.equal(r.vehicle.spec.id, 'muscle');
@@ -197,7 +197,7 @@ test('system: door opens within 15 m, GARAGE offered at the door when slow, firs
   assert.ok(Math.hypot(r.vehicle.x - g.bay.x, r.vehicle.z - g.bay.z) < 0.01);
   assert.equal(game.player.vehicle, r.vehicle);
   assert.equal(game.explore.state.garages.cars.length, 0);
-  assert.equal(favouriteCar(game).spec, 'muscle', 'the favourite out on the road still counts');
+  assert.equal(favoriteCar(game).spec, 'muscle', 'the favorite out on the road still counts');
   // The save went to its own key.
   assert.ok(st.map.has(EXPLORE_KEY));
   assert.ok(JSON.parse(st.map.get(EXPLORE_KEY)).garages.found.includes(g.id));
@@ -309,7 +309,7 @@ test('K8: driving a reward car that was never marked out marks it out', () => {
   assert.deepEqual(game.explore.state.garages.out, ['sunchaser']);
 });
 
-test('K7: the favourite car keeps its star after a reload and the live car is starred again', () => {
+test('K7: the favorite car keeps its star after a reload and the live car is starred again', () => {
   const st = memory();
   let game = boot(st);
   const g = garages[1];
@@ -318,12 +318,12 @@ test('K7: the favourite car keeps its star after a reload and the live car is st
   game.enterVehicle(car);
   visit(game, 1);
   assert.equal(game.garages.store().ok, true);
-  game.garages.favourite(0);
+  game.garages.favorite(0);
   const out = game.garages.takeOut(0).vehicle;
   assert.equal(out.fav, true);
   // Cold start: new game object, same storage; the session restored an unstarred copy.
   game = boot(st);
-  assert.equal(favouriteCar(game).spec, 'muscle', 'the title Start still uses it');
+  assert.equal(favoriteCar(game).spec, 'muscle', 'the title Start still uses it');
   const again = createVehicle('muscle', 0, 0, 0, game.rng);
   again.color = out.color;
   game.addVehicle(again);
@@ -334,7 +334,7 @@ test('K7: the favourite car keeps its star after a reload and the live car is st
   again.wrecked = true;
   at(game, 0, 0, 40);
   assert.equal(game.explore.state.garages.road, null);
-  assert.equal(favouriteCar(game), null);
+  assert.equal(favoriteCar(game), null);
 });
 
 test('shed: stored cars are drawn inside the open garage, only the nearest, up to four', () => {

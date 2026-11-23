@@ -320,7 +320,7 @@ async function liveLayout(check) {
       add('steer', document.querySelector('.rw-wheel'), false);
       add('steer', document.querySelector('.rw-pad'), false);
       add('steer', document.querySelector('.rw-stick'), false);
-      // text on pills: colour, background (own), opacity along the chain
+      // text on pills: color, background (own), opacity along the chain
       const texts = [];
       for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-m1', '.rw-m2', '.rw-objcell', '.rw-wanted', '.rw-prompt', '.rw-ammo .rw-face']) {
         const e = document.querySelector(sel);
@@ -422,14 +422,14 @@ async function liveLayout(check) {
       // the stack holds its content; its two message rows are one line of 28 px each and never go past y = 100 + T
       const st = el.find((q) => q.key === 'stack');
       for (const k of el.filter((q) => ['stars', 'objcell', 'cool', 'm1', 'm2'].includes(q.key))) {
-        if (st && (k.b > st.b + 0.5 || k.y < st.y - 0.5 || k.x < st.x - 0.5 || k.r > st.r + 0.5)) bad(`${k.key} spills out of the top centre stack`);
+        if (st && (k.b > st.b + 0.5 || k.y < st.y - 0.5 || k.x < st.x - 0.5 || k.r > st.r + 0.5)) bad(`${k.key} spills out of the top center stack`);
         if ((k.key === 'm1' || k.key === 'm2') && Math.abs(k.h - 28) > 0.5) bad(`${k.key} is ${k.h.toFixed(1)} high, not one 28 px line`);
         if (k.b > 100.5) bad(`${k.key} ends at ${k.b.toFixed(1)}, past y 100`);
       }
-      // a message pill is centred in its row
+      // a message pill is centered in its row
       for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
         const row = grid[k.key];
-        if (Math.abs((k.x + k.r) / 2 - (grid.loose ? grid.V / 2 : row[0] + row[2] / 2)) > 2) bad(`${k.key} is not centred in its row`);
+        if (Math.abs((k.x + k.r) / 2 - (grid.loose ? grid.V / 2 : row[0] + row[2] / 2)) > 2) bad(`${k.key} is not centered in its row`);
       }
       // HG-2: at most one control in the BOOST cell (BOOST, or GARAGE and TALK); BOOST hides while an offer shows
       const cell = el.filter((q) => q.key === 'boost');
@@ -514,7 +514,7 @@ async function liveLayout(check) {
         }
       }
     }
-    // HG-3 to HG-5 (docs/REVAMP.md 6.12): the top centre stack with every item forced on in the same frame,
+    // HG-3 to HG-5 (docs/REVAMP.md 6.12): the top center stack with every item forced on in the same frame,
     // a 200 character toast, and the stack against the speed readout with the minimap grown.
     let hgStates = 0;
     const hgProblems = [];
@@ -640,7 +640,7 @@ async function liveLayout(check) {
       }
     }
     for (const p of hgProblems.slice(0, 40)) console.log('   ', p);
-    check(`top centre stack: ${hgStates} states: HG-3 everything on at once, HG-4 long toast, HG-5 clear of the speed readout, score, fan and ammo panel`, hgProblems.length === 0, `(${hgProblems.length} problems)`);
+    check(`top center stack: ${hgStates} states: HG-3 everything on at once, HG-4 long toast, HG-5 clear of the speed readout, score, fan and ammo panel`, hgProblems.length === 0, `(${hgProblems.length} problems)`);
     // The title screen (docs/REVAMP.md 6.8): name, Start (Loading until ready), Continue only when offered, credit, version.
     for (const [w, h] of [[915, 412], [780, 360], [748, 360]]) {
       const tc = await br.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
@@ -822,7 +822,7 @@ try {
   await turn(1, wb, 60, 150);
   check('wheel past 120 deg -> full right', (await read('rw.input.steer')) === 1);
   await turn(1, wb, 150, -150, 8);
-  check('wheel turned back past centre -> full left', (await read('rw.input.steer')) === -1);
+  check('wheel turned back past center -> full left', (await read('rw.input.steer')) === -1);
   // The finger went 30 deg past the stop; turning back moves the wheel at once.
   await turn(1, wb, -150, -60);
   const stm30 = await read('rw.input.steer');
@@ -830,8 +830,8 @@ try {
   await shot('car-wheel-active-915x412.png');
   await up(1);
   check('wheel released -> steer 0', (await read('rw.input.steer')) === 0);
-  check('wheel springs back to centre', (await wheelRot()) === '' && await page.evaluate(() => document.querySelector('.rw-wheel').classList.contains('rw-spring')));
-  // Grabbing the wheel off-centre (anywhere in the zone) is relative to the touch.
+  check('wheel springs back to center', (await wheelRot()) === '' && await page.evaluate(() => document.querySelector('.rw-wheel').classList.contains('rw-spring')));
+  // Grabbing the wheel off-center (anywhere in the zone) is relative to the touch.
   await down(1, wb.x + 120, wb.y - 20);
   check('grab away from the rim: no jump', (await read('rw.input.steer')) === 0);
   await move(1, wb.x + 115, wb.y + 30);
@@ -871,7 +871,7 @@ try {
   const b2 = await read('rw.input.steer');
   check('button release: target 0 at once (the car returns the wheel)', b2 === 0, `${b2}`);
   await tick(5);
-  check('button back at centre', (await read('rw.input.steer')) === 0);
+  check('button back at center', (await read('rw.input.steer')) === 0);
   await tick(15, 1 / 30); // frame-rate independent: 0.3 s at 30 Hz
   await down(3, sl.x, sl.y);
   await tick(10, 1 / 30);
@@ -884,7 +884,7 @@ try {
   await shot('car-buttons-780x360.png');
   await page.setViewportSize({ width: 915, height: 412 });
 
-  // ---- steering style: slider (absolute, 90 px from the bar centre is full lock, docs/REVAMP.md 6.3) ----
+  // ---- steering style: slider (absolute, 90 px from the bar center is full lock, docs/REVAMP.md 6.3) ----
   await page.evaluate(() => rw.touch.setSteering('slider', 1));
   const pb = await page.evaluate(() => { const r = document.querySelector('.rw-pad').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await down(1, pb.x + 45, pb.y);
@@ -895,7 +895,7 @@ try {
   await drag(1, pb.x + 120, pb.y, pb.x - 300, pb.y, 16);
   check('slider far left (off the bar) still steers full left', (await read('rw.input.steer')) === -1);
   await move(1, pb.x, pb.y);
-  check('slider centre -> 0', (await read('rw.input.steer')) === 0);
+  check('slider center -> 0', (await read('rw.input.steer')) === 0);
   await page.evaluate(() => rw.touch.setSteering('slider', 1.5));
   await move(1, pb.x + 45, pb.y);
   const s55b = await read('rw.input.steer');
@@ -915,7 +915,7 @@ try {
 
   // ---- steering style: tilt ----
   check('tilt accepted when the API exists', (await page.evaluate(() => rw.touch.setSteering('tilt', 1))) === 'tilt');
-  const tb = await center('Tilt steering (tap the steering area to re-centre)');
+  const tb = await center('Tilt steering (tap the steering area to re-center)');
   check('tilt indicator where the wheel was', tb.x < 200 && tb.y > 300, JSON.stringify(tb));
   const tiltNow = async (beta, gamma) => {
     await page.evaluate(([b, g]) => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { beta: b, gamma: g, alpha: 0 })), [beta, gamma]);
@@ -939,11 +939,11 @@ try {
   await page.waitForTimeout(150);
   await shot('car-tilt-780x360.png');
   await page.setViewportSize({ width: 915, height: 412 });
-  // Tap the bar to re-centre on the current pose.
+  // Tap the bar to re-center on the current pose.
   await down(3, tb.x, tb.y);
   await up(3);
   const tc = await tiltNow(...pose);
-  check('tap re-centres tilt', Math.abs(tc.steer) < 0.02, JSON.stringify(tc));
+  check('tap re-centers tilt', Math.abs(tc.steer) < 0.02, JSON.stringify(tc));
   // No sensor events: falls back to the wheel and reports it.
   await page.evaluate(() => { rw.touch.setSteering('wheel'); rw.fallbacks.length = 0; rw.touch.setSteering('tilt'); });
   await page.waitForTimeout(2800);
@@ -1058,7 +1058,7 @@ try {
   check('3 wanted badges lit', (await page.locator('.rw-badge.rw-on').count()) === 3);
   check('wanted row visible', await page.locator('.rw-wanted').isVisible());
   check('speed text (87.4 km/h shown as 54 mph)', (await page.textContent('.rw-speed')).startsWith('54'));
-  check('clock text', (await page.textContent('.rw-clock')) === '13:30');
+  check('clock text', (await page.textContent('.rw-clock')) === '1:30 PM');
   check('minimap canvas 176', await page.evaluate(() => rw.hud.minimapCanvas.width === 176));
   await page.evaluate(() => rw.hud.update({ mode: 'car', speedKmh: 0, health: 80, armor: 40, score: 1, pending: 0, combo: 1, wanted: 0,
     district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null }));
@@ -1708,7 +1708,7 @@ try {
     return { deg: Math.acos((dx * r.dx + dy * r.dy + dz * r.dz) / l) * 180 / Math.PI, lock: rw.chud.lock === e,
       ring: !!document.querySelector('.rw-tgt.rw-locked'), btn: !!document.querySelector('.rw-lock.rw-on') };
   });
-  check('lock-on keeps a moving target near the centre', follow.lock && follow.deg < 6, JSON.stringify(follow));
+  check('lock-on keeps a moving target near the center', follow.lock && follow.deg < 6, JSON.stringify(follow));
   check('lock ring and LOCK button lit', follow.ring && follow.btn);
   await shot('aim-lock-915x412.png');
   // A swipe flicks to the next target on that side.

@@ -7,7 +7,7 @@
 // the flying and the scoring. Docs: docs/SPEC.md "Stunt jumps".
 import { createRng } from '../core/rng.js';
 
-// Shapes (metres): slope length, flat top length, height, width.
+// Shapes (meters): slope length, flat top length, height, width.
 export const RAMP_LAND = { slope: 6, top: 4, height: 1.5, width: 6.5 };
 export const RAMP_WATER = { slope: 7, top: 2.5, height: 1.25, width: 6 };
 export const STREET_RAMPS = 4; // quiet-street ramps, plus the two at the airfield dock
@@ -82,7 +82,7 @@ function clearOfBuildings(city, x, z, r) {
 
 // The ramps for a city: a few on quiet streets (seeded pick of
 // residential, park, beach and industrial street middles, spread apart)
-// and two at the airfield dock (one on the quay, one in the water).
+// and two at the airfield dock (one on the pier, one in the water).
 export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
   const out = [];
   if (!city || !city.nodes || !city.edges) return out;
@@ -132,13 +132,13 @@ export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
 }
 
 // The two ramps at the airfield dock (the last pier is the dock off the
-// islet's south edge): one on the quay, one in the water.
+// islet's south edge): one on the pier, one in the water.
 function dockRamps(city, out) {
   const af = city.airfield;
   const dock = city.piers && city.piers.length ? city.piers[city.piers.length - 1] : null;
   if (af && af.islet && dock) {
     const dx = (dock.x0 + dock.x1) / 2;
-    // On the quay: the strip of islet between the depot wall and the sea.
+    // On the pier: the strip of islet between the depot wall and the sea.
     const qz = af.islet.z1 - 11;
     for (const off of [-70, -100, -130, -40]) {
       const qx = dx + off;
@@ -160,7 +160,7 @@ function dockRamps(city, out) {
 // the whole box still throws (a data change the tests must catch).
 export function placeRamps(city, spec) {
   const out = [];
-  const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6; // m of straight road each side of the centre
+  const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6; // m of straight road each side of the center
   for (const r of spec) {
     let best = null, bd = Infinity;
     for (const e of city.edges) {

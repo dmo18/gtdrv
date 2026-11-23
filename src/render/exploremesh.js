@@ -24,7 +24,7 @@ const DOOR_TOP = 3.6;
 // Where stored cars stand inside a shed: [x along the door axis (negative =
 // inside), z across, extra heading]. Shed interior is 9.2 m wide, 13.6 deep.
 const STORE_SLOTS = [[-5.2, -2.2, 0.08], [-5.2, 2.2, -0.06], [-10.2, -2.2, -0.04], [-10.2, 2.2, 0.05]];
-// Wall and trim colours, one of a few per garage (by its index).
+// Wall and trim colors, one of a few per garage (by its index).
 const SKINS = [
   [0x8e8a80, 0x6f6c66, 0xc2452d], [0x7b8794, 0x5d6772, 0xe0a526], [0x9b8f7a, 0x77705f, 0x2c7a7b],
   [0x8a7f86, 0x6c6369, 0x3a7bd5],
@@ -45,7 +45,7 @@ function buildShed(g, k, idx) {
   }
   // A pitched-look roof slab with an overhang at the front.
   k.box(-D - 0.4, -H - 0.5, 0.8, H + 0.5, Y, Y + 0.25, 0x3f4246, 0x4a4e53);
-  // Coloured trim band and a sign board over the door.
+  // Colored trim band and a sign board over the door.
   k.box(0.1, -H, 0.16, H, DOOR_TOP + 0.05, DOOR_TOP + 0.3, trim, trim);
   k.box(0.12, -2.6, 0.22, 2.6, DOOR_TOP + 0.35, Y - 0.1, 0xf1ead8, 0xf1ead8);
   k.box(0.22, -2.3, 0.26, 2.3, DOOR_TOP + 0.5, Y - 0.25, trim, trim);

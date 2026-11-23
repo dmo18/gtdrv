@@ -237,7 +237,7 @@ test('buildings: no box on a road strip, inside the crop, on land; collision wor
     city.edgesNear(cx, cz, r + 1, near);
     for (const id of near) {
       const e = city.edges[id], a = city.nodes[e.a], c = city.nodes[e.b];
-      // Sample the centreline: no point within half a road width of the box.
+      // Sample the centerline: no point within half a road width of the box.
       for (let t = 0; t <= 1; t += 0.02) {
         const x = a.x + (c.x - a.x) * t, z = a.z + (c.z - a.z) * t;
         const dx = Math.max(b.x0 - x, 0, x - b.x1), dz = Math.max(b.z0 - z, 0, z - b.z1);
@@ -258,7 +258,7 @@ test('buildings: no box on a road strip, inside the crop, on land; collision wor
   const world = { collision, city, time: 0 };
   for (let k = 0; k < 120; k++) stepVehicle(v, { steer: 0, throttle: 1, brake: 0, handbrake: false }, 1 / 60, world);
   assert.ok(v.x < big.x0 + 0.5, `car went into the building (${v.x.toFixed(1)} vs ${big.x0.toFixed(1)})`);
-  // Blocks are clear of roads and every building in a block keeps its pavement.
+  // Blocks are clear of roads and every building in a block keeps its sidewalk.
   for (const k of city.blocks) {
     city.edgesNear((k.x0 + k.x1) / 2, (k.z0 + k.z1) / 2, Math.hypot(k.x1 - k.x0, k.z1 - k.z0) / 2, near);
     for (const id of near) {
@@ -339,7 +339,7 @@ test('helpers are cheap on the whole box: 1e5 calls of shoreDist, onRoad, distri
   assert.ok(ms < 400, `${ms.toFixed(0)} ms`);
 });
 
-test('edge grid: the traffic and police neighbour scans see the same edges as a full scan, much faster', () => {
+test('edge grid: the traffic and police neighbor scans see the same edges as a full scan, much faster', () => {
   const out = [];
   let tGrid = 0, tFull = 0;
   for (let i = 0; i < 300; i++) {

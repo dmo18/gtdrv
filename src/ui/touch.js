@@ -228,7 +228,7 @@ export function createTouchControls(root, input, opts = {}) {
   const stick = gate(el('div', 'rw-stick', layer), 'foot', 'plane', 'heli', 'tank');
   const stickKnob = el('div', 'rw-knob', stick);
   const origin = { x: 0, y: 0 };
-  // Wheel tracking: centre, last touch angle, accumulated wheel angle (deg).
+  // Wheel tracking: center, last touch angle, accumulated wheel angle (deg).
   const wh = { cx: 0, cy: 0, last: 0, angle: 0, have: false };
 
   // The inset in px. The custom property holds an unevaluated max(env(...)),
@@ -288,7 +288,7 @@ export function createTouchControls(root, input, opts = {}) {
       maybeAskTilt();
       if (steerMode()) {
         if (style === 'tilt') {
-          // A touch in the steering zone re-centres tilt (the bar is a display).
+          // A touch in the steering zone re-centers tilt (the bar is a display).
           tilt.zero += tilt.smooth;
           tilt.smooth = 0;
           vibrate();
@@ -397,7 +397,7 @@ export function createTouchControls(root, input, opts = {}) {
   const tiltBar = gate(el('button', 'rw-btn rw-tiltbar rw-st-tilt rw-pri', layer), 'car', 'boat');
   tiltBar.type = 'button';
   tiltBar.tabIndex = -1;
-  tiltBar.setAttribute('aria-label', 'Tilt steering (tap the steering area to re-centre)');
+  tiltBar.setAttribute('aria-label', 'Tilt steering (tap the steering area to re-center)');
   tiltBar.setAttribute('aria-disabled', 'true');
   const tiltFace = el('span', 'rw-face', tiltBar);
   const tiltTrack = el('span', 'rw-tilt-track', tiltFace);
@@ -707,7 +707,7 @@ export function createTouchControls(root, input, opts = {}) {
     wheelSlices.push(sl);
   }
   const wheelLabel = el('div', 'rw-ww-label', wheelEl);
-  const wheelCtr = { x: 0, y: 0 }; // ring centre in client px
+  const wheelCtr = { x: 0, y: 0 }; // ring center in client px
   const wheelPos = { x: 0, y: 0 };
   const wheelAvoid = [{ l: 0, t: 0, r: 0, b: 0 }, { l: 0, t: 0, r: 0, b: 0 }];
   let wheelOpen = false, wheelSel = WHEEL_KEEP, swapTimer = 0, picker = null;
@@ -754,7 +754,7 @@ export function createTouchControls(root, input, opts = {}) {
     wheelEl.classList.add('rw-ww-open');
     wheelEl.setAttribute('aria-hidden', 'false');
     vibrate();
-    // A throw being aimed is cancelled; the wheel then picks the weapon.
+    // A throw being aimed is canceled; the wheel then picks the weapon.
     input.press('cancel');
     input.release('cancel');
   }

@@ -1,10 +1,10 @@
 // Geometry helpers for smooth procedural vehicles: an accumulator that
-// collects vertices with colour, surface class and uv, a lofted grid
+// collects vertices with color, surface class and uv, a lofted grid
 // emitter with crease-aware smooth normals, and a monotone curve.
 import * as THREE from 'three';
 
 const linCache = new Map();
-// Linear RGB triple for an sRGB hex colour (cached).
+// Linear RGB triple for an sRGB hex color (cached).
 export function lin(hex) {
   let c = linCache.get(hex);
   if (!c) {
@@ -39,7 +39,7 @@ export class Acc {
     this.i.push(a, b, c);
   }
 
-  // Append a three.js geometry with one colour and class. `m` is an
+  // Append a three.js geometry with one color and class. `m` is an
   // optional Matrix4 applied first. Flat normals are recomputed when the
   // geometry has none.
   geo(g, hex, cls, m = null, u = 0, v = 0) {
@@ -80,8 +80,8 @@ export class Acc {
 
 // Emit a lofted grid. P[i][r] = [x, y, z]: stations i (any order along
 // the body) by ring points r. Face (i, r) spans i..i+1, r..r+1. `fn(i, r,
-// c, n)` gets the face centre and unit normal and returns null (skip) or
-// { col, cls, u, v }. Vertex normals average neighbouring faces within
+// c, n)` gets the face center and unit normal and returns null (skip) or
+// { col, cls, u, v }. Vertex normals average neighboring faces within
 // the crease angle, so curved panels are smooth and sharp edges stay
 // sharp. `offset` pushes vertices out along their normals (lamp lenses).
 // `flip` reverses the winding (for grids built inside out).
@@ -209,7 +209,7 @@ export function spow(c, e) {
 }
 
 // A lathe (surface of revolution about the local z axis) from a profile
-// of [radius, z] points, `seg` segments, with per-face colour callback
+// of [radius, z] points, `seg` segments, with per-face color callback
 // fn(segIndex, profileIndex) -> { col, cls } | null. Smooth normals
 // along the ring, crease-aware along the profile.
 export function lathe(acc, profile, seg, fn, opts = {}) {

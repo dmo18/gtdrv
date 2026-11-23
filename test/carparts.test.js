@@ -8,14 +8,14 @@ import {
 
 const car = (id, extra = {}) => ({ id, kind: 'car', color: 0x3060c0, spec: { length: 4.5, width: 1.8, height: 1.4 }, ...extra });
 
-test('a car throws 14 to 18 parts with a door, a wheel, the bonnet and a bumper', () => {
+test('a car throws 14 to 18 parts with a door, a wheel, the hood and a bumper', () => {
   for (let id = 0; id < 30; id++) {
     const P = createParts();
     const out = {};
     const n = launchCarParts(P, car(id), 0, 0.7, 0, out);
     assert.ok(n >= 14 && n <= 18, `${n} parts`);
     assert.equal(liveParts(P), n);
-    assert.ok(out.door >= 1 && out.wheel >= 1 && out.bonnet === 1 && out.bumper === 1, JSON.stringify(out));
+    assert.ok(out.door >= 1 && out.wheel >= 1 && out.hood === 1 && out.bumper === 1, JSON.stringify(out));
     assert.equal(out.door, 2, 'an empty pool has room for the second door');
     assert.equal(out.wheel, 2);
     for (let i = 0; i < P.max; i++) {
@@ -89,6 +89,6 @@ test('the pool of 96 is a hard cap; the oldest parts make room', () => {
   const Q = createParts();
   const out = {};
   launchCarParts(Q, { id: 1, kind: 'tank', color: 0x556644, spec: { length: 7, width: 3.4, height: 2.4 } }, 0, 1, 0, out);
-  assert.equal(out.door + out.wheel + out.bonnet + out.bumper, 0);
+  assert.equal(out.door + out.wheel + out.hood + out.bumper, 0);
   assert.ok([...Q.kind].includes(PART.panel));
 });

@@ -197,8 +197,8 @@ characters, weapons, user interface, icons, the feature graphic, the
 screenshots and the audio were created for this game, either drawn in code or
 generated procedurally at runtime or build time. The game does not use art,
 audio, names, characters, maps, logos or trademarks from any existing game,
-film, brand or real organisation, and no third party game assets were
+film, brand or real organization, and no third party game assets were
 copied. The only third party code is the open source three.js library (MIT
-licence) used for 3D rendering, bundled into the app. Names of fictional
+license) used for 3D rendering, bundled into the app. Names of fictional
 places and shops in the game are invented, and any resemblance to real
 businesses is accidental.

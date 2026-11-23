@@ -8,7 +8,7 @@
 //   ambulance   `treat`  tap: revives a body lying close by; in hard mode
 //               heals the player (and seated regen); in normal mode, with
 //               nobody to treat, refills the boost meter.
-//   garbage     `lift`   tap: lifts and empties a kerb bin into the hopper;
+//   garbage     `lift`   tap: lifts and empties a curb bin into the hopper;
 //               with no bin in reach the crusher takes small wreck parts.
 //   tow truck   `hook`   tap: hooks the car behind and tows it as a one-axle
 //               trailer (pure kinematics); tap again to drop it.
@@ -92,7 +92,7 @@ function hitsSolid(city, x, z, cache, m = 0.3) {
 }
 const inGarage = (city, x, z, m) => !!(city.garages && city.garages.some((g) => x > g.x0 - m && x < g.x1 + m && z > g.z0 - m && z < g.z1 + m));
 // Nearest road surface: distance from (x, z) to the carriageway edge of
-// the nearest edge, the point on its centre line, the edge.
+// the nearest edge, the point on its center line, the edge.
 const EDGES = [];
 export function nearestRoad(city, x, z, r = 60) {
   let best = null, bd = Infinity, px = 0, pz = 0;
@@ -204,7 +204,7 @@ export function roadDistances(city, x0, z0) {
 }
 
 // The island (no lots, no hand list): one of each kind, seeded, on the
-// largest open car parks (rows of lot bays), 400 m apart.
+// largest open parking lots (rows of lot bays), 400 m apart.
 export function planIslandSpots(city, seed = 6011) {
   const groups = new Map();
   for (const s of city.parkingSpots || []) {
@@ -226,7 +226,7 @@ export function planIslandSpots(city, seed = 6011) {
     const x = sx / g.list.length, z = sz / g.list.length;
     if (out.some((o) => Math.hypot(o.x - x, o.z - z) < SPOT_RULES.apart)) continue;
     const heading = (g.alongX ? 0 : Math.PI / 2) + (rng.next() < 0.5 ? 0 : Math.PI);
-    out.push({ kind: kinds[out.length], x, z, heading, name: 'Car park' });
+    out.push({ kind: kinds[out.length], x, z, heading, name: 'Parking lot' });
   }
   return out;
 }
@@ -234,7 +234,7 @@ export function planIslandSpots(city, seed = 6011) {
 // A region build (docs/PLAN_V2.md 3.3) parks the service vehicles whose
 // home SERVICE_SPOTS puts inside its crop (SERVICE_MARGIN m in: a bay at
 // Downtown's very edge still stays) and a road of the region reaches, plus one patrol bay when none of them
-// is a police home: the nearest car park, works or plaza lot 60 m or more
+// is a police home: the nearest parking lot, works or plaza lot 60 m or more
 // from the start place that passes checkSpot. The whole box and the island
 // get the list unchanged. Pure; same city, same list.
 export const SERVICE_MARGIN = 8;
@@ -770,7 +770,7 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
     TL.hx = v.x - ch * (v.spec.length / 2 + H.hitch);
     TL.hz = v.z - sh * (v.spec.length / 2 + H.hitch);
     const wb = c.spec.wheelBase || c.spec.length * 0.6;
-    // The far axle where the car is now (centre minus half the wheelbase
+    // The far axle where the car is now (center minus half the wheelbase
     // toward its far end).
     const ax = c.x - Math.cos(c.heading) * s.nearSign * (wb / 2), az = c.z - Math.sin(c.heading) * s.nearSign * (wb / 2);
     let ux = TL.hx - ax, uz = TL.hz - az;
@@ -915,7 +915,7 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
   // Parked service vehicles at their homes (6.11 "Where they park").
   const homes = spots.map((s) => ({ s, v: null, back: 0 }));
   // Ordinary parked cars keep off the service homes (src/systems/parked.js
-  // fills the kerb and lot bays): their bays near a home are taken.
+  // fills the curb and lot bays): their bays near a home are taken.
   const parked = game.systems ? game.systems.find((q) => q && q.name === 'parked') : null;
   if (parked && parked.spots && parked.spotsNear) {
     // The parked spots' grid index: only the bays round each home.

@@ -1,5 +1,5 @@
 // Vehicle simulation: a single-track ("bicycle") car model with a
-// saturating tyre curve per axle, load transfer, an automatic gearbox and
+// saturating tire curve per axle, load transfer, an automatic gearbox and
 // a stability assist, plus static collision against the world and simple
 // vehicle-vs-vehicle contact.
 // Pure logic (no three.js, no DOM). Heading 0 faces +x, forward vector is
@@ -11,7 +11,7 @@
 // - `steer` smoothed input (-1..1), `steerAngle` front wheel angle (rad).
 // - `pitch`/`roll` body motion from a damped spring (visual only),
 //   `suspension` 0..1 extra wheel travel after an impact (decays).
-// - `slip` 0..1 tyre squeal / skid amount, `abs` true while ABS works.
+// - `slip` 0..1 tire squeal / skid amount, `abs` true while ABS works.
 import { clamp, angleDiff } from '../core/rng.js';
 import { stepBoost, CAR_BOOST } from './boost.js';
 import { SERVICE_SPECS } from './servicevehicles.js'; // V1 service vehicles, merged below the reward cars
@@ -25,11 +25,11 @@ const G = 9.81;
 // Handling and drivetrain fields:
 //   drive 'fwd'|'rwd'|'awd', gears (forward gear count), power (kW),
 //   firstGear (m/s at the redline in 1st), cgFront (share of weight on the
-//   front axle), grip (peak tyre friction, the lateral grip in g is about
-//   `lateralGrip(spec)`), brake (pedal decel request, m/s^2; the tyres
+//   front axle), grip (peak tire friction, the lateral grip in g is about
+//   `lateralGrip(spec)`), brake (pedal decel request, m/s^2; the tires
 //   limit it), steerMax (true front wheel angle at walking pace, rad, the
 //   same in both modes), lockRate / returnRate (full locks per second
-//   away from / back toward the centre), accel (rough launch acceleration,
+//   away from / back toward the center), accel (rough launch acceleration,
 //   m/s^2, informative). Tuned to the bands of src/entities/handlingbands.js.
 export const VEHICLE_SPECS = {
   compact: {
@@ -116,7 +116,7 @@ export const VEHICLE_SPECS = {
   },
 };
 // The three reward cars of docs/REVAMP.md 6.6 (the Ghostwake pattern: an
-// existing chassis and body, their own id, label and one colour).
+// existing chassis and body, their own id, label and one color).
 function rewardCar(base, id, label, power, o) {
   const b = VEHICLE_SPECS[base];
   return Object.assign({}, b, { id, label, power: Math.round(b.power * power), reward: true }, o);
@@ -190,20 +190,20 @@ function approach(v, target, step) {
 // Tuning constants.
 const IDLE = 0.14; // idle rpm as a fraction of the redline
 const RP = 0.75; // rpm fraction where the engine makes its rated power
-const NSUB = 3; // tyre-dynamics sub-steps per simulation step
+const NSUB = 3; // tire-dynamics sub-steps per simulation step
 const V0 = 4; // m/s: slip angles use at least this speed (low-speed sanity)
 const KIN_V = 4; // below this the car blends into a no-slip kinematic model
 const ROLL_RES = 0.013; // rolling resistance coefficient
-const ABS_K = 0.95; // ABS keeps braking at this share of the tyre limit
-const HB_K = 0.8; // locked rear tyres slide at this share of grip
-const LONG_K = 1.08; // tyres grip a little more in a straight line than sideways
+const ABS_K = 0.95; // ABS keeps braking at this share of the tire limit
+const HB_K = 0.8; // locked rear tires slide at this share of grip
+const LONG_K = 1.08; // tires grip a little more in a straight line than sideways
 const COMB = 0.85; // friction ellipse weight of the longitudinal force
 const PEDAL_S = 1.0; // brake pedal S-curve strength (see brakePedal); 0 = linear
 const BRAKE_BUILD = 9; // brake pressure rise, full pedal per second
 const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
 const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse
 const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
-const REAR_K = 1.08; // rear tyres a little grippier than the front: the car settles at the limit (both modes)
+const REAR_K = 1.08; // rear tires a little grippier than the front: the car settles at the limit (both modes)
 // Rear slip (share of its peak) when the front is at its peak in a steady turn.
 const XR_REAR = 1 - Math.sqrt(1 - 1 / REAR_K);
 const TC_X = 1.0; // traction control starts at the rear peak slip
@@ -214,7 +214,7 @@ const ASK_V1 = 10, ASK_V2 = 20; // m/s: Sim's full-input ask ramps in between
 // the same steering timing (lockRate, returnRate, steerMax) and the same
 // input; they differ only in these rows:
 //   latK     lateral grip = latK * spec.grip
-//   fall     tyre force sag past the peak slip
+//   fall     tire force sag past the peak slip
 //   ask      share of lateral grip that full steering input asks for
 //   assist   stability assist (yaw and slide correction) on
 //   yawK / yawFirm  yaw assist gains (under / over rotating); sim keeps a
@@ -225,7 +225,7 @@ const ASK_V1 = 10, ASK_V2 = 20; // m/s: Sim's full-input ask ramps in between
 //            it recovers by itself; off = free slide while held
 //   transfer share of the longitudinal weight transfer the lateral grip
 //            (the balance) sees; braking and traction always see all of it
-//   squeal   tyre squeal onset in multiples of the peak slip
+//   squeal   tire squeal onset in multiples of the peak slip
 const HANDLING = {
   arcade: {
     latK: 1.06, fall: 0.05, ask: 1.0, assist: true, yawK: 10, yawFirm: 4, betaK: 150,
@@ -238,7 +238,7 @@ const HANDLING = {
 };
 let handlingMode = 'arcade';
 let H = HANDLING.arcade;
-let FALL = H.fall; // tyre force falls this much past the peak slip
+let FALL = H.fall; // tire force falls this much past the peak slip
 
 // Pick the handling for every car: 'arcade' (default) or 'sim'. Anything
 // else means 'arcade'.
@@ -253,20 +253,20 @@ export function getHandlingMode() {
   return handlingMode;
 }
 
-// Lateral tyre friction of a spec in the current mode.
+// Lateral tire friction of a spec in the current mode.
 export function lateralGrip(spec) {
   return H.latK * spec.grip;
 }
 
-// Normalised engine torque, peak around 60% of the redline.
+// Normalized engine torque, peak around 60% of the redline.
 function torque(r) {
   const t = (r - 0.6) / 0.45;
   return 1 - 0.3 * t * t;
 }
 
-// Saturating tyre curve: x = slip / peak slip. Rises linearly, peaks at
+// Saturating tire curve: x = slip / peak slip. Rises linearly, peaks at
 // x = 1, then sags toward (1 - FALL) in a full slide.
-function tyre(x) {
+function tire(x) {
   const ax = x < 0 ? -x : x;
   let y;
   if (ax < 1) y = ax * (2 - ax);
@@ -285,9 +285,9 @@ export function brakePedal(p) {
   return x + PEDAL_S * x * (1 - x) * (1 - 2 * x);
 }
 
-// The tyre curve of the current mode (tests and tools).
-export function tyreCurve(x) {
-  return tyre(x);
+// The tire curve of the current mode (tests and tools).
+export function tireCurve(x) {
+  return tire(x);
 }
 
 // A copy of a mode's handling row (tests and tools).
@@ -336,7 +336,7 @@ function derive(s) {
 // never simply spins the car. `steer` (-1..1, from the player or an AI
 // planner) is a share of it: a planner that wants a path curvature k sends
 // atan(k * wheelBase) / steerLock(spec, u) and gets about k (test A1). The
-// real wheel angle adds the tyres' slip angles (steerAngle).
+// real wheel angle adds the tires' slip angles (steerAngle).
 export function steerLock(spec, u) {
   return steerGeo(spec, u, 1);
 }
@@ -354,8 +354,8 @@ function askAt(au) {
 // Front wheel angle for a steer share s (-1..1) at speed u. At walking
 // pace s * steerMax. Above that the angle is built so the steady path
 // curvature is the share s of the full-lock curvature (accuracy test A1):
-// the geometric angle s * L * kappa plus the slip angles the tyres need
-// for that share of grip on the curve tyreCurve (front at s * ask of its
+// the geometric angle s * L * kappa plus the slip angles the tires need
+// for that share of grip on the curve tireCurve (front at s * ask of its
 // peak, rear at the share its extra REAR_K grip leaves).
 export function steerAngle(spec, u, s) {
   const d = derive(spec);
@@ -391,24 +391,24 @@ function steerGeo(spec, u, s) {
   return full >= spec.steerMax ? s * spec.steerMax : s * geo;
 }
 
-// Move the steering value toward its target: away from the centre at
+// Move the steering value toward its target: away from the center at
 // `lockRate` full locks per second, toward it at `returnRate`, and through
-// the centre at the return rate first when the target is on the other side.
+// the center at the return rate first when the target is on the other side.
 export function steerToward(cur, target, lockRate, returnRate, dt) {
   if (cur === target || !(dt > 0)) return cur;
   const away = cur === 0 ? true : cur > 0 ? target > cur : target < cur;
   if (away) return approach(cur, target, lockRate * dt);
-  // Toward the centre: stop at the target if it is on the same side.
+  // Toward the center: stop at the target if it is on the same side.
   const stop = target * cur > 0 ? target : 0;
   const need = cur > stop ? cur - stop : stop - cur;
   const step = returnRate * dt;
   if (step <= need) return cur > stop ? cur - step : cur + step;
   if (stop === target) return target;
-  // Crossed the centre: spend the rest of the step at the lock rate.
+  // Crossed the center: spend the rest of the step at the lock rate.
   return approach(0, target, lockRate * (step - need) / returnRate);
 }
 
-const MAX_SUBSTEP_MOVE = 0.3; // metres per collision sub-step
+const MAX_SUBSTEP_MOVE = 0.3; // meters per collision sub-step
 
 export function stepVehicle(v, controls, dt, world) {
   const s = v.spec;
@@ -526,7 +526,7 @@ export function stepVehicle(v, controls, dt, world) {
   v.brakeP = approach(v.brakeP, brakePedal(brakeReq), BRAKE_BUILD * dt);
   const brakeF = v.brakeP * m * s.brake * wetBrake(rain);
 
-  // ---- Tyre dynamics in sub-steps.
+  // ---- Tire dynamics in sub-steps.
   const h = dt / NSUB;
   const a = d.a, b = d.b, L = d.L;
   let spinMax = 0, absOn = false, slideF = 0, slideR = 0, hbSlide = 0;
@@ -566,7 +566,7 @@ export function stepVehicle(v, controls, dt, world) {
           assistMz += d.iz * H.betaK * (sl > 0 ? over : -over);
           if (H.tc) driveScale = clamp(1 - over * 5, H.cutMin, 1);
         }
-        // Traction control: ease the drive off as the driven rear tyres
+        // Traction control: ease the drive off as the driven rear tires
         // reach their peak slip, so power does not break them loose.
         const xr = (sl < 0 ? -sl : sl) / d.apR;
         if (H.tc && d.frontDrive < 1 && xr > TC_X) driveScale = Math.min(driveScale, clamp(1 - (xr - TC_X) * 4, H.cutMin, 1));
@@ -619,12 +619,12 @@ export function stepVehicle(v, controls, dt, world) {
     const uF = fxF / capF;
     const latF = capLF * Math.sqrt(Math.max(0.05, 1 - COMB * uF * uF));
     const xF = alphaF / d.apF;
-    const fyF = -latF * tyre(xF);
+    const fyF = -latF * tire(xF);
     const ffx = fxF * cd - fyF * sd;
     const ffy = fxF * sd + fyF * cd;
     slideF = Math.max(slideF, Math.abs(xF));
 
-    // Rear axle: normal tyre, or locked by the handbrake (sliding friction).
+    // Rear axle: normal tire, or locked by the handbrake (sliding friction).
     const vlr = vl - b * r;
     let frx, fry;
     if (handbrake) {
@@ -643,7 +643,7 @@ export function stepVehicle(v, controls, dt, world) {
       const uR = fxR / capR;
       const latR = capLR * Math.sqrt(Math.max(0.05, 1 - COMB * uR * uR));
       const xR = alphaR / d.apR;
-      fry = -latR * tyre(xR);
+      fry = -latR * tire(xR);
       frx = fxR;
       slideR = Math.max(slideR, Math.abs(xR));
     }
@@ -731,7 +731,7 @@ export function stepVehicle(v, controls, dt, world) {
   if (v.suspension < 1e-4) v.suspension = 0;
 
   v.wheelSpin = (v.wheelSpin + (vf + Math.sign(driveF) * v.spin * 8) * dt / s.wheelRadius) % (Math.PI * 2);
-  // Squeal starts past the tyre peak (later in Arcade, whose tyres saturate softly).
+  // Squeal starts past the tire peak (later in Arcade, whose tires saturate softly).
   const slideAmt = Math.max(clamp((slideR - H.squeal) / 1.2, 0, 1), clamp((slideF - H.squeal) / 2, 0, 1));
   const hbAmt = handbrake && Math.abs(vf) > 3 ? clamp(0.4 + hbSlide / 25, 0, 1) : 0;
   v.slip = Math.max(slideAmt, hbAmt, v.spin * 0.8, absOn ? 0.3 : 0);
@@ -817,7 +817,7 @@ function collideStatic(v, col) {
     dvz -= scrape * tz;
     v.vx += dvx;
     v.vz += dvz;
-    // Off-centre hits spin the car.
+    // Off-center hits spin the car.
     v.yawRate += (ox * dvz - oz * dvx) * inertiaK * 0.5;
     v.yawRate = clamp(v.yawRate, -4, 4);
   }
@@ -897,7 +897,7 @@ export function collideVehicles(a, b) {
     a.vz -= jz * ima;
     b.vx += jx * imb;
     b.vz += jz * imb;
-    // Off-centre spin, scaled down for arcade feel.
+    // Off-center spin, scaled down for arcade feel.
     const ia = sa.mass * (sa.length * sa.length + sa.width * sa.width) / 12;
     const ib = sb.mass * (sb.length * sb.length + sb.width * sb.width) / 12;
     a.yawRate = clamp(a.yawRate - (boax * jz - boaz * jx) / ia * 0.5, -4, 4);

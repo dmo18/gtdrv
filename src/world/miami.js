@@ -5,7 +5,7 @@
 // or one region of it (world/regions.js, docs/PLAN_V2.md 3), plus the
 // invented airfield islet where the region holds it.
 //
-// Coordinates: x east, z south, metres, flat ground y = 0.
+// Coordinates: x east, z south, meters, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W, lanePoint } from './citygen.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
@@ -30,7 +30,7 @@ const MERGE = 12; // junctions closer than this become one
 const SNAP = 2.2; // a vertex this close to another road joins it
 const CHAIN_TOL = 2.5; // Douglas-Peucker tolerance for bends (m)
 const RIVERS = { 'Miami River': 19 }; // carved half widths (m)
-const BAY_LIST_MAX = 3; // car park bays listed as parking spots, per lot
+const BAY_LIST_MAX = 3; // parking lot bays listed as parking spots, per lot
 
 const DRIVE = new Set([
   'trunk', 'primary', 'secondary', 'tertiary', 'trunk_link', 'primary_link', 'secondary_link',
@@ -65,7 +65,7 @@ export function plateText(name) {
   return t;
 }
 
-// Polyline field p: delta-encoded decimetres. Returns metres [x0, z0, x1, z1, ...].
+// Polyline field p: delta-encoded decimeters. Returns meters [x0, z0, x1, z1, ...].
 export function decodePolyline(p) {
   const out = new Float64Array(p.length);
   let x = 0, z = 0;
@@ -153,7 +153,7 @@ function stampRect(R, x0, z0, x1, z1, v) {
   const j0 = Math.max(0, Math.ceil((z0 - R.z0) / c - 0.5)), j1 = Math.min(R.h - 1, Math.floor((z1 - R.z0) / c - 0.5));
   for (let j = j0; j <= j1; j++) R.data.fill(v, j * R.w + i0, j * R.w + i1 + 1);
 }
-// Even-odd fill of a closed polygon (pts metres, implicit closing edge).
+// Even-odd fill of a closed polygon (pts meters, implicit closing edge).
 let POLY_XS = new Float64Array(64); // scratch: the crossings of one row
 function fillPolygon(R, pts, v) {
   const n = pts.length / 2;
@@ -199,8 +199,8 @@ function stampLine(R, ax, az, bx, bz, v) {
   }
 }
 
-// Signed distance (decimetres, Int16) from a land mask: + on land, the
-// exact Euclidean distance between cell centres (Felzenszwalb squared
+// Signed distance (decimeters, Int16) from a land mask: + on land, the
+// exact Euclidean distance between cell centers (Felzenszwalb squared
 // distance transform of each side) less half a cell, clamped to CLAMP.
 // A squared distance of FAR cells or more always clamps, so the column
 // pass caps at FAR (squared run length to the nearest cell of the other
@@ -290,7 +290,7 @@ function signedField(R) {
   return out;
 }
 
-// Bilinear sample of a signed field at cell centres; metres.
+// Bilinear sample of a signed field at cell centers; meters.
 function makeSampler(R, f) {
   const { x0, z0, cell, w, h } = R;
   const inv = 1 / cell;
@@ -307,7 +307,7 @@ function makeSampler(R, f) {
 
 // Labels the 4-connected regions of cells where wall is 0. Returns the
 // count. Regions are numbered in the row order of their first cell (a
-// span fill: each run of a row is labelled at once, and one seed per
+// span fill: each run of a row is labeled at once, and one seed per
 // open run above and below it is stacked). queue: unused scratch.
 function labelRegions(wall, W, H, label, queue) {
   const NC = W * H;
@@ -334,7 +334,7 @@ function labelRegions(wall, W, H, label, queue) {
   }
   return n;
 }
-// Stacks the first cell of every open, unlabelled run in a..b.
+// Stacks the first cell of every open, unlabeled run in a..b.
 function seedRuns(wall, label, a, b, stack) {
   let inRun = false;
   for (let k = a; k <= b; k++) {
@@ -428,7 +428,7 @@ function voteUnreached(R, label, nLab, hits, coarse) {
   }
 }
 
-// Coastline wall cells (1) take the majority of their settled neighbours.
+// Coastline wall cells (1) take the majority of their settled neighbors.
 function settleWalls(wall, land, W, H) {
   const NC = W * H;
   for (let pass = 0; pass < 3; pass++) {
@@ -509,7 +509,7 @@ function polyBox(pts, out) {
 
 // A footprint rasterised on R (its cells at 2 m, R.data the buffer) and
 // covered by largestRects (into rects). Returns the rectangle count (0
-// when no cell centre is inside the polygon).
+// when no cell center is inside the polygon).
 function footprintRects(R, pts, hist, stack, rects) {
   const cw = R.w, ch = R.h, cells = R.data;
   cells.fill(0, 0, cw * ch);
@@ -521,8 +521,8 @@ function footprintRects(R, pts, hist, stack, rects) {
 }
 
 // Building box k on the owner raster (CELL cells from x0, z0): the cells
-// whose centre is strictly inside the box (as inBuilding); a box too
-// small to cover a cell centre still holds its own cell.
+// whose center is strictly inside the box (as inBuilding); a box too
+// small to cover a cell center still holds its own cell.
 function stampOwnerBox(owner, b, k, x0, z0, W, H) {
   const e = 1e-6;
   const i0 = Math.max(0, Math.ceil((b.x0 - x0) / CELL - 0.5 + e)), i1 = Math.min(W - 1, Math.floor((b.x1 - x0) / CELL - 0.5 - e));
@@ -533,7 +533,7 @@ function stampOwnerBox(owner, b, k, x0, z0, W, H) {
   if (c >= 0 && owner[c] < 0) owner[c] = k;
 }
 
-// Indices of the boxes (not the depot's) whose centre is within r of (x, z).
+// Indices of the boxes (not the depot's) whose center is within r of (x, z).
 function boxesWithin(boxes, x, z, r) {
   const out = [];
   for (let k = 0; k < boxes.length; k++) {
@@ -584,7 +584,7 @@ function floodBlock(s, W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, out)
   out[0] = qt; out[1] = i0; out[2] = i1; out[3] = j0; out[4] = j1; out[5] = parks; out[6] = ok;
 }
 
-// floodBlock from every unlabelled road-free land cell of the window, in
+// floodBlock from every unlabeled road-free land cell of the window, in
 // row order. Returns an Int32Array of 7 values per region (as FB).
 function floodRegions(W, ci0, ci1, cj0, cj1, land, road, park, lab, queue, FB) {
   let out = new Int32Array(7 * 4096), n = 0;
@@ -688,7 +688,7 @@ function splitJunctions(crop, vx, vz, vflag, segA, segB, segW, ways, vertexOf) {
   return null;
 }
 
-// Removes the spots (only car park ones when lotOnly) with
+// Removes the spots (only parking lot ones when lotOnly) with
 // Math.hypot(dx, dz) < r from (x, z), keeping the order of the rest;
 // hypot only where the squared distance is within rounding of r squared.
 function dropSpotsNear(spots, x, z, r, lotOnly) {
@@ -844,7 +844,7 @@ export function createMiamiCity(data, opts = {}) {
     applyVotes(label, votes, land.data, NC);
     if (region) voteUnreached(land, label, nLab, hits, coarseLand(data, coast));
     lap('land.votes');
-    // Wall cells: majority of their labelled neighbours.
+    // Wall cells: majority of their labeled neighbors.
     settleWalls(wall.data, land.data, W, H);
     lap('land.walls');
     // The river (water lines are carved with a width), then lakes and
@@ -967,7 +967,7 @@ export function createMiamiCity(data, opts = {}) {
     flush();
   }
 
-  // Vertices are shared where the data shares them (same decimetre).
+  // Vertices are shared where the data shares them (same decimeter).
   const vx = [], vz = [], vflag = []; // flag: 1 street, 2 bridge, 4 way end
   const vkey = new Map();
   const vertexOf = (x, z, flag) => {
@@ -1165,7 +1165,7 @@ export function createMiamiCity(data, opts = {}) {
     for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
   }
   for (const r of adj.keys()) {
-    // Loops with no junction on them (a roundabout on its own).
+    // Loops with no junction on them (a traffic circle on its own).
     for (const o of adj.get(r).keys()) if (!visited.has(pairKey(r, o))) walkFrom(r, o);
   }
   for (const e of edges) {
@@ -1347,7 +1347,7 @@ export function createMiamiCity(data, opts = {}) {
   };
 
   // Shrinks rect r (x0, z0, x1, z1) away from road strips until it is
-  // `margin` m clear of every kerb. False when it gets below minSize.
+  // `margin` m clear of every curb. False when it gets below minSize.
   const TR = { x0: 0, z0: 0, x1: 0, z1: 0 };
   function trimRect(r, margin, minSize) {
     for (let k = 0; k < 12; k++) {
@@ -1411,7 +1411,7 @@ export function createMiamiCity(data, opts = {}) {
     const c = distCell(x, z);
     return c < 0 ? 'midtown' : DKEYS[distData[c]];
   }
-  // Real neighbourhood names for the HUD (placeOf, below), baked at 16 m:
+  // Real neighborhood names for the HUD (placeOf, below), baked at 16 m:
   // index into placeNames, 0 = none.
   const placeNames = [''];
   const landPlace = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, 16);
@@ -1458,9 +1458,9 @@ export function createMiamiCity(data, opts = {}) {
         const qt = regions[r], bi0 = regions[r + 1], bi1 = regions[r + 2], bj0 = regions[r + 3], bj1 = regions[r + 4], parks = regions[r + 5], ok = regions[r + 6] === 1;
         const bw = (bi1 - bi0 + 1) * CELL, bh = (bj1 - bj0 + 1) * CELL;
         if (!ok || qt * CELL * CELL < 0.85 * bw * bh || Math.min(bw, bh) < 24 || Math.max(bw, bh) > 320) continue;
-        // Start from the cell centres (clear of the road), then grow.
+        // Start from the cell centers (clear of the road), then grow.
         let x0 = land.x0 + (bi0 + 0.5) * CELL, z0 = land.z0 + (bj0 + 0.5) * CELL, x1 = land.x0 + (bi1 + 0.5) * CELL, z1 = land.z0 + (bj1 + 0.5) * CELL;
-        // Clear of every kerb first, then grow each side up to the kerb.
+        // Clear of every curb first, then grow each side up to the curb.
         TR.x0 = x0; TR.z0 = z0; TR.x1 = x1; TR.z1 = z1;
         const area0 = (x1 - x0) * (z1 - z0);
         if (!trimRect(TR, 0, 20) || (TR.x1 - TR.x0) * (TR.z1 - TR.z0) < area0 * 0.7) continue;
@@ -1525,7 +1525,7 @@ export function createMiamiCity(data, opts = {}) {
       if (area < 25 || !inCrop((x0 + x1) / 2, (z0 + z1) / 2)) continue;
       const cw = Math.ceil((x1 - x0) / BC), ch = Math.ceil((z1 - z0) / BC);
       if (cw < 2 || ch < 2 || cw > 200 || ch > 200) continue;
-      // Rasterise at 2 m (cell centres inside the polygon), then the
+      // Rasterise at 2 m (cell centers inside the polygon), then the
       // largest all-inside rectangles, until 85 % is covered.
       R2.x0 = x0; R2.z0 = z0; R2.w = cw; R2.h = ch;
       const nb = footprintRects(R2, pts, hist, stack, rects);
@@ -1544,11 +1544,11 @@ export function createMiamiCity(data, opts = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const blk = blockAt(cx, cz);
     if (blk) {
-      // Inside a block: keep the pavement ring clear.
+      // Inside a block: keep the sidewalk ring clear.
       x0 = Math.max(x0, blk.x0 + SIDEWALK); z0 = Math.max(z0, blk.z0 + SIDEWALK);
       x1 = Math.min(x1, blk.x1 - SIDEWALK); z1 = Math.min(z1, blk.z1 - SIDEWALK);
     } else {
-      // Trim the side facing a road until it is 1.5 m clear of the kerb.
+      // Trim the side facing a road until it is 1.5 m clear of the curb.
       TR.x0 = x0; TR.z0 = z0; TR.x1 = x1; TR.z1 = z1;
       if (!trimRect(TR, 1.5, 3)) return;
       x0 = TR.x0; z0 = TR.z0; x1 = TR.x1; z1 = TR.z1;
@@ -1625,7 +1625,7 @@ export function createMiamiCity(data, opts = {}) {
   if (S.seaplane) aircraftSpots.push({ x: S.seaplane.x, z: S.seaplane.z, heading: S.seaplane.heading, spec: 'seaplane' });
   for (const hp of S.helipads || []) helipads.push({ x: hp.x, z: hp.z });
 
-  // Depot (as citygen, explicit colours, no rng).
+  // Depot (as citygen, explicit colors, no rng).
   const tankSpots = [];
   let depot = null;
   if (islet) {
@@ -1667,7 +1667,7 @@ export function createMiamiCity(data, opts = {}) {
   }
 
   // ---- 8b. Lot rasters and infill (docs/REVAMP.md 6.2, world/lots.js). ----
-  // free: drawn land clear of every road strip and its pavement and
+  // free: drawn land clear of every road strip and its sidewalk and
   // outside every building box; owner: the building box at a cell. Big
   // empty pieces of built-up districts get plain infill boxes (`gen`).
   let lotIn;
@@ -1868,7 +1868,7 @@ export function createMiamiCity(data, opts = {}) {
     spawn = best;
   }
 
-  // ---- 10. Kerb parking, lamps, street trees, signals. ----
+  // ---- 10. Curb parking, lamps, street trees, signals. ----
   const parkingSpots = [], props = [], furniture = [], signals = [];
   const dr = createRng(seed ^ 0x5eed51);
   for (const e of edges) {
@@ -1930,14 +1930,14 @@ export function createMiamiCity(data, opts = {}) {
   }
 
   // ---- 10b. The designed start street (MIAMI_SPOTS.startView, core hand
-  // content): street trees on both kerbs and kerb spaces (`start`, filled
+  // content): street trees on both curbs and curb spaces (`start`, filled
   // first) along the spawn street ahead of the title camera. No rng.
   if (S.startView) {
     const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
     const TREE_STEP = 7, SPOT_STEP = 6.5;
     // The two framed views stay clear of trunks and posts (docs/PLAN_V1.md
     // W2b): the title shot (a cone of FRAME_DEG round the view line within
-    // FRAME_R m, along the whole dolly) and the near pavement in front of
+    // FRAME_R m, along the whole dolly) and the near sidewalk in front of
     // the chase camera at the start (NEAR_R m, the width of the view).
     const cam = S.startView.camera;
     const FRAME_DEG = 9.5, FRAME_R = 42, NEAR_R = 16.5, NEAR_DEG = 55, CHASE_BACK = 7.5;
@@ -1976,7 +1976,7 @@ export function createMiamiCity(data, opts = {}) {
         const along = (px - spawn.x) * fx + (pz - spawn.z) * fz;
         const lat = -(px - spawn.x) * fz + (pz - spawn.z) * fx;
         if (along < -20 || along > 110 || Math.abs(lat) > 12) continue;
-        // One tree slot each TREE_STEP m of `along` (the first metre step
+        // One tree slot each TREE_STEP m of `along` (the first meter step
         // into a new slot), so no slot is skipped or doubled by rounding.
         const slot = Math.floor((along + 20) / TREE_STEP);
         const newSlot = slot !== prevSlot;
@@ -1984,7 +1984,7 @@ export function createMiamiCity(data, opts = {}) {
         const k = slot * TREE_STEP;
         for (const side of [-1, 1]) {
           if (newSlot) {
-            // On the kerb line, or set back into the plaza where the kerb
+            // On the curb line, or set back into the plaza where the curb
             // line is in a framed view.
             for (const off of [1.15, 4.8]) {
               const x = px + rx * side * (half + off), z = pz + rzv * side * (half + off);
@@ -2051,7 +2051,7 @@ export function createMiamiCity(data, opts = {}) {
 
   // Landmarks: windsock, runway lights and the port cranes.
   const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: runway ? { x: runway.x0 + 70, z: runway.z0 - 14 } : null, runwayLights: [] };
-  // Each crane steps south from its point to the quay edge: legs (x +-7,
+  // Each crane steps south from its point to the pier edge: legs (x +-7,
   // z +-6) on land, clear of buildings and roads, the boom (to z + 40)
   // out over the water.
   (S.cranes || []).forEach((c, k) => {
@@ -2066,8 +2066,8 @@ export function createMiamiCity(data, opts = {}) {
     if (shoreDist(x, z + 30) > -2) return;
     landmarks.cranes.push({ x, z, rot: Math.PI / 2, v: k % 2 ? 0.7 : 0.3 });
   });
-  // The Cinder tank: open ground in a Wynwood yard (no car parks in the
-  // data); kerb spaces within 6 m are cleared, as in citygen.
+  // The Cinder tank: open ground in a Wynwood yard (no parking lots in the
+  // data); curb spaces within 6 m are cleared, as in citygen.
   if (S.cinder) {
     let spot = null;
     for (let r = 0; r <= 400 && !spot; r += 4) {
@@ -2209,7 +2209,7 @@ export function createMiamiCity(data, opts = {}) {
     }
     return out;
   }
-  // The real neighbourhood (or water, or bridge) name at a point, for the
+  // The real neighborhood (or water, or bridge) name at a point, for the
   // HUD. No allocation: the edge scratch list is reused.
   const placeEdges = [];
   const landPlaceCell = cellLookup(landPlace), waterPlaceCell = cellLookup(waterPlace);
@@ -2376,7 +2376,7 @@ export function createMiamiCity(data, opts = {}) {
     shoreDist, mainShore, isLand, isGround, districtOf, onRoad, placeOf, placeNames: placeNames.slice(1),
     nodeAt: () => null,
     blockAt, edgesNear, buildingsNear, landRuns, landTarget, inBuilding,
-    // Drawn land (no road strips): 1 = land, sampled at cell centres.
+    // Drawn land (no road strips): 1 = land, sampled at cell centers.
     landGrid: { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: visual },
     crop, cut, bounds: { x0: land.x0, z0: land.z0, x1: land.x0 + W * CELL, z1: land.z0 + H * CELL },
     attribution: data.attribution,
@@ -2401,7 +2401,7 @@ export function createMiamiCity(data, opts = {}) {
     city.lotGrid = L.lotGrid;
     city.lotAt = L.lotAt;
     city.lotTypeAt = L.lotTypeAt;
-    // Car park bays: some of each car park's bays are parking spots (the
+    // Parking lot bays: some of each parking lot's bays are parking spots (the
     // parked-car system spawns a real car in each one near the player, so
     // at most 3 per lot and never over 60 %), chosen by the lot seed; the
     // renderer parks static cars in part of the others.

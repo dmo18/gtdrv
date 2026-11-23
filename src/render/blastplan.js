@@ -39,19 +39,19 @@ export function fireRadius(vs, t) {
 export const ROLL_V = [30, 27, 24, 21, 17, 13, 9, 5, 25, 18, 11, 4];
 export const ROLL_S0 = 3, ROLL_S1 = 9;
 
-// Distance (m) from the centre that the edge of a smoke roll puff
+// Distance (m) from the center that the edge of a smoke roll puff
 // launched at speed v (scale vs) has reached t seconds after the blast.
 export function rollReach(vs, v, t) {
   const R = BLAST.roll;
   const a = t - R.t0;
   if (!(a > 0)) return 0;
   const d = R.drag;
-  const centre = (v * vs / d) * (1 - Math.exp(-d * a));
+  const center = (v * vs / d) * (1 - Math.exp(-d * a));
   const size = vs * (ROLL_S0 + (ROLL_S1 - ROLL_S0) * Math.sqrt(Math.min(1, a / R.life)));
-  return centre + size * 0.5;
+  return center + size * 0.5;
 }
 
-// The farthest a blast's smoke is seen from its centre at time t.
+// The farthest a blast's smoke is seen from its center at time t.
 export function smokeReach(vs, t) {
   let m = 0;
   for (let i = 0; i < ROLL_V.length; i++) m = Math.max(m, rollReach(vs, ROLL_V[i], t));
@@ -59,17 +59,17 @@ export function smokeReach(vs, t) {
 }
 
 // Camera shake target (0..1, chasecam trauma) for a blast seen from d m:
-// 1 at the centre, a straight line down to 0 at 60 m (x the visual scale
+// 1 at the center, a straight line down to 0 at 60 m (x the visual scale
 // for bigger blasts, so a tank reaches farther).
 export function shakeAt(vs, d) {
   const reach = BLAST.shake.reach * Math.max(0.6, vs);
   return d >= reach ? 0 : 1 - d / reach;
 }
 
-// Dust skirt colour from the ground under the blast (city.lotTypeAt).
-const SAND = [0.8, 0.72, 0.56], DIRT = [0.48, 0.4, 0.31], GREY = [0.6, 0.6, 0.58];
+// Dust skirt color from the ground under the blast (city.lotTypeAt).
+const SAND = [0.8, 0.72, 0.56], DIRT = [0.48, 0.4, 0.31], GRAY = [0.6, 0.6, 0.58];
 export function dustTone(type) {
   if (type === 'beach' || type === 'site' || type === 'wateredge') return SAND;
   if (type === 'works' || type === 'park' || type === 'grass' || type === 'yard' || type === 'verge') return DIRT;
-  return GREY;
+  return GRAY;
 }

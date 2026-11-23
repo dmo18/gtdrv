@@ -17,7 +17,7 @@
 import {
   loadExplore, saveExplore, clearExplore, defaultExplore, miamiLand, counts as exploreCounts, cellIndex, cellBit, setCellBit,
   cellsFrom, bytesToB64, landCells, explorePercent, markAdventureSeen, markGarageSeen, adventureReady, nextStep,
-  completeStep, track as trackAdventure, favourite as favouriteOf, routeOpen, garageOpen,
+  completeStep, track as trackAdventure, favorite as favoriteOf, routeOpen, garageOpen,
 } from '../core/explore.js';
 import { ADV_SEEN_R, ADV_SIGN_R, ADV_TALK_R, ADV_TALKERS_MAX, ADV_TALKER_NEAR, ADV_FINALE_BONUS, playerStepMode, stepReached } from '../world/adventures.js';
 import { GARAGE_FIND_R } from '../world/garages.js';
@@ -89,7 +89,7 @@ export function createAdventures(game, storage) {
     isDone,
     routeOpen: (advId) => routeOpen(ex, advId),
     garageOpen: (gid) => garageOpen(ex, gid),
-    favourite: () => favouriteOf(ex),
+    favorite: () => favoriteOf(ex),
     changed,
     save,
   };
@@ -143,7 +143,7 @@ export function createAdventures(game, storage) {
       m.z = a.giver.z;
       setShown(m, seen);
     }
-    // The tracked adventure: a ring round its next step, off centre.
+    // The tracked adventure: a ring round its next step, off center.
     objective = null;
     const t = ex.adventures.tracked ? advs.find((a) => a.id === ex.adventures.tracked) : null;
     const k = t ? nextStep(ex, t) : -1;

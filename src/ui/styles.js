@@ -76,7 +76,7 @@ const CSS = `
 .rw-sleft { left: calc(var(--rw-sl) + 16px); }
 .rw-sright { left: calc(var(--rw-sl) + 16px + var(--sbtn) + 8px); }
 
-/* tilt indicator (style 'tilt'): a 120 by 20 display, not a target; a tap in the zone re-centres */
+/* tilt indicator (style 'tilt'): a 120 by 20 display, not a target; a tap in the zone re-centers */
 .rw-btn.rw-tiltbar {
   left: calc(var(--rw-sl) + 16px + (var(--slot) - 120px) / 2); bottom: calc(var(--rw-sb) + var(--sgap));
   width: 120px; height: 20px; border-radius: 10px; pointer-events: none;
@@ -214,7 +214,7 @@ const CSS = `
 .rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
 .rw-slot-bomb { --x: 100px; --y: 108px; }
 .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 184px; --y: 84px; }
-/* SIREN: 8 px beside the steering slot on the side toward the screen centre, centred on its height
+/* SIREN: 8 px beside the steering slot on the side toward the screen center, centered on its height
    (915x412: 184, 292; 780x360: 164, 246). It moves with the left inset and mirrors with the slot. */
 .rw-btn.rw-slot-siren { right: auto; left: calc(var(--rw-sl) + var(--sx)); bottom: calc(var(--rw-sb) + var(--sy)); width: var(--ew); height: var(--ew); }
 .rw-lefty .rw-btn.rw-slot-siren { left: auto; right: calc(var(--rw-sr) + var(--sx)); }
@@ -434,14 +434,14 @@ const CSS = `
 }
 .rw-full .rw-clock { display: block; }
 
-/* top centre stack (docs/REVAMP.md 6.12): 335 by 92 (300 by 92 at 780x360), centred, top at 8.
+/* top center stack (docs/REVAMP.md 6.12): 335 by 92 (300 by 92 at 780x360), centered, top at 8.
    Status row (stars, objective cell), then two one-line message rows at y 32 and 64 of the box.
    Rows never move: an empty row stays empty. */
 .rw-stack {
   position: absolute; left: 50%; top: calc(var(--rw-st) + 8px); width: 335px; height: 92px; margin-left: -167.5px;
   pointer-events: none;
 }
-/* stars: centred, only while wanted; the cooldown bar sits right under */
+/* stars: centered, only while wanted; the cooldown bar sits right under */
 .rw-wanted {
   position: absolute; left: 50%; top: 0; width: 150px; height: 24px; margin-left: -75px;
   display: flex; align-items: center; justify-content: center;
@@ -505,7 +505,7 @@ const CSS = `
 /* with the minimap grown the speed readout reaches further right: keep long lines clear of it */
 .rw-mapbig .rw-msg { max-width: calc(100vw - 2 * (var(--rw-sl) + 24px + var(--mapw) + var(--spw))); }
 
-/* prompt strip: centred, under the keep-out rect */
+/* prompt strip: centered, under the keep-out rect */
 .rw-prompt {
   position: absolute; left: 50%; bottom: calc(var(--rw-sb) + 8px); width: 300px; height: 28px; margin-left: -150px;
   font-size: 14px; font-weight: 700; line-height: 28px; text-align: center; overflow: hidden; text-overflow: ellipsis;

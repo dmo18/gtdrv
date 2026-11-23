@@ -2,10 +2,10 @@
 // of that spec: a body (paint, trim, cabin and details merged into one
 // geometry), the glass (tinted, see-through, with the contact shadow in
 // the same draw), the lamps (head and tail in one mesh) and one wheel.
-// Paint materials are shared by colour. Near and mid model: 4 draw calls
+// Paint materials are shared by color. Near and mid model: 4 draw calls
 // (body, glass, lamps, the four wheels instanced), +1 for a police light
 // bar. Far model: one call.
-// Origin is the ground centre of the car; the car points along local +x.
+// Origin is the ground center of the car; the car points along local +x.
 //
 // Hierarchy: group (position, yaw) -> rig (body pitch / roll) -> body,
 // glass, lamps, far, bar; group -> wheels (one instanced mesh per LOD
@@ -34,8 +34,8 @@ function wheelGeo(spec, lite = false) {
   return g;
 }
 
-// Underbody light (spec.glow): a soft additive pool of colour on the road
-// under the car. One shared texture and material per colour.
+// Underbody light (spec.glow): a soft additive pool of color on the road
+// under the car. One shared texture and material per color.
 const glowMats = new Map();
 function underglow(spec) {
   let m = glowMats.get(spec.glow);
@@ -113,11 +113,11 @@ function specEntry(spec) {
   const anchors = {
     exhaust: [spec.body === 'truck' ? sh.x0 - 0.2 : sh.x0 - 0.05, spec.body === 'truck' ? spec.height + 0.2 : exY, exZ],
     exhaust2: S.exhaust && S.exhaust.n === 2 ? [sh.x0 - 0.05, exY, -exZ] : null,
-    bonnet: [spec.body === 'van' || spec.body === 'truck' ? sh.x1 - 0.5 : (gs.xA + sh.x1) / 2, sh.top((gs.xA + sh.x1) / 2) + 0.05],
+    hood: [spec.body === 'van' || spec.body === 'truck' ? sh.x1 - 0.5 : (gs.xA + sh.x1) / 2, sh.top((gs.xA + sh.x1) / 2) + 0.05],
     head: [sh.x1 + 0.05, sh.yc(sh.x1 - 0.1) - 0.06, sh.hw * 0.68],
     tail: spec.body === 'truck' ? [-spec.length / 2 - 0.05, 0.55, spec.width / 2 - 0.22] : [sh.x0 - 0.05, sh.yc(sh.x0 + 0.1) - 0.06, sh.hw * 0.7],
     roofY: gs.roofY + gs.crown,
-    // Roof mount for a light bar or sign: centre x and height (local).
+    // Roof mount for a light bar or sign: center x and height (local).
     roofX: (gs.xR0 + gs.xR1) / 2,
     wr, ax, az,
     bodyTris: tris(near.body), midTris: tris(mid.body), farTris: tris(far.body),
@@ -275,7 +275,7 @@ export function createVehicleMesh(spec, color) {
 }
 
 // Write the four wheel instance matrices: rotation Ry(yaw) * Rz(spin) at
-// the wheel centre. Wheels 0, 1 front (right, left), 2, 3 rear.
+// the wheel center. Wheels 0, 1 front (right, left), 2, 3 rear.
 function writeWheels(ud, steer, spin, roll, pitch) {
   const a = ud.anchors;
   const m = ud.wheelMatrix.array;
@@ -297,7 +297,7 @@ function writeWheels(ud, steer, spin, roll, pitch) {
 }
 
 // Remember a hit for damage decals. (lx, ly, lz) is the direction from
-// the car centre to the struck point in the car's local frame; strength
+// the car center to the struck point in the car's local frame; strength
 // the closing speed in m/s.
 export function noteVehicleHit(mesh, lx, ly, lz, strength) {
   const ud = mesh && mesh.userData;
@@ -409,7 +409,7 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   mesh.position.set(x, Number.isFinite(v.y) ? v.y : 0, z);
   mesh.rotation.set(0, -h, 0);
 
-  // Body lean about a roll / pitch centre a little above the ground.
+  // Body lean about a roll / pitch center a little above the ground.
   const roll = Math.max(-MAX_ROLL, Math.min(MAX_ROLL, v.roll || 0));
   const pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, v.pitch || 0));
   const p = 0.45;

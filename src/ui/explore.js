@@ -126,7 +126,7 @@ export function registerExploreScreens(game) {
       side.appendChild(head);
       const grid = h('div', 'rw-ex-grid');
       grid.setAttribute('role', 'radiogroup');
-      grid.setAttribute('aria-label', 'Paint colours');
+      grid.setAttribute('aria-label', 'Paint colors');
       const spec = specOf(car.spec);
       const colors = PAINT_COLORS.slice();
       for (const c of (spec && spec.colors) || []) if (!colors.includes(c)) colors.push(c);
@@ -134,7 +134,7 @@ export function registerExploreScreens(game) {
         const sw = button('', 'rw-ex-swatch', () => {
           G.repaint(isArr ? 'arrived' : sel, c);
           api.rerender();
-        }, 'Colour ' + hex(c));
+        }, 'Color ' + hex(c));
         sw.style.background = hex(c);
         sw.setAttribute('role', 'radio');
         sw.setAttribute('aria-checked', String(car.color === c));
@@ -171,8 +171,8 @@ export function registerExploreScreens(game) {
       const rp = button('Repaint', '', () => { painting = true; api.rerender(); }, 'Repaint');
       rp.dataset.role = 'repaint';
       acts.appendChild(rp);
-      const fv = button(car.fav ? '★ Favourite' : '☆ Favourite', '', () => { G.favourite(sel); api.rerender(); }, car.fav ? 'Favourite: on' : 'Make favourite');
-      fv.dataset.role = 'favourite';
+      const fv = button(car.fav ? '★ Favorite' : '☆ Favorite', '', () => { G.favorite(sel); api.rerender(); }, car.fav ? 'Favorite: on' : 'Make favorite');
+      fv.dataset.role = 'favorite';
       fv.setAttribute('aria-pressed', String(!!car.fav));
       if (isArr) fv.disabled = true;
       acts.appendChild(fv);

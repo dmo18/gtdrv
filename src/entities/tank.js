@@ -22,7 +22,7 @@ const BASE = {
   mounts: ['cannon', 'coax'],
   armor: { bullet: 0.04, melee: 0, ram: 0.15, blast: 0.6, fire: 0.3 },
   engine: 'tracks', mass: 42000,
-  // Turret ring and barrel in hull-local metres (x forward, y up).
+  // Turret ring and barrel in hull-local meters (x forward, y up).
   turretX: -0.45, turretY: 2.05, barrelLen: 4.6,
 };
 
@@ -203,7 +203,7 @@ export function stepTank(t, controls, dt, world) {
   if (city && city.shoreDist) keepOnLand(t, city);
   if (close > 0) {
     t.impact = close;
-    // Armoured: only a hard crash hurts (ram armour 0.15).
+    // Armored: only a hard crash hurts (ram armor 0.15).
     if (close > 4) t.health = Math.max(0, t.health - (close - 4) * 40 * s.armor.ram);
     if (t.health <= 0) t.wrecked = true;
   }

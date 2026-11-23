@@ -1,6 +1,6 @@
 // Rustback tank (task 32, docs/ARMS.md section 3): tracked physics, the
 // turret, cannon and coax through the combat core, crush and ram rules,
-// armour, the AI gunner core, fleet respawn and determinism.
+// armor, the AI gunner core, fleet respawn and determinism.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTank, stepTank, collideTank, TANK_SPECS, TANK_ID0, barrelRay, turretWorldYaw } from '../src/entities/tank.js';
@@ -24,7 +24,7 @@ const run = (t, c, n, w = null) => {
 };
 const lateral = (t) => -t.vx * Math.sin(t.heading) + t.vz * Math.cos(t.heading);
 
-// A combat game on a flat yard with the armour system and a tank aboard.
+// A combat game on a flat yard with the armor system and a tank aboard.
 function tankGame({ boxes = [], seed = 3 } = {}) {
   const { city, collision } = yard(boxes);
   city.furniture = [];
@@ -36,7 +36,7 @@ function tankGame({ boxes = [], seed = 3 } = {}) {
   return { g, t };
 }
 // Step the craft (tank with controls, cars parked), the pair rule, the
-// armour system and combat, in game.js order.
+// armor system and combat, in game.js order.
 function sim(g, n, controls = null, each = null) {
   const tankSys = {
     fixedUpdate(dt) {
@@ -122,7 +122,7 @@ test('pivot turn on the spot; turns slower at speed; no sideways slip', () => {
   assert.ok(Math.abs(lateral(b)) < 1e-9);
 });
 
-test('walls and the shore stop it; it climbs over kerbs and low walls under 1 m', () => {
+test('walls and the shore stop it; it climbs over curbs and low walls under 1 m', () => {
   const w = world([[20, -20, 24, 20, 6], [-40, -20, -36, 20, 0.6]]);
   const t = createTank('rustback', 0, 0, 0);
   run(t, ctl(1), 60 * 8, w);
@@ -336,7 +336,7 @@ test('benches and signs: the tank rolls through with a crush event (no target)',
   assert.ok(ev.every((e) => e[0] === null));
 });
 
-test('armour: small arms bounce off, explosives and other tanks hurt', () => {
+test('armor: small arms bounce off, explosives and other tanks hurt', () => {
   const { g, t } = tankGame();
   const w = g.player.walker;
   w.x = -20;

@@ -9,7 +9,7 @@ import { TANK_SPECS } from '../entities/tank.js';
 import { REGION_IDS, regionFor, inRegion } from '../world/regions.js';
 
 export const GARAGE_MAX = 8;
-// Metres from the origin, either axis: the Miami map reaches about 4.5 km
+// Meters from the origin, either axis: the Miami map reaches about 4.5 km
 // from it (docs/MAP.md), so 6 km with room to spare. Still a hard bound.
 export const MAP_LIMIT = 6000;
 export const MAX_ALT = 1500;

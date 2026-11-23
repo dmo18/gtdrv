@@ -12,7 +12,7 @@ const WIND = { x: 0, z: 0 };
 
 const G = 9.81;
 
-// Sea surface: a cheap sum of three travelling sines (amplitude about
+// Sea surface: a cheap sum of three traveling sines (amplitude about
 // 0.24 m). The water renderer builds its vertex shader from this same
 // table so boats sit on the visible waves.
 // Each wave: height a * sin(kx * x + kz * z + w * t).
@@ -121,7 +121,7 @@ function approach(v, target, step) {
   return Math.max(target, v - step);
 }
 
-// Collision circles: bow (i = 0) and stern (i = 1) on the centre line.
+// Collision circles: bow (i = 0) and stern (i = 1) on the center line.
 function circleRadius(s) {
   return s.width / 2;
 }
@@ -355,7 +355,7 @@ function collideStatic(b, col) {
     const j = -1.15 * vn;
     b.vx += j * nx;
     b.vz += j * nz;
-    // Off-centre knocks swing the hull around.
+    // Off-center knocks swing the hull around.
     const k = 6 / (s.length * s.length);
     b.yawRate = clamp(b.yawRate + (ox * j * nz - oz * j * nx) * k, -3, 3);
   }

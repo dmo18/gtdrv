@@ -11,7 +11,7 @@ right. Wanted: a proper revamp with a semantic review, a token plan and implemen
 
 ## 1. Semantic review
 
-### 1a. Why the Miami view is an empty grey plaza
+### 1a. Why the Miami view is an empty gray plaza
 
 Headline: the spawn itself is not empty. The emptiness is everywhere else, and it is built into
 how land is drawn.
@@ -24,19 +24,19 @@ how land is drawn.
   from the last saved place. The player is standing inside a block, off the road, in a low rise
   area. So the first thing the owner sees on every launch is wherever the last session ended, not
   a view anyone designed.
-- Root cause 1, all open land is one grey paving tile. In src/render/citymesh.js `realLand` (lines
+- Root cause 1, all open land is one gray paving tile. In src/render/citymesh.js `realLand` (lines
   650 to 672) every land cell that is not in a `park` or `airfield` district is drawn with the one
-  `PAVE` colour and paving texture. The map data (src/world/data/miami.json) has roads, buildings,
+  `PAVE` color and paving texture. The map data (src/world/data/miami.json) has roads, buildings,
   water, coastline, parks and labels only: no land use, no yards, no parking lots, no fences, no
   driveways. Measured shares of the 40.4 km2 of land: roads 15.8 %, building boxes about 17 %
   (6.88 km2), grass (parks and the airfield) 5.0 %, and the rest, about 62 %, is bare paving tile
   with nothing on it.
 - Root cause 2, nothing stands on that land. The whole map has 13,971 lamps, 2,570 street trees
-  and 66 street signs (measured, `city.props` and `city.furniture`), all along kerbs. Nothing is
+  and 66 street signs (measured, `city.props` and `city.furniture`), all along curbs. Nothing is
   placed inside a lot. 2,570 trees over 40 km2 is one tree per 1.6 hectares.
 - Root cause 3, real gaps read as deserts. 14.5 % of non-park land is 60 m or more from any
   building, 8.2 % is 100 m or more, and 671 of 5,113 road nodes are 60 m or more from a building
-  (measured on a 10 m grid). Car parks, rail yards, the port, causeways and places where the
+  (measured on a 10 m grid). Parking lots, rail yards, the port, causeways and places where the
   source data has no footprints all become flat tile.
 - Root cause 4, the map is far bigger than the detail budget. 9.0 by 7.8 km, 559 km of road,
   33,077 building boxes cut from 20,674 footprints, but only 6 points of interest, 23 landmarks
@@ -44,10 +44,10 @@ how land is drawn.
   tenths of the map is one or two storey boxes on tile.
 - Streaming (src/render/realcity.js:32, `LOD = { near: 340, mid: 170, build: 520, drop: 860 }`):
   full detail only within 340 m; past that every building is a plain box in a far block. In the
-  screenshot the grey featureless towers on the left are far boxes seen from about 400 m. Small
+  screenshot the gray featureless towers on the left are far boxes seen from about 400 m. Small
   props vanish past 170 m, which makes open ground look even emptier.
 - Minimap disagrees with the world: it paints land and blocks green (src/ui/minimap.js:10 to 11,
-  `#6f7b5c`, `#7d8869`) while the 3D ground there is grey paving.
+  `#6f7b5c`, `#7d8869`) while the 3D ground there is gray paving.
 - Small losses: footprints with a bounding box over 400 m are skipped (src/world/miami.js:1155; 2
   footprints, 51,000 m2), `roof` and `patio` kinds are skipped (line 33), 335 footprints under 25
   m2 are dropped. Not the main cause.
@@ -102,10 +102,10 @@ test/handling-bands.test.js):
   travel is full lock, then a power curve with exponent 1.6. The first third of the travel gives
   about 17 % of lock, the last third gives half of it. Combined with 2.7 g grip and 0.08 s lock
   time, small corrections do nothing and larger ones snap. The wheel also only turns while the
-  thumb circles its centre; a thumb that drifts into the 16 px core loses tracking.
+  thumb circles its center; a thumb that drifts into the 16 px core loses tracking.
 - Four steering styles (wheel, buttons, tilt, slider), a sensitivity slider and two handling
   modes: ten settings to tune a feel that has no good default.
-- The world is flat at y = 0 with 2D physics: no kerb bump, no slope, no visible suspension travel
+- The world is flat at y = 0 with 2D physics: no curb bump, no slope, no visible suspension travel
   beyond body pitch and roll. Fine for this game, but the camera and body motion must sell weight.
 
 ### 1d. Why killing and explosions feel fake
@@ -121,9 +121,9 @@ sparks, smoke column, scorch, shake, debris, blood, slow motion. What falls shor
 - The wreck vanishes 3 s after the blast and bodies fade after a few seconds (docs/STATUS.md,
   2026-11-20). Nothing you destroy stays. A burnt hull that sits and smokes is the proof that it
   happened.
-- Debris is 6 to 10 chunks from a pool of 48; no doors, wheels or bonnet that can be recognised.
+- Debris is 6 to 10 chunks from a pool of 48; no doors, wheels or hood that can be recognized.
 - Every person dies in one hit the same way. The ragdoll (src/render/ragdoll.js, 59 lines) turns
-  the whole figure about its centre with loose limb angles; it is not a jointed body reacting to
+  the whole figure about its center with loose limb angles; it is not a jointed body reacting to
   the direction and force of the hit.
 - No hit-stop or kick on a normal kill; slow motion fires at most once per 6 s and only on special
   cases. No hit marker sound that differs from a miss.
@@ -142,11 +142,11 @@ cue.
 
 - Scale: 9.0 by 7.8 km, larger than can be dressed. 62 % bare tile.
 - Roads: 7,045 edges, 466 names, 1,432 signals. Road markings were added in the polish pass, but
-  there are no driveways, alleys, car parks or kerb cuts.
+  there are no driveways, alleys, parking lots or curb cuts.
 - Buildings: 33,077 boxes, 8 styles (office, brick, stucco, glass, house, shed, hangar,
   container), 6 districts. 23,323 of them are plain stucco, brick or office boxes in "residential"
   or "midtown".
-- Variety: districts differ by wall colour and window pattern only. No beach, no stadium shape, no
+- Variety: districts differ by wall color and window pattern only. No beach, no stadium shape, no
   elevated rail, no bridges with height (flat world), no shop fronts outside the island style.
 - Landmarks: 23 map landmarks, mostly labels on ordinary boxes. Some carry real venue names
   (STATUS commit 55c54d9), which is a trademark risk for a published game and against the "must
@@ -162,7 +162,7 @@ toasts, district name (hud.js); minimap and full map (minimap.js, systems/mapui.
 with steering wheel or pad, GAS, BRAKE, HAND, EXIT or ENTER, FIRE, the "more" fan, LOCK, weapon
 wheel on SWAP (touch.js, wheel.js); combat and tank HUDs (combathud.js, tankhud.js, armsctl.js).
 
-Failing behaviours, in plain words:
+Failing behaviors, in plain words:
 
 1. Settings is one long scroll of about 22 controls with no groups: steering style, sensitivity,
    handling, five sound controls, radio, time of day, invert stick, left-handed, police, hard
@@ -173,16 +173,16 @@ Failing behaviours, in plain words:
    sending the player to Scores (menu.js:337).
 4. New game and Reset progress, two destructive buttons, sit at the bottom of the same scroll list
    as the volume sliders.
-5. The speed readout sits on top of the player's car at bottom centre (owner's screenshot: "2 mph"
+5. The speed readout sits on top of the player's car at bottom center (owner's screenshot: "2 mph"
    over the van's shadow).
-6. The score is pale grey on a pale sky, top right, hard to read.
+6. The score is pale gray on a pale sky, top right, hard to read.
 7. HAND sits a few pixels from BRAKE and the "more" button floats between them and the car; three
    sizes of round button and two square pedals with no shared grid.
 8. The steering wheel is about 165 CSS px wide, 18 % of the screen, and covers the lower left of
    the road view.
 9. A black bar about 37 CSS px wide on the left: the page does not draw the world under the camera
    cut-out even though `viewport-fit=cover` is set (src/index.html:5).
-10. The minimap shows green where the world is grey (see 1a).
+10. The minimap shows green where the world is gray (see 1a).
 11. There is no title screen flow that lets the player choose "start downtown" over "continue
     where I left off".
 12. scripts/ui-test.mjs checks overlap in a harness page (scripts/ui-harness.html), not the
@@ -223,7 +223,7 @@ World (check: test/world-density.test.js, scripts/review-shots.mjs)
 - Playable area is a dressed core of about 4.5 by 4 km (Downtown, Brickell, the port edge, Little
   Havana east, Wynwood south, the near bay islands). The rest of the box is far scenery or cut.
 - Bare paving with nothing on it is under 10 % of core land (now 62 %). Every lot has a type:
-  yard, car park, plaza, vacant grass, works yard, beach, and is dressed for it.
+  yard, parking lot, plaza, vacant grass, works yard, beach, and is dressed for it.
 - At every road node in the core: at least 15 buildings within 150 m at the 10th percentile (now
   11 over the whole box), and no road node more than 60 m from a building or a dressed lot
   feature.
@@ -245,7 +245,7 @@ Handling (check: test/handling-bands.test.js)
 - One default mode. Lateral grip 0.9 to 1.1 g for ordinary cars, up to 1.3 g for the sports cars,
   at 15 and 30 m/s.
 - Turning radius at walking pace 5 to 6.5 m (truck 9 to 11 m).
-- Centre to full lock 0.25 to 0.40 s; back to centre 0.20 to 0.30 s.
+- Center to full lock 0.25 to 0.40 s; back to center 0.20 to 0.30 s.
 - 0 to 60 mph: compact 9 to 11 s, sedan 7.5 to 9 s, sports 3.5 to 4.5 s, van 11 to 13 s. Top
   speed: compact 95 to 105 mph, sedan 110 to 120, sports 150 to 165, van 85 to 95. 60 to 0 mph in
   34 to 42 m.
@@ -255,7 +255,7 @@ Handling (check: test/handling-bands.test.js)
 
 Combat (check: test/blast.test.js, test/combatfx.test.js, scripts/combat-e2e.mjs, review shots)
 - Car blast: flash, fireball with smoke, ring, dust, light on surroundings; visible radius at
-  least 12 m; at least 14 parts thrown with 4 that can be recognised (door, wheel, bonnet,
+  least 12 m; at least 14 parts thrown with 4 that can be recognized (door, wheel, hood,
   bumper).
 - The burnt hull stays at least 60 s (at most 6 at once) and smokes; the scorch stays 120 s.
 - A person hit falls away from the shot or blast; bodies stay 30 s.
@@ -304,7 +304,7 @@ Total estimated implementation spend: 3.0M to 4.3M tokens. For scale, the two ea
 
 ### W1. World data: core area and lots (Opus, 450k to 600k)
 - Goal: a dense, dressed core. Classify every piece of non-road land into lots with a type; place
-  yard fences, hedges, driveways, car park bays with parked cars, lot trees, bins, plaza
+  yard fences, hedges, driveways, parking lot bays with parked cars, lot trees, bins, plaza
   furniture; cut the play area to the core; invented landmark names; a designed start view.
 - Owns: src/world/miami.js, src/world/miami-spots.js, new src/world/lots.js, src/world/maps.js,
   scripts/fetch-map.mjs, test/miami*.test.js, new test/world-density.test.js.
@@ -341,7 +341,7 @@ Total estimated implementation spend: 3.0M to 4.3M tokens. For scale, the two ea
 ### W4. Menus, HUD and touch layout (Fable layout in W0, then Sonnet, 300k to 400k)
 - Goal: the Menus and HUD criteria in section 2. Audit first, then regroup Settings, merge Records
   into Stats, move destructive actions, one HUD grid, speed and score moved off the craft,
-  safe-area drawing, minimap colours from the lot types, Continue or Start downtown on the title
+  safe-area drawing, minimap colors from the lot types, Continue or Start downtown on the title
   screen.
 - Owns: src/ui/menu.js, hud.js, styles.js, touch.js, minimap.js, wheel.js, combathud.js,
   tankhud.js, armsctl.js, src/systems/mapui.js, src/index.html, scripts/ui-test.mjs,
@@ -378,7 +378,7 @@ Total estimated implementation spend: 3.0M to 4.3M tokens. For scale, the two ea
 - Check: named tests, combat-e2e, perf heavy fight under 520 calls.
 
 ### W7. Sky, light and water (Sonnet, 150k to 220k)
-- Goal: layered clouds, a sun disc and haze, warmer light, softer shadow edge, sea colour at the
+- Goal: layered clouds, a sun disc and haze, warmer light, softer shadow edge, sea color at the
   seawall, night glow.
 - Owns: src/systems/daynight.js, src/render/water.js, nightlights.js, scripts/sky-preview.mjs,
   test/daynight.test.js.
@@ -431,7 +431,7 @@ Decisions for the owner (answered 2026-11-22; the answers are in section 6.0):
   testing and tilt fails on some phones.
 - D5. Should wrecks and bodies stay? Recommend: yes, 60 s and 30 s with caps. Reason: things that
   vanish are the main "fake" signal.
-- D6. Launch behaviour? Recommend: title screen with Continue and Start downtown, Start downtown
+- D6. Launch behavior? Recommend: title screen with Continue and Start downtown, Start downtown
   first. Reason: the first view must be a designed one.
 - D7. May Fable be used for W0 only (about 100k)? Recommend: yes. Reason: STATUS decision 6
   dropped Fable, but the contracts in W0 decide whether 3M of other work lands; if no, Opus does
@@ -458,9 +458,9 @@ Top risks:
    the start view; save version bump with a loader test.
 6. Menu rework breaks hidden flows (first-run steering dialog, tilt fallback, map restart).
    Mitigation: ui-test drives the real game through each flow before and after.
-7. Art in code hits a ceiling: lofted cars may never look modelled. Mitigation: W5 starts with one
+7. Art in code hits a ceiling: lofted cars may never look modeled. Mitigation: W5 starts with one
    car taken to the bar and a go or no-go shot for the owner before the other eight.
-8. Real map licence: the ODbL credit must stay visible in the menu and the store listing.
+8. Real map license: the ODbL credit must stay visible in the menu and the store listing.
    Mitigation: a smoke check for the credit text.
 
 ## 5. Verification and release
@@ -478,7 +478,7 @@ by hand in this order:
 5. `node scripts/perf.mjs`: street view at most 420 draw calls and 600k triangles; heavy fight at
    most 520 calls.
 6. Screenshot review at 915x412, written to docs/preview/review/ and looked at by a person or a
-   reviewing model against section 2: start view; a residential street; a car park lot; the
+   reviewing model against section 2: start view; a residential street; a parking lot lot; the
    waterfront; a causeway; a car close-up by day and by night; a car blast at 0.1 s, 0.5 s and 5
    s; a gunfight; the pause menu on each section; the HUD in car, on foot, in a boat and in a
    plane; the full map. Any view with bare tile, an overlap or a blocky edge fails.
@@ -523,7 +523,7 @@ workstream as long as the named test still passes; everything else is fixed.
 ### 6.1 Core area and the whole-box rule
 
 ```
-CORE = { x0: -2700, z0: -2700, x1: 2450, z1: 1900 }   // metres, x east, z south
+CORE = { x0: -2700, z0: -2700, x1: 2450, z1: 1900 }   // meters, x east, z south
 BOX  = city.cut = { x0: -4505, z0: -3891, x1: 4505, z1: 3891 }
 ```
 
@@ -562,7 +562,7 @@ skip dressing; `inCore` is only for tests, for placing hand content and for the 
 Module: new src/world/lots.js (W1). Pure, no three.js, no DOM. The island has no lots
 (`city.lots` undefined); every consumer must treat that as "no lots".
 
-Data shape. All lengths in metres, areas in m2, angles in radians, rects axis-aligned.
+Data shape. All lengths in meters, areas in m2, angles in radians, rects axis-aligned.
 
 ```
 city.lots: Lot[]                       // index = lot id
@@ -571,23 +571,23 @@ Lot = {
   type: string,                        // one of LOT_TYPES
   x0, z0, x1, z1: number,              // bounding rect of the lot's cells
   area: number,                        // m2 of cells that belong to the lot (cells * 25)
-  district: string,                    // districtOf(centre): downtown midtown residential industrial docks park airfield
-  place: string,                       // placeOf(centre), '' if none
+  district: string,                    // districtOf(center): downtown midtown residential industrial docks park airfield
+  place: string,                       // placeOf(center), '' if none
   seed: int,                           // uint32, see "seed" below
   dress: string,                       // dressing set id, see the dressing table
   building: int,                       // index into city.buildings of the lot's main building, -1 if none
   edge: int,                           // id of the nearest road edge that touches the lot, -1 if none
   front: int,                          // side of the rect that faces `edge`: 0 +x, 1 +z, 2 -x, 3 -z
-  core: boolean,                       // centre inside MIAMI_CORE
+  core: boolean,                       // center inside MIAMI_CORE
 }
 
 city.lotGrid = {                       // the ground truth for ground material and for clipping props
   x0, z0: number, cell: 5, w: int, h: int,   // same origin, cell and size as city.landGrid
-  id: Int32Array(w * h),               // lot id per cell, -1 = road, pavement ring, building, water
+  id: Int32Array(w * h),               // lot id per cell, -1 = road, sidewalk ring, building, water
   type: Uint8Array(w * h),             // index into LOT_TYPES + 1, 0 = no lot
 }
 city.lotAt(x, z) -> Lot | null
-city.lotTypeAt(x, z) -> string | ''    // for the minimap, audio, peds, dust colour
+city.lotTypeAt(x, z) -> string | ''    // for the minimap, audio, peds, dust color
 ```
 
 ```
@@ -595,10 +595,10 @@ export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach',
   'wateredge', 'site', 'verge', 'airfield'];
 ```
 
-| type | meaning | ground | minimap colour (W4) |
+| type | meaning | ground | minimap color (W4) |
 |---|---|---|---|
 | yard | private garden round a low building | lawn with a paved drive strip | #7d8f62 |
-| carpark | surface car park | asphalt with painted bays | #6a6d72 |
+| carpark | surface parking lot | asphalt with painted bays | #6a6d72 |
 | plaza | paved forecourt of a tall or public building | light paving slabs | #b8b0a2 |
 | grass | vacant grass, landuse grass, road-side green | rough grass | #86965f |
 | works | works yard, depot, container yard, boatyard | concrete and dirt patches | #8a8378 |
@@ -606,18 +606,18 @@ export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach',
 | park | public park or wood | mown grass with paths | #6f8f55 |
 | wateredge | the strip beside the water that is not beach | seawall cap, riprap, boardwalk | #9a9a94 |
 | site | building site (OSM building kind `construction`, or a seeded 2 % of large `grass` lots) | dirt | #a08a66 |
-| verge | sliver too small or thin to dress | kerb paving | #8f8f8a |
+| verge | sliver too small or thin to dress | curb paving | #8f8f8a |
 | airfield | the Gullwing islet surfaces (existing `city.surfaces`) | as today | as today |
 
 How lots are produced (W1, at city build, deterministic, no randomness beyond `lot.seed`):
 
 1. Free cells. On the 5 m raster a cell is free when it is drawn land (`landGrid.data` = 1), is
-   not within `edge.width / 2 + 4` m of a road edge (the road and its 4 m pavement), and its
-   centre is not inside a building box.
+   not within `edge.width / 2 + 4` m of a road edge (the road and its 4 m sidewalk), and its
+   center is not inside a building box.
 2. Mask layers, stamped once: `parkMask` (data.parks kinds `park` and `forest`, plus the `park`
    district rects), `grassMask` (data.parks kind `grass`), `beachMask` (rects in the new
    `MIAMI_SPOTS.beaches`; W1 lists at least 2, one in the core, each on a real sandy or open
-   shore), `shore` = `city.mainShore(x, z)` (metres to the water).
+   shore), `shore` = `city.mainShore(x, z)` (meters to the water).
 3. Regions. Flood fill free cells into road-free regions (the existing `floodBlock` pass).
 4. Split a region into lots, in this order:
    a. Cells with `shore < SHORE_STRIP` (8 m): `beach` if in `beachMask` (the beach strip is 30 m
@@ -650,7 +650,7 @@ Named constants in lots.js (start values): `SHORE_STRIP = 8`, `BEACH_DEPTH = 30`
 40`, `LOT_MAX_AREA = 6400`, `LOT_MIN_AREA = 100`, `LOT_MIN_WIDTH = 10`, `CARPARK_MIN = 600`.
 
 Seed: `lot.seed = hash32(city.seed, round(cx / 5), round(cz / 5), typeIndex)` where cx, cz is the
-centre of the bounding rect. It does not depend on the lot's index, so adding or removing other
+center of the bounding rect. It does not depend on the lot's index, so adding or removing other
 lots never changes a lot's look. All dressing randomness is `createRng(lot.seed)`.
 
 Dressing. A lot's features are not stored. They come from one pure function that both the
@@ -660,19 +660,19 @@ renderer and the collision and parking code call:
 export function dressLot(city, lot, out = []) -> Feature[]
 Feature = {
   kind: string,                 // see the list below
-  x, z: number,                 // centre, metres
+  x, z: number,                 // center, meters
   heading: number,              // radians, 0 faces +x
-  l, w, h: number,              // length along heading, width, height, metres (0 if not used)
+  l, w, h: number,              // length along heading, width, height, meters (0 if not used)
   r: number,                    // collision radius for round solids, else 0
   solid: boolean,               // true: blocks cars and people (box l by w, or circle r)
-  v: int,                       // variant picked from the seed (tree species, bin colour, paint)
+  v: int,                       // variant picked from the seed (tree species, bin color, paint)
 }
 FEATURE_KINDS = ['fence', 'hedge', 'wall', 'gate', 'drive', 'bay', 'tree', 'shrub', 'bin',
   'bench', 'planter', 'lamp', 'bollard', 'umbrella', 'stack', 'pallet', 'cabin', 'boat',
   'path', 'sign', 'towel', 'rock', 'pile']
 ```
 
-- A feature is only emitted where `lotGrid.id` at its centre equals `lot.id` (so nothing lands
+- A feature is only emitted where `lotGrid.id` at its center equals `lot.id` (so nothing lands
   on a road, in a building or in the water).
 - `lot.dress` is picked at build time as `DRESS[lot.type][lot.district]` (a short list of set
   ids), entry `rng.int(list.length)` with `createRng(lot.seed)`. W1 writes the table; each type
@@ -696,7 +696,7 @@ FEATURE_KINDS = ['fence', 'hedge', 'wall', 'gate', 'drive', 'bay', 'tree', 'shru
 - Caps (phone budget): at most 24 features per lot, at most 120 per hectare, at most 12 `solid`
   per lot. `dressLot` for one lot under 0.05 ms on the test machine (measured in the test).
 - Parking: every `bay` is also added to `city.parkingSpots` at build time as `{ x, z, heading,
-  lot: true }` (the field exists today), with at most 60 % of a car park's bays listed, chosen
+  lot: true }` (the field exists today), with at most 60 % of a parking lot's bays listed, chosen
   by the lot seed. The parked-car system then fills them with no change. W8 tunes the fill later.
 - Correction (W2, owner approved): a `bay` is a row of bays (`l` = n x 2.5 m along `heading`, `w` = 5 m, split by `eachBay`), a single 2.5 by 5 m bay being the row of one; the renderer and the collision fill take both; collision shapes for all lots are made once at city build (`fillLotCollision`), not per tile.
 - Collision: W2 adds a collision shape for each `solid` feature when its tile is built and
@@ -726,8 +726,8 @@ no wind, starting from rest or from a settled speed.
 export const MODES = ['arcade', 'sim'];                 // settings.handling, default 'arcade'
 export const LAT_G_FACTOR = { arcade: [1.00, 1.12], sim: [0.88, 1.00] };  // times spec.grip
 export const LAT_TEST_SPEEDS = [15, 30];                // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
-export const LOCK_TIME = [0.25, 0.40];                  // s, centre to full lock, at 0 to 10 m/s
-export const RETURN_TIME = [0.20, 0.30];                // s, full lock to centre, hands off
+export const LOCK_TIME = [0.25, 0.40];                  // s, center to full lock, at 0 to 10 m/s
+export const RETURN_TIME = [0.20, 0.30];                // s, full lock to center, hands off
 export const LOCK_TIME_FAST_MAX = 0.55;                 // s, at 30 m/s
 export const MODE_BRAKE_DIFF = 0.05;                    // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03;                 // 0 to 60 and top speed within 3 %
@@ -743,7 +743,7 @@ export const BANDS = {                                  // [min, max]
   van:      { r0: [6.0, 7.5],  t60: [11, 13],    top: [85, 95],   stop: [40, 46] },
   truck:    { r0: [9.0, 11.0], t60: [18, 24],    top: [65, 75],   stop: [46, 55] },
 };
-// r0: radius (m) of the path of the car's centre at 2 m/s on full lock.
+// r0: radius (m) of the path of the car's center at 2 m/s on full lock.
 // t60: s from rest to 26.82 m/s. top: mph, reached within 90 s. stop: m from 26.82 m/s to rest.
 ```
 
@@ -766,7 +766,7 @@ Car spec table: fields that change in `VEHICLE_SPECS` (W3). Start values; the ba
 | truck | 0.70 | 0.42 | 2.5 | 3.3 | 31.3 | 7500 |
 
 - `lockRate` and `returnRate` are new fields: units of full lock per second. The steer value
-  moves toward the input at `lockRate` when moving away from centre and at `returnRate` when
+  moves toward the input at `lockRate` when moving away from center and at `returnRate` when
   moving toward it. `1 / lockRate` must sit in `LOCK_TIME`, `1 / returnRate` in `RETURN_TIME`.
   They replace the per-mode `steerRate` and the 1.6 return factor. At speed the rate may fall,
   but never below `1 / LOCK_TIME_FAST_MAX`.
@@ -789,7 +789,7 @@ What is the same in both modes (D3: accurate steering and braking in both):
    - A3 mirror: left and right give the same radius within 1 %.
    - A4 straight: hands off at 30 m/s for 5 s drifts under 0.2 m sideways.
    - A5 lane change: 3.5 m sideways within 30 m of road at 20 m/s (truck 15 m/s), ending within
-     0.4 m of the new lane centre and 3 degrees of straight, 1.5 s after the move.
+     0.4 m of the new lane center and 3 degrees of straight, 1.5 s after the move.
 Brake pedal (H1, replaces the traffic brake gain scale): every brake input, the player's and
 every AI planner's, goes through one S-curve before the hydraulic build-up,
 `brakePedal(p) = p + PEDAL_S * p * (1 - p) * (1 - 2p)` with `PEDAL_S = 1.0` (vehicle.js; pinned
@@ -797,7 +797,7 @@ by `BRAKE_PEDAL_S` in handlingbands.js and a test). It is exact at 0, half and f
 holds), point symmetric about half pedal, strictly rising, and firmer in the first half of the
 travel (0.25 gives 0.344 of the full brake), where drivers and the AI trim their speed. The
 per-car traffic brake gain scale planned earlier is not built: planners send their pedal
-unchanged, and the car's own `brake` and tyre limit set the deceleration.
+unchanged, and the car's own `brake` and tire limit set the deceleration.
 
 5. Braking accuracy tests, both modes:
    - B1 linear: a brake input of 0.5 gives 45 to 55 % of the full-brake deceleration at 20 m/s.
@@ -813,13 +813,13 @@ What differs:
 | item | Arcade (default) | Sim |
 |---|---|---|
 | Steady lateral grip on full lock | 1.00 to 1.12 times `spec.grip` | 0.88 to 1.00 times `spec.grip` |
-| Tyre past its peak | force sags at most 6 % | force sags 18 to 22 % |
+| Tire past its peak | force sags at most 6 % | force sags 18 to 22 % |
 | Full steering input at speed asks for | 1.00 of lateral grip (the front never ploughs) | 1.10 of lateral grip (too much lock scrubs speed and runs wide) |
 | Stability assist (yaw and slide correction) | on; body slip held under 8 degrees (rear drive 16) | off, apart from a light yaw damper; the car can spin |
 | Traction control | on; drive is cut in a slide, no less than 30 % kept | off; rear drive cars step out under power |
 | Handbrake | slide capped (slip 0.6 rad) and it recovers by itself | free; holds the slide until released |
 | Weight transfer on the balance (lift off, trail brake) | half effect | full effect |
-| Tyre squeal starts at | 1.3 times peak slip | 0.9 times peak slip |
+| Tire squeal starts at | 1.3 times peak slip | 0.9 times peak slip |
 | Rain | grip loss as today | grip loss as today, plus the sag above |
 
 Nothing else may differ. The mode table in vehicle.js (`HANDLING`) keeps only the fields that
@@ -844,9 +844,9 @@ export function wheelCurve(x) -> number      // 0.85 * x + 0.15 * x^3, clamped
 // settings.steerSensitivity, 0.5 to 1.5; more sensitivity means less travel.
 export function steerTravel(style, sensitivity = 1) -> number
 //   wheel: degrees of wheel turn, 110 / sensitivity
-//   slider: CSS px from the bar centre, 90 / sensitivity
+//   slider: CSS px from the bar center, 90 / sensitivity
 //   tilt: degrees of phone roll past the dead zone, 22 / sensitivity
-//   buttons: seconds from centre to a full target, 0.30 / sensitivity
+//   buttons: seconds from center to a full target, 0.30 / sensitivity
 export function rawFromTravel(style, travel, sensitivity = 1) -> number   // clamp(travel / steerTravel, -1, 1)
 ```
 
@@ -857,14 +857,14 @@ A style may not add its own smoothing, except the two named below.
 
 | style | input mapping | acceptance (test/steering.test.js plus a slalom in test/handling-bands.test.js) |
 |---|---|---|
-| wheel | The thumb's angle about the wheel centre is summed from one pointer event to the next (`angleDelta`), starting at 0 where the thumb lands, so a touch never jumps the wheel. raw = summed degrees / `steerTravel('wheel')`. Inside 16 px of the centre the sum holds its value and tracking is kept. The pointer is tracked by id until it lifts, wherever it goes. On lift the target is 0. | 55 degrees gives raw 0.5 and a target of 0.40 to 0.55. A path through the centre core changes the target by under 0.02. 110 degrees is full lock. Slalom (cones 18 m apart, 20 m/s, Arcade, sedan) passes with the thumb limited to 300 degrees per second; in Sim it passes at 17 m/s. |
+| wheel | The thumb's angle about the wheel center is summed from one pointer event to the next (`angleDelta`), starting at 0 where the thumb lands, so a touch never jumps the wheel. raw = summed degrees / `steerTravel('wheel')`. Inside 16 px of the center the sum holds its value and tracking is kept. The pointer is tracked by id until it lifts, wherever it goes. On lift the target is 0. | 55 degrees gives raw 0.5 and a target of 0.40 to 0.55. A path through the center core changes the target by under 0.02. 110 degrees is full lock. Slalom (cones 18 m apart, 20 m/s, Arcade, sedan) passes with the thumb limited to 300 degrees per second; in Sim it passes at 17 m/s. |
 | buttons | LEFT and RIGHT. While one is held the target ramps from its current value toward -1 or 1 over `steerTravel('buttons')` seconds (this ramp is the one allowed input filter; it equals the car's own lock time so the two do not add up). Release: target 0. Both held: target 0. The keyboard uses the same mapping. | Hold to full lock takes 0.25 to 0.40 s measured at the car's wheels. A 0.10 s tap peaks between 0.25 and 0.40 of lock. Both held gives 0. The slalom passes with a scripted press and release driver. |
 | tilt | `tiltAngle(beta, gamma, screenAngle)` gives the roll of the phone like a steering wheel. Dead zone 1.5 degrees, then raw = (degrees - 1.5) / `steerTravel('tilt')`, then `wheelCurve`. A low-pass with a 0.08 s time constant is the one allowed filter. If no orientation event arrives within 1.0 s of choosing tilt, or permission is refused, the game shows a toast, uses the wheel for this run and keeps the saved setting. | 12.5 degrees gives raw 0.5. Both landscape ways give the same sign. Lying flat gives 0. Noise of 0.5 degrees at rest gives 0. The fallback fires in a test with no events. The slalom passes with the roll limited to 60 degrees per second. |
-| slider | A bar 180 px wide. raw = (pointer x - bar centre x) / `steerTravel('slider')`, then `wheelCurve`. Absolute: where the thumb lands is the value. The pointer is tracked by id until it lifts, even off the bar. On lift the target is 0. | 45 px gives raw 0.5. A pointer that leaves the bar still steers. Ends clamp at 1. The slalom passes with the thumb limited to 400 px per second. |
+| slider | A bar 180 px wide. raw = (pointer x - bar center x) / `steerTravel('slider')`, then `wheelCurve`. Absolute: where the thumb lands is the value. The pointer is tracked by id until it lifts, even off the bar. On lift the target is 0. | 45 px gives raw 0.5. A pointer that leaves the bar still steers. Ends clamp at 1. The slalom passes with the thumb limited to 400 px per second. |
 
 Slalom pass rule (all four styles, `SLALOM` in handlingbands.js): six cones on a straight line
 18 m apart, passed on alternate sides by the sedan at 20 m/s (Arcade) or 17 m/s (Sim). It
-passes when the car reaches all six cones in order, passes each on its own side with its centre
+passes when the car reaches all six cones in order, passes each on its own side with its center
 at least 0.4 m out (`clear`) and never drops under 95 % of the speed (`keep`). One scripted
 driver (the same preview, gains and weave) serves every style; only the input device and its
 rate limit (thumb 300 degrees per second, roll 60 degrees per second, slider 400 px per second,
@@ -905,7 +905,7 @@ Screens:
 | New game | Settings, Game, "New game" row | Two rows, each with the confirm rule: "New game: back to the start street in the starter car. Score, garages and adventures are kept." and "Erase all progress: score, medals, secrets, garages, adventures and settings." |
 | Map choice | Settings, Game, "Map" row | Two cards: "Miami" and "Classic island", the current one marked. Tapping the other arms the confirm ("Switching restarts the game. Your place on each map is kept."). |
 | Garage | in the world, at a garage (6.6) | Car list and actions. |
-| Garages | hub tile | List of the 12 garages: found ones by name and neighbourhood, unfound ones as "Unknown". Tap a found one: "Show on map". |
+| Garages | hub tile | List of the 12 garages: found ones by name and neighborhood, unfound ones as "Unknown". Tap a found one: "Show on map". |
 | Adventures | hub tile | "Active" list (name, current clue, "Track" button), "Done" list (name, reward), a line "Rumours to hear: n". |
 
 Settings groups (4 groups, at most 6 rows each):
@@ -930,7 +930,7 @@ Settings groups (4 groups, at most 6 rows each):
 | Display | HUD | 2 choices: Minimal, Full | `settings.hud` |
 | Display | Graphics quality | 3 choices: Low, Normal, High | `settings.quality` |
 | Display | Live day and night | switch | `settings.liveTime` |
-| Display | Time of day | slider, greyed while Live is on | `settings.timeOfDay` |
+| Display | Time of day | slider, grayed while Live is on | `settings.timeOfDay` |
 
 No new settings keys. Menu API that W4 provides for W11 (so W11 never edits menu.js):
 `menu.registerScreen({ id, title, render(body, api) })` and `menu.open(id)`; `api.back()`,
@@ -955,7 +955,7 @@ L = 40 (the S24 Ultra camera cut-out in landscape), with R = T = B = 0.
   no padding; only HUD items are moved.
 - Left-anchored items (minimap, speed, steering slot) move right by L. Right-anchored items
   (score, pause, the button cluster) move left by R. Top items move down by T, bottom items up
-  by B. Centred items stay centred on the viewport.
+  by B. Centered items stay centered on the viewport.
 - Left-handed: the steering slot and the button cluster are mirrored (`x' = V - x - w`). The
   minimap, speed, score, stars and pause do not move.
 - In a normal Chrome tab the browser may keep its own bar beside the cut-out. The Start tap
@@ -972,12 +972,12 @@ wheel while held, the open "more" fan, toasts in their own strip above it.
 | Minimap | 8, 8, 84, 84 | 8, 8, 72, 72 | tap grows it to 170 (140) square from the same corner, shrinks after 5 s |
 | Speed | 100, 8, 88, 44 | 92, 8, 80, 40 | always 8 px right of the minimap, also when it is grown; number 28 px bold, unit 11 px; in a craft only |
 | Health (hard mode only) | 100, 56, 88, 12 | 92, 52, 80, 12 | under the speed |
-| Stars | 383, 8, 150, 24 | 315, 8, 150, 24 | centred; only while wanted; cooldown bar 150 by 4 right under it |
-| District and toasts strip | 290, 56, 335, 80 | 240, 56, 300, 72 | centred; clear of the speed readout when the minimap is grown; district title 3 s, toasts stack downward, never past the strip |
+| Stars | 383, 8, 150, 24 | 315, 8, 150, 24 | centered; only while wanted; cooldown bar 150 by 4 right under it |
+| District and toasts strip | 290, 56, 335, 80 | 240, 56, 300, 72 | centered; clear of the speed readout when the minimap is grown; district title 3 s, toasts stack downward, never past the strip |
 | Score | 691, 8, 160, 28 | 564, 8, 152, 26 | right aligned text; combo line 18 px high right under it |
 | Pause | 859, 8, 48, 48 | 724, 8, 48, 48 | |
 | Radio caption (talk station) | 8, 100, 180, 36 | 8, 92, 170, 32 | under the minimap; hidden while the minimap is grown |
-| Prompt strip ("ENTER", "GARAGE", "TALK" hints) | 308, 376, 300, 28 | 240, 324, 300, 28 | centred, under the keep-out rect |
+| Prompt strip ("ENTER", "GARAGE", "TALK" hints) | 308, 376, 300, 28 | 240, 324, 300, 28 | centered, under the keep-out rect |
 | Steering slot | 16, 240, 160, 160 | 16, 204, 140, 140 | holds one of: wheel (150 round, 136 at 780), two arrow buttons (72 by 72 each, 8 apart, bottom of the slot), slider bar (full slot width by 56, bottom of the slot), tilt bar (120 by 20, display only). The foot and flight sticks use the same slot. |
 | GAS (THRUST) | 835, 316, 72, 88 | 708, 280, 64, 72 | |
 | BRAKE (DOWN) | 751, 316, 72, 88 | 632, 280, 64, 72 | |
@@ -1040,8 +1040,8 @@ export const GARAGE_BONUS = 500;       // points for the first visit to each gar
 Garage = {
   id: string,                 // 'g-downtown' ...; the allow-list GARAGE_IDS
   name: string,               // invented
-  place: string,              // neighbourhood name from city.placeOf
-  x, z, heading: number,      // centre of the shed and the way the door faces
+  place: string,              // neighborhood name from city.placeOf
+  x, z, heading: number,      // center of the shed and the way the door faces
   door: { x, z },             // middle of the door line
   bay: { x, z, heading },     // where a car taken out appears, on the forecourt
   footprint: { x0, z0, x1, z1, h },   // shed, 10 by 14 m, 4.5 m high
@@ -1054,7 +1054,7 @@ Garage = {
 
 The 12 garages. Anchors are start values; W11 may move one up to 300 m to find a legal spot.
 
-| id | name | neighbourhood | anchor x, z | notes |
+| id | name | neighborhood | anchor x, z | notes |
 |---|---|---|---|---|
 | g-downtown | First Street Lock-up | Downtown | -1300, 560 | `known`; within 350 m of the start view |
 | g-brickell | Keyside Garage | Brickell | -1300, 1650 | |
@@ -1087,9 +1087,9 @@ screen and pauses the game. Everything is free.
 - Take out: pick any car in the collection. The car the player arrived in is stored first (or
   left on the forecourt if the collection is full), then the picked car appears on `bay` with
   the player in it, at full health. The collection is shared by all garages.
-- Repaint: a grid of 16 colours plus the model's own colours; applies at once to the selected
+- Repaint: a grid of 16 colors plus the model's own colors; applies at once to the selected
   car, stored or just driven in.
-- Favourite: a star toggle; at most one favourite. The favourite is the car the player starts
+- Favorite: a star toggle; at most one favorite. The favorite is the car the player starts
   in on "Start" (6.8) and after "New game".
 - Release: removes a car from the collection (confirm rule). Reward cars cannot be released.
 - "Word at the garage": one line under the list that names the nearest thing the player has not
@@ -1097,8 +1097,8 @@ screen and pauses the game. Everything is free.
   the map. One per visit, picked by distance, so it is the same for every player.
 
 Garage screen layout (inside the 6.4 rules): left half, the car list as cards 2 across (model
-name, colour swatch, star, "Reward" tag), scrolls; right half, the selected car's name and four
-buttons (Take out or Store, Repaint, Favourite, Release), then the "Word at the garage" line.
+name, color swatch, star, "Reward" tag), scrolls; right half, the selected car's name and four
+buttons (Take out or Store, Repaint, Favorite, Release), then the "Word at the garage" line.
 Repaint replaces the right half with the swatch grid (swatches 48 by 48) and a Back button.
 
 #### Adventures
@@ -1114,7 +1114,7 @@ AdventureDef = {
   id: string,                 // 'a-first-light' ...; the allow-list ADVENTURE_IDS
   name: string,               // invented
   kind: 'lookout' | 'clue' | 'hidden' | 'tour',
-  place: string,              // neighbourhood, for the list
+  place: string,              // neighborhood, for the list
   core: boolean,
   giver: { type: 'start' | 'sign' | 'talker' | 'garage', x, z, garage: id | null, line: string },
   steps: Step[],              // 1 to 3
@@ -1141,11 +1141,11 @@ Kinds:
 - clue: 2 or 3 steps in order; each step's clue describes the next place in words ("where the
   river meets the bay, under the last crane").
 - hidden: find a tucked-away spot inside one fuzzy ring of 150 to 200 m (a yard behind a works
-  lot, the back of a car park, a gap between buildings). One step with a small `r` (10 m).
+  lot, the back of a parking lot, a gap between buildings). One step with a small `r` (10 m).
 - tour: visit 3 named places in any order.
 
 The set: 16 adventures, 8 in the core and 8 outside, at least 3 of each kind, at least one in
-each of the 12 garage neighbourhoods. W11 writes the 16 definitions (names, clues, anchors) to
+each of the 12 garage neighborhoods. W11 writes the 16 definitions (names, clues, anchors) to
 this shape. Fixed by this contract:
 
 | id | kind | where | reward beyond score |
@@ -1171,9 +1171,9 @@ Rewards:
   src/world/courses.js builds them with the others and marks them `locked: adventureId`;
   src/systems/activities.js hides a locked course until its adventure is done.
 - Cars: three reward models added to `VEHICLE_SPECS` by W3 from this table (the Ghostwake
-  pattern: an existing chassis and body, its own id, label and one colour):
+  pattern: an existing chassis and body, its own id, label and one color):
 
-| id | label | based on | changes | colour |
+| id | label | based on | changes | color |
 |---|---|---|---|---|
 | sunchaser | Sunchaser | muscle | power plus 8 %, maxSpeed 64.0, grip 1.05 | 0xff5a1f |
 | tidewinder | Tidewinder | pickup | power plus 15 %, maxSpeed 49.0, grip 0.92, health 1400 | 0x1f8a8a |
@@ -1184,7 +1184,7 @@ Rewards:
 How things are found:
 1. Exploring. The box is cut into explore cells of 250 m (36 by 32). Entering a new cell that
    holds land sets its bit, pays 50 points with no toast, and updates "explored n %" in Stats.
-   A garage appears on the map (grey marker, then its name on the first visit) when the player
+   A garage appears on the map (gray marker, then its name on the first visit) when the player
    comes within `GARAGE_FIND_R`. An adventure appears (a "?" marker at the giver) within
    `ADV_SEEN_R`.
 2. Signs. Each adventure with `giver.type` 'sign' has a notice board placed by the adventures
@@ -1197,12 +1197,12 @@ How things are found:
    nearest within 200 m). A talker cannot be hurt and is hidden while the player is wanted.
 4. Garages. "Word at the garage" (above), and `giver.type` 'garage' adventures start there.
 5. Map. Seen adventures show a "?"; the tracked one shows its current step as a fuzzy ring of
-   radius `step.hint` whose centre is offset from the true point by up to half the radius
+   radius `step.hint` whose center is offset from the true point by up to half the radius
    (offset from `createRng(ADVENTURE_SEED + index * 8 + stepIndex)`). Done adventures show a
    small tick. Locked garages show nothing until revealed. Markers come from a layer W11
    registers: `game.mapui.addLayer({ id, markers() })` (W4 provides this on minimap and full map).
 6. Tracking. One adventure can be tracked; the objective arrow (src/systems/objective.js) points
-   at the ring centre, not the true point.
+   at the ring center, not the true point.
 
 A step is done when the player is within `r` of the true point in the right `mode` (and above
 `minY`, and with the stunt medal when `stunt` is set, heard from the existing `stunt` event).
@@ -1268,7 +1268,7 @@ Acceptance (W11): test/garages.test.js, test/adventures.test.js, test/explore.te
   road edge); every step point is reachable in its `mode` (on land for foot and car, in water
   for boat, clear air for air); 5 garages and 8 adventures in the core; no two garages within
   900 m; every step at least 150 m from its giver.
-- Rules: store, take out, repaint, favourite, release and the full-collection case as pure
+- Rules: store, take out, repaint, favorite, release and the full-collection case as pure
   functions on the explore state; a locked garage cannot be used before its adventure.
 - A scripted run completes a-first-light and one clue adventure step by step and gets the score,
   the events and the unlock.
@@ -1282,13 +1282,13 @@ Car blast, scale 1 (an ordinary car). Times are from the blast step; "s" is game
 
 | layer | numbers |
 |---|---|
-| 1 Flash | frame 0 only: a white-yellow sprite 6 m across; one pooled point light, colour 0xffc870, range 30 m, full at 0 s, gone by 0.35 s; at most 2 blast lights alive |
-| 2 Fireball | 3 additive billboards; radius 2 m at 0 s to 7 m at 0.25 s; colour white to yellow (0.1 s) to orange (0.3 s) to dark red (0.7 s); gone by 0.7 s |
-| 3 Smoke roll | 8 to 12 dark puffs from 0.08 s, rising 3 m/s, spreading so smoke is seen to at least 12 m from the centre by 0.5 s; each lives 2.5 s |
+| 1 Flash | frame 0 only: a white-yellow sprite 6 m across; one pooled point light, color 0xffc870, range 30 m, full at 0 s, gone by 0.35 s; at most 2 blast lights alive |
+| 2 Fireball | 3 additive billboards; radius 2 m at 0 s to 7 m at 0.25 s; color white to yellow (0.1 s) to orange (0.3 s) to dark red (0.7 s); gone by 0.7 s |
+| 3 Smoke roll | 8 to 12 dark puffs from 0.08 s, rising 3 m/s, spreading so smoke is seen to at least 12 m from the center by 0.5 s; each lives 2.5 s |
 | 4 Pressure ring | a ground ring from 0 to 16 m radius in 0.3 s, fading as it grows |
-| 5 Dust skirt | 10 ground puffs thrown outward at 8 m/s, life 1.2 s, colour from `city.lotTypeAt` (sand, dirt, grey) |
+| 5 Dust skirt | 10 ground puffs thrown outward at 8 m/s, life 1.2 s, color from `city.lotTypeAt` (sand, dirt, gray) |
 | 6 Sparks | 24, life 0.4 to 0.9 s |
-| 7 Parts | 14 to 18 per car from a pool of 96. Always 4 that can be recognised: a door, a wheel, the bonnet, a bumper (a second wheel and door when the pool allows). Launch speed 6 to 16 m/s, 35 to 75 degrees up, spinning; one bounce (0.3 of the speed kept); lie 20 s, fade 1 s. Seeded from the vehicle id. |
+| 7 Parts | 14 to 18 per car from a pool of 96. Always 4 that can be recognized: a door, a wheel, the hood, a bumper (a second wheel and door when the pool allows). Launch speed 6 to 16 m/s, 35 to 75 degrees up, spinning; one bounce (0.3 of the speed kept); lie 20 s, fade 1 s. Seeded from the vehicle id. |
 | 8 Scorch | a ground mark 9 m across, stays 120 s, fades 5 s, at most 8 |
 | 9 Hull | the burnt body stays 60 s then fades over 2 s (D5); flames for the first 12 s, smoke the whole time; solid; at most 6 hulls, a seventh makes the oldest start its fade at once |
 | 10 Camera | shake 1.0 at 0 m falling in a straight line to 0 at 60 m, for 0.5 s; the existing blast camera (40 m) stays; both off under reduced motion |
@@ -1301,8 +1301,8 @@ stays under 520.
 
 Body fall direction rule. For every killing hit the code computes one unit vector `d` on the
 ground plane:
-- gunshot: the direction the shot travelled;
-- blast: from the blast centre to the victim (a random seeded direction if they are within 0.2 m);
+- gunshot: the direction the shot traveled;
+- blast: from the blast center to the victim (a random seeded direction if they are within 0.2 m);
 - vehicle: the vehicle's velocity direction.
 The body moves along `d` and ends lying along `d`: the line from feet to head is within 25
 degrees of `d`. Start speed along `d`: bullet 1.5 m/s (shotgun 4), vehicle 0.6 times the closing
@@ -1343,16 +1343,16 @@ MIAMI_SPOTS.startView = {
   time: 17.5,            // hours; fixed for the title
   weather: 'clear',
   traffic: 6,            // moving cars placed on the street at build
-  parked: 6,             // kerb spots filled first
+  parked: 6,             // curb spots filled first
 }
 ```
 
 - Camera (W4 with the coordinator, using src/render/chasecam.js only through a new
-  `setTitleShot(spec)` that W3 adds): it sits `back` metres behind the spawn point along the
-  street, `side` metres toward the south kerb, `height` metres up, and looks at a point
-  `lookAhead` metres ahead at `lookHeight`. It moves forward `dolly` metres at `dollySpeed`
+  `setTitleShot(spec)` that W3 adds): it sits `back` meters behind the spawn point along the
+  street, `side` meters toward the south curb, `height` meters up, and looks at a point
+  `lookAhead` meters ahead at `lookHeight`. It moves forward `dolly` meters at `dollySpeed`
   m/s, eases, and comes back the same way, for ever. The player's car is in the shot, lower
-  centre. Under reduced motion it does not move.
+  center. Under reduced motion it does not move.
 - Time: 17:30, clear sky. The sun is low in the west, behind the camera, so the towers ahead
   are lit and the street has long shadows. The title ignores "Live day and night"; when play
   begins the clock jumps to the setting during the camera blend.
@@ -1364,16 +1364,16 @@ MIAMI_SPOTS.startView = {
   traffic system places `traffic` cars on the edges ahead of the spawn at build, from a fixed
   seed, in addition to its normal spawning); at least 6 walkers.
 - Layout (CSS px, 915x412; at 780x360 the same rules): game name top left at `24 + L, 20`, 40 px
-  high. "Start" 180 by 56 and "Continue" 180 by 56 side by side, 16 apart, centred, bottom edge
+  high. "Start" 180 by 56 and "Continue" 180 by 56 side by side, 16 apart, centered, bottom edge
   24 above the safe bottom; Start is on the right and is the filled button. With no Continue,
-  Start is centred. Credit line bottom left, 11 px. Version bottom right, 11 px. Nothing in the
+  Start is centered. Credit line bottom left, 11 px. Version bottom right, 11 px. Nothing in the
   keep-out rect.
-- Loading: the title shows as soon as the page does, on the plain boot colour, with Start
+- Loading: the title shows as soon as the page does, on the plain boot color, with Start
   disabled and reading "Loading". When the city is built the designed view fades in (0.4 s) and
   Start enables. First frame of the view under 6 s on the test machine.
 - Start: asks for fullscreen, blends the camera to the chase camera over 1.2 s, shows the HUD
-  and controls when the blend ends. The player is at the spawn in the favourite car (6.6), or
-  the starter sedan in its first colour when there is none. If the saved session held a car, it
+  and controls when the blend ends. The player is at the spawn in the favorite car (6.6), or
+  the starter sedan in its first color when there is none. If the saved session held a car, it
   joins the left-behind cars exactly as leaving a car does today. Score and all progress are
   kept. No confirm is needed, since nothing is lost.
 - Continue: shown only when `game.session.canContinue()`: a saved session exists for the
@@ -1483,7 +1483,7 @@ Health: ambulance 1600, towtruck 1800, garbage 2400, firetruck 2600. Wheel radiu
 car" in 6.7 (radius 11 m, visual scale 1.1).
 
 Handling bands (same meaning and units as `BANDS` in 6.3; these are deliberate exceptions to
-the single car line, modelled on the truck row):
+the single car line, modeled on the truck row):
 
 ```
 export const SERVICE_BANDS = {
@@ -1509,10 +1509,10 @@ export const SERVICE_BANDS = {
 
 Siren and light bar. Sound is played by W6 from B2's event `siren { on, id }` plus a new field
 `kind`; lamps are drawn by src/render/lightbar.js (V1). All phase lengths are multiples of 50
-ms (3 fixed steps) and are counted from game time, never wall clock. Colours: red 0xff2a2a,
+ms (3 fixed steps) and are counted from game time, never wall clock. Colors: red 0xff2a2a,
 blue 0x2a5cff, white 0xffffff, amber 0xffa200. A bar uses the shared lamp materials (lit and
-unlit per colour), swapped per phase: no new material per vehicle, at most 2 draw calls per
-bar. Only the player's vehicle may also carry one pooled point light (range 14 m, colour of
+unlit per color), swapped per phase: no new material per vehicle, at most 2 draw calls per
+bar. Only the player's vehicle may also carry one pooled point light (range 14 m, color of
 the lit lamp) at night; every other bar is emissive only. Under `prefers-reduced-motion` the
 bar holds a steady "all lit at half brightness" state.
 
@@ -1520,7 +1520,7 @@ bar holds a steady "all lit at half brightness" state.
 |---|---|---|
 | police | `wail`: one tone sweeping 600 to 1300 Hz and back, 3200 ms per cycle. While HORN is held with the siren on: `yelp`, the same sweep in 300 ms. | Roof bar in two halves, left red, right blue. Cycle 800 ms in 8 phases of 100 ms: L, off, L, off, R, off, R, off. Headlamps alternate left and right every 400 ms (wig-wag) while the siren is on. |
 | ambulance | `hilo`: 960 Hz for 500 ms, then 770 Hz for 500 ms, repeating. | Four red corner lamps on the box roof and one white lamp over the cab. Cycle 900 ms in 6 phases of 150 ms: front reds, off, front reds, rear reds plus white, off, rear reds plus white. |
-| firetruck | `deepwail`: 400 to 1000 Hz and back, 5000 ms per cycle. HORN is an air horn: 150 Hz and 190 Hz together for as long as it is held. | Cab bar in two red halves alternating every 250 ms (cycle 500 ms); two red lamps on each body side lit in the opposite phase; one white lamp at the cab centre lit for 50 ms at the start of each 250 ms phase. |
+| firetruck | `deepwail`: 400 to 1000 Hz and back, 5000 ms per cycle. HORN is an air horn: 150 Hz and 190 Hz together for as long as it is held. | Cab bar in two red halves alternating every 250 ms (cycle 500 ms); two red lamps on each body side lit in the opposite phase; one white lamp at the cab center lit for 50 ms at the start of each 250 ms phase. |
 | garbage | none. Reverse beeper: 1000 Hz, 400 ms on, 400 ms off, while in reverse. | Two amber beacons on the cab roof alternating every 400 ms. On while the bin lift runs, while reversing, and for 2 s after either. |
 | towtruck | none. Reverse beeper as above. | Amber roof bar in 4 segments, a chase left to right at 150 ms per segment (cycle 600 ms). On while a car is hooked, while reversing, and for 2 s after. |
 
@@ -1536,10 +1536,10 @@ bottom edge for the extra's charge or progress, so no new HUD rectangle is neede
 
 | vehicle | `spec.extra` | input | numbers | how it changes the world |
 |---|---|---|---|---|
-| firetruck | `cannon` | hold | Roof nozzle. Water tank 20 s of spray; refills in 40 s while not spraying; after running dry it needs 25 % of a tank to start again. Works at any speed. Range 28 m. The jet points along the truck's heading and turns by itself at 90 degrees per second toward the nearest target inside 35 degrees either side and 28 m: a burning hull first, then a burning vehicle, then a person. A target is "in the jet" when within 0.9 m of the jet line (2.0 m for a hull or vehicle). | Person in the jet: knocked down, no damage, no blood, never a kill; pushed at 5 m/s along the jet direction (the 6.7 fall rule with `d` = jet direction), stays down 3 s, then gets up and flees. Burning hull: after 1.5 s in the jet (summed, not in a row) its flames stop, `hullBurn { id, on: false }` fires, the smoke turns to white steam for 4 s and then stays thin; the hull itself still lasts its 60 s. Score "Fire out" +150 per hull. A vehicle that is burning before its blast (if combat.js has that state) is put out the same way and its blast is cancelled. Any other vehicle in the jet is pushed with 3000 N along the jet. Heat: none for people, +1 star when an officer is knocked down. Drawn with at most 40 pooled particles and one ground splash, at most 2 draw calls. |
-| ambulance | `treat` | tap | Needs speed under 2 m/s. Range 8 m from the vehicle centre. Takes 2.0 s (progress on the fill bar; moving off above 2 m/s cancels it). Cooldown 5 s after a finished treatment. | Any mode: the nearest body lying within range (6.7 bodies) is revived: the body and its blood pool are removed and a person stands up at that place and walks away. Score "Revived" +200. Hard mode (`settings.mortal`) also: the player's health goes to full over the same 2.0 s, and while seated in an ambulance the player regains 5 % of full health per second. With no body in range and nothing to heal the tap gives a short "Nobody to treat" toast and no cooldown. |
-| garbage | `lift` | tap | Needs speed under 1.5 m/s. Range 4.0 m from the vehicle centre to a kerb bin (a lot feature of kind `bin`, or a street bin prop). One cycle is 3.0 s: raise 1.0 s, tip 1.0 s, set down 1.0 s. Driving above 1.5 m/s during a cycle aborts it and the bin is dropped on its side. No cooldown; one cycle at a time. | The bin is marked emptied for 300 s (it cannot be lifted again in that time). Score "Bin emptied" +50. The hopper counts loads 0 to 20; at 20 the lift refuses ("Full") until the truck stops inside a garbage yard spot for 2 s, which empties it and gives +400. With no bin in range the tap runs the crusher instead: up to 3 wreck parts (6.7 layer 7) lying within 4.0 m are pulled in and removed, +20 each, 1.0 s. During a cycle service.js draws one pooled bin mesh on the arm; the lot's own bin instance is hidden through a W2 call if one exists (`hideFeature`), otherwise it simply stays in place. |
-| towtruck | `hook` | tap to hook, tap to release | Hook needs truck speed under 1.5 m/s and a target whose centre is within 3.5 m of the truck's rear point and within 30 degrees of the truck's axis. Targets: one car of mass 2600 kg or less moving under 1 m/s, or a burnt hull. Not a tank, truck, service vehicle, boat or aircraft. Attaching takes 1.0 s. Release at any speed. 1.0 s between any two taps. | The car's near end is lifted 0.35 m and pinned to the hitch 0.8 m behind the truck; it follows as a one-axle trailer (its far axle trails the hitch; pure kinematics, no new physics body). A driver in a hooked traffic car gets out and flees (the carjack eject). While towing: the truck accelerates and brakes as if its mass were its own plus 0.6 times the towed mass, with top speed capped at 26.8 m/s; t60 may rise by at most 35 % and stop by at most 25 %. Auto release: hitch angle over 75 degrees, the towed car destroyed, the truck wrecked, the player leaving. A released car keeps its speed and heading. Stopping for 2 s inside a tow yard spot with a car or hull hooked removes it and gives "Towed in" +300. Hooking a police car gives 2 stars. |
+| firetruck | `cannon` | hold | Roof nozzle. Water tank 20 s of spray; refills in 40 s while not spraying; after running dry it needs 25 % of a tank to start again. Works at any speed. Range 28 m. The jet points along the truck's heading and turns by itself at 90 degrees per second toward the nearest target inside 35 degrees either side and 28 m: a burning hull first, then a burning vehicle, then a person. A target is "in the jet" when within 0.9 m of the jet line (2.0 m for a hull or vehicle). | Person in the jet: knocked down, no damage, no blood, never a kill; pushed at 5 m/s along the jet direction (the 6.7 fall rule with `d` = jet direction), stays down 3 s, then gets up and flees. Burning hull: after 1.5 s in the jet (summed, not in a row) its flames stop, `hullBurn { id, on: false }` fires, the smoke turns to white steam for 4 s and then stays thin; the hull itself still lasts its 60 s. Score "Fire out" +150 per hull. A vehicle that is burning before its blast (if combat.js has that state) is put out the same way and its blast is canceled. Any other vehicle in the jet is pushed with 3000 N along the jet. Heat: none for people, +1 star when an officer is knocked down. Drawn with at most 40 pooled particles and one ground splash, at most 2 draw calls. |
+| ambulance | `treat` | tap | Needs speed under 2 m/s. Range 8 m from the vehicle center. Takes 2.0 s (progress on the fill bar; moving off above 2 m/s cancels it). Cooldown 5 s after a finished treatment. | Any mode: the nearest body lying within range (6.7 bodies) is revived: the body and its blood pool are removed and a person stands up at that place and walks away. Score "Revived" +200. Hard mode (`settings.mortal`) also: the player's health goes to full over the same 2.0 s, and while seated in an ambulance the player regains 5 % of full health per second. With no body in range and nothing to heal the tap gives a short "Nobody to treat" toast and no cooldown. |
+| garbage | `lift` | tap | Needs speed under 1.5 m/s. Range 4.0 m from the vehicle center to a curb bin (a lot feature of kind `bin`, or a street bin prop). One cycle is 3.0 s: raise 1.0 s, tip 1.0 s, set down 1.0 s. Driving above 1.5 m/s during a cycle aborts it and the bin is dropped on its side. No cooldown; one cycle at a time. | The bin is marked emptied for 300 s (it cannot be lifted again in that time). Score "Bin emptied" +50. The hopper counts loads 0 to 20; at 20 the lift refuses ("Full") until the truck stops inside a garbage yard spot for 2 s, which empties it and gives +400. With no bin in range the tap runs the crusher instead: up to 3 wreck parts (6.7 layer 7) lying within 4.0 m are pulled in and removed, +20 each, 1.0 s. During a cycle service.js draws one pooled bin mesh on the arm; the lot's own bin instance is hidden through a W2 call if one exists (`hideFeature`), otherwise it simply stays in place. |
+| towtruck | `hook` | tap to hook, tap to release | Hook needs truck speed under 1.5 m/s and a target whose center is within 3.5 m of the truck's rear point and within 30 degrees of the truck's axis. Targets: one car of mass 2600 kg or less moving under 1 m/s, or a burnt hull. Not a tank, truck, service vehicle, boat or aircraft. Attaching takes 1.0 s. Release at any speed. 1.0 s between any two taps. | The car's near end is lifted 0.35 m and pinned to the hitch 0.8 m behind the truck; it follows as a one-axle trailer (its far axle trails the hitch; pure kinematics, no new physics body). A driver in a hooked traffic car gets out and flees (the carjack eject). While towing: the truck accelerates and brakes as if its mass were its own plus 0.6 times the towed mass, with top speed capped at 26.8 m/s; t60 may rise by at most 35 % and stop by at most 25 %. Auto release: hitch angle over 75 degrees, the towed car destroyed, the truck wrecked, the player leaving. A released car keeps its speed and heading. Stopping for 2 s inside a tow yard spot with a car or hull hooked removes it and gives "Towed in" +300. Hooking a police car gives 2 stars. |
 
 Where they park at the start. `SERVICE_SPOTS` in servicevehicles.js is a hand-made list of
 `{ kind, x, z, heading, name }`; parked.js reads it through one coordinator line. Coordinates
@@ -1548,7 +1548,7 @@ against the city data:
 
 - Counts on Miami: 4 fire trucks, 4 ambulances, 3 garbage trucks, 3 tow trucks, 6 police cars.
   On the classic island: one of each, placed by rule (seeded) on the largest parking lots.
-- Every spot is on a lot (parking, civic, industrial or yard type) or a marked kerb bay; never
+- Every spot is on a lot (parking, civic, industrial or yard type) or a marked curb bay; never
   on a carriageway, in a building footprint, in water, on a garage footprint (`city.garages`)
   or on a beach. A clear box of the vehicle's length plus 2 m by its width plus 1.5 m; the
   heading follows the bay or faces the lot's drive.
@@ -1558,16 +1558,16 @@ against the city data:
   the title shot (not within 60 m of it, and not in its view cone).
 - Two vehicles of the same kind are at least 400 m apart, except the two that share a station.
 - Homes, by kind. Fire: two fire houses, each a lot on a real street with a drive across the
-  pavement (one in Downtown, one in Little Havana or Wynwood), two trucks nose-out at the first
+  sidewalk (one in Downtown, one in Little Havana or Wynwood), two trucks nose-out at the first
   and one at the second, plus one at the Port. Ambulance: two at a hospital forecourt in the
   health district north-west of Downtown, one at each fire house. Garbage: two in a city yard
   on industrial land (Allapattah or the river industrial strip), one in a Wynwood back lot.
   Tow: two in a tow yard on industrial land (this lot is also the "tow yard spot"), one on a
-  kerb bay in Brickell. Police: two at each of two station lots (Downtown and Little Havana),
-  two on kerb bays on Biscayne Boulevard and in Brickell. If a named district is outside the
+  curb bay in Brickell. Police: two at each of two station lots (Downtown and Little Havana),
+  two on curb bays on Biscayne Boulevard and in Brickell. If a named district is outside the
   playable box the nearest district inside it is used.
-- Venue names are invented (owner decision): for example "Harbour Fire House", "Calle Fire
-  House", "Tideline Medical Centre", "City Yard", "Sunline Towing". No real hospital, station
+- Venue names are invented (owner decision): for example "Harbor Fire House", "Calle Fire
+  House", "Tideline Medical Center", "City Yard", "Sunline Towing". No real hospital, station
   number, company or city department name; streets and districts stay real. A name is checked
   against the map's real venue names before use (the D1 list in miami-spots.js).
 - A parked service vehicle that is driven away or wrecked comes back at its spot 300 s later,
@@ -1624,7 +1624,7 @@ Buttons and the meter:
 |---|---|---|---|---|
 | BOOST | 843, 116, 56, 56 | 716, 88, 56, 56 | car, boat, plane, heli | Primary, hold. The cell above MORE, as B1 built it. Not in foot or tank mode. |
 | Boost meter | 100, 56, 88, 6 | 92, 52, 80, 6 | where BOOST shows | Display only, under the speed. With the health meter showing (hard mode): 100, 72, 88, 6 and 92, 68, 80, 6. In Full mode, under the clock: 100, 91, 88, 6 and 92, 85, 80, 6. It follows the speed readout when the minimap grows. Amber fill, pale while boosting, red after running dry. |
-| SIREN | 184, 292, 56, 56 | 164, 246, 56, 56 | car, only when `spec.siren` | Primary, tap to toggle, lit while on (`aria-pressed`). 8 px beside the steering slot on the side toward the screen centre, centred on the slot's height. It moves by L and mirrors with the steering slot. In a police helicopter, plane or tank the siren stays a fan item as today. |
+| SIREN | 184, 292, 56, 56 | 164, 246, 56, 56 | car, only when `spec.siren` | Primary, tap to toggle, lit while on (`aria-pressed`). 8 px beside the steering slot on the side toward the screen center, centered on the slot's height. It moves by L and mirrors with the steering slot. In a police helicopter, plane or tank the siren stays a fan item as today. |
 | EXTRA | 675, 272, 56, 56 | 564, 224, 56, 56 | car, only when `spec.extra` | Primary. The LOCK rect of 6.5. Caption per vehicle: WATER (hold), TREAT (tap), LIFT (tap), HOOK and DROP (tap). A 4 px fill bar along the bottom of the face shows tank, progress or cooldown. Dim (40 % opacity, still 56 px) when it cannot act now. |
 
 Why these places. The right cluster may not grow a fourth column: a cell left of LOCK (x 611
@@ -1647,18 +1647,18 @@ Collisions found in the 6.5 table and their fixes (U1 applies them and updates u
    is hidden while the offer shows. No control may ever use the cell above BOOST.
 3. Fan against the keep-out rect at 780x360. Left-handed with L = 40 the third fan column
    lands at x 240 to 296, inside the keep-out rect (from 281); in Full mode that is permanent.
-   The same column (x 524 to 580, y 88 to 144) also overlaps the top centre strip (to x 540).
+   The same column (x 524 to 580, y 88 to 144) also overlaps the top center strip (to x 540).
    Fix, 780x360 only: fan cells are 48 by 48 with 8 px gaps, columns at x 660, 604, 548, rows
    at y 156 and 100. Mirrored with L = 40 the third column is then x 224 to 272. This replaces
    the 780 half of the Fan row in 6.5. At 915x412 the fan is unchanged.
-4. Fan against the top centre strip, left-handed with L = 40 (both sizes): the old strip ran
+4. Fan against the top center strip, left-handed with L = 40 (both sizes): the old strip ran
    down to y 136 and the mirrored fan's upper row starts at y 116 (100). Fixed by the stack
    below, which ends at y 100.
 5. The weapon arc of plane and heli must not cover BOOST either (6.5 named only EXIT and
    MORE); at 780x360 the arc box starts at y 140 and BOOST ends at y 144.
 
-Top centre stack (U1). It replaces the "Stars" and "District and toasts strip" rows of 6.5.
-The stack box is `290, 8, 335, 92` at 915x412 and `240, 8, 300, 92` at 780x360, centred on
+Top center stack (U1). It replaces the "Stars" and "District and toasts strip" rows of 6.5.
+The stack box is `290, 8, 335, 92` at 915x412 and `240, 8, 300, 92` at 780x360, centered on
 the viewport; it moves down by T only.
 
 THE ONE-LINE RULE: every item in the stack is one line of text in one pill of fixed height.
@@ -1674,7 +1674,7 @@ row stays empty, items below it do not slide up.
 | Message row 1 | 290, 40, 335, 28 | 240, 40, 300, 28 | police toast, else objective text, else district banner |
 | Message row 2 | 290, 72, 335, 28 | 240, 72, 300, 28 | tutorial hint, else score toast or any other toast |
 
-A message pill is as wide as its text, centred in its row, at most the row width. Text: 14
+A message pill is as wide as its text, centered in its row, at most the row width. Text: 14
 px, weight 700 (district banner 15 px, upper case, letter spacing 0.08 em), white on
 `rgba(0, 0, 0, 0.6)`, radius 6, a 4 px accent bar on the left: red for police, amber for
 score, blue for hints, none for the banner and objective text.
@@ -1693,7 +1693,7 @@ Priority and suppression:
   tutorial keeps them in its own queue.
 - `hud.toast(text, seconds, kind)` gets a third argument: `'police'`, `'objective'`,
   `'district'`, `'hint'`, `'score'` or `'info'` (default). The kind picks the row and the
-  priority. No caller positions its own text in the top centre any more: objective.js and
+  priority. No caller positions its own text in the top center any more: objective.js and
   tutorial.js lose their own elements there.
 - Under `prefers-reduced-motion` items appear and vanish without the slide.
 - The old district "big title" (32 px high, 18 px text) is gone; the banner is a row 1 pill.
@@ -1725,15 +1725,15 @@ scripts/vehicle-shots.mjs; all must pass, there is no partial credit):
 | id | criterion |
 |---|---|
 | CG-1 triangles | Near model 6,000 to 9,000 triangles with wheels and interior; mid model (from 40 m) 900 to 1,500; far model (from 120 m) 120 to 300. The interior is at most 600 of the near count, each wheel 250 to 450. |
-| CG-2 draw calls | One sedan at near detail is at most 4 draw calls (paint, glass, dark trim with tyres and interior, lamps); ten in view add at most 40. No material or shader program is made per car: colour is a per-instance or per-mesh value on shared materials. No texture larger than 512 px; the reflection map is shared by all cars. |
-| CG-3 build cost | Building the near mesh takes under 25 ms and a colour or damage change under 4 ms in headless Chromium at 4 times CPU slowdown; no allocation per frame once built. |
-| CG-4 silhouette at 50 m | The side-on mask of the car at 50 m (phone field of view, 915x412), reduced to a 32 by 16 bit grid, differs from the 0.4.0 sedan and from the current compact, van and pickup in at least 12 % of the bits (62 of 512). The side outline shows three steps: bonnet, cabin, boot; the cabin is shorter than the body by at least 18 % of the length at each end; both wheel arches cut the lower edge. |
-| CG-5 proportions | Length, width, height and wheelbase within 3 % of the spec; wheels sit within 3 cm of the arch centres; arch gap 4 to 8 cm; ground clearance 14 to 20 cm; the collision box is unchanged. |
-| CG-6 reflection | Paint: roughness 0.25 to 0.45 with a clear highlight, reflection strength 0.6 or more. In shot G1 the mean brightness of the bonnet and roof is at least 15 % above the door, and the door shows a sky to ground split (a brighter upper half) of at least 8 %. In shot G8 at least one street lamp highlight is on the body. |
-| CG-7 glass and interior | Glass is tinted and see-through (opacity 0.35 to 0.55), with its own highlight. Behind it: two front seats with head rests, a rear bench, a steering wheel on the left, a dash top. The driver figure is seen when the car is occupied. In shot G6 at least 5 % of the side window pixels differ from the flat glass colour by more than 24 of 255. |
-| CG-8 wheels | Tyre and rim are different colours; the rim has 5 or more spokes as geometry or relief and a centre set back 3 cm or more; 16 or more segments round at near detail (10 at mid). Wheels spin with speed and the fronts turn with the steering in the chase view. |
-| CG-9 panel detail | Seams for 4 doors, bonnet and boot read as dark lines at 10 m (grooves or lines 1.5 cm or wider); door handles, two mirrors, a grille, bumpers, head and tail lamps with a lens distinct from its housing, a number plate with an invented plate. Head, tail, brake, reverse and indicator lamps each light alone. |
-| CG-10 damage at 20 m | Four states: clean, light (a dented or scratched panel and one cracked lamp), heavy (bonnet raised 8 cm or more, a bumper hanging, broken glass, smoke), burnt hull. In shot G11 the changed pixels inside the car mask against the clean car (difference over 24 of 255) are at least 4 % for light, 10 % for heavy and 40 % for the hull. Dirt level 1 changes at least 3 %. |
+| CG-2 draw calls | One sedan at near detail is at most 4 draw calls (paint, glass, dark trim with tires and interior, lamps); ten in view add at most 40. No material or shader program is made per car: color is a per-instance or per-mesh value on shared materials. No texture larger than 512 px; the reflection map is shared by all cars. |
+| CG-3 build cost | Building the near mesh takes under 25 ms and a color or damage change under 4 ms in headless Chromium at 4 times CPU slowdown; no allocation per frame once built. |
+| CG-4 silhouette at 50 m | The side-on mask of the car at 50 m (phone field of view, 915x412), reduced to a 32 by 16 bit grid, differs from the 0.4.0 sedan and from the current compact, van and pickup in at least 12 % of the bits (62 of 512). The side outline shows three steps: hood, cabin, boot; the cabin is shorter than the body by at least 18 % of the length at each end; both wheel arches cut the lower edge. |
+| CG-5 proportions | Length, width, height and wheelbase within 3 % of the spec; wheels sit within 3 cm of the arch centers; arch gap 4 to 8 cm; ground clearance 14 to 20 cm; the collision box is unchanged. |
+| CG-6 reflection | Paint: roughness 0.25 to 0.45 with a clear highlight, reflection strength 0.6 or more. In shot G1 the mean brightness of the hood and roof is at least 15 % above the door, and the door shows a sky to ground split (a brighter upper half) of at least 8 %. In shot G8 at least one street lamp highlight is on the body. |
+| CG-7 glass and interior | Glass is tinted and see-through (opacity 0.35 to 0.55), with its own highlight. Behind it: two front seats with head rests, a rear bench, a steering wheel on the left, a dash top. The driver figure is seen when the car is occupied. In shot G6 at least 5 % of the side window pixels differ from the flat glass color by more than 24 of 255. |
+| CG-8 wheels | Tire and rim are different colors; the rim has 5 or more spokes as geometry or relief and a center set back 3 cm or more; 16 or more segments round at near detail (10 at mid). Wheels spin with speed and the fronts turn with the steering in the chase view. |
+| CG-9 panel detail | Seams for 4 doors, hood and boot read as dark lines at 10 m (grooves or lines 1.5 cm or wider); door handles, two mirrors, a grille, bumpers, head and tail lamps with a lens distinct from its housing, a number plate with an invented plate. Head, tail, brake, reverse and indicator lamps each light alone. |
+| CG-10 damage at 20 m | Four states: clean, light (a dented or scratched panel and one cracked lamp), heavy (hood raised 8 cm or more, a bumper hanging, broken glass, smoke), burnt hull. In shot G11 the changed pixels inside the car mask against the clean car (difference over 24 of 255) are at least 4 % for light, 10 % for heavy and 40 % for the hull. Dirt level 1 changes at least 3 %. |
 | CG-11 contact | A soft contact shadow under the car in every lit shot: the ground within 0.3 m of the sills is at least 20 % darker than the ground 2 m away. |
 | CG-12 frame cost | The street view with ten new sedans stays inside the 0.4.0 draw call and triangle limits of perf.mjs, and the simulation step is unchanged. |
 
@@ -1744,18 +1744,18 @@ Screenshots the reviewer judges (scripts/vehicle-shots.mjs writes them as `go-<n
 
 | shot | camera and scene | pass phrase |
 |---|---|---|
-| G1 front-34-day | 6 m from the car, 1.5 m high, 35 degrees off the nose, day, on the start street | "I see a designed car, not a box: curved bonnet and roof, a grille, lamps with lenses, and the sky on the paint." |
+| G1 front-34-day | 6 m from the car, 1.5 m high, 35 degrees off the nose, day, on the start street | "I see a designed car, not a box: curved hood and roof, a grille, lamps with lenses, and the sky on the paint." |
 | G2 rear-34-day | 6 m, 1.5 m high, 35 degrees off the tail, day | "The back is as finished as the front: boot line, tail lamps, bumper, plate." |
 | G3 side-day | 8 m, 1.0 m high, square to the side, day | "Three clear volumes, four door seams, wheels filling their arches." |
 | G4 top-chase-day | the game's chase camera at rest and at 20 m/s in a turn, day | "This is the view I play in and the car looks good in it; the wheels turn and the body leans." |
-| G5 wheel-close | 2 m from the front wheel, 0.5 m high, day | "A tyre and a rim with spokes and depth, round, not a disc." |
+| G5 wheel-close | 2 m from the front wheel, 0.5 m high, day | "A tire and a rim with spokes and depth, round, not a disc." |
 | G6 interior | 2.5 m from the driver's window, 1.3 m high, day, driver seated | "I can see seats, a wheel and a driver through tinted glass." |
 | G7 front-34-dusk | as G1 at dusk, low sun behind the camera | "Warm light rolls over the body; the edges catch it." |
 | G8 front-34-night | as G1 at night under a street lamp, head lamps on | "Lamps glow, the lamp post shows as a highlight, the car is not a black blob." |
-| G9 colours | five sedans in white, black, red, silver and mid blue, 10 m, day | "Every colour reads as paint; white is not blown out and black still shows its lines." |
+| G9 colors | five sedans in white, black, red, silver and mid blue, 10 m, day | "Every color reads as paint; white is not blown out and black still shows its lines." |
 | G10 line-up-50m | the new sedan beside the old sedan, compact, van and pickup, side on at 50 m, day | "I can pick the new sedan by its outline alone." |
 | G11 damage-20m | clean, light, heavy and hull side by side at 20 m, three-quarter, day | "I can tell at a glance which is which." |
-| G12 street-day | ten new sedans in traffic on the start street with people on the pavement, day | "The cars are the right size for the doors, lanes and people, and the street looks like one game." |
+| G12 street-day | ten new sedans in traffic on the start street with people on the sidewalk, day | "The cars are the right size for the doors, lanes and people, and the street looks like one game." |
 | G13 before-after | the 0.4.0 sedan and the new one, same camera as G1, side by side | "The new one is clearly a generation better." |
 
 Verdict. GO: CG-1 to CG-12 all pass, no shot is "fail", at most two are "weak", and G1, G4

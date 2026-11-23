@@ -51,7 +51,7 @@ test('foot sessions clamp coordinates and wrap headings', () => {
   assert.equal(sanitizeSession({ mode: 'foot', x: 1, z: 2, heading: Infinity }).heading, 0);
 });
 
-test('craft sessions: spec ids, colours and health are validated', () => {
+test('craft sessions: spec ids, colors and health are validated', () => {
   const ok = sanitizeSession({ mode: 'car', x: 10, z: 20, heading: 1, craft: { spec: 'muscle', color: 0xff0000, health: 0.5 } });
   assert.equal(ok.mode, 'car');
   assert.deepEqual(ok.craft, { spec: 'muscle', color: 0xff0000, health: 0.5, y: 0, speed: 0, airborne: false });
@@ -63,7 +63,7 @@ test('craft sessions: spec ids, colours and health are validated', () => {
   assert.equal(sanitizeSession({ mode: 'car', x: 1, z: 1 }).mode, 'start');
   const c = sanitizeCraft({ spec: 'sedan', color: 'red', health: 99 });
   assert.equal(c.health, 1);
-  assert.ok(Number.isInteger(c.color) && c.color >= 0 && c.color <= 0xffffff, 'a bad colour falls back to a spec colour');
+  assert.ok(Number.isInteger(c.color) && c.color >= 0 && c.color <= 0xffffff, 'a bad color falls back to a spec color');
   assert.equal(sanitizeCraft({ spec: 'sedan', color: 1.5 }).color !== 1.5, true);
   assert.equal(sanitizeCraft({ spec: 'sedan', color: -1 }).color !== -1, true);
   assert.equal(sanitizeCraft({ spec: 'sedan', color: 0x1000000 }).color !== 0x1000000, true);
@@ -118,7 +118,7 @@ test('garage list: add replaces the same car, keeps 8, remove works', () => {
   garageAdd(list, rec('sedan', 1, 1));
   assert.equal(list.length, 2);
   assert.equal(list[0].spec, 'sedan');
-  // Same spec, different colour or place is a different car.
+  // Same spec, different color or place is a different car.
   garageAdd(list, rec('sedan', 1, 1, { color: 0x111111 }));
   garageAdd(list, rec('sedan', 100, 100));
   assert.equal(list.length, 4);
@@ -178,7 +178,7 @@ test('buildSession: aircraft flags airborne only when off the ground and high', 
   assert.equal(buildSession(null, b, []).mode, 'boat');
 });
 
-test('craftRecord reads spec id, colour and health fraction', () => {
+test('craftRecord reads spec id, color and health fraction', () => {
   const v = createVehicle('van', 3, 4, 1);
   v.health = v.spec.health / 4;
   const r = craftRecord(v);

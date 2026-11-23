@@ -1,5 +1,5 @@
 // The Miami building look (src/render/miamilook.js): pure, seeded, by
-// neighbourhood; the procedural island keeps its own look.
+// neighborhood; the procedural island keeps its own look.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lookOf, unit } from '../src/render/miamilook.js';
@@ -20,7 +20,7 @@ test('the look is the same every time for a building', () => {
   assert.ok(unit(5, 1) >= 0 && unit(5, 1) < 1);
 });
 
-test('neighbourhoods get their own styles', () => {
+test('neighborhoods get their own styles', () => {
   const styles = (place, h, base = 'office') => {
     const s = new Set();
     for (let i = 1; i < 200; i++) s.add(lookOf(city(place), bld(h, base, i * 7919)).style);
@@ -36,7 +36,7 @@ test('neighbourhoods get their own styles', () => {
   assert.ok(beach.every((L) => L.deco && L.style === 'stucco'), 'deco on the beach');
 });
 
-test('colours are valid and vary between buildings', () => {
+test('colors are valid and vary between buildings', () => {
   const seen = new Set();
   for (let i = 1; i < 100; i++) {
     const L = lookOf(city('Shenandoah'), bld(8, 'stucco', i * 104729));

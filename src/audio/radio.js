@@ -140,7 +140,7 @@ export function createJazzComposer(rng) {
 // ---- station 4: talk. A jingle, vowel-blip "speech" under a caption, songs,
 // and an ad jingle after every third song. No words are ever spoken. ----
 const ADJ = ['Midnight', 'Rusty', 'Quiet', 'Neon', 'Lazy', 'Golden', 'Foggy', 'Borrowed', 'Salty', 'Paper'];
-const NOUN = ['Harbour', 'Gull', 'Causeway', 'Lantern', 'Engine', 'Tide', 'Postcard', 'Ferry', 'Rooftop', 'Anchor'];
+const NOUN = ['Harbor', 'Gull', 'Causeway', 'Lantern', 'Engine', 'Tide', 'Postcard', 'Ferry', 'Rooftop', 'Anchor'];
 const STING = ['Gullspeak: the talking shed of Rustwater.', 'You are tuned to Gullspeak.', 'Gullspeak, now with more gulls.'];
 const VOWELS = ['vocA', 'vocE', 'vocO', 'vocI'];
 const LOOP = ['dj', 'song', 'dj', 'song', 'dj', 'song', 'ad'];

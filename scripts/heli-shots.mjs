@@ -56,7 +56,7 @@ async function shot(name, hour, setup) {
   await page.close();
 }
 
-// Player car parked on its spawn street, chase view; heli 60 m ahead.
+// Player parking loted on its spawn street, chase view; heli 60 m ahead.
 const CHASE = `
   frames(30);
   const p = heliAt(60, 7, 20);

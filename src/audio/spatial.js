@@ -17,7 +17,7 @@ export function distanceLowpass(d, k = 120) {
   return clamp(20000 * Math.exp(-x / k), 900, 20000);
 }
 
-// Seconds for a sound to arrive from d metres, capped.
+// Seconds for a sound to arrive from d meters, capped.
 export function travelDelay(d, cap = 2.5) {
   return Number.isFinite(d) && d > 0 ? Math.min(cap, d / SOUND_SPEED) : 0;
 }

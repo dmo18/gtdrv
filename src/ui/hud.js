@@ -1,4 +1,4 @@
-import { speedMph } from '../core/units.js';
+import { speedMph, formatClock12 } from '../core/units.js';
 // Heads-up display. update() runs every frame, so it only touches the DOM
 // when a displayed value changed and allocates nothing when nothing did.
 import { injectStyles } from './styles.js';
@@ -17,12 +17,11 @@ function bar(cls, parent) {
   return { box: b, fill };
 }
 
-const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
 
 export const MAP_SHRINK_MS = 5000; // the expanded minimap shrinks after this long untouched
 
 // ---------------------------------------------------------------------------
-// The top centre stack (docs/REVAMP.md 6.12). Pure logic, no DOM: two message
+// The top center stack (docs/REVAMP.md 6.12). Pure logic, no DOM: two message
 // rows with fixed priorities. Row 1: police toast, then objective text, then
 // the district banner. Row 2: a tutorial hint, then score or other toasts.
 // Lower items are dropped or wait a few seconds, never queued for long.
@@ -182,7 +181,7 @@ export function createHud(root) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMapBig(!mapBig); }
   });
 
-  // top-centre stack (docs/REVAMP.md 6.12): status row (stars, objective arrow
+  // top-center stack (docs/REVAMP.md 6.12): status row (stars, objective arrow
   // and distance), then two one-line message rows. Rows never move.
   const stackEl = el('div', 'rw-stack', hud);
   const stack = createTopStack();
@@ -199,7 +198,7 @@ export function createHud(root) {
   const comboEl = el('div', 'rw-combo rw-pill', tr);
   comboEl.style.display = 'none';
 
-  // top-centre: police attention (stars, then the escape meter), only while wanted
+  // top-center: police attention (stars, then the escape meter), only while wanted
   const wantedEl = el('div', 'rw-wanted rw-pill rw-none', stackEl);
   wantedEl.setAttribute('role', 'img');
   wantedEl.setAttribute('aria-label', 'Police attention: none');
@@ -307,7 +306,7 @@ export function createHud(root) {
     const minutes = Math.floor(s.time * 60) % 1440;
     if (minutes !== last.clock) {
       last.clock = minutes;
-      clockEl.textContent = pad2(Math.floor(minutes / 60)) + ':' + pad2(minutes % 60);
+      clockEl.textContent = formatClock12(minutes);
     }
     const meterOn = s.mortal === true;
     if (meterOn !== last.meterOn) {
@@ -385,7 +384,7 @@ export function createHud(root) {
 
   // hud.toast(text, seconds, kind): kind picks the row and the priority
   // ('police', 'objective', 'district', 'hint', 'score', 'info'); callers that
-  // pass none get a kind from the text. Nobody places their own top centre text.
+  // pass none get a kind from the text. Nobody places their own top center text.
   function toast(text, seconds = 3, kind) {
     stack.add(toastKind(text, kind), String(text), seconds);
     paintRows();

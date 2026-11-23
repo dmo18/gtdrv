@@ -234,7 +234,7 @@ async function startUp() {
   // Continue, and the arrival after travel (a fresh page in the target
   // region: no tap, so no full screen). `link`: the pad the player came
   // through, for the exact arrival pose.
-  async function continueGame(tapped, link, travelled = false) {
+  async function continueGame(tapped, link, traveled = false) {
     game.audio.unlock();
     if (tapped) {
       try {
@@ -254,7 +254,7 @@ async function startUp() {
       ok = false;
     }
     if (!ok) game.session.startFresh();
-    else if ((link || travelled) && game.session.arrive) game.session.arrive(link);
+    else if ((link || traveled) && game.session.arrive) game.session.arrive(link);
     start(game);
     if (!ok && game.hud && game.hud.toast) game.hud.toast(link ? 'Arrived at the start place' : 'Could not restore your place', 3);
     await veil.to(0);

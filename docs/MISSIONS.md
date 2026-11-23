@@ -48,10 +48,10 @@ at one checkpoint a SKIP button appears (skipped part scores 0).
 
 ## Using what exists
 Start zones and markers reuse src/render/markers.js and
-`game.map.addMarker` (mission colour `#ff4d6d`, numbered). Activities
+`game.map.addMarker` (mission color `#ff4d6d`, numbered). Activities
 hide their starts while a mission runs and a mission cannot start in a
 race. Objective text uses the activities panel style; the target arrow
-uses the checkpoint marker. Briefing cards: initials in a coloured
+uses the checkpoint marker. Briefing cards: initials in a colored
 circle, name, one or two short lines, tap to advance (auto 4 s);
 mid-mission `say` lines appear as a phone ping toast with the sender's
 name. Tutorial hints add one combat hint and one mission hint.
@@ -98,7 +98,7 @@ Lisk (nervous banner pilot, Gullwing Airfield).
    under 50%). Fail: downed, van wrecked. Score: takedowns, combo,
    delivery time.
 2. Glitter Grab (car; Glasswell). Steal the Anchors' glitter-cannon
-   truck from a Glasswell car park, escape heat 2, deliver to Pip in
+   truck from a Glasswell parking lot, escape heat 2, deliver to Pip in
    Cinder Row. Fail: truck wrecked. Score: near misses, drift, escape.
 3. Saltyard Splash (boat; Saltyard to Pale Shore). Chase an Anchors
    speedboat through the marina, wreck it (ram or shoot), then escape

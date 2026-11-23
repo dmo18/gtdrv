@@ -5,7 +5,7 @@
 // call dressLot, which is the one dressing function for every lot in the
 // box (no core test anywhere in here).
 //
-// Coordinates: x east, z south, metres. Heading 0 faces +x and grows
+// Coordinates: x east, z south, meters. Heading 0 faces +x and grows
 // toward +z.
 import { createRng, firstNext } from '../core/rng.js';
 
@@ -158,7 +158,7 @@ export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, 
     const i = c % W;
     const up = c >= W, dn = c < N - W, lf = i > 0, rt = i < W - 1;
     let m;
-    // The eight neighbours, unrolled.
+    // The eight neighbors, unrolled.
     if (lf) { m = c - 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
     if (rt) { m = c + 1; if (dist[m] === 255 && pass[m] === pv) { dist[m] = nd; if (owner) owner[m] = ow; queue[qt++] = m; } }
     if (up) {
@@ -180,7 +180,7 @@ export function stepDistance(W, H, src, pass, max, dist, owner, queue, list, n, 
 // added on a world grid of parcels, so a street there is not a desert.
 // Same rule everywhere in the box; parks, grass, beaches, the shore and
 // the airfield are never filled, and a seeded share of parcels stays open
-// (car parks and works yards).
+// (parking lots and works yards).
 // ---------------------------------------------------------------------
 const INFILL = {
   docks: { pitch: 34, size: [18, 26], h: [8, 15], keep: 0.9, kind: 'warehouse', osm: ['warehouse', 'industrial', ''] },
@@ -205,7 +205,7 @@ export function planInfill(inp) {
     const pi0 = Math.floor(gx0 / P.pitch), pi1 = Math.floor(gx1 / P.pitch);
     const pj0 = Math.floor(gz0 / P.pitch), pj1 = Math.floor(gz1 / P.pitch);
     for (let pj = pj0; pj <= pj1; pj++) {
-      // Quick reject on the parcel's centre cell; the rest (rare) in
+      // Quick reject on the parcel's center cell; the rest (rare) in
       // infillParcel.
       const cz = (pj + 0.5) * P.pitch;
       const cj = Math.floor((cz - z0) / cell);
@@ -418,12 +418,12 @@ function lotObjects(city, tmp, remap, lots, G, cell) {
     if (edge >= 0 && ed > 8) edge = -1;
     if (edge >= 0) {
       const e = city.edges[edge], a = city.nodes[e.a], q = city.nodes[e.b];
-      // Closest point of the edge to the lot centre.
+      // Closest point of the edge to the lot center.
       const dx = q.x - a.x, dz = q.z - a.z, L2 = dx * dx + dz * dz || 1;
       let t = ((cx - a.x) * dx + (cz - a.z) * dz) / L2;
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const px = a.x + dx * t - cx, pz = a.z + dz * t - cz;
-      // Normalise by the rect's half sizes so a long thin lot faces its side.
+      // Normalize by the rect's half sizes so a long thin lot faces its side.
       const nx = px / ((lx1 - lx0) / 2 + 1), nz = pz / ((lz1 - lz0) / 2 + 1);
       front = Math.abs(nx) >= Math.abs(nz) ? (nx >= 0 ? 0 : 2) : nz >= 0 ? 1 : 3;
     }
@@ -472,7 +472,7 @@ export function buildLots(city, inp) {
     water = new Uint8Array(N);
     stepDistance(W, H, G.data, free, 8, water, null, queue, list, nList, SRC_ZERO);
   }
-  const stripSteps = Math.ceil(SHORE_STRIP / cell - 0.5); // cells whose centre is < 8 m in
+  const stripSteps = Math.ceil(SHORE_STRIP / cell - 0.5); // cells whose center is < 8 m in
   const beachSteps = Math.ceil(BEACH_DEPTH / cell - 0.5);
   // Class per free cell: 1 beach, 2 water edge, 3 park, 4 grass, 5 to a
   // building, 6 open.
@@ -573,7 +573,7 @@ export function featureCap(lot) {
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
 // Scratch per feature index of the lot being dressed (put fills it):
-// centre and radius, 1 for a drive, bay or path, with the cosine and sine
+// center and radius, 1 for a drive, bay or path, with the cosine and sine
 // of its heading and its half length and width.
 const F_X = new Float64Array(MAX_FEATURES), F_Z = new Float64Array(MAX_FEATURES), F_R = new Float64Array(MAX_FEATURES);
 const F_FLAT = new Uint8Array(MAX_FEATURES);
@@ -632,7 +632,7 @@ export function dressLot(city, lot, out = []) {
     if (!inB) return true;
     if (r > 0 || (!l && !w)) return !inB(x, z, Math.max(r, 0.3));
     const ca = Math.cos(heading), sa = Math.sin(heading), hl = l / 2, hw = w / 2;
-    // Centre, the two ends and the four corners.
+    // Center, the two ends and the four corners.
     if (inB(x, z, 0.2) || inB(x + ca * hl, z + sa * hl, 0.2) || inB(x - ca * hl, z - sa * hl, 0.2)) return false;
     for (let k = 0; k < 4; k++) {
       const u = k & 1 ? hl : -hl, q = k & 2 ? hw : -hw;
@@ -640,10 +640,10 @@ export function dressLot(city, lot, out = []) {
     }
     return true;
   };
-  // Adds a feature when its centre is in the lot and the caps allow.
+  // Adds a feature when its center is in the lot and the caps allow.
   const put = (kind, x0f, z0f, heading, l, w, h, r, isSolid, v) => {
     if (out.length >= cap || (isSolid && solid >= MAX_SOLID)) return false;
-    // Rounded to the centimetre first, so the stored point is the tested one.
+    // Rounded to the centimeter first, so the stored point is the tested one.
     const x = Math.round(x0f * 100) / 100, z = Math.round(z0f * 100) / 100;
     if (!inLot(x, z) || inGarage(x, z) || !offBuildings(x, z, heading, l, w, r)) return false;
     const q = out.length;
@@ -667,7 +667,7 @@ export function dressLot(city, lot, out = []) {
   const j0 = Math.round((z0 - G.z0) / cell), j1 = Math.round((z1 - G.z0) / cell) - 1;
   // Longest run of lot cells along side s (0 +x, 1 +z, 2 -x, 3 -z), on the
   // outermost row of cells that has one of at least `min` cells. Returns
-  // [from, to, fixed] in metres (from..to along the side) or null.
+  // [from, to, fixed] in meters (from..to along the side) or null.
   const RUN = [0, 0, 0];
   const sideRun = (s, min = 2) => {
     const alongX = s === 1 || s === 3;
@@ -819,7 +819,7 @@ export function dressLot(city, lot, out = []) {
         };
         for (let a = span0 + 1.25; a <= span1 - 1.25 + 1e-6; a += 2.5) {
           const x = alongX ? a : d, z = alongX ? d : a;
-          // The whole bay on the lot: its centre and both ends.
+          // The whole bay on the lot: its center and both ends.
           const ex = alongX ? 0 : 2.2, ez = alongX ? 2.2 : 0;
           const ok = inLot(x, z) && inLot(x + ex, z + ez) && inLot(x - ex, z - ez) && (!inB || (!inB(x, z, 1.5) && !inB(x + ex, z + ez, 1.3) && !inB(x - ex, z - ez, 1.3)));
           if (ok && runN < 16) { if (!runN) runA = a; runN++; } else { flush(); if (ok) { runA = a; runN = 1; } }
@@ -1037,7 +1037,7 @@ export function lotShares(lots, keep = () => true) {
 
 // The single bays of a `bay` feature (a row): calls fn(x, z, heading) per
 // bay, heading the way a parked car faces (across the row). The renderer
-// splits a row the same way (2.5 m per bay, centred on the feature).
+// splits a row the same way (2.5 m per bay, centered on the feature).
 export function eachBay(f, fn) {
   const n = Math.max(1, Math.round(f.l / 2.5));
   const ca = Math.cos(f.heading), sa = Math.sin(f.heading);

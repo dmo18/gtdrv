@@ -1,5 +1,5 @@
 // Person body geometry for render/personmesh.js: a sculpted, clothed human
-// figure built from lofted surfaces with smooth normals, coloured per
+// figure built from lofted surfaces with smooth normals, colored per
 // vertex (clothing, skin, hair, a little baked shading) and skinned to the
 // person skeleton. Two detail levels: near (about 2k triangles, face
 // details, thumbs, collars) and far (a few hundred triangles, same
@@ -15,10 +15,10 @@ export const KNEE_DY = -0.44; // knee bone below the hip joint
 export const ELBOW_DY = -0.3; // elbow bone below the shoulder joint
 export const LEG_Z = 0.092;
 export const B = { body: 0, torso: 1, head: 2, legL: 3, kneeL: 4, legR: 5, kneeR: 6, armL: 7, elbowL: 8, armR: 9, elbowR: 10 };
-// Half the shoulder width (arm joint from the centre line) for a build.
+// Half the shoulder width (arm joint from the center line) for a build.
 export const armZ = (build) => 0.188 + build * 0.016;
 
-// ---- colour helpers ---------------------------------------------------------------
+// ---- color helpers ---------------------------------------------------------------
 const cache = new Map();
 export function lin(hex) {
   let c = cache.get(hex);
@@ -59,15 +59,15 @@ class Build {
 }
 
 // A closed grid surface: K rows of S points, wrapping around in s. Each
-// point { x, y, z, col, b0, b1, w }; each row has a centre { x, y, z }
+// point { x, y, z, col, b0, b1, w }; each row has a center { x, y, z }
 // used to orient normals outward. Normals come from the grid itself
 // (finite differences), so every surface is smooth shaded.
-function surface(bd, rows, centres, ao = 0.16) {
+function surface(bd, rows, centers, ao = 0.16) {
   const K = rows.length, S = rows[0].length;
   const base = bd.count;
   for (let k = 0; k < K; k++) {
     const r = rows[k], rp = rows[Math.max(0, k - 1)], rn = rows[Math.min(K - 1, k + 1)];
-    const C = centres[k];
+    const C = centers[k];
     for (let s = 0; s < S; s++) {
       const P = r[s];
       const A = r[(s + 1) % S], Z = r[(s + S - 1) % S];
@@ -77,7 +77,7 @@ function surface(bd, rows, centres, ao = 0.16) {
       let l = Math.hypot(nx, ny, nz);
       const ox = P.x - C.x, oy = P.y - C.y, oz = P.z - C.z;
       if (l < 1e-9) {
-        // Degenerate (a pole): point away from the centre.
+        // Degenerate (a pole): point away from the center.
         nx = ox;
         ny = oy;
         nz = oz;
@@ -126,7 +126,7 @@ function tri(bd, N, a, b, c) {
 const se = (t, p) => Math.sign(t) * Math.pow(Math.abs(t), 2 / p);
 // Column angles, denser toward the front (a = 0, +x) where the detail is.
 // `cuts` (angles from the front, mirrored to both sides) get a doubled
-// column so a colour edge there (a jacket opening, a vest side) is crisp
+// column so a color edge there (a jacket opening, a vest side) is crisp
 // instead of a sawtooth across the triangles.
 function angles(S, q = 1.25, cuts = null) {
   let out = [];
@@ -145,14 +145,14 @@ function angles(S, q = 1.25, cuts = null) {
 
 // Loft along y: rings { y, f (radius toward +x), b (toward -x), w (half
 // width along z), cx, p (superellipse power), col (array or fn(ca, sa, y)),
-// occ, bones: fn(y) -> [b0, b1, w] }. `cz` is the loft's z centre. Far
+// occ, bones: fn(y) -> [b0, b1, w] }. `cz` is the loft's z center. Far
 // LOD keeps every other ring (plus those marked keep) and half the columns.
 function loftY(bd, rings, seg, cz, bones, opt = {}) {
   let list = rings;
   if (bd.far) list = rings.filter((r, k) => r.keep || k % 2 === 0 || k === rings.length - 1);
   const S = bd.far ? Math.max(opt.minFar || 5, Math.round(seg * 0.5)) : seg;
   const A = angles(S, opt.q ?? 1.25, bd.far ? null : opt.cuts);
-  const rows = [], centres = [];
+  const rows = [], centers = [];
   for (const R of list) {
     const row = [];
     const [b0, b1, w] = bones(R.y);
@@ -168,20 +168,20 @@ function loftY(bd, rings, seg, cz, bones, opt = {}) {
       row.push({ x, y: R.y + (R.dy ? R.dy(ca, sa) : 0), z, col, occ, b0, b1, w });
     }
     rows.push(row);
-    centres.push({ x: R.cx || 0, y: R.y, z: cz });
+    centers.push({ x: R.cx || 0, y: R.y, z: cz });
   }
-  surface(bd, rows, centres, opt.ao);
+  surface(bd, rows, centers, opt.ao);
 }
 
 // Ellipsoid-like blob around (cx, cy, cz) with radii rx, ry, rz. `opt`:
 // p (superellipse power), seg, rows, v0 (start latitude 0..1), deform(pt,
-// nx, ny, nz), col(nx, ny, nz) or colour, bone, occ.
+// nx, ny, nz), col(nx, ny, nz) or color, bone, occ.
 function blob(bd, cx, cy, cz, rx, ry, rz, col, bone, opt = {}) {
   const S = bd.far ? Math.max(5, Math.round((opt.seg || 8) * 0.5)) : opt.seg || 8;
   const R = bd.far ? Math.max(3, Math.round((opt.rows || 6) * 0.5)) : opt.rows || 6;
   const p = opt.p || 2;
   const C = { x: cx, y: cy, z: cz };
-  const rows = [], centres = [];
+  const rows = [], centers = [];
   const pt = { x: 0, y: 0, z: 0 };
   for (let r = 0; r <= R; r++) {
     const th = -Math.PI / 2 + (r / R) * Math.PI;
@@ -199,10 +199,10 @@ function blob(bd, cx, cy, cz, rx, ry, rz, col, bone, opt = {}) {
       row.push({ x: cx + pt.x, y: cy + pt.y, z: cz + pt.z, col: c, occ: opt.occ ?? 1, b0: bone, b1: 0, w: 0 });
     }
     rows.push(row);
-    centres.push(C);
+    centers.push(C);
   }
-  // Every row uses the blob centre, which keeps normals outward.
-  surface(bd, rows, centres, opt.ao ?? 0.1);
+  // Every row uses the blob center, which keeps normals outward.
+  surface(bd, rows, centers, opt.ao ?? 0.1);
 }
 
 // Bone weights along y: rigid b0 above yj + band, rigid b1 below yj - band.
@@ -239,7 +239,7 @@ function headFront(y, z) {
 function shell(bd, col, front, side, back, thick, opt = {}) {
   const S = bd.far ? 7 : opt.seg || 14;
   const R = bd.far ? 3 : opt.rows || 6;
-  const rows = [], centres = [];
+  const rows = [], centers = [];
   const pt = { x: 0, y: 0, z: 0 };
   for (let r = 0; r <= R; r++) {
     const row = [];
@@ -266,9 +266,9 @@ function shell(bd, col, front, side, back, thick, opt = {}) {
       row.push({ x: HEAD.x + x, y: HEAD.y + y, z, col: c, occ: 1, b0: B.head, b1: 0, w: 0 });
     }
     rows.push(row);
-    centres.push({ x: HEAD.x, y: HEAD.y, z: 0 });
+    centers.push({ x: HEAD.x, y: HEAD.y, z: 0 });
   }
-  surface(bd, rows, centres, 0.12);
+  surface(bd, rows, centers, 0.12);
 }
 
 // ---- the whole figure -------------------------------------------------------------
@@ -325,7 +325,7 @@ export function buildPerson(L, far = false) {
     ];
     const S = far ? 6 : 8;
     const list = far ? st.filter((_, k) => k % 2 === 0) : st;
-    const rows = [], centres = [];
+    const rows = [], centers = [];
     const sz = side * (LEG_Z + 0.008);
     for (const [x, yc, up, down, w] of list) {
       const row = [];
@@ -339,13 +339,13 @@ export function buildPerson(L, far = false) {
         row.push({ x, y, z: sz + w * v, col, occ: 1, b0: knee, b1: 0, w: 0 });
       }
       rows.push(row);
-      centres.push({ x, y: yc, z: sz });
+      centers.push({ x, y: yc, z: sz });
     }
-    surface(bd, rows, centres, 0.2);
+    surface(bd, rows, centers, 0.2);
   }
 
   // -- torso: pelvis, waist, chest, shoulders --------------------------------------
-  // Colour by height and angle for each outfit.
+  // Color by height and angle for each outfit.
   const hemY = police || tucked ? 1.0 : jacket ? 0.875 : o === 'hoodie' ? 0.945 : 0.965;
   const torsoCol = (ca, sa, y) => {
     const ang = Math.atan2(Math.abs(sa), ca); // 0 front .. PI back

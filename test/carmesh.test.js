@@ -1,9 +1,9 @@
 // Car and person mesh structure: triangle budgets per LOD, draw calls per
-// car, wheel and tyre profiles, the plate atlas, people looks and poses.
+// car, wheel and tire profiles, the plate atlas, people looks and poses.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
-import { buildCar, buildWheel, wheelLayout, wheelStyle, tyreProfile } from '../src/render/carbody.js';
+import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile } from '../src/render/carbody.js';
 import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M } from '../src/render/vehiclemesh.js';
 import { lampAtlasPixels, PLATE_TEXT, CLS } from '../src/render/vehiclemats.js';
 import * as THREE from 'three';
@@ -116,7 +116,7 @@ test('wheels: one instanced draw, front wheels steer and all spin', () => {
 });
 
 // Side outline of a car at 50 m on a 915 x 412 screen with a 50 degree
-// field of view (about 8.8 px per metre): the mid model (what draws at
+// field of view (about 8.8 px per meter): the mid model (what draws at
 // that distance) plus its lamps and light bar, rasterised.
 function outline(id) {
   const spec = VEHICLE_SPECS[id];
@@ -196,9 +196,9 @@ test('wheel styles: 5 to 10 spokes, several distinct looks', () => {
   assert.ok(looks.size >= 6, `only ${looks.size} wheel looks`);
 });
 
-test('tyre profile: symmetric, tread at the radius, bead on the rim', () => {
+test('tire profile: symmetric, tread at the radius, bead on the rim', () => {
   const wr = 0.33, tw = 0.25;
-  const p = tyreProfile(wr, tw);
+  const p = tireProfile(wr, tw);
   const n = p.length;
   for (let k = 0; k < n; k++) {
     assert.ok(Math.abs(p[k][0] - p[n - 1 - k][0]) < 1e-9);
@@ -212,7 +212,7 @@ test('tyre profile: symmetric, tread at the radius, bead on the rim', () => {
 });
 
 test('lamp atlas holds an invented plate with dark glyphs', () => {
-  assert.match(PLATE_TEXT, /^[A-Z0-9-]+$/);
+  assert.match(PLATE_TEXT, /^[A-Z0-9 -]+$/);
   const d = lampAtlasPixels([0x111111, 0x222222, 0x333333, 0x444444, 0x555555]);
   assert.equal(d.length, 128 * 32 * 4);
   let dark = 0, light = 0;
@@ -224,12 +224,12 @@ test('lamp atlas holds an invented plate with dark glyphs', () => {
     }
   }
   assert.ok(dark > 40 && light > dark, `${dark} dark, ${light} light`);
-  // Lens cells keep their base colour.
+  // Lens cells keep their base color.
   assert.equal(d[(16 * 128 + 8) * 4], 0x11);
   assert.equal(d[(16 * 128 + 72) * 4], 0x55);
 });
 
-test('people: police and crew looks are recognised from their colours', () => {
+test('people: police and crew looks are recognized from their colors', () => {
   const cop = resolveLook({ shirt: 0x26406b, trousers: 0x1a2233, skin: 0xb98060, hair: 0x22180f });
   assert.equal(cop.outfit, 'police');
   assert.equal(cop.hairStyle, 'cap');

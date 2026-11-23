@@ -548,7 +548,7 @@ test('determinism and no NaN over thousands of steps of mixed fire', () => {
   assert.deepEqual(run(), run());
 });
 
-test('bombs and missiles wreck an ordinary car (700 to 1100 health) near the blast centre', () => {
+test('bombs and missiles wreck an ordinary car (700 to 1100 health) near the blast center', () => {
   const car = (k) => 120 * k * 1.5;
   assert.ok(car(0.7) * MOUNTS.bomb.blastScale >= 1100, 'bomb within 30% of the radius');
   assert.ok(MOUNTS.missile.dmg + car(1) * MOUNTS.missile.blastScale >= 1100, 'missile direct hit');

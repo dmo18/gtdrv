@@ -1,6 +1,6 @@
 // Draws a tumbling person (core/ragdoll.js) with the existing person
 // mesh (render/personmesh.js): the whole mesh turns about the body
-// centre and the limb bones take the ragdoll's loose limb angles. Also
+// center and the limb bones take the ragdoll's loose limb angles. Also
 // holds the settled lying pose afterwards. No three.js import: it only
 // writes numbers into the mesh, so it is safe to load in node.
 import { ragOrigin, LIMB, LIMB_REST, RAG_THICK } from '../core/ragdoll.js';
@@ -29,7 +29,7 @@ export function poseRagdoll(mesh, a) {
     ang = LIMB_REST;
   }
   // updatePersonMesh placed the mesh at the (interpolated) actor x, z,
-  // which is the body centre while ragdolled.
+  // which is the body center while ragdolled.
   const cx = mesh.position.x, cz = mesh.position.z;
   ragOrigin(cx, cy, cz, yaw, pitch, roll, O);
   if (mesh.rotation.order !== 'YXZ') mesh.rotation.order = 'YXZ';

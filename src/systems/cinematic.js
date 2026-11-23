@@ -85,7 +85,7 @@ export function pullCurve(u) {
 }
 
 // One pull-back. start(side) begins (side = +1 or -1, which way it swings);
-// update(dt, cancelled) advances and fills `out` (yaw, dist, rise).
+// update(dt, canceled) advances and fills `out` (yaw, dist, rise).
 export function createPullback(cfg = PULL) {
   const p = { active: false, t: 0, side: 1, yaw: 0, dist: 0, rise: 0, k: 0 };
   p.start = (side = 1) => {
@@ -93,10 +93,10 @@ export function createPullback(cfg = PULL) {
     p.t = 0;
     p.side = side < 0 ? -1 : 1;
   };
-  p.update = (dt, cancelled = false) => {
+  p.update = (dt, canceled = false) => {
     if (p.active) {
       p.t += dt;
-      if (cancelled || p.t >= cfg.duration) p.active = false;
+      if (canceled || p.t >= cfg.duration) p.active = false;
     }
     p.k = p.active ? pullCurve(p.t / cfg.duration) : 0;
     p.yaw = p.k * cfg.yaw * p.side;
@@ -156,7 +156,7 @@ export function createCinematic(game, uiRoot) {
   const reduced = () => !!(game.progress && game.progress.settings && game.progress.settings.reduceMotion);
 
   // Kill flash on the crosshair: a white-red burst of four ticks at the
-  // screen centre (the crosshair on foot and in drive-by).
+  // screen center (the crosshair on foot and in drive-by).
   let flash = null;
   if (typeof document !== 'undefined' && uiRoot && uiRoot.appendChild) {
     overlay = document.createElement('div');

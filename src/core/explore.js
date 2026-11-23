@@ -149,7 +149,7 @@ const REWARD_OF = {};
 for (const id of Object.keys(REWARD_CARS)) REWARD_OF[REWARD_CARS[id]] = id;
 export const isRewardSpec = (spec) => typeof spec === 'string' && has(REWARD_OF, spec);
 
-// The colours a car may wear: the paint grid plus its model's own.
+// The colors a car may wear: the paint grid plus its model's own.
 export function paintAllowed(specId, color) {
   if (!Number.isInteger(color) || color < 0 || color > 0xffffff) return false;
   if (PAINT_COLORS.includes(color)) return true;
@@ -170,7 +170,7 @@ function cleanCar(raw) {
   return c;
 }
 
-// The favourite taken out of a garage: it leaves the list, so the star is
+// The favorite taken out of a garage: it leaves the list, so the star is
 // kept as { spec, color } until the car is stored again (or another star is
 // set). Reward cars never come here (their record stays in the list).
 function cleanRoad(raw) {
@@ -226,7 +226,7 @@ export function deriveExplore(ex) {
   G.cars = cars;
   // Reward cars out on the road: only ones that are in the collection.
   G.out = G.out.filter((spec, i) => G.out.indexOf(spec) === i && cars.some((c) => c.reward && c.spec === spec));
-  // One star: a favourite in the list means none out on the road.
+  // One star: a favorite in the list means none out on the road.
   if (fav) G.road = null;
   // Steps only for seen and not done, clamped to the step count.
   const step = {};
@@ -243,6 +243,12 @@ export function deriveExplore(ex) {
   A.step = step;
   if (A.tracked !== null && (!A.seen.includes(A.tracked) || done.includes(A.tracked))) A.tracked = null;
   return ex;
+}
+
+// Ids saved by older builds under their British spelling: read as the new id.
+const LEGACY_ADVENTURE_IDS = { 'a-port-quay': 'a-port-pier' };
+function modernIds(list) {
+  return Array.isArray(list) ? list.map((id) => (typeof id === 'string' && has(LEGACY_ADVENTURE_IDS, id) ? LEGACY_ADVENTURE_IDS[id] : id)) : list;
 }
 
 // Anything -> a valid explore state. Returns { state, newer }: `newer` is
@@ -270,14 +276,19 @@ export function readExplore(raw) {
     G.out = has(g, 'out') && Array.isArray(g.out) ? g.out.slice(0, MAX_SCAN).filter((v) => isRewardSpec(v)) : [];
     G.road = has(g, 'road') ? cleanRoad(g.road) : null;
     G.last = has(g, 'last') && typeof g.last === 'string' && GARAGE_IDS.includes(g.last) ? g.last : null;
-    A.seen = idList(has(a, 'seen') ? a.seen : null, ADVENTURE_IDS);
-    A.done = idList(has(a, 'done') ? a.done : null, ADVENTURE_IDS);
+    A.seen = idList(has(a, 'seen') ? modernIds(a.seen) : null, ADVENTURE_IDS);
+    A.done = idList(has(a, 'done') ? modernIds(a.done) : null, ADVENTURE_IDS);
     if (has(a, 'step') && isObj(a.step)) {
       for (const id of ADVENTURE_IDS) {
         if (has(a.step, id) && Number.isInteger(a.step[id])) A.step[id] = a.step[id];
       }
+      for (const old of Object.keys(LEGACY_ADVENTURE_IDS)) {
+        const id = LEGACY_ADVENTURE_IDS[old];
+        if (has(a.step, old) && !has(a.step, id) && Number.isInteger(a.step[old])) A.step[id] = a.step[old];
+      }
     }
-    A.tracked = has(a, 'tracked') && typeof a.tracked === 'string' && ADVENTURE_IDS.includes(a.tracked) ? a.tracked : null;
+    const tracked = has(a, 'tracked') && typeof a.tracked === 'string' && has(LEGACY_ADVENTURE_IDS, a.tracked) ? LEGACY_ADVENTURE_IDS[a.tracked] : a.tracked;
+    A.tracked = typeof tracked === 'string' && ADVENTURE_IDS.includes(tracked) ? tracked : null;
     if (has(raw, 'cells')) {
       const b = b64ToBytes(raw.cells);
       ex.cells = b && b.length === CELL_BYTES ? raw.cells : '';
@@ -355,7 +366,7 @@ export function carRecord(src) {
   const id = spec ? spec.id : src.spec;
   const maxHp = spec && spec.health > 0 ? spec.health : 1;
   const health = spec ? (Number.isFinite(src.health) ? src.health / maxHp : 1) : src.health;
-  // A taken-out favourite carries its star on the live car (v.fav).
+  // A taken-out favorite carries its star on the live car (v.fav).
   return cleanCar({ spec: id, color: src.color, health, fav: src.fav === true });
 }
 
@@ -404,7 +415,7 @@ export function takeOut(ex, index, arriving = null) {
     if (r.ok) stored = true;
     else left = true;
   }
-  // One star only: an arriving favourite stored just now keeps it.
+  // One star only: an arriving favorite stored just now keeps it.
   const fav = pick.fav && !(stored && arr.fav);
   if (!pick.reward && fav) ex.garages.road = { spec: pick.spec, color: pick.color };
   return { ok: true, car: { spec: pick.spec, color: pick.color, health: 1, fav, reward: pick.reward }, stored, left };
@@ -413,13 +424,13 @@ export function takeOut(ex, index, arriving = null) {
 export function repaint(ex, index, color) {
   const c = ex.garages.cars[index];
   if (!c) return { ok: false, reason: 'no-car' };
-  if (!paintAllowed(c.spec, color)) return { ok: false, reason: 'colour' };
+  if (!paintAllowed(c.spec, color)) return { ok: false, reason: 'color' };
   c.color = color;
   return { ok: true };
 }
 
-// Star toggle: at most one favourite.
-export function toggleFavourite(ex, index) {
+// Star toggle: at most one favorite.
+export function toggleFavorite(ex, index) {
   const cars = ex.garages.cars;
   const c = cars[index];
   if (!c) return { ok: false, reason: 'no-car' };
@@ -438,7 +449,7 @@ export function release(ex, index) {
   return { ok: true };
 }
 
-export function favourite(ex) {
+export function favorite(ex) {
   for (const c of ex.garages.cars) {
     if (c.fav && !(c.reward && ex.garages.out.includes(c.spec))) return { spec: c.spec, color: c.color, health: 1, reward: c.reward };
   }

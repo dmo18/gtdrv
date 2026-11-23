@@ -11,7 +11,7 @@ const NEAR_SIZE = 400;
 const NEAR_CELLS = 64;
 const CELL = NEAR_SIZE / NEAR_CELLS;
 const SHORE_N = 128; // texels per side of the shore map
-const SHORE_CELL = 4; // metres per texel
+const SHORE_CELL = 4; // meters per texel
 const SHORE_SPAN = SHORE_N * SHORE_CELL;
 const SHORE_NEG = 16; // the map holds distances from -16 m (land) ...
 const SHORE_RANGE = 64; // ... to +48 m (sea)
@@ -35,7 +35,7 @@ function waveGlsl() {
   }
   return `
 uniform float uTime;
-uniform vec2 uCentre;
+uniform vec2 uCenter;
 varying float vRwH;
 varying vec2 vRwP;
 float rwWave(vec2 p, float t) { return 0.0${h}; }
@@ -43,14 +43,14 @@ vec2 rwGrad(vec2 p, float t) { return vec2(0.0${gx}, 0.0${gz}); }
 // 1 in the middle of the patch, 0 at its rim, so the edge meets the
 // flat far plane without a step.
 float rwFade(vec2 p) {
-  vec2 d = abs(p - uCentre) / ${glslFloat(NEAR_SIZE / 2)};
+  vec2 d = abs(p - uCenter) / ${glslFloat(NEAR_SIZE / 2)};
   float m = max(d.x, d.y);
   return 1.0 - smoothstep(0.65, 0.98, m);
 }
 `;
 }
 
-// Sea colour with depth and light: looking steeply down you see into
+// Sea color with depth and light: looking steeply down you see into
 // the water (deeper, greener); toward a glancing view it turns paler and
 // bluer before the sky reflection (the environment map) takes over;
 // slow large patches of lighter and darker water. Runs after the normal
@@ -97,7 +97,7 @@ function makeNearMaterial(color, uniforms) {
       if (!vs.includes('#include <beginnormal_vertex>') || !vs.includes('#include <begin_vertex>') ||
           !fs.includes('#include <color_fragment>') || !fs.includes('#include <normal_fragment_maps>')) return;
       shader.uniforms.uTime = uniforms.uTime;
-      shader.uniforms.uCentre = uniforms.uCentre;
+      shader.uniforms.uCenter = uniforms.uCenter;
       shader.uniforms.uShore = uniforms.uShore;
       shader.uniforms.uShoreOrg = uniforms.uShoreOrg;
       shader.uniforms.uShoreOn = uniforms.uShoreOn;
@@ -128,7 +128,7 @@ varying vec2 vRwP;
           #include <color_fragment>
           {
             // Darker troughs, lighter crests with a hint of foam, and
-            // broad slow patches so the sea is not one flat colour.
+            // broad slow patches so the sea is not one flat color.
             float rwT = clamp(vRwH / 0.24 * 0.5 + 0.5, 0.0, 1.0);
             diffuseColor.rgb *= mix(0.8, 1.12, rwT);
             float rwPatch = sin(vRwP.x * 0.013 + sin(vRwP.y * 0.011) * 1.7) * sin(vRwP.y * 0.017 - vRwP.x * 0.004);
@@ -153,7 +153,7 @@ varying vec2 vRwP;
           ${SEA_TONE}
           ${SHORE_TONE}`);
     } catch {
-      // Leave the stock Lambert shader: a flat coloured plane.
+      // Leave the stock Lambert shader: a flat colored plane.
     }
   };
   mat.customProgramCacheKey = () => 'rustwater-sea-v4';
@@ -172,7 +172,7 @@ function makeFarMaterial(color) {
   return mat;
 }
 
-// A scrolling window (SHORE_SPAN metres) of distance-to-shore round the
+// A scrolling window (SHORE_SPAN meters) of distance-to-shore round the
 // camera, in two textures: one is shown while the other is filled a few
 // rows a frame, then they swap. Nothing is allocated after creation.
 function createShoreMap(uniforms) {
@@ -245,7 +245,7 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
   group.add(far);
 
   const uniforms = {
-    uTime: { value: 0 }, uCentre: { value: new THREE.Vector2() },
+    uTime: { value: 0 }, uCenter: { value: new THREE.Vector2() },
     uShore: { value: null }, uShoreOrg: { value: new THREE.Vector2() }, uShoreOn: { value: 0 },
   };
   const shore = createShoreMap(uniforms);
@@ -266,7 +266,7 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
     const sx = Math.round(cameraPos.x / CELL) * CELL;
     const sz = Math.round(cameraPos.z / CELL) * CELL;
     near.position.set(sx, 0, sz);
-    uniforms.uCentre.value.set(sx, sz);
+    uniforms.uCenter.value.set(sx, sz);
     // The far plane only needs coarse following.
     // The city's shore function: given, or found on the running game.
     let sd = shoreDist;
@@ -286,8 +286,8 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
 // One wake slice: a soft oval of churned water on the track plus two
 // foam crests at z = +-1 (the arms of the V). Instances are scaled
 // sideways as they age, so consecutive slices fan out into a V wake.
-// White centres fade to black at the rims, drawn additively, so black
-// adds nothing and fading the instance colour fades the foam.
+// White centers fade to black at the rims, drawn additively, so black
+// adds nothing and fading the instance color fades the foam.
 function foamGeometry() {
   const seg = 12;
   const pos = [];

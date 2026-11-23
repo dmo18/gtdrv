@@ -66,7 +66,7 @@ export const CAR_SHOTS = {
     for (let i = 0; i < n; i++) out[i] += hi[i] * 0.3;
     return fadeEdges(normalize(removeDC(out), 0.8), 8, 800);
   },
-  // footsteps: a heel tap and a sole scuff on pavement; a soft rustle on grass
+  // footsteps: a heel tap and a sole scuff on sidewalk; a soft rustle on grass
   stepHard(rng) {
     const out = z(len(0.16));
     const b = z(out.length);

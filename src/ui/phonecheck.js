@@ -13,11 +13,11 @@ import { nextStation } from '../core/radio.js';
 
 export const DRIVE_SECONDS = 60;
 export const SOUND_SECONDS = 3.2; // each of the eight sounds
-export const SOUNDS = ['Engine', 'Tyre squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'];
+export const SOUNDS = ['Engine', 'Tire squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'];
 // What to listen for in each of the eight sounds (shown by Settings, Display, Sound test).
 export const SOUND_NOTES = [
   'Your car revving up',
-  'Tyres sliding in a turn',
+  'Tires sliding in a turn',
   'A few shots',
   'A big explosion ahead',
   'A police siren',
@@ -97,10 +97,10 @@ export function createSystemTimer(systems, now) {
 
 // ---------------------------------------------------------------------------
 // The route: from the node nearest the start, always the edge that turns least
-// (ties: the lowest edge id), until it is `metres` long. No randomness.
+// (ties: the lowest edge id), until it is `meters` long. No randomness.
 // ---------------------------------------------------------------------------
 const angleDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
-export function buildRoute(city, x, z, metres = 1100) {
+export function buildRoute(city, x, z, meters = 1100) {
   const nodes = city.nodes, edges = city.edges;
   const route = [];
   if (!nodes || !nodes.length) return route;
@@ -111,7 +111,7 @@ export function buildRoute(city, x, z, metres = 1100) {
   }
   route.push({ x: nodes[cur].x, z: nodes[cur].z });
   let prev = -1, heading = NaN, total = 0;
-  for (let guard = 0; guard < 600 && total < metres; guard++) {
+  for (let guard = 0; guard < 600 && total < meters; guard++) {
     const n = nodes[cur];
     let pick = -1, pickScore = Infinity;
     for (const pass of [0, 1]) {
@@ -216,7 +216,7 @@ export function createCheckRun(game, opts = {}) {
     return true;
   };
 
-  // The point `d` metres ahead of the car along its heading, nudged to the route side.
+  // The point `d` meters ahead of the car along its heading, nudged to the route side.
   const ahead = (d, side = 0) => {
     const c = run.car;
     return { x: c.x + Math.cos(c.heading) * d - Math.sin(c.heading) * side, z: c.z + Math.sin(c.heading) * d + Math.cos(c.heading) * side, h: c.heading };
@@ -285,7 +285,7 @@ export function createCheckRun(game, opts = {}) {
       playSound(k);
     }
     if (run.sound === 0) src.throttle = 1; // engine: floor it
-    if (run.sound === 1 && into > 0.3 && into < 1.5) { src.steer = 1; src.handbrake = true; src.throttle = 1; } // tyres: a slide
+    if (run.sound === 1 && into > 0.3 && into < 1.5) { src.steer = 1; src.handbrake = true; src.throttle = 1; } // tires: a slide
     // from the gunshot on, the car rolls to a stop and idles, so each test
     // sound is heard on its own and not under engine and road roar
     // (brake only while rolling: held at a standstill it would reverse)
@@ -516,7 +516,7 @@ export function createPhoneCheck(game, root, opts = {}) {
     state.raf = requestAnimationFrame(frame);
   }
 
-  function end(cancelled) {
+  function end(canceled) {
     const run = state.run;
     if (!run) return;
     cancelAnimationFrame(state.raf);
@@ -524,8 +524,8 @@ export function createPhoneCheck(game, root, opts = {}) {
     state.run = null;
     run.finish();
     if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
-    if (had && !cancelled) { state.finished = run; showResult(run); } else clearPanel();
-    if (state.onEnd) state.onEnd(!cancelled);
+    if (had && !canceled) { state.finished = run; showResult(run); } else clearPanel();
+    if (state.onEnd) state.onEnd(!canceled);
   }
 
   function start() {

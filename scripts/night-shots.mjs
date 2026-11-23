@@ -1,5 +1,5 @@
 // Developer helper: night (and matching day) screenshots for judging the
-// night look: a downtown street, the harbour and the player car with its
+// night look: a downtown street, the harbor and the player car with its
 // headlights, each at 23:00 and at 13:00 for day regression.
 // usage: node scripts/night-shots.mjs [prefix]   (default prefix "night")
 // Writes docs/preview/<prefix>-<view>.png and prints draw calls.
@@ -19,10 +19,10 @@ await buildGame({ minify: false });
 // name: [where, hour, camera]
 const VIEWS = {
   downtown: ['spawn', 23, 'chase'],
-  harbour: ['harbour', 23, 'chase'],
+  harbor: ['harbor', 23, 'chase'],
   car: ['spawn', 23, 'front'],
   'downtown-day': ['spawn', 13, 'chase'],
-  'harbour-day': ['harbour', 13, 'chase'],
+  'harbor-day': ['harbor', 13, 'chase'],
   'car-day': ['spawn', 13, 'front'],
 };
 const server = await serve(0);
@@ -41,7 +41,7 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
     const g = window.__rw;
     const c = g.city;
     let x = c.spawn.x, z = c.spawn.z, heading = c.spawn.heading || 0, pierEnd = 0;
-    if (where === 'harbour') {
+    if (where === 'harbor') {
       // Out on the docks marina pier, looking back at the city over the water.
       const m = c.pois.find((p) => p.type === 'marina' && /Saltyard/.test(p.label)) || c.pois.find((p) => p.type === 'marina');
       let best = null, bd = 1e9;
@@ -49,7 +49,7 @@ for (const [name, [where, hour, cam]] of Object.entries(VIEWS)) {
         const d = m ? Math.hypot((p.x0 + p.x1) / 2 - m.x, (p.z0 + p.z1) / 2 - m.z) : 0;
         if (d < bd) { bd = d; best = p; }
       }
-      // The car waits on the quay at the root of the pier, lamps along it;
+      // The car waits on the pier at the root of the pier, lamps along it;
       // the camera stands out on the pier looking back at the city.
       if (best) { x = (best.x0 + best.x1) / 2; z = best.z0 - 4; heading = Math.PI / 2; pierEnd = best.z1 - 6; }
       else { x = 58; z = 596; heading = 1.35; }

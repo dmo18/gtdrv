@@ -11,7 +11,7 @@ Shared state fields
 - `spec`: entry from that kind's SPECS table. Every spec has `id`,
   `label` (invented name, never a real brand or model), `length`,
   `width`, `height`, `health`, `colors`, `maxSpeed` (m/s).
-- `x, z` position (metres; x east, z south), `y` height of the craft's
+- `x, z` position (meters; x east, z south), `y` height of the craft's
   ground-contact point above ground/sea level (cars: always 0).
 - `heading` (0 faces +x; increasing turns toward +z, i.e. clockwise
   seen from above = a right turn), `pitch` (nose up positive, radians),
@@ -37,7 +37,7 @@ Step functions: `step<Kind>(craft, controls, dt, world)`
   - `collision.raycast(x, z, dx, dz, maxDist)`.
   - `waterCollision`: same API, holds piers and buoys (things only
     boats hit).
-  - `city.shoreDist(x, z)`: metres inside the shoreline; positive on
+  - `city.shoreDist(x, z)`: meters inside the shoreline; positive on
     land (main island, airfield islet, causeway), negative at sea.
   - `city.isGround(x, z)`: true on land or on a pier.
   - `time`: simulated seconds.
@@ -60,26 +60,26 @@ Car-only fields (src/entities/vehicle.js)
 - Specs add `drive` (`'fwd' | 'rwd' | 'awd'`), `gears` (4..6), `power`
   (kW), `firstGear` (m/s at the redline in 1st), `cgFront` (front weight
   share). `accel` is informative; `brake` is the pedal's decel request
-  (the tyres and ABS limit it); `steerMax` is the lock at walking pace.
+  (the tires and ABS limit it); `steerMax` is the lock at walking pace.
 - `gear`: 0 = reverse, 1..spec.gears forward (automatic, brief torque dip
   while `shiftT > 0`). `rpm`: engine speed as a share of the redline,
   0..1 (idle about 0.14), for the engine sound.
 - `steer` smoothed input, `steerAngle` front wheel angle (rad).
 - `pitch`/`roll`: body dive/squat and lean from damped springs (visual).
   `suspension` 0..1: extra travel after an impact, decays in ~1 s.
-- `slip` 0..1 tyre squeal / skid amount, `spin` wheelspin 0..1, `abs`
+- `slip` 0..1 tire squeal / skid amount, `spin` wheelspin 0..1, `abs`
   true while ABS is working, `accelX`/`accelY` body-frame acceleration.
 - Game logic files must not import three.js or touch the DOM.
 
 Mesh functions (three.js), per kind:
 `create<Kind>Mesh(spec, color)` returns a THREE.Group with origin at
-the craft's ground-contact centre, nose along local +x, up +y.
+the craft's ground-contact center, nose along local +x, up +y.
 `update<Kind>Mesh(mesh, craft, alpha, time)` places it, interpolating
 previous to current state. A heading h maps to `rotation.y = -h`.
 Cars: see src/render/vehiclemesh.js. Boats, aircraft and tanks are
 built with src/render/hullkit.js (smooth lofts, lathes, airfoil panels,
 swept tubes, flat plates; pure shape maths in craftmath.js): one merged,
-vertex-coloured geometry per part with a surface class (aCls) and a rig
+vertex-colored geometry per part with a surface class (aCls) and a rig
 attribute, drawn with one PBR "skin" per craft (vehiclemats class patch
 plus a shared triplanar panel / rivet / grime / camo texture). The skin's
 vertex shader moves rigged parts from per-craft uniforms (ailerons,
@@ -102,4 +102,4 @@ A car whose spec has `police` or `emergency` gets a SIREN button (touch input
 the light bar flashes and the siren loop plays. It starts off and goes off when
 the player leaves the car. While it is on and the car moves over 4 m/s, AI cars
 ahead pull over and stop (src/core/yield.js) and pedestrians on the road step
-to the kerb; both carry on shortly after the car has passed.
+to the curb; both carry on shortly after the car has passed.

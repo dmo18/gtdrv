@@ -1,7 +1,7 @@
 // Generates the whole island city from a seed. Pure data, no drawing,
 // so it can be tested without a browser.
 //
-// Coordinates: x = east, z = south, metres. The ground is flat (y = 0).
+// Coordinates: x = east, z = south, meters. The ground is flat (y = 0).
 import { createRng, TAU } from '../core/rng.js';
 
 export const SIDEWALK = 4;
@@ -217,7 +217,7 @@ export function generateCity(seed = 20261) {
       return;
     }
     if ((district === 'midtown' || district === 'industrial' || district === 'beach') && rng.chance(0.08)) {
-      // An open car park.
+      // An open parking lot.
       const alongX = bx1 - bx0 > bz1 - bz0;
       const n = Math.floor(((alongX ? bx1 - bx0 : bz1 - bz0) - 2) / 3);
       for (let k = 0; k < n; k++) {
@@ -230,9 +230,9 @@ export function generateCity(seed = 20261) {
     }
     let h = rng.range(spec.hMin, spec.hMax);
     if (district === 'downtown') {
-      // Taller toward the very centre, with the odd landmark tower.
-      const centre = 1 - Math.min(1, Math.hypot(cx, cz) / 230);
-      h = spec.hMin + (spec.hMax - spec.hMin) * Math.pow(rng.next(), 2.2 - centre * 1.4);
+      // Taller toward the very center, with the odd landmark tower.
+      const center = 1 - Math.min(1, Math.hypot(cx, cz) / 230);
+      h = spec.hMin + (spec.hMax - spec.hMin) * Math.pow(rng.next(), 2.2 - center * 1.4);
     }
     if (district === 'residential') {
       // Houses sit back from the street with a tree or two in the yard.
@@ -362,7 +362,7 @@ export function generateCity(seed = 20261) {
     const dock = piers[piers.length - 1];
     aircraftSpots.push({ x: dock.x1 + 14, z: dock.z1 - 12, heading: Math.PI / 2, spec: 'seaplane' });
   }
-  // A helipad in the docks and a city one on open ground by the centre.
+  // A helipad in the docks and a city one on open ground by the center.
   let dockPad = null;
   {
     const hp = { x: xs[11] + wx[11] / 2 + 14, z: zs[N - 3] };
@@ -372,14 +372,14 @@ export function generateCity(seed = 20261) {
     }
   }
 
-  // --- Street furniture and kerbside parking along every road. ---
+  // --- Street furniture and curbside parking along every road. ---
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b];
     const half = e.width / 2;
     const startPad = (e.horizontal ? a.hx : a.hz) + 6;
     const endPad = (e.horizontal ? b.hx : b.hz) + 6;
     const usable = e.length - startPad - endPad;
-    // Street lamps on both kerbs.
+    // Street lamps on both curbs.
     for (let d = startPad; d <= e.length - endPad; d += 28) {
       for (const side of [-1, 1]) {
         const off = side * (half + 0.8);
@@ -434,9 +434,9 @@ export function generateCity(seed = 20261) {
     return !buildings.some((b) => p.x > b.x0 - 1 && p.x < b.x1 + 1 && p.z > b.z0 - 1 && p.z < b.z1 + 1);
   });
 
-  // Player start: the middle of a street next to the centre of town.
-  const centre = nodes.reduce((best, n) => (Math.hypot(n.x, n.z) < Math.hypot(best.x, best.z) ? n : best), nodes[0]);
-  const spawn = { x: centre.x + 30, z: centre.z + (wz[centre.j] / 2 - 2.6), heading: 0 };
+  // Player start: the middle of a street next to the center of town.
+  const center = nodes.reduce((best, n) => (Math.hypot(n.x, n.z) < Math.hypot(best.x, best.z) ? n : best), nodes[0]);
+  const spawn = { x: center.x + 30, z: center.z + (wz[center.j] / 2 - 2.6), heading: 0 };
 
 
   // --- Extra detail for drawing (facade styles, street furniture,
@@ -472,7 +472,7 @@ export function generateCity(seed = 20261) {
   }
 
   // Street names: avenues run north-south, numbered streets east-west.
-  const AVE = ['Marrow', 'Glasswell', 'Saltyard', 'Fern', 'Cinder', 'Gull', 'Tide', 'Kelp', 'Rust', 'Pale', 'Heron', 'Lantern', 'Brine', 'Otter', 'Quay', 'Ember'];
+  const AVE = ['Marrow', 'Glasswell', 'Saltyard', 'Fern', 'Cinder', 'Gull', 'Tide', 'Kelp', 'Rust', 'Pale', 'Heron', 'Lantern', 'Brine', 'Otter', 'Pier', 'Ember'];
   const ORD = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th', '13th', '14th', '15th', '16th'];
   const streetNames = {
     x: xs.map((_, i) => `${AVE[i % 16]} ${isAvenue(i) ? 'Ave' : 'St'}`),
@@ -540,7 +540,7 @@ export function generateCity(seed = 20261) {
       const e = edges[eid];
       const o = nodes[e.a === n.id ? e.b : e.a];
       const l = Math.hypot(n.x - o.x, n.z - o.z);
-      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l; // travelling toward the junction
+      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l; // traveling toward the junction
       const rx = -tz, rz = tx; // the driver's right
       const along = e.horizontal ? n.hx : n.hz, across = e.horizontal ? n.hz : n.hx;
       const x = n.x - tx * (along + 0.9) + rx * (across + 0.9);
@@ -573,7 +573,7 @@ export function generateCity(seed = 20261) {
     }
     if (best > 0) landmarks.lighthouse = { x: Math.cos(bestTh) * (best - 22), z: Math.sin(bestTh) * (best - 22), h: 30, r: 3.4 };
   }
-  // Gantry cranes on the quay east of the marina, booms out to sea.
+  // Gantry cranes on the pier east of the marina, booms out to sea.
   for (let k = 0; k < 3; k++) {
     const x = xs[9] + 70 + k * 62;
     let z = 200;
@@ -609,7 +609,7 @@ export function generateCity(seed = 20261) {
   }
 
   // --- Military places (docs/ARMS.md section 3). Appended after every
-  // random draw, with explicit colours and styles, so the rest of the
+  // random draw, with explicit colors and styles, so the rest of the
   // seeded city is exactly as before. ---
   const tankSpots = []; // { x, z, heading, spec }
   const roofPads = []; // { x, z, y, building }
@@ -655,8 +655,8 @@ export function generateCity(seed = 20261) {
     surfaces.push({ x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, type: 'apron', depot: true });
     pois.push({ type: 'depot', x: D.x0 + 110, z: gz, label: 'Ironbank Depot' });
   }
-  // One Rustback in the easternmost Cinder Row open car park (by
-  // position, not chance); kerb and lot spaces within 6 m are cleared.
+  // One Rustback in the easternmost Cinder Row open parking lot (by
+  // position, not chance); curb and lot spaces within 6 m are cleared.
   {
     let best = null;
     for (const s of parkingSpots) if (s.lot && districtOf(s.x, s.z) === 'industrial' && (!best || s.x > best.x)) best = s;
@@ -669,7 +669,7 @@ export function generateCity(seed = 20261) {
     }
   }
   // Police roof pad: the midtown roof (16 x 16 m or more, 12..30 m high)
-  // nearest the centre; else the docks helipad.
+  // nearest the center; else the docks helipad.
   {
     let best = null, bd = Infinity;
     for (const b of buildings) {
@@ -706,7 +706,7 @@ export function generateCity(seed = 20261) {
   };
 }
 
-// Centre-line offset of a driving lane, measured to the right of the
+// Center-line offset of a driving lane, measured to the right of the
 // direction of travel. Streets have one lane each way, avenues two.
 export function laneOffset(edge, lane = 0) {
   if (edge.avenue) return lane === 0 ? 2.6 : 6.1;
@@ -715,7 +715,7 @@ export function laneOffset(edge, lane = 0) {
 export const lanesPerDirection = (edge) => (edge.avenue ? 2 : 1);
 
 // World position on a lane. `from` is the node id being driven away
-// from, `d` is metres travelled from that node's centre.
+// from, `d` is meters traveled from that node's center.
 export function lanePoint(city, edge, from, d, lane = 0, out = { x: 0, z: 0, heading: 0 }) {
   const a = city.nodes[from];
   const b = city.nodes[edge.a === from ? edge.b : edge.a];
@@ -728,8 +728,8 @@ export function lanePoint(city, edge, from, d, lane = 0, out = { x: 0, z: 0, hea
   return out;
 }
 
-// Traffic-light state for traffic travelling along an edge into a
-// signalled junction: 'green', 'amber' or 'red'.
+// Traffic-light state for traffic traveling along an edge into a
+// signaled junction: 'green', 'amber' or 'red'.
 export function signalState(node, horizontal, time) {
   if (!node.signal) return 'green';
   const cycle = 24;

@@ -5,7 +5,7 @@
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const unit = (x) => (x > 0 ? (x < 1 ? x : 1) : 0);
 
-// Share of dry tyre grip left on a wet road. Exactly 1 in clear weather,
+// Share of dry tire grip left on a wet road. Exactly 1 in clear weather,
 // falling smoothly to 0.72 in a downpour.
 export function wetGrip(rain) {
   return 1 - 0.28 * unit(rain);

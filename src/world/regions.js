@@ -1,7 +1,7 @@
 // Miami regions (docs/PLAN_V2.md section 3): the data box split into five
 // regions that load one at a time, all in the one coordinate frame of
-// docs/MAP.md (x east, z south, metres from lat 25.78, lon -80.18).
-// Nothing is re-centred, so saved positions, ids and medals stay valid.
+// docs/MAP.md (x east, z south, meters from lat 25.78, lon -80.18).
+// Nothing is re-centered, so saved positions, ids and medals stay valid.
 //
 // Pure data and helpers: runs in node tests (no DOM, no three.js). The
 // data loaders below are dynamic imports, one per region file, so the
@@ -15,7 +15,7 @@
 // holds everything. Placement code skips what a region does not hold; it
 // never throws for it.
 
-// The data box (the bounds of src/world/data/miami.json, whole metres).
+// The data box (the bounds of src/world/data/miami.json, whole meters).
 export const BOX = { x0: -4505, z0: -3891, x1: 4505, z1: 3891 };
 
 // The filter margins (PLAN_V2 3.2, 3.5 rule 6).

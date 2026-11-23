@@ -30,7 +30,7 @@ test('wheelIndex: slice 0 is up, slices run clockwise', () => {
   assert.equal(wheelIndex(0, 70, 4), 2); // straight down of four
   assert.equal(wheelIndex(70, 0, 4), 1); // right
   assert.equal(wheelIndex(-70, 0, 4), 3); // left
-  // slice centres land on their own index
+  // slice centers land on their own index
   for (let i = 0; i < N; i++) {
     const a = i * 2 * Math.PI / N;
     assert.equal(wheelIndex(Math.sin(a) * 70, -Math.cos(a) * 70, N), i);

@@ -54,7 +54,7 @@ await build({
         },
         audio: { setVolume: (v) => { log.volume = v.master; log.vol = v; } },
         resize: () => { log.resizes++; },
-        activities: { courses: [{ id: 'race_harbour', name: 'Harbour Dash', type: 'race' }] },
+        activities: { courses: [{ id: 'race_harbor', name: 'Harbor Dash', type: 'race' }] },
       };
       const economy = createEconomy(game, window.localStorage);
       game.score = createScore(game);
@@ -96,8 +96,8 @@ try {
     if (window.name === 'v1') {
       window.name = '';
       localStorage.setItem('rustwater.save.v1', JSON.stringify({
-        money: 4321, owned: ['jet'], medals: { race_harbour: 'gold', seen_docks: 'bronze', hint_car: 'bronze' },
-        bestTimes: { race_harbour: 70.5 }, stats: { distance: 9000, flights: 3, races: 4 }, settings: { quality: 0.75, handling: 'sim', steering: 'slider' },
+        money: 4321, owned: ['jet'], medals: { race_harbor: 'gold', seen_docks: 'bronze', hint_car: 'bronze' },
+        bestTimes: { race_harbor: 70.5 }, stats: { distance: 9000, flights: 3, races: 4 }, settings: { quality: 0.75, handling: 'sim', steering: 'slider' },
       }));
     }
     if (window.name === 'tamper') {
@@ -167,9 +167,9 @@ try {
   const grp = (g) => page.locator(`.rw-menu-groups [data-group="${g}"]`).tap();
   await ev(() => {
     const g = window.rw.game;
-    g.progress.medals.race_harbour = 'gold';
+    g.progress.medals.race_harbor = 'gold';
     g.progress.medals.air_loop = 'silver';
-    g.progress.bestTimes.race_harbour = 83.4;
+    g.progress.bestTimes.race_harbor = 83.4;
     g.progress.medals.seen_docks = 'bronze';
     g.progress.stats.distance = 12345;
     window.rw.game.events.emit('progress');
@@ -201,11 +201,11 @@ try {
   const help = await page.locator('.rw-menu-body').innerText();
   check('help has the credit line and the version', help.includes('Map data (c) OpenStreetMap contributors, ODbL') && /Rustwater/.test(help), help.slice(-120));
 
-  // About (Help tab, and the title): version, credits, map licence, names, privacy link.
+  // About (Help tab, and the title): version, credits, map license, names, privacy link.
   await page.locator('[data-role="about"]').tap();
   const about = await page.locator('.rw-menu-body').innerText();
   check('about: title, version, map credit, invented names, privacy', (await page.locator('.rw-menu-title').innerText()) === 'About'
-    && /Version v?\d+\.\d+\.\d+|Version dev/.test(about) && about.includes('Map data (c) OpenStreetMap contributors, ODbL') && /ODbL|Open Database Licence/.test(about)
+    && /Version v?\d+\.\d+\.\d+|Version dev/.test(about) && about.includes('Map data (c) OpenStreetMap contributors, ODbL') && /ODbL|Open Database License/.test(about)
     && /names .* are invented/.test(about) && /privacy/i.test(about), about);
   check('about: privacy link goes to privacy.html, no email', (await page.locator('[data-role="about-privacy-link"]').getAttribute('href')) === 'privacy.html' && !/@/.test(about));
   check('about: Help stays the selected section', (await page.locator('.rw-menu-tab[aria-selected="true"]').innerText()) === 'Help');
@@ -250,11 +250,11 @@ try {
   await grp('display');
   // 6 rows: the Phone check (docs/PLAN_V1.md 4.2) and the Sound test join HUD, graphics quality, live day and night and time of day (at most 6)
   check('display: 6 rows (HUD, quality, live time, time of day, Phone check, Sound test)', (await rowCount()) === 6 && (await page.locator('[data-role="phonecheck"]').count()) === 1 && (await page.locator('[data-role="soundtest"]').count()) === 1);
-  check('time of day greyed while live is on', await ev(() => document.querySelector('[data-setting="timeOfDay"]').disabled === true));
+  check('time of day grayed while live is on', await ev(() => document.querySelector('[data-setting="timeOfDay"]').disabled === true));
   // Sound test: the eight numbered sounds of the Phone check, reachable from Settings.
   await page.locator('[data-role="soundtest"]').tap();
   const names = await page.locator('.rw-menu-sounds li').evaluateAll((l) => l.map((e) => e.dataset.sound + ' ' + e.querySelector('b').textContent));
-  check('sound test: 8 numbered sounds, same names as the Phone check', JSON.stringify(names) === JSON.stringify(['Engine', 'Tyre squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'].map((n, i) => (i + 1) + ' ' + n)), JSON.stringify(names));
+  check('sound test: 8 numbered sounds, same names as the Phone check', JSON.stringify(names) === JSON.stringify(['Engine', 'Tire squeal', 'Gunshot', 'Blast', 'Siren', 'Music', 'Radio', 'Boost whoosh'].map((n, i) => (i + 1) + ' ' + n)), JSON.stringify(names));
   check('sound test: has a Start the Phone check button', (await page.locator('[data-role="phonecheck-start"]').count()) === 1);
   await page.locator('.rw-menu-back').tap();
   check('sound test: Back returns to Settings', (await page.locator('.rw-menu-groups').isVisible()));
@@ -425,8 +425,8 @@ try {
   await load();
   pr = await progress();
   check('v1 migrates: total money x 10', pr.score.total === 43210 && pr.version === 3, JSON.stringify(pr.score));
-  check('v1 migrates: nothing lost', pr.medals.race_harbour === 'gold' && pr.medals.seen_docks === 'bronze' && pr.medals.hint_car === 'bronze'
-    && pr.bestTimes.race_harbour === 70.5 && pr.stats.races === 4 && pr.settings.quality === 0.75 && pr.settings.handling === 'sim' && pr.settings.steering === 'slider', JSON.stringify(pr));
+  check('v1 migrates: nothing lost', pr.medals.race_harbor === 'gold' && pr.medals.seen_docks === 'bronze' && pr.medals.hint_car === 'bronze'
+    && pr.bestTimes.race_harbor === 70.5 && pr.stats.races === 4 && pr.settings.quality === 0.75 && pr.settings.handling === 'sim' && pr.settings.steering === 'slider', JSON.stringify(pr));
 
   // Tampered storage.
   await page.evaluate(() => { window.name = 'tamper'; });

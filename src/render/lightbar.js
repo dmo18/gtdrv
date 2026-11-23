@@ -101,9 +101,9 @@ function build(parts) {
 
 // Bar geometry for bar `id`, mounted by its own numbers (`m`): the police
 // bar is built about its roof mount (origin at the roof), the service
-// bars in the body's frame (origin at the ground centre).
+// bars in the body's frame (origin at the ground center).
 //   police: m = { head: [x, y, z] } (headlamp anchor for the wig-wag)
-//   others: m = { L, W, H, cabX, cabY } (cab roof centre x and height)
+//   others: m = { L, W, H, cabX, cabY } (cab roof center x and height)
 const geoCache = new Map();
 export function lightbarGeometry(id, m) {
   const key = id + ':' + JSON.stringify(m);

@@ -217,7 +217,7 @@ function begin(mode, range) {
 // opts: { range, cone (fixed half-angle; else the foot cone by distance),
 //         craft (include crewed craft, default true) }
 // Score: share of the cone used plus 0.8 x share of the range, so the
-// nearer of two targets in the cone wins unless it is far off-centre.
+// nearer of two targets in the cone wins unless it is far off-center.
 export function pickAssist(ctx, eye, fwd, muzzle, opts) {
   begin(Q_ASSIST, opts.range);
   Q.cone = opts.cone || 0;

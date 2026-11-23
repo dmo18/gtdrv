@@ -1,6 +1,6 @@
 // The title camera (docs/REVAMP.md 6.8): while the title shows, the camera
 // sits `back` m behind the start spawn along its street, `side` m toward the
-// south kerb and `height` m up, looking `lookAhead` m ahead at `lookHeight`.
+// south curb and `height` m up, looking `lookAhead` m ahead at `lookHeight`.
 // It dollies `dolly` m forward at `dollySpeed` m/s, eased, and back, for
 // ever (not at all under reduced motion). When play begins it blends to the
 // chase camera over BLEND_S seconds.
@@ -25,7 +25,7 @@ export function titlePose(sv, t, still, out) {
   const c = sv.camera, sp = sv.spawn;
   const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
   const d = still ? 0 : dollyAt(c, t);
-  // Right of the heading is (-fz, fx): toward the south kerb for an east heading.
+  // Right of the heading is (-fz, fx): toward the south curb for an east heading.
   out.x = sp.x + fx * (d - c.back) - fz * c.side;
   out.z = sp.z + fz * (d - c.back) + fx * c.side;
   out.y = c.height;

@@ -24,7 +24,7 @@ the final review and fix stage; nothing is in progress that blocks play.
   (from the features it just dressed), so a step seldom has to; the answers are the same either way.
 - dressLot: scatter tests against flat scratch arrays of the features already put and squares distances first
   (hypot only at the rounding edge); about 20 % faster, the same features.
-- Garages: the candidates in flat arrays, the centre tests (keep-outs, start, other garages) on squared distances
+- Garages: the candidates in flat arrays, the center tests (keep-outs, start, other garages) on squared distances
   before sorting, the survivors walked in 1 m bands of distance (only the bands reached are sorted), the ground
   tests on a scratch shape (the shape made for the winner only), the type test first and type-free failures
   remembered for the fallback pass. The same twelve sites (byte equal).
@@ -85,7 +85,7 @@ the final review and fix stage; nothing is in progress that blocks play.
   unhurt for 3 s then flee, +1 star for an officer; hulls and burning cars put out after 1.5 s, +150 "Fire out", white
   steam 4 s; cars pushed 3000 N); treat (tap under 2 m/s: revive a civilian body within 8 m in 2 s, +200 and its blood
   pool cleared; hard mode heals to full in 2 s and 5 %/s seated; normal mode with nobody to treat refills boost; 5 s
-  cooldown); lift (side loader: kerb bin within 4 m, 3 s cycle, +50, 300 s lock, 20 loads, yard stop +400; crusher
+  cooldown); lift (side loader: curb bin within 4 m, 3 s cycle, +50, 300 s lock, 20 loads, yard stop +400; crusher
   takes up to 3 lying wreck parts, +20 each; driving off tips the bin over); hook (tap: car up to 2600 kg or a hull in
   the rear cone, 1 s attach, one-axle kinematic trailer, mass share 0.6 on acceleration and braking (braking no worse
   than 0.82), 26.8 m/s cap, slips over 75 degrees, 2 s stop in the tow yard or a garage +300, police car 2 stars).
@@ -93,7 +93,7 @@ the final review and fix stage; nothing is in progress that blocks play.
   SV-P1; parked by service.js, back 300 s after being taken when 250 m away; parked.js bays near them are kept free.
   Deviations: the third garbage truck is in a Downtown lot (Bayside Bin Depot), not Wynwood, to meet "one of each
   within 600 m of the start"; the tow yard is on the Port's works land (no legal yard on the river strip); the medical
-  centre is in Overtown. Island: one of each on the largest car parks.
+  center is in Overtown. Island: one of each on the largest parking lots.
 - Traffic: seeded share (garbage 1.2 % 05:00 to 15:00, tow 1.0, ambulance 0.8, fire 0.5), at most 2, one of a kind,
   150 m apart, inside the core; one in four ambulance or fire truck spawns on call (siren, 1.3 x lane speed). The
   yield code accepted an AI siren vehicle unchanged, so on-call ships. A hooked traffic car's driver bails out.
@@ -105,11 +105,11 @@ the final review and fix stage; nothing is in progress that blocks play.
 
 ## W5 Cars (2026-11-22)
 - Bodies (src/render/carbody.js): new section (tucked sill, character line, crisp shoulder, flat crowned deck), noses
-  and tails that round over (`lean`), bonnet creases, shut lines with depth, glass with tumblehome, fender peaks over
-  a lower bonnet on the sports cars (`valley`). Thirteen bodies, ten road outlines plus the three reward cars
+  and tails that round over (`lean`), hood creases, shut lines with depth, glass with tumblehome, fender peaks over
+  a lower hood on the sports cars (`valley`). Thirteen bodies, ten road outlines plus the three reward cars
   (Sunchaser speedster, Tidewinder off-road wagon, Night Heron fastback) on their own silhouettes.
 - Glass is tinted and see-through with a cabin behind it (seats, dash, steering wheel, headliner); crazed when badly
-  hurt, blown out when burnt. A contact shadow (dark under the sills and tyres, fading out) rides in the glass draw,
+  hurt, blown out when burnt. A contact shadow (dark under the sills and tires, fading out) rides in the glass draw,
   pressed onto the ground; the sun shadow is unchanged.
 - Paint (src/render/vehiclemats.js): a hotter clear coat and a cheap street reflection (a skyline with windows, lit
   at night, and the road) mixed into the sky reflection; no probes. Burnt lamps go dark.
@@ -125,8 +125,8 @@ the final review and fix stage; nothing is in progress that blocks play.
 
 ## W7 Sky, light and water (2026-11-22)
 - Sky dome (src/systems/daynight.js): two procedural cloud layers (low deck, thin high veil) drift with the wind and
-  take the sun colour at dusk, go dark blue and pick up the city glow at night, grey out with overcast and rain and
-  vanish in fog. Sun disc with a warm haze, moon with halo, and a horizon haze band in the fog colour so far towers
+  take the sun color at dusk, go dark blue and pick up the city glow at night, gray out with overcast and rain and
+  vanish in fog. Sun disc with a warm haze, moon with halo, and a horizon haze band in the fog color so far towers
   fade into it. The old puff clouds are hidden (SHOW_PUFFS). Cloud drift is slowed with the reduce-motion setting.
   All in the existing dome shader: no new draw call, no new program.
 - Sea (src/render/water.js): a small scrolling shore-distance map (two 128x128 R8 textures, filled 16 rows a frame,
@@ -144,10 +144,10 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   12), their blood pools as long. The scorch stays 120 s (9 m across under a car).
 - The blast in ten layers (src/render/blastplan.js holds the numbers): frame-0 flash, warm light on the street and
   walls for 0.35 s (pooled sprites, no real light), a three-billboard fireball 2 m to 7 m by 0.25 s cooling to dark
-  red, a smoke roll seen 12 m out by 0.5 s, a 16 m pressure ring, a dust skirt coloured by the ground, 24 sparks,
+  red, a smoke roll seen 12 m out by 0.5 s, a 16 m pressure ring, a dust skirt colored by the ground, 24 sparks,
   the smoke column. Blast radius by craft: car 10 m, heavy car 11, heli 12, plane 12 (fighter 13), tank 14; visual
-  scale 1 to 1.5. Shake 1 at the centre to 0 at 60 m.
-- Parts (src/render/carparts.js): 14 to 18 per car from a pool of 96, always a door, a wheel, the bonnet and a bumper,
+  scale 1 to 1.5. Shake 1 at the center to 0 at 60 m.
+- Parts (src/render/carparts.js): 14 to 18 per car from a pool of 96, always a door, a wheel, the hood and a bumper,
   one bounce with sparks and a clatter, lying 20 s.
 - Falls: every killing hit throws the body along its fall direction (shot, blast or car) and lays it along it: on
   the back from the front, on the face from behind, on the side from the side; 16 directions per cause tested.
@@ -200,7 +200,7 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   a safe spot, full health, heat cleared; the craft stays where it was.
 
 ## Decisions and direction changes, in order
-1. Name: Rustwater, an original island harbour city. 3D, flat ground,
+1. Name: Rustwater, an original island harbor city. 3D, flat ground,
    physics in 2D (x, z). three.js 0.187.0, esbuild 0.28.2, eslint 10.15.0.
 2. Preview on a public GitHub Pages site (user's choice). No separate main
    branch: the working branch is the default branch and publishes directly.
@@ -263,7 +263,7 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   blasts hurt everyone, a wreck kills everyone. Dead officers fall out as
   body actors (blood, score, heat as for any person). A car with no one left
   stops (`role: 'dead'`) and the chase calls a new one. See COMBAT.md.
-- Blasts: layered fireball with colour over life, shock ring, sparks and
+- Blasts: layered fireball with color over life, shock ring, sparks and
   embers, a 6 to 10 s smoke column, fading scorch, distance-scaled shake
   (off with Reduce motion), cars thrown and flipped, people tumbling, bins
   and benches scatter chunks, tanks and jets explode bigger.
@@ -291,8 +291,8 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   instant entry. Debug hook: game.debug.spawnOccupied(spec, x, z, heading, team).
 - Saved session (core/garage.js, systems/session.js, save version 3, v1 and
   v2 saves still load): last position and heading, mode, the craft (spec
-  id, paint colour, health fraction, altitude and speed for aircraft) and a
-  garage of the 8 most recently used cars (spec, colour, health, pose).
+  id, paint color, health fraction, altitude and speed for aircraft) and a
+  garage of the 8 most recently used cars (spec, color, health, pose).
   Autosave: enter, exit, every 10 s of simulated time, visibilitychange
   hidden, pagehide, beforeunload. createGame calls game.restoreSession()
   so Play continues; "New game" in Settings calls game.newSession() (scores
@@ -318,7 +318,7 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   accumulator; every step is still 1/60), a vignette overlay and a 4 percent
   zoom. At most one per 6 s; off with Reduce motion.
 - Blast camera: a vehicle exploding within 40 m swings the chase camera
-  back and aside for 1.5 s (`chase.fx`), cancelled at once by a camera drag.
+  back and aside for 1.5 s (`chase.fx`), canceled at once by a camera drag.
 - Tests: `test/cinematic.test.js`. Screenshots: `scripts/wanted-shots.mjs`.
 
 ## 2026-11-20: hidden secrets and the Ghostwake
@@ -363,7 +363,7 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   the title screen; the sun keeps castShadow on through sunrise and sunset
   (switching it recompiled every lit material) and just skips the shadow
   map; car models not built yet are lofted one per idle slot.
-- Look: colour grade in the tone curve (ACES, a little saturation, cool
+- Look: color grade in the tone curve (ACES, a little saturation, cool
   shadows, warm highlights, exposure 1.1), facade AO-lite (darker at the
   ground, lift toward the top), damp night streets with lamp reflection
   streaks (one draw call), a sun band along the horizon at dusk.
@@ -373,7 +373,7 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
 
 ## 2026-11-20: car radio
 - RADIO in the "more" fan (car and boat) and "Car radio" in Settings: Off,
-  Lagoon Drive (chill synth), Pulse Harbour (dance pop 118 to 124 BPM),
+  Lagoon Drive (chill synth), Pulse Harbor (dance pop 118 to 124 BPM),
   Lamplight Keys (slow jazz-like) and Gullspeak (talk). Saved as
   `settings.station` (allow-list, old saves load as off).
 - Gullspeak is a generated talk texture (vowel blips, jingles, ads) with
@@ -425,13 +425,13 @@ None critical or high.
   spin; it topples flat and settles about 0.8 s after touching down, then
   the pose is baked onto the actor and the slot freed. At most 12 tumble
   at once (the rest use the old fall pose). Own seeded stream, so fights
-  stay deterministic. A car at speed throws the person up over the bonnet
+  stay deterministic. A car at speed throws the person up over the hood
   (up speed 1.2 + 0.32 per m/s of car speed, cap 8). Drawn by the existing
   person mesh through `src/render/ragdoll.js`, hooked in `layDown`.
 - Stunt jumps (`src/world/stunts.js`, `src/core/stunt.js`,
   `src/systems/stunts.js`, `test/stunts.test.js`): four tabletop ramps on
   quiet streets (Fernside, Pale Shore, Cinder Row) and two at the airfield
-  dock (Dock Kicker on the quay, Dock Splash in the water for boats),
+  dock (Dock Kicker on the pier, Dock Splash in the water for boats),
   placed from the seeded city. Violet ramp icon on the map and minimap and
   a violet start pillar beside each ramp. Brake in the air for a backflip,
   steer for a barrel roll. Points from air time, distance, height, flips
@@ -439,7 +439,7 @@ None critical or high.
   `progress.medals` and best points in `score.courses`. Wrecked, crashed
   into a wall, sideways or roof landings score nothing. Ramp jumps no
   longer also count as generic airtime.
-- Screenshots: docs/preview/ragdoll-bonnet.png, docs/preview/stunt-jump.png
+- Screenshots: docs/preview/ragdoll-hood.png, docs/preview/stunt-jump.png
   (`node scripts/stunt-shots.mjs`).
 - Not done: bikes do not exist in the game, so only cars and boats jump;
   traffic cars also fly off the street ramps (no score for them); ramps
@@ -483,9 +483,9 @@ None critical or high.
   `buildings.js` adds whole-number UV offsets (no change by day) that
   carry the building and wall number.
 - Street lamps: every lamp and floodlight baked once into a 1024 px top
-  down light map; ground, kerb, pavement, pier and shopfront shaders add
-  it as light on their own colour (warm pools that take the asphalt or
-  paving colour, walls catch it near the ground). The old additive pool
+  down light map; ground, curb, sidewalk, pier and shopfront shaders add
+  it as light on their own color (warm pools that take the asphalt or
+  paving color, walls catch it near the ground). The old additive pool
   decal is off when the map is in use.
 - Car lamps: the player's and the 5 nearest cars light the ground in the
   same shaders: a widening headlight cone and a red tail glow (brighter
@@ -493,7 +493,7 @@ None critical or high.
   pool decals. Signs glow brighter at night, shop windows warmer, softer.
 - Sky: deeper blue night keys, a warm city glow low on the horizon, fog
   that matches it; less flat night fill (hemi 0.6 -> 0.36, moon 1.5 ->
-  1.3), night pavement a little darker. Day unchanged (same screenshots).
+  1.3), night sidewalk a little darker. Day unchanged (same screenshots).
 - Draw calls (perf.mjs, street view): day 253 -> 253, night 264 -> 264;
   triangles night 451k -> 449k. Programs 84 -> 89, no new program at
   night after warm-up.
@@ -508,7 +508,7 @@ None critical or high.
   deliveries), the six secrets and the Ghostwake garage, four street stunt
   ramps plus the two dock ramps, the roof pad, the Cinder tank and three
   port cranes, all from `src/world/miami-spots.js`.
-- HUD shows real neighbourhood, bridge and water names (`city.placeOf`,
+- HUD shows real neighborhood, bridge and water names (`city.placeOf`,
   names taken from the map data); the HUD sends the district key with
   the name, so the economy's `seen_` flags keep working.
 - Tutorial and menu place texts are Miami's on that map; Settings shows
@@ -560,7 +560,7 @@ None critical or high.
   full detail streamed in 300 m tiles round the camera, small stuff
   hidden past 170 m. Spawn street view: 221 draw calls and 311k
   triangles by day (was 312 and 436k on the old core crop).
-- Traffic and police neighbour scans use the edge grid; street name
+- Traffic and police neighbor scans use the edge grid; street name
   signs with real names at the major junctions.
 - Saves: sessions carry their map; an island save stays on the island
   and a Miami save on Miami (`progress.mapSessions`).
@@ -581,7 +581,7 @@ None critical or high.
     40 m at 55..70 m out gave a mean elevation of 41..74 deg (50 deg in
     the browser hunt, 168 of 600 steps steeper than 60 deg). It was on
     screen in 0 of 60 sampled frames of a chase.
-  - The beam: an additive, double-sided, capped cone of flat colour,
+  - The beam: an additive, double-sided, capped cone of flat color,
     13% as wide as long, aimed at the player, so the chase camera sat
     inside it and the whole screen was washed every frame, plus a white
     disc on the ground. Night frame with the heli on screen: +23%
@@ -635,31 +635,31 @@ None critical or high.
 
 ## 2026-11-22: Miami street polish (owner report: "very CGA and alpha again")
 - Buildings (new src/render/miamilook.js, buildings.js): each Miami
-  building gets a look from its neighbourhood and a seeded hash: Brickell
+  building gets a look from its neighborhood and a seeded hash: Brickell
   and Downtown glass towers (teal and blue tints, fins, spandrel ledges,
   setbacks, roof railings, a plant penthouse) and white condo towers
   with a balcony and glass railing on every floor; Little Havana,
   Shenandoah and the like in pastel stucco with a new arched-window
   facade (shutters, sills, balconettes) and terracotta tile copings or
   hipped tile roofs; art-deco pastel blocks on Miami Beach (eyebrow
-  ledges, a centre fin over the roof, speed-line bands); port sheds in
-  light greys. All get a stone plinth, corner pilasters, string courses
+  ledges, a center fin over the roof, speed-line bands); port sheds in
+  light grays. All get a stone plinth, corner pilasters, string courses
   per floor and an entrance canopy on tall ones. Facades have normal
   maps (recessed windows, sills) and wear in the shader (darker, dirtier
   base, rain streaks under floor lines that fade by 150 m, patchy tone).
-  The far blocks use the same colours. The island is unchanged.
+  The far blocks use the same colors. The island is unchanged.
 - Trees (props.js): Miami street trees are round canopies of many leafy
   clumps (a foliage picture on them), or palms (ringed leaning trunk,
   crown of see-through leafy fronds, two old fronds hanging) in the palm
-  neighbourhoods and by the water; extra palms down the avenues there,
+  neighborhoods and by the water; extra palms down the avenues there,
   Brickell Avenue, Biscayne Boulevard, Calle Ocho and other named
   boulevards, and along the seawalls (with colliders). Trees stay drawn
   at the middle level (no pop-in at 170 m).
-- Ground: edge lines along the kerbs, zebra crossings and stop lines at
+- Ground: edge lines along the curbs, crosswalk crossings and stop lines at
   junctions; grass and open land vary in slow lusher and drier patches.
 - Sky and sea: deeper blue overhead and a warm haze at the horizon by
   day, with the fog close to it so far towers fade into it
-  (daynight.js, colours only); the sea is deeper and greener looking
+  (daynight.js, colors only); the sea is deeper and greener looking
   down, paler at a glancing view, with slow large patches (water.js,
   shading only; the waves are unchanged).
 - Night: the new arched facade lights its windows like the others
@@ -680,7 +680,7 @@ None critical or high.
   Bayline Garage, Seaplane Sheds, Northwest Yard, Riverbend Garage, Ocho
   Lock-up, Roads End Garage, Atelier Garage, Sandbar Garage, Key Point
   Shed), placed from the lots with seed 7129. Store, take out, repaint,
-  favourite and release; the favourite is the Start car.
+  favorite and release; the favorite is the Start car.
 - Sixteen adventures (seed 9241), four of each kind, eight in the core:
   signs, talkers (TALK on foot), garage word and the start rumour; a
   tracked adventure shows a fuzzy ring and the objective arrow.
@@ -694,16 +694,16 @@ None critical or high.
   ring circle until mapui offers a layer with those shapes).
 
 ## 2026-11-22: garage fixes G1 (K7, K8, cars inside the shed)
-- K7 fixed: a favourite taken out of a garage keeps its star in
+- K7 fixed: a favorite taken out of a garage keeps its star in
   `rustwater.explore.v1` (`garages.road`, `{ spec, color }`, strict
   sanitiser, same version 1: older and newer data read as no star). After a
-  reload the live car gets its star back; a wrecked favourite loses it; the
+  reload the live car gets its star back; a wrecked favorite loses it; the
   title Start uses it.
 - K8 fixed: a reward car taken out is marked in `garages.out`. Other
   garages show it as "Out on the road" and refuse (`reason: 'out'`) until it
   is stored again, wrecked or lost (no live copy and not in the left-behind
   cars). A reward car driven without being marked is marked on entering. A
-  reward favourite that is out is not used by Start.
+  reward favorite that is out is not used by Start.
 - Parked cars show inside an open garage: up to four stored cars (two rows,
   nose to the door) for the one garage whose door is open; rebuilt only when
   the list changes. Screenshot: docs/preview/g1-garage-open.png.
@@ -719,15 +719,15 @@ None critical or high.
   rect (675, 272 / 564, 224), which a car never uses; the touch action is
   `carsiren` (input `siren`, `touch.setSiren(can, on)` called by police.js).
   Leaving the car switches it off.
-- Traffic: `src/core/yield.js` (`yieldTarget`, `stepYield`, `kerbShift`). Any
+- Traffic: `src/core/yield.js` (`yieldTarget`, `stepYield`, `curbShift`). Any
   vehicle with `siren` on and moving over 4 m/s (the player's, an AI police
-  car) makes AI cars up to 60 m ahead in the same or the neighbouring lane
-  (oncoming ones within 40 m) pull to the right kerb at up to 6 m/s, stop,
+  car) makes AI cars up to 60 m ahead in the same or the neighboring lane
+  (oncoming ones within 40 m) pull to the right curb at up to 6 m/s, stop,
   and drive off 0.8 to 1.8 s after it has passed or the siren goes off. Not
   inside a junction or about to enter one; never held longer than 25 s, then
   an 8 s cooldown. Hook in `driveStep` only; parked cars are never touched.
 - Pedestrians: within 25 m ahead of a siren car over 5 m/s, anybody closer than
-  5.2 m to its line walks to the kerb side and waits 1.2 s after it passes. No
+  5.2 m to its line walks to the curb side and waits 1.2 s after it passes. No
   panic, no heat.
 - Tests: test/yield.test.js (16). Street run: 4 cars pulled over, no impact,
   2 came to a full stop; avenue run: 6 cars, 3 full stops; siren off while a car

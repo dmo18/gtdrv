@@ -12,8 +12,8 @@ export const LAT_G_FACTOR = { arcade: [1.00, 1.12], sim: [0.88, 1.00] }; // time
 export const LAT_G_LINE = [0.9, 1.1];
 export const ORDINARY_CARS = ['compact', 'sedan', 'taxi'];
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
-export const LOCK_TIME = [0.25, 0.40]; // s, centre to full lock, at 0 to 10 m/s
-export const RETURN_TIME = [0.20, 0.30]; // s, full lock to centre, hands off
+export const LOCK_TIME = [0.25, 0.40]; // s, center to full lock, at 0 to 10 m/s
+export const RETURN_TIME = [0.20, 0.30]; // s, full lock to center, hands off
 export const LOCK_TIME_FAST_MAX = 0.55; // s, at 30 m/s
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %
@@ -35,7 +35,7 @@ export const BANDS = { // [min, max]
   nightheron: { r0: [5.0, 6.5], t60: [5.5, 7], top: [122, 135], stop: [34, 42] },
   ...SERVICE_BANDS,
 };
-// r0: radius (m) of the path of the car's centre at 2 m/s on full lock.
+// r0: radius (m) of the path of the car's center at 2 m/s on full lock.
 // t60: s from rest to 26.82 m/s. top: mph, reached within 90 s. stop: m from 26.82 m/s to rest.
 
 // Steering accuracy and braking accuracy limits (6.3, tests A1 to A5 and B1 to B4).
@@ -60,7 +60,7 @@ export const SQUEAL = { arcade: 1.3, sim: 0.9 };
 // Touch curve and travel.
 export const HALF_TRAVEL = [0.40, 0.55];
 // Slalom pass rule (K9): all `cones` reached in order, each passed on its own side
-// with the car's centre at least `clear` m out, at least `keep` of the speed held,
+// with the car's center at least `clear` m out, at least `keep` of the speed held,
 // one scripted driver for every style (only the input device and its rate limit differ).
 export const SLALOM = {
   gap: 18, speed: 20, simSpeed: 17, thumbDegPerS: 300, tiltDegPerS: 60, sliderPxPerS: 400,

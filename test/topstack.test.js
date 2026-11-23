@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTopStack, toastKind } from '../src/ui/hud.js';
 
-// The top centre stack rules of docs/REVAMP.md 6.12 (pure logic, no DOM).
+// The top center stack rules of docs/REVAMP.md 6.12 (pure logic, no DOM).
 const shown = (st) => st.rows.map((r) => (r.kind ? r.kind + ':' + r.text : ''));
 
 test('toast kinds: given, or taken from the text for callers that pass none', () => {

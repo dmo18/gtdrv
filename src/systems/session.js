@@ -18,7 +18,7 @@
 //   canContinue()    a saved place exists and is valid for this map
 //   continueSaved()  restore it (true if it worked, never throws)
 //   startFresh()     the first view: the designed start spot, player in the
-//                    favourite or starter car; the car held before is left
+//                    favorite or starter car; the car held before is left
 //                    behind; place and garage are kept
 //   newGame()        game.newSession()
 //   hold(on)         while on (the title is showing) nothing is autosaved,
@@ -268,9 +268,9 @@ export function createSession(game, storage) {
   function newSession() {
     const p = game.player;
     const old = p.vehicle;
-    // The favourite car from the garages (docs/REVAMP.md 6.6), else the
-    // sedan; read before the old car goes (it may be the favourite).
-    const fav = game.favouriteCar ? game.favouriteCar() : null;
+    // The favorite car from the garages (docs/REVAMP.md 6.6), else the
+    // sedan; read before the old car goes (it may be the favorite).
+    const fav = game.favoriteCar ? game.favoriteCar() : null;
     // Cars from the old garage are forgotten (and removed if parked ones).
     for (const e of garage) {
       if (e.vehicle && !e.vehicle.removed && e.vehicle !== old && !e.vehicle.driver) {
@@ -352,8 +352,8 @@ export function createSession(game, storage) {
     restoring = true;
     try {
       leaveCar();
-      // The favourite car (docs/REVAMP.md 6.6), when the garage screen offers one.
-      const fav = game.favouriteCar ? game.favouriteCar() : null;
+      // The favorite car (docs/REVAMP.md 6.6), when the garage screen offers one.
+      const fav = game.favoriteCar ? game.favoriteCar() : null;
       const favSpec = fav && specOf(fav.spec) && kindOfSpec(fav.spec) === 'car' ? fav : null;
       const car = createVehicle(favSpec ? favSpec.spec : 'sedan', at.x, at.z, at.heading, game.rng);
       if (favSpec) {
@@ -394,9 +394,9 @@ export function createSession(game, storage) {
       return null;
     }
   };
-  let travelling = false;
+  let traveling = false;
   function travelTo(toId, linkId = null) {
-    if (travelling || !regionFor(toId) || toId === mapId) return '';
+    if (traveling || !regionFor(toId) || toId === mapId) return '';
     const p = game.player;
     const why = travelRefusal(p.wanted || 0);
     if (why) return why;
@@ -405,11 +405,11 @@ export function createSession(game, storage) {
     const pose = linkId ? arrivalApprox(toId, linkId) : null;
     // One save call: the target's session and the map choice (PLAN_V2 3.5 rule 9).
     travelSave(storage, game.progress, mapId, toId, car, p, pose);
-    travelling = true;
+    traveling = true;
     held = true; // no autosave or page-hide save may overwrite what was just written
     const ns = noteStore();
     if (ns) writeTravelNote(ns, toId, linkId);
-    if (typeof document !== 'undefined' && document.body) showVeil(document, 'Travelling to ' + mapName(toId) + '...');
+    if (typeof document !== 'undefined' && document.body) showVeil(document, 'Traveling to ' + mapName(toId) + '...');
     const go = game.reload || (() => { if (typeof location !== 'undefined' && location.reload) location.reload(); });
     if (typeof setTimeout === 'function') setTimeout(go, 120);
     else go();
@@ -471,7 +471,7 @@ export function createSession(game, storage) {
   function padCheck() {
     const p = game.player;
     const pads = city.travelPads;
-    if (!pads || !pads.length || game.paused || travelling || held) return;
+    if (!pads || !pads.length || game.paused || traveling || held) return;
     if (p.mode !== 'car' && p.mode !== 'tank' && p.mode !== 'foot') return;
     padNear(city, p.x, p.z, NEAR);
     if (!NEAR.pad) {

@@ -40,7 +40,7 @@ export function createObjective(game) {
       return;
     }
     // The tracked adventure (systems/adventures.js): the arrow points at
-    // the centre of its fuzzy map ring, not the true spot.
+    // the center of its fuzzy map ring, not the true spot.
     const adv = game.adventures && game.adventures.objective;
     if (adv && Number.isFinite(adv.x) && Number.isFinite(adv.z)) {
       goal.x = adv.x;

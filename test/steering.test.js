@@ -9,7 +9,7 @@ import { defaultProgress, sanitizeProgress } from '../src/core/save.js';
 import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode, lateralGrip } from '../src/entities/vehicle.js';
 import { createRng, angleDiff } from '../src/core/rng.js';
 
-test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the centre; sensitivity changes travel only', () => {
+test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the center; sensitivity changes travel only', () => {
   assert.equal(wheelCurve(0), 0);
   assert.equal(wheelCurve(1), 1);
   assert.equal(wheelCurve(-1), -1);
@@ -54,7 +54,7 @@ test('buttons: ramp 0.30 s to a full target while held, 0 on release or both, fr
     assert.equal(run(hz, 1, 1), 1);
   }
   assert.equal(rampSteer(0.7, 0, 1 / 60), 0, 'release: target 0 at once');
-  // Pressing the other side ramps from where it is, through the centre.
+  // Pressing the other side ramps from where it is, through the center.
   assert.ok(Math.abs(rampSteer(1, -1, 0.06) - 0.8) < 1e-12);
   // Sensitivity shortens the ramp.
   assert.ok(Math.abs(rampSteer(0, 1, 0.1, 1.5) - 0.5) < 1e-12);
@@ -86,7 +86,7 @@ test('wheel tracker: summed angle, 55 deg is half, holds through the core, full 
   for (let a = -40; a <= 15; a += 5) w.move(...at(a));
   assert.ok(Math.abs(w.raw() - 0.5) < 1e-9, `55 deg raw ${w.raw()}`);
   assert.ok(w.target() >= 0.4 && w.target() <= 0.55);
-  // A path straight through the centre core barely changes the target.
+  // A path straight through the center core barely changes the target.
   const before = w.target();
   const [x0, y0] = at(15);
   for (let k = 1; k <= 20; k++) w.move(x0 - (2 * x0 * k) / 20, y0 - (2 * y0 * k) / 20);
@@ -110,7 +110,7 @@ test('wheel tracker: summed angle, 55 deg is half, holds through the core, full 
   assert.ok(Math.abs(s.raw() - 0.75) < 1e-9);
 });
 
-test('slider: absolute from the bar centre, 45 px is half, works off the bar, clamps at the ends', () => {
+test('slider: absolute from the bar center, 45 px is half, works off the bar, clamps at the ends', () => {
   assert.equal(SLIDER_W, 180);
   assert.equal(sliderRaw(545, 500), 0.5);
   assert.equal(sliderRaw(455, 500), -0.5);

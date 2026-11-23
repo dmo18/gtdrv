@@ -619,7 +619,7 @@ test('SV-A1: treat revives a body 6 m away after 2.0 s at rest; 9 m does nothing
   tick(game, service, null, 60);
   for (let k = 0; k < 120; k++) tick(game, service, ctl({ throttle: 1 }), 1);
   assert.ok(am.speed > 2);
-  assert.equal(b4.life, 'out', 'cancelled by driving off');
+  assert.equal(b4.life, 'out', 'canceled by driving off');
   assert.equal(am.svc.treat, 0);
   // Normal mode, nobody to treat: the boost meter refills at once.
   for (let k = 0; k < 400 && am.speed > 0.05; k++) tick(game, service, ctl({ brake: 1 }), 1);
@@ -951,10 +951,10 @@ test('SV-P1: every service spot obeys the parking rules on the built Miami city'
   for (const s of SERVICE_SPOTS) {
     const sp = VEHICLE_SPECS[s.kind];
     assert.ok(city.inCore(s.x, s.z), `${s.name} in the core`);
-    if (s.kerb) {
-      // A marked kerb bay: one of the city's kerb spaces, its heading.
+    if (s.curb) {
+      // A marked curb bay: one of the city's curb spaces, its heading.
       const bay = city.parkingSpots.find((q) => !q.lot && Math.hypot(q.x - s.x, q.z - s.z) < 0.5);
-      assert.ok(bay, `${s.name}: a kerb bay`);
+      assert.ok(bay, `${s.name}: a curb bay`);
       assert.ok(Math.abs(Math.sin(bay.heading - s.heading)) < 0.05 && Math.cos(bay.heading - s.heading) > 0, `${s.name}: the bay's heading`);
       assert.ok(nearestRoad(city, s.x, s.z).dist < SPOT_RULES.roadNear);
       assert.ok(!city.inBuilding(s.x, s.z) && city.isLand(s.x, s.z));
@@ -1081,7 +1081,7 @@ test('SV-R1: each region keeps the homes inside its crop and has a police home; 
   const want = {
     'miami-beach': ['Patrol bay'], // the Port Fire Station's streets are Downtown's: no road reaches it here
     'miami-north': ['City Yard', 'City Yard', 'Patrol bay'],
-    'miami-west': ['Calle Fire House', 'Calle Fire House', 'Tideline Medical Centre', 'Tideline Medical Centre', 'Ocho Patrol Base', 'Ocho Patrol Base'],
+    'miami-west': ['Calle Fire House', 'Calle Fire House', 'Tideline Medical Center', 'Tideline Medical Center', 'Ocho Patrol Base', 'Ocho Patrol Base'],
     'miami-south': ['Patrol bay'],
   };
   for (const [id, c] of allRegionCities()) {
@@ -1110,7 +1110,7 @@ test('SV-R2: every home of every region, hand-placed or generated, passes the pa
       const sp = VEHICLE_SPECS[s.kind];
       assert.ok(c.isLand(s.x, s.z) && !c.inBuilding(s.x, s.z), `${id} ${s.name} on land, off buildings`);
       assert.ok(nearestRoad(c, s.x, s.z).dist < SPOT_RULES.roadNear, `${id} ${s.name} by a road`);
-      if (s.kerb) continue; // a kerb bay: the region's kerb spots are seeded again, only the ground is checked
+      if (s.curb) continue; // a curb bay: the region's curb spots are seeded again, only the ground is checked
       const r = checkSpot(c, s, sp, cache, out);
       assert.ok(r.ok, `${id} ${s.name} ${s.kind} at ${s.x}, ${s.z}: ${r.why}`);
       const lot = c.lotAt(s.x, s.z);

@@ -30,7 +30,7 @@ const MIX = {
 };
 
 export function createParkedCars(game) {
-  // The designed start street's kerb spaces (`start`, docs/REVAMP.md 6.8)
+  // The designed start street's curb spaces (`start`, docs/REVAMP.md 6.8)
   // come first, so the first scan fills them before any other.
   const spots = game.city.parkingSpots.map((s) => ({ ...s, vehicle: null, used: false }));
   spots.sort((a, b) => (b.start ? 1 : 0) - (a.start ? 1 : 0));
@@ -162,7 +162,7 @@ export function createParkedCars(game) {
     }
     index.near(px, pz, SPAWN_R, nearIds);
     stats.looked += nearIds.length;
-    // Nearest first (start kerb spots before all), so the first view is
+    // Nearest first (start curb spots before all), so the first view is
     // full within a few steps and, under the live cap, the cars stand
     // where the player looks.
     sortX = px;

@@ -13,7 +13,7 @@ import { R, TAU, lp1, white, gauss, removeDC, peak, scale, runSpecJS, warm, harm
 // 3.2 kHz; above about 4 kHz there is only fizz on a phone speaker.
 export const ENGINE_TOP = 3900;
 
-// Normalised rpm points (fraction of redline) shared by all characters:
+// Normalized rpm points (fraction of redline) shared by all characters:
 // idle (replaced by each character's own), low, mid, high, redline.
 export const RPM_POINTS = [0, 0.3, 0.5, 0.72, 0.95];
 // Loop length: long enough that the cycle-to-cycle variation does not

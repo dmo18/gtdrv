@@ -209,7 +209,7 @@ function leafy(B, r, cx, cy, cz, rx, ry, rz, color, segs, rings, jit) {
 }
 
 // One round canopy: every foliage normal leans toward the direction from
-// the canopy's centre (cx, cy, cz; ry its half height), so the clumps
+// the canopy's center (cx, cy, cz; ry its half height), so the clumps
 // light as one soft ball instead of a heap of facets, and the side away
 // from the sun falls off gently. `k`: how far (0..1).
 function roundCanopy(B, n0, cx, cy, cz, k) {
@@ -298,7 +298,7 @@ function makeMiamiTemplates(rng, R) {
 // Lighter trees for the lot dressing (there are many more of them than
 // street trees): a canopy of four clumps, a palm crown of seven fronds
 // and a trunk in three pieces. About a third of the street tree's
-// triangles, the same pictures and colours.
+// triangles, the same pictures and colors.
 function makeLotTemplates(rng, R) {
   const T = { canopies: [], foliage: [], palmTrunks: [], palmCrowns: [] };
   const jit = () => rng.next() - 0.5;
@@ -351,7 +351,7 @@ const PALM_PLACES = new Set(['Brickell', 'Downtown Miami', 'Brickell Key', 'Bayf
 const PALM_STREET = /Southwest 8th Street|Brickell Avenue|Brickell Bay|Biscayne Boulevard|Bayshore|Ocean Drive|Collins Avenue|Alton Road|Venetian|MacArthur|Coral Way|Port Boulevard/;
 
 // Where the extra Miami palms stand (x, z, height triples): down the
-// avenues of the palm neighbourhoods and the named palm boulevards, and
+// avenues of the palm neighborhoods and the named palm boulevards, and
 // along the seawalls there. Worked out once per city (the whole map is
 // scanned) and kept, so a streamed tile only filters the list.
 const palmCache = new WeakMap(), templateCache = new WeakMap();
@@ -402,7 +402,7 @@ function miamiPalmSpots(city, lamps, hash, blocked) {
   return out;
 }
 
-// Upright picture centred at (x, z), facing direction `rot`.
+// Upright picture centered at (x, z), facing direction `rot`.
 function sign(D, x, z, rot, w, y0, y1, r, color = 0xffffff, sh = 1) {
   const dx = Math.sin(rot) * w * 0.5, dz = -Math.cos(rot) * w * 0.5;
   D.wall(x - dx, z - dz, x + dx, z + dz, y0, y1, color, r.u0, r.v0, r.u1, r.v1, sh);
@@ -541,11 +541,11 @@ function drawRoadEnd(P, re) {
   }
 }
 
-// The colour of the sign for the region a pad leads to.
+// The color of the sign for the region a pad leads to.
 const PAD_COLOR = { 'miami-downtown': 0x1f6f78, 'miami-beach': 0xe39b25, 'miami-north': 0xc8402e, 'miami-west': 0x2d8a5f, 'miami-south': 0x3a7bd5 };
 // A travel pad (city.travelPads entry): the turning pad painted in the
-// destination's colour with arrows pointing out of the region, and a
-// sign on the kerb facing the traffic. The words ("To Miami Beach") are in
+// destination's color with arrows pointing out of the region, and a
+// sign on the curb facing the traffic. The words ("To Miami Beach") are in
 // render/markers.js createTravelMarkers.
 function drawTravelPad(P, pad) {
   const col = PAD_COLOR[pad.to] || 0x1f6f78;
@@ -561,8 +561,8 @@ function drawTravelPad(P, pad) {
     const rr = [cx - ux * r * 0.1 - px * r * 0.34, cz - uz * r * 0.1 - pz * r * 0.34];
     P.tri(tip[0], 0.056, tip[1], rr[0], 0.056, rr[1], l[0], 0.056, l[1], 0xf2efe6, 0, 1, 0);
   }
-  // The sign: two posts and a board on the right-hand kerb, face to the
-  // approaching traffic, in the destination's colour with a white band.
+  // The sign: two posts and a board on the right-hand curb, face to the
+  // approaching traffic, in the destination's color with a white band.
   const half = r + 1.6;
   const sx = pad.x - ux * 6 + px * half, sz = pad.z - uz * 6 + pz * half;
   for (const t of [-1.0, 1.0]) P.cyl(sx + px * t, sz + pz * t, 0, 2.6, 0.06, 0.06, 4, 0x4a4c50);
@@ -588,7 +588,7 @@ export function addProps(C, own = null, side = true, lists = null) {
     return v - Math.floor(v);
   };
   // A Miami street tree that is a palm: most of them in the palm
-  // neighbourhoods and by the water, a few elsewhere.
+  // neighborhoods and by the water, a few elsewhere.
   const streetPalm = (x, z) => {
     const k = hash(z + 7, x);
     const shore = city.mainShore ? city.mainShore(x, z) : 999;
@@ -678,7 +678,7 @@ export function addProps(C, own = null, side = true, lists = null) {
       case 'streettree':
         if (MT && streetPalm(x, z)) palm(x, z, 7 + v * 4, 0);
         else tree(x, z, 5 + v * 3, 0, false);
-        // Tree pit: a square of bare earth in the pavement.
+        // Tree pit: a square of bare earth in the sidewalk.
         if (y > 0) C.decal.at(x, z).flatRect(x - 0.7, z - 0.7, x + 0.7, z + 0.7, y + 0.015, 0x6a5a48, C.DR.stain1);
         break;
       case 'palmtree':

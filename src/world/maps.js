@@ -54,7 +54,7 @@ export async function loadMapCity(id) {
 // What the HUD shows for a point: `out.key` is the district key the
 // economy's first-visit flags use (`seen_<key>`, 'shore' for the coast),
 // `out.name` the text. The island shows its district names (The Strand
-// on the shore); a real map shows the real neighbourhood, bridge or
+// on the shore); a real map shows the real neighborhood, bridge or
 // water name (city.placeOf) and keys 'shore' when out on the water.
 // Fills and returns `out` (no allocation: the HUD calls it every frame).
 export function hudPlace(city, x, z, out) {

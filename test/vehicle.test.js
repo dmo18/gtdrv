@@ -209,7 +209,7 @@ test('no NaN after 2000 random-control steps among random boxes', () => {
   }
 });
 
-// ---- Driving feel: drivetrain, brakes, tyres, assists. ----
+// ---- Driving feel: drivetrain, brakes, tires, assists. ----
 
 const PLAYER = (o) => ({ steer: 0, throttle: 0, brake: 0, handbrake: false, steerMode: 'proportional', ...o });
 const bodySlip = (v) => {
@@ -266,7 +266,7 @@ test('braking from 100 km/h stops in a realistic distance, with ABS and no lock'
       assert.ok(v.slip <= 0.31, `${id} slip ${v.slip}`);
     } while (v.speed > 0.05 && v.gear !== 0 && steps < 600);
     assert.ok(v.x >= lo && v.x <= hi, `${id} stopped in ${v.x.toFixed(1)} m, want ${lo}..${hi}`);
-    // Where full pedal asks more than the tyres give, ABS works (a few
+    // Where full pedal asks more than the tires give, ABS works (a few
     // cars' brakes sit just under their limit to land in their band;
     // test/handling-bands.test.js checks ABS for all of them in the wet).
     if (v.spec.brake > 1.08 * 0.95 * 9.81 * v.spec.grip) assert.ok(absSeen, `${id} ABS active`);
@@ -444,7 +444,7 @@ test('engine braking slows a coasting car; body pitch and roll settle', () => {
   assert.ok(Math.abs(v.pitchV) < 0.01 && Math.abs(v.rollV) < 0.01);
 });
 
-test('a kerb or wall strike adds suspension travel that decays', () => {
+test('a curb or wall strike adds suspension travel that decays', () => {
   const col = createCollisionWorld();
   col.addBox(20, -20, 26, 20, 10);
   const world = { collision: col };
@@ -488,12 +488,12 @@ test('AI and player steering are one mapping: a share of steerLock, and the curv
   assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - lateralGrip(s) * 9.81) < 0.05);
 });
 
-test('steering rate: away from centre at lockRate, back at returnRate, through the centre', () => {
+test('steering rate: away from center at lockRate, back at returnRate, through the center', () => {
   const lr = 3.3, rr = 4.2, dt = 1 / 60;
   assert.ok(Math.abs(steerToward(0, 1, lr, rr, dt) - lr * dt) < 1e-12);
   assert.ok(Math.abs(steerToward(1, 0, lr, rr, dt) - (1 - rr * dt)) < 1e-12);
   assert.ok(Math.abs(steerToward(-0.5, -0.2, lr, rr, dt) - (-0.5 + rr * dt)) < 1e-12);
-  // Crossing: the rest of the step after the centre is at the lock rate.
+  // Crossing: the rest of the step after the center is at the lock rate.
   const x = steerToward(0.03, -1, lr, rr, dt);
   assert.ok(Math.abs(x - -(dt - 0.03 / rr) * lr) < 1e-12, `${x}`);
   assert.equal(steerToward(0.5, 0.5, lr, rr, dt), 0.5);

@@ -46,7 +46,7 @@ function thump(out, f0, f1, tc, amp, tau, at = 0) {
 function report(rng, o) {
   const out = z(len(o.dur));
   // A1 balance: the crack used to set the peak alone (a 0.5 ms tick 23 dB
-  // above everything else), so after normalising the body and thump were
+  // above everything else), so after normalizing the body and thump were
   // too quiet to carry and the shot read as a click. The crack is now
   // softer and a little longer, the body and the low thump longer and
   // louder, so the report is a crack *and* a boom.

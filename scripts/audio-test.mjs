@@ -552,11 +552,11 @@ try {
       const farB = await measure(exp(250));
       check('explosion audible', Math.max(...nearB) > 0.02, `peak ${Math.max(...nearB).toFixed(3)}`);
       check('explosion falls off with distance', Math.max(...farB) < Math.max(...nearB) * 0.6, `near ${Math.max(...nearB).toFixed(3)} far ${Math.max(...farB).toFixed(3)}`);
-      // The pan check hears only the effects bus: the engine, tyre and
+      // The pan check hears only the effects bus: the engine, tire and
       // ambience buses are cut from the master for this measurement (the
       // engine never goes silent and its level drifts, which swamped the
       // small left-right difference). Compared as RMS over a long window.
-      const cut = ['engine', 'tyres', 'world'].filter((k) => dbg.buses[k]);
+      const cut = ['engine', 'tires', 'world'].filter((k) => dbg.buses[k]);
       for (const k of cut) dbg.buses[k].disconnect(dbg.master);
       const quiet = await measure(() => {}, true);
       const rightB = await measure(() => events.emit('shot', payload('scatter', 25, 0)), true);

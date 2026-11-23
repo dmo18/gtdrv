@@ -1,17 +1,17 @@
 // The twelve Miami garages in play (docs/REVAMP.md 6.6): collision for
 // the sheds, the roller doors that open as the player comes within 15 m,
 // the GARAGE offer at the door (slow, within 7 m), the first-visit bonus,
-// "Word at the garage", and the store / take out / repaint / favourite /
+// "Word at the garage", and the store / take out / repaint / favorite /
 // release actions the Garage screen (ui/explore.js) calls. Everything is
 // free. The collection rules are pure (core/explore.js); this file moves
 // the real cars. Needs game.explore (systems/adventures.js) first.
 //
 //   game.garages.current      the garage the screen is open for (or null)
 //   game.garages.arrived()    the car the player came in with (or null)
-//   game.garages.store() / takeOut(i) / repaint(i | 'arrived', colour) /
-//     favourite(i) / release(i) / word()
+//   game.garages.store() / takeOut(i) / repaint(i | 'arrived', color) /
+//     favorite(i) / release(i) / word()
 import {
-  storeCar, takeOut as takeOutRule, repaint as repaintRule, toggleFavourite, release as releaseRule,
+  storeCar, takeOut as takeOutRule, repaint as repaintRule, toggleFavorite, release as releaseRule,
   markGarageFound, markGarageSeen, markAdventureSeen, garageOpen, paintAllowed, isRewardSpec,
 } from '../core/explore.js';
 import { kindOfSpec, savable, garageRemove } from '../core/garage.js';
@@ -104,7 +104,7 @@ export function createGarages(game) {
     return ex().garages.out.includes(spec);
   };
   // Driving a reward car that is not marked out (the title Start with it as
-  // favourite, a save from before this rule) marks it out too.
+  // favorite, a save from before this rule) marks it out too.
   events.on('enter', (v) => {
     if (!on || !v || !v.spec || !isRewardSpec(v.spec.id) || v.kind !== 'car') return;
     const G = ex().garages;
@@ -112,9 +112,9 @@ export function createGarages(game) {
     G.out.push(v.spec.id);
     game.explore.changed();
   });
-  // The star travels with the favourite car taken out: it lives on the
+  // The star travels with the favorite car taken out: it lives on the
   // explore state (garages.road) so it survives a reload, and is put back on
-  // the live car after one. A wrecked favourite loses it.
+  // the live car after one. A wrecked favorite loses it.
   let starTimer = 0;
   function starCheck() {
     const G = ex().garages;
@@ -202,11 +202,11 @@ export function createGarages(game) {
   }
 
   // Repaint a stored car (index) or the one driven in ('arrived'). The
-  // live car changes colour at once.
+  // live car changes color at once.
   function repaint(target, color) {
     if (target === 'arrived') {
       const v = arrived();
-      if (!v || !paintAllowed(v.spec.id, color)) return { ok: false, reason: 'colour' };
+      if (!v || !paintAllowed(v.spec.id, color)) return { ok: false, reason: 'color' };
       v.color = color;
       if (v.fav && ex().garages.road) { ex().garages.road.color = color; game.explore.changed(); }
       if (game.kinds && game.kinds.car && v.mesh) {
@@ -225,12 +225,12 @@ export function createGarages(game) {
     }
     return r;
   }
-  function favourite(index) {
-    const r = toggleFavourite(ex(), index);
+  function favorite(index) {
+    const r = toggleFavorite(ex(), index);
     if (r.ok) {
-      // A favourite out on the road loses its star when another is picked.
+      // A favorite out on the road loses its star when another is picked.
       for (const v of game.vehicles) if (v.fav) v.fav = false;
-      if (current) events.emit('garageUsed', { id: current.id, action: 'favourite' });
+      if (current) events.emit('garageUsed', { id: current.id, action: 'favorite' });
       game.explore.changed();
     }
     return r;
@@ -345,7 +345,7 @@ export function createGarages(game) {
     arrived,
     arrivedKind,
     open,
-    store, takeOut, repaint, favourite, release, isOut, pruneOut,
+    store, takeOut, repaint, favorite, release, isOut, pruneOut,
     close() { current = null; },
     setMeshes(m) { meshes = m; },
     fixedUpdate(dt) {
@@ -394,10 +394,10 @@ export function createGarages(game) {
 }
 
 // The car the player starts in on Start and after New game (6.6, 6.8):
-// the favourite in the collection, or a favourite out on the road.
-export function favouriteCar(game) {
+// the favorite in the collection, or a favorite out on the road.
+export function favoriteCar(game) {
   if (game.garages && game.garages.pruneOut) game.garages.pruneOut();
-  const f = game.explore && game.explore.favourite ? game.explore.favourite() : null;
+  const f = game.explore && game.explore.favorite ? game.explore.favorite() : null;
   if (f) return f;
   const vs = game.vehicles || [];
   for (let i = 0; i < vs.length; i++) {

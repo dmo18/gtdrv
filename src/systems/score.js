@@ -26,7 +26,7 @@ export const POINTS = {
   chainFactor: 2, // an explosion that was set off by another one
   streak: 50, // extra for each takedown within STREAK_TIME of the last
   airtimePerSecond: 100,
-  jumpPerMetre: 10,
+  jumpPerMeter: 10,
   driftPerSecond: 50,
   nearMiss: 150,
   lowFlyPerSecond: 40,
@@ -290,7 +290,7 @@ export function createScore(game) {
           const dist = Math.hypot(v.x - takeX, v.z - takeZ);
           if (dist >= JUMP_MIN) {
             recordBest('jump', dist);
-            add(dist * POINTS.jumpPerMetre, 'Jump ' + formatDistance(dist), v.x, v.z);
+            add(dist * POINTS.jumpPerMeter, 'Jump ' + formatDistance(dist), v.x, v.z);
           }
         }
       }

@@ -19,7 +19,7 @@ export function createMapUi(game, uiRoot) {
   const layers = [];
   // What the full map draws: the plain markers, then every layer's (rebuilt in place each frame).
   const all = [];
-  const state = { x: 0, z: 0, heading: 0, zoomMetres: 190, blips, blipCount: 0, waypoint: null, markers: all };
+  const state = { x: 0, z: 0, heading: 0, zoomMeters: 190, blips, blipCount: 0, waypoint: null, markers: all };
   let zoom = 190;
   let pausedByMap = false;
 
@@ -86,10 +86,10 @@ export function createMapUi(game, uiRoot) {
       state.heading = p.vehicle ? p.heading : game.camHeading;
       const target = (ZOOM[p.mode] || 190) + (p.y || 0) * 0.8;
       zoom += (target - zoom) * Math.min(1, dt * 2);
-      state.zoomMetres = Math.round(zoom / 5) * 5;
+      state.zoomMeters = Math.round(zoom / 5) * 5;
       let n = 0;
       const vs = game.vehicles;
-      const r2 = (state.zoomMetres * 1.1) ** 2;
+      const r2 = (state.zoomMeters * 1.1) ** 2;
       for (let i = 0; i < vs.length && n < 30; i++) {
         const v = vs[i];
         if (v === p.vehicle) continue;
@@ -107,7 +107,7 @@ export function createMapUi(game, uiRoot) {
       }
       all.length = 0;
       for (let i = 0; i < markers.length; i++) all.push(markers[i]);
-      const reach2 = (state.zoomMetres * LAYER_REACH) ** 2;
+      const reach2 = (state.zoomMeters * LAYER_REACH) ** 2;
       for (let l = 0; l < layers.length; l++) {
         const list = layers[l].markers();
         if (!list) continue;

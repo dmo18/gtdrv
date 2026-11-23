@@ -169,7 +169,7 @@ From code, tests and today's screenshots (dist/w2b, dist/menu-test). Not seen on
 Split Miami into five regions plus the classic island. One region is loaded at a time. Changing
 region is a page reload behind a loading veil (the path the Settings map switch uses today), so
 memory starts clean every time. All Miami regions keep the one coordinate frame of
-docs/MAP.md (origin lat 25.78, lon -80.18; x east, z south, metres). Nothing is re-centred, so
+docs/MAP.md (origin lat 25.78, lon -80.18; x east, z south, meters). Nothing is re-centered, so
 every saved position, explore cell, garage id, adventure id, course id and medal stays valid.
 
 The default is the existing core, not a smaller new box. Reason: docs/REVAMP.md 6.1 already
@@ -177,7 +177,7 @@ puts every course, ramp, secret, pier, the airfield and the start view inside it
 determinism fingerprints and tests today, and the narrower box measured only 17 MB lighter
 while it would force three courses, two ramps and two secrets to move.
 
-### 3.2 Regions (exact crops, metres)
+### 3.2 Regions (exact crops, meters)
 
 BOX is x -4505 to 4505, z -3891 to 3891. Counts measured on the built whole box.
 
@@ -198,7 +198,7 @@ BOX is x -4505 to 4505, z -3891 to 3891. Counts measured on the built whole box.
   without a region stays for tests, benches and a development build (`?map=miami`).
 - Adventures: 15 of 16 already sit inside one region with a 40 m margin. `a-roads-end` spans
   West and South: its giver and first two steps are re-anchored inside South (the reward
-  garage `g-roads` is there). `a-port-quay` and `a-sunchaser` have a last step 41 to 62 m from
+  garage `g-roads` is there). `a-port-pier` and `a-sunchaser` have a last step 41 to 62 m from
   an edge and stay. Rule: an adventure belongs to the region that holds its giver and every
   step at least 40 m inside; it is offered only there.
 - Secrets: the six keep their places and ids. Downtown holds the-gullet, lone-ride, roof-garden,
@@ -246,7 +246,7 @@ dies in stunts.js:178, secrets.js:380, garages.js:430, adventures.js:355 and mia
   list covers that pair.
 - Prompt. Stopping on the pad shows "Drive on to Miami Beach?" with Yes and Stay. Yes saves,
   fades, reloads into the other region at the twin link, 30 m inside, facing in, in the same
-  car (model, colour, health). Travel is refused with a wanted level ("Lose the police first").
+  car (model, color, health). Travel is refused with a wanted level ("Lose the police first").
 - Boats and aircraft are turned back 600 m past the crop by the code that exists
   (entities/aircraft.js edgeSteer reads city.crop) with a new HUD line: "Edge of this map.
   Open the map to travel."
@@ -458,7 +458,7 @@ screenshot review, publish and record, the owner's Phone check), with these chan
 - [ ] Security: zero critical, high or medium findings open.
 - [ ] Section 2 list: every line closed or struck off by the owner in writing.
 - [ ] Store text, pictures and docs/SPEC.md describe the game as it is; privacy page has a
-      real contact address; the map licence credit shows in Settings, on the title and in
+      real contact address; the map license credit shows in Settings, on the title and in
       the store text; no real venue brand in src/ or public/.
 - [ ] Android: signed bundle built from the tagged commit, version and code agree, tested in
       the WebView on the owner's phone, closed test finished if the account needs one.
@@ -470,7 +470,7 @@ screenshot review, publish and record, the owner's Phone check), with these chan
    tested core) as the start, and remove "All of Miami" from the game? Default: yes. Reason:
    memory 265 to 161 MB and build time halved in a prototype, with no content moved.
 2. Region edges are sea behind a seawall, with travel pads on the main roads and a Travel list
-   on the map. Default: yes. Reason: it is the tested crop behaviour and has no invisible
+   on the map. Default: yes. Reason: it is the tested crop behavior and has no invisible
    walls; a ring of fake city costs more than it shows.
 3. Keep all land, as five regions, with the four outer regions on generator dressing and a
    minimum of hand content (start, pier, helipad, two ramps)? Default: yes. If 0.7.0 reaches

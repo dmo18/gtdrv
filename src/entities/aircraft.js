@@ -7,8 +7,8 @@ import { stepBoost, PLANE_BOOST, HELI_BOOST } from './boost.js';
 
 const G = 9.81;
 const TAU = Math.PI * 2;
-const CEILING = 600; // metres, soft
-const EDGE = 2600; // metres from the origin, craft are turned back beyond
+const CEILING = 600; // meters, soft
+const EDGE = 2600; // meters from the origin, craft are turned back beyond
 const CRASH_CLOSE = 8; // m/s closing speed against a wall that wrecks
 const DEG = Math.PI / 180;
 
@@ -67,8 +67,8 @@ export const AIRCRAFT_SPECS = {
   // Single-seat fighter (docs/ARMS.md section 4). Arcade assists read by
   // stepPlane: noStall (never stalls: below 1.1 x stallSpeed the nose eases
   // down and thrust rises), cruise (airborne throttle floor with THRUST
-  // released), autoLevel (rad/s of extra roll levelling with the stick
-  // centred), afterburner (extra thrust share with THRUST above 0.9).
+  // released), autoLevel (rad/s of extra roll leveling with the stick
+  // centered), afterburner (extra thrust share with THRUST above 0.9).
   fighter: {
     id: 'fighter', label: 'Gannetfang', kind: 'plane',
     length: 13.4, width: 9.6, height: 3.6, mass: 9000, health: 700,
@@ -686,7 +686,7 @@ function stepHeli(a, controls, dt, world) {
     let tv = throttle * s.climbRate - brake * s.sinkRate;
     if (a.y > CEILING - 60) tv = Math.min(tv, (CEILING - a.y) * 0.1);
     if (tv < 0) {
-      // Ground effect: the last few metres are always slow.
+      // Ground effect: the last few meters are always slow.
       const h = a.y - surfaceAt(world, a.x, a.z);
       if (h < 8) tv = Math.max(tv, -(1.2 + (s.sinkRate - 1.2) * Math.max(0, h) / 8));
     }

@@ -1,6 +1,6 @@
 // Ragdoll tumbling for people knocked down hard (blast, car hit). A
 // cheap fake: one rigid body (a capsule from the feet to the head, its
-// centre at the hips) that flies, spins and lands under gravity with a
+// center at the hips) that flies, spins and lands under gravity with a
 // ground clamp, plus ten loose limb angles on damped springs that lag
 // behind the body's spin and get kicked on impact. On the ground the
 // body topples flat (on its back or front) and settles in about RAG_T
@@ -22,9 +22,9 @@ export const RAGDOLL_MAX = 12; // tumbling at once; the rest use the plain fall 
 export const RAG_G = 9.81;
 export const RAG_T = 0.8; // s from first touching the ground to settled
 export const RAG_MAX_T = 3; // s: settles no matter what after this long
-export const RAG_CENTRE = 0.9; // m from the feet to the body centre (hips)
-export const RAG_HALF = 0.75; // m from the centre to the head or feet (upright reach = RAG_CENTRE)
-export const RAG_THICK = 0.15; // m: centre height when lying flat
+export const RAG_CENTER = 0.9; // m from the feet to the body center (hips)
+export const RAG_HALF = 0.75; // m from the center to the head or feet (upright reach = RAG_CENTER)
+export const RAG_THICK = 0.15; // m: center height when lying flat
 const BOUNCE = 0.25;
 const SPIN_MAX = 9; // rad/s: fastest tumble
 const clampSpin = (w) => (w > SPIN_MAX ? SPIN_MAX : w < -SPIN_MAX ? -SPIN_MAX : w);
@@ -78,7 +78,7 @@ export function createRagdolls(max = RAGDOLL_MAX) {
   return { max: n, slots, active: 0, started: 0, refused: 0 };
 }
 
-// Height of the body's lowest point below its centre for a pitch and roll.
+// Height of the body's lowest point below its center for a pitch and roll.
 export function ragReach(pitch, roll) {
   return RAG_HALF * Math.abs(Math.cos(pitch) * Math.cos(roll)) + RAG_THICK;
 }
@@ -115,7 +115,7 @@ export function startRagdoll(pool, a, vx, vy, vz, rng) {
   s.ground = Number.isFinite(a.y) && a.y > 0 ? a.y : 0;
   s.x = s.px = a.x;
   s.z = s.pz = a.z;
-  s.y = s.ground + RAG_CENTRE;
+  s.y = s.ground + RAG_CENTER;
   s.vx = vx; s.vy = vy; s.vz = vz;
   const h = Number.isFinite(a.heading) ? a.heading : 0;
   s.yaw = h;
@@ -261,7 +261,7 @@ function settle(pool, s) {
 }
 
 // One fixed step for every tumbling body. Writes the actor's x, z (body
-// centre), y (height of the lowest point), ky (vertical speed in the
+// center), y (height of the lowest point), ky (vertical speed in the
 // air) and spin (pitch in the air, 0 once it has landed). `fix(slot)`,
 // if given, runs after each body moves (walls, shoreline) and may
 // change slot x, z, vx, vz; px, pz hold the position before the step.
@@ -365,11 +365,11 @@ function stepOne(s, dt) {
   }
 }
 
-// World position of the mesh origin (the feet) for a body centre and
+// World position of the mesh origin (the feet) for a body center and
 // angles, written into out {x, y, z}. Rotation R = Ry(-yaw) Rx(roll) Rz(pitch)
-// applied to the centre offset (0, RAG_CENTRE, 0), subtracted from the centre.
+// applied to the center offset (0, RAG_CENTER, 0), subtracted from the center.
 export function ragOrigin(cx, cy, cz, yaw, pitch, roll, out) {
-  const c = RAG_CENTRE;
+  const c = RAG_CENTER;
   const sp = Math.sin(pitch), cp = Math.cos(pitch), sr = Math.sin(roll), cr = Math.cos(roll);
   const lx = -c * sp, ly = c * cp * cr, lz = c * cp * sr;
   const cyw = Math.cos(yaw), syw = Math.sin(yaw);

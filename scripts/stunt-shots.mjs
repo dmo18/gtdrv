@@ -1,4 +1,4 @@
-// Developer helper: a person thrown over a car bonnet mid-tumble
+// Developer helper: a person thrown over a car hood mid-tumble
 // (ragdoll) and a car in the air over a stunt ramp with the stunt toast,
 // at phone size, saved to docs/preview/.
 // usage: node scripts/stunt-shots.mjs
@@ -62,7 +62,7 @@ await page.evaluate(() => {
   };
 });
 
-// --- 1. Pedestrian run-over: thrown over the bonnet, mid-tumble. ---
+// --- 1. Pedestrian run-over: thrown over the hood, mid-tumble. ---
 const ram = await page.evaluate(() => {
   const g = window.__rw;
   const v = g.player.vehicle;
@@ -99,7 +99,7 @@ await page.evaluate((r) => {
   window.__shot.draw([r.x + 0.8, 1.9, r.z + 6.2, r.x - 0.6, 1.5, r.z]);
 }, ram);
 await page.waitForTimeout(200);
-await page.screenshot({ path: 'docs/preview/ragdoll-bonnet.png' });
+await page.screenshot({ path: 'docs/preview/ragdoll-hood.png' });
 
 // --- 2. Stunt ramp: one jump for the toast, then the car in the air. ---
 // Drive to the ramp first and let the district banner fade.

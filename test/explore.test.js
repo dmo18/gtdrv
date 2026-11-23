@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   EXPLORE_KEY, EXPLORE_VERSION, CELL_BYTES, EXPLORE_CELLS, defaultExplore, sanitizeExplore, readExplore, loadExplore,
   saveExplore, clearExplore, bytesToB64, b64ToBytes, cellIndex, setCellBit, cellBit, cellsFrom, explorePercent,
-  unlocks, garageOpen, routeOpen, counts, storeCar, takeOut, repaint, toggleFavourite, release, favourite,
+  unlocks, garageOpen, routeOpen, counts, storeCar, takeOut, repaint, toggleFavorite, release, favorite,
   markGarageSeen, markGarageFound, markAdventureSeen, completeStep, nextStep, stepsDone, track, paintAllowed,
   isRewardSpec, deriveExplore, EXPLORE_MAX_TEXT,
 } from '../src/core/explore.js';
@@ -101,7 +101,7 @@ test('a save from a newer build is left alone and not written over', () => {
   assert.equal(readExplore({ version: 1 }).newer, false);
 });
 
-test('derived, never trusted: locked garages, reward cars, step clamps, favourite', () => {
+test('derived, never trusted: locked garages, reward cars, step clamps, favorite', () => {
   // A locked garage needs its adventure done.
   const raw = { version: 1, garages: { found: [...GARAGE_IDS], seen: [...GARAGE_IDS], cars: [car('sunchaser'), car('tidewinder', { fav: true }), car('sedan', { fav: true })] },
     adventures: { seen: ['a-roads-end', 'a-sunchaser', 'a-sandbar'], done: ['a-roads-end'], step: { 'a-sunchaser': 99, 'a-sandbar': 0xff }, tracked: 'a-roads-end' } };
@@ -113,7 +113,7 @@ test('derived, never trusted: locked garages, reward cars, step clamps, favourit
   }
   // Reward cars only for done adventures: sunchaser and tidewinder dropped.
   assert.deepEqual(ex.garages.cars.map((c) => c.spec), ['sedan']);
-  assert.equal(ex.garages.cars[0].fav, true, 'the first remaining favourite wins');
+  assert.equal(ex.garages.cars[0].fav, true, 'the first remaining favorite wins');
   assert.equal(ex.adventures.step['a-sunchaser'], def('a-sunchaser').steps.length - 1, 'seq steps clamped below the count');
   assert.equal(ex.adventures.step['a-sandbar'], 0b111, 'tour bits masked to the step count');
   assert.equal(ex.adventures.tracked, null, 'a done adventure is not tracked');
@@ -136,8 +136,8 @@ test('round trip of a full state', () => {
   deriveExplore(ex);
   for (const id of GARAGE_IDS) markGarageFound(ex, id);
   while (ex.garages.cars.length < GARAGE_CARS_MAX) storeCar(ex, car('muscle', { color: PAINT_COLORS[ex.garages.cars.length % 16] }));
-  toggleFavourite(ex, 4);
-  ex.adventures.step['a-port-quay'] = 0;
+  toggleFavorite(ex, 4);
+  ex.adventures.step['a-port-pier'] = 0;
   ex.adventures.step['a-hammock-trail'] = 0b101;
   ex.adventures.tracked = 'a-hammock-trail';
   ex.garages.last = 'g-key';
@@ -206,7 +206,7 @@ test('unlock rule: garages, cars and routes come from the done list only', () =>
   assert.equal(counts(ex, NaN).percent, 0);
 });
 
-test('collection rules: store, take out, repaint, favourite, release, full', () => {
+test('collection rules: store, take out, repaint, favorite, release, full', () => {
   const ex = defaultExplore();
   const live = { spec: VEHICLE_SPECS.muscle, color: VEHICLE_SPECS.muscle.colors[1], health: VEHICLE_SPECS.muscle.health / 2 };
   assert.deepEqual(storeCar(ex, live), { ok: true, index: 0 });
@@ -216,18 +216,18 @@ test('collection rules: store, take out, repaint, favourite, release, full', () 
   assert.equal(storeCar(ex, { spec: 'rustback', color: 0 }).ok, false, 'tanks are never stored');
   assert.equal(storeCar(ex, { spec: 'speedboat', color: 0 }).ok, false, 'boats are never stored');
   storeCar(ex, car('sedan'));
-  // Repaint: the paint grid or the model's own colours only.
+  // Repaint: the paint grid or the model's own colors only.
   assert.equal(repaint(ex, 1, PAINT_COLORS[3]).ok, true);
   assert.equal(ex.garages.cars[1].color, PAINT_COLORS[3]);
   assert.equal(repaint(ex, 1, 0x010203).ok, false);
   assert.equal(repaint(ex, 9, PAINT_COLORS[0]).ok, false);
-  // Favourite: a star toggle, at most one.
-  assert.equal(toggleFavourite(ex, 0).fav, true);
-  assert.equal(toggleFavourite(ex, 1).fav, true);
+  // Favorite: a star toggle, at most one.
+  assert.equal(toggleFavorite(ex, 0).fav, true);
+  assert.equal(toggleFavorite(ex, 1).fav, true);
   assert.deepEqual(ex.garages.cars.map((c) => c.fav), [false, true]);
-  assert.equal(favourite(ex).spec, 'sedan');
-  assert.equal(toggleFavourite(ex, 1).fav, false);
-  assert.equal(favourite(ex), null);
+  assert.equal(favorite(ex).spec, 'sedan');
+  assert.equal(toggleFavorite(ex, 1).fav, false);
+  assert.equal(favorite(ex), null);
   // Take out: the arriving car is stored first, the picked one leaves.
   const arriving = { spec: VEHICLE_SPECS.van || VEHICLE_SPECS.sedan, color: (VEHICLE_SPECS.van || VEHICLE_SPECS.sedan).colors[0], health: 1 };
   const r = takeOut(ex, 0, arriving);
@@ -260,13 +260,13 @@ test('collection rules: store, take out, repaint, favourite, release, full', () 
   const n = ex.garages.cars.length;
   assert.equal(takeOut(ex, ri).car.spec, 'sunchaser');
   assert.equal(ex.garages.cars.length, n);
-  // A favourite taken out keeps its star on the live car and gets it back when stored.
+  // A favorite taken out keeps its star on the live car and gets it back when stored.
   const fi = ex.garages.cars.findIndex((c) => !c.reward);
-  toggleFavourite(ex, fi);
+  toggleFavorite(ex, fi);
   const out = takeOut(ex, fi).car;
   assert.equal(out.fav, true);
   storeCar(ex, { spec: VEHICLE_SPECS[out.spec], color: out.color, health: 900, fav: true });
-  assert.equal(favourite(ex).spec, out.spec);
+  assert.equal(favorite(ex).spec, out.spec);
 });
 
 test('adventure steps: seq in order, tour in any order, once each, needs first', () => {
@@ -311,19 +311,19 @@ function withRewards() {
   return deriveExplore(ex);
 }
 
-test('K7: the star of a favourite taken out survives save and load and a cold start', () => {
+test('K7: the star of a favorite taken out survives save and load and a cold start', () => {
   const ex = defaultExplore();
   storeCar(ex, car('muscle'));
   storeCar(ex, car('sedan'));
-  toggleFavourite(ex, 0);
+  toggleFavorite(ex, 0);
   const r = takeOut(ex, 0);
   assert.equal(r.car.fav, true);
-  assert.equal(ex.garages.cars.length, 1, 'the favourite left the list');
-  assert.deepEqual(favourite(ex), { spec: 'muscle', color: VEHICLE_SPECS.muscle.colors[0], health: 1, reward: false });
+  assert.equal(ex.garages.cars.length, 1, 'the favorite left the list');
+  assert.deepEqual(favorite(ex), { spec: 'muscle', color: VEHICLE_SPECS.muscle.colors[0], health: 1, reward: false });
   const st = memory();
   assert.equal(saveExplore(st, ex), true);
   const back = loadExplore(st).state;
-  assert.equal(favourite(back).spec, 'muscle', 'the star is read back');
+  assert.equal(favorite(back).spec, 'muscle', 'the star is read back');
   assert.deepEqual(back.garages.road, { spec: 'muscle', color: VEHICLE_SPECS.muscle.colors[0] });
   // Stored again: the star moves into the list and the road record goes.
   const live = { spec: VEHICLE_SPECS.muscle, color: back.garages.road.color, health: VEHICLE_SPECS.muscle.health, fav: true };
@@ -332,12 +332,12 @@ test('K7: the star of a favourite taken out survives save and load and a cold st
   assert.equal(back.garages.cars.filter((c) => c.fav).length, 1);
   // Another star replaces it.
   const ex2 = loadExplore(st).state;
-  toggleFavourite(ex2, storeCar(ex2, car('sedan')).index);
+  toggleFavorite(ex2, storeCar(ex2, car('sedan')).index);
   assert.equal(ex2.garages.road, null);
-  assert.equal(favourite(ex2).spec, 'sedan');
+  assert.equal(favorite(ex2).spec, 'sedan');
 });
 
-test('K7: the road star is sanitised: junk, reward cars, boats and bad colours are dropped', () => {
+test('K7: the road star is sanitised: junk, reward cars, boats and bad colors are dropped', () => {
   const ok = (road) => sanitizeExplore({ version: 1, garages: { road } }).garages.road;
   assert.deepEqual(ok({ spec: 'sedan', color: 0xff0000 }), { spec: 'sedan', color: VEHICLE_SPECS.sedan.colors[0] });
   assert.deepEqual(ok({ spec: 'sedan', color: PAINT_COLORS[3] }), { spec: 'sedan', color: PAINT_COLORS[3] });
@@ -375,13 +375,13 @@ test('K8: a reward car taken out cannot be taken out again until stored', () => 
   assert.equal(takeOut(ex, i).ok, true);
 });
 
-test('K8: out reward cars survive a reload; a car that is out is not the favourite start car', () => {
+test('K8: out reward cars survive a reload; a car that is out is not the favorite start car', () => {
   const ex = withRewards();
   const i = ex.garages.cars.findIndex((c) => c.spec === 'sunchaser');
-  toggleFavourite(ex, i);
-  assert.equal(favourite(ex).spec, 'sunchaser');
+  toggleFavorite(ex, i);
+  assert.equal(favorite(ex).spec, 'sunchaser');
   takeOut(ex, i);
-  assert.equal(favourite(ex), null, 'the one copy is on the road: Start does not make another');
+  assert.equal(favorite(ex), null, 'the one copy is on the road: Start does not make another');
   const st = memory();
   saveExplore(st, ex);
   const back = loadExplore(st).state;
@@ -408,4 +408,16 @@ test('the whole-box land mask: 838 cells, same string every time, percent is of 
   assert.equal(explorePercent(bytes, land), (84 * 100) / 838);
   const text = bytesToB64(bytes);
   assert.equal(bytesToB64(cellsFrom({ cells: text })), text, 'the cell text is byte-identical after a region change');
+});
+
+test('legacy British adventure id a-port-quay is read as a-port-pier', () => {
+  const raw = {
+    version: 1,
+    adventures: { seen: ['a-port-quay'], done: [], step: {}, tracked: 'a-port-quay' },
+  };
+  const { state } = readExplore(raw);
+  assert.ok(state.adventures.seen.includes('a-port-pier'));
+  assert.equal(state.adventures.tracked, 'a-port-pier');
+  const out = JSON.stringify(sanitizeExplore(raw));
+  assert.ok(!out.includes('a-port-quay'), 'written back with the new id');
 });

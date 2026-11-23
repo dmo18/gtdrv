@@ -3,13 +3,13 @@
 // streets and coastline, and test/miami.test.js checks every one against
 // the data (on land, in water, clear of buildings).
 //
-// Coordinates: x east, z south, metres from lat 25.78, lon -80.18.
+// Coordinates: x east, z south, meters from lat 25.78, lon -80.18.
 
 // Milestone 1 core crop: Downtown, Brickell, Overtown, Edgewater,
 // Wynwood south, Watson, Star, Palm and Hibiscus Islands and the west
 // half of PortMiami. Since milestone 3 the game builds the whole data
 // box; the crop is only a test option (createMiamiCity opts.crop). Land
-// past the crop is cut off LAND_MARGIN metres outside it (a straight
+// past the crop is cut off LAND_MARGIN meters outside it (a straight
 // seawall); roads end at the crop edge itself.
 export const MIAMI_CROP = { x0: -2600, z0: -2600, x1: 2450, z1: 1800 };
 export const LAND_MARGIN = 150;
@@ -39,7 +39,7 @@ export const MIAMI_COURSES = {
       start: { x: 800, z: -1000 }, gates: [{ x: 1050, z: -950 }, { x: 1300, z: -900 }, { x: 1550, z: -820 }, { x: 1800, z: -740 }, { x: 2050, z: -650 }, { x: 2300, z: -520 }, { x: 2550, z: -420 }] },
     { id: 'boat-slalom', name: 'Venetian Slalom', blurb: 'Swing left and right through the buoys along the Venetian Causeway.', r: 13, maxLeg: 140,
       start: { x: -250, z: -1480 }, gates: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => ({ x: -150 + k * 150, z: k % 2 ? -1400 : -1560 })) },
-    { id: 'boat-island', name: 'Fisherman\'s Channel Round', blurb: 'The big one: a full lap of the south bay, out along the port quays and back by Brickell Key.', r: 18, lap: true,
+    { id: 'boat-island', name: 'Fisherman\'s Channel Round', blurb: 'The big one: a full lap of the south bay, out along the port piers and back by Brickell Key.', r: 18, lap: true,
       start: { x: -150, z: 1650 }, gates: [{ x: -100, z: 1300 }, { x: 400, z: 900 }, { x: 1000, z: 1050 }, { x: 1600, z: 1350 }, { x: 2300, z: 1700 }, { x: 1600, z: 1800 }, { x: 900, z: 1800 }, { x: 200, z: 1800 }] },
   ],
   gull: { name: 'First Feathers', blurb: 'An easy, low loop around Gullwing Airfield. Take off east.' },
@@ -151,11 +151,11 @@ export const MIAMI_SPOTS = {
   landmarks: [
     { id: 'tidewater-arena', name: 'Tidewater Arena', shape: 'arena', fit: 'site', x: -749, z: -204, r: 75, h: 34, on: 'the bayfront arena' },
     { id: 'riverfront-hall', name: 'Riverfront Hall', shape: 'drum', fit: 'site', x: -1146, z: 984, r: 40, h: 64, on: 'the convention hall on the river mouth' },
-    { id: 'opal-opera', name: 'Opal Opera House', shape: 'shell', fit: 'site', x: -802, z: -1053, r: 70, h: 34, on: 'the performing arts centre' },
+    { id: 'opal-opera', name: 'Opal Opera House', shape: 'shell', fit: 'site', x: -802, z: -1053, r: 70, h: 34, on: 'the performing arts center' },
     { id: 'wavecrest-terminal', name: 'Wavecrest Terminal', shape: 'wave', fit: 'site', x: 960, z: 348, r: 60, h: 30, on: 'a PortMiami cruise terminal' },
     { id: 'twin-spires', name: 'Brickell Twin Spires', shape: 'twin', fit: 'site', x: -1216, z: 1458, r: 45, h: 170, on: 'the Brickell towers by the Metromover' },
     { id: 'bayfront-sail', name: 'Bayfront Sail', shape: 'sail', fit: 'open', x: -700, z: 650, l: 30, w: 18, h: 30, on: 'Bayfront Park, by the amphitheatre' },
-    { id: 'harbour-wheel', name: 'Harbour Wheel', shape: 'wheel', fit: 'open', x: -660, z: 200, l: 16, w: 16, h: 62, on: 'the bayfront north of Bayfront Park' },
+    { id: 'harbor-wheel', name: 'Harbor Wheel', shape: 'wheel', fit: 'open', x: -660, z: 200, l: 16, w: 16, h: 62, on: 'the bayfront north of Bayfront Park' },
     { id: 'key-point-light', name: 'Key Point Light', shape: 'lighthouse', fit: 'open', x: -360, z: 1480, l: 9, w: 9, h: 34, on: 'the east shore of Brickell Key' },
     { id: 'watson-aviary', name: 'Watson Aviary', shape: 'dome', fit: 'open', x: 560, z: -470, l: 40, w: 40, h: 30, on: 'the attraction parcels of Watson Island' },
     { id: 'omni-needle', name: 'Omni Needle', shape: 'needle', fit: 'open', x: -980, z: -1250, l: 10, w: 10, h: 135, on: 'Edgewater, by the old Omni site' },
@@ -175,14 +175,14 @@ export const MIAMI_SPOTS = {
   // Wynwood warehouse yard nearest this point.
   cinder: { x: -2050, z: -2350 },
 
-  // Gantry cranes on the PortMiami south quay (booms out over
-  // Fisherman's Channel): each is moved down from (x, z) to the quay edge.
+  // Gantry cranes on the PortMiami south pier (booms out over
+  // Fisherman's Channel): each is moved down from (x, z) to the pier edge.
   cranes: [{ x: 1700, z: 1200 }, { x: 1780, z: 1240 }, { x: 1860, z: 1280 }],
 
   // The six secrets (ids and names kept so saves stay valid; see
   // world/secrets.js placeSecrets) and the Ghostwake garage.
   secrets: {
-    // In Fisherman's Channel off the PortMiami south quay.
+    // In Fisherman's Channel off the PortMiami south pier.
     'drowned-box': { x: 1300, z: 1160 },
     // A rooftop lounge on a Wynwood roof.
     'roof-garden': { region: { x0: -2550, z0: -2550, x1: -1500, z1: -1750 } },
@@ -207,7 +207,7 @@ export const MIAMI_SPOTS = {
     { name: 'Palm Island Skip', street: 'Palm Avenue', x: 1800, z: 20 },
   ],
 
-  // Neighbourhood names for the HUD (placeOf). Later entries win. Each
+  // Neighborhood names for the HUD (placeOf). Later entries win. Each
   // `src` is the map-data feature (label, street, park, building or
   // water name) the name is taken from; a test checks it is in the data.
   // A rect is x0, z0, x1, z1; a `line` is a capsule ax, az, bx, bz, r.
@@ -263,7 +263,7 @@ export const MIAMI_SPOTS = {
   },
   // Secret notes worded for these spots (the Records list).
   secretNotes: {
-    'drowned-box': 'A shipping container sinking off the PortMiami south quay.',
+    'drowned-box': 'A shipping container sinking off the PortMiami south pier.',
     'roof-garden': 'Somebody keeps a lounge on a Wynwood rooftop nobody can walk up to.',
     'the-gullet': 'A dark arch in the Brickell Key seawall.',
     rustlamp: 'A rusted lighthouse on the far tip of Palm Island.',
@@ -274,7 +274,7 @@ export const MIAMI_SPOTS = {
 
 // Real Miami places shown on the full map and the minimap, so a player can
 // find them (not game places). `src` is the name in the map data (a label,
-// building or park), `name` is what the map prints. Metres, same frame as
+// building or park), `name` is what the map prints. Meters, same frame as
 // the data. Virginia Key lies south of the data box, so it is not listed.
 // Where the real name is a venue brand (decision D1) the map prints the
 // invented name of the landmark that stands there (MIAMI_SPOTS.landmarks)

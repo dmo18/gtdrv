@@ -75,7 +75,7 @@ const out = await page.evaluate(([startGaps, breakdown, service]) => {
   t0 = performance.now();
   for (let i = 0; i < 300; i++) g.step(1 / 60);
   const stepMs2 = (performance.now() - t0) / 300;
-  // A fixed street view: the player car parked at the spawn point.
+  // A fixed street view: the player parking loted at the spawn point.
   const v = g.player.vehicle, c = g.city;
   if (v) { v.x = v.px = c.spawn.x; v.z = v.pz = c.spawn.z; v.heading = v.pheading = c.spawn.heading; v.vx = v.vz = 0; v.speed = 0; }
   // RW_SERVICE=1: two service vehicles in view, lamps on (V1 budget check).

@@ -300,7 +300,7 @@ test('Miami secrets: on land, off the airfield, spread out, none inside a buildi
 test('Miami secrets: each spot checked against the data where the plan puts it', () => {
   const at = Object.fromEntries(layout.spots.map((s) => [s.id, s]));
   const ahead = (s, d) => city.shoreDist(s.x + Math.cos(s.heading) * d, s.z + Math.sin(s.heading) * d);
-  // The container sinks off the port's south quay: its spot on the quay
+  // The container sinks off the port's south pier: its spot on the pier
   // edge, the box (23 m out along the heading) in open water.
   const box = at['drowned-box'];
   assert.equal(city.placeOf(box.x, box.z), 'Dodge Island');
@@ -449,11 +449,11 @@ test('Miami places: roof pad, Cinder tank and the port cranes, checked against t
     assert.equal(collision.resolveCircle(x, z, 1.9, 1).hit, false, 'Cinder tank clear of buildings');
     assert.ok(city.shoreDist(x, z) > 3 && !city.onRoad(x, z));
   }
-  for (const s of city.parkingSpots) assert.ok(Math.hypot(s.x - cinder.x, s.z - cinder.z) >= 6, 'no car parked on the tank');
+  for (const s of city.parkingSpots) assert.ok(Math.hypot(s.x - cinder.x, s.z - cinder.z) >= 6, 'no parking loted on the tank');
   assert.equal(city.landmarks.cranes.length, MIAMI_SPOTS.cranes.length);
   for (const c of city.landmarks.cranes) {
     assert.equal(city.placeOf(c.x, c.z), 'Dodge Island');
-    for (const ox of [-7, 7]) for (const oz of [-6, 6]) assert.ok(city.mainShore(c.x + ox, c.z + oz) > 1 && !city.onRoad(c.x + ox, c.z + oz), 'crane leg on the quay');
+    for (const ox of [-7, 7]) for (const oz of [-6, 6]) assert.ok(city.mainShore(c.x + ox, c.z + oz) > 1 && !city.onRoad(c.x + ox, c.z + oz), 'crane leg on the pier');
     assert.ok(city.shoreDist(c.x, c.z + 30) < -2, 'boom out over the water');
   }
 });
@@ -462,7 +462,7 @@ test('Miami places: roof pad, Cinder tank and the port cranes, checked against t
 // HUD names and first-visit flags
 // ---------------------------------------------------------------------------
 
-test('Miami HUD names: real neighbourhoods from the data; bridges and water named', () => {
+test('Miami HUD names: real neighborhoods from the data; bridges and water named', () => {
   for (const list of [MIAMI_SPOTS.places, MIAMI_SPOTS.waterPlaces]) {
     for (const p of list) {
       assert.ok(DATA_NAMES.has(p.src), `${p.name}: ${p.src} is in the data`);

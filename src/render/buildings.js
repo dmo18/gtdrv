@@ -159,7 +159,7 @@ function tower(C, b) {
   const { x0, z0, x1, z1, h } = b;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
   const P = C.plain.at(cx, cz);
-  // The real Miami map: a look from the neighbourhood (miamilook.js).
+  // The real Miami map: a look from the neighborhood (miamilook.js).
   const L = lookOf(C.city, b);
   const style = L ? L.style : b.style;
   const F = C[style].at(cx, cz);
@@ -249,7 +249,7 @@ function tower(C, b) {
 const terracotta = (b) => [0xb8583a, 0xc0684a, 0xa85034, 0xc4785a][b.vseed & 3];
 
 // One face from 3 or 4 points (counter-clockwise seen from the front),
-// its normal from the points, texture in metres / k along a and up b.
+// its normal from the points, texture in meters / k along a and up b.
 function face(B, p, color, k = 1.5, s = 1) {
   const [a, b2, c] = p;
   const ux = b2[0] - a[0], uy = b2[1] - a[1], uz = b2[2] - a[2];
@@ -395,7 +395,7 @@ function hipRoof(C, b, x0, z0, x1, z1, y, col, trim) {
 }
 
 // Art-deco details on the street fronts: eyebrow ledges over the
-// windows, a centre fin rising over the roof, speed-line bands.
+// windows, a center fin rising over the roof, speed-line bands.
 function deco(C, b, L, gf, h, floors, trim, tint) {
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
   const P = C.plain.at(cx, cz);
@@ -540,7 +540,7 @@ function house(C, b) {
   const kind = rng.next();
   const nF = Math.max(1, Math.floor((front.L - 1.2) / 3));
   const doorA = ((nF >> 1) + 0.5) * (front.L / nF);
-  // Front path from the porch to the pavement.
+  // Front path from the porch to the sidewalk.
   {
     const gap = front.m === 1 ? z0 - blk.z0 : front.m === 2 ? blk.z1 - z1 : front.m === 4 ? x0 - blk.x0 : blk.x1 - x1;
     const len = gap - SIDEWALK;

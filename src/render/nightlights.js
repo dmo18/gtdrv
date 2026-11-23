@@ -102,10 +102,10 @@ export function patchWindows(mats, atlas) {
 
 // ---- street lamp light, baked ---------------------------------------------
 // Every street lamp (and the big floodlights) painted once, seen from
-// above, into one light map over the whole city. The ground, kerb,
-// pavement and shopfront shaders read it by world position and add it
-// as light on their own colour, so each lamp leaves a warm pool that
-// takes the colour of the asphalt or paving under it, and walls next to
+// above, into one light map over the whole city. The ground, curb,
+// sidewalk and shopfront shaders read it by world position and add it
+// as light on their own color, so each lamp leaves a warm pool that
+// takes the color of the asphalt or paving under it, and walls next to
 // a lamp catch it near the ground. One texture read per pixel; no
 // lights, no extra draws.
 export function bakeLampLight(lamps, glows = []) {

@@ -5,11 +5,11 @@
 //
 // - Engines: firing-pulse loops at four rpm points with on-load and
 //   off-load layers (src/audio/engines.js), crossfaded by rpm/throttle.
-// - Tyres and road, boat wash and hull slaps, prop/jet/rotor rigs.
+// - Tires and road, boat wash and hull slaps, prop/jet/rotor rigs.
 // - Impacts, doors, starter, horns, police siren as pooled voices.
 // - A generated street impulse response for reverb, ambience beds that
 //   follow place, time and weather, and quiet UI sounds.
-// - Buses (engine, tyres, world, effects, ui) into a gentle compressor
+// - Buses (engine, tires, world, effects, ui) into a gentle compressor
 //   and a limiter. Silent no-op until unlock(), and when the browser has
 //   no AudioContext. render() never throws.
 
@@ -26,8 +26,8 @@ import { dopplerFactor, distanceLowpass, travelDelay } from '../audio/spatial.js
 import { createTankRig } from '../audio/tankrig.js'; // tank (task 32)
 import { safetyCurve, bassCurve, BASS_HELPER } from '../audio/master.js';
 
-const HEARING = 70; // metres for crash sounds
-const OTHER_RANGE = 70; // metres for other craft engines
+const HEARING = 70; // meters for crash sounds
+const OTHER_RANGE = 70; // meters for other craft engines
 const OTHERS = 4;
 const UPDATE_EVERY = 1 / 30; // seconds between parameter pushes
 const PLACE_EVERY = 0.5; // seconds between place/enclosure probes
@@ -36,7 +36,7 @@ const SLICE_MS = 5; // generation budget per slice
 // Default bus levels (the master is set separately). Engines sit under
 // the world so the city still reads.
 // (A1: music up 3 dB; it sat 6 dB under every effect in the phone check)
-const BUS = { engine: 0.42, tyres: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.28 };
+const BUS = { engine: 0.42, tires: 0.5, world: 0.6, effects: 0.75, ui: 0.4, music: 0.28 };
 const GESTURES = ['touchend', 'pointerup', 'click', 'keydown'];
 
 const URBAN = { downtown: 1, midtown: 0.85, industrial: 0.8, docks: 0.6, residential: 0.45, park: 0.35, beach: 0.3, airfield: 0.25, shore: 0.3 };
@@ -78,7 +78,7 @@ export function createAudio(game) {
   let muted = false;
   let hidden = typeof document !== 'undefined' && document.hidden === true;
   let wantRunning = true;
-  const vol = { master: 0.8, engine: 1, tyres: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, ambience: 1, musicOn: true, muteAll: false };
+  const vol = { master: 0.8, engine: 1, tires: 1, world: 1, effects: 1, ui: 1, music: 0.6, sfx: 1, ambience: 1, musicOn: true, muteAll: false };
   let musicBus = null; // music -> its own duck -> master
   let musicDuck = null;
   let sirenDuck = null; // music steps back under a close siren (after the explosion duck)
@@ -346,17 +346,17 @@ export function createAudio(game) {
   };
   let enterT = -9;
   let enterCrank = false;
-  let fx = null; // persistent craft loops (tyres, wind, wash ...)
+  let fx = null; // persistent craft loops (tires, wind, wash ...)
 
   function buildFx() {
     fx = {
-      road: bed('road', bus.tyres),
-      gravel: bed('gravel', bus.tyres),
-      squeal: bed('squeal', bus.tyres),
-      wet: bed('wet', bus.tyres),
-      rush: bed('wind', bus.tyres, { filterType: 'bandpass', f: 600, q: 0.6 }),
-      wash: bed('wash', bus.tyres),
-      buffet: bed('buffet', bus.tyres),
+      road: bed('road', bus.tires),
+      gravel: bed('gravel', bus.tires),
+      squeal: bed('squeal', bus.tires),
+      wet: bed('wet', bus.tires),
+      rush: bed('wind', bus.tires, { filterType: 'bandpass', f: 600, q: 0.6 }),
+      wash: bed('wash', bus.tires),
+      buffet: bed('buffet', bus.tires),
       scrape: bed('scrape', bus.effects),
       cabin: bed('wind', bus.world, { filterType: 'lowpass', f: 500, q: 0.6 }),
     };
@@ -511,7 +511,7 @@ export function createAudio(game) {
       tankRig.update(r, c, now, dt);
     }
 
-    // tyres, wind, water
+    // tires, wind, water
     const isCar = !!c && c.kind === 'car';
     const isBoat = !!c && c.kind === 'boat';
     const isAir = !!c && (c.kind === 'plane' || c.kind === 'heli');
@@ -905,8 +905,8 @@ export function createAudio(game) {
     set(amb.birds.g.gain, 0.1 * (1 - night) * land * (1 - 0.6 * place.urban) * (1 - alt) * (1 - 0.9 * rain), now, 1.2);
     set(amb.crickets.g.gain, 0.16 * night * land * place.cricket * (1 - alt) * (1 - 0.8 * rain), now, 1.2);
     set(amb.surf.g.gain, 0.34 * nearShore * (place.district === 'beach' ? 1.3 : 1) * (1 - 0.8 * alt), now, 1);
-    const harbour = place.district === 'docks' ? 0.22 : sd < -20 ? 0.14 * (1 - alt) : 0;
-    set(amb.lap.g.gain, harbour, now, 1);
+    const harbor = place.district === 'docks' ? 0.22 : sd < -20 ? 0.14 * (1 - alt) : 0;
+    set(amb.lap.g.gain, harbor, now, 1);
     const wb = clamp((wind - 1) / 12, 0, 1);
     set(amb.wind.g.gain, 0.04 + 0.26 * Math.pow(wb, 1.2) + 0.1 * alt, now, 1);
     set(amb.wind.f.frequency, 320 + 45 * wind, now, 1);
@@ -918,7 +918,7 @@ export function createAudio(game) {
     // reverb sends follow the street's enclosure
     const enc = clamp(place.enclosure, 0, 1) * (1 - alt);
     set(send.engine.gain, 0.04 + 0.22 * enc, now, 0.5);
-    set(send.tyres.gain, 0.03 + 0.18 * enc, now, 0.5);
+    set(send.tires.gain, 0.03 + 0.18 * enc, now, 0.5);
     set(send.effects.gain, 0.16 + 0.45 * enc, now, 0.5);
     set(send.world.gain, 0.12 + 0.12 * enc, now, 0.5);
 
@@ -1162,7 +1162,7 @@ export function createAudio(game) {
     if (!ready || !e || lowPriority() || !combatGate('part', 0.04)) return;
     spatial(fin(e.x), fin(e.z), 80);
     if (sp.gain < 0.01) return;
-    const heavy = e.part === 'wheel' || e.part === 'door' || e.part === 'bonnet';
+    const heavy = e.part === 'wheel' || e.part === 'door' || e.part === 'hood';
     voices.play(bus.effects, sp.gain * (heavy ? 0.65 : 0.45), sp.pan, (v, t) => {
       v.add(`impactMetal${Math.floor(rng.next() * 3)}`, t, 1, heavy ? 0.6 + rng.next() * 0.1 : 0.9 + rng.next() * 0.2);
       if (heavy) v.add(`clank${Math.floor(rng.next() * 2)}`, t + 0.01, 0.6, 0.7);
@@ -1781,7 +1781,7 @@ export function createAudio(game) {
 
   function setVolume(v) {
     if (!v) return;
-    for (const k of ['master', 'engine', 'tyres', 'world', 'effects', 'ui', 'music', 'sfx', 'ambience']) {
+    for (const k of ['master', 'engine', 'tires', 'world', 'effects', 'ui', 'music', 'sfx', 'ambience']) {
       if (Number.isFinite(v[k])) vol[k] = clamp(v[k], 0, 1);
     }
     if (typeof v.musicOn === 'boolean') vol.musicOn = v.musicOn;

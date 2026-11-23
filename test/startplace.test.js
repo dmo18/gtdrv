@@ -153,7 +153,7 @@ test('a region game: the session belongs to the region id, travelTo saves target
   assert.equal(store.getItem('rustwater.map'), null);
   g.player.wanted = 0;
   assert.equal(s.travelTo('miami-downtown'), '', 'the region being played is not a trip');
-  assert.equal(s.travelTo('island'), '', 'the island is picked, not travelled to');
+  assert.equal(s.travelTo('island'), '', 'the island is picked, not traveled to');
   assert.equal(s.travelTo('miami-beach'), '');
   assert.equal(store.getItem('rustwater.map'), 'miami-beach');
   const saved = loadProgress(store);
