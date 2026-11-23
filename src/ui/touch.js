@@ -1011,7 +1011,7 @@ export function createTouchControls(root, input, opts = {}) {
       if (!show) wheelClose();
       if (c.weapon !== shown.weapon) {
         shown.weapon = c.weapon;
-        const ic = WEAPON_ICONS[c.weapon] || ICONS.fire;
+        const ic = (Object.hasOwn(WEAPON_ICONS, c.weapon) && WEAPON_ICONS[c.weapon]) || ICONS.fire;
         ammoIcon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>`;
         swapBtn.querySelector('svg').innerHTML = ic;
         carSwapBtn.querySelector('svg').innerHTML = ic;

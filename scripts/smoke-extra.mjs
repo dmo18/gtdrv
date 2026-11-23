@@ -999,9 +999,9 @@ export default async function extra(page, check) {
     w.x = w.px = car.x - 3.4;
     w.z = w.pz = car.z - 1.2;
     for (let i = 0; i < 5; i++) g.step(1 / 60);
-    g.input.press('enter');
-    g.step(1 / 60);
-    g.input.release('enter');
+    // Jack this very car (the ENTER press and its nearest-car pick are checked in the carjack step above;
+    // at a busy junction another car can be nearer, and this step is about saving the stolen car).
+    g.tryEnterVehicle(car);
     for (let i = 0; i < 200; i++) g.step(1 / 60);
     const ok = p.vehicle === car;
     if (!ok) return { ok, mode: p.mode, near: !!p.near, busy: g.carjack.busy };

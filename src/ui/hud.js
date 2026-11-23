@@ -526,7 +526,7 @@ export function createHud(root) {
     const v = !!on;
     if (v !== last.navOn) { last.navOn = v; navEl.classList.toggle('rw-none', !v); stackEl.classList.toggle('rw-navon', v); }
     if (!v) return;
-    if (kind !== last.navKind) { last.navKind = kind; navPath.setAttribute('d', ARROW[kind] || ARROW.depart); }
+    if (kind !== last.navKind) { last.navKind = kind; navPath.setAttribute('d', (Object.hasOwn(ARROW, kind) && ARROW[kind]) || ARROW.depart); }
     const t = l2 ? (text || '') + ' \u00b7 ' + l2 : (text || '');
     if (t !== last.navText) { last.navText = t; navTextNode.nodeValue = t; }
     const sn = !!soon;
