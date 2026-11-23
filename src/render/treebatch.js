@@ -31,7 +31,7 @@ const CELL_R = CELL * 0.75 + 8; // a cell's bounding sphere (trees reach out)
 // No tree changes its shape inside this distance (m), whatever nearR the
 // caller asks for (docs/PLAN_V3.md 13, LOTS: nothing pops within 60 m of
 // the camera; the near shape's edge sits past it, with its hysteresis).
-export const NO_POP_R = 62;
+export const NO_POP_R = 64;
 
 class TreeBatch extends THREE.BatchedMesh {
   onBeforeShadow(renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
