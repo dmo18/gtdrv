@@ -11,7 +11,7 @@ import { regionCity, REGION_IDS } from './regionfixture.js';
 import { createGround } from '../src/world/ground.js';
 import {
   buildRoadGeo, edgePaint, edgeStations, curbsAt, inJunctionArea, ringDist, isSimple, triangulate, ringArea,
-  walkOf, walkLeftOf, medianBand, stopDistance, STOP_BAR,
+  walkOf, walkLeftOf, medianBand, medianAt, stopDistance, STOP_BAR,
 } from '../src/world/junctions.js';
 import { MEDIAN_PLANT } from '../src/world/roadprofile.js';
 
@@ -111,7 +111,7 @@ function metrics(city) {
       for (let d = span0; d <= span1; d += 4) {
         const C = curbsAt(geo, e, d);
         const wR = walkOf(e), med = medianBand(e), wL = walkLeftOf(e);
-        for (const [o0, dir] of [[C.r + wR, 1], [C.l - (med > 0 ? med : wL), -1]]) {
+        for (const [o0, dir] of [[C.r + wR, 1], [C.l - (med > 0 ? medianAt(city, e, d, C.l) : wL), -1]]) {
           if (med > 0 && dir < 0 && e.median > 8) continue; // lot ground in a wide median
           const [x0, z0] = pt(d, o0 + dir * 0.25);
           if (ground.surfaceAt(x0, z0) !== 0 || inJunction(jAt, x0, z0, -0.5)) continue;

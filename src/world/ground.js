@@ -10,7 +10,7 @@
 // The answer is a pure function of the city and the point.
 
 import { divideOf, GUTTER } from './roadprofile.js';
-import { inJunctionArea, curbsAt, walkOf, walkLeftOf, medianBand } from './junctions.js';
+import { inJunctionArea, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
 
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
@@ -158,8 +158,7 @@ export function createGround(city) {
       const C = curbsAt(geo, e, d);
       if (s >= C.l && s <= C.r) return 1;
       if (s > C.r) { if (s <= C.r + walkOf(e)) side = true; continue; }
-      const m = medianBand(e);
-      if (m > 0) { if (s >= C.l - m) median = true; } else if (s >= C.l - walkLeftOf(e)) side = true;
+      if (medianBand(e) > 0) { if (s >= C.l - medianAt(city, e, d, C.l)) median = true; } else if (s >= C.l - walkLeftOf(e)) side = true;
     }
     return median ? 3 : side ? 2 : 0;
   }

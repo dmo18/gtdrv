@@ -134,6 +134,17 @@ export function createObjective(game) {
       goal.src = 'mission';
       return;
     }
+    // A destination the player set on the map comes before a merely tracked
+    // adventure (it is what they chose; it gets turn by turn).
+    const w = game.waypoint;
+    if (w) {
+      goal.x = w.x;
+      goal.z = w.z;
+      goal.on = true;
+      goal.text = 'Waypoint';
+      goal.src = 'waypoint';
+      return;
+    }
     // The tracked adventure (systems/adventures.js): the arrow points at
     // the center of its fuzzy map ring, not the true spot.
     const adv = game.adventures && game.adventures.objective;
@@ -144,14 +155,6 @@ export function createObjective(game) {
       goal.text = adv.label || 'Adventure';
       goal.src = 'adventure';
       return;
-    }
-    const w = game.waypoint;
-    if (w) {
-      goal.x = w.x;
-      goal.z = w.z;
-      goal.on = true;
-      goal.text = 'Waypoint';
-      goal.src = 'waypoint';
     }
   }
 

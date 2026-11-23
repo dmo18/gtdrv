@@ -304,6 +304,11 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
   const trees = st.trees();
   assert.ok(trees && trees.mesh.isBatchedMesh, 'the tree batch');
   assert.ok(!group.children.some((o) => o.name === 'tile' && o.children.some((m) => m.name === 'trees-detail')), 'no tree meshes in the tiles');
+  // No tree changes shape inside NO_POP_R (treebatch.js), whatever the
+  // tier asks: the near shape reaches at least that far.
+  const { NO_POP_R } = await import('../src/render/treebatch.js');
+  const NEAR = Math.max(NO_POP_R, TREE_NEAR_R[1]), FAR = Math.max(NEAR + 20, TREE_FAR_R[1]);
+  assert.ok(NEAR >= 60, 'no shape change within 60 m');
   let near = 0, far2 = 0, distant = 0;
   for (const t of st.tiles) {
     if (!t.group) continue;
@@ -316,9 +321,9 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
       assert.equal(vis, t.shown, 'drawn while its tile is shown');
       if (!t.shown) continue;
       const lod = e.lod[i];
-      if (d < TREE_NEAR_R[1]) { near++; assert.equal(lod, 2, `tree ${d.toFixed(0)} m near`); }
-      else if (d > TREE_NEAR_R[1] + 5 && d < TREE_FAR_R[1]) { far2++; assert.equal(lod, 1, `tree ${d.toFixed(0)} m far`); }
-      else if (d > TREE_FAR_R[1] + 9) { distant++; assert.equal(lod, 0, `tree ${d.toFixed(0)} m distant`); }
+      if (d < NEAR) { near++; assert.equal(lod, 2, `tree ${d.toFixed(0)} m near`); }
+      else if (d > NEAR + 5 && d < FAR) { far2++; assert.equal(lod, 1, `tree ${d.toFixed(0)} m far`); }
+      else if (d > FAR + 9) { distant++; assert.equal(lod, 0, `tree ${d.toFixed(0)} m distant`); }
       // The batch draws the shape the tree asks for.
       const geo = trees.mesh.getGeometryIdAt(e.ids[i]);
       assert.equal(geo, e.sp[i] * 3 + lod);
@@ -351,7 +356,7 @@ test('streaming: static matrices, packed far level, no tiles in fast or high fli
   st.update(cam, 3);
   for (const e of trees.tiles.values()) {
     if (!e.shown) continue;
-    for (let i = 0; i < e.n; i++) if (Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z) > TREE_NEAR_R[1] + 5) assert.notEqual(e.lod[i], 2);
+    for (let i = 0; i < e.n; i++) if (Math.hypot(e.px[i] - cam.position.x, e.pz[i] - cam.position.z) > NEAR + 5) assert.notEqual(e.lod[i], 2);
   }
   // A renderer without multi-draw: the trees go back into the tiles.
   st.setTreeBatch(false);

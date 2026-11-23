@@ -11,7 +11,7 @@ import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 import { CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
-import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand } from '../world/junctions.js';
+import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt } from '../world/junctions.js';
 import { groundFn } from '../world/ground.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
@@ -927,11 +927,12 @@ export function realRoads(city, B, nodes, edges, own = null) {
         }
         if (med > 0) {
           const mb = e.median > MEDIAN_PLANT ? B.grass.at(mx, mz) : wb;
-          band(mb, l0 - med, l0, l1 - med, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          const m0 = medianAt(city, e, d0, l0), m1 = medianAt(city, e, d1, l1);
+          band(mb, l0 - m0, l0, l1 - m1, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
           curb(wb, l0, l1, true);
           // The median's nose where it ends at a junction.
-          if (i === 0 && geo.jEnd[2 * e.id] >= 0) wb.wall(wx(d0, l0 - med), wz(d0, l0 - med), wx(d0, l0), wz(d0, l0), -0.02, CURB_H, COL.curb, 0, 0, med / 4.8, 0.05, 1, 1);
-          if (i + 8 >= ST.length && geo.jEnd[2 * e.id + 1] >= 0) wb.wall(wx(d1, l1), wz(d1, l1), wx(d1, l1 - med), wz(d1, l1 - med), -0.02, CURB_H, COL.curb, 0, 0, med / 4.8, 0.05, 1, 1);
+          if (i === 0 && geo.jEnd[2 * e.id] >= 0) wb.wall(wx(d0, l0 - m0), wz(d0, l0 - m0), wx(d0, l0), wz(d0, l0), -0.02, CURB_H, COL.curb, 0, 0, m0 / 4.8, 0.05, 1, 1);
+          if (i + 8 >= ST.length && geo.jEnd[2 * e.id + 1] >= 0) wb.wall(wx(d1, l1), wz(d1, l1), wx(d1, l1 - m1), wz(d1, l1 - m1), -0.02, CURB_H, COL.curb, 0, 0, m1 / 4.8, 0.05, 1, 1);
         }
       }
     }

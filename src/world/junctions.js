@@ -61,6 +61,19 @@ export function medianBand(e) {
 export function walkLeftOf(e) {
   return e.divided || medianBand(e) > 0 ? 0 : walkOf(e);
 }
+// The median band at d m along edge e whose left curb is at lateral lc:
+// half the real distance to the partner's left curb there (the data gap
+// varies along a pair; a fixed band left a sliver of ground down the
+// middle or ran onto the partner), up to 4 m.
+export function medianAt(city, e, d, lc) {
+  const m = medianBand(e);
+  if (!(m > 0) || !(e.pair >= 0) || e.median > 8) return m;
+  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
+  const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
+  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
+  const dist = Math.abs(lat - ((p.off || 0) - p.width / 2));
+  return Math.max(0, Math.min(4, dist / 2 + 0.02));
+}
 const walkR = (e) => walkOf(e);
 const walkL = walkLeftOf;
 
@@ -471,7 +484,19 @@ export function buildRoadGeo(nodes, edges) {
       if (!e.causeway && !e.ped && !e.bridge) ctrl[q] = 1;
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats };
+  // The junctions by 32 m cell of their boxes (junctionsAt).
+  const jGrid = new Map();
+  for (const J of junctions) {
+    for (let i = Math.floor(J.x0 / JCELL); i <= Math.floor(J.x1 / JCELL); i++) {
+      for (let j = Math.floor(J.z0 / JCELL); j <= Math.floor(J.z1 / JCELL); j++) {
+        const k = i * 100003 + j;
+        let l = jGrid.get(k);
+        if (!l) jGrid.set(k, (l = []));
+        l.push(J);
+      }
+    }
+  }
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid };
 }
 
 // A node of two edges is a junction when the road turns sharply there or
@@ -675,6 +700,19 @@ function buildJunction(id, nodes, g, list, C, PG) {
   };
 }
 
+const JCELL = 32;
+const NONE = [];
+// The junctions whose box may hold (x, z) (a list owned by the grid).
+export function junctionsAt(geo, x, z) {
+  return geo.jGrid.get(Math.floor(x / JCELL) * 100003 + Math.floor(z / JCELL)) || NONE;
+}
+// Is (x, z) on some junction's asphalt?
+export function onJunction(geo, x, z) {
+  const l = junctionsAt(geo, x, z);
+  for (let k = 0; k < l.length; k++) if (inJunctionArea(l[k], x, z)) return true;
+  return false;
+}
+
 // ---- Per edge: strip outline, curbs and paint. ----
 
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -836,6 +874,41 @@ export function edgePaint(city, e, out) {
     }
     if (hi - lo > 1) out.push(dd, lo, dd, hi, STOP_HW, 0);
   }
+  return clipPaint(city, e, out);
+}
+
+// Paint never lies on a junction's asphalt: a line with a point on one
+// (a neighbor's polygon reaching over the strip) keeps only its pieces off
+// every junction, found in 0.5 m steps.
+const CLIP = [];
+function clipPaint(city, e, out) {
+  const geo = city.roadGeo, a = city.nodes[e.a];
+  const on = (d, o) => onJunction(geo, a.x + e.ux * d - e.uz * o, a.z + e.uz * d + e.ux * o);
+  let dirty = false;
+  for (let k = 0; k < out.length && !dirty; k += 6) {
+    if (on(out[k], out[k + 1]) || on(out[k + 2], out[k + 3]) || on((out[k] + out[k + 2]) / 2, (out[k + 1] + out[k + 3]) / 2)) dirty = true;
+  }
+  if (!dirty) return out;
+  CLIP.length = 0;
+  for (let k = 0; k < out.length; k += 6) {
+    const d0 = out[k], o0 = out[k + 1], d1 = out[k + 2], o1 = out[k + 3];
+    const L = Math.hypot(d1 - d0, o1 - o0), n = Math.max(1, Math.ceil(L / 0.5));
+    let run = -1;
+    for (let m = 0; m <= n; m++) {
+      const f = m / n, free = !on(d0 + (d1 - d0) * f, o0 + (o1 - o0) * f);
+      if (free && run < 0) run = m;
+      if ((!free || m === n) && run >= 0) {
+        const end = free ? m : m - 1;
+        if (end > run) {
+          const f0 = run / n, f1 = end / n;
+          CLIP.push(d0 + (d1 - d0) * f0, o0 + (o1 - o0) * f0, d0 + (d1 - d0) * f1, o0 + (o1 - o0) * f1, out[k + 4], out[k + 5]);
+        }
+        run = -1;
+      }
+    }
+  }
+  out.length = 0;
+  for (let k = 0; k < CLIP.length; k++) out.push(CLIP[k]);
   return out;
 }
 
