@@ -327,3 +327,21 @@ test('the session system picks the session of the map being played, both ways', 
   assert.equal(back.session.map, 'island');
   assert.equal(back.mapSessions.miami.x, 3900);
 });
+
+// ---- Region ids (PLAN_V2 3.5 rule 1) ----
+import { SESSION_MAPS as MAPS2, sanitizeSession as sanitizeSession2, sanitizeMapSessions as sanitizeMapSessions2 } from '../src/core/garage.js';
+import { REGION_IDS } from '../src/world/regions.js';
+
+test('SESSION_MAPS holds the island, miami and every region id', () => {
+  for (const id of ['island', 'miami', ...REGION_IDS]) assert.ok(MAPS2.includes(id), id);
+  assert.equal(new Set(MAPS2).size, MAPS2.length);
+});
+
+test('a region session is kept with its map id; a place off the crop is the start place', () => {
+  const s = sanitizeSession2({ map: 'miami-north', mode: 'foot', x: -2600, z: -3300, heading: 1 });
+  assert.equal(s.map, 'miami-north');
+  assert.equal(s.mode, 'foot');
+  const far = sanitizeSession2({ map: 'miami-north', mode: 'foot', x: 3000, z: 3000, heading: 1 });
+  assert.equal(far.mode, 'start');
+  assert.deepEqual(Object.keys(sanitizeMapSessions2({ 'miami-north': s, 'miami-west': s })), ['miami-north']);
+});

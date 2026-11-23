@@ -1066,3 +1066,69 @@ test('SV-M1: service meshes inside their triangle bands; the light bar adds one 
   assert.equal(callsAt(pm, 6), 5, 'police: still one bar');
   assert.ok(pm.userData.svcBar === pm.userData.bar);
 });
+
+// ---- Regions (docs/PLAN_V2.md 3.3): a region parks the service vehicles whose
+// home SERVICE_SPOTS puts inside its crop, plus one patrol bay when it has no
+// police home. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { regionFor, inRegion } from '../src/world/regions.js';
+import { regionServiceSpots, SERVICE_MARGIN } from '../src/systems/service.js';
+
+test('SV-R1: each region keeps the homes inside its crop and has a police home; Downtown and the whole box keep all twenty', () => {
+  const dt = regionCity('miami-downtown');
+  assert.deepEqual(regionServiceSpots(dt), SERVICE_SPOTS, 'Downtown: every home as today');
+  assert.equal(regionServiceSpots({ region: null }), SERVICE_SPOTS, 'the whole box: the same list');
+  const want = {
+    'miami-beach': ['Patrol bay'], // the Port Fire Station's streets are Downtown's: no road reaches it here
+    'miami-north': ['City Yard', 'City Yard', 'Patrol bay'],
+    'miami-west': ['Calle Fire House', 'Calle Fire House', 'Tideline Medical Centre', 'Tideline Medical Centre', 'Ocho Patrol Base', 'Ocho Patrol Base'],
+    'miami-south': ['Patrol bay'],
+  };
+  for (const [id, c] of allRegionCities()) {
+    const list = regionServiceSpots(c);
+    if (id in want) assert.deepEqual(list.map((s) => s.name), want[id], id);
+    assert.ok(list.some((s) => s.kind === 'police'), id + ' has a police home');
+    for (const s of list) assert.ok(inRegion(regionFor(id), s.x, s.z, s.name === 'Patrol bay' ? 150 : SERVICE_MARGIN), `${id} ${s.name} inside`);
+    // Same list from the same city.
+    assert.deepEqual(regionServiceSpots(c), list, id + ' deterministic');
+  }
+  // Every home lies in some region.
+  for (const s of SERVICE_SPOTS) assert.ok(allRegionCities().some(([id]) => inRegion(regionFor(id), s.x, s.z, SERVICE_MARGIN)), s.name);
+});
+
+test('SV-R2: a generated patrol bay passes the parking rules; every hand home stands on land, off buildings, by a road', () => {
+  // The hand homes were tuned on the whole box (SV-P1). A region's lot raster has
+  // its own origin, so a home at a lot's very edge can fall a cell outside it there
+  // ("box off the lot"): those keep the looser rule below, the generated bays the full one.
+  let generated = 0;
+  for (const [id, c] of allRegionCities()) {
+    const cache = new Map();
+    const out = {};
+    const list = regionServiceSpots(c);
+    for (const s of list) {
+      const sp = VEHICLE_SPECS[s.kind];
+      assert.ok(c.isLand(s.x, s.z) && !c.inBuilding(s.x, s.z), `${id} ${s.name} on land, off buildings`);
+      assert.ok(nearestRoad(c, s.x, s.z).dist < SPOT_RULES.roadNear, `${id} ${s.name} by a road`);
+      if (s.kerb) continue; // a kerb bay: the region's kerb spots are seeded again, only the ground is checked
+      if (s.name === 'Patrol bay') {
+        generated++;
+        const r = checkSpot(c, s, sp, cache, out);
+        assert.ok(r.ok, `${id} ${s.name} ${s.kind} at ${s.x}, ${s.z}: ${r.why}`);
+        const lot = c.lotAt(s.x, s.z);
+        assert.ok(lot && SPOT_RULES.lotTypes.includes(lot.type), `${id} lot type ${lot && lot.type}`);
+        assert.ok(Math.hypot(s.x - c.spawn.x, s.z - c.spawn.z) > SPOT_RULES.titleClear, `${id} ${s.name} inside the title shot`);
+      }
+      assert.ok(!c.garages.some((g) => s.x > g.x0 - 2 && s.x < g.x1 + 2 && s.z > g.z0 - 2 && s.z < g.z1 + 2), `${id} ${s.name}: not on a garage`);
+    }
+  }
+  assert.equal(generated, 3, 'Beach, North and South have no police home of their own');
+});
+
+test('SV-R3: the service system parks the region\'s homes', () => {
+  const c = regionCity('miami-south');
+  const { game } = svcGame({ spots: null });
+  game.city = c;
+  const sys = createService(game);
+  assert.deepEqual(sys.spots, regionServiceSpots(c));
+  assert.equal(sys.homes.length, sys.spots.length);
+});

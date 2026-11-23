@@ -7,8 +7,11 @@
 //
 // Coordinates: x east, z south, metres. Heading 0 faces +x.
 import { createRng, TAU } from '../core/rng.js';
-import { placeGarages } from './garages.js';
+import { placeGarages, GARAGE_DEFS } from './garages.js';
 import { buildRoutes } from './courses.js';
+import { MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
+import { inRegion, PLACE_MARGIN } from './regions.js';
+import { attachRegionContent } from './regioncontent.js';
 
 export const ADVENTURE_SEED = 9241;
 export const ADV_SEEN_R = 300; // m from the giver: the adventure appears on the map
@@ -58,11 +61,14 @@ export const ADVENTURE_DEFS = [
     reward: R(KIND_SCORE.lookout),
   },
   {
+    // Re-anchored inside The Roads and the South Shore (PLAN_V2 3.2): the
+    // giver and every step lie 40 m inside that one region, with the reward
+    // garage g-roads.
     id: 'a-roads-end', name: 'Roads End', kind: 'clue', order: 'seq', needs: [],
-    giver: { type: 'garage', x: 0, z: 0, garage: 'g-havana', line: 'The mechanic swears there is a forgotten lock-up where the Roads run out.' },
+    giver: { type: 'sign', x: -2350, z: 2150, garage: null, line: 'Notice: the mechanic at the Roads swears there is a forgotten lock-up where the Roads run out.' },
     steps: [
-      S('Start where the river boats tie up by the little park in Little Havana.', { anchor: { x: -2312, z: 430 } }, { r: 18, hint: 150 }),
-      S('Follow the river down and turn south, past the big towers, to the diagonal streets.', { anchor: { x: -2050, z: 1950 } }, { r: 20, hint: 160 }),
+      S('Start where the quiet streets of the Roads begin, west of the big towers.', { anchor: { x: -2750, z: 2250 } }, { r: 18, hint: 150 }),
+      S('Follow the diagonal streets south, toward the bay.', { anchor: { x: -2050, z: 2850 } }, { r: 20, hint: 160 }),
       S('Where the Roads run out toward the bay, look for an old shed.', { garage: 'g-roads' }, { r: 18, hint: 140 }),
     ],
     reward: R(KIND_SCORE.clue, { garage: 'g-roads' }),
@@ -344,35 +350,88 @@ function resolveGiver(city, g, garages) {
   return nearestWhere(g.x, g.z, 300, open);
 }
 
+// Every fixed point an adventure definition names (the giver, each step),
+// as { x, z } from the hand tables: what decides which region offers it
+// (PLAN_V2 3.2: the region that holds the giver and every step at least
+// 40 m inside). A giver of type 'start' is the player's start place and a
+// pier step is looked up by label; a step on a garage or secret uses that
+// one's anchor.
+export function adventurePoints(def) {
+  const out = [];
+  const add = (p) => { if (p && Number.isFinite(p.x) && Number.isFinite(p.z)) out.push({ x: p.x, z: p.z }); };
+  const g = def.giver;
+  if (g.type === 'garage') add(GARAGE_DEFS.find((q) => q.id === g.garage));
+  else if (g.type !== 'start') add(g);
+  for (const s of def.steps) {
+    const at = s.at;
+    if (at.anchor || at.water || at.roof) add(at.anchor || at.water || at.roof);
+    else if (at.pier) add((MIAMI_SPOTS.piers || []).find((q) => q.label === at.pier));
+    else if (at.landmark) add((MIAMI_SPOTS.landmarks || []).find((q) => q.id === at.landmark) || MIAMI_LANDMARKS.find((q) => q.landmark === at.landmark));
+    else if (at.garage) add(GARAGE_DEFS.find((q) => q.id === at.garage));
+    else if (at.secret) {
+      const sp = (MIAMI_SPOTS.secrets || {})[at.secret];
+      if (sp && sp.region) add({ x: (sp.region.x0 + sp.region.x1) / 2, z: (sp.region.z0 + sp.region.z1) / 2 });
+      else add(sp);
+    } else if (at.lot) add(at.near);
+  }
+  return out;
+}
+
+// Is this definition offered by `region` (a region, an id or a city; null:
+// the whole box, which offers all of them)?
+export function adventureInRegion(def, region) {
+  if (!region) return true;
+  return adventurePoints(def).every((p) => inRegion(region, p.x, p.z, PLACE_MARGIN));
+}
+
 // city.adventures: the sixteen, resolved. Each is the definition plus
 // `index`, `place`, `core`, the giver's x, z and every step's x, z, minY
 // and its map ring centre (rx, rz). Throws when a step cannot be placed
-// (a data change the tests must catch). [] on a map without lots.
+// (a data change the tests must catch). [] on a map without lots. A region
+// build (city.region) resolves only the adventures it holds
+// (adventureInRegion); one that cannot be placed inside the crop, or whose
+// reward garage was not built there, is left out instead of throwing.
 export function placeAdventures(city, garages = city.garages || []) {
   if (!city || !Array.isArray(city.lots) || !city.lots.length) return [];
-  return ADVENTURE_DEFS.map((def, index) => {
+  const region = city.region || null;
+  const out = [];
+  ADVENTURE_DEFS.forEach((def, index) => {
+    if (region && !adventureInRegion(def, region)) return;
+    if (region && def.reward.garage && !garages.some((q) => q.id === def.reward.garage)) return;
     const gp = resolveGiver(city, def.giver, garages);
-    if (!gp) throw new Error('adventures: no giver spot for ' + def.id);
+    if (!gp) {
+      if (region) return;
+      throw new Error('adventures: no giver spot for ' + def.id);
+    }
     const giver = { ...def.giver, x: gp.x, z: gp.z, heading: 0 };
-    const steps = def.steps.map((s, k) => {
+    const steps = [];
+    for (let k = 0; k < def.steps.length; k++) {
+      const s = def.steps[k];
       const p = resolveStep(city, s, garages);
-      if (!p) throw new Error('adventures: no place for ' + def.id + ' step ' + k);
+      if (!p) {
+        if (region) return;
+        throw new Error('adventures: no place for ' + def.id + ' step ' + k);
+      }
       const rng = createRng(ADVENTURE_SEED + index * 8 + k);
       const a = rng.range(0, TAU), off = rng.range(0, s.hint / 2);
-      return {
+      steps.push({
         clue: s.clue, at: s.at, r: s.r, minY: p.minY, mode: s.mode, stunt: s.stunt, hint: s.hint,
         x: p.x, z: p.z,
         rx: Math.round((p.x + Math.cos(a) * off) * 10) / 10, rz: Math.round((p.z + Math.sin(a) * off) * 10) / 10,
-      };
-    });
+      });
+    }
+    // Resolved points may drift (a search spirals out): a region keeps the
+    // adventure only if all of it is still inside.
+    if (region && !(inRegion(region, giver.x, giver.z, 20) && steps.every((q) => inRegion(region, q.x, q.z, 20)))) return;
     const last = steps[steps.length - 1];
     const core = city.inCore ? steps.every((s) => city.inCore(s.x, s.z)) && city.inCore(giver.x, giver.z) : false;
-    return {
+    out.push({
       id: def.id, name: def.name, kind: def.kind, order: def.order, needs: def.needs.slice(), reward: { ...def.reward },
       index, giver, steps, core,
       place: city.placeOf ? city.placeOf(last.x, last.z) : '',
-    };
+    });
   });
+  return out;
 }
 
 export const adventureById = (list, id) => {
@@ -409,6 +468,10 @@ export function stepReached(s, x, y, z, pmode, stunt = null) {
 // the garage rects). Returns the city.
 export function attachExplore(city) {
   if (!city || !city.map || !Array.isArray(city.lots) || !city.lots.length || city.garages) return city;
+  // A region build first gets what its map lacks (world/regioncontent.js:
+  // start view, pier, helipad, ramps, the secrets and courses it holds), so
+  // the garages keep clear of them.
+  attachRegionContent(city);
   city.garages = placeGarages(city);
   city.adventures = placeAdventures(city, city.garages);
   city.routes = buildRoutes(city, ROUTE_SPECS);

@@ -350,7 +350,7 @@ try {
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
   await grp('game');
-  check('game group: the Map row names the current map', (await page.locator('[data-role="map"]').innerText()).includes('Miami'));
+  check('game group: the Map row names the current map', (await page.locator('[data-role="map"]').innerText()).includes('Downtown and the Bay'));
   await page.locator('[data-role="newgame"]').tap();
   check('New game screen opens', (await page.locator('.rw-menu-title').innerText()) === 'New game' && (await page.locator('.rw-menu-confirmrow').count()) === 2);
   await page.screenshot({ path: path.join(out, 'newgame-915x412.png') });
@@ -388,20 +388,21 @@ try {
   const sv = await stored();
   check('reset saved', sv && sv.version === 3 && sv.score.total === 0);
   check('progress object kept in place', await ev(() => window.rw.game.progress === window.refP && window.rw.game.progress.score === window.refO));
-  // Map choice: two cards, the other one arms a confirm, Yes switches.
+  // Map choice: one card per region and the island; one tap on another map stores it and reloads behind a veil.
   await page.locator('.rw-menu-back').tap();
   await page.locator('[data-role="map"]').tap();
-  check('Map choice: two cards, Miami marked', (await page.locator('.rw-menu-card').count()) === 2 && (await page.locator('.rw-menu-card[data-map="miami"]').getAttribute('data-current')) === 'true');
-  await page.locator('[data-role="map-island"]').tap();
-  check('Map choice: the other map arms, with the warning and the named Yes', (await page.locator('[data-role="map-island-confirm"]').innerText()) === 'Yes, switch to the classic island'
-    && (await page.locator('.rw-menu-card[data-map="island"]').innerText()).includes('Switching restarts the game'));
-  await page.screenshot({ path: path.join(out, 'mapchoice-armed-915x412.png') });
-  await page.locator('[data-role="map-island-cancel"]').tap();
-  check('Map choice: Cancel disarms and nothing changed', (await page.locator('[data-role="map-island-confirm"]').count()) === 0 && (await ev(() => localStorage.getItem('rustwater.map'))) === null);
-  await page.locator('[data-role="map-island"]').tap();
-  await Promise.all([page.waitForNavigation().catch(() => {}), page.locator('[data-role="map-island-confirm"]').tap()]);
+  check('Map choice: five regions and the island, Downtown marked', (await page.locator('.rw-mp-card').count()) === 6 && (await page.locator('.rw-mp-card[data-map="miami-downtown"]').getAttribute('data-current')) === 'true'
+    && (await page.locator('.rw-mp-card[data-current="true"]').count()) === 1);
+  const mapNames = await page.locator('.rw-mp-card b').allInnerTexts();
+  check('Map choice: clear names', JSON.stringify(mapNames) === JSON.stringify(['Downtown and the Bay', 'Miami Beach and the Islands', 'Wynwood and the North Side', 'Little Havana and Civic Center', 'The Roads and the South Shore', 'Classic island']), JSON.stringify(mapNames));
+  const cardBox = await page.locator('.rw-mp-card').first().boundingBox();
+  check('Map choice: touch targets 48+', cardBox.height >= 48 && cardBox.width >= 48, JSON.stringify(cardBox));
+  await page.screenshot({ path: path.join(out, 'mapchoice-915x412.png') });
+  await page.locator('[data-role="map-miami-downtown"]').tap();
+  check('Map choice: the current map does nothing', (await ev(() => localStorage.getItem('rustwater.map'))) === null && (await page.locator('[data-role="map-veil"]').count()) === 0);
+  await Promise.all([page.waitForNavigation().catch(() => {}), page.locator('[data-role="map-miami-beach"]').tap()]);
   await page.waitForFunction(() => window.rw);
-  check('Map choice: Yes saves the map and restarts', (await ev(() => localStorage.getItem('rustwater.map'))) === 'island');
+  check('Map choice: one tap saves the map and restarts', (await ev(() => localStorage.getItem('rustwater.map'))) === 'miami-beach');
   await ev(() => localStorage.removeItem('rustwater.map'));
 
   // Registered screens (W11 adds Garage, Garages, Adventures this way).

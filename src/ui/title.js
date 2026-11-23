@@ -15,6 +15,9 @@
 // The About page (docs/UI.md): `fillAbout(doc, parent, { version })` writes the
 // content; the title shows it in its own panel (the About button, top right),
 // the pause menu shows the same content on its About screen.
+import { fillMapPicker, switchMap } from './mappicker.js';
+import { mapName, pickerCurrent } from '../core/travel.js';
+
 export const MAP_CREDIT = 'Map data (c) OpenStreetMap contributors, ODbL';
 export const PRIVACY_PAGE = 'privacy.html';
 
@@ -105,6 +108,50 @@ export function createTitle(doc) {
     aboutBox = null;
     if (aboutBtn) aboutBtn.focus({ preventScroll: true });
   }
+  // The map picker (PLAN_V2 5.3 R3): one tap on a map stores it, shows the loading veil and reloads.
+  const mapBtn = doc.getElementById('mapbtn');
+  let mapId = null, mapBox = null;
+  function closeMap() {
+    if (mapBox) mapBox.remove();
+    mapBox = null;
+    if (mapBtn) mapBtn.focus({ preventScroll: true });
+  }
+  function openMap() {
+    if (!boot || mapBox) return;
+    if (!doc.getElementById('rw-about-style')) {
+      const st = doc.createElement('style');
+      st.id = 'rw-about-style';
+      st.textContent = ABOUT_CSS;
+      doc.head.appendChild(st);
+    }
+    mapBox = doc.createElement('div');
+    mapBox.className = 'rw-aboutwrap';
+    mapBox.dataset.role = 'map-panel';
+    const box = doc.createElement('div');
+    box.className = 'rw-aboutbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Choose a map');
+    const top = doc.createElement('div');
+    top.className = 'rw-abouttop';
+    const t = doc.createElement('b');
+    t.textContent = 'Choose a map';
+    const close = doc.createElement('button');
+    close.type = 'button';
+    close.className = 'rw-aboutclose';
+    close.dataset.role = 'map-close';
+    close.textContent = 'Close';
+    close.addEventListener('click', closeMap);
+    top.append(t, close);
+    const body = doc.createElement('div');
+    body.className = 'rw-aboutbody';
+    fillMapPicker(doc, body, { current: mapId, onPick: (id) => switchMap(doc, id) });
+    box.append(top, body);
+    mapBox.appendChild(box);
+    boot.appendChild(mapBox);
+    close.focus({ preventScroll: true });
+  }
+  if (mapBtn) mapBtn.addEventListener('click', openMap);
   if (aboutBtn) aboutBtn.addEventListener('click', openAbout);
   if (play) play.addEventListener('click', () => { if (startFn && !play.disabled) startFn(); });
   if (cont) cont.addEventListener('click', () => { if (contFn && !cont.disabled) contFn(); });
@@ -118,7 +165,13 @@ export function createTitle(doc) {
     // true: the page background goes clear so the 3D view shows through.
     showView(on) { if (boot) boot.classList.toggle('rw-clear', !!on); },
     hide() { if (boot) boot.style.display = 'none'; },
+    // The map being played: the Map button names it.
+    setMap(id) {
+      mapId = pickerCurrent(id);
+      if (mapBtn) mapBtn.textContent = mapName(mapId) || 'Map';
+    },
     isAboutOpen: () => !!aboutBox,
+    isMapOpen: () => !!mapBox,
     isShown() { return !!boot && boot.style.display !== 'none'; },
   };
 }

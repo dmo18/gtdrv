@@ -154,7 +154,10 @@ function dockRamps(city, out) {
 
 // A real map: hand-placed street ramps, each on the named street nearest
 // its point, in the middle of a straight stretch (along the street, both
-// ways), then the dock ramps. Spec: [{ name, street, x, z }].
+// ways), then the dock ramps. Spec: [{ name, street, x, z }]. A region
+// build (city.region) holds only part of the map: a ramp whose street has
+// no straight stretch within 200 m is left out there instead of throwing;
+// the whole box still throws (a data change the tests must catch).
 export function placeRamps(city, spec) {
   const out = [];
   const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6; // m of straight road each side of the centre
@@ -175,10 +178,73 @@ export function placeRamps(city, spec) {
         best = { x, z, heading: Math.atan2(e.uz, e.ux) };
       }
     }
-    if (!best || bd > 200) throw new Error('stunts: no straight stretch of ' + r.street);
+    if (!best || bd > 200) {
+      if (city.region) continue;
+      throw new Error('stunts: no straight stretch of ' + r.street);
+    }
     const x = Math.round(best.x * 10) / 10, z = Math.round(best.z * 10) / 10;
     out.push(makeSpot('stunt_' + slug(r.name), r.name, x, z, Math.round(best.heading * 1000) / 1000, RAMP_LAND, false));
   }
   dockRamps(city, out);
+  return out;
+}
+
+// Ramps for a region that has fewer than `count` of the hand-placed ones
+// (docs/PLAN_V2.md 3.3: two in every region): quiet straight stretches of
+// ordinary streets, at least 200 m from the region's edge and MIN_GAP from
+// each other and from the ramps it already has, picked by a seeded shuffle.
+// Returns the new spots only (the caller appends them). Pure.
+const FAST = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link']);
+export function generateRegionRamps(city, count, seed = 6203) {
+  const have = Array.isArray(city.rampSpots) ? city.rampSpots : [];
+  const out = [];
+  if (!city || !city.edges || count <= have.length) return out;
+  const c = city.crop;
+  const inside = (x, z) => x > c.x0 + 200 && x < c.x1 - 200 && z > c.z0 + 200 && z < c.z1 - 200;
+  const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6;
+  const rng = createRng(seed);
+  const order = [];
+  city.edges.forEach((e, i) => {
+    if (!e.name || e.bridge || e.causeway || e.avenue || FAST.has(e.cls) || e.length < need * 2 + 30) return;
+    order.push({ i, k: rng.next() });
+  });
+  order.sort((p, q) => p.k - q.k || p.i - q.i);
+  const taken = have.map((r) => ({ x: r.x, z: r.z }));
+  const names = new Set(have.map((r) => r.name));
+  const spawn = city.spawn;
+  for (const { i } of order) {
+    if (have.length + out.length >= count) break;
+    const e = city.edges[i];
+    const a = city.nodes[e.a], b = city.nodes[e.b];
+    const t0 = Math.max(a.hx, a.hz) + need, t1 = e.length - Math.max(b.hx, b.hz) - need;
+    if (t1 < t0) continue;
+    const mid = (t0 + t1) / 2;
+    for (let dt = 0; dt <= (t1 - t0) / 2 + 1e-6; dt += 2) {
+      let hit = null;
+      for (const t of dt ? [mid - dt, mid + dt] : [mid]) {
+        const x = a.x + e.ux * t, z = a.z + e.uz * t;
+        const hx = e.ux * RAMP_LAND.slope * 2, hz = e.uz * RAMP_LAND.slope * 2;
+        if (!inside(x, z) || !city.isLand(x + hx, z + hz) || !city.isLand(x - hx, z - hz) || city.shoreDist(x, z) < 30) continue;
+        if (city.inBuilding && city.inBuilding(x, z, RAMP_LAND.width)) continue;
+        if (spawn && Math.hypot(x - spawn.x, z - spawn.z) < 120) continue;
+        if (taken.some((q) => Math.hypot(q.x - x, q.z - z) < MIN_GAP)) continue;
+        hit = { x, z };
+        break;
+      }
+      if (!hit) continue;
+      const place = city.placeOf ? city.placeOf(hit.x, hit.z) : '';
+      let name = '';
+      for (let k = 0; k < SUFFIX.length && !name; k++) {
+        const n = (place || 'Quiet Street') + ' ' + SUFFIX[(rng.int(0, SUFFIX.length - 1) + k) % SUFFIX.length];
+        if (!names.has(n)) name = n;
+      }
+      if (!name) break;
+      names.add(name);
+      taken.push(hit);
+      const x = Math.round(hit.x * 10) / 10, z = Math.round(hit.z * 10) / 10;
+      out.push(makeSpot('stunt_' + slug(name), name, x, z, Math.round(Math.atan2(e.uz, e.ux) * 1000) / 1000, RAMP_LAND, false));
+      break;
+    }
+  }
   return out;
 }

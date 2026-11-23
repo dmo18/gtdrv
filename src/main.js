@@ -2,6 +2,8 @@ import { createGame } from './game.js';
 import { registerServiceWorker } from './pwa.js';
 import { createTitle } from './ui/title.js';
 import { mapFromSearch, loadMapCity, MAP_CHOICE_KEY } from './world/maps.js';
+import { migrateMapChoice } from './core/save.js';
+import { takeTravelNote } from './core/travel.js';
 
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
@@ -43,7 +45,20 @@ function storedMap() {
   }
 }
 
+// Players of 0.4.0 to 0.6.0 played the whole box: once, their stored choice
+// becomes the region that holds their saved place (PLAN_V2 3.5). A map
+// named in the URL (tests, links) is left alone.
+function migrateStoredMap() {
+  try {
+    if (new URLSearchParams(location.search).has('map')) return;
+    migrateMapChoice(localStorage);
+  } catch {
+    // no storage: nothing to migrate
+  }
+}
+
 async function loadCity() {
+  migrateStoredMap();
   const id = mapFromSearch(location.search, storedMap());
   if (id === 'island') return null;
   try {
@@ -87,6 +102,7 @@ function goFullscreen() {
 
 async function startUp() {
   const city = await loadCity();
+  const mapId = (city && city.mapId) || 'island';
   const game = createGame({
     canvas: document.getElementById('game'),
     uiRoot: document.getElementById('ui'),
@@ -111,6 +127,7 @@ async function startUp() {
     game.draw(1, 0);
     title.showView(true);
   }
+  title.setMap(mapId);
   title.setReady(true);
   title.setCanContinue(game.session.canContinue());
   title.onStart(() => {
@@ -122,13 +139,18 @@ async function startUp() {
     game.session.startFresh();
     start(game, true);
   });
-  title.onContinue(async () => {
+  // Continue, and the arrival after travel (a fresh page in the target
+  // region: no tap, so no full screen). `link`: the pad the player came
+  // through, for the exact arrival pose.
+  async function continueGame(tapped, link) {
     game.audio.unlock();
-    try {
-      await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
-      await screen.orientation?.lock?.('landscape');
-    } catch {
-      /* fine without */
+    if (tapped) {
+      try {
+        await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+        await screen.orientation?.lock?.('landscape');
+      } catch {
+        /* fine without */
+      }
     }
     const veil = fadeVeil();
     await veil.to(1);
@@ -140,11 +162,21 @@ async function startUp() {
       ok = false;
     }
     if (!ok) game.session.startFresh();
+    else if (link && game.session.arrive) game.session.arrive(link);
     start(game);
-    if (!ok && game.hud && game.hud.toast) game.hud.toast('Could not restore your place', 3);
+    if (!ok && game.hud && game.hud.toast) game.hud.toast(link ? 'Arrived at the start place' : 'Could not restore your place', 3);
     await veil.to(0);
     veil.remove();
-  });
+  }
+  title.onContinue(() => continueGame(true, null));
+  // Travel reloaded the page: carry on in the new region without the title.
+  let note;
+  try {
+    note = takeTravelNote(sessionStorage, mapId);
+  } catch {
+    note = null;
+  }
+  if (note && !autostart) continueGame(false, note.link);
   if (autostart) start(game);
 }
 startUp().catch((err) => {

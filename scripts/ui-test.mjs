@@ -682,6 +682,27 @@ async function liveLayout(check) {
         check(`${tag}: About button 48 high, inside the right edge, clear of everything else on the title`, ab.btn.h >= 47.5 && ab.btn.w >= 47.5 && ab.btn.r <= w - 7.5 && ab.btn.y >= 7.5 && !ab.others.some(hit), JSON.stringify(ab));
         check(`${tag}: About panel fits, buttons 48+, version, OpenStreetMap ODbL credit, invented names, privacy link, closes`, ab.box.x >= L - 0.5 && ab.box.r <= w + 0.5 && ab.box.b <= h + 0.5 && ab.box.y >= -0.5 && ab.small === 0 && /Version v\d/.test(ab.text)
           && /OpenStreetMap contributors, ODbL/.test(ab.text) && /invented/.test(ab.text) && ab.link === 'privacy.html' && ab.closed, JSON.stringify(ab));
+        // The Map button (left of About) and the picker: 48 px targets, clear of the other title parts, one tap on a card reloads.
+        const mp = await tp.evaluate(() => {
+          const rc = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+          const btn = document.getElementById('mapbtn');
+          const out = { btn: rc(btn), label: btn.textContent, others: ['#boot h1', '#bootmsg', '#aboutbtn', '#play', '#bootcredit', '#bootver'].map((q) => rc(document.querySelector(q))) };
+          btn.click();
+          const box = document.querySelector('.rw-aboutbox');
+          out.box = rc(box);
+          const body = document.querySelector('.rw-aboutbody');
+          out.scroll = body.scrollHeight - body.clientHeight;
+          const cards = [...box.querySelectorAll('.rw-mp-card')];
+          out.cards = cards.length;
+          out.small = [...box.querySelectorAll('button')].filter((e) => { const b = e.getBoundingClientRect(); return b.height < 47.5 || b.width < 47.5 || b.bottom > innerHeight || b.right > innerWidth; }).length;
+          out.current = cards.filter((c) => c.dataset.current === 'true').map((c) => c.dataset.map);
+          document.querySelector('.rw-aboutclose').click();
+          out.closed = !document.querySelector('.rw-aboutbox');
+          return out;
+        });
+        const hitM = (o) => Math.min(mp.btn.r, o.r) - Math.max(mp.btn.x, o.x) > 0.5 && Math.min(mp.btn.b, o.b) - Math.max(mp.btn.y, o.y) > 0.5;
+        check(`${tag}: Map button 48 high, names the map, clear of everything else on the title`, mp.btn.h >= 47.5 && mp.btn.r <= w - 7.5 && /Downtown/.test(mp.label) && !mp.others.some(hitM), JSON.stringify(mp));
+        check(`${tag}: map picker fits without scrolling, six cards 48+, Downtown marked, closes`, mp.box.r <= w + 0.5 && mp.box.b <= h + 0.5 && mp.scroll <= 1 && mp.cards === 6 && mp.small === 0 && JSON.stringify(mp.current) === '["miami-downtown"]' && mp.closed, JSON.stringify(mp));
       }
       await tc.close();
     }

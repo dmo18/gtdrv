@@ -23,7 +23,12 @@ export function createMapUi(game, uiRoot) {
   let zoom = 190;
   let pausedByMap = false;
 
+  // The Travel list (PLAN_V2 3.4): only on a Miami region; returns the plain refusal or ''.
+  const travel = game.city.region
+    ? { current: game.city.mapId, go: (id) => (game.session && game.session.travelTo ? game.session.travelTo(id) : '') }
+    : null;
   const fullMap = createFullMap(uiRoot, renderer, {
+    travel,
     onWaypoint(p) {
       state.waypoint = p ? { x: p.x, z: p.z } : null;
       game.waypoint = state.waypoint;

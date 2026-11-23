@@ -211,7 +211,7 @@ export function saveProgress(storage, progress) {
 // (null: nothing stored). Never throws.
 export const MIGRATE_INSIDE = 60;
 export function migrateMapChoice(storage, key = MAP_CHOICE_KEY) {
-  let stored = null;
+  let stored;
   try {
     stored = storage ? storage.getItem(key) : null;
   } catch {

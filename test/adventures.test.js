@@ -47,7 +47,9 @@ test('sixteen adventures: ids, kinds, core split and the fixed ten', () => {
     for (const k of ['garage', 'car', 'route']) assert.equal(a.reward[k], rw[k] || null, id + ' ' + k);
   }
   assert.equal(byId['a-first-light'].giver.type, 'start');
-  assert.equal(byId['a-roads-end'].giver.garage, 'g-havana');
+  // Re-anchored inside The Roads and the South Shore (PLAN_V2 3.2): a notice board there, not the Havana garage.
+  assert.equal(byId['a-roads-end'].giver.type, 'sign');
+  assert.equal(city.placeOf(byId['a-roads-end'].giver.x, byId['a-roads-end'].giver.z), 'The Roads');
   assert.deepEqual(byId['a-beach-mile'].needs, ['a-sandbar']);
   assert.equal(byId['a-river-run'].steps.every((s) => s.mode === 'boat'), true);
   assert.equal(byId['a-nightheron'].steps[0].mode, 'air');
@@ -255,8 +257,8 @@ test('scripted run: First Light and Roads End step by step, score, events and th
   assert.ok(game.score.total - before >= KIND_SCORE.lookout);
   go(game, sys, fl.steps[0].x, fl.steps[0].z);
   assert.equal(count(game, 'adventureDone', fl.id), 1, 'done once');
-  // Roads End: heard at the Little Havana garage (the garage system marks it
-  // seen; here the giver is in reach), then the three clue steps in order.
+  // Roads End: heard at the notice board in The Roads (here the giver is in
+  // reach), then the three clue steps in order.
   const re = byId['a-roads-end'];
   go(game, sys, re.giver.x, re.giver.z);
   assert.ok(game.explore.state.adventures.seen.includes(re.id));
@@ -341,4 +343,83 @@ test('activities: a locked route is hidden until its adventure is done', () => {
   put(r.start.x + 400, r.start.z + 400);
   put(r.start.x, r.start.z);
   assert.equal(acts.offer, r.id);
+});
+
+// ---- Regions (docs/PLAN_V2.md 3.2): an adventure belongs to the region that
+// holds its giver and every step 40 m inside, and is offered only there. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { regionFor, inRegion, PLACE_MARGIN } from '../src/world/regions.js';
+import { ADVENTURE_DEFS, adventurePoints, adventureInRegion } from '../src/world/adventures.js';
+
+const OFFERED = {
+  'miami-downtown': ['a-first-light', 'a-river-run', 'a-keys-dash', 'a-nightheron', 'a-watson-wings', 'a-edgewater-hush', 'a-brickell-crawl', 'a-port-quay'],
+  'miami-beach': ['a-sandbar', 'a-far-key', 'a-beach-mile'],
+  'miami-north': ['a-sunchaser', 'a-tidewinder'],
+  'miami-west': ['a-civic-ledger'],
+  'miami-south': ['a-roads-end', 'a-hammock-trail'],
+};
+
+test('regions: each offers the adventures it holds (the table of PLAN_V2 3.2), every one in exactly one', () => {
+  const seen = {};
+  for (const [id, c] of allRegionCities()) {
+    assert.deepEqual(c.adventures.map((a) => a.id), OFFERED[id], id);
+    for (const a of c.adventures) seen[a.id] = (seen[a.id] || 0) + 1;
+    // The rule itself: the definition's giver and steps 40 m inside the crop.
+    for (const d of ADVENTURE_DEFS) {
+      const holds = adventurePoints(d).every((p) => inRegion(regionFor(id), p.x, p.z, PLACE_MARGIN));
+      assert.equal(adventureInRegion(d, regionFor(id)), holds, id + ' ' + d.id);
+      assert.equal(c.adventures.some((a) => a.id === d.id), holds, id + ' offers ' + d.id + ' iff it holds it');
+    }
+  }
+  assert.deepEqual(Object.keys(seen).sort(), ADVENTURE_IDS.slice().sort(), 'all sixteen are offered somewhere');
+  assert.ok(Object.values(seen).every((n) => n === 1), 'and in one region only');
+  assert.equal(adventureInRegion(ADVENTURE_DEFS[0], null), true, 'the whole box offers all');
+});
+
+test('regions: Roads End is re-anchored inside the South: giver, two clues and the reward garage', () => {
+  const def = ADVENTURE_DEFS.find((d) => d.id === 'a-roads-end');
+  assert.ok(adventurePoints(def).every((p) => inRegion(regionFor('miami-south'), p.x, p.z, PLACE_MARGIN)));
+  assert.ok(!adventurePoints(def).every((p) => inRegion(regionFor('miami-west'), p.x, p.z, PLACE_MARGIN)));
+  const c = regionCity('miami-south');
+  const a = c.adventures.find((q) => q.id === 'a-roads-end');
+  assert.equal(a.steps.length, 3);
+  assert.equal(a.giver.type, 'sign');
+  assert.equal(c.placeOf(a.steps[2].x, a.steps[2].z), 'The Roads');
+  const g = c.garages.find((q) => q.id === 'g-roads');
+  assert.ok(g && a.reward.garage === 'g-roads');
+  for (const s of a.steps) assert.ok(Math.hypot(s.x - a.giver.x, s.z - a.giver.z) >= 150);
+});
+
+test('regions: every step is reachable in its mode, 150 m from the giver, inside its region; rewards are in the region', () => {
+  for (const [id, c] of allRegionCities()) {
+    const r = regionFor(id);
+    const pierAt = (x, z) => c.piers.some((p) => x > p.x0 - 0.5 && x < p.x1 + 0.5 && z > p.z0 - 0.5 && z < p.z1 + 0.5);
+    for (const a of c.adventures) {
+      assert.ok(inRegion(r, a.giver.x, a.giver.z, 20), `${id} ${a.id} giver inside`);
+      for (const [k, s] of a.steps.entries()) {
+        assert.ok(inRegion(r, s.x, s.z, 20), `${id} ${a.id} step ${k} inside`);
+        assert.ok(Math.hypot(s.x - a.giver.x, s.z - a.giver.z) >= 150, `${id} ${a.id} step ${k} too near the giver`);
+        assert.ok(stepPlaceOk(c, s.x, s.z, s.mode), `${id} ${a.id} step ${k}`);
+        if (s.mode === 'boat') assert.ok(c.shoreDist(s.x, s.z) < -6);
+        else if (s.mode !== 'air') assert.ok(c.isLand(s.x, s.z) || pierAt(s.x, s.z));
+      }
+      if (a.reward.garage) assert.ok(c.garages.some((g) => g.id === a.reward.garage), `${id} ${a.id} reward garage built here`);
+      if (a.reward.route) assert.ok(c.routes.some((q) => q.id === a.reward.route), `${id} ${a.id} reward route built here`);
+      if (a.giver.type === 'garage') assert.ok(c.garages.some((g) => g.id === a.giver.garage), `${id} ${a.id} giver garage built here`);
+      for (const n of a.needs) assert.ok(c.adventures.some((q) => q.id === n), `${id} ${a.id} needs ${n} here`);
+    }
+    // The locked routes of a region are the ones its adventures open.
+    for (const q of c.routes) assert.ok(c.adventures.some((a) => a.reward.route === q.id), `${id} route ${q.id} has its adventure`);
+  }
+});
+
+test('regions: the locked routes are cut to the region and deterministic', () => {
+  const beach = regionCity('miami-beach');
+  assert.deepEqual(beach.routes.map((q) => [q.id, q.locked]), [['street-x-beach', 'a-beach-mile']]);
+  assert.deepEqual(buildRoutes(beach, ROUTE_SPECS), beach.routes);
+  const dt = regionCity('miami-downtown');
+  assert.deepEqual(dt.routes.map((q) => q.id), ['street-x-keys', 'boat-x-river']);
+  // Same shape as the whole box's.
+  const w = city.routes.find((q) => q.id === 'street-x-keys'), d = dt.routes.find((q) => q.id === 'street-x-keys');
+  assert.deepEqual([d.type, d.laps, d.locked], [w.type, w.laps, w.locked]);
 });

@@ -201,3 +201,65 @@ test('system: a slow car just drives over the ramp', () => {
   assert.ok(Math.abs(maxY - RAMP_LAND.height) < 1e-9, 'rode over the top');
   assert.ok(car.x > 12 && car.y === 0 && !car.stuntRamp, 'back on the road');
 });
+
+// ---- Regions (docs/PLAN_V2.md 3.3): every region has two ramps; a region
+// build leaves out a hand ramp its street cannot hold instead of throwing. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { placeRamps, generateRegionRamps } from '../src/world/stunts.js';
+import { regionFor, inRegion } from '../src/world/regions.js';
+
+const RAMPS = {
+  'miami-downtown': ['stunt_wynwood_kicker', 'stunt_little_havana_hop', 'stunt_edgewater_launch', 'stunt_palm_island_skip', 'stunt_dock_kicker', 'stunt_dock_splash'],
+  'miami-beach': ['stunt_palm_island_skip', 'stunt_miami_beach_launch'],
+  'miami-north': ['stunt_wynwood_kicker', 'stunt_edgewater_launch', 'stunt_dock_kicker', 'stunt_dock_splash'],
+  'miami-west': ['stunt_little_havana_hop', 'stunt_civic_center_skip'],
+  'miami-south': ['stunt_bay_heights_kicker', 'stunt_shenandoah_hop'],
+};
+
+test('regions: every region has at least two ramps, on land or in the water, clear of buildings, inside the crop', () => {
+  for (const [id, c] of allRegionCities()) {
+    assert.deepEqual(c.rampSpots.map((s) => s.id), RAMPS[id], id);
+    assert.ok(c.rampSpots.length >= 2, id);
+    assert.equal(new Set(c.rampSpots.map((s) => s.id)).size, c.rampSpots.length, id + ' unique ids');
+    for (const s of c.rampSpots) {
+      assert.match(s.id, /^stunt_[a-z0-9_]+$/);
+      assert.ok(inRegion(regionFor(id), s.x, s.z, 40), `${id} ${s.id} inside`);
+      const hx = s.ax * s.slope * 2, hz = s.az * s.slope * 2;
+      if (s.water) {
+        assert.ok(c.shoreDist(s.x, s.z) < 0, `${id} ${s.name} in the water`);
+      } else {
+        assert.ok(c.isLand(s.x, s.z) && c.isLand(s.x + hx, s.z + hz) && c.isLand(s.x - hx, s.z - hz), `${id} ${s.name} on land`);
+        assert.ok(!c.inBuilding(s.x, s.z, RAMP_LAND.width), `${id} ${s.name} clear of buildings`);
+        if (s.id !== 'stunt_dock_kicker') assert.ok(c.onRoad(s.x, s.z) && c.onRoad(s.x + hx, s.z + hz) && c.onRoad(s.x - hx, s.z - hz), `${id} ${s.name} on a straight stretch of road`);
+        assert.ok(rampAt([s], s.x, s.z, false) === s);
+      }
+      // No parked car stands on a street ramp.
+      if (!s.water) for (const p of c.parkingSpots) assert.ok(Math.hypot(p.x - s.x, p.z - s.z) >= s.r + 5.9, `${id} ${s.name}: a parked car on the ramp`);
+    }
+    // Street ramps keep apart (the generated ones by MIN_GAP, the hand ones are far apart).
+    const street = c.rampSpots.filter((s) => !s.water && s.id !== 'stunt_dock_kicker');
+    for (let i = 0; i < street.length; i++) {
+      for (let j = i + 1; j < street.length; j++) assert.ok(Math.hypot(street[i].x - street[j].x, street[i].z - street[j].z) >= 240, `${id} ${street[i].id} vs ${street[j].id}`);
+    }
+  }
+});
+
+test('regions: the generated ramps are seeded, off the start and never replace a hand ramp', () => {
+  const c = regionCity('miami-south');
+  assert.deepEqual(generateRegionRamps(c, 2).map((s) => s.id), [], 'two already: nothing more');
+  const spare = { ...c, rampSpots: [] };
+  const a = generateRegionRamps(spare, 2), b = generateRegionRamps(spare, 2);
+  assert.deepEqual(a, b);
+  assert.equal(a.length, 2);
+  for (const s of a) assert.ok(Math.hypot(s.x - c.spawn.x, s.z - c.spawn.z) >= 120, 'off the start place');
+  // A different seed picks other streets.
+  assert.notDeepEqual(generateRegionRamps(spare, 2, 1).map((s) => [s.x, s.z]), a.map((s) => [s.x, s.z]));
+});
+
+test('regions: a hand ramp whose street is not in the region is left out; the whole box still throws', () => {
+  const west = regionCity('miami-west');
+  const spec = [{ name: 'Nowhere Hop', street: 'No Such Street', x: -3000, z: 1000 }];
+  assert.deepEqual(placeRamps(west, spec).map((s) => s.id), [], 'a region leaves it out (only the dock ramps, which West lacks)');
+  const bare = { edges: [], nodes: [], isLand: () => true, shoreDist: () => 99 };
+  assert.throws(() => placeRamps(bare, spec), /no straight stretch/);
+});

@@ -513,6 +513,63 @@ export function lotStamps(C) {
   };
 }
 
+// ---- Region edges (docs/PLAN_V2.md 3.4) ----
+// A road cut by a region's sea edge ends in a striped barrier across the
+// lanes (the collision posts are world/collision.js fillRoadEndCollision) and
+// a round turning pad just inside it. `re`: a city.roadEnds entry. P is the
+// plain builder of the tile that holds the end.
+const END_STRIPE = [0xd8762c, 0xf2efe6];
+function drawRoadEnd(P, re) {
+  const b = re.barrier, h = b.heading;
+  const px = -Math.sin(h), pz = Math.cos(h);
+  // The turning pad: a worn patch with a pale rim.
+  const pd = re.pad;
+  P.cyl(pd.x, pd.z, 0, 0.026, pd.r, pd.r, 20, 0xc9c5b8, true);
+  P.cyl(pd.x, pd.z, 0, 0.034, pd.r - 0.35, pd.r - 0.35, 20, 0x45484d, true);
+  // A low concrete base across the road, striped rails above it, a post
+  // at each end.
+  P.obox(b.x, b.z, 0.34, b.w / 2, 0, 0.5, h, 0xb8b4ac, 0xc8c4bc, 0.6, 0.95);
+  const n = Math.max(2, Math.round(b.w / 1.5)), seg = b.w / n;
+  for (let k = 0; k < n; k++) {
+    const t = -b.w / 2 + seg * (k + 0.5);
+    P.obox(b.x + px * t, b.z + pz * t, 0.14, seg / 2, 0.5, 0.98, h, END_STRIPE[k & 1], END_STRIPE[k & 1]);
+  }
+  for (const t of [-b.w / 2, b.w / 2]) {
+    const x = b.x + px * t, z = b.z + pz * t;
+    P.cyl(x, z, 0, 1.7, 0.1, 0.1, 5, 0xe8e4dc, true);
+    P.cyl(x, z, 1.25, 1.7, 0.12, 0.12, 5, 0xd8762c, true);
+  }
+}
+
+// The colour of the sign for the region a pad leads to.
+const PAD_COLOR = { 'miami-downtown': 0x1f6f78, 'miami-beach': 0xe39b25, 'miami-north': 0xc8402e, 'miami-west': 0x2d8a5f, 'miami-south': 0x3a7bd5 };
+// A travel pad (city.travelPads entry): the turning pad painted in the
+// destination's colour with arrows pointing out of the region, and a
+// sign on the kerb facing the traffic. The words ("To Miami Beach") are in
+// render/markers.js createTravelMarkers.
+function drawTravelPad(P, pad) {
+  const col = PAD_COLOR[pad.to] || 0x1f6f78;
+  const h = pad.heading, ux = Math.cos(h), uz = Math.sin(h), px = -uz, pz = ux;
+  const r = pad.r;
+  P.cyl(pad.x, pad.z, 0, 0.04, r, r, 24, 0xf2efe6, true);
+  P.cyl(pad.x, pad.z, 0, 0.05, r - 0.4, r - 0.4, 24, col, true);
+  // Two arrows pointing out (toward the region edge).
+  for (const k of [-0.32, 0.34]) {
+    const cx = pad.x + ux * r * k, cz = pad.z + uz * r * k;
+    const tip = [cx + ux * r * 0.34, cz + uz * r * 0.34];
+    const l = [cx - ux * r * 0.1 + px * r * 0.34, cz - uz * r * 0.1 + pz * r * 0.34];
+    const rr = [cx - ux * r * 0.1 - px * r * 0.34, cz - uz * r * 0.1 - pz * r * 0.34];
+    P.tri(tip[0], 0.056, tip[1], rr[0], 0.056, rr[1], l[0], 0.056, l[1], 0xf2efe6, 0, 1, 0);
+  }
+  // The sign: two posts and a board on the right-hand kerb, face to the
+  // approaching traffic, in the destination's colour with a white band.
+  const half = r + 1.6;
+  const sx = pad.x - ux * 6 + px * half, sz = pad.z - uz * 6 + pz * half;
+  for (const t of [-1.0, 1.0]) P.cyl(sx + px * t, sz + pz * t, 0, 2.6, 0.06, 0.06, 4, 0x4a4c50);
+  P.obox(sx, sz, 0.05, 1.4, 1.5, 2.9, h, col, 0xf2efe6, 0.9, 1);
+  P.obox(sx - ux * 0.06, sz - uz * 0.06, 0.02, 1.25, 2.15, 2.4, h, 0xf2efe6, 0xf2efe6);
+}
+
 // own(x, z): emit geometry only for items it accepts (a streamed tile of
 // the real map; null: everything). side: also add the collision circles
 // (the real map does that once, for the whole map, with no geometry).
@@ -777,6 +834,14 @@ export function addProps(C, own = null, side = true, lists = null) {
       const col = rng.pick(FLOWERS);
       C.plain.at(fx, fz, 1).blob(fx, 0.2, fz, rng.range(1, 2), 0.3, rng.range(1, 2), col, 6, 3, 0.7, 1.1);
     }
+  }
+
+  // ---- region edges: generated road ends and travel pads (PLAN_V2 3.4) ----
+  for (const re of city.roadEnds || []) {
+    if (mine(re.barrier.x, re.barrier.z) || mine(re.pad.x, re.pad.z)) drawRoadEnd(C.plain.at(re.barrier.x, re.barrier.z), re);
+  }
+  for (const pad of city.travelPads || []) {
+    if (mine(pad.x, pad.z)) drawTravelPad(C.plain.at(pad.x, pad.z), pad);
   }
 
   // ---- piers: mooring bollards ----

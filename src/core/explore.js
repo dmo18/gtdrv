@@ -102,6 +102,21 @@ export function landCells(isLand) {
   return out;
 }
 
+// The land cells of the WHOLE data box (36 by 32 grid of 250 m, measured on
+// the built whole box with landCells), as the bits of the cell string. The
+// percent shown is "of all Miami" in every region (PLAN_V2 3.5 rule 5), so
+// it divides by these, not by the land of the region being played.
+export const MIAMI_LAND_B64 = '//8AAP7/HwDw////////DwDA//8AgP//zwP4//8/wP//jwD4//8EgP//D+Dx///A////3/////8fn///z3n7///8D///f//2///fb//////2///8f///D//////B//3/H/DP//8B8Pj/FwD8/38AwP//BwD0/38A4v7/AcAP/w8g/PB/AMc////f/fHHx/sf';
+let miamiLandCache = null;
+export function miamiLand() {
+  if (!miamiLandCache) {
+    const b = b64ToBytes(MIAMI_LAND_B64);
+    miamiLandCache = new Uint8Array(EXPLORE_CELLS);
+    for (let c = 0; c < EXPLORE_CELLS; c++) miamiLandCache[c] = cellBit(b, c);
+  }
+  return miamiLandCache;
+}
+
 // Percent of land cells visited, 0..100.
 export function explorePercent(bytes, land) {
   let n = 0, seen = 0;

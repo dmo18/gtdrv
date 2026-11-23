@@ -2,6 +2,7 @@
 // into an offscreen canvas; both views just blit it with a transform.
 //
 // Coordinates: x east, z south, metres. Heading 0 faces +x and grows toward +z.
+import { fillMapPicker } from './mappicker.js';
 
 const MAP_PX = 2048;
 const COL = {
@@ -451,6 +452,17 @@ const MAP_CSS = `
   padding: 8px 16px; border-radius: 999px; background: ${COL.panel}; border: 1px solid ${COL.accent};
   font-size: 14px; font-weight: 700; pointer-events: none; opacity: 0; transition: opacity 0.25s;
 }
+.rw-map-travelbtn {
+  position: absolute; left: calc(var(--rw-map-sl) + 10px); bottom: calc(var(--rw-map-sb) + 10px);
+  min-width: 112px; height: 52px; padding: 0 18px; border-radius: 999px; border: 2px solid ${COL.accent};
+  background: ${COL.panel}; color: ${COL.text}; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; touch-action: manipulation;
+}
+.rw-map-travel {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box;
+  width: min(560px, calc(100% - var(--rw-map-sl) - var(--rw-map-sr) - 24px)); max-height: calc(100% - var(--rw-map-st) - var(--rw-map-sb) - 24px); overflow-y: auto;
+  padding: 10px; border-radius: 16px; background: rgba(14,26,32,0.96); border: 2px solid ${COL.accent}; touch-action: pan-y;
+}
+.rw-map-travelh { font-size: 13px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 4px 8px; }
 .rw-map-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .rw-map-legend canvas { width: 18px; height: 18px; }
 `;
@@ -584,7 +596,7 @@ function drawIcon(g, type, color, s) {
   }
 }
 
-export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
+export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel = null } = {}) {
   injectCss();
   const city = mapRenderer.city;
   const el = document.createElement('div');
@@ -610,6 +622,35 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   const toast = document.createElement('div');
   toast.className = 'rw-map-toast';
   el.appendChild(toast);
+  // The Travel list (PLAN_V2 3.4): every region, tap to go. travel = { current, go(id) -> message or '' }.
+  let travelPanel = null;
+  if (travel) {
+    const tb = document.createElement('button');
+    tb.className = 'rw-map-travelbtn';
+    tb.type = 'button';
+    tb.dataset.role = 'map-travel';
+    tb.textContent = 'Travel';
+    tb.setAttribute('aria-label', 'Travel to another part of Miami');
+    el.appendChild(tb);
+    tb.addEventListener('click', () => {
+      if (travelPanel) { travelPanel.remove(); travelPanel = null; return; }
+      travelPanel = document.createElement('div');
+      travelPanel.className = 'rw-map-travel';
+      travelPanel.dataset.role = 'travel-list';
+      const h = document.createElement('div');
+      h.className = 'rw-map-travelh';
+      h.textContent = 'Travel to';
+      travelPanel.appendChild(h);
+      fillMapPicker(document, travelPanel, {
+        current: travel.current, regionsOnly: true, hint: 'Tap to travel',
+        onPick: (id) => {
+          const msg = travel.go(id);
+          if (msg) showToast(msg);
+        },
+      });
+      el.appendChild(travelPanel);
+    });
+  }
   root.appendChild(el);
 
   const g = canvas.getContext('2d');
@@ -980,6 +1021,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose } = {}) {
   function close() {
     if (!opened) return;
     opened = false;
+    if (travelPanel) { travelPanel.remove(); travelPanel = null; }
     el.classList.remove('rw-map-open');
     pointers.clear();
     gesture = null;

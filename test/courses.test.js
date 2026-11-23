@@ -501,3 +501,136 @@ test('activities: sky rings count in 3D', () => {
   put(game, sys, cp.x, cp.z, cp.y);
   assert.equal(sys.active.index, 1);
 });
+
+// ---- Regions (docs/PLAN_V2.md 3.2, 3.3): a course is built in a region that
+// holds all its points 40 m inside; each of the four new regions also gets
+// the courses generated from its own roads and shore. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { regionFor, inRegion, holdsAll, pointsIn, PLACE_MARGIN } from '../src/world/regions.js';
+import { MIAMI_COURSES } from '../src/world/miami-spots.js';
+import { regionCourseSpec } from '../src/world/regioncontent.js';
+import { gateIsClear, waterLineClear, buildSpecCourses } from '../src/world/courses.js';
+
+const REGION_COURSES = {
+  'miami-downtown': ['street-glasswell', 'street-fernside', 'street-rim', 'street-causeway', 'boat-saltyard', 'boat-slalom', 'boat-island', 'sky-gull', 'sky-threader', 'sky-rooftop', 'deliver-courier', 'deliver-fare', 'deliver-tide', 'deliver-airmail'],
+  'miami-beach': ['street-beach-loop', 'boat-beach-sprint', 'deliver-beach-courier'],
+  'miami-north': ['street-north-loop', 'street-causeway', 'sky-gull', 'sky-rooftop', 'deliver-north-courier', 'deliver-airmail'],
+  'miami-west': ['street-west-loop', 'deliver-west-courier'],
+  'miami-south': ['street-south-loop', 'boat-south-sprint', 'deliver-south-courier'],
+};
+
+test('regions: the courses each builds are pinned, ids unique across the regions that share one', () => {
+  for (const [id, c] of allRegionCities()) {
+    assert.deepEqual(c.courses.map((q) => q.id).sort(), REGION_COURSES[id].slice().sort(), id);
+    assert.equal(new Set(c.courses.map((q) => q.name)).size, c.courses.length, id + ' names');
+    assert.ok(c.courses.length >= 1, id);
+  }
+  // Downtown's fourteen are the whole box's, in the same order (the R1 spec, unfiltered).
+  assert.deepEqual(regionCity('miami-downtown').courses.map((q) => q.id), REGION_COURSES['miami-downtown']);
+});
+
+test('regions: Palm Island Sprint (last gate 100 m outside Downtown) stays Downtown\'s; the spec filter drops it elsewhere', () => {
+  const sprint = MIAMI_COURSES.boats.find((b) => b.id === 'boat-saltyard');
+  assert.ok(!holdsAll(regionFor('miami-downtown'), pointsIn([sprint.start, sprint.gates]), PLACE_MARGIN), 'not 40 m inside Downtown');
+  for (const id of ['miami-beach', 'miami-north', 'miami-west', 'miami-south']) {
+    assert.ok(!regionCourseSpec(regionCity(id)).boats.some((b) => b.id === 'boat-saltyard'), id);
+  }
+  // Every part of a filtered spec is held 40 m inside.
+  for (const id of ['miami-beach', 'miami-north', 'miami-west', 'miami-south']) {
+    const c = regionCity(id), spec = regionCourseSpec(c);
+    for (const s of spec.street) assert.ok(holdsAll(regionFor(id), pointsIn(s.via), PLACE_MARGIN), id + ' ' + s.id);
+    for (const b of spec.boats) assert.ok(holdsAll(regionFor(id), pointsIn([b.start, b.gates]), PLACE_MARGIN), id + ' ' + b.id);
+    assert.equal(!!spec.threader, false, id + ' no threader: it spans Downtown and North');
+  }
+  assert.ok(!regionCourseSpec(regionCity('miami-west')).gull, 'West has no airfield, so no sky courses');
+  assert.ok(regionCourseSpec(regionCity('miami-north')).gull, 'North shares Gullwing');
+});
+
+test('regions: valid numbers, medals, starts apart and clear of parked craft, every point inside the region', () => {
+  for (const [id, c] of allRegionCities()) {
+    const r = regionFor(id);
+    const list = c.courses;
+    for (const q of list) {
+      assert.match(q.id, /^[a-z0-9_-]{1,40}$/);
+      assert.ok(q.name.length > 2 && q.blurb.length > 10 && q.kinds.length > 0 && q.laps >= 1, q.id);
+      for (const k of ['x', 'z', 'y', 'heading']) assert.ok(fin(q.start[k]), `${q.id} start.${k}`);
+      assert.ok(q.checkpoints.length >= 1);
+      for (const cp of q.checkpoints) {
+        for (const k of ['x', 'z', 'y', 'r', 'dir']) assert.ok(fin(cp[k]), `${q.id} cp.${k}`);
+        if (id !== 'miami-downtown') assert.ok(inRegion(r, cp.x, cp.z, 0), `${id} ${q.id} checkpoint inside the crop`);
+      }
+      const m = q.medalTimes;
+      assert.ok(m.gold > 0 && m.gold < m.silver && m.silver < m.bronze, q.id);
+      assert.ok(q.reward.gold > q.reward.silver && q.reward.silver > q.reward.bronze && q.reward.bronze > 0, q.id);
+      assert.ok(q.length / m.gold <= REF_SPEED[q.kinds[0]] + 1e-9, q.id);
+      if (q.type === 'delivery') assert.equal(q.timeLimit, m.bronze);
+    }
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) assert.ok(Math.hypot(list[i].start.x - list[j].start.x, list[i].start.z - list[j].start.z) > 30, `${id} ${list[i].id} vs ${list[j].id}`);
+    }
+    const spots = [...c.aircraftSpots, ...c.boatSpots];
+    for (const q of list) {
+      if (q.id === 'sky-gull') continue;
+      for (const s of spots) assert.ok(Math.hypot(s.x - q.start.x, s.z - q.start.z) >= 14, `${id} ${q.id} start near a ${s.spec}`);
+    }
+  }
+});
+
+test('regions: street courses run junction to junction on road, boat gates are at sea, rings clear the roofs, pads are on roofs or helipads', () => {
+  for (const [id, c] of allRegionCities()) {
+    const pierD = (x, z) => c.piers.reduce((m, p) => Math.min(m, Math.hypot(Math.max(p.x0 - x, 0, x - p.x1), Math.max(p.z0 - z, 0, z - p.z1))), Infinity);
+    for (const q of c.courses) {
+      const cps = q.checkpoints;
+      if (cps[0].kind === 'ground') {
+        assert.ok(c.onRoad(q.start.x, q.start.z), `${id} ${q.id} start off road`);
+        for (const [k, cp] of cps.entries()) {
+          assert.ok(c.onRoad(cp.x, cp.z) && !c.inBuilding(cp.x, cp.z, 0), `${id} ${q.id} cp ${k} off road`);
+          const node = c.nodes[cp.node];
+          assert.ok(node && Math.hypot(node.x - cp.x, node.z - cp.z) < 0.2, `${id} ${q.id} cp ${k} not a node`);
+          // The causeway race also stops at bends on its way to the airfield gate.
+          if (q.id !== 'street-causeway') assert.ok(node.edges.length >= 3, `${id} ${q.id} cp ${k} not a junction`);
+          if (q.type === 'street' || k > 0) {
+            const prev = cps[(k + cps.length - 1) % cps.length];
+            if (prev !== cp) assert.ok(roadDistance(c, prev.node, cp.node) < 4 * Math.hypot(cp.x - prev.x, cp.z - prev.z), `${id} ${q.id} cp ${k} detour`);
+          }
+        }
+        if (q.type === 'street') assert.ok(cps.length >= 8 && cps.length <= 16, `${id} ${q.id}: ${cps.length}`);
+      } else if (cps[0].kind === 'buoy') {
+        assert.ok(c.shoreDist(q.start.x, q.start.z) < -10, `${id} ${q.id} start not at sea`);
+        let px = q.start.x, pz = q.start.z;
+        for (const [k, cp] of cps.entries()) {
+          assert.ok(gateIsClear(c, cp.x, cp.z) && pierD(cp.x, cp.z) > 20, `${id} ${q.id} gate ${k}`);
+          assert.ok(waterLineClear(c, px, pz, cp.x, cp.z, -3), `${id} ${q.id} leg to gate ${k} crosses land`);
+          px = cp.x;
+          pz = cp.z;
+        }
+      } else {
+        for (const [k, cp] of cps.entries()) {
+          if (cp.kind === 'pad') {
+            const onHeli = c.helipads.some((h) => Math.hypot(h.x - cp.x, h.z - cp.z) < 1);
+            const roof = c.buildings.find((b) => cp.x >= b.x0 && cp.x <= b.x1 && cp.z >= b.z0 && cp.z <= b.z1);
+            assert.ok(onHeli || (roof && Math.abs(cp.y - (roof.h + 1)) < 0.6), `${id} ${q.id} pad ${k}`);
+            continue;
+          }
+          assert.ok(cp.y - cp.r > 5, `${id} ${q.id} ring ${k} too close to the ground`);
+          if (!cp.canyon) {
+            const tall = tallestNear(c, cp.x, cp.z, 40);
+            if (tall > 0) assert.ok(cp.y - cp.r >= tall + 25 - 1e-6, `${id} ${q.id} ring ${k} too near a tower`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('regions: the courses are deterministic, a spec with parts left out builds only those', () => {
+  for (const id of ['miami-beach', 'miami-north', 'miami-west', 'miami-south']) {
+    const c = regionCity(id);
+    // A rebuild from the stored spec gives the same courses (a generated boat sprint
+    // that failed its water check stays out).
+    const again = buildSpecCourses(c, c.courseSpec).filter((q) => c.courses.some((x) => x.id === q.id));
+    assert.deepEqual(again, c.courses, id);
+  }
+  assert.deepEqual(buildSpecCourses(regionCity('miami-west'), {}), []);
+  assert.deepEqual(buildSpecCourses(regionCity('miami-west'), { street: [], boats: [] }), []);
+});

@@ -346,3 +346,86 @@ export function createMarkers(scene, opts = {}) {
 
   return { root, showStart, hideStart, hideStarts, showCheckpoint, hideCheckpoint, hideCheckpoints, update, dispose };
 }
+
+// ---- Travel pads (docs/PLAN_V2.md 3.4) -------------------------------------
+// The glow and the words of each city.travelPads entry: a faint tube over
+// the pad in the destination's colour and a floating "To Miami Beach"
+// label that shows within TRAVEL_SHOW m. The paving, arrows and kerb sign
+// are static props (render/props.js). Built once; update() only moves
+// opacity and visibility. Browser only: returns null without a scene, a
+// document or pads, so node tests and the island are unaffected.
+export const TRAVEL_SHOW = 260;
+const TRAVEL_COLOR = { 'miami-downtown': 0x1f9aa8, 'miami-beach': 0xf0a030, 'miami-north': 0xe2573a, 'miami-west': 0x3fbf86, 'miami-south': 0x4d90e8 };
+// "Miami Beach and the Islands" reads "Miami Beach" on a sign.
+export function padLabel(name) {
+  const short = String(name || '').split(' and ')[0];
+  return 'To ' + short;
+}
+function labelSprite(text, color) {
+  if (typeof document === 'undefined') return null;
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = 96;
+  const c = cv.getContext('2d');
+  if (!c) return null;
+  c.fillStyle = 'rgba(16,20,24,0.78)';
+  c.fillRect(0, 0, 512, 96);
+  c.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  c.fillRect(0, 0, 14, 96);
+  c.fillStyle = '#f6efe6';
+  c.font = 'bold 44px sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillText(text, 262, 50, 480);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: true });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(14, 14 * 96 / 512, 1);
+  return sp;
+}
+// names: { regionId: name } (the picker's names; REGIONS in world/regions.js).
+export function createTravelMarkers(scene, city, names = {}) {
+  const pads = city && city.travelPads;
+  if (!scene || !pads || !pads.length || typeof document === 'undefined') return null;
+  const g = geo();
+  const root = new THREE.Group();
+  root.name = 'travel-markers';
+  const items = [];
+  for (const p of pads) {
+    const col = TRAVEL_COLOR[p.to] || 0x1f9aa8;
+    const grp = new THREE.Group();
+    grp.position.set(p.x, 0, p.z);
+    const tubeMat = glow(col, 0.5);
+    const tube = new THREE.Mesh(g.tube, tubeMat);
+    tube.scale.set(p.r * 0.92, 7, p.r * 0.92);
+    tube.renderOrder = 2;
+    grp.add(tube);
+    const label = labelSprite(padLabel(names[p.to] || p.to), col);
+    if (label) {
+      label.position.set(0, 9.5, 0);
+      label.renderOrder = 3;
+      grp.add(label);
+    }
+    grp.visible = false;
+    root.add(grp);
+    items.push({ p, grp, tubeMat, phase: items.length * 0.7 });
+  }
+  scene.add(root);
+  return {
+    root,
+    items,
+    // x, z: the player (or the camera); time: seconds of play.
+    update(x, z, time) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const on = Math.hypot(it.p.x - x, it.p.z - z) < TRAVEL_SHOW;
+        if (it.grp.visible !== on) it.grp.visible = on;
+        if (on) it.tubeMat.opacity = 0.3 + 0.2 * (0.5 + 0.5 * Math.sin(time * 3 + it.phase));
+      }
+    },
+    dispose() {
+      scene.remove(root);
+    },
+  };
+}

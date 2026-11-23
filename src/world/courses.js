@@ -7,6 +7,7 @@
 // Checkpoint `kind`: 'ground' (car), 'buoy' (boat gate), 'ring' (sky),
 // 'pad' (touch down on a roof or helipad). `dir` is the heading of travel
 // through it, used to face rings and line up buoy pairs.
+import { holdsAll, pointsIn, PLACE_MARGIN } from './regions.js';
 
 // Average speed (m/s) a good run holds, per craft kind. Gold needs this.
 export const REF_SPEED = { car: 21, boat: 17, plane: 46, heli: 27 };
@@ -911,26 +912,42 @@ function canyonPoint(city, street, x, z, r) {
   return best;
 }
 
+// A region build holds only part of the spec (world/regioncontent.js
+// regionCourseSpec): every part is optional, the sky parts need the
+// airfield, and a part that cannot be built on this region's ground is left
+// out instead of throwing (the whole box still throws).
 export function buildSpecCourses(city, spec) {
   const N = city.nodes;
-  const { gate } = city.airfield;
+  const gate = city.airfield ? city.airfield.gate : null;
   const mainNodes = N.filter((n) => n !== gate);
-  const avoidGate = new Set([gate.id]);
+  const avoidGate = new Set(gate ? [gate.id] : []);
   const junction = (n) => n.edges.length !== 2;
   const junctions = mainNodes.filter(junction);
   const at = (p) => nearestNode(junctions, p.x, p.z);
   const list = [];
+  const soft = !!city.region;
+  const part = (f) => {
+    if (!soft) return f();
+    const n = list.length;
+    try { return f(); } catch (err) {
+      void err;
+      list.length = n;
+      return undefined;
+    }
+  };
 
   // --- Street races ---------------------------------------------------------
-  for (const s of spec.street) {
-    const c = streetCircuit(city, s.via.map((p) => at(p).id), { avoid: avoidGate, ok: junction });
-    const cps = groundCheckpoints(city, c.nodeIds, c.start.heading);
-    const lap = roadLength(city, cps[cps.length - 1].node, c.nodeIds);
-    list.push(finish({ id: s.id, name: s.name, type: 'street', kinds: ['car'], start: c.start, checkpoints: cps, laps: s.laps, blurb: s.blurb }, lap * s.laps));
+  for (const s of spec.street || []) {
+    part(() => {
+      const c = streetCircuit(city, s.via.map((p) => at(p).id), { avoid: avoidGate, ok: junction });
+      const cps = groundCheckpoints(city, c.nodeIds, c.start.heading);
+      const lap = roadLength(city, cps[cps.length - 1].node, c.nodeIds);
+      list.push(finish({ id: s.id, name: s.name, type: 'street', kinds: ['car'], start: c.start, checkpoints: cps, laps: s.laps, blurb: s.blurb }, lap * s.laps));
+    });
   }
-  {
+  if (spec.causeway && gate) {
     const s = spec.causeway;
-    list.push(causewayCourse(city, junctions, avoidGate, s.a, s.b, s.c, s.name, s.blurb, junction));
+    part(() => list.push(causewayCourse(city, junctions, avoidGate, s.a, s.b, s.c, s.name, s.blurb, junction)));
   }
 
   // --- Boat races -----------------------------------------------------------
@@ -942,56 +959,72 @@ export function buildSpecCourses(city, spec) {
     const p = pushToSea(city, s);
     return { x: r1(p.x), z: r1(p.z), y: 0, heading: headingOf(p.x, p.z, toward.x, toward.z) };
   };
-  for (const b of spec.boats) {
-    const start = seaStart(b.start, b.gates[0]);
-    if (b.lap) {
-      // Close the loop on the first gate: the finish is where it began.
-      const pts = seaRoute(start, b.gates, true, b.maxLeg || 330);
-      start.heading = headingOf(start.x, start.z, pts[0].x, pts[0].z);
-      boatCourse(list, b.id, b.name, b.blurb, start, [...pts, pts[0]], b.r, false);
-    } else boatCourse(list, b.id, b.name, b.blurb, start, seaRoute(start, b.gates, false, b.maxLeg || 320), b.r);
+  for (const b of spec.boats || []) {
+    part(() => {
+      const start = seaStart(b.start, b.gates[0]);
+      if (b.lap) {
+        // Close the loop on the first gate: the finish is where it began.
+        const pts = seaRoute(start, b.gates, true, b.maxLeg || 330);
+        start.heading = headingOf(start.x, start.z, pts[0].x, pts[0].z);
+        boatCourse(list, b.id, b.name, b.blurb, start, [...pts, pts[0]], b.r, false);
+      } else boatCourse(list, b.id, b.name, b.blurb, start, seaRoute(start, b.gates, false, b.maxLeg || 320), b.r);
+    });
   }
 
   // --- Sky courses ----------------------------------------------------------
-  gullCourse(city, list, spec.gull.name, spec.gull.blurb);
-  {
-    const { runway } = city.airfield;
-    const s = spec.threader;
-    const start = { x: r1(runway.x1 - 40), z: r1((runway.z0 + runway.z1) / 2), y: 0, heading: Math.PI };
-    const rings = s.rings.map((q) => (q.canyon ? { ...canyonPoint(city, q.street, q.x, q.z, q.r), y: q.y, r: q.r, canyon: true } : q));
-    skyCourse(city, list, 'sky-threader', s.name, ['plane', 'heli'], s.blurb, start, rings);
+  if (spec.gull && city.airfield) part(() => gullCourse(city, list, spec.gull.name, spec.gull.blurb));
+  if (spec.threader && city.airfield) {
+    part(() => {
+      const { runway } = city.airfield;
+      const s = spec.threader;
+      const start = { x: r1(runway.x1 - 40), z: r1((runway.z0 + runway.z1) / 2), y: 0, heading: Math.PI };
+      const rings = s.rings.map((q) => (q.canyon ? { ...canyonPoint(city, q.street, q.x, q.z, q.r), y: q.y, r: q.r, canyon: true } : q));
+      skyCourse(city, list, 'sky-threader', s.name, ['plane', 'heli'], s.blurb, start, rings);
+    });
   }
-  rooftopCourse(city, list, spec.rooftop.name, spec.rooftop.blurb);
+  if (spec.rooftop && city.airfield && city.helipads.length) part(() => rooftopCourse(city, list, spec.rooftop.name, spec.rooftop.blurb));
 
   // --- Timed deliveries -----------------------------------------------------
-  {
-    const s = spec.courier;
-    const from = at(s.from), to = at(s.to);
-    const next = N[roadPath(city, from.id, to.id, null, avoidGate)[1]];
-    const start = startOnEdge(from, next, 20);
-    const cps = groundCheckpoints(city, [to.id], start.heading);
-    deliveryCourse(list, 'deliver-courier', s.name, ['car'], s.blurb, start, cps, roadDistance(city, from.id, to.id));
+  if (spec.courier) {
+    part(() => {
+      const s = spec.courier;
+      const from = at(s.from), to = at(s.to);
+      const next = N[roadPath(city, from.id, to.id, null, avoidGate)[1]];
+      const start = startOnEdge(from, next, 20);
+      const cps = groundCheckpoints(city, [to.id], start.heading);
+      deliveryCourse(list, s.id || 'deliver-courier', s.name, ['car'], s.blurb, start, cps, roadDistance(city, from.id, to.id));
+    });
   }
-  {
-    const s = spec.fare;
-    const from = at(s.from);
-    const stops = s.stops.map(at);
-    const next = N[roadPath(city, from.id, stops[0].id, null, avoidGate)[1]];
-    const start = startOnEdge(from, next, 20);
-    const ids = stops.map((n) => n.id);
-    const cps = groundCheckpoints(city, ids, start.heading);
-    deliveryCourse(list, 'deliver-fare', s.name, ['car'], s.blurb, start, cps, roadLength(city, from.id, ids));
+  if (spec.fare) {
+    part(() => {
+      const s = spec.fare;
+      const from = at(s.from);
+      const stops = s.stops.map(at);
+      const next = N[roadPath(city, from.id, stops[0].id, null, avoidGate)[1]];
+      const start = startOnEdge(from, next, 20);
+      const ids = stops.map((n) => n.id);
+      const cps = groundCheckpoints(city, ids, start.heading);
+      deliveryCourse(list, 'deliver-fare', s.name, ['car'], s.blurb, start, cps, roadLength(city, from.id, ids));
+    });
   }
-  {
-    const s = spec.tide;
-    const start = seaStart(s.start, s.gates[0]);
-    const route = seaRoute(start, s.gates, false, 320);
-    const cps = buoyCheckpoints(route, (k) => (k === route.length - 1 ? 14 : 18), false, start);
-    deliveryCourse(list, 'deliver-tide', s.name, ['boat'], s.blurb, start, cps, pathLength3(start, cps));
+  if (spec.tide) {
+    part(() => {
+      const s = spec.tide;
+      const start = seaStart(s.start, s.gates[0]);
+      const route = seaRoute(start, s.gates, false, 320);
+      const cps = buoyCheckpoints(route, (k) => (k === route.length - 1 ? 14 : 18), false, start);
+      deliveryCourse(list, 'deliver-tide', s.name, ['boat'], s.blurb, start, cps, pathLength3(start, cps));
+    });
   }
-  airmailCourse(city, list, mainPiersOf(city).northPier, spec.airmail.name, spec.airmail.blurb);
+  if (spec.airmail && city.airfield) {
+    part(() => {
+      if (soft && !city.helipads.some((p) => !onIslet(city, p))) return;
+      airmailCourse(city, list, mainPiersOf(city).northPier, spec.airmail.name, spec.airmail.blurb);
+    });
+  }
   return tidy(list);
 }
+const onIslet = (city, p) => p.x > city.airfield.islet.x0 && p.x < city.airfield.islet.x1 && p.z > city.airfield.islet.z0 && p.z < city.airfield.islet.z1;
 
 // ---------------------------------------------------------------------------
 // Locked routes (docs/REVAMP.md 6.6): the three extra courses an adventure
@@ -1014,22 +1047,29 @@ function deepestNear(city, p, R = 40) {
   return { x: r1(best.x), z: r1(best.z) };
 }
 
+// A region build offers a route only when the region holds all of its
+// points 40 m inside (the PLAN_V2 3.2 rule); boat routes may end out on
+// the water, so they get the land margin. The airfield is not needed.
 export function buildRoutes(city, specs) {
-  if (!city || !city.courseSpec || !specs || !city.airfield || !city.airfield.gate) return [];
+  if (!city || !city.courseSpec || !specs) return [];
   const N = city.nodes;
-  const { gate } = city.airfield;
-  const avoidGate = new Set([gate.id]);
+  const gate = city.airfield ? city.airfield.gate : null;
+  const avoidGate = new Set(gate ? [gate.id] : []);
   const junction = (n) => n.edges.length !== 2;
   const junctions = N.filter((n) => n !== gate && junction(n));
   const at = (p) => nearestNode(junctions, p.x, p.z);
+  const region = city.region || null;
+  const holds = (v, m) => !region || holdsAll(region, pointsIn(v), m);
   const list = [];
   for (const s of specs.street || []) {
+    if (!holds(s.via, PLACE_MARGIN)) continue;
     const c = streetCircuit(city, s.via.map((p) => at(p).id), { avoid: avoidGate, ok: junction });
     const cps = groundCheckpoints(city, c.nodeIds, c.start.heading);
     const lap = roadLength(city, cps[cps.length - 1].node, c.nodeIds);
     list.push(finish({ id: s.id, name: s.name, type: 'street', kinds: ['car'], start: c.start, checkpoints: cps, laps: s.laps, blurb: s.blurb, locked: s.locked }, lap * s.laps));
   }
   for (const b of specs.boats || []) {
+    if (!holds([b.start, b.gates], PLACE_MARGIN)) continue;
     let start, pts;
     if (b.river) {
       const s0 = deepestNear(city, b.start, 16);

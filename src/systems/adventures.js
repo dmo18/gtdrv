@@ -15,12 +15,13 @@
 //   game.explore.changed()  save now and tell the menu
 //   game.adventures.track(id), .objective, .talk(), .probe(x, y, z, mode)
 import {
-  loadExplore, saveExplore, clearExplore, defaultExplore, counts as exploreCounts, cellIndex, cellBit, setCellBit,
+  loadExplore, saveExplore, clearExplore, defaultExplore, miamiLand, counts as exploreCounts, cellIndex, cellBit, setCellBit,
   cellsFrom, bytesToB64, landCells, explorePercent, markAdventureSeen, markGarageSeen, adventureReady, nextStep,
   completeStep, track as trackAdventure, favourite as favouriteOf, routeOpen, garageOpen,
 } from '../core/explore.js';
 import { ADV_SEEN_R, ADV_SIGN_R, ADV_TALK_R, ADV_TALKERS_MAX, ADV_TALKER_NEAR, ADV_FINALE_BONUS, playerStepMode, stepReached } from '../world/adventures.js';
 import { GARAGE_FIND_R } from '../world/garages.js';
+import { trackedElsewhere } from '../core/travel.js';
 import { createExploreMeshes } from '../render/exploremesh.js';
 import { specOf } from '../core/garage.js';
 
@@ -42,7 +43,9 @@ export function createAdventures(game, storage) {
   const readOnly = loaded.newer;
   const land = on ? landCells((x, z) => city.isLand(x, z)) : new Uint8Array(0);
   let cells = cellsFrom(ex);
-  let percent = on ? explorePercent(cells, land) : 0;
+  // Cells are the whole box's grid, so the percent is of all Miami in every region.
+  const allLand = on ? miamiLand() : land;
+  let percent = on ? explorePercent(cells, allLand) : 0;
   let cellsDirty = false;
   let cellTimer = CELL_SAVE_EVERY;
 
@@ -308,7 +311,7 @@ export function createAdventures(game, storage) {
     const c = cellIndex(x, z);
     if (c < 0 || !land[c] || cellBit(cells, c)) return false;
     setCellBit(cells, c);
-    percent = explorePercent(cells, land);
+    percent = explorePercent(cells, allLand);
     cellsDirty = true;
     quietAward(CELL_POINTS, x, z);
     events.emit('explored', { cell: c, percent });
@@ -345,6 +348,10 @@ export function createAdventures(game, storage) {
     list: advs,
     meshes,
     get objective() { return objective; },
+    // The tracked adventure when another region holds it: { id, name, where } or null.
+    get elsewhere() {
+      return on && city.mapId ? trackedElsewhere(ex.adventures.tracked, city.mapId, advs.map((a) => a.id)) : null;
+    },
     get talkers() { return nearTalk; },
     get talkTarget() { return talkTarget; },
     talk,

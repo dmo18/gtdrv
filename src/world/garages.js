@@ -6,6 +6,7 @@
 //
 // Coordinates: x east, z south, metres. Heading 0 faces +x.
 import { createRng } from '../core/rng.js';
+import { inRegion, GARAGE_MARGIN } from './regions.js';
 
 export const GARAGE_SEED = 7129;
 export const GARAGE_FIND_R = 400; // m: coming this close puts it on the map
@@ -16,6 +17,7 @@ export const GARAGE_CARS_MAX = 24;
 export const GARAGE_BONUS = 500; // points for the first visit to each garage
 export const GARAGE_MOVE_MAX = 300; // m an anchor may move to find a legal spot
 export const GARAGE_APART = 900; // m between any two garages
+const REGION_EDGE = 40; // m: a garage's centre keeps this far inside a region's crop
 
 // Shed and forecourt sizes (the 16 by 22 m rect: shed 10 by 14 at the
 // back, forecourt the front 8 m).
@@ -167,6 +169,12 @@ function keepOuts(city) {
   for (const s of city.secretSpots || []) out.push({ x: s.x, z: s.z });
   if (city.secretGarage) out.push({ x: city.secretGarage.x, z: city.secretGarage.z });
   for (const c of city.courses || []) out.push({ x: c.start.x, z: c.start.z });
+  // A region's generated pier, helipad and ramps (world/regioncontent.js)
+  // are kept clear too; the Downtown and whole-box lists stay as they were.
+  if (city.region && city.regionDressed) {
+    for (const p of city.piers || []) out.push({ x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 });
+    for (const h of city.helipads || []) out.push({ x: h.x, z: h.z });
+  }
   return out;
 }
 
@@ -265,6 +273,8 @@ function farFromAll(def, gx, gz, taken, keep, city) {
   for (let k = 0; k < keep.length; k++) if (nearer(keep[k].x - gx, keep[k].z - gz, 30)) return false;
   if (def.nearStart && city.spawn && !nearer(city.spawn.x - gx, city.spawn.z - gz, def.nearStart) && Math.hypot(city.spawn.x - gx, city.spawn.z - gz) > def.nearStart) return false;
   for (let k = 0; k < taken.length; k++) if (nearer(taken[k].x - gx, taken[k].z - gz, GARAGE_APART)) return false;
+  // A region build: the shed and its forecourt stay inside the crop.
+  if (city.region && !inRegion(city.region, gx, gz, REGION_EDGE)) return false;
   return true;
 }
 
@@ -412,12 +422,17 @@ function placeOne(city, def, rng, taken, keep) {
 
 // city.garages: the twelve garages in GARAGE_DEFS order. Throws when an
 // anchor has no legal spot (a data change the tests must catch). Returns
-// [] on a map without lots (the island).
+// [] on a map without lots (the island). A region build (city.region)
+// places only the garages whose anchor lies GARAGE_MARGIN m inside its
+// crop (PLAN_V2 3.5 rule 6); one that finds no legal spot there is left
+// out instead of throwing. The rng of each is still seeded by its index in
+// GARAGE_DEFS, so a garage lands where the whole box puts it.
 export function placeGarages(city, seed = GARAGE_SEED) {
   if (!city || !Array.isArray(city.lots) || !city.lots.length || !city.lotAt) return [];
   const keep = keepOuts(city);
   const out = [];
   GARAGE_DEFS.forEach((def, i) => {
+    if (city.region && !inRegion(city.region, def.x, def.z, GARAGE_MARGIN)) return;
     const rng = createRng(seed + i);
     // Same as walking candidates(city, def, rng) in order with tryAt.
     const r = placeOne(city, def, rng, out, keep);
@@ -427,7 +442,10 @@ export function placeGarages(city, seed = GARAGE_SEED) {
       for (let k = 0; k < free.length && !g; k++) g = tryAt(city, def, free[k], out, keep, LOT_FALLBACK);
       if (g) g.road = false;
     }
-    if (!g) throw new Error('garages: no spot for ' + def.id);
+    if (!g) {
+      if (city.region) return;
+      throw new Error('garages: no spot for ' + def.id);
+    }
     g.place = city.placeOf ? city.placeOf(g.x, g.z) : def.hood;
     g.core = city.inCore ? city.inCore(g.x, g.z) : false;
     out.push(g);

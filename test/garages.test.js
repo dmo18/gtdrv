@@ -391,3 +391,70 @@ test('shed: the meshes put the cars inside the shed, facing the door, and clear 
   assert.equal(m.bay.children.length, 0);
   assert.equal(m.bay.visible, false);
 });
+
+// ---- Regions (docs/PLAN_V2.md 3.5 rule 6): a garage is built in every region
+// whose crop holds its anchor 60 m inside; the rest are skipped, not thrown. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { regionFor, inRegion, GARAGE_MARGIN } from '../src/world/regions.js';
+
+const HELD = {
+  'miami-downtown': ['g-downtown', 'g-brickell', 'g-wynwood', 'g-edgewater', 'g-watson'],
+  'miami-beach': ['g-beach', 'g-key'],
+  'miami-north': ['g-wynwood', 'g-edgewater', 'g-allapattah', 'g-design'],
+  'miami-west': ['g-civic', 'g-havana'],
+  'miami-south': ['g-roads'],
+};
+
+test('regions: each builds the garages its crop holds, the table of PLAN_V2 3.2', () => {
+  for (const [id, c] of allRegionCities()) {
+    assert.deepEqual(c.garages.map((g) => g.id), HELD[id], id);
+    for (const g of c.garages) {
+      const d = GARAGE_DEFS.find((q) => q.id === g.id);
+      assert.ok(inRegion(regionFor(id), d.x, d.z, GARAGE_MARGIN), id + ' ' + g.id + ' anchor 60 m inside');
+      assert.ok(inRegion(regionFor(id), g.x, g.z, 40), id + ' ' + g.id + ' shed inside the crop');
+      assert.ok(g.place.includes(d.hood), `${id} ${g.id}: ${g.place} is not ${d.hood}`);
+    }
+  }
+  // Every garage is in some region.
+  const all = new Set(Object.values(HELD).flat());
+  assert.deepEqual([...all].sort(), GARAGE_IDS.slice().sort());
+});
+
+test('regions: every rect is on land, off roads, 6 m clear of buildings, 12 m inland, door to a road, 30 m clear of the rest', () => {
+  for (const [id, c] of allRegionCities()) {
+    const near = [];
+    for (const g of c.garages) {
+      const r = g.rect;
+      for (let x = r.x0; x <= r.x1; x += 2) {
+        for (let z = r.z0; z <= r.z1; z += 2) {
+          assert.ok(c.isLand(x, z) && !c.onRoad(x, z), `${id} ${g.id} ground at ${x},${z}`);
+        }
+      }
+      for (const [x, z] of [[r.x0, r.z0], [r.x1, r.z1], [r.x0, r.z1], [r.x1, r.z0]]) assert.ok(c.mainShore(x, z) >= 12, `${id} ${g.id} 12 m inland`);
+      c.buildingsNear(r.x0 - 8, r.z0 - 8, r.x1 + 8, r.z1 + 8, near);
+      for (const k of near) {
+        const b = c.buildings[k];
+        assert.ok(Math.hypot(Math.max(b.x0 - r.x1, 0, r.x0 - b.x1), Math.max(b.z0 - r.z1, 0, r.z0 - b.z1)) >= 6, `${id} ${g.id} near a building`);
+      }
+      if (g.road !== false) assert.ok(doorToRoad(c, g) <= DOOR_ROAD, `${id} ${g.id} door ${doorToRoad(c, g)} m from the road`);
+      const others = [...c.rampSpots, ...c.secretSpots, ...c.courses.map((q) => q.start), ...c.helipads, ...c.piers.map((p) => ({ x: (p.x0 + p.x1) / 2, z: (p.z0 + p.z1) / 2 }))];
+      for (const p of others) assert.ok(Math.hypot(p.x - g.x, p.z - g.z) >= 30, `${id} ${g.id} near ${p.id || 'a start'}`);
+      for (const s of c.parkingSpots) assert.ok(!(s.x > g.x0 && s.x < g.x1 && s.z > g.z0 && s.z < g.z1), `${id} ${g.id} parking spot inside`);
+    }
+    for (let i = 0; i < c.garages.length; i++) {
+      for (let j = i + 1; j < c.garages.length; j++) {
+        assert.ok(Math.hypot(c.garages[i].x - c.garages[j].x, c.garages[i].z - c.garages[j].z) >= GARAGE_APART, id);
+      }
+    }
+  }
+});
+
+test('regions: Downtown puts its five within 60 m of where the whole box does (the keep-outs differ); Wynwood is one place in Downtown and North', () => {
+  for (const g of regionCity('miami-downtown').garages) {
+    const w = garages.find((q) => q.id === g.id);
+    assert.ok(Math.hypot(g.x - w.x, g.z - w.z) <= 60, `${g.id} moved ${Math.round(Math.hypot(g.x - w.x, g.z - w.z))} m from the whole box`);
+  }
+  const n = regionCity('miami-north').garages.find((g) => g.id === 'g-wynwood');
+  const d = regionCity('miami-downtown').garages.find((g) => g.id === 'g-wynwood');
+  assert.ok(Math.hypot(n.x - d.x, n.z - d.z) <= 60, 'Wynwood garage in Downtown and North is one place');
+});

@@ -31,6 +31,7 @@ import {
 } from '../entities/servicevehicles.js';
 import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
+import { inRegion } from '../world/regions.js';
 import { resetActor } from './combat.js';
 import { scarePed } from './peds.js';
 import { attachServiceLook } from '../render/servicebody.js';
@@ -229,6 +230,49 @@ export function planIslandSpots(city, seed = 6011) {
   return out;
 }
 
+// A region build (docs/PLAN_V2.md 3.3) parks the service vehicles whose
+// home SERVICE_SPOTS puts inside its crop (SERVICE_MARGIN m in: a bay at
+// Downtown's very edge still stays) and a road of the region reaches, plus one patrol bay when none of them
+// is a police home: the nearest car park, works or plaza lot 60 m or more
+// from the start place that passes checkSpot. The whole box and the island
+// get the list unchanged. Pure; same city, same list.
+export const SERVICE_MARGIN = 8;
+export function regionServiceSpots(city, all = SERVICE_SPOTS) {
+  const region = city && city.region;
+  if (!region) return all;
+  // A home the region's roads do not reach (the Port Fire Station's streets are Downtown's) is left out.
+  const out = all.filter((s) => {
+    if (!inRegion(region, s.x, s.z, SERVICE_MARGIN)) return false;
+    const road = nearestRoad(city, s.x, s.z);
+    return !!road && road.dist < SPOT_RULES.roadNear;
+  });
+  if (!out.some((s) => s.kind === 'police') && city.lots && city.spawn && VEHICLE_SPECS.police) {
+    const sp = city.spawn;
+    const spec = VEHICLE_SPECS.police;
+    const lots = city.lots.filter((l) => SPOT_RULES.lotTypes.includes(l.type) && l.area >= 300)
+      .map((l) => ({ l, d: Math.hypot((l.x0 + l.x1) / 2 - sp.x, (l.z0 + l.z1) / 2 - sp.z) }))
+      .filter((q) => q.d >= SPOT_RULES.titleClear + 20 && inRegion(region, (q.l.x0 + q.l.x1) / 2, (q.l.z0 + q.l.z1) / 2, 150))
+      .sort((a, b) => a.d - b.d || a.l.id - b.l.id);
+    const cache = new Map();
+    const res = {};
+    const taken = out.map((s) => ({ x: s.x, z: s.z }));
+    for (const { l } of lots.slice(0, 60)) {
+      let found = null;
+      for (let x = l.x0 + 3; x < l.x1 && !found; x += 4) {
+        for (let z = l.z0 + 3; z < l.z1 && !found; z += 4) {
+          if (city.lotAt(x, z) !== l || taken.some((t) => Math.hypot(t.x - x, t.z - z) < 12)) continue;
+          if (checkSpot(city, { x, z, heading: null }, spec, cache, res).ok) found = { x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10, heading: Math.round(res.heading * 1000) / 1000 };
+        }
+      }
+      if (found) {
+        out.push({ kind: 'police', x: found.x, z: found.z, heading: found.heading, name: 'Patrol bay' });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------
 export function createService(game, { seed = 6110, spots: givenSpots = null } = {}) {
   const rng = createRng(seed);
@@ -327,7 +371,7 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
   }
 
   // --- Places where a load or a towed car is handed in.
-  const spots = givenSpots || (city && city.lots && city.lots.length ? SERVICE_SPOTS : city && city.parkingSpots ? planIslandSpots(city) : []);
+  const spots = givenSpots || (city && city.lots && city.lots.length ? regionServiceSpots(city) : city && city.parkingSpots ? planIslandSpots(city) : []);
   const yardOf = (kind) => spots.filter((s) => s.kind === kind && s.yard);
   const garbageYards = yardOf('garbage'), towYards = yardOf('towtruck');
   function inYard(list, v) {

@@ -82,6 +82,55 @@ for (const [name, where, hour, weather, drive] of STREETS) {
   await page.screenshot({ path: join(out, `${name}.png`) });
   done.push(name);
 }
+
+// Every region (docs/PLAN_V2.md 5.3 RV): its start view, a generated road end
+// with its barrier, and the first travel pad with its sign, one page per
+// region (a region is a page load: ?map=<id>). The car is put 26 m before the
+// road end or the pad, facing it.
+const REGION_IDS = ['miami-downtown', 'miami-beach', 'miami-north', 'miami-west', 'miami-south'];
+for (const id of REGION_IDS) {
+  const rp = await browser.newPage({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+  rp.setDefaultTimeout(240000);
+  rp.on('pageerror', (e) => errors.push(`${id}: ${e}`));
+  await rp.goto(`http://127.0.0.1:${server.address().port}/?autostart&map=${id}`);
+  await rp.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
+  const views = [['start', null]];
+  const counts = await rp.evaluate(() => {
+    const c = window.__rw.city;
+    return { ends: (c.roadEnds || []).length, pads: (c.travelPads || []).length };
+  });
+  if (counts.ends) views.push(['road-end', 'end']);
+  if (counts.pads) views.push(['travel-pad', 'pad']);
+  for (const [what, target] of views) {
+    await rp.evaluate(([target, hour]) => {
+      const g = window.__rw, c = g.city;
+      let x = c.spawn.x, z = c.spawn.z, heading = c.spawn.heading;
+      if (target) {
+        // The first pad, or the road end nearest the start place.
+        let t = null;
+        if (target === 'pad') t = c.travelPads[0];
+        else {
+          let bd = 1e12;
+          for (const e of c.roadEnds) {
+            const d = Math.hypot(e.x - c.spawn.x, e.z - c.spawn.z);
+            if (d < bd) { bd = d; t = e; }
+          }
+        }
+        heading = t.heading;
+        x = t.x - Math.cos(heading) * 26;
+        z = t.z - Math.sin(heading) * 26;
+      }
+      const v = g.player.vehicle;
+      v.x = v.px = x; v.z = v.pz = z; v.heading = v.pheading = heading; v.vx = v.vz = 0; v.speed = 0;
+      g.daynight.setWeather('clear', true);
+      g.daynight.setHour(hour);
+    }, [target, 16.5]);
+    await rp.waitForTimeout(2500);
+    await rp.screenshot({ path: join(out, `${id}-${what}.png`) });
+    done.push(`${id}-${what}`);
+  }
+  await rp.close();
+}
 await browser.close();
 server.close();
 console.log(`wrote ${done.length} views to ${out}`);

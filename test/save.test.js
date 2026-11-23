@@ -186,3 +186,94 @@ test('the Blood setting survives a load only as a real boolean', () => {
   p.settings.blood = 'no';
   assert.equal(sanitizeProgress(JSON.parse(JSON.stringify(p))).settings.blood, undefined);
 });
+
+// ---- Regions (PLAN_V2 3.5) ----
+import { migrateMapChoice } from '../src/core/save.js';
+import { MAP_CHOICE_KEY } from '../src/world/maps.js';
+import { regionOfPoint, inRegion as inRegionOf } from '../src/world/regions.js';
+
+const store = (init = {}) => {
+  const m = new Map(Object.entries(init));
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+};
+const sedan = { spec: 'sedan', color: 0x336699, health: 1 };
+const miamiSession = (x, z, mode = 'car') => ({ map: 'miami', mode, x, z, heading: 0, craft: mode === 'car' ? { ...sedan, y: 0, speed: 0 } : null, garage: [] });
+const withSession = (session) => JSON.stringify({ version: 3, session });
+
+test('migration: stored miami becomes the region of the saved position, once', () => {
+  // ten sample points of the whole box and the region each lands in
+  const samples = [
+    [0, 0, 'miami-downtown'], [-900, -1200, 'miami-downtown'], [3500, 500, 'miami-beach'], [3000, -3000, 'miami-beach'],
+    [-3500, -3000, 'miami-north'], [-3500, 0, 'miami-west'], [-3500, 3000, 'miami-south'], [-1500, 3000, 'miami-south'],
+    [2000, 2500, 'miami-beach'], [-2000, -2650, 'miami-downtown'],
+  ];
+  for (const [x, z, want] of samples) {
+    assert.equal(regionOfPoint(x, z), want, `${x},${z}`);
+    const st = store({ [SAVE_KEY]: withSession(miamiSession(x, z)), [MAP_CHOICE_KEY]: 'miami' });
+    assert.equal(migrateMapChoice(st), want);
+    assert.equal(st.getItem(MAP_CHOICE_KEY), want);
+    const p = loadProgress(st);
+    // the miami session is kept untouched; the region slot holds a copy only when 60 m inside
+    assert.equal(p.session.map, 'miami');
+    assert.equal(p.session.x, x);
+    const copied = p.mapSessions[want];
+    if (inRegionOf(want, x, z, 60)) {
+      assert.ok(copied, `${want} copy at ${x},${z}`);
+      assert.equal(copied.map, want);
+      assert.equal(copied.x, x);
+      assert.equal(copied.craft.spec, 'sedan');
+    } else assert.equal(copied, undefined);
+    // done once: the stored id is no longer 'miami'
+    assert.equal(migrateMapChoice(st), want);
+  }
+});
+
+test('migration: no saved position or no choice at all', () => {
+  const st = store({ [MAP_CHOICE_KEY]: 'miami' });
+  assert.equal(migrateMapChoice(st), 'miami-downtown');
+  assert.equal(st.getItem(MAP_CHOICE_KEY), 'miami-downtown');
+  // a new player (nothing stored, no Miami session): nothing is written
+  const fresh = store();
+  assert.equal(migrateMapChoice(fresh), null);
+  assert.equal(fresh.getItem(MAP_CHOICE_KEY), null);
+  // an old default-map player (no stored choice, a Miami session): moved to its region
+  const old = store({ [SAVE_KEY]: withSession(miamiSession(3500, 500)) });
+  assert.equal(migrateMapChoice(old), 'miami-beach');
+  assert.equal(old.getItem(MAP_CHOICE_KEY), 'miami-beach');
+  // the island and region choices are left alone
+  assert.equal(migrateMapChoice(store({ [MAP_CHOICE_KEY]: 'island' })), 'island');
+  assert.equal(migrateMapChoice(store({ [MAP_CHOICE_KEY]: 'miami-west' })), 'miami-west');
+  // a standing region session is never overwritten by the copy
+  const both = store({ [SAVE_KEY]: JSON.stringify({ version: 3, session: miamiSession(3500, 500), mapSessions: { 'miami-beach': { map: 'miami-beach', mode: 'foot', x: 3000, z: 0, heading: 0, garage: [] } } }), [MAP_CHOICE_KEY]: 'miami' });
+  migrateMapChoice(both);
+  assert.equal(loadProgress(both).mapSessions['miami-beach'].mode, 'foot');
+  // a start-mode Miami session has nothing to copy
+  const startOnly = store({ [SAVE_KEY]: withSession(miamiSession(0, 0, 'start')), [MAP_CHOICE_KEY]: 'miami' });
+  assert.equal(migrateMapChoice(startOnly), 'miami-downtown');
+  assert.equal(loadProgress(startOnly).mapSessions['miami-downtown'], undefined);
+});
+
+test('migration never throws on broken storage', () => {
+  const bad = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+  assert.equal(migrateMapChoice(bad), null);
+  assert.equal(migrateMapChoice(null), null);
+  const half = { getItem: (k) => (k === MAP_CHOICE_KEY ? 'miami' : '{broken'), setItem: () => { throw new Error('full'); } };
+  assert.equal(typeof migrateMapChoice(half), 'string');
+});
+
+test('saves: region sessions load, an unknown map id falls back to the island record, a session off its crop starts fresh', () => {
+  const ok = sanitizeProgress({ version: 3, session: { map: 'miami-beach', mode: 'car', x: 3000, z: 100, heading: 0, craft: { ...sedan, y: 0, speed: 3 }, garage: [] } });
+  assert.equal(ok.session.map, 'miami-beach');
+  assert.equal(ok.session.mode, 'car');
+  const off = sanitizeProgress({ version: 3, session: { map: 'miami-beach', mode: 'car', x: -3000, z: 100, heading: 0, craft: sedan, garage: [{ ...sedan, x: -3000, z: 0, heading: 0 }] } });
+  assert.equal(off.session.mode, 'start');
+  assert.equal(off.session.garage.length, 1, 'cars left on the road stay in the save');
+  const junk = sanitizeProgress({ version: 3, session: { map: 'miami-elsewhere', mode: 'foot', x: 5, z: 5 } });
+  assert.equal(junk.session.map, 'island');
+  const maps = sanitizeProgress({ version: 3, mapSessions: { 'miami-west': { map: 'miami-west', mode: 'foot', x: -3500, z: 0, heading: 0 }, 'miami-south': { map: 'miami-west', mode: 'foot', x: -3500, z: 0 }, __proto__: { x: 1 } } });
+  assert.deepEqual(Object.keys(maps.mapSessions), ['miami-west']);
+  // a boat just past the crop is allowed (craft turn back 600 m out); far away is not
+  const boat = (x) => sanitizeProgress({ version: 3, session: { map: 'miami-beach', mode: 'boat', x, z: 0, heading: 0, craft: { spec: 'speedboat', color: 1, health: 1, y: 0, speed: 0 }, garage: [] } }).session.mode;
+  assert.equal(boat(4800), 'boat');
+  assert.equal(boat(-3000), 'start');
+});

@@ -3,7 +3,9 @@
 // arrival pose from the link table, and the one save that writes the
 // target region's session and the map choice before the page reloads.
 // Pure: runs in node tests (no DOM, no three.js).
-import { REGIONS, regionFor, inRegion, DEFAULT_REGION } from '../world/regions.js';
+import { REGIONS, regionFor, inRegion, regionsAt, DEFAULT_REGION } from '../world/regions.js';
+import { ADVENTURE_DEFS } from '../world/adventures.js';
+import { GARAGE_DEFS } from '../world/garages.js';
 import { MIAMI_SPOTS } from '../world/miami-spots.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
 import { saveProgress } from './save.js';
@@ -135,3 +137,69 @@ export function travelSave(storage, progress, fromId, toId, car, player, pose) {
 
 // Is (x, z) inside region `id`'s crop (the rule the saves use)?
 export const insideRegion = (id, x, z, margin = 0) => inRegion(id, x, z, margin);
+
+// The region that holds an adventure (rule: its giver; a garage giver is
+// the garage's own place, the start is the start place of Downtown).
+export function adventureRegion(def) {
+  const g = def && def.giver;
+  if (!g) return DEFAULT_REGION;
+  let x = g.x, z = g.z;
+  if (g.type === 'garage') {
+    const gd = GARAGE_DEFS.find((q) => q.id === g.garage);
+    if (gd) { x = gd.x; z = gd.z; }
+  } else if (g.type === 'start') {
+    return DEFAULT_REGION;
+  }
+  const ids = regionsAt(x, z);
+  return ids.length ? ids[0] : DEFAULT_REGION;
+}
+
+// The adventure being tracked when this map does not hold it (rule 8):
+// { id, name, where: 'Miami Beach and the Islands' }, else null. The step
+// it is on is kept; it shows "in <region>".
+export function trackedElsewhere(trackedId, cityRegionId, localIds) {
+  if (typeof trackedId !== 'string' || localIds.includes(trackedId)) return null;
+  const def = ADVENTURE_DEFS.find((d) => d.id === trackedId);
+  if (!def) return null;
+  const home = adventureRegion(def);
+  if (home === cityRegionId) return null;
+  return { id: def.id, name: def.name, where: mapName(home) };
+}
+
+// ---- The arrival note ---------------------------------------------------
+// Travel reloads the page. Per-tab sessionStorage carries one note to the
+// new page: which region the player was heading for and which link they
+// came through (so the exact pad pose of the twin can be used). Read back
+// as untrusted: ids come from the allow-lists below, the note is removed
+// when read.
+export const TRAVEL_NOTE_KEY = 'rustwater.travel';
+const LINK_IDS = [];
+for (const r of REGIONS) for (const l of r.links) if (!LINK_IDS.includes(l.id)) LINK_IDS.push(l.id);
+
+export function writeTravelNote(storage, toId, linkId) {
+  try {
+    const link = LINK_IDS.includes(linkId) ? linkId : null;
+    storage.setItem(TRAVEL_NOTE_KEY, JSON.stringify({ to: toId, link }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// { to, link } for the page now loaded as `mapId`, or null. Always clears it.
+export function takeTravelNote(storage, mapId) {
+  let out = null;
+  try {
+    const text = storage ? storage.getItem(TRAVEL_NOTE_KEY) : null;
+    if (storage) storage.removeItem(TRAVEL_NOTE_KEY);
+    if (typeof text === 'string' && text.length < 200) {
+      const v = JSON.parse(text);
+      if (v && typeof v === 'object' && v.to === mapId && regionFor(mapId)) {
+        out = { to: mapId, link: typeof v.link === 'string' && LINK_IDS.includes(v.link) ? v.link : null };
+      }
+    }
+  } catch {
+    out = null;
+  }
+  return out;
+}

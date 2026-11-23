@@ -391,3 +391,21 @@ test('K8: out reward cars survive a reload; a car that is out is not the favouri
   const junk = sanitizeExplore({ version: 1, garages: { out: ['sunchaser', 'sedan', 7, '__proto__'] } });
   assert.deepEqual(junk.garages.out, [], 'no adventure done, no reward car');
 });
+
+// ---- Regions: the percent stays "of all Miami" (PLAN_V2 3.5 rule 5) ----
+import { MIAMI_LAND_B64, miamiLand } from '../src/core/explore.js';
+
+test('the whole-box land mask: 838 cells, same string every time, percent is of all Miami', () => {
+  const land = miamiLand();
+  assert.equal(land.length, EXPLORE_CELLS);
+  assert.equal(land.reduce((a, b) => a + b, 0), 838);
+  assert.equal(miamiLand(), land);
+  assert.equal(b64ToBytes(MIAMI_LAND_B64).length, CELL_BYTES);
+  // the same explored cells give the same percent whichever region is played
+  const bytes = new Uint8Array(CELL_BYTES);
+  let n = 0;
+  for (let c = 0; c < EXPLORE_CELLS && n < 84; c++) if (land[c]) { setCellBit(bytes, c); n++; }
+  assert.equal(explorePercent(bytes, land), (84 * 100) / 838);
+  const text = bytesToB64(bytes);
+  assert.equal(bytesToB64(cellsFrom({ cells: text })), text, 'the cell text is byte-identical after a region change');
+});

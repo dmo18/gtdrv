@@ -225,3 +225,63 @@ test('title and start frames: no prop in the 8 degree cone within 40 m; no post 
   }
   assert.deepEqual(near, [], 'no trunk or post right in front of the start camera');
 });
+
+// ---- Every region has a start view (docs/PLAN_V2.md 3.3) ----
+// Built like Downtown's: the spawn on a named street 300 m or more from
+// every crop edge, the same camera and 17:30 clear sky, moving cars on the
+// street ahead and parked cars on the kerb.
+import { regionCity, NEW_REGIONS } from './regionfixture.js';
+import { regionFor, START_EDGE } from '../src/world/regions.js';
+import { REGION_STARTS } from '../src/world/regioncontent.js';
+
+function regionGame(c) {
+  const v = c.startView;
+  return {
+    city: c, rng: createRng(42), vehicles: [], time: 0, clock: 9, quality: 1,
+    player: { x: v.spawn.x, z: v.spawn.z, heading: v.spawn.heading, vehicle: null },
+    addVehicle(car) { this.vehicles.push(car); return car; },
+    removeVehicle(car) { car.removed = true; this.vehicles = this.vehicles.filter((o) => o !== car); },
+    events: { emit() {} },
+  };
+}
+
+test('each other region: a start view on its named street, 300 m from every edge, with the 6.8 look', () => {
+  for (const id of NEW_REGIONS) {
+    const c = regionCity(id), r = regionFor(id), v = c.startView, sp = v.spawn;
+    assert.ok(v, id);
+    assert.equal(sp.street, REGION_STARTS[id].street, id);
+    assert.deepEqual([sp.x, sp.z, sp.heading], [c.spawn.x, c.spawn.z, c.spawn.heading], id);
+    assert.deepEqual(v.camera, MIAMI_SPOTS.startView.camera, id);
+    assert.equal(v.time, 17.5);
+    assert.equal(v.weather, 'clear');
+    assert.ok(v.traffic >= 6 && v.parked >= 6, id);
+    let best = Infinity, name = '';
+    for (const e of c.edges) {
+      if (e.bridge || e.causeway) continue;
+      const a = c.nodes[e.a];
+      const t = Math.max(0, Math.min(e.length, (sp.x - a.x) * e.ux + (sp.z - a.z) * e.uz));
+      const d = Math.hypot(a.x + e.ux * t - sp.x, a.z + e.uz * t - sp.z);
+      if (d < best) { best = d; name = e.name; }
+    }
+    assert.ok(best < 8, `${id}: ${best.toFixed(1)} m from a road`);
+    assert.equal(name, REGION_STARTS[id].street, id);
+    assert.ok(c.isGround(sp.x, sp.z), id + ' on ground');
+    for (const d of [sp.x - r.crop.x0, r.crop.x1 - sp.x, sp.z - r.crop.z0, r.crop.z1 - sp.z]) assert.ok(d >= START_EDGE, id);
+  }
+});
+
+test('each other region: traffic and parked cars fill the start view', () => {
+  for (const id of NEW_REGIONS) {
+    const c = regionCity(id), v = c.startView;
+    const g = regionGame(c);
+    const n = createTraffic(g).seedStart(v.traffic);
+    assert.ok(n >= 3 && n <= v.traffic, `${id}: ${n} cars placed`);
+    for (const car of g.vehicles) assert.ok(Math.hypot(car.x - v.spawn.x, car.z - v.spawn.z) < 120, id);
+    const g2 = regionGame(c);
+    const p = createParkedCars(g2);
+    p.fixedUpdate(1 / 60);
+    let near = 0;
+    for (const s of p.spots) if (s.vehicle && Math.hypot(s.x - v.spawn.x, s.z - v.spawn.z) < 80) near++;
+    assert.ok(near >= 4, `${id}: ${near} parked cars within 80 m`);
+  }
+});

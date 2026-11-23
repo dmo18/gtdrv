@@ -198,3 +198,81 @@ test('the system: toast and score once, the sixth unlocks and parks Ghostwake, d
   run(120);
   assert.equal(sys.doorOpen, 0);
 });
+
+// ---- Regions (docs/PLAN_V2.md 3.2): a region holds the secrets inside it
+// and builds those alone; no secret moves, the Ghostwake garage is in Downtown
+// and West. ----
+import { regionCity, allRegionCities } from './regionfixture.js';
+import { regionFor, inRegion, PLACE_MARGIN } from '../src/world/regions.js';
+import { placeSecrets } from '../src/world/secrets.js';
+import { regionSecretSpec } from '../src/world/regioncontent.js';
+import { MIAMI_SPOTS } from '../src/world/miami-spots.js';
+
+const SECRETS = {
+  'miami-downtown': SECRET_IDS,
+  'miami-beach': ['rustlamp'],
+  'miami-north': ['roof-garden', 'tag-alley', 'lone-ride'],
+  'miami-west': [],
+  'miami-south': [],
+};
+
+test('regions: the partial spec holds the secrets 40 m inside; the six keep their ids and places in every region that holds them', () => {
+  for (const [id, c] of allRegionCities()) {
+    const spec = regionSecretSpec(regionFor(id));
+    assert.deepEqual(Object.keys(spec).filter((k) => k !== 'garage').sort(), SECRETS[id].slice().sort(), id + ' spec');
+    assert.deepEqual(c.secretSpots.map((s) => s.id), SECRET_IDS.filter((k) => SECRETS[id].includes(k)), id + ' built');
+    assert.equal(!!c.secretGarage, id === 'miami-downtown' || id === 'miami-west', id + ' Ghostwake garage');
+    for (const s of c.secretSpots) assert.ok(inRegion(regionFor(id), s.x, s.z, PLACE_MARGIN), `${id} ${s.id} inside`);
+    for (const k of Object.keys(spec)) {
+      const s = spec[k];
+      if (s.region) assert.ok([[s.region.x0, s.region.z0], [s.region.x1, s.region.z1]].every(([x, z]) => inRegion(regionFor(id), x, z, PLACE_MARGIN)), id + ' ' + k);
+      else assert.ok(inRegion(regionFor(id), s.x, s.z, PLACE_MARGIN), id + ' ' + k);
+    }
+  }
+  const all = new Set(Object.values(SECRETS).flat());
+  assert.equal(all.size, 6, 'every secret is in some region');
+  // Wynwood's roof and alley are in both Downtown and North: the same alley, and a
+  // roof of the same rect (the pick among equal roofs can differ by a block).
+  const dt = regionCity('miami-downtown'), nt = regionCity('miami-north');
+  for (const [k, max] of [['tag-alley', 1], ['lone-ride', 1], ['roof-garden', 150]]) {
+    const a = dt.secretSpots.find((s) => s.id === k), b = nt.secretSpots.find((s) => s.id === k);
+    assert.ok(Math.hypot(a.x - b.x, a.z - b.z) < max, k + ' is one place in both');
+  }
+});
+
+test('regions: placed secrets are on open ground, apart, the roof and alley are real, notes are the Miami ones', () => {
+  for (const [id, c] of allRegionCities()) {
+    const list = c.secretSpots;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) assert.ok(Math.hypot(list[i].x - list[j].x, list[i].z - list[j].z) > 3 * DISCOVER_R, `${id} ${list[i].id} / ${list[j].id}`);
+    }
+    for (const s of list) {
+      assert.equal(s.note || MIAMI_SPOTS.secretNotes[s.id], MIAMI_SPOTS.secretNotes[s.id], id + ' ' + s.id);
+      if (s.kind === 'rooftop') {
+        assert.ok(s.minY > 3 && s.minY < s.roofY);
+        assert.ok(c.buildings.some((b) => b.h === s.roofY && s.x > b.x0 && s.x < b.x1 && s.z > b.z0 && s.z < b.z1), id + ' roof');
+        continue;
+      }
+      assert.ok(!c.buildings.some((b) => s.x > b.x0 && s.x < b.x1 && s.z > b.z0 && s.z < b.z1), `${id} ${s.id} inside a building`);
+    }
+    if (c.secretGarage) {
+      const f = c.secretGarage.footprint;
+      assert.ok(!c.buildings.some((b) => f.x0 < b.x1 && f.x1 > b.x0 && f.z0 < b.z1 && f.z1 > b.z0), id + ' garage overlaps a building');
+      assert.ok(c.mainShore(c.secretGarage.x, c.secretGarage.z) > 10, id + ' garage inland');
+      assert.ok(inRegion(regionFor(id), c.secretGarage.x, c.secretGarage.z, 20), id + ' garage inside');
+    }
+  }
+});
+
+test('regions: a partial spec places only its ids; a region leaves out one it cannot place, the whole box throws', () => {
+  const north = regionCity('miami-north');
+  const one = placeSecrets(north, { 'lone-ride': MIAMI_SPOTS.secrets['lone-ride'] });
+  assert.deepEqual(one.spots.map((s) => s.id), ['lone-ride']);
+  assert.equal(one.garage, null);
+  assert.deepEqual(placeSecrets(north, {}).spots, []);
+  // A shore secret pointed at a spot with no shore: left out in a region...
+  const spec = { 'drowned-box': { x: -3000, z: -2600 } };
+  assert.deepEqual(placeSecrets(north, spec).spots, []);
+  // ...and an error on the whole box.
+  assert.throws(() => placeSecrets({ ...north, region: null }, spec), /no place for drowned-box/);
+});

@@ -233,7 +233,7 @@ function findGarage(city, rng, taken) {
 // ---- a real map: hand-placed spots (world/miami-spots.js) ---------------------
 // The same open-ground test, with the building grid of a real map.
 const NEAR = [];
-function openGroundNear(city, x, z, r, shore = 0) {
+export function openGroundNear(city, x, z, r, shore = 0) {
   if (city.districtOf(x, z) === 'airfield') return false;
   if (city.mainShore(x, z) < Math.max(shore, 3)) return false;
   city.buildingsNear(x - r - 1, z - r - 1, x + r + 1, z + r + 1, NEAR);
@@ -373,26 +373,35 @@ function garageNear(city, x, z, rng) {
 // { spots, garage } from a spec: drowned-box, the-gullet and rustlamp near
 // a shore point; roof-garden and tag-alley found inside a region;
 // lone-ride on open park ground near a point; the garage near a point.
+// A partial spec (a map region that holds only some of the six, see
+// world/regioncontent.js regionSecretSpec) places just the ids it lists; a
+// listed secret that cannot be placed throws on the whole box (a data
+// change the tests must catch) and is left out on a region build.
 export function placeSecrets(city, spec, seed = SECRETS_SEED) {
   const rng = createRng(seed);
   const out = {};
   const put = (id, p, extra = {}) => {
-    if (!p) throw new Error('secrets: no place for ' + id);
+    if (!p) {
+      if (city.region) return;
+      throw new Error('secrets: no place for ' + id);
+    }
     const def = SECRET_DEFS.find((d) => d.id === id);
     out[id] = { id, kind: def.kind, name: def.name, x: p.x, z: p.z, heading: p.heading || 0, minY: null, ...extra };
   };
   // The container lies 23 m out along the heading: that must be open water.
   const wet = (px, pz, h) => city.shoreDist(px + Math.cos(h) * 23, pz + Math.sin(h) * 23) < -4 && city.shoreDist(px + Math.cos(h) * 30, pz + Math.sin(h) * 30) < -6;
-  put('drowned-box', shoreSpot(city, spec['drowned-box'].x, spec['drowned-box'].z, 5, wet));
-  const roof = roofIn(city, spec['roof-garden'].region, rng);
+  if (spec['drowned-box']) put('drowned-box', shoreSpot(city, spec['drowned-box'].x, spec['drowned-box'].z, 5, wet));
+  const roof = spec['roof-garden'] ? roofIn(city, spec['roof-garden'].region, rng) : null;
   if (roof) put('roof-garden', roof, { minY: roof.roofY - 3.5, roofY: roof.roofY, roof: roof.roof });
-  put('the-gullet', shoreSpot(city, spec['the-gullet'].x, spec['the-gullet'].z, 5, wet));
-  put('rustlamp', shoreSpot(city, spec.rustlamp.x, spec.rustlamp.z, 6));
-  const alley = alleyIn(city, spec['tag-alley'].region);
+  if (spec['the-gullet']) put('the-gullet', shoreSpot(city, spec['the-gullet'].x, spec['the-gullet'].z, 5, wet));
+  if (spec.rustlamp) put('rustlamp', shoreSpot(city, spec.rustlamp.x, spec.rustlamp.z, 6));
+  const alley = spec['tag-alley'] ? alleyIn(city, spec['tag-alley'].region) : null;
   if (alley) put('tag-alley', alley, { tag: alley.tag, gap: alley.gap, len: alley.len });
   const lr = spec['lone-ride'];
-  const ride = nearestWhere(lr.x, lr.z, 200, (px, pz) => openGroundNear(city, px, pz, 7, 10));
-  put('lone-ride', ride && { x: ride.x, z: ride.z, heading: rng.range(0, TAU) });
+  if (lr) {
+    const ride = nearestWhere(lr.x, lr.z, 200, (px, pz) => openGroundNear(city, px, pz, 7, 10));
+    put('lone-ride', ride && { x: ride.x, z: ride.z, heading: rng.range(0, TAU) });
+  }
   const spots = SECRET_IDS.map((id) => out[id]).filter(Boolean);
   const garage = spec.garage ? garageNear(city, spec.garage.x, spec.garage.z, rng) : null;
   return { spots, garage };

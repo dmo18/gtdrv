@@ -56,6 +56,14 @@ try {
   const state = await page.evaluate(() => ({ t: window.__rw.time, ctl: !!navigator.serviceWorker.controller }));
   check(state.ctl, 'page is controlled by the service worker');
   check(true, 'offline reload: the game started and is running');
+  // Travel with the network off: the second region's chunk comes from the offline cache.
+  await page.goto(`${base}?pwa`);
+  await page.waitForFunction(() => window.__rw && window.__rw.session && window.__rw.city.mapId === 'miami-downtown', null, { timeout: 30000 });
+  await Promise.all([page.waitForNavigation({ timeout: 30000 }).catch(() => {}), page.evaluate(() => window.__rw.session.travelTo('miami-west'))]);
+  await page.waitForFunction(() => window.__rw && window.__rw.loop.running && window.__rw.city.mapId === 'miami-west', null, { timeout: 60000 });
+  await page.waitForFunction(() => document.getElementById('boot').style.display === 'none', null, { timeout: 30000 }).catch(() => {});
+  const trav = await page.evaluate(() => ({ id: window.__rw.city.mapId, choice: localStorage.getItem('rustwater.map'), mode: window.__rw.player.mode, shown: document.getElementById('boot').style.display }));
+  check(trav.id === 'miami-west' && trav.choice === 'miami-west' && trav.mode === 'car' && trav.shown === 'none', `offline travel to a second region: playing there in the car, title skipped ${JSON.stringify(trav)}`);
   const probe = await page.evaluate(() => caches.match('privacy.html', { ignoreSearch: true }).then((r) => (r ? r.status : -1)));
   check(probe === 200, `privacy page held in the offline cache (${probe})`);
   const manifest = await page.evaluate(() => caches.match('manifest.webmanifest').then((r) => r.json()).then((j) => j.name));

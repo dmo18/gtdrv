@@ -234,6 +234,13 @@ export function registerExploreScreens(game) {
     const rum = h('p', 'rw-ex-rumours', 'Rumours to hear: ' + (game.explore.adventures.length - A.seen.length));
     rum.dataset.role = 'rumours';
     wrap.appendChild(rum);
+    // An adventure tracked in another region keeps its step; say where it is.
+    const away = game.adventures && game.adventures.elsewhere;
+    if (away) {
+      const el = h('p', 'rw-ex-rumours', 'Tracking ' + away.name + ', in ' + away.where + '. Travel there from the map.');
+      el.dataset.role = 'adv-elsewhere';
+      wrap.appendChild(el);
+    }
     const col = (title, role) => {
       const c = h('div', 'rw-ex-col');
       c.appendChild(h('h3', '', title));

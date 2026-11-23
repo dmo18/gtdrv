@@ -127,3 +127,38 @@ test('startFresh without a designed view uses the map spawn (island)', () => {
   assert.equal(g.player.vehicle.x, 12);
   assert.equal(g.player.vehicle.z, 34);
 });
+
+test('placeValid on a region: inside its crop only; the whole box has no crop rule', () => {
+  const region = { crop: { x0: 1400, z0: -3891, x1: 4505, z1: 3891 } };
+  const city = { region, cut: { x0: 500, z0: -4100, x1: 4700, z1: 4100 }, isGround: () => true, isLand: () => false };
+  const s = (over) => ({ map: 'miami-beach', mode: 'car', x: 3000, z: 0, ...over });
+  assert.equal(placeValid(s(), 'miami-beach', city), true);
+  assert.equal(placeValid(s({ x: 1300 }), 'miami-beach', city), false);
+  assert.equal(placeValid(s({ map: 'miami' }), 'miami-beach', city), false);
+  assert.equal(placeValid(s({ mode: 'plane', x: 1000 }), 'miami-beach', city), true, 'aircraft may be out past the crop');
+  assert.equal(placeValid(s({ mode: 'plane', x: 600 }), 'miami-beach', city), false);
+  assert.equal(placeValid(s({ map: 'miami', x: 1300 }), 'miami', { ...city, region: null }), true);
+});
+
+test('a region game: the session belongs to the region id, travelTo saves target session and map choice, refused while wanted', () => {
+  const store = memory();
+  const calls = [];
+  const g = fakeGame(loadProgress(store), { city: { map: 'miami', mapId: 'miami-downtown', region: { crop: { x0: -2700, z0: -2700, x1: 2450, z1: 1900 } }, travelPads: [] } });
+  g.reload = () => calls.push('reload');
+  g.hud = { toast: (t) => calls.push(t) };
+  const s = createSession(g, store);
+  assert.equal(s.mapId, 'miami-downtown');
+  g.player.wanted = 2;
+  assert.equal(s.travelTo('miami-beach'), 'Lose the police first');
+  assert.equal(store.getItem('rustwater.map'), null);
+  g.player.wanted = 0;
+  assert.equal(s.travelTo('miami-downtown'), '', 'the region being played is not a trip');
+  assert.equal(s.travelTo('island'), '', 'the island is picked, not travelled to');
+  assert.equal(s.travelTo('miami-beach'), '');
+  assert.equal(store.getItem('rustwater.map'), 'miami-beach');
+  const saved = loadProgress(store);
+  assert.equal(saved.session.map, 'miami-beach');
+  // the leaving page may not overwrite what travel wrote
+  assert.equal(g.saveSession(), false);
+  assert.equal(loadProgress(store).session.map, 'miami-beach');
+});

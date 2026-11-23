@@ -9,6 +9,11 @@
 //   game.saveSession()      snapshot and write to storage
 //   game.restoreSession()   put the player back (returns true if it did)
 //   game.newSession()       forget place and car (scores and settings stay)
+// Travel between regions (docs/PLAN_V2.md 3.4, 3.5): on game.session,
+//   travelTo(regionId, linkId)  save the target region's session and the map
+//                    choice in one call, then reload behind a veil; returns
+//                    the plain refusal text (wanted) or '' when it goes
+//   arrive(linkId)   after the reload: the exact pose of that pad's arrival
 // Title screen (docs/REVAMP.md 6.8), on game.session:
 //   canContinue()    a saved place exists and is valid for this map
 //   continueSaved()  restore it (true if it worked, never throws)
@@ -24,6 +29,12 @@ import {
   sanitizeGarage, selectMapSession, GARAGE_MAX, SAFE_ALT,
 } from '../core/garage.js';
 import { placeValid, startSpot } from '../core/startplace.js';
+import {
+  padNear, padHint, travelRefusal, travelSave, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
+} from '../core/travel.js';
+import { regionFor } from '../world/regions.js';
+import { createTravelPrompt } from '../ui/travelprompt.js';
+import { showVeil } from '../ui/mappicker.js';
 import { createVehicle } from '../entities/vehicle.js';
 import { createBoat } from '../entities/boat.js';
 import { createAircraft } from '../entities/aircraft.js';
@@ -373,6 +384,122 @@ export function createSession(game, storage) {
     return true;
   }
 
+  // --- Travel ----------------------------------------------------------------
+  const toast = (t, secs = 3, kind = 'info') => { if (game.hud && game.hud.toast) game.hud.toast(t, secs, kind); };
+  const noteStore = () => {
+    try {
+      return typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+    } catch {
+      return null;
+    }
+  };
+  let travelling = false;
+  function travelTo(toId, linkId = null) {
+    if (travelling || !regionFor(toId) || toId === mapId) return '';
+    const p = game.player;
+    const why = travelRefusal(p.wanted || 0);
+    if (why) return why;
+    snapshot();
+    const car = p.vehicle && savable(p.vehicle) ? p.vehicle : null;
+    const pose = linkId ? arrivalApprox(toId, linkId) : null;
+    // One save call: the target's session and the map choice (PLAN_V2 3.5 rule 9).
+    travelSave(storage, game.progress, mapId, toId, car, p, pose);
+    travelling = true;
+    held = true; // no autosave or page-hide save may overwrite what was just written
+    const ns = noteStore();
+    if (ns) writeTravelNote(ns, toId, linkId);
+    if (typeof document !== 'undefined' && document.body) showVeil(document, 'Travelling to ' + mapName(toId) + '...');
+    const go = game.reload || (() => { if (typeof location !== 'undefined' && location.reload) location.reload(); });
+    if (typeof setTimeout === 'function') setTimeout(go, 120);
+    else go();
+    return '';
+  }
+
+  // The exact arrival pose of a travel pad of this region (the twin link).
+  function arrive(linkId) {
+    const pad = (city.travelPads || []).find((q) => q.id === linkId);
+    if (!pad || !pad.arrive) return false;
+    const a = pad.arrive, p = game.player, v = p.vehicle, w = p.walker;
+    if (v) {
+      v.x = v.px = a.x;
+      v.z = v.pz = a.z;
+      v.heading = v.pheading = a.heading;
+      v.vx = v.vz = 0;
+      v.speed = 0;
+    }
+    if (w) {
+      w.x = w.px = a.x;
+      w.z = w.pz = a.z;
+      w.heading = w.pheading = a.heading;
+    }
+    p.x = a.x;
+    p.z = a.z;
+    p.heading = a.heading;
+    if (game.snapCam) game.snapCam();
+    return true;
+  }
+
+  // The pad prompt and the hint lines, checked four times a second of
+  // simulated time (never wall-clock time).
+  const NEAR = { pad: null, d: 0, on: false };
+  let padTimer = 0, edgeTimer = 0, clock = 0, hintAt = -99, edgeAt = -99, declined = null, paused = false;
+  const prompt = typeof document !== 'undefined'
+    ? createTravelPrompt(document, {
+      onYes() {
+        const pad = prompt.pad;
+        if (paused) game.paused = false;
+        paused = false;
+        const msg = pad ? travelTo(pad.to, pad.id) : '';
+        if (msg) toast(msg, 3, 'police');
+      },
+      onStay() {
+        if (paused) game.paused = false;
+        paused = false;
+        declined = prompt.pad ? prompt.pad.id : null;
+      },
+    })
+    : null;
+  function padCheck() {
+    const p = game.player;
+    const pads = city.travelPads;
+    if (!pads || !pads.length || game.paused || travelling || held) return;
+    if (p.mode !== 'car' && p.mode !== 'tank' && p.mode !== 'foot') return;
+    padNear(city, p.x, p.z, NEAR);
+    if (!NEAR.pad) {
+      declined = null;
+      return;
+    }
+    const pad = NEAR.pad;
+    const refused = travelRefusal(p.wanted || 0);
+    const speed = p.vehicle ? Math.abs(p.vehicle.speed || 0) : 0;
+    if (NEAR.on && !refused && declined !== pad.id && speed <= PAD_STOP && prompt) {
+      prompt.pad = pad;
+      prompt.show('Drive on to ' + mapName(pad.to) + '?');
+      if (prompt.isOpen()) {
+        paused = !game.paused;
+        game.paused = true;
+      }
+      return;
+    }
+    if (declined === pad.id && NEAR.d > 15) declined = null;
+    if (declined !== pad.id && clock - hintAt > 8) {
+      hintAt = clock;
+      toast(padHint(pad, p.wanted || 0), 3, refused ? 'police' : 'info');
+    }
+  }
+  // Boats and aircraft are turned back 600 m past the crop (entities/aircraft.js):
+  // from 400 m out the HUD says where the edge is.
+  function edgeCheck() {
+    const c = city.region ? city.crop : null;
+    const p = game.player, v = p.vehicle;
+    if (!c || !v || (v.kind !== 'boat' && v.kind !== 'plane' && v.kind !== 'heli')) return;
+    const out = Math.max(c.x0 - v.x, v.x - c.x1, c.z0 - v.z, v.z - c.z1, 0);
+    if (out > 400 && clock - edgeAt > 10) {
+      edgeAt = clock;
+      toast('Edge of this map. Open the map to travel.', 4);
+    }
+  }
+
   // --- Hooks ----------------------------------------------------------------
   game.events.on('enter', (v) => {
     if (restoring) return;
@@ -413,6 +540,7 @@ export function createSession(game, storage) {
   game.saveSession = save;
   game.restoreSession = restore;
   game.newSession = newSession;
+  game.travelTo = travelTo;
   // The garage as loaded from storage, before the player is put back.
   loadGarage(game.progress.session ? sanitizeGarage(game.progress.session.garage) : []);
 
@@ -423,10 +551,24 @@ export function createSession(game, storage) {
     continueSaved,
     startFresh,
     newGame: newSession,
+    travelTo,
+    arrive,
+    mapId,
     hold(on) {
       held = !!on;
     },
     fixedUpdate(dt) {
+      clock += dt;
+      padTimer -= dt;
+      if (padTimer <= 0) {
+        padTimer = 0.25;
+        padCheck();
+      }
+      edgeTimer -= dt;
+      if (edgeTimer <= 0) {
+        edgeTimer = 0.5;
+        edgeCheck();
+      }
       timer -= dt;
       if (timer <= 0) {
         timer = AUTOSAVE_EVERY;

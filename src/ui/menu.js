@@ -9,6 +9,8 @@ import { setHandlingMode } from '../entities/vehicle.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { nextStation, stationInfo } from '../core/radio.js';
 import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
+import { fillMapPicker, switchMap } from './mappicker.js';
+import { mapName, pickerCurrent } from '../core/travel.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
 
 const STYLE_ID = 'rw-menu-style';
@@ -329,6 +331,7 @@ export function createMenu(root, game, economy) {
       // The map system opens on the map button (systems/mapui.js).
       if (game.input && game.input.press) { game.input.press('map'); game.input.release('map'); }
     });
+    if (game.city && game.city.region && game.session && game.session.travelTo) tile('travel', 'Travel', 'To another part of Miami', () => go('travel'));
     box.appendChild(tiles);
     body.appendChild(box);
   }
@@ -443,7 +446,16 @@ export function createMenu(root, game, economy) {
     row.appendChild(b);
     return row;
   }
-  const currentMap = () => { try { return localStorage.getItem(MAP_CHOICE_KEY) || 'miami'; } catch { return 'miami'; } };
+  // The map being played (the city knows it; the island has no id).
+  const currentMap = () => {
+    const c = game.city;
+    if (c) return c.mapId || (c.map ? 'miami' : 'island');
+    try {
+      return pickerCurrent(localStorage.getItem(MAP_CHOICE_KEY));
+    } catch {
+      return pickerCurrent(null);
+    }
+  };
 
   function renderSettings() {
     const s = settings();
@@ -488,7 +500,7 @@ export function createMenu(root, game, economy) {
       // Blood (red spatters and pools): on unless switched off. Read by render/combatfx.js.
       if (typeof s.blood !== 'boolean') delete s.blood;
       body.appendChild(toggleRow('Blood', 'blood', true));
-      body.appendChild(goRow('Map', currentMap() === 'island' ? 'Classic island' : 'Miami', 'map', 'mapchoice'));
+      body.appendChild(goRow('Map', mapName(currentMap()) || 'Miami', 'map', 'mapchoice'));
       body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {
       body.appendChild(segRow('HUD', [['minimal', 'Minimal'], ['full', 'Full']], s.hud, 'hud', (v) => { settings().hud = v; commit(); render(); }));
@@ -549,27 +561,31 @@ export function createMenu(root, game, economy) {
       render();
     }, { id: 'reset', role: 'reset', danger: true, text: 'Erase all progress: score, medals, secrets, garages, adventures and settings.' }));
   }
+  // One tap on a map: the place on this map is saved, then the page reloads
+  // behind the loading veil (the region's data loads with the page).
   function renderMapChoice() {
-    const cur = currentMap() === 'island' ? 'island' : 'miami';
-    const maps = h('div', 'rw-menu-maps');
-    for (const [id, name, yes] of [['miami', 'Miami', 'Yes, switch to Miami'], ['island', 'Classic island', 'Yes, switch to the classic island']]) {
-      const card = h('div', 'rw-menu-card');
-      card.dataset.map = id;
-      card.dataset.current = String(id === cur);
-      card.appendChild(h('b', '', name));
-      if (id === cur) {
-        card.appendChild(h('span', 'rw-menu-dim', 'Playing now'));
-      } else {
-        const row = confirmRow(name, yes, () => {
-          try { localStorage.setItem(MAP_CHOICE_KEY, id); } catch { /* storage blocked: the choice lasts this visit */ }
-          commit();
-          if (typeof location !== 'undefined' && location.reload) location.reload();
-        }, { id: 'map-' + id, role: 'map-' + id, button: 'Switch', text: 'Switching restarts the game. Your place on each map is kept.' });
-        card.appendChild(row);
-      }
-      maps.appendChild(card);
-    }
-    body.appendChild(maps);
+    body.appendChild(h('p', 'rw-menu-dim', 'Pick a map. Your place on each map is kept.'));
+    fillMapPicker(document, body, {
+      current: currentMap(),
+      onPick: (id) => {
+        switchMap(document, id, { before: () => { if (game.saveSession) game.saveSession(); commit(); } });
+      },
+    });
+  }
+  // Travel: every region, tap to go (refused while wanted).
+  function renderTravel() {
+    const note = h('p', 'rw-menu-dim', 'Travel keeps your car. On foot, in a boat or a plane you arrive at the start place.');
+    body.appendChild(note);
+    const msg = h('p', 'rw-menu-dim', '');
+    msg.dataset.role = 'travel-msg';
+    body.appendChild(msg);
+    fillMapPicker(document, body, {
+      current: currentMap(), regionsOnly: true, hint: 'Tap to travel',
+      onPick: (id) => {
+        const why = game.session && game.session.travelTo ? game.session.travelTo(id) : '';
+        if (why) msg.textContent = why;
+      },
+    });
   }
 
   // ---------- Help ----------
@@ -621,6 +637,7 @@ export function createMenu(root, game, economy) {
     soundtest: { title: 'Sound test', render: renderSoundTest },
     newgame: { title: 'New game', render: renderNewGame },
     mapchoice: { title: 'Map', render: renderMapChoice },
+    travel: { title: 'Travel', render: renderTravel },
   };
   const screenOf = (id) => BUILTIN[id] || screens.get(id) || null;
   const isTop = (id) => TABS.some(([t]) => t === id);
