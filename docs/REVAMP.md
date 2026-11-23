@@ -814,12 +814,12 @@ What differs:
 |---|---|---|
 | Steady lateral grip on full lock | 1.00 to 1.12 times `spec.grip` | 0.88 to 1.00 times `spec.grip` |
 | Tire past its peak | force sags at most 6 % | force sags 18 to 22 % |
-| Full steering input at speed asks for | 1.00 of lateral grip (the front never ploughs) | 1.10 of lateral grip (too much lock scrubs speed and runs wide) |
+| Full steering input at speed asks for | 1.15 of lateral grip (the front pushes wide a little, with tire noise; 0.10.0, HANDLE) | 1.10 of lateral grip (too much lock scrubs speed and runs wide) |
 | Stability assist (yaw and slide correction) | on; body slip held under 8 degrees (rear drive 16) | off, apart from a light yaw damper; the car can spin |
 | Traction control | on; drive is cut in a slide, no less than 30 % kept | off; rear drive cars step out under power |
 | Handbrake | slide capped (slip 0.6 rad) and it recovers by itself | free; holds the slide until released |
 | Weight transfer on the balance (lift off, trail brake) | half effect | full effect |
-| Tire squeal starts at | 1.3 times peak slip | 0.9 times peak slip |
+| Tire squeal starts at | 1.05 times peak slip (0.10.0, HANDLE; was 1.3) | 0.9 times peak slip |
 | Rain | grip loss as today | grip loss as today, plus the sag above |
 
 Nothing else may differ. The mode table in vehicle.js (`HANDLING`) keeps only the fields that
