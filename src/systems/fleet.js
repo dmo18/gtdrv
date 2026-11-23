@@ -87,11 +87,6 @@ export function createFleet(game) {
     get ready() {
       return filled;
     },
-    // Every berth filled now (tests and tools; skips the spawn gate).
-    fillAll() {
-      for (const s of spots) if (!s.made) fill(s);
-      filled = true;
-    },
     fixedUpdate(dt) {
       beginSpawnStep(game, SPAWNER.fleet);
       if (!filled) filled = stepFirstFill();

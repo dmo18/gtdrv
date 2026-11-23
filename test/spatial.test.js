@@ -145,7 +145,10 @@ function drive() {
   game.systems = systems;
   const builtAtStart = game.vehicles.length;
 
-  const timer = createSystemTimer(systems);
+  // CPU time of this process (other test files running beside this one
+  // do not count; its own garbage collection does).
+  const cpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
+  const timer = createSystemTimer(systems, cpuMs);
   const pts = route(20 * 40 + 100);
   const p = game.player;
   let seg = 0, along = 0, mostSpawns = 0, mostLive = 0, firstParked = 0, firstPeds = 0;
@@ -185,7 +188,7 @@ test('H1 budget on the real map: spawns spread, two a step at most, live cap, ch
   drive(); // warm the JIT: the measured run is the next one
   let r = drive();
   // A garbage collection can land in any call: the better of two runs.
-  if (r.worst.ms >= 6) {
+  if (r.worst.ms >= 8) {
     const r2 = drive();
     if (r2.worst.ms < r.worst.ms) r = r2;
   }
@@ -200,7 +203,8 @@ test('H1 budget on the real map: spawns spread, two a step at most, live cap, ch
   assert.ok(fleet.ready, 'every berth filled by distance within the run');
   // A parked scan looks at the spots near the player, not the city's 27k.
   assert.ok(parked.stats.looked / parked.stats.scans < 2000, `${(parked.stats.looked / parked.stats.scans).toFixed(0)} spots a scan`);
-  // No single system call over 6 ms once the first two seconds are past
-  // (desktop node; the budget a step is 1 ms, the margin is for slow machines).
-  assert.ok(worst.ms < 6, `slowest call ${worst.name} ${worst.ms.toFixed(2)} ms`);
+  // No single system call over 8 ms of CPU once the first two seconds are
+  // past (desktop node; the work budget is 1 ms a step, the margin is for a
+  // garbage collection landing in a call and for slow machines).
+  assert.ok(worst.ms < 8, `slowest call ${worst.name} ${worst.ms.toFixed(2)} ms`);
 });
