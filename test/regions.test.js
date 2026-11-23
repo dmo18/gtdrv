@@ -30,16 +30,22 @@ const whole = createMiamiCity(data);
 const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 + m && z <= c.z1 - m;
 
 // Fingerprints (regions.js cityFingerprint) measured 2026-11-23. The
-// whole box and Downtown were measured on the code before the split
-// (commit e09a4f2): Downtown is today's core crop, value for value.
+// whole box was measured on the code before the split (commit e09a4f2)
+// and is unchanged. The regions were re-pinned when the integration put
+// every raster origin on the whole box's lattice (miami.js
+// RASTER_LATTICE): before it Downtown, West and South rastered 1 m off
+// in z and Beach on other district cells, so their lots and some
+// buildings differed from the whole box's (North was already aligned and
+// kept its pin). Downtown is still today's core crop, value for value,
+// and now also the whole box inside it (test below).
 // A change here means the build changed: find out why before re-pinning.
 const PINNED = {
   [WHOLE_BOX]: { nodes: '9168e9b8', edges: '4a77a31e', buildings: 'd0bf1051', lots: 'a7ce2dc2', lotGrid: '241d865f' },
-  'miami-downtown': { nodes: '77fe93be', edges: 'f0b79fce', buildings: '3ba551d5', lots: 'ab633744', lotGrid: '09d9c8d7' },
-  'miami-beach': { nodes: '18926d49', edges: 'be23bdba', buildings: 'ede5b496', lots: '071222c1', lotGrid: '74572b54' },
+  'miami-downtown': { nodes: '77fe93be', edges: 'f0b79fce', buildings: '694f9c1a', lots: 'cc6516a8', lotGrid: '999d69bc' },
+  'miami-beach': { nodes: '18926d49', edges: 'be23bdba', buildings: '23dfeea4', lots: 'c957d7ae', lotGrid: '1fb74d76' },
   'miami-north': { nodes: '7acdc0b7', edges: 'daa23eea', buildings: '37b29085', lots: 'e46ec52d', lotGrid: 'c06840ed' },
-  'miami-west': { nodes: '549d16b8', edges: 'e4348533', buildings: '159791bc', lots: '9db8ff2e', lotGrid: '8b97badb' },
-  'miami-south': { nodes: '8191f4a5', edges: 'c3067070', buildings: '0fe067ac', lots: '88b689ea', lotGrid: '92b4d79c' },
+  'miami-west': { nodes: '549d16b8', edges: 'e4348533', buildings: '03c0d066', lots: '1165f417', lotGrid: 'b03ebe39' },
+  'miami-south': { nodes: '8191f4a5', edges: 'c3067070', buildings: '13ecf657', lots: 'dc74e057', lotGrid: '4d50919c' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);
@@ -287,4 +293,39 @@ test('the map loader: one data chunk per region in the bundle; the island is nul
   for (const l of dataChunks) assert.equal(l.length, 1, 'one data file a chunk');
   const names = dataChunks.map((l) => l[0].split('/').pop()).filter((n) => n !== 'miami.json').sort();
   assert.deepEqual(names, REGION_IDS.map((id) => id + '.json').sort());
+});
+
+// Every raster origin sits on the whole box's lattice (miami.js
+// RASTER_LATTICE), so a region away from its edges is the whole box: the
+// same building boxes, the same lots, the same lot under every point. When
+// Downtown rastered 1 m off in z, none of its lots matched the whole box's
+// and 8 of the 20 service homes tuned on the whole box hung off their lot.
+// What may still differ: hangar heights drawn from the build's rng
+// sequence, and a few shore lots where land past the crop is cut.
+test('a region 300 m inside its edges holds the whole box\'s buildings and lots', () => {
+  for (const id of REGION_IDS) {
+    const c = cities[id], k = regionFor(id).crop, M = 300;
+    const inner = (x, z) => inCrop(k, x, z, M);
+    const bkey = (b) => [b.x0, b.z0, b.x1, b.z1, b.kind].join(',');
+    const lkey = (l) => [l.type, l.x0, l.z0, l.x1, l.z1].join(',');
+    const share = (a, b, key, pick) => {
+      const want = a.filter(pick).map(key), have = new Set(b.filter(pick).map(key));
+      return want.filter((q) => have.has(q)).length / Math.max(1, want.length);
+    };
+    const bs = share(whole.buildings, c.buildings, bkey, (b) => inner(b.x0, b.z0));
+    const ls = share(whole.lots, c.lots, lkey, (l) => inner(l.x0, l.z0) && inner(l.x1, l.z1));
+    assert.ok(bs >= 0.99, `${id}: ${(bs * 100).toFixed(1)} % of the whole box's buildings`);
+    assert.ok(ls >= 0.98, `${id}: ${(ls * 100).toFixed(1)} % of the whole box's lots`);
+    assert.equal(c.lotGrid.cell, whole.lotGrid.cell);
+    assert.equal((c.lotGrid.x0 - whole.lotGrid.x0) % 160, 0, id + ' lattice x');
+    assert.equal((c.lotGrid.z0 - whole.lotGrid.z0) % 160, 0, id + ' lattice z');
+    let n = 0, off = 0;
+    for (let x = k.x0 + M; x < k.x1 - M; x += 23.3) {
+      for (let z = k.z0 + M; z < k.z1 - M; z += 23.3) {
+        n++;
+        if (c.lotTypeAt(x, z) !== whole.lotTypeAt(x, z) || c.inBuilding(x, z) !== whole.inBuilding(x, z)) off++;
+      }
+    }
+    assert.ok(off / n < 0.005, `${id}: lot or building differs at ${off} of ${n} points`);
+  }
 });

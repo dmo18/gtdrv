@@ -32,7 +32,8 @@ import { placeValid, startSpot } from '../core/startplace.js';
 import {
   padNear, padHint, travelRefusal, travelSave, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
 } from '../core/travel.js';
-import { regionFor } from '../world/regions.js';
+import { regionFor, REGIONS } from '../world/regions.js';
+import { createTravelMarkers } from '../render/markers.js';
 import { createTravelPrompt } from '../ui/travelprompt.js';
 import { showVeil } from '../ui/mappicker.js';
 import { createVehicle } from '../entities/vehicle.js';
@@ -415,11 +416,19 @@ export function createSession(game, storage) {
     return '';
   }
 
-  // The exact arrival pose of a travel pad of this region (the twin link).
+  // The exact arrival pose of a travel pad of this region (the twin link);
+  // with no link (the Travel list), the region's start place as built
+  // (core/travel.js regionStart is the table point the save was written
+  // at; Downtown's table point lies 42 m off its street).
+  const ARRIVE = { x: 0, z: 0, heading: 0 };
   function arrive(linkId) {
-    const pad = (city.travelPads || []).find((q) => q.id === linkId);
-    if (!pad || !pad.arrive) return false;
-    const a = pad.arrive, p = game.player, v = p.vehicle, w = p.walker;
+    let a = null;
+    if (linkId) {
+      const pad = (city.travelPads || []).find((q) => q.id === linkId);
+      a = pad && pad.arrive ? pad.arrive : null;
+    } else if (city.region) a = startSpot(city, ARRIVE);
+    if (!a) return false;
+    const p = game.player, v = p.vehicle, w = p.walker;
     if (v) {
       v.x = v.px = a.x;
       v.z = v.pz = a.z;
@@ -541,6 +550,19 @@ export function createSession(game, storage) {
   game.restoreSession = restore;
   game.newSession = newSession;
   game.travelTo = travelTo;
+  // The glow and "To Miami Beach" label over each travel pad (render/markers.js;
+  // null in node, without a scene or on a map with no pads).
+  let padMarks = null;
+  if (game.scene && city.travelPads && city.travelPads.length) {
+    const names = {};
+    for (const r of REGIONS) names[r.id] = r.name;
+    try {
+      padMarks = createTravelMarkers(game.scene, city, names);
+    } catch (e) {
+      padMarks = null;
+      if (game.errors && game.errors.report) game.errors.report('session.travelMarkers', e);
+    }
+  }
   // The garage as loaded from storage, before the player is put back.
   loadGarage(game.progress.session ? sanitizeGarage(game.progress.session.garage) : []);
 
@@ -556,6 +578,12 @@ export function createSession(game, storage) {
     mapId,
     hold(on) {
       held = !!on;
+    },
+    travelMarkers: () => padMarks,
+    render() {
+      if (!padMarks) return;
+      const p = game.player;
+      padMarks.update(p.x, p.z, game.time || 0);
     },
     fixedUpdate(dt) {
       clock += dt;

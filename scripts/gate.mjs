@@ -1,9 +1,12 @@
 // Runs the publish gate in order and stops at the first failure.
 // Usage: npm run gate            lint, test, release:check (after build), smoke --extra
 //        npm run gate -- --ui    also runs the ui-test (about 8 minutes)
+//        npm run gate -- --regions  also loads and drives every Miami region
+//                                (scripts/smoke-regions.mjs, PLAN_V2 5.4)
 import { spawnSync } from 'node:child_process';
 
 const ui = process.argv.includes('--ui');
+const regions = process.argv.includes('--regions');
 const node = process.execPath;
 const steps = [
   ['lint', 'npx', ['eslint', '.']],
@@ -12,6 +15,7 @@ const steps = [
   ['release:check', node, ['scripts/release-check.mjs']],
   ['smoke --extra', node, ['scripts/smoke.mjs', '--extra']],
 ];
+if (regions) steps.push(['smoke regions', node, ['scripts/smoke-regions.mjs', '--no-build']]);
 if (ui) steps.push(['ui-test', node, ['scripts/ui-test.mjs']]);
 
 const rows = [];
@@ -26,6 +30,7 @@ for (const [name, cmd, args] of steps) {
 }
 console.log('\nstep            result  time');
 for (const [n, s, t] of rows) console.log(`${n.padEnd(15)} ${s.padEnd(7)} ${t}`);
+if (!regions) console.log('smoke regions   skipped (add --regions)');
 if (!ui) console.log('ui-test         skipped (add --ui)');
 console.log(failed ? 'GATE FAILED' : 'GATE PASSED');
 process.exit(failed ? 1 : 0);

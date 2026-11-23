@@ -257,6 +257,12 @@ function installHelpers() {
     const sysSum = new Float64Array(ns), sysWorst = new Float64Array(ns), blame = new Int32Array(ns + 1);
     const drawSys = new Float64Array(ns);
     let coreSum = 0, nd = 0, over4 = 0, liveMax = 0, steps = 0;
+    // Heat: what the police fielded during the run (stats.tanks counts every
+    // tank spawned), not only what is still out at the end (a tank is taken
+    // away when the helicopter, and with it the fifth star, is lost).
+    const pst = g.police && g.police.stats;
+    const tanks0 = pst ? pst.tanks : 0;
+    let maxStars = 0, tankAt = -1;
     const v = cfg.jet ? H.enterKind('plane', 'jet') : H.toSpawnCar('sedan');
     if (!v) return { skipped: 'no craft' };
     const b = g.city.bounds || { x0: -3000, z0: -3000, x1: 3000, z1: 3000 };
@@ -308,6 +314,10 @@ function installHelpers() {
         for (let k = 0; k < ns; k++) drawSys[k] += P.curDraw[k];
       }
       if (i % 30 === 0 && g.vehicles.length > liveMax) liveMax = g.vehicles.length;
+      if (cfg.heat && g.police) {
+        if (g.police.stars > maxStars) maxStars = g.police.stars;
+        if (tankAt < 0 && pst && pst.tanks > tanks0) tankAt = r1(i / 60);
+      }
     }
     // Summaries (allocation is fine here: the run is over).
     const sorted = Array.from(stepMs.subarray(0, steps)).sort((x, y) => x - y);
@@ -320,6 +330,7 @@ function installHelpers() {
     const heatInfo = cfg.heat ? {
       stars: g.police.stars,
       tanks: g.vehicles.filter((o) => o.kind === 'tank' && !o.removed && o.spec.police).length,
+      maxStars, tanksSpawned: pst ? pst.tanks - tanks0 : 0, firstTankS: tankAt,
       helis: g.vehicles.filter((o) => o.kind === 'heli' && !o.removed && (o.spec.police || o.spec.id === 'patrolheli')).length,
       cars: g.vehicles.filter((o) => o.kind === 'car' && !o.removed).length,
     } : null;
@@ -480,7 +491,7 @@ function printReport(res) {
   for (const [k, r] of sc) {
     if (r.skipped) continue;
     const top = r.systems.slice(0, 5).map((x) => `${x.name} ${x.meanMs}${x.blame ? ` (blamed ${x.blame})` : ''}`).join(', ');
-    console.log(`  ${k}: ${top}${r.heat ? `; heat: ${r.heat.stars} stars, ${r.heat.tanks} tanks, ${r.heat.helis} helis` : ''}`);
+    console.log(`  ${k}: ${top}${r.heat ? `; heat: ${r.heat.stars} stars at the end (best ${r.heat.maxStars}), ${r.heat.tanksSpawned} tanks spawned (first at ${r.heat.firstTankS} s, ${r.heat.tanks} out at the end), ${r.heat.helis} helis` : ''}`);
   }
   console.log(`\nStreet view at the start place: ${res.street.calls} calls, ${res.street.tris} triangles, ${res.street.programs} programs, ${res.street.vehicles} vehicles`);
 }

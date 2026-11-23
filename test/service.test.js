@@ -1096,10 +1096,11 @@ test('SV-R1: each region keeps the homes inside its crop and has a police home; 
   for (const s of SERVICE_SPOTS) assert.ok(allRegionCities().some(([id]) => inRegion(regionFor(id), s.x, s.z, SERVICE_MARGIN)), s.name);
 });
 
-test('SV-R2: a generated patrol bay passes the parking rules; every hand home stands on land, off buildings, by a road', () => {
-  // The hand homes were tuned on the whole box (SV-P1). A region's lot raster has
-  // its own origin, so a home at a lot's very edge can fall a cell outside it there
-  // ("box off the lot"): those keep the looser rule below, the generated bays the full one.
+test('SV-R2: every home of every region, hand-placed or generated, passes the parking rules', () => {
+  // The hand homes were tuned on the whole box (SV-P1). Every region rasters its
+  // lots on the whole box's lattice (miami.js RASTER_LATTICE), so a home keeps the
+  // lot it was tuned on and the full rule holds for it in the region too (before
+  // that, 8 of Downtown's 20 failed: "box off the lot", "solid feature").
   let generated = 0;
   for (const [id, c] of allRegionCities()) {
     const cache = new Map();
@@ -1110,12 +1111,12 @@ test('SV-R2: a generated patrol bay passes the parking rules; every hand home st
       assert.ok(c.isLand(s.x, s.z) && !c.inBuilding(s.x, s.z), `${id} ${s.name} on land, off buildings`);
       assert.ok(nearestRoad(c, s.x, s.z).dist < SPOT_RULES.roadNear, `${id} ${s.name} by a road`);
       if (s.kerb) continue; // a kerb bay: the region's kerb spots are seeded again, only the ground is checked
+      const r = checkSpot(c, s, sp, cache, out);
+      assert.ok(r.ok, `${id} ${s.name} ${s.kind} at ${s.x}, ${s.z}: ${r.why}`);
+      const lot = c.lotAt(s.x, s.z);
+      assert.ok(lot && SPOT_RULES.lotTypes.includes(lot.type), `${id} ${s.name} lot type ${lot && lot.type}`);
       if (s.name === 'Patrol bay') {
         generated++;
-        const r = checkSpot(c, s, sp, cache, out);
-        assert.ok(r.ok, `${id} ${s.name} ${s.kind} at ${s.x}, ${s.z}: ${r.why}`);
-        const lot = c.lotAt(s.x, s.z);
-        assert.ok(lot && SPOT_RULES.lotTypes.includes(lot.type), `${id} lot type ${lot && lot.type}`);
         assert.ok(Math.hypot(s.x - c.spawn.x, s.z - c.spawn.z) > SPOT_RULES.titleClear, `${id} ${s.name} inside the title shot`);
       }
       assert.ok(!c.garages.some((g) => s.x > g.x0 - 2 && s.x < g.x1 + 2 && s.z > g.z0 - 2 && s.z < g.z1 + 2), `${id} ${s.name}: not on a garage`);

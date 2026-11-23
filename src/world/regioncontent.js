@@ -11,7 +11,7 @@
 // before the garages are placed; it does nothing on the whole box, on the
 // island, or on Downtown (which already has everything).
 import { MIAMI_SPOTS, MIAMI_COURSES } from './miami-spots.js';
-import { inRegion, holdsAll, pointsIn, PLACE_MARGIN, DEFAULT_REGION } from './regions.js';
+import { REGIONS, inRegion, holdsAll, pointsIn, PLACE_MARGIN, DEFAULT_REGION } from './regions.js';
 import { SECRET_IDS, placeSecrets, openGroundNear } from './secrets.js';
 import { buildSpecCourses, roadPath, gateIsClear, waterLineClear } from './courses.js';
 import { generateRegionRamps } from './stunts.js';
@@ -100,18 +100,12 @@ export function regionCourseSpec(city, spec = MIAMI_COURSES) {
 
 // ---- Generated: start view, texts -----------------------------------------
 
-// The designed start places of the four generated regions (3.3: a named
-// street, 300 m or more from every edge, a long straight with room ahead
-// for the first view's cars). regions.js `start` is the first draft; where
-// the street there is too short these replace it (the spawn is snapped to
-// the street like the build does, so the same numbers give the same spot).
-// Beach keeps its draft.
-export const REGION_STARTS = {
-  'miami-beach': { street: 'Alton Road', x: 4100, z: -500, heading: -Math.PI / 2 },
-  'miami-north': { street: 'Northwest 34th Street', x: -2445, z: -3148, heading: 0 },
-  'miami-west': { street: 'Southwest 5th Street', x: -3030, z: 1245, heading: 0 },
-  'miami-south': { street: 'Southwest 1st Avenue', x: -1904, z: 2449, heading: Math.PI / 2 },
-};
+// The designed start places of the four generated regions: regions.js
+// `start` is the one source (the build, this module and core/travel.js
+// regionStart all read it). Kept under this name for the callers. The
+// spawn is snapped to the street like the build does, so the same numbers
+// give the same spot.
+export const REGION_STARTS = Object.freeze(Object.fromEntries(REGIONS.filter((r) => r.start).map((r) => [r.id, r.start])));
 
 // The spawn snapped to the named street near (st.x, st.z): the right-hand
 // lane of the direction closest to st.heading, off buildings and junction

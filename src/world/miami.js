@@ -13,13 +13,18 @@ import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
-import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX } from './regions.js';
+import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX, BOX } from './regions.js';
 
 export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
 
 const CELL = 5; // land raster cell (m)
 const CLAMP = 250; // shoreDist is clamped to +-CLAMP m
 const SEA_PAD = 260; // raster reaches this far past the land cut (all sea)
+// The world lattice of every land raster origin: a multiple of CELL (5 m)
+// and of the district (32 m) and place (16 m) rasters, anchored at the
+// whole box's origin (BOX x0, z0 less SEA_PAD). See step 1.
+export const RASTER_LATTICE = 160;
+const RASTER_X0 = BOX.x0 - SEA_PAD, RASTER_Z0 = BOX.z0 - SEA_PAD;
 const GRID = 64; // spatial index cell (m)
 const MERGE = 12; // junctions closer than this become one
 const SNAP = 2.2; // a vertex this close to another road joins it
@@ -774,15 +779,36 @@ export function createMiamiCity(data, opts = {}) {
   const rng = createRng(seed);
   const timings = {};
   let tMark = tStart;
+  // opts.cpuClock (test/fixtures/build-budget-run.mjs only): a function
+  // giving CPU ms; each lap then also records the stage's CPU time in
+  // city.cpuTimings, which load from other processes does not stretch.
+  const cpuClock = typeof opts.cpuClock === 'function' ? opts.cpuClock : null;
+  const cpuTimings = cpuClock ? {} : null;
+  let cMark = cpuClock ? cpuClock() : 0;
   const lap = (name) => {
     const t = typeof performance !== 'undefined' ? performance.now() : Date.now();
     timings[name] = Math.round(t - tMark);
     tMark = t;
+    if (cpuClock) {
+      const c = cpuClock();
+      cpuTimings[name] = c - cMark;
+      cMark = c;
+    }
   };
 
   // ---- 1. Land mask: coastline sides, water polygons, the river. ----
   const cut = { x0: crop.x0 - marginOf('x0'), z0: crop.z0 - marginOf('z0'), x1: crop.x1 + marginOf('x1'), z1: crop.z1 + marginOf('z1') };
-  const land = makeRaster(cut.x0 - SEA_PAD, cut.z0 - SEA_PAD, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
+  // The raster origin sits on one world lattice (RASTER_LATTICE m, from
+  // the whole box's own origin), so every region and crop rasters its
+  // land, roads, districts (32 m), places (16 m) and lots on the same
+  // cells as the whole box: a region holds the whole box's buildings and
+  // lots inside it, not ones shifted by a part of a cell (before 0.7.0
+  // was integrated Downtown's origin was 1 m off in z, which moved every
+  // lot edge, 6 % of its buildings and the service homes tuned on the
+  // whole box). The whole box itself is unchanged.
+  const lx0 = RASTER_X0 + Math.floor((cut.x0 - SEA_PAD - RASTER_X0) / RASTER_LATTICE) * RASTER_LATTICE;
+  const lz0 = RASTER_Z0 + Math.floor((cut.z0 - SEA_PAD - RASTER_Z0) / RASTER_LATTICE) * RASTER_LATTICE;
+  const land = makeRaster(lx0, lz0, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
   const W = land.w, H = land.h, NC = W * H;
   const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
   let coastLand = null;
@@ -2425,6 +2451,7 @@ export function createMiamiCity(data, opts = {}) {
   if (city.courseSpec) city.courses = buildCourses(city);
   lap('places.courses');
   lap('places');
+  if (cpuTimings) city.cpuTimings = cpuTimings;
   city.buildMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart);
   return city;
 }

@@ -165,3 +165,33 @@ test('travel pad labels: the picker name cut at "and", no markers without a page
   assert.equal(createTravelMarkers({ add() {}, remove() {} }, c), null, 'node: no document, nothing drawn');
   assert.equal(createTravelMarkers(null, c), null);
 });
+
+test('one start place a region: regions.js start, REGION_STARTS, travel regionStart and the built spawn agree', async () => {
+  const { REGION_STARTS } = await import('../src/world/regioncontent.js');
+  const { regionStart } = await import('../src/core/travel.js');
+  for (const id of REGION_IDS) {
+    const st = regionFor(id).start;
+    if (id === DEFAULT_REGION) {
+      assert.equal(st, null, 'Downtown starts at MIAMI_SPOTS.spawn');
+      assert.equal(REGION_STARTS[id], undefined);
+      assert.deepEqual(regionStart(id), { x: MIAMI_SPOTS.spawn.x, z: MIAMI_SPOTS.spawn.z, heading: MIAMI_SPOTS.spawn.heading });
+    } else {
+      assert.equal(REGION_STARTS[id], st, id + ': REGION_STARTS is regions.js start itself');
+      assert.deepEqual(regionStart(id), { x: st.x, z: st.z, heading: st.heading }, id);
+    }
+    // The spawn the game uses (snapped to the street) is the table point
+    // that travel writes (to 0.1 m), on the same street, facing the same way.
+    // Downtown's table point (MIAMI_SPOTS.spawn, hand content that the
+    // start-view and service tests measure from) lies 42 m off its street:
+    // a Travel-list arrival there is moved onto the built start place by
+    // session.arrive(null), so only the street is checked for it.
+    const c = regionCity(id), s = regionStart(id);
+    const d = Math.hypot(c.spawn.x - s.x, c.spawn.z - s.z);
+    if (id !== DEFAULT_REGION) {
+      assert.ok(d < 0.5, `${id}: spawn ${d.toFixed(1)} m from regionStart`);
+      assert.ok(Math.cos(c.spawn.heading - s.heading) > 0.999, id + ' heading');
+    } else assert.ok(d < 60, `${id}: spawn ${d.toFixed(1)} m from regionStart`);
+    const street = st ? st.street : MIAMI_SPOTS.spawn.street;
+    assert.ok(c.edgesNear(c.spawn.x, c.spawn.z, 1, []).some((e) => c.edges[e].name === street), id + ' on ' + street);
+  }
+});

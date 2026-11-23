@@ -2,9 +2,12 @@
 // registered on the pause menu through menu.registerScreen. Bodies only:
 // the menu draws the frame, the Back button and the title. All text goes
 // through textContent / DOM APIs, never innerHTML. No money anywhere.
-import { PAINT_COLORS, GARAGE_CARS_MAX } from '../world/garages.js';
+import { PAINT_COLORS, GARAGE_CARS_MAX, GARAGE_DEFS } from '../world/garages.js';
+import { ADVENTURE_DEFS } from '../world/adventures.js';
+import { regionsAt, GARAGE_MARGIN } from '../world/regions.js';
 import { specOf } from '../core/garage.js';
 import { nextStep, stepsDone } from '../core/explore.js';
+import { mapName, adventureRegion } from '../core/travel.js';
 
 const STYLE_ID = 'rw-explore-style';
 const CSS = `
@@ -214,6 +217,19 @@ export function registerExploreScreens(game) {
       if (!found) b.disabled = true;
       wrap.appendChild(b);
     }
+    // Found and seen are kept for all Miami (PLAN_V2 3.5 rule 6): a garage
+    // found in another region is listed with where it is (the hub tile
+    // counts every garage, so the list adds up to it).
+    for (const g of GARAGE_DEFS) {
+      if (!ex.garages.found.includes(g.id) || game.explore.garages.some((q) => q.id === g.id)) continue;
+      const where = mapName(regionsAt(g.x, g.z, GARAGE_MARGIN)[0] || '');
+      const b = button('', 'rw-ex-g', () => {}, g.name + (where ? ', in ' + where : '') + '. Travel there to visit');
+      b.dataset.garage = g.id;
+      b.dataset.elsewhere = '1';
+      b.append(h('b', '', g.name), h('small', '', (where ? 'In ' + where + '. ' : '') + 'Travel there to visit'));
+      b.disabled = true;
+      wrap.appendChild(b);
+    }
     body.appendChild(wrap);
   }
 
@@ -221,7 +237,7 @@ export function registerExploreScreens(game) {
   function rewardLine(a) {
     const r = a.reward;
     const parts = [r.score.toLocaleString('en-US') + ' pts'];
-    if (r.garage) { const g = game.explore.garages.find((q) => q.id === r.garage); parts.push(g ? g.name : 'a garage'); }
+    if (r.garage) { const g = game.explore.garages.find((q) => q.id === r.garage) || GARAGE_DEFS.find((q) => q.id === r.garage); parts.push(g ? g.name : 'a garage'); }
     if (r.car) parts.push('the ' + labelOf(r.car));
     if (r.route) parts.push('a new route');
     return parts.join(', ');
@@ -231,7 +247,8 @@ export function registerExploreScreens(game) {
     const ex = game.explore.state;
     const A = ex.adventures;
     const wrap = h('div', 'rw-ex rw-ex-adv');
-    const rum = h('p', 'rw-ex-rumours', 'Rumours to hear: ' + (game.explore.adventures.length - A.seen.length));
+    // Seen is kept for all Miami: count this region's adventures not yet heard.
+    const rum = h('p', 'rw-ex-rumours', 'Rumours to hear: ' + game.explore.adventures.filter((a) => !A.seen.includes(a.id)).length);
     rum.dataset.role = 'rumours';
     wrap.appendChild(rum);
     // An adventure tracked in another region keeps its step; say where it is.
@@ -258,7 +275,7 @@ export function registerExploreScreens(game) {
       const info = h('div');
       const k = nextStep(ex, a);
       const locked = a.needs.some((n) => !A.done.includes(n));
-      const clue = locked ? 'Finish ' + a.needs.map((n) => (game.explore.adventures.find((q) => q.id === n) || { name: n }).name).join(', ') + ' first.'
+      const clue = locked ? 'Finish ' + a.needs.map((n) => (game.explore.adventures.find((q) => q.id === n) || ADVENTURE_DEFS.find((q) => q.id === n) || { name: n }).name).join(', ') + ' first.'
         : k >= 0 ? a.steps[k].clue : '';
       const n = stepsDone(ex, a);
       info.append(h('b', '', a.name + (a.steps.length > 1 ? '  ' + n + ' / ' + a.steps.length : '')), h('small', '', clue));
@@ -280,6 +297,16 @@ export function registerExploreScreens(game) {
       const row = h('div', 'rw-ex-row');
       const info = h('div');
       info.append(h('b', '', a.name), h('small', '', rewardLine(a)));
+      row.appendChild(info);
+      done.appendChild(row);
+    }
+    // Done in another region (the hub tile counts all Miami).
+    for (const a of ADVENTURE_DEFS) {
+      if (!A.done.includes(a.id) || game.explore.adventures.some((q) => q.id === a.id)) continue;
+      const row = h('div', 'rw-ex-row');
+      row.dataset.elsewhere = '1';
+      const info = h('div');
+      info.append(h('b', '', a.name), h('small', '', 'Done in ' + mapName(adventureRegion(a)) + '. ' + rewardLine(a)));
       row.appendChild(info);
       done.appendChild(row);
     }

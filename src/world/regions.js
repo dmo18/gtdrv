@@ -38,11 +38,14 @@ export const WHOLE_BOX = 'miami';
 // the last land instead of mid-span.
 const L = (id, to, road, x, z) => ({ id, to, road, x, z });
 
-// The five regions. `crop` is exact (3.2); `start` is the region's start
-// place (spawn on a named street, 300 m or more from every edge; R2 may
-// replace the outer four with designed ones); `spots` names the hand
-// tables that differ from MIAMI_SPOTS (null: Downtown, which is
-// MIAMI_SPOTS itself).
+// The five regions. `crop` is exact (3.2); `start` is the region's
+// designed start place (a named street, 300 m or more from every edge, a
+// long straight with room ahead for the first view's cars). It is the one
+// source: the build snaps its spawn to it, world/regioncontent.js
+// (REGION_STARTS) re-snaps the same numbers and core/travel.js
+// regionStart() hands it to travel. The numbers are the snapped lane
+// point itself (to 0.1 m), so the table and the spawn agree (pinned by
+// test/regioncontent.test.js). Downtown's is MIAMI_SPOTS.spawn.
 export const REGIONS = [
   {
     id: 'miami-downtown', name: 'Downtown and the Bay', crop: { x0: -2700, z0: -2700, x1: 2450, z1: 1900 },
@@ -59,7 +62,7 @@ export const REGIONS = [
   },
   {
     id: 'miami-beach', name: 'Miami Beach and the Islands', crop: { x0: 1400, z0: -3891, x1: 4505, z1: 3891 },
-    start: { street: 'Alton Road', x: 4100, z: -500, heading: -Math.PI / 2 },
+    start: { street: 'Alton Road', x: 3904.7, z: -495.1, heading: -1.596 },
     links: [
       L('downtown-beach-macarthur', 'miami-downtown', 'MacArthur Causeway', 1400, 176),
       L('north-beach-tuttle', 'miami-north', 'Julia Tuttle Causeway', 1400, -3392),
@@ -67,7 +70,7 @@ export const REGIONS = [
   },
   {
     id: 'miami-north', name: 'Wynwood and the North Side', crop: { x0: -4505, z0: -3891, x1: 1500, z1: -1500 },
-    start: { street: 'Northwest 36th Street', x: -2600, z: -3300, heading: 0 },
+    start: { street: 'Northwest 34th Street', x: -2445.8, z: -3146.4, heading: -0.034 },
     links: [
       L('downtown-north-biscayne', 'miami-downtown', 'Biscayne Boulevard', -900, -1507),
       L('downtown-north-nw2', 'miami-downtown', 'Northwest 2nd Avenue', -1886, -1500),
@@ -77,7 +80,7 @@ export const REGIONS = [
   },
   {
     id: 'miami-west', name: 'Little Havana and Civic Center', crop: { x0: -4505, z0: -1700, x1: -1900, z1: 2050 },
-    start: { street: 'Southwest 8th Street', x: -3500, z: 1530, heading: Math.PI },
+    start: { street: 'Southwest 5th Street', x: -3029.3, z: 1246.9, heading: -0.036 },
     links: [
       L('downtown-west-sw8', 'miami-downtown', 'Southwest 8th Street', -1906, 1529),
       L('downtown-west-flagler', 'miami-downtown', 'West Flagler Street', -1900, 641),
@@ -87,7 +90,7 @@ export const REGIONS = [
   },
   {
     id: 'miami-south', name: 'The Roads and the South Shore', crop: { x0: -4505, z0: 1850, x1: 1400, z1: 3891 },
-    start: { street: 'South Miami Avenue', x: -1900, z: 2700, heading: Math.PI / 2 },
+    start: { street: 'Southwest 1st Avenue', x: -1904.5, z: 2446.9, heading: 2.488 },
     links: [
       L('downtown-south-brickell', 'miami-downtown', 'Brickell Avenue', -1145, 1850),
       L('downtown-south-miamiave', 'miami-downtown', 'South Miami Avenue', -1322, 1850),

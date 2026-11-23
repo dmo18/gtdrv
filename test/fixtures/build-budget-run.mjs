@@ -35,17 +35,24 @@ function calibrate() {
   for (const b of boxes) acc += (b.x1 - b.x0) * (b.z1 - b.z0) + b.h;
   return acc + regions;
 }
+// Main-thread CPU ms (the stage laps): GC helper threads and other
+// processes do not add to it. process.cpuUsage where the node is older.
+const threadMs = typeof process.threadCpuUsage === 'function'
+  ? () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; }
+  : () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
 function timeIt(fn) {
-  const c0 = process.cpuUsage(), t0 = performance.now();
+  const c0 = process.cpuUsage(), t0 = performance.now(), m0 = threadMs();
   const r = fn();
-  return { r, wall: performance.now() - t0, cpu: process.cpuUsage(c0).user / 1000 };
+  return { r, wall: performance.now() - t0, cpu: process.cpuUsage(c0).user / 1000, thread: threadMs() - m0 };
 }
 
 const data = JSON.parse(fs.readFileSync(new URL('../../src/world/data/miami.json', import.meta.url), 'utf8'));
 // Calibration once before and three times after the (cold) build; the
 // fastest run counts (a pause in one run does not move it).
 const cals = [timeIt(calibrate)];
-const build = timeIt(() => createMiamiCity(data));
+// Each stage's main-thread CPU time as well as its wall time (miami.js opts.cpuClock).
+const build = timeIt(() => createMiamiCity(data, { cpuClock: threadMs }));
 for (let k = 0; k < 3; k++) cals.push(timeIt(calibrate));
 const calWall = Math.min(...cals.map((c) => c.wall)), calCpu = Math.min(...cals.map((c) => c.cpu));
-process.stdout.write(JSON.stringify({ wall: build.wall, cpu: build.cpu, calWall, calCpu, lots: build.r.lots.length, buildings: build.r.buildings.length, timings: build.r.timings }) + '\n');
+const calThread = Math.min(...cals.map((c) => c.thread));
+process.stdout.write(JSON.stringify({ wall: build.wall, cpu: build.cpu, thread: build.thread, calWall, calCpu, calThread, lots: build.r.lots.length, buildings: build.r.buildings.length, timings: build.r.timings, cpuTimings: build.r.cpuTimings }) + '\n');

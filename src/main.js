@@ -13,12 +13,28 @@ const showUi = (on) => {
   if (uiRoot) uiRoot.style.visibility = on ? '' : 'hidden';
 };
 
+// Page load to running (the Phone check start field, PLAN_V2 section 4):
+// set once, the first time the game is playable: the title is up with
+// Start enabled (on Miami the simulation already runs behind it, the
+// moment scripts/perf-scenarios.mjs times as the first loop start), or
+// play itself began (?autostart).
+function markRunning() {
+  try {
+    if (window.__rwStartMs > 0) return;
+    window.__rwStartMs = Math.round(performance.now());
+    performance.mark('rw-running');
+  } catch {
+    // no performance API: the Phone check prints n/a
+  }
+}
+
 function start(game, blend) {
   title.hide();
   // Play begins: from here the place is autosaved again.
   game.session.hold(false);
   game.resize();
   game.loop.start();
+  markRunning();
   // The HUD and controls show when the camera has blended to the chase view
   // (docs/REVAMP.md 6.8); then, on the first visit only, the player may pick
   // how they want to steer. (Skipped for the automated checks, which start
@@ -129,6 +145,7 @@ async function startUp() {
   }
   title.setMap(mapId);
   title.setReady(true);
+  if (!autostart) markRunning();
   title.setCanContinue(game.session.canContinue());
   title.onStart(() => {
     game.audio.unlock();
@@ -142,7 +159,7 @@ async function startUp() {
   // Continue, and the arrival after travel (a fresh page in the target
   // region: no tap, so no full screen). `link`: the pad the player came
   // through, for the exact arrival pose.
-  async function continueGame(tapped, link) {
+  async function continueGame(tapped, link, travelled = false) {
     game.audio.unlock();
     if (tapped) {
       try {
@@ -162,7 +179,7 @@ async function startUp() {
       ok = false;
     }
     if (!ok) game.session.startFresh();
-    else if (link && game.session.arrive) game.session.arrive(link);
+    else if ((link || travelled) && game.session.arrive) game.session.arrive(link);
     start(game);
     if (!ok && game.hud && game.hud.toast) game.hud.toast(link ? 'Arrived at the start place' : 'Could not restore your place', 3);
     await veil.to(0);
@@ -176,7 +193,7 @@ async function startUp() {
   } catch {
     note = null;
   }
-  if (note && !autostart) continueGame(false, note.link);
+  if (note && !autostart) continueGame(false, note.link, true);
   if (autostart) start(game);
 }
 startUp().catch((err) => {
