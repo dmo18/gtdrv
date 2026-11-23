@@ -36,6 +36,27 @@ export const EYE_DEFAULTS = {
 };
 export const MIN_CLEAR = 0.15; // eye to any body shell surface (m; the cabin parts hide in the cockpit)
 export const WHEEL_MAX_DEG = 90; // steering wheel turn at full input
+// The cockpit camera (chasecam.js VIEWS.car 'Cockpit'): vertical FOV in
+// degrees, looking level from the eye. The kit is framed for it.
+export const COCKPIT_FOV = 78;
+
+// How each class looks from the driver's seat (docs/PLAN_V3.md section
+// 13, AIR): angles in degrees from the level line of sight. dash: the
+// dash top where it meets the glass (the eye is raised or moved forward
+// until the body's cowl is no higher, or the dash is built up to it);
+// header: lower edge of the roof header (35 degrees keeps it under 8
+// percent of the frame); wheelTop / wheelBot: the rim's top and bottom
+// edge (the whole wheel stays in frame); tilt: column angle from upright;
+// lip: how far the dash lip sits ahead of the eye (m); face: dash face
+// height under the lip (m); fwd: the eye may move this far forward.
+export const LOOKS = {
+  low: { dash: -18, header: 36, wheelR: 0.185, rimR: 0.024, tilt: 22, wheelTop: -7, wheelBot: -36.5, spokes: 3, lip: 0.74, face: 0.2, fwd: 0.12 },
+  tall: { dash: -17, header: 36, wheelR: 0.19, rimR: 0.025, tilt: 24, wheelTop: -6.5, wheelBot: -36.5, spokes: 3, lip: 0.74, face: 0.3, fwd: 0.1 },
+  big: { dash: -21, header: 36, wheelR: 0.245, rimR: 0.022, tilt: 56, wheelTop: -15, wheelBot: -35.5, spokes: 4, lip: 0.8, face: 0.32, fwd: 0 },
+};
+const LOOK_OF = { suv: 'tall', crossover: 'tall', pickup: 'tall', van: 'tall', bus: 'big', truck: 'big' };
+export const lookOf = (spec) => LOOKS[LOOK_OF[spec && spec.body] || 'low'];
+const DEG = Math.PI / 180;
 
 // ---- measuring -------------------------------------------------------------------
 const cabinCache = new Map();
@@ -176,11 +197,12 @@ export function inCabin(cab, p) {
 // The driver's eye ({x, y, z}, car local): `spec.eye` when the spec has
 // one inside the cabin on the left, else the per-kind default fitted to
 // the measured cabin and moved clear of the body by MIN_CLEAR where it
-// can be (`fromSpec` says which).
+// can be (`fromSpec` says which). Either is then framed for the cockpit
+// (frameEye).
 export function eyePoint(spec, cab) {
   if (cab.eye) return cab.eye;
   if (validEye(spec.eye) && spec.eye.z < 0 && inCabin(cab, spec.eye)) {
-    cab.eye = { x: spec.eye.x, y: spec.eye.y, z: spec.eye.z, fromSpec: true };
+    cab.eye = frameEye(spec, cab, { x: spec.eye.x, y: spec.eye.y, z: spec.eye.z, fromSpec: true });
     return cab.eye;
   }
   const d = EYE_DEFAULTS[spec.body] || EYE_DEFAULTS.default;
@@ -208,8 +230,30 @@ export function eyePoint(spec, cab) {
     }
     [x, y, z] = bestFar || best;
   }
-  cab.eye = { x, y, z, fromSpec: false };
+  cab.eye = frameEye(spec, cab, { x, y, z, fromSpec: false });
   return cab.eye;
+}
+
+// Cockpit framing: the dash line (the body's cowl) at most LOOKS.dash
+// below the level line of sight, so the windshield fills the frame. The
+// eye moves forward a little, then up, staying in the cabin and clear of
+// the body shell (the largest move that keeps both).
+export function frameEye(spec, cab, e) {
+  const lk = lookOf(spec);
+  const t = Math.tan(-lk.dash * DEG);
+  if (e.y - cab.wsY >= (cab.wsX - e.x) * t) return e;
+  const x1 = Math.min(e.x + lk.fwd, Math.max(e.x, cab.wsX - (e.y - cab.wsY) / t));
+  const y1 = Math.max(e.y, cab.wsY + (cab.wsX - x1) * t);
+  const ok = (k) => {
+    const p = { x: e.x + (x1 - e.x) * k, y: e.y + (y1 - e.y) * k, z: e.z };
+    return inCabin(cab, p) && cab.at(p.x).roofY != null && p.y < cab.at(p.x).roofY - 0.06 &&
+      (!cab.body || bodyClearance(cab.body, p.x, p.y, p.z, true) >= MIN_CLEAR + 0.02);
+  };
+  let lo = 0, hi = 1;
+  if (ok(1)) lo = 1;
+  else for (let i = 0; i < 10; i++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
+  if (lo === 0) return e;
+  return { x: e.x + (x1 - e.x) * lo, y: e.y + (y1 - e.y) * lo, z: e.z, fromSpec: e.fromSpec };
 }
 
 // The Hood camera point: on the center line at the windshield base, at
@@ -300,62 +344,94 @@ export function frontShell(body, cab) {
 }
 
 // ---- the interior kit ------------------------------------------------------------
+// One texture atlas (canvas, 1024 x 512) serves the whole cockpit: the
+// gauge cluster, the center screen, a stitched seam, vent slats, a soft
+// leather grain, a plain white block (vertex color only) and the needle
+// color. Regions in canvas pixels [x0, y0, x1, y1].
+export const ATLAS = {
+  w: 1024, h: 512,
+  cluster: [0, 0, 640, 256], screen: [640, 0, 1024, 256],
+  stitch: [0, 256, 512, 288], vent: [0, 288, 256, 416], grain: [512, 256, 1024, 512],
+  white: [272, 304, 496, 496], needle: [8, 424, 56, 472],
+};
+// The two dials on the cluster (pixels): rpm on the left, mph on the right.
+export const DIAL = { start: (225 * Math.PI) / 180, sweep: (270 * Math.PI) / 180, mph: 140, rpm: 8, red: 6.5, r: 112, rpmC: [130, 128], mphC: [510, 128] };
+const uvRect = (r) => [r[0] / ATLAS.w, 1 - r[3] / ATLAS.h, r[2] / ATLAS.w, 1 - r[1] / ATLAS.h];
+const UV = {};
+for (const k of ['cluster', 'screen', 'stitch', 'vent', 'grain', 'white', 'needle']) UV[k] = uvRect(ATLAS[k]);
+const UVW = [(UV.white[0] + UV.white[2]) / 2, (UV.white[1] + UV.white[3]) / 2];
+
 const _col = new THREE.Color();
 class Kit {
-  constructor() { this.p = []; this.n = []; this.c = []; this.i = []; }
+  constructor() { this.p = []; this.n = []; this.c = []; this.u = []; this.i = []; this.parts = {}; this.part = null; }
   get tris() { return this.i.length / 3; }
-  vert(x, y, z, nx, ny, nz, hex, shade = 1) {
+  // Name the triangles that follow (tests measure the pillars, header, wheel).
+  begin(name) {
+    this.end();
+    this.part = [this.tris, this.tris];
+    (this.parts[name] || (this.parts[name] = [])).push(this.part);
+  }
+  end() { if (this.part) this.part[1] = this.tris; this.part = null; }
+  vert(x, y, z, nx, ny, nz, hex, shade = 1, u = UVW[0], v = UVW[1]) {
     _col.setHex(hex);
     this.p.push(x, y, z);
     this.n.push(nx, ny, nz);
     this.c.push(_col.r * shade, _col.g * shade, _col.b * shade);
+    this.u.push(u, v);
     return this.p.length / 3 - 1;
   }
-  // A flat quad a b c d (either winding: the material is double sided).
-  quad(a, b, c, d, hex, shade = 1) {
+  // A flat quad a b c d (either winding: the material is double sided);
+  // `uv` maps a->(u0,v0), b->(u1,v0), c->(u1,v1), d->(u0,v1).
+  quad(a, b, c, d, hex, shade = 1, uv = null) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const l = Math.hypot(nx, ny, nz) || 1;
     nx /= l; ny /= l; nz /= l;
-    const i0 = this.vert(a[0], a[1], a[2], nx, ny, nz, hex, shade);
-    this.vert(b[0], b[1], b[2], nx, ny, nz, hex, shade);
-    this.vert(c[0], c[1], c[2], nx, ny, nz, hex, shade);
-    this.vert(d[0], d[1], d[2], nx, ny, nz, hex, shade);
+    const r = uv || null;
+    const i0 = this.vert(a[0], a[1], a[2], nx, ny, nz, hex, shade, r ? r[0] : UVW[0], r ? r[1] : UVW[1]);
+    this.vert(b[0], b[1], b[2], nx, ny, nz, hex, shade, r ? r[2] : UVW[0], r ? r[1] : UVW[1]);
+    this.vert(c[0], c[1], c[2], nx, ny, nz, hex, shade, r ? r[2] : UVW[0], r ? r[3] : UVW[1]);
+    this.vert(d[0], d[1], d[2], nx, ny, nz, hex, shade, r ? r[0] : UVW[0], r ? r[3] : UVW[1]);
     this.i.push(i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3);
   }
   // A box on three axes (unit vectors u, v, w) around a center.
-  obox(cx, cy, cz, u, v, w, su, sv, sw, hex, skip = '') {
+  obox(cx, cy, cz, u, v, w, su, sv, sw, hex, skip = '', uv = null) {
     const P = (a, b, c) => [cx + u[0] * a * su / 2 + v[0] * b * sv / 2 + w[0] * c * sw / 2, cy + u[1] * a * su / 2 + v[1] * b * sv / 2 + w[1] * c * sw / 2, cz + u[2] * a * su / 2 + v[2] * b * sv / 2 + w[2] * c * sw / 2];
-    if (!skip.includes('u')) this.quad(P(1, -1, -1), P(1, 1, -1), P(1, 1, 1), P(1, -1, 1), hex, 0.95);
-    if (!skip.includes('U')) this.quad(P(-1, -1, -1), P(-1, 1, -1), P(-1, 1, 1), P(-1, -1, 1), hex, 0.95);
-    if (!skip.includes('v')) this.quad(P(-1, 1, -1), P(1, 1, -1), P(1, 1, 1), P(-1, 1, 1), hex);
-    if (!skip.includes('V')) this.quad(P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), P(-1, -1, 1), hex, 0.8);
-    if (!skip.includes('w')) this.quad(P(-1, -1, 1), P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1), hex, 0.9);
-    if (!skip.includes('W')) this.quad(P(-1, -1, -1), P(1, -1, -1), P(1, 1, -1), P(-1, 1, -1), hex, 0.9);
+    if (!skip.includes('u')) this.quad(P(1, -1, -1), P(1, 1, -1), P(1, 1, 1), P(1, -1, 1), hex, 0.95, uv);
+    if (!skip.includes('U')) this.quad(P(-1, -1, -1), P(-1, 1, -1), P(-1, 1, 1), P(-1, -1, 1), hex, 0.95, uv);
+    if (!skip.includes('v')) this.quad(P(-1, 1, -1), P(1, 1, -1), P(1, 1, 1), P(-1, 1, 1), hex, 1, uv);
+    if (!skip.includes('V')) this.quad(P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), P(-1, -1, 1), hex, 0.8, uv);
+    if (!skip.includes('w')) this.quad(P(-1, -1, 1), P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1), hex, 0.9, uv);
+    if (!skip.includes('W')) this.quad(P(-1, -1, -1), P(1, -1, -1), P(1, 1, -1), P(-1, 1, -1), hex, 0.9, uv);
   }
-  box(cx, cy, cz, sx, sy, sz, hex, skip = '') {
-    this.obox(cx, cy, cz, X, Y, Z, sx, sy, sz, hex, skip);
+  box(cx, cy, cz, sx, sy, sz, hex, skip = '', uv = null) {
+    this.obox(cx, cy, cz, X, Y, Z, sx, sy, sz, hex, skip, uv);
   }
-  // A bar from p0 to p1 with a cross-section w x d; `side` points to the
-  // bar's flat face.
-  bar(p0, p1, side, w, d, hex) {
+  // A bar from p0 to p1, w0 wide at p0 and w1 at p1, d deep; `side`
+  // points to the bar's flat face (the one that shows).
+  bar(p0, p1, side, w0, d, hex, w1 = w0, uv = null) {
     const t = norm([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]]);
     const k = side[0] * t[0] + side[1] * t[1] + side[2] * t[2];
     const a = norm([side[0] - t[0] * k, side[1] - t[1] * k, side[2] - t[2] * k]);
     const b = cross(t, a);
-    const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
-    this.obox((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2, t, a, b, len, d, w, hex, 'uU');
+    const C = (p, w, sa, sb) => [p[0] + a[0] * sa * d / 2 + b[0] * sb * w / 2, p[1] + a[1] * sa * d / 2 + b[1] * sb * w / 2, p[2] + a[2] * sa * d / 2 + b[2] * sb * w / 2];
+    this.quad(C(p0, w0, 1, -1), C(p0, w0, 1, 1), C(p1, w1, 1, 1), C(p1, w1, 1, -1), hex, 1, uv);
+    this.quad(C(p0, w0, -1, -1), C(p0, w0, -1, 1), C(p1, w1, -1, 1), C(p1, w1, -1, -1), hex, 0.8, uv);
+    this.quad(C(p0, w0, -1, 1), C(p0, w0, 1, 1), C(p1, w1, 1, 1), C(p1, w1, -1, 1), hex, 0.9, uv);
+    this.quad(C(p0, w0, -1, -1), C(p0, w0, 1, -1), C(p1, w1, 1, -1), C(p1, w1, -1, -1), hex, 0.9, uv);
   }
-  // A torus around the origin in the xy plane (smooth normals).
-  torus(R, r, segU, segV, hex, mark = null) {
+  // A torus around the origin in the xy plane (smooth normals); vertices
+  // within `mark.half` radians of 12 o'clock take mark.hex.
+  torus(R, r, segU, segV, hex, mark = null, uv = null) {
     const base = this.p.length / 3;
     for (let i = 0; i <= segU; i++) {
       const u = (i / segU) * Math.PI * 2, cu = Math.cos(u), su = Math.sin(u);
       const h = mark && Math.abs(Math.atan2(Math.sin(u - Math.PI / 2), Math.cos(u - Math.PI / 2))) < mark.half ? mark.hex : hex;
       for (let j = 0; j <= segV; j++) {
         const v = (j / segV) * Math.PI * 2, cv = Math.cos(v), sv = Math.sin(v);
-        this.vert((R + r * cv) * cu, (R + r * cv) * su, r * sv, cv * cu, cv * su, sv, h);
+        const tu = uv ? uv[0] + (uv[2] - uv[0]) * (i / segU) : UVW[0], tv = uv ? uv[1] + (uv[3] - uv[1]) * (j / segV) : UVW[1];
+        this.vert((R + r * cv) * cu, (R + r * cv) * su, r * sv, cv * cu, cv * su, sv, h, 1, tu, tv);
       }
     }
     for (let i = 0; i < segU; i++) {
@@ -365,13 +441,13 @@ class Kit {
       }
     }
   }
-  // A capped cylinder along z from z0 to z1 around (x, y).
-  cyl(x, y, z0, z1, r, seg, hex, cap = true) {
+  // A capped cylinder along z from z0 to z1 around (x, y), radii rx, ry.
+  cyl(x, y, z0, z1, rx, ry, seg, hex, cap = true, shade = 0.9) {
     const base = this.p.length / 3;
     for (let i = 0; i <= seg; i++) {
       const a = (i / seg) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
-      this.vert(x + c * r, y + s * r, z0, c, s, 0, hex, 0.9);
-      this.vert(x + c * r, y + s * r, z1, c, s, 0, hex, 0.9);
+      this.vert(x + c * rx, y + s * ry, z0, c, s, 0, hex, shade);
+      this.vert(x + c * rx, y + s * ry, z1, c, s, 0, hex, shade);
     }
     for (let i = 0; i < seg; i++) {
       const a = base + i * 2;
@@ -382,16 +458,18 @@ class Kit {
       const ring = this.p.length / 3;
       for (let i = 0; i <= seg; i++) {
         const a = (i / seg) * Math.PI * 2;
-        this.vert(x + Math.cos(a) * r, y + Math.sin(a) * r, z1, 0, 0, 1, hex);
+        this.vert(x + Math.cos(a) * rx, y + Math.sin(a) * ry, z1, 0, 0, 1, hex);
       }
       for (let i = 0; i < seg; i++) this.i.push(c0, ring + i, ring + i + 1);
     }
   }
   geometry() {
+    this.end();
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.u, 2));
     g.setIndex(this.i);
     g.computeBoundingSphere();
     return g;
@@ -400,273 +478,450 @@ class Kit {
 const X = [1, 0, 0], Y = [0, 1, 0], Z = [0, 0, 1];
 function norm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
-// Interior colors (dark, original, no brand marks).
+// Interior colors (original, no brand marks): a two-tone cabin, charcoal
+// upper and warm gray lower.
 const COL = {
-  dash: 0x26272a, dashTop: 0x1b1c1e, binnacle: 0x141517, trim: 0x3a3b3e, door: 0x34353a, doorTop: 0x232427,
-  liner: 0x8e8a82, pillar: 0x45433f, seat: 0x2f2c29, seatSide: 0x3b3733, floor: 0x1c1c1c, console: 0x222326,
-  vent: 0x0d0e0f, mirror: 0x9aaab8, mirrorFrame: 0x151617, rim: 0x151515, spoke: 0x2c2d30, hub: 0x1f2022, mark: 0xc9b48a,
-  strip: 0x6d6f73, screen: 0x0c1620,
+  top: 0x2a2b2e, upper: 0x323337, lower: 0x77726a, lowerDark: 0x5e5a53, seam: 0x1c1c1e, stitch: 0xd8d2c4,
+  binnacle: 0x1d1e21, pillar: 0x4a4842, liner: 0xa8a399, door: 0x6f6a62, doorTop: 0x2c2d30, trim: 0x3d3e42,
+  seat: 0x34312e, seatSide: 0x403c37, floor: 0x1e1e1e, console: 0x2b2c30, knob: 0x8d9095, chrome: 0xb9bcc0,
+  mirror: 0xa8b8c6, mirrorFrame: 0x18191b, rim: 0x232325, spoke: 0x3a3b3f, hub: 0x26272a, mark: 0xc9b48a,
 };
 
 // Where the parts sit for one cabin and eye (car local). Exported for the
-// tests (wheel hub, cluster).
-export function interiorLayout(cab, eye) {
+// tests (wheel, cluster, header).
+export function interiorLayout(cab, eye, spec = cab.spec) {
+  const lk = lookOf(spec);
   const s = cab.at(eye.x);
-  const roof = s.roofY != null ? s.roofY - 0.035 : null;
+  const tan = (a) => Math.tan(a * DEG);
   const hw = Math.max(0.45, s.hwBelt - 0.03); // door panel half width
-  const dashLipX = Math.min(eye.x + 0.6, cab.wsX - 0.18);
-  const dashLipY = Math.min(eye.y - 0.27, cab.wsY + 0.03);
-  const wheelX = eye.x + 0.45, wheelY = eye.y - 0.33;
-  const clusterX = Math.min(eye.x + 0.7, cab.wsX - 0.1), clusterY = eye.y - 0.2;
-  return { s, roof, hw, dashLipX, dashLipY, wheelX, wheelY, wheelR: 0.185, tilt: 24 * Math.PI / 180, clusterX, clusterY, clusterW: 0.34, clusterH: 0.136 };
+  // Dash line where the dash meets the glass (built up to the line when
+  // the body's cowl is lower, as in trucks and buses).
+  const gX = cab.wsX - 0.01;
+  const gY = Math.max(cab.wsY - 0.01, eye.y + (gX - eye.x) * tan(lk.dash));
+  // Steering wheel: center and column tilt so the rim's outer top and
+  // bottom edges sit at wheelTop and wheelBot.
+  const R = lk.wheelR, Re = R + lk.rimR, t = lk.tilt * DEG;
+  const A = tan(lk.wheelTop), B = tan(lk.wheelBot);
+  const wd = (2 * Re * Math.cos(t) - (A + B) * Re * Math.sin(t)) / (A - B);
+  const wheelX = eye.x + wd, wheelY = eye.y + A * (wd + Re * Math.sin(t)) - Re * Math.cos(t);
+  // Gauge cluster: behind the rim's top, seen through the wheel.
+  const big = lk === LOOKS.big;
+  const clusterW = big ? 0.44 : 0.4, clusterH = clusterW * 0.4;
+  const cd = Math.min(wd + (big ? 0.22 : 0.15), gX - eye.x - 0.12);
+  const clusterX = eye.x + cd;
+  const clusterY = eye.y + cd * tan(lk.wheelTop - 2.2) - clusterH / 2;
+  // Dash lip: under the cluster in front of the driver, curving closer
+  // toward the passenger side; its edge reads as one level line.
+  const lipAng = Math.min(lk.dash - 5, Math.atan2(clusterY - clusterH / 2 - 0.03 - eye.y, cd) / DEG);
+  const lipNear = Math.min(cd + 0.03, gX - eye.x - 0.12), lipFar = Math.min(lk.lip, lipNear);
+  const lipD = (z) => lipNear - (lipNear - lipFar) * smooth((z - eye.z - 0.3) / 0.55);
+  const lipY = (z) => eye.y + lipD(z) * tan(lipAng);
+  // Roof header: its lower edge at `header` degrees above the line of sight.
+  const hd = Math.max(0.32, Math.min(1.4, cab.rfX - eye.x));
+  const headerX = eye.x + hd, headerY = eye.y + hd * tan(lk.header);
+  return {
+    look: lk, s, hw, gX, gY, lipD, lipY, lipAng, headerX, headerY,
+    dashW: Math.min(hw, cab.hwBase + 0.02),
+    wheelX, wheelY, wheelR: R, rimR: lk.rimR, tilt: t,
+    clusterX, clusterY, clusterW, clusterH,
+  };
 }
 
 function buildShell(cab, eye, lay) {
   const k = new Kit();
-  const { s, hw } = lay;
-  const ez = eye.z;
-  const wsX = cab.wsX, wsY = cab.wsY;
+  const { s, hw, look: lk, dashW } = lay;
+  const ex = eye.x, ey = eye.y, ez = eye.z;
+  const gX = lay.gX, gY = lay.gY;
   const floor = cab.floorY;
-  const rearX = Math.max(cab.rearX + 0.15, eye.x - 1.6);
+  const rearX = Math.max(cab.rearX + 0.15, ex - 1.6);
   const belt = s.beltY - 0.005;
-  // Dashboard: a top from the glass back to the lip (5 strips across),
-  // the lip face and the lower dash down to the knees.
-  const NZ = 8;
-  const dashW = Math.min(hw, cab.hwBase + 0.02);
-  const lipY = lay.dashLipY;
-  for (let i = 0; i < NZ; i++) {
-    const z0 = -dashW + (2 * dashW * i) / NZ, z1 = -dashW + (2 * dashW * (i + 1)) / NZ;
-    const glassY = wsY - 0.01;
-    k.quad([wsX - 0.01, glassY, z0], [wsX - 0.01, glassY, z1], [lay.dashLipX + 0.08, lipY + 0.015, z1], [lay.dashLipX + 0.08, lipY + 0.015, z0], COL.dashTop);
-    k.quad([lay.dashLipX + 0.08, lipY + 0.015, z0], [lay.dashLipX + 0.08, lipY + 0.015, z1], [lay.dashLipX, lipY, z1], [lay.dashLipX, lipY, z0], COL.dash, 1.1);
-    k.quad([lay.dashLipX, lipY, z0], [lay.dashLipX, lipY, z1], [lay.dashLipX + 0.004, lipY - 0.018, z1], [lay.dashLipX + 0.004, lipY - 0.018, z0], COL.strip);
-    k.quad([lay.dashLipX + 0.004, lipY - 0.018, z0], [lay.dashLipX + 0.004, lipY - 0.018, z1], [lay.dashLipX + 0.05, lipY - 0.2, z1], [lay.dashLipX + 0.05, lipY - 0.2, z0], COL.dash, 0.85);
-    k.quad([lay.dashLipX + 0.05, lipY - 0.2, z0], [lay.dashLipX + 0.05, lipY - 0.2, z1], [lay.dashLipX + 0.22, floor + 0.12, z1], [lay.dashLipX + 0.22, floor + 0.12, z0], COL.dash, 0.6);
+  const roofY = lay.headerY + 0.045;
+  const G = UV.grain;
+
+  // ---- dash: a soft top from the glass to the lip, a rolled lip with a
+  // stitched seam, the lighter lower face down to the knees.
+  k.begin('dash');
+  const NZ = 14;
+  const row = (z) => {
+    const lx = ex + lay.lipD(z), ly = lay.lipY(z);
+    const midX = (gX + lx) / 2, midY = Math.max(gY, ly) + 0.012; // a gentle crown
+    return [
+      [gX, gY, z], [midX, midY, z], [lx + 0.03, ly + 0.012, z], // top
+      [lx + 0.005, ly + 0.002, z], [lx, ly - 0.02, z], // the rolled lip
+      [lx + 0.002, ly - 0.032, z], // stitched seam below the roll
+      [lx + 0.03, ly - lk.face, z], // lower face
+      [lx + 0.24, Math.max(floor + 0.15, ly - lk.face - 0.3), z], // knee roll to the firewall
+    ];
+  };
+  let prev = row(-dashW);
+  for (let i = 1; i <= NZ; i++) {
+    const z = -dashW + (2 * dashW * i) / NZ;
+    const cur = row(z);
+    const gu = [G[0] + (G[2] - G[0]) * ((i - 1) / NZ), G[1], G[0] + (G[2] - G[0]) * (i / NZ), G[3]];
+    k.quad(prev[0], cur[0], cur[1], prev[1], COL.top, 1.0, gu);
+    k.quad(prev[1], cur[1], cur[2], prev[2], COL.top, 1.06, gu);
+    k.quad(prev[2], cur[2], cur[3], prev[3], COL.upper, 1.2, gu);
+    k.quad(prev[3], cur[3], cur[4], prev[4], COL.upper, 1.0, gu);
+    k.quad(prev[4], cur[4], cur[5], prev[5], 0xffffff, 0.85, UV.stitch);
+    k.quad(prev[5], cur[5], cur[6], prev[6], COL.lower, 1.0, gu);
+    k.quad(prev[6], cur[6], cur[7], prev[7], COL.lowerDark, 0.8, gu);
+    prev = cur;
   }
   // Dash ends against the doors.
   for (const sg of [-1, 1]) {
-    const z = sg * dashW;
-    k.quad([wsX - 0.01, wsY - 0.01, z], [lay.dashLipX, lipY, z], [lay.dashLipX + 0.22, floor + 0.12, z], [wsX - 0.01, floor + 0.12, z], COL.dash, 0.7);
+    const r = row(sg * dashW);
+    k.quad(r[0], r[2], r[6], [gX, r[6][1], r[0][2]], COL.upper, 0.75);
+    k.quad([gX, r[6][1], r[0][2]], r[6], r[7], [gX, r[7][1], r[0][2]], COL.lowerDark, 0.7);
   }
-  // Vents: two in the middle, one at each end.
-  for (const vz of [-0.12, 0.12, -dashW + 0.1, dashW - 0.1]) {
-    k.quad([lay.dashLipX - 0.002, lipY - 0.03, vz - 0.06], [lay.dashLipX - 0.002, lipY - 0.03, vz + 0.06], [lay.dashLipX + 0.006, lipY - 0.075, vz + 0.06], [lay.dashLipX + 0.006, lipY - 0.075, vz - 0.06], COL.vent);
+  // Vents: one at each end, two over the center screen (slats in the atlas).
+  const vent = (z, w, h, drop) => {
+    const lx = ex + lay.lipD(z) + 0.012, ly = lay.lipY(z) - drop;
+    k.quad([lx - 0.004, ly, z - w / 2], [lx - 0.004, ly, z + w / 2], [lx + 0.012, ly - h, z + w / 2], [lx + 0.012, ly - h, z - w / 2], 0xffffff, 0.9, UV.vent);
+  };
+  vent(-dashW + 0.1, 0.12, 0.06, 0.045);
+  vent(dashW - 0.1, 0.12, 0.06, 0.045);
+  vent(-0.07, 0.11, 0.05, 0.045);
+  vent(0.07, 0.11, 0.05, 0.045);
+  // Glove box: a seam outline and a latch on the passenger side.
+  {
+    const gz0 = Math.max(0.2, dashW * 0.35), gz1 = dashW - 0.12;
+    const lx = ex + lay.lipD((gz0 + gz1) / 2), ly = lay.lipY((gz0 + gz1) / 2);
+    const P = (y, z) => { const f = (ly - y - 0.032) / (lk.face - 0.032); return [lx + 0.002 + 0.028 * f - 0.003, y, z]; };
+    const y0 = ly - 0.07, y1 = ly - lk.face + 0.025;
+    k.quad(P(y0, gz0), P(y0, gz1), P(y0 - 0.006, gz1), P(y0 - 0.006, gz0), COL.seam);
+    k.quad(P(y1 + 0.006, gz0), P(y1 + 0.006, gz1), P(y1, gz1), P(y1, gz0), COL.seam);
+    k.quad(P(y0, gz0), P(y0, gz0 + 0.006), P(y1, gz0 + 0.006), P(y1, gz0), COL.seam);
+    k.quad(P(y0, gz1 - 0.006), P(y0, gz1), P(y1, gz1), P(y1, gz1 - 0.006), COL.seam);
+    const m = P(y0 - 0.03, (gz0 + gz1) / 2);
+    k.box(m[0] - 0.004, m[1], m[2], 0.012, 0.014, 0.07, COL.chrome);
   }
-  // Gauge binnacle: a hood over the cluster in front of the driver.
-  const bx0 = lay.clusterX - 0.07, bx1 = lay.clusterX + 0.16;
-  const bTop = lay.clusterY + lay.clusterH / 2 + 0.035;
+  // ---- instrument binnacle: a hood over the cluster in front of the driver.
+  k.begin('binnacle');
+  const cx = lay.clusterX, cyTop = lay.clusterY + lay.clusterH / 2, cyBot = lay.clusterY - lay.clusterH / 2;
   const bw = lay.clusterW / 2 + 0.035;
-  const NB = 10;
-  let prev = null;
+  const bTop = cyTop + 0.03, baseY = Math.max(lay.lipY(ez) + 0.012, cyBot - 0.02);
+  const NB = 8;
+  let pr = null;
   for (let i = 0; i <= NB; i++) {
     const a = Math.PI * (i / NB);
     const z = ez - Math.cos(a) * bw;
-    const h = Math.sin(a) ** 0.45;
-    const y = lipY + (bTop - lipY) * h;
-    // Visor edge (toward the driver), crown, back down to the dash top.
-    const cur = [[bx0, y - 0.012 * h, z], [bx0 + 0.04, y, z], [bx1, lipY + (bTop - lipY) * h * 0.55, z]];
-    if (prev) {
-      k.quad(prev[0], cur[0], cur[1], prev[1], COL.binnacle, 1.15);
-      k.quad(prev[1], cur[1], cur[2], prev[2], COL.binnacle);
+    const h = Math.pow(Math.sin(a), 0.4);
+    const y = baseY + (bTop - baseY) * h;
+    const cur = [[cx - 0.075, y - 0.014 * h, z], [cx - 0.05, y, z], [cx + 0.16, baseY + (bTop - baseY) * h * 0.5, z]];
+    if (pr) {
+      k.quad(pr[0], cur[0], cur[1], pr[1], COL.binnacle, 1.25);
+      k.quad(pr[1], cur[1], cur[2], pr[2], COL.top, 1.05, G);
     }
-    prev = cur;
+    pr = cur;
   }
-  // The cluster's back wall and the sides of its well.
-  k.quad([lay.clusterX + 0.025, lipY - 0.02, ez - bw], [lay.clusterX + 0.025, lipY - 0.02, ez + bw], [lay.clusterX + 0.025, bTop, ez + bw], [lay.clusterX + 0.025, bTop, ez - bw], COL.vent);
-  for (const sg of [-1, 1]) {
-    const z = ez + sg * bw;
-    k.quad([bx0, lipY, z], [lay.clusterX + 0.025, lipY - 0.02, z], [lay.clusterX + 0.025, lipY + 0.02, z], [bx0, lipY + 0.01, z], COL.binnacle, 0.7);
-  }
-  // Center stack and console to the seats.
-  k.box(lay.dashLipX + 0.06, lipY - 0.18, 0, 0.16, 0.3, 0.24, COL.console, 'U');
-  k.quad([lay.dashLipX - 0.021, lipY - 0.035, -0.1], [lay.dashLipX - 0.021, lipY - 0.035, 0.1], [lay.dashLipX - 0.021, lipY - 0.15, 0.1], [lay.dashLipX - 0.021, lipY - 0.15, -0.1], COL.screen);
-  // Climate knobs under the screen, a gear selector on the console.
-  for (const kz of [-0.06, 0, 0.06]) k.box(lay.dashLipX - 0.03, lipY - 0.19, kz, 0.02, 0.03, 0.03, COL.strip);
-  k.box(eye.x + 0.28, floor + 0.43, 0, 0.06, 0.14, 0.04, COL.trim);
-  k.box(eye.x + 0.28, floor + 0.51, 0, 0.07, 0.04, 0.05, COL.strip);
+  // The well around the dials: back wall and floor.
+  k.quad([cx + 0.012, cyBot - 0.02, ez - bw], [cx + 0.012, cyBot - 0.02, ez + bw], [cx + 0.012, bTop, ez + bw], [cx + 0.012, bTop, ez - bw], COL.seam);
+  k.quad([cx - 0.075, baseY, ez - bw], [cx - 0.075, baseY, ez + bw], [cx + 0.012, cyBot - 0.02, ez + bw], [cx + 0.012, cyBot - 0.02, ez - bw], COL.binnacle, 0.8);
+  // Column shroud from the dash face to the wheel.
+  k.begin('column');
+  const ct = [Math.cos(lay.tilt), -Math.sin(lay.tilt), 0];
+  const hubBack = [lay.wheelX + ct[0] * 0.07, lay.wheelY + ct[1] * 0.07, ez];
+  const colEnd = [ex + lay.lipD(ez) + 0.06, lay.wheelY + ct[1] * (ex + lay.lipD(ez) + 0.06 - lay.wheelX) / ct[0], ez];
+  k.bar(hubBack, colEnd, [0, 1, 0], 0.085, 0.075, COL.seam, 0.11);
+  // ---- center stack: panel, screen frame, climate knobs, console.
+  k.begin('stack');
+  const sx = ex + lay.lipD(0), sy = lay.lipY(0);
+  k.box(sx + 0.03, sy - 0.2, 0, 0.06, 0.3, 0.3, COL.trim, 'u');
+  for (const kz of [-0.075, 0, 0.075]) k.obox(sx - 0.005, sy - 0.31, kz, X, Y, Z, 0.03, 0.03, 0.04, kz === 0 ? COL.trim : COL.knob, 'u');
   const consoleTop = floor + 0.36;
-  k.box((lay.dashLipX + eye.x - 0.25) / 2, (consoleTop + floor) / 2, 0, lay.dashLipX - eye.x + 0.25, consoleTop - floor, 0.22, COL.console, 'u');
-  // Floor.
-  k.quad([wsX, floor, -hw], [wsX, floor, hw], [rearX, floor, hw], [rearX, floor, -hw], COL.floor);
-  // Doors: the door top (belt), the inner panel with an armrest, both sides
-  // from the dash to the cabin rear.
+  k.box((sx + 0.06 + ex - 0.25) / 2, (consoleTop + floor) / 2, 0, sx + 0.06 - ex + 0.25, consoleTop - floor, 0.22, COL.console, 'u');
+  k.box(ex + 0.22, consoleTop + 0.07, 0, 0.06, 0.14, 0.04, COL.trim);
+  k.box(ex + 0.22, consoleTop + 0.15, 0, 0.07, 0.04, 0.05, COL.chrome);
+  k.quad([gX + 0.05, floor, -hw], [gX + 0.05, floor, hw], [rearX, floor, hw], [rearX, floor, -hw], COL.floor);
+  // ---- doors: the door top (belt), the inner panel with an armrest, both
+  // sides from the dash to the cabin rear.
+  k.begin('doors');
   for (const sg of [-1, 1]) {
-    const zo = sg * (s.hwBelt + 0.005), zi = sg * hw, zp = sg * (hw - 0.05);
-    const x0 = wsX - 0.02, x1 = rearX;
-    k.quad([x0, belt, zo], [x1, belt, zo], [x1, belt, zi], [x0, belt, zi], COL.doorTop, 1.05);
-    k.quad([x0, belt, zi], [x1, belt, zi], [x1, belt - 0.06, zp], [x0, belt - 0.06, zp], COL.trim);
-    k.quad([x0, belt - 0.06, zp], [x1, belt - 0.06, zp], [x1, floor, zp], [x0, floor, zp], COL.door, 0.85);
-    // Armrest.
-    k.box(eye.x - 0.05, belt - 0.22, sg * (hw - 0.09), 0.5, 0.05, 0.09, COL.trim);
-    // Door grab handle, window switches, speaker grille, map pocket.
-    k.box(eye.x + 0.25, belt - 0.12, sg * (hw - 0.055), 0.12, 0.03, 0.012, 0x55585c);
-    k.box(eye.x + 0.05, belt - 0.195, sg * (hw - 0.09), 0.12, 0.012, 0.05, 0x111214);
-    k.box(eye.x + 0.38, floor + 0.2, sg * (hw - 0.05), 0.2, 0.16, 0.012, 0x1a1b1d);
-    k.box(eye.x + 0.1, floor + 0.12, sg * (hw - 0.07), 0.45, 0.1, 0.04, COL.trim, 'U');
+    const zo = sg * (s.hwBelt + 0.01), zi = sg * hw, zp = sg * (hw - 0.04);
+    const x0 = gX + 0.02, x1 = rearX;
+    k.quad([x0, belt, zo], [x1, belt, zo], [x1, belt, zi], [x0, belt, zi], COL.doorTop, 1.1, G);
+    k.quad([x0, belt, zi], [x1, belt, zi], [x1, belt - 0.05, zp], [x0, belt - 0.05, zp], COL.upper, 1.0, G);
+    k.quad([x0, belt - 0.05, zp], [x1, belt - 0.05, zp], [x1, belt - 0.07, zp], [x0, belt - 0.07, zp], 0xffffff, 0.8, UV.stitch);
+    k.quad([x0, belt - 0.07, zp], [x1, belt - 0.07, zp], [x1, floor, zp], [x0, floor, zp], COL.door, 0.9, G);
+    k.box(ex - 0.05, belt - 0.22, sg * (hw - 0.08), 0.5, 0.05, 0.08, COL.trim);
+    k.box(ex + 0.25, belt - 0.12, sg * (hw - 0.05), 0.12, 0.03, 0.012, COL.chrome);
+    k.box(ex + 0.38, floor + 0.2, sg * (hw - 0.045), 0.2, 0.16, 0.012, COL.seam);
   }
-  // A-pillars along the windshield edges, the header, the headliner.
-  const roofY = lay.roof != null ? lay.roof : null;
-  const hTop = roofY != null ? Math.min(roofY, cab.rfY - 0.02) : cab.rfY - 0.02;
+  // ---- A-pillars (slim, tapering up), the header band, the headliner.
+  k.begin('pillars');
+  const hx = lay.headerX, hy = lay.headerY;
   for (const sg of [-1, 1]) {
-    const p0 = [wsX - 0.03, wsY + 0.01, sg * (cab.hwBase - 0.01)];
-    const p1 = [cab.rfX - 0.02, hTop, sg * (cab.hwHead - 0.02)];
-    k.bar(p0, p1, [-0.3, 0.4, -sg], 0.085, 0.05, COL.pillar);
+    const p0 = [gX - 0.02, gY + 0.005, sg * (cab.hwBase - 0.015)];
+    const p1 = [hx, hy + 0.01, sg * (cab.hwHead - 0.02)];
+    k.bar(p0, p1, norm([ex - (p0[0] + p1[0]) / 2, ey - (p0[1] + p1[1]) / 2, ez - (p0[2] + p1[2]) / 2]), 0.05, 0.035, COL.pillar, 0.034);
   }
-  if (roofY != null) {
-    const hwR = Math.max(cab.hwHead, s.hwTop) - 0.01;
-    k.bar([cab.rfX - 0.03, hTop - 0.02, -hwR], [cab.rfX - 0.03, hTop - 0.02, hwR], [-1, -0.4, 0], 0.08, 0.04, COL.liner);
-    const NR = 4;
-    for (let i = 0; i < NR; i++) {
-      const xa = cab.rfX - 0.05 - ((cab.rfX - 0.05 - rearX) * i) / NR, xb = cab.rfX - 0.05 - ((cab.rfX - 0.05 - rearX) * (i + 1)) / NR;
-      k.quad([xa, roofY, -hwR], [xa, roofY, hwR], [xb, roofY, hwR], [xb, roofY, -hwR], COL.liner, 0.95 - i * 0.04);
-    }
-    // Side rails down to the side glass top, B- and C-pillars.
-    for (const sg of [-1, 1]) {
-      k.quad([cab.rfX - 0.05, roofY, sg * hwR], [rearX, roofY, sg * hwR], [rearX, s.topY, sg * (s.hwTop + 0.01)], [cab.rfX - 0.05, s.topY, sg * (s.hwTop + 0.01)], COL.pillar, 0.9);
-      const bxp = eye.x - 0.42;
-      k.bar([bxp, belt, sg * (s.hwBelt - 0.02)], [bxp, roofY, sg * (s.hwTop - 0.02)], [0, 0, -sg], 0.12, 0.05, COL.pillar);
-      k.bar([rearX + 0.08, belt, sg * (s.hwBelt - 0.02)], [rearX + 0.2, roofY, sg * (s.hwTop - 0.02)], [0, 0, -sg], 0.24, 0.05, COL.pillar);
-    }
-    // Rear-view mirror: stem, frame, glass, angled toward the driver.
-    // On the glass a little below its top edge, at least 0.42 m ahead of the eye.
-    const t = Math.min(0.6, Math.max(0.16, (eye.x + 0.48 - cab.rfX) / Math.max(0.1, cab.wsX - cab.rfX)));
-    const gx = cab.rfX + t * (cab.wsX - cab.rfX), gy = cab.rfY - t * (cab.rfY - cab.wsY);
-    const mx = gx - 0.06, my = Math.max(gy - 0.07, eye.y + 0.05);
-    k.bar([gx + 0.005, gy, 0], [mx + 0.012, my + 0.02, 0], [0, 0, 1], 0.025, 0.02, COL.mirrorFrame);
-    const yaw = Math.atan2(-ez, mx - eye.x) * 0.5;
-    const u = [Math.sin(yaw), 0, Math.cos(yaw)], w = [Math.cos(yaw), 0, -Math.sin(yaw)];
-    k.obox(mx, my, 0, u, Y, w, 0.25, 0.07, 0.03, COL.mirrorFrame);
-    k.obox(mx - 0.016 * w[0], my, -0.016 * w[2], u, Y, w, 0.225, 0.052, 0.002, COL.mirror);
-    // Sun visors folded up against the headliner.
-    for (const sg of [-1, 1]) k.box(cab.rfX - 0.12, roofY - 0.015, sg * hwR * 0.5, 0.16, 0.02, hwR * 0.8, COL.liner, '');
+  k.begin('header');
+  const hwR = Math.max(cab.hwHead, s.hwTop) + 0.01;
+  k.quad([hx, hy, -hwR], [hx, hy, hwR], [hx - 0.012, roofY, hwR], [hx - 0.012, roofY, -hwR], COL.liner, 0.9);
+  k.quad([hx, hy, -hwR], [hx, hy, hwR], [hx + 0.04, hy + 0.02, hwR], [hx + 0.04, hy + 0.02, -hwR], COL.pillar, 0.8);
+  k.begin('liner');
+  k.quad([hx - 0.012, roofY, -hwR], [hx - 0.012, roofY, hwR], [rearX, roofY, hwR], [rearX, roofY, -hwR], COL.liner, 0.95, G);
+  for (const sg of [-1, 1]) {
+    // Roof rail down to the side glass, B- and C-pillars.
+    const zr = sg * hwR, zg = sg * (s.hwTop + 0.02);
+    const gy = Math.max(belt + 0.3, roofY - 0.06);
+    k.quad([hx - 0.012, roofY, zr], [rearX, roofY, zr], [rearX, gy, zg], [hx - 0.012, gy, zg], COL.liner, 0.85);
+    const bxp = ex - 0.42;
+    k.bar([bxp, belt, sg * (s.hwBelt - 0.02)], [bxp, gy, sg * (s.hwTop - 0.0)], [0, 0, -sg], 0.11, 0.05, COL.pillar);
+    k.bar([rearX + 0.08, belt, sg * (s.hwBelt - 0.02)], [rearX + 0.2, gy, sg * (s.hwTop - 0.0)], [0, 0, -sg], 0.22, 0.05, COL.pillar);
   }
-  // Seats: driver's (seen when looking down and back), passenger's, rear bench.
-  // The driver's own seat is only its cushion (its back and headrest
-  // would fill the view when the head turns).
-  const seat = (sx, sz, w, own) => {
+  // Rear-view mirror: a small one on a stem from the header, angled to the driver.
+  k.begin('mirror');
+  const mx = hx + 0.1, my = hy - 0.075;
+  k.bar([hx + 0.02, hy + 0.005, 0], [mx + 0.01, my + 0.02, 0], [0, 0, 1], 0.02, 0.018, COL.mirrorFrame);
+  const yaw = Math.atan2(-ez, mx - ex) * 0.5;
+  const u = [Math.sin(yaw), 0, Math.cos(yaw)], w = [Math.cos(yaw), 0, -Math.sin(yaw)];
+  k.obox(mx, my, 0, u, Y, w, 0.13, 0.042, 0.025, COL.mirrorFrame);
+  k.obox(mx - 0.013 * w[0], my, -0.013 * w[2], u, Y, w, 0.116, 0.03, 0.002, COL.mirror, 'uUvVW');
+  // ---- seats: the driver's cushion, the passenger's seat, a rear bench.
+  k.begin('seats');
+  const seat = (sx0, sz, sw, own) => {
     const cy = floor + 0.24;
-    k.box(sx + 0.06, cy, sz, 0.5, 0.12, w, COL.seat);
+    k.box(sx0 + 0.06, cy, sz, 0.5, 0.12, sw, COL.seat, '', G);
     if (own) return;
-    const back0 = [sx - 0.2, cy + 0.05, sz], back1 = [sx - 0.3, eye.y - 0.08, sz];
-    k.bar(back0, back1, [1, 0, 0], w, 0.12, COL.seat);
-    // Side bolsters on the cushion and the back, the headrest.
-    for (const b of [-1, 1]) {
-      k.box(sx + 0.06, cy + 0.06, sz + b * (w / 2 - 0.04), 0.46, 0.06, 0.08, COL.seatSide);
-      k.bar([back0[0] + 0.04, back0[1], sz + b * (w / 2 - 0.04)], [back1[0] + 0.04, back1[1] - 0.1, sz + b * (w / 2 - 0.04)], [1, 0, 0], 0.08, 0.1, COL.seatSide);
-    }
-    k.box(sx - 0.31, eye.y + 0.0, sz, 0.09, 0.14, 0.24, COL.seatSide);
+    const back0 = [sx0 - 0.2, cy + 0.05, sz], back1 = [sx0 - 0.3, ey - 0.08, sz];
+    k.bar(back0, back1, [1, 0, 0], sw, 0.12, COL.seat, sw, G);
+    for (const b of [-1, 1]) k.box(sx0 + 0.06, cy + 0.06, sz + b * (sw / 2 - 0.04), 0.46, 0.06, 0.08, COL.seatSide);
+    k.box(sx0 - 0.31, ey + 0.0, sz, 0.09, 0.14, 0.24, COL.seatSide);
   };
-  // Pedals under the dash in front of the driver.
-  for (const pz of [-0.1, 0.02, 0.13]) k.obox(lay.dashLipX + 0.16, floor + 0.12, ez + pz, [0.5, 0.87, 0], [-0.87, 0.5, 0], Z, 0.1, 0.012, pz > 0.1 ? 0.06 : 0.08, 0x2a2a2a);
-  seat(eye.x - 0.02, ez, 0.5, true);
-  seat(eye.x - 0.02, -ez, 0.5, false);
-  if (eye.x - rearX > 1.05) {
+  seat(ex - 0.02, ez, 0.5, true);
+  seat(ex - 0.02, -ez, 0.5, false);
+  if (ex - rearX > 1.05) {
     const rx = rearX + 0.35;
-    k.box(rx, floor + 0.22, 0, 0.45, 0.12, hw * 1.9, COL.seat);
-    const top = Math.min(belt + 0.12, (roofY || belt + 0.3) - 0.15);
-    k.bar([rx - 0.18, floor + 0.28, 0], [rx - 0.28, top, 0], [1, 0, 0], hw * 1.9, 0.1, COL.seat);
-    for (const hz of [-0.55, 0, 0.55]) k.box(rx - 0.29, top + 0.07, hz * hw, 0.08, 0.12, 0.22, COL.seatSide);
+    k.box(rx, floor + 0.22, 0, 0.45, 0.12, hw * 1.9, COL.seat, '', G);
+    const top = Math.min(belt + 0.12, roofY - 0.15);
+    k.bar([rx - 0.18, floor + 0.28, 0], [rx - 0.28, top, 0], [1, 0, 0], hw * 1.9, 0.1, COL.seat, hw * 1.9, G);
   }
+  k.end();
   return k;
 }
 
+// The steering wheel in its own frame: rim in the xy plane, +z toward
+// the driver. Three spokes (four on buses and trucks), a padded hub.
 function buildWheel(lay) {
   const k = new Kit();
-  // In the wheel's own frame: rim in the xy plane, +z toward the driver.
-  k.torus(lay.wheelR, 0.019, 48, 8, COL.rim, { half: 0.1, hex: COL.mark });
-  // Three spokes: 3, 9 and 6 o'clock.
-  for (const a of [0, Math.PI, -Math.PI / 2]) {
+  const R = lay.wheelR, r = lay.rimR, four = lay.look.spokes === 4;
+  k.begin('rim');
+  k.torus(R, r, 40, 8, COL.rim, { half: 0.09, hex: COL.mark }, UV.grain);
+  k.begin('spokes');
+  const angs = four ? [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4] : [-0.12, Math.PI + 0.12, -Math.PI / 2];
+  for (const a of angs) {
     const c = Math.cos(a), s = Math.sin(a);
-    k.bar([c * 0.05, s * 0.05, 0.012], [c * (lay.wheelR - 0.01), s * (lay.wheelR - 0.01), 0], [-s, c, 0], 0.045, 0.014, COL.spoke);
+    const wide = !four && a === -Math.PI / 2;
+    k.bar([c * 0.05, s * 0.05, 0.018], [c * (R - r * 0.6), s * (R - r * 0.6), 0], [0, 0, 1], wide ? 0.075 : 0.06, 0.016, COL.spoke, wide ? 0.05 : 0.036);
+    // A thin bright edge along the spoke's top face.
+    k.bar([c * 0.055, s * 0.055, 0.027], [c * (R - r * 1.2), s * (R - r * 1.2), 0.012], [0, 0, 1], 0.006, 0.003, COL.chrome);
   }
-  // Hub and horn pad, the column behind.
-  k.cyl(0, 0, -0.01, 0.035, 0.062, 16, COL.hub);
-  k.cyl(0, 0, -0.3, -0.01, 0.034, 8, COL.spoke, false);
+  k.begin('hub');
+  // Hub: a rounded pad (elliptic on cars), a ring around it, the column.
+  const px = four ? 0.06 : 0.072, py = four ? 0.06 : 0.058;
+  k.cyl(0, 0, -0.005, 0.03, px, py, 16, COL.hub);
+  k.cyl(0, 0, 0.03, 0.046, px * 0.86, py * 0.84, 16, COL.spoke, true, 1.1);
+  k.cyl(0, 0, -0.16, -0.005, 0.035, 0.035, 8, COL.seam, false);
+  k.end();
   return k;
 }
 
-// Gauge face: tach on the left, speedometer (mph) on the right.
-const DIAL = { start: (225 * Math.PI) / 180, sweep: (270 * Math.PI) / 180, mph: 160, rpm: 8, red: 6.5 };
-let faceTex = null;
-function gaugeTexture() {
-  if (faceTex !== null) return faceTex;
-  faceTex = false;
+// ---- the atlas -------------------------------------------------------------------
+// Paints the cockpit atlas onto a 2D context (1024 x 512). Pure canvas
+// calls, so the tests can record them.
+export function paintAtlas(g) {
+  const fill = (c, r) => { g.fillStyle = c; g.fillRect(r[0], r[1], r[2] - r[0], r[3] - r[1]); };
+  fill('#ffffff', [0, 0, ATLAS.w, ATLAS.h]);
+  // Leather grain: soft light speckle (multiplied by the vertex colors).
+  const gr = ATLAS.grain;
+  fill('#f4f4f4', gr);
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 2600; i++) {
+    const v = 214 + Math.floor(rnd() * 40);
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(gr[0] + rnd() * (gr[2] - gr[0]), gr[1] + rnd() * (gr[3] - gr[1]), 1 + rnd() * 3, 1 + rnd() * 2);
+  }
+  // Stitched seam: a dark welt with light thread dashes along it.
+  const st = ATLAS.stitch;
+  fill('#3a3a3c', st);
+  g.fillStyle = '#26262a';
+  g.fillRect(st[0], st[1], st[2] - st[0], 6);
+  g.fillRect(st[0], st[3] - 6, st[2] - st[0], 6);
+  g.fillStyle = '#d9d2c2';
+  for (let x = st[0] + 2; x < st[2]; x += 14) g.fillRect(x, st[1] + 14, 8, 4);
+  // Vent: dark louvres with lit slat edges.
+  const vt = ATLAS.vent;
+  fill('#121314', vt);
+  g.fillStyle = '#3c3e42';
+  for (let y = vt[1] + 8; y < vt[3] - 6; y += 16) g.fillRect(vt[0] + 8, y, vt[2] - vt[0] - 16, 5);
+  g.strokeStyle = '#6b6e73';
+  g.lineWidth = 6;
+  g.strokeRect(vt[0] + 3, vt[1] + 3, vt[2] - vt[0] - 6, vt[3] - vt[1] - 6);
+  fill('#ff6a1f', ATLAS.needle);
+  fill('#ffffff', ATLAS.white);
+  // Gauge cluster.
+  const cl = ATLAS.cluster;
+  fill('#08090b', cl);
+  const dial = (cx, cy, max, step, minor, label, unit, red) => {
+    const r = DIAL.r;
+    const grd = typeof g.createRadialGradient === 'function' ? g.createRadialGradient(cx, cy, r * 0.2, cx, cy, r + 8) : null;
+    if (grd) { grd.addColorStop(0, '#1d2127'); grd.addColorStop(1, '#0b0c0f'); }
+    g.fillStyle = grd || '#14171b';
+    g.beginPath(); g.arc(cx, cy, r + 8, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#a7adb5'; g.lineWidth = 5;
+    g.beginPath(); g.arc(cx, cy, r + 7, 0, Math.PI * 2); g.stroke();
+    if (red != null) {
+      g.strokeStyle = '#c8321f'; g.lineWidth = 10;
+      g.beginPath();
+      g.arc(cx, cy, r - 6, -(DIAL.start - (red / max) * DIAL.sweep), -(DIAL.start - DIAL.sweep));
+      g.stroke();
+    }
+    for (let v = 0; v <= max + 1e-6; v += minor) {
+      const a = DIAL.start - (v / max) * DIAL.sweep;
+      const major = Math.abs(v / step - Math.round(v / step)) < 1e-6;
+      const r0 = major ? r - 20 : r - 10;
+      g.strokeStyle = red != null && v >= red ? '#ff5a3c' : '#f1f1ec';
+      g.lineWidth = major ? 5 : 2.5;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r0, cy - Math.sin(a) * r0);
+      g.lineTo(cx + Math.cos(a) * (r - 1), cy - Math.sin(a) * (r - 1));
+      g.stroke();
+      if (major) {
+        g.fillStyle = red != null && v >= red ? '#ff5a3c' : '#ffffff';
+        g.font = 'bold 30px sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(String(v), cx + Math.cos(a) * (r - 42), cy - Math.sin(a) * (r - 42));
+      }
+    }
+    g.fillStyle = '#c7ccd3';
+    g.font = 'bold 22px sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(label, cx, cy + r * 0.42);
+    if (unit) { g.font = '15px sans-serif'; g.fillText(unit, cx, cy + r * 0.64); }
+  };
+  dial(DIAL.rpmC[0], DIAL.rpmC[1], DIAL.rpm, 1, 0.5, 'RPM', 'x1000', DIAL.red);
+  dial(DIAL.mphC[0], DIAL.mphC[1], DIAL.mph, 20, 10, 'MPH', null, null);
+  // Between the dials: gear, a fuel bar and a temperature bar.
+  const mx = (DIAL.rpmC[0] + DIAL.mphC[0]) / 2;
+  g.fillStyle = '#7ad3ff'; g.font = 'bold 40px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('D', mx, 92);
+  g.fillStyle = '#2b3036'; g.fillRect(mx - 44, 150, 88, 10); g.fillRect(mx - 44, 182, 88, 10);
+  g.fillStyle = '#e8e8e2'; g.fillRect(mx - 44, 150, 62, 10);
+  g.fillStyle = '#8fd18a'; g.fillRect(mx - 44, 182, 40, 10);
+  // Center screen: a dark glass panel with an invented map and tiles.
+  const sc = ATLAS.screen;
+  fill('#0b1118', sc);
+  g.fillStyle = '#16222e'; g.fillRect(sc[0] + 14, sc[1] + 14, 236, 228);
+  g.strokeStyle = '#2f4a5e'; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(sc[0] + 20, sc[1] + 190); g.lineTo(sc[0] + 120, sc[1] + 120); g.lineTo(sc[0] + 244, sc[1] + 140); g.stroke();
+  g.beginPath(); g.moveTo(sc[0] + 90, sc[1] + 20); g.lineTo(sc[0] + 130, sc[1] + 236); g.stroke();
+  g.strokeStyle = '#4fb3ff'; g.lineWidth = 7;
+  g.beginPath(); g.moveTo(sc[0] + 108, sc[1] + 236); g.lineTo(sc[0] + 120, sc[1] + 120); g.lineTo(sc[0] + 200, sc[1] + 132); g.stroke();
+  for (let i = 0; i < 3; i++) {
+    g.fillStyle = ['#1f3346', '#2a2f3a', '#1f3a2f'][i];
+    g.fillRect(sc[0] + 264, sc[1] + 14 + i * 78, 106, 70);
+    g.fillStyle = '#9fb3c6';
+    g.fillRect(sc[0] + 280, sc[1] + 40 + i * 78, 74, 8);
+  }
+}
+
+let atlasTex = null;
+function atlasTexture() {
+  if (atlasTex !== null) return atlasTex;
+  atlasTex = false;
   const doc = globalThis.document;
-  if (!doc || typeof doc.createElement !== 'function') return faceTex;
+  if (!doc || typeof doc.createElement !== 'function') return atlasTex;
   try {
     const cv = doc.createElement('canvas');
-    cv.width = 512; cv.height = 204;
+    cv.width = ATLAS.w; cv.height = ATLAS.h;
     const g = cv.getContext('2d');
-    if (!g) return faceTex;
-    g.fillStyle = '#0a0b0d';
-    g.fillRect(0, 0, 512, 204);
-    const dial = (cx, cy, r, max, step, minor, label, red) => {
-      g.fillStyle = '#121418';
-      g.beginPath(); g.arc(cx, cy, r + 6, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = '#3c4047'; g.lineWidth = 3;
-      g.beginPath(); g.arc(cx, cy, r + 5, 0, Math.PI * 2); g.stroke();
-      for (let v = 0; v <= max + 1e-6; v += minor) {
-        const a = DIAL.start - (v / max) * DIAL.sweep;
-        const major = Math.abs(v / step - Math.round(v / step)) < 1e-6;
-        const r0 = major ? r - 16 : r - 9;
-        g.strokeStyle = red != null && v >= red ? '#e0412f' : '#e9e9e4';
-        g.lineWidth = major ? 4 : 2;
-        g.beginPath();
-        g.moveTo(cx + Math.cos(a) * r0, cy - Math.sin(a) * r0);
-        g.lineTo(cx + Math.cos(a) * r, cy - Math.sin(a) * r);
-        g.stroke();
-        if (major) {
-          g.fillStyle = red != null && v >= red ? '#e0412f' : '#f2f2ee';
-          g.font = 'bold 25px sans-serif';
-          g.textAlign = 'center'; g.textBaseline = 'middle';
-          g.fillText(String(v), cx + Math.cos(a) * (r - 35), cy - Math.sin(a) * (r - 35));
-        }
-      }
-      g.fillStyle = '#9ea3aa';
-      g.font = 'bold 15px sans-serif';
-      g.fillText(label, cx, cy - r * 0.36);
-    };
-    dial(128, 102, 88, DIAL.rpm, 1, 0.5, 'x1000 RPM', DIAL.red);
-    dial(384, 102, 88, DIAL.mph, 20, 10, 'MPH', null);
-    faceTex = new THREE.CanvasTexture(cv);
-    faceTex.colorSpace = THREE.SRGBColorSpace;
-    faceTex.anisotropy = 4;
+    if (!g) return atlasTex;
+    paintAtlas(g);
+    atlasTex = new THREE.CanvasTexture(cv);
+    atlasTex.colorSpace = THREE.SRGBColorSpace;
+    atlasTex.anisotropy = 4;
+    atlasTex.generateMipmaps = true;
   } catch {
-    faceTex = false;
+    atlasTex = false;
   }
-  return faceTex;
+  return atlasTex;
 }
 
 let mats = null;
 function materials() {
   if (mats) return mats;
-  const tex = gaugeTexture();
+  const tex = atlasTexture();
   mats = {
-    // A little self light: the cabin is in the roof's shade and the bounce
-    // light fills it.
-    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x1a1a1a }),
+    // One lit material for the cabin and the wheel (vertex colors times
+    // the atlas), a little self light: the cabin is in the roof's shade.
+    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x161616, map: tex || null }),
+    // Unlit for the dials, needles and screen (they glow).
     face: new THREE.MeshBasicMaterial(tex ? { map: tex, toneMapped: false } : { color: 0x15171a }),
-    needle: new THREE.MeshBasicMaterial({ color: 0xff5a1e, toneMapped: false, side: THREE.DoubleSide }),
     // Draws nothing, casts the car's shadow.
     shadow: new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }),
   };
   return mats;
 }
 
-let needleGeo = null;
-function needleGeometry(len) {
-  if (needleGeo) return needleGeo;
-  needleGeo = new THREE.BufferGeometry();
-  needleGeo.setAttribute('position', new THREE.Float32BufferAttribute([-0.008, -0.0025, 0, len, -0.0008, 0, len, 0.0008, 0, -0.008, 0.0025, 0], 3));
-  needleGeo.setIndex([0, 1, 2, 0, 2, 3]);
-  return needleGeo;
+// The glowing parts in one mesh, car local: the cluster face, the center
+// screen and the two needles (their 8 vertices move every frame).
+function buildFace(cab, eye, lay) {
+  const P = [], U = [], I = [];
+  const quad = (a, b, c, d, uv) => {
+    const i0 = P.length / 3;
+    P.push(...a, ...b, ...c, ...d);
+    U.push(uv[0], uv[1], uv[2], uv[1], uv[2], uv[3], uv[0], uv[3]);
+    I.push(i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3);
+  };
+  // Cluster plane: faces the eye; u to the driver's right, v up.
+  const c = [lay.clusterX, lay.clusterY, eye.z];
+  const f = norm([eye.x - c[0], eye.y - c[1], 0]);
+  const cu = [0, 0, 1], cv = cross(f, cu);
+  const at = (x, y, dz = 0) => [c[0] + cu[0] * x + cv[0] * y + f[0] * dz, c[1] + cu[1] * x + cv[1] * y + f[1] * dz, c[2] + cu[2] * x + cv[2] * y + f[2] * dz];
+  const W = lay.clusterW, H = lay.clusterH;
+  quad(at(-W / 2, -H / 2), at(W / 2, -H / 2), at(W / 2, H / 2), at(-W / 2, H / 2), UV.cluster);
+  // Center screen on the stack, tipped toward the driver.
+  const sx = eye.x + lay.lipD(0) - 0.004, sy = lay.lipY(0) - 0.11, sw = 0.24, sh = 0.15;
+  const yaw = Math.atan2(-eye.z, sx - eye.x) * 0.4;
+  const zx = Math.sin(yaw), zz = Math.cos(yaw);
+  quad([sx - zx * sw / 2, sy - sh, -zz * sw / 2], [sx + zx * sw / 2, sy - sh, zz * sw / 2], [sx + zx * sw / 2 - 0.02, sy, zz * sw / 2], [sx - zx * sw / 2 - 0.02, sy, -zz * sw / 2], UV.screen);
+  // Needles: 4 vertices each, filled in by setNeedle.
+  const n0 = P.length / 3;
+  for (let k = 0; k < 2; k++) quad(at(0, 0), at(0, 0), at(0, 0), at(0, 0), UV.needle);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  g.setIndex(I);
+  g.computeBoundingSphere();
+  const px = W / ATLAS.cluster[2]; // meters per atlas pixel
+  const centers = [[(DIAL.rpmC[0] - ATLAS.cluster[2] / 2) * px, (ATLAS.cluster[3] / 2 - DIAL.rpmC[1]) * px], [(DIAL.mphC[0] - ATLAS.cluster[2] / 2) * px, (ATLAS.cluster[3] / 2 - DIAL.mphC[1]) * px]];
+  const len = DIAL.r * px * 0.88;
+  const pos = g.attributes.position;
+  // Needle k at angle a (radians, counterclockwise from 3 o'clock on the dial).
+  const setNeedle = (k, a) => {
+    const [ox, oy] = centers[k];
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const pts = [[-0.012, -0.0035], [len, -0.001], [len, 0.001], [-0.012, 0.0035]];
+    for (let j = 0; j < 4; j++) {
+      const x = ox + ca * pts[j][0] - sa * pts[j][1], y = oy + sa * pts[j][0] + ca * pts[j][1];
+      const i = (n0 + k * 4 + j) * 3;
+      pos.array[i] = c[0] + cu[0] * x + cv[0] * y + f[0] * 0.004;
+      pos.array[i + 1] = c[1] + cu[1] * x + cv[1] * y + f[1] * 0.004;
+      pos.array[i + 2] = c[2] + cu[2] * x + cv[2] * y + f[2] * 0.004;
+    }
+    pos.needsUpdate = true;
+  };
+  return { geometry: g, setNeedle, tris: I.length / 3, dialCenters: centers.map(([x, y]) => at(x, y)) };
 }
 
 // Build the interior for one car (spec, cabin, eye). Returns the group to
 // add to the car's rig, its parts and `update(vehicle)`.
 export function buildInterior(spec, cab, eye) {
-  const lay = interiorLayout(cab, eye);
+  const lay = interiorLayout(cab, eye, spec);
   const m = materials();
   const group = new THREE.Group();
   group.name = 'rw-interior';
@@ -685,27 +940,18 @@ export function buildInterior(spec, cab, eye) {
   const wheel = new THREE.Mesh(wheelKit.geometry(), m.shell);
   spinner.add(wheel);
   group.add(mount);
-  // Gauge cluster face looking at the eye, two needles.
-  const cluster = new THREE.Group();
-  cluster.position.set(lay.clusterX, lay.clusterY, eye.z);
-  cluster.lookAt(eye.x, eye.y, eye.z);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(lay.clusterW, lay.clusterH), m.face);
-  cluster.add(face);
-  const dialR = (88 / 512) * lay.clusterW;
-  const ng = needleGeometry(dialR * 0.86);
-  const tach = new THREE.Mesh(ng, m.needle);
-  tach.position.set(((128 / 512) - 0.5) * lay.clusterW, 0, 0.004);
-  const speedo = new THREE.Mesh(ng, m.needle);
-  speedo.position.set(((384 / 512) - 0.5) * lay.clusterW, 0, 0.004);
-  cluster.add(tach, speedo);
-  group.add(cluster);
-  // The interior draws after the world's opaque pass would not help: it
-  // is opaque and near; keep it out of shadows (no flicker inside).
+  // Dials, needles and the screen.
+  const faceKit = buildFace(cab, eye, lay);
+  const face = new THREE.Mesh(faceKit.geometry, m.face);
+  group.add(face);
+  // The interior is opaque and near; keep it out of shadows (no flicker inside).
   group.traverse((o) => { o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false; });
-  const tris = shellKit.tris + wheelKit.tris + 2 + 4;
-  const state = { wheelDeg: 0, mph: 0, rpm: 0 };
-  return {
-    group, shell, wheel, spinner, mount, cluster, tach, speedo, layout: lay, tris, state,
+  const tris = shellKit.tris + wheelKit.tris + faceKit.tris;
+  const state = { wheelDeg: 0, mph: 0, rpm: 0, speedAngle: 0, rpmAngle: 0 };
+  const it = {
+    group, shell, wheel, spinner, mount, face, layout: lay, tris, state,
+    parts: shellKit.parts, wheelParts: wheelKit.parts, dialCenters: faceKit.dialCenters,
+    textured: !!m.shell.map,
     update(v) {
       const steer = Math.max(-1, Math.min(1, (v && v.steer) || 0));
       state.wheelDeg = steer * WHEEL_MAX_DEG;
@@ -714,10 +960,14 @@ export function buildInterior(spec, cab, eye) {
       const mph = Math.abs((v && v.speed) || 0) * 2.23694;
       state.mph = mph;
       state.rpm = Math.max(0, Math.min(1, (v && v.rpm) || 0));
-      speedo.rotation.z = DIAL.start - Math.min(1, mph / DIAL.mph) * DIAL.sweep;
-      tach.rotation.z = DIAL.start - Math.min(1, (state.rpm * 7) / DIAL.rpm) * DIAL.sweep;
+      state.speedAngle = DIAL.start - Math.min(1, mph / DIAL.mph) * DIAL.sweep;
+      state.rpmAngle = DIAL.start - Math.min(1, (state.rpm * 7) / DIAL.rpm) * DIAL.sweep;
+      faceKit.setNeedle(0, state.rpmAngle);
+      faceKit.setNeedle(1, state.speedAngle);
     },
   };
+  it.update(null);
+  return it;
 }
 
 // ---- attaching to a car mesh ----------------------------------------------------

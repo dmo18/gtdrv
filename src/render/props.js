@@ -577,7 +577,7 @@ export function lotStamps(C) {
       } else {
         trees.at(x, z).add(T.trees[(k * T.trees.length) | 0], x, y - 0.04, z, k * TAU * 7, h, h, h, s, s, s);
       }
-      C.ao.at(x, z).aoDisc(x, z, h * 0.36, y + 0.012, 0.55, 6);
+      C.ao.at(x, z).aoDisc(x, z, h * 0.36, y + 0.044, 0.55, 6);
     },
     palm(x, z, y, h, v) {
       const s = 0.85 + hash2(x + 3, z) * 0.3;
@@ -591,7 +591,7 @@ export function lotStamps(C) {
       } else {
         trees.at(x, z).add(T.palms[(v * 3) | 0], x, y - 0.04, z, v * TAU * 7, h * 1.15, h, h * 1.15, s, s, s);
       }
-      C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.012, 0.66, 6);
+      C.ao.at(x, z).aoDisc(x, z, h * 0.3, y + 0.044, 0.66, 6);
     },
     lamp(x, z, y, rot, h = 7) {
       trees.at(x, z).add(T.lamp, x, y - 0.02, z, rot, 1, h / 7, 1);
@@ -600,7 +600,7 @@ export function lotStamps(C) {
     },
     bench(x, z, y, rot) {
       C.plain.at(x, z).add(T.bench, x, y, z, rot);
-      C.ao.at(x, z).aoDisc(x, z, 1.0, y + 0.012, 0.7, 6);
+      C.ao.at(x, z).aoDisc(x, z, 1.0, y + 0.044, 0.7, 6);
     },
     bin(x, z, y, rot, v) {
       C.plain.at(x, z).add(T.bin, x, y, z, rot, 1, 1, 1, v < 0.5 ? 1 : 1.6, v < 0.5 ? 1 : 1.2, 1);
@@ -613,14 +613,18 @@ export function lotStamps(C) {
     planter(x, z, y, rot, v) {
       const fl = v < 0.35;
       C.plain.at(x, z).add(T.planter, x, y, z, rot, 1, 1, 1, fl ? 1.5 : 1, fl ? 0.9 : 1, fl ? 1.3 : 1);
-      C.ao.at(x, z).aoDisc(x, z, 1.15, y + 0.012, 0.68, 6);
+      C.ao.at(x, z).aoDisc(x, z, 1.15, y + 0.044, 0.68, 6);
+    },
+    // A bike rack (the street one: hoops on a rail), along `rot`.
+    rack(x, z, y, rot) {
+      C.plain.at(x, z).add(T.rack, x, y, z, rot - Math.PI / 2);
     },
     umbrella(x, z, y, v) {
       const col = UMBRELLA[(v * UMBRELLA.length) | 0];
       const P = C.plain.at(x, z);
       P.cyl(x, z, y, y + 2.25, 0.03, 0.03, 4, 0xe8e4dc);
       P.cyl(x, z, y + 1.9, y + 2.35, 1.45, 0.04, 8, col, false, 0.8, 1.1);
-      C.ao.at(x, z).aoDisc(x, z, 1.7, y + 0.012, 0.66, 8);
+      C.ao.at(x, z).aoDisc(x, z, 1.7, y + 0.044, 0.66, 8);
     },
   };
 }

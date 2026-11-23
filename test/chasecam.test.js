@@ -235,7 +235,7 @@ test('tank: chase behind the aim, far and gunner views, drag turns the aim (task
   assert.ok(pos.x < -8, 'follows the aim while reversing');
 });
 
-test('car weight: 0.18 s yaw lag, roll into turns up to 2 degrees, pitch under braking up to 1.5', async () => {
+test('car weight: yaw lag (0.12 s since DRIVE, was 0.18), roll into turns up to 2 degrees, pitch under braking up to 1.5', async () => {
   const { LEAN } = await import('../src/render/chasecam.js');
   const { CAMERA } = await import('../src/entities/handlingbands.js');
   assert.equal(LEAN.yawLag, CAMERA.yawLag);
@@ -310,4 +310,64 @@ test('reduced motion starts the car lean off; on foot never leans', () => {
     chase.update(t, 1 / 60, null, null);
   }
   assert.equal(chase.getLean().rollDeg, 0);
+});
+
+test('DRIVE: the chase view follows the car within 0.15 s, looks a few degrees into the turn by the steering, no sway', async () => {
+  const { LEAN } = await import('../src/render/chasecam.js');
+  const { CAMERA } = await import('../src/entities/handlingbands.js');
+  assert.ok(LEAN.yawLag <= 0.15, `yaw lag ${LEAN.yawLag} s`);
+  assert.equal(LEAN.lookDeg, CAMERA.lookDeg);
+  const cam = new THREE.PerspectiveCamera(62, 2, 0.5, 1800);
+  const chase = createChaseCamera(cam);
+  chase.setMode('car');
+  const car = { steer: 0 };
+  const t = { x: 0, z: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 20, height: 1.2, vehicle: car };
+  chase.snap(t);
+  // A heading step: the follow heading rises without overshoot and is
+  // within 10 % of it 0.3 s later.
+  t.heading = 0.3;
+  let last = 0, t90 = -1;
+  for (let i = 1; i <= 60; i++) {
+    chase.update(t, 1 / 60, null, null);
+    const h = chase.getLean().heading;
+    assert.ok(h >= last - 1e-12 && h <= 0.3 + 1e-9, `monotonic, no overshoot (${h})`);
+    last = h;
+    if (t90 < 0 && h >= 0.27) t90 = i / 60;
+  }
+  assert.ok(t90 > 0 && t90 <= 0.3, `90 % in ${t90.toFixed(3)} s`);
+  // Full right steering: the view turns up to lookDeg into the turn (the
+  // look point moves to the right of the car), quickly; centered, it comes back.
+  chase.snap(t);
+  car.steer = 1;
+  for (let i = 0; i < 30; i++) chase.update(t, 1 / 60, null, null);
+  const look = chase.getLean().lookDeg;
+  assert.ok(look > 0.9 * LEAN.lookDeg && look <= LEAN.lookDeg + 1e-9, `look ${look.toFixed(2)} deg`);
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  // Heading t.heading: right of the car is (-sin h, cos h).
+  const right = -Math.sin(t.heading) * dir.x + Math.cos(t.heading) * dir.z;
+  assert.ok(right > 0, 'looks to the right in a right turn');
+  car.steer = 0;
+  for (let i = 0; i < 30; i++) chase.update(t, 1 / 60, null, null);
+  assert.ok(Math.abs(chase.getLean().lookDeg) < 0.2, 'back to center');
+  // No sway: a car on a steady 0.5 g curve (steady steering) keeps the
+  // camera's view yaw steady after it settles (spread under 0.3 degrees).
+  chase.snap(t);
+  car.steer = 0.4;
+  const yaws = [];
+  for (let i = 0; i < 240; i++) {
+    t.heading += (0.5 * 9.81 / 20) / 60;
+    t.x += Math.cos(t.heading) * 20 / 60;
+    t.z += Math.sin(t.heading) * 20 / 60;
+    chase.update(t, 1 / 60, null, null);
+    if (i >= 120) yaws.push(chase.viewYaw() - t.heading);
+  }
+  const spread = (Math.max(...yaws) - Math.min(...yaws)) * 180 / Math.PI;
+  assert.ok(spread < 0.3, `view yaw relative to the car wanders ${spread.toFixed(3)} deg`);
+  // The hood and cockpit views are untouched: rigid on the car, no turn look.
+  chase.setView('Hood');
+  t.heading = 0.4;
+  car.steer = 1;
+  for (let i = 0; i < 10; i++) chase.update(t, 1 / 60, null, null);
+  assert.ok(Math.abs(chase.viewYaw() - 0.4) < 1e-6, `hood looks straight ahead (${chase.viewYaw()})`);
 });

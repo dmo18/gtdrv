@@ -263,6 +263,7 @@ export function createMenu(root, game, economy) {
     if (game.touch && game.touch.setSteering) game.touch.setSteering(s.steering, s.steerSensitivity);
     if (game.touch && game.touch.setHudMode) game.touch.setHudMode(s.hud);
     if (game.hud && game.hud.setHudMode) game.hud.setHudMode(s.hud);
+    if (game.hud && game.hud.setStreetLabel) game.hud.setStreetLabel(s.streetLabel !== false);
     if (game.quality !== s.quality) {
       game.quality = s.quality;
       if (game.resize) game.resize();
@@ -517,6 +518,9 @@ export function createMenu(root, game, economy) {
       // Blood (red spatters and pools): on unless switched off. Read by render/combatfx.js.
       if (typeof s.blood !== 'boolean') delete s.blood;
       body.appendChild(toggleRow('Blood', 'blood', true));
+      // Street names: the small label under the minimap (src/ui/hud.js), on unless switched off.
+      if (typeof s.streetLabel !== 'boolean') delete s.streetLabel;
+      body.appendChild(toggleRow('Street names', 'streetLabel', true));
       body.appendChild(goRow('Map', mapName(currentMap()) || 'Miami', 'map', 'mapchoice'));
       body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {

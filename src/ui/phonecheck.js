@@ -216,6 +216,7 @@ export function createCheckRun(game, opts = {}) {
     sysTimer = createSystemTimer(game.systems);
     sysTimer.start();
     run.fullscreen = typeof document !== 'undefined' && !!document.fullscreenElement;
+    game.phoneCheckRunning = true; // objective.js: no turn by turn while the check drives
     return true;
   };
 
@@ -343,6 +344,7 @@ export function createCheckRun(game, opts = {}) {
     }
     run.phase = 'idle';
     run.car = null;
+    game.phoneCheckRunning = false;
   };
   run.cancel = run.finish;
   return run;
@@ -353,6 +355,8 @@ export function createCheckRun(game, opts = {}) {
 // ---------------------------------------------------------------------------
 const CSS = `
 .rw-pc { z-index: 45; pointer-events: none; }
+/* While the check runs its bar owns the bottom edge: the prompt strip (and any red alert) waits. */
+.rw-pc-on .rw-prompt { display: none !important; }
 .rw-pc button, .rw-pc textarea { pointer-events: auto; font: 700 14px system-ui, sans-serif; touch-action: manipulation; }
 .rw-pc-bar { position: absolute; left: 50%; bottom: calc(var(--rw-sb) + 8px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
   max-width: calc(100vw - var(--rw-sl) - var(--rw-sr) - 16px); padding: 6px 8px; border-radius: 8px; background: rgba(0, 0, 0, 0.7); color: #fff; font: 700 14px system-ui, sans-serif; }
@@ -534,6 +538,7 @@ export function createPhoneCheck(game, root, opts = {}) {
     state.run = null;
     run.finish();
     if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
+    root.classList.remove('rw-pc-on');
     if (had && !canceled) { state.finished = run; showResult(run); } else clearPanel();
     if (state.onEnd) state.onEnd(!canceled);
   }
@@ -553,6 +558,7 @@ export function createPhoneCheck(game, root, opts = {}) {
     // Best effort: ask for fullscreen on this tap (the check reports whether it was granted).
     Promise.resolve().then(() => document.documentElement.requestFullscreen && !document.fullscreenElement && document.documentElement.requestFullscreen({ navigationUI: 'hide' })).catch(() => {});
     if (game.touch && game.touch.setVisible) game.touch.setVisible(false);
+    root.classList.add('rw-pc-on');
     showBar(run);
     updateBar(run);
     state.raf = requestAnimationFrame(frame);

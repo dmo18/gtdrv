@@ -137,8 +137,9 @@ async function mapScreen() {
       await pg.evaluate(() => { const g = window.__rw, c = g.city; const n = c.nodes.find((q) => q.edges.some((i) => c.edges[i].name === 'Washington Avenue') && q.edges.some((i) => c.edges[i].name === 'Lincoln Road')); g.map.fullMap.close(); g.paused = false; g.waypoint = { x: n.x, z: n.z }; g.objective.refresh(); });
       await pg.waitForTimeout(600);
       const hud = await pg.evaluate(() => { const n = document.querySelector('.rw-nav'), s = document.querySelector('.rw-street'); const r = n.getBoundingClientRect(); return { nav: getComputedStyle(n).display !== 'none' ? n.textContent : '', y: r.top, b: r.bottom, street: getComputedStyle(s).display !== 'none' ? s.textContent : '' }; });
-      check(`map ${W}: the turn strip reads "In ... ft/mi, turn/bear ... onto ..." clear of the keep-out rect`, /^In [\d.]+ (ft|mi), .+onto .+/.test(hud.nav) && hud.b <= 0.4 * H, JSON.stringify(hud));
-      check(`map ${W}: the street line names the street`, /\S/.test(hud.street), JSON.stringify(hud));
+      // 0.10.1: one compact pill in the stack's second row, "300 ft · Lincoln Rd", at most 30 px high, out of the middle half of the screen.
+      check(`map ${W}: the turn pill reads "... ft/mi · street", one line at most 30 high, in the top quarter`, /^[\d.]+ (ft|mi) \u00b7 \S.+/.test(hud.nav) && hud.b - hud.y <= 30 && hud.b <= 0.25 * H, JSON.stringify(hud));
+      check(`map ${W}: the street label names the street`, /\S/.test(hud.street), JSON.stringify(hud));
       await pg.screenshot({ path: path.join(out, `nav-hud-${W}x${H}.png`) });
       check(`map ${W}: no page errors`, errs.length === 0, errs.join(' | '));
       await pg.close();
@@ -310,7 +311,12 @@ try {
   await grp('sound');
   check('sound: 6 rows, no music on/off switch', (await rowCount()) === 6 && (await page.locator('[data-setting="music"]').count()) === 0);
   await grp('game');
-  check('game: 5 rows (police, hard, blood, map, new game)', (await rowCount()) === 5);
+  check('game: 6 rows (police, hard, blood, street names, map, new game)', (await rowCount()) === 6);
+  // Street names (0.10.1): the label under the minimap, on by default, a switch that turns it off.
+  check('street names: on by default', (await page.locator('[data-setting="streetLabel"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('[data-setting="streetLabel"]').click();
+  check('street names: the switch turns it off', (await page.locator('[data-setting="streetLabel"]').getAttribute('aria-checked')) === 'false');
+  await page.locator('[data-setting="streetLabel"]').click();
   // Blood (owner decision): on by default, switchable, stored with the other settings.
   check('blood: on by default', (await page.locator('[data-setting="blood"]').getAttribute('aria-checked')) === 'true' && (await page.locator('[data-setting="blood"]').innerText()) === 'On');
   await grp('display');

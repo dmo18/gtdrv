@@ -41,3 +41,35 @@ test('a burning player car shows "Get out!" and it clears when out or put out', 
   events.emit('burning', { craft: car, on: false });
   assert.deepEqual(alerts, ['Get out!', null, 'Get out!', null]);
 });
+
+// 0.10.1 (docs/PLAN_V3.md 13, CONTROLS): one compact turn pill, only for a goal the player chose or accepted.
+test('turn pill: "300 ft · Alton Rd", the verb at the turn, "U-turn · street", the arrival', async () => {
+  const { navPill } = await import('../src/systems/objective.js');
+  const out = {};
+  const tr = { toTurn: 91.44, next: () => ({ kind: 'right', name: 'Alton Rd' }) };
+  navPill(tr, out);
+  assert.deepEqual([out.kind, out.text, out.soon], ['right', '300 ft · Alton Rd', true]);
+  tr.toTurn = 8;
+  assert.equal(navPill(tr, out).text, 'Turn right · Alton Rd');
+  tr.next = () => ({ kind: 'uturn', name: 'S Miami Ave' });
+  tr.toTurn = 40;
+  assert.equal(navPill(tr, out).text, 'U-turn · S Miami Ave');
+  tr.next = () => ({ kind: 'arrive', name: 'Lincoln Rd' });
+  tr.toTurn = 700;
+  assert.equal(navPill(tr, out).text, '0.4 mi · Lincoln Rd');
+  tr.next = () => ({ kind: 'left', name: '' });
+  tr.toTurn = 300;
+  assert.equal(navPill(tr, out).text, '1,000 ft · turn left'.replace('1,000 ft', navPill(tr, out).text.split(' · ')[0]));
+  assert.ok(!/\n/.test(out.text));
+});
+
+test('turn by turn only for a map destination, an activity or a mission; never a tracked adventure or the Phone check', async () => {
+  const { wantsTurnByTurn, UTURN_WAIT_S } = await import('../src/systems/objective.js');
+  assert.equal(wantsTurnByTurn('waypoint', false), true);
+  assert.equal(wantsTurnByTurn('activity', false), true);
+  assert.equal(wantsTurnByTurn('mission', false), true);
+  assert.equal(wantsTurnByTurn('adventure', false), false);
+  assert.equal(wantsTurnByTurn('waypoint', true), false);
+  assert.equal(wantsTurnByTurn('', false), false);
+  assert.equal(UTURN_WAIT_S, 3);
+});

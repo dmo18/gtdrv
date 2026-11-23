@@ -96,12 +96,18 @@ export const AIM = {
 export const TANK_AIM = { pitchMin: -0.3, pitchMax: 0.42 };
 const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 // Car weight (docs/REVAMP.md 6.3), the same in both handling modes: the
-// chase views lag the car's heading by a 0.18 s time constant, roll up to
-// 2 degrees into a turn and pitch down up to 1.5 degrees under braking.
-// These limits are what the settings show the player; `setLean(false)`
-// and prefers-reduced-motion turn the roll and pitch off.
+// chase views lag the car's heading by a 0.12 s time constant (task DRIVE:
+// was 0.18; the view shows where the car is going, with no lag that makes
+// the player over-correct), roll up to 2 degrees into a turn and pitch
+// down up to 1.5 degrees under braking. They look up to `lookDeg` degrees
+// into the turn by the steering (smoothed over `lookEase` s), in place of
+// the slow sideways look shift from the yaw rate the other kinds use (it
+// swayed the view after every correction). These limits are what the
+// settings show the player; `setLean(false)` and prefers-reduced-motion
+// turn the roll and pitch off.
 export const LEAN = {
-  yawLag: 0.18, // s
+  yawLag: 0.12, // s
+  lookDeg: 4, lookEase: 0.1, // degrees at full steering, s
   rollMaxDeg: 2, rollPerG: 2.2, // degrees of roll per g of cornering, capped
   pitchMaxDeg: 1.5, pitchPerG: 1.6, // degrees of pitch per g of braking, capped
   ease: 0.15, // s, smoothing of the roll and pitch themselves
@@ -173,6 +179,7 @@ export function createChaseCamera(camera) {
   let shakeT = 0;
   let lastHeading = null, lastSpeed = 0;
   let turnLook = 0; // smoothed sideways look shift (m)
+  let steerLook = 0; // car chase views: smoothed look into the turn (rad)
   let accel = 0; // smoothed forward acceleration (m/s^2)
   let fovKick = 0;
   let yawRateEst = 0; // target heading rate (rad/s), last step
@@ -260,9 +267,12 @@ export function createChaseCamera(camera) {
     const spd = Math.abs(target.speed || 0);
     const ahead = modeKey === 'tank' ? mode.lookAhead : mode.lookAhead * Math.min(1, 0.3 + spd / 25);
     const ch = Math.cos(target.heading), sh = Math.sin(target.heading);
-    let lx = target.x + ch * ahead - sh * turnLook;
+    // Car chase views: the look point moves sideways so the view turns
+    // steerLook into the turn as seen from the camera.
+    const side = carChase() ? Math.tan(steerLook) * (curDist + ahead) : turnLook;
+    let lx = target.x + ch * ahead - sh * side;
     let ly = baseY + mode.lookHeight + sp * ahead;
-    let lz = target.z + sh * ahead + ch * turnLook;
+    let lz = target.z + sh * ahead + ch * side;
     let cx = px, cy = py, cz = pz;
     const s = smooth01(aim.k);
     if (s > 0) {
@@ -347,8 +357,17 @@ export function createChaseCamera(camera) {
     lastHeading = target.heading;
     yawRateEst = yawRate;
     const fwd = Math.max(0, spd);
-    const wantLook = clamp(yawRate * Math.min(fwd, 30) * 0.06 * feel.turnLook, -1.4, 1.4);
-    turnLook += (wantLook - turnLook) * Math.min(1, 2.5 * dt);
+    if (carChase()) {
+      // Look into the turn by the steering (rigid, quick, no sway).
+      const v = target.vehicle;
+      const st = v && Number.isFinite(v.steer) && fwd > 0.5 ? clamp(v.steer, -1, 1) : 0;
+      steerLook += (st * LEAN.lookDeg * RAD - steerLook) * (1 - Math.exp(-dt / LEAN.lookEase));
+      turnLook = 0;
+    } else {
+      steerLook = 0;
+      const wantLook = clamp(yawRate * Math.min(fwd, 30) * 0.06 * feel.turnLook, -1.4, 1.4);
+      turnLook += (wantLook - turnLook) * Math.min(1, 2.5 * dt);
+    }
     const a = clamp((spd - lastSpeed) / dt, -30, 30);
     lastSpeed = spd;
     accel += (a - accel) * Math.min(1, 4 * dt);
@@ -543,6 +562,8 @@ export function createChaseCamera(camera) {
     }
   }
   const firstOn = () => !!mode.fp && modeKey === 'car';
+  // A car's chase views (Chase, Far chase): not first person, not aiming.
+  const carChase = () => modeKey === 'car' && !mode.fp && mode.dist > 0.5 && aim.k <= 0;
 
   return {
     update(target, dt, input, collision) {
@@ -631,6 +652,7 @@ export function createChaseCamera(camera) {
       sinceDrag = 99;
       lastHeading = null;
       turnLook = 0;
+      steerLook = 0;
       leanRoll = 0;
       leanPitch = 0;
       accel = 0;
@@ -704,7 +726,7 @@ export function createChaseCamera(camera) {
       if (!leanOn) { leanRoll = 0; leanPitch = 0; }
     },
     // Current follow heading (rad) and lean (degrees), for tests and the HUD.
-    getLean: () => ({ on: leanOn, heading: camHeading, rollDeg: leanRoll / RAD, pitchDeg: leanPitch / RAD, yawRate: yawRateEst }),
+    getLean: () => ({ on: leanOn, heading: camHeading, rollDeg: leanRoll / RAD, pitchDeg: leanPitch / RAD, yawRate: yawRateEst, lookDeg: steerLook / RAD }),
     // Impact shake: strength is the closing speed in m/s.
     kick(strength) {
       if (!(strength > 1.5)) return;

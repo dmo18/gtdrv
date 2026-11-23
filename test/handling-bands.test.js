@@ -9,6 +9,7 @@ import {
 import {
   MODES, LAT_SHARE, LAT_TEST_SPEEDS, REFERENCE, FLEET_CLASSES, TOL, FT, curbCircleFt, arcadeFactor, ARCADE_GRIP,
   RETURN_TARGET, LOCK_DEG, HEAVY, UTURN, HB_TURN, LIFT_OFF, PUSH, LOCK_TIME, RETURN_TIME, LOCK_TIME_FAST_MAX, MODE_BRAKE_DIFF,
+  DRIVE_LOCK_TIME, BUTTON_TIME, USE,
   MODE_STRAIGHT_DIFF, BANDS, A1_LINEAR, A2_OVERSHOOT, A2_SETTLE, A3_MIRROR, A4_DRIFT, A5, B1_HALF, B2, B4_KEEP,
   ARCADE_SLIP_MAX_DEG, SAG, ASK, HB_SLIP_CAP, SQUEAL, HALF_TRAVEL, SLALOM, LAT_G_LINE, ORDINARY_CARS, BRAKE_PEDAL_S,
 } from '../src/entities/handlingbands.js';
@@ -145,7 +146,10 @@ test('bands: every car has a band, steering rates sit in the lock and return tim
   for (const id of IDS) {
     const s = VEHICLE_SPECS[id];
     assert.ok(s, `${id} spec`);
-    assert.ok(inBand(1 / s.lockRate, LOCK_TIME), `${id} 1/lockRate ${(1 / s.lockRate).toFixed(3)}`);
+    // Task DRIVE (deliberate): the player cars lock in 0.15 to 0.2 s; the
+    // service vehicles keep the old LOCK_TIME band (test/service.test.js).
+    const lockBand = SERVICE_IDS.includes(id) ? LOCK_TIME : DRIVE_LOCK_TIME;
+    assert.ok(inBand(1 / s.lockRate, lockBand), `${id} 1/lockRate ${(1 / s.lockRate).toFixed(3)}`);
     assert.ok(inBand(1 / s.returnRate, RETURN_TIME), `${id} 1/returnRate ${(1 / s.returnRate).toFixed(3)}`);
     assert.ok(s.steerMax > 0.3 && s.steerMax < 0.75, `${id} steerMax`);
   }
@@ -269,9 +273,11 @@ test('bands: center to full lock and back at the wheels, the same in both modes'
   for (const mode of MODES) {
     inMode(mode, () => {
       for (const id of IDS) {
+        // Task DRIVE (deliberate): player cars in DRIVE_LOCK_TIME, service vehicles in LOCK_TIME.
+        const band = SERVICE_IDS.includes(id) ? LOCK_TIME : DRIVE_LOCK_TIME;
         for (const u of [0, 5, 10]) {
           const tl = lockTime(id, u, 0, 1), tr = lockTime(id, u, 1, 0);
-          assert.ok(inBand(tl, [LOCK_TIME[0] - DT, LOCK_TIME[1]]), `${mode} ${id} at ${u}: lock ${tl.toFixed(3)} s`);
+          assert.ok(inBand(tl, [band[0] - DT, band[1]]), `${mode} ${id} at ${u}: lock ${tl.toFixed(3)} s`);
           assert.ok(inBand(tr, [RETURN_TIME[0] - DT, RETURN_TIME[1]]), `${mode} ${id} at ${u}: return ${tr.toFixed(3)} s`);
         }
         assert.ok(lockTime(id, 30, 0, 1) <= LOCK_TIME_FAST_MAX, `${mode} ${id} lock at 30 m/s`);
@@ -469,6 +475,7 @@ test('mode rows: tire sag, steering ask, squeal onset, assists', () => {
       assert.ok(Math.abs(tireCurve(1) - 1) < 1e-12 && tireCurve(-1) === -tireCurve(1));
     });
     assert.equal(p.ask, ASK[mode]);
+    assert.equal(p.use, USE[mode]);
     assert.equal(p.squeal, SQUEAL[mode]);
   }
   // Only the listed rows differ.
@@ -633,7 +640,9 @@ test('buttons: hold reaches full lock at the wheels in 0.25 to 0.40 s, a tap pea
       t += DT;
       if (v.steerAngle / steerLock(v.spec, v.speed) > 0.999) break;
     }
-    assert.ok(inBand(t, LOCK_TIME), `${id} button hold to full lock ${t.toFixed(3)} s`);
+    // (Task DRIVE: the band is BUTTON_TIME, the old LOCK_TIME numbers; the
+    // button ramp, not the car, sets this time now.)
+    assert.ok(inBand(t, BUTTON_TIME), `${id} button hold to full lock ${t.toFixed(3)} s`);
     const w = moving(id, 5).v;
     target = 0;
     let peak = 0;
@@ -932,7 +941,11 @@ test('handbrake turn: 90 degrees at 25 mph into a 12 m cross street, then away (
   console.log(`# handbrake turn at 25 mph, center travel past the pull: ${out.join(', ')}`);
 });
 
-test('past the limit the front pushes wide: more lock, a slip angle and tire squeal, never a silent cut', () => {
+test('past the limit: Sim pushes wide with more lock and squeal; Arcade full input stays under the limit, never a silent cut', () => {
+  // Task DRIVE (deliberate, docs/PLAN_V3.md 13): the 115 % ask and the push
+  // past the grip are Sim's alone. In Arcade full input is the tightest turn
+  // the car makes without sliding: more lock still gives more turn up to
+  // the last bit of travel, the front stays under its peak, no squeal.
   const out = [];
   for (const mode of MODES) {
     inMode(mode, () => {
@@ -950,9 +963,16 @@ test('past the limit the front pushes wide: more lock, a slip angle and tire squ
         };
         const part = run(PUSH.share), full = run(1), tag = `${mode} ${id}`;
         assert.ok(full.ang > part.ang * 1.05, `${tag} more lock: ${(part.ang / DEG).toFixed(1)} to ${(full.ang / DEG).toFixed(1)} deg`);
-        assert.ok(Math.abs(full.k / part.k - 1) <= PUSH.same, `${tag} the same turn: ${(full.k / part.k).toFixed(3)}`);
-        assert.ok(full.x > 1 && full.sq >= PUSH.squeal, `${tag} front past its peak (${full.x.toFixed(2)}), squeal ${full.sq.toFixed(2)}`);
-        assert.ok(part.sq < full.sq, `${tag} quieter under the limit`);
+        if (mode === 'sim') {
+          assert.ok(Math.abs(full.k / part.k - 1) <= PUSH.same, `${tag} the same turn: ${(full.k / part.k).toFixed(3)}`);
+          assert.ok(full.x > 1 && full.sq >= PUSH.squeal, `${tag} front past its peak (${full.x.toFixed(2)}), squeal ${full.sq.toFixed(2)}`);
+          assert.ok(part.sq < full.sq, `${tag} quieter under the limit`);
+        } else {
+          assert.ok(full.k / part.k >= PUSH.grow, `${tag} more turn on full input: ${(full.k / part.k).toFixed(3)} of ${PUSH.share}`);
+          assert.ok(full.x < PUSH.frontMax, `${tag} front under its peak (${full.x.toFixed(2)})`);
+          assert.ok(full.sq <= PUSH.quiet, `${tag} no squeal on full input (${full.sq.toFixed(2)})`);
+          assert.ok(Math.abs(full.k / (lateralGrip(VEHICLE_SPECS[id], PUSH.speed) * G) - 1) <= 0.04, `${tag} full input is the grip: ${(full.k / G).toFixed(3)} g`);
+        }
         if (id === 'sedan') out.push(`${mode} sedan at 20 m/s: steer ${PUSH.share} ${(part.ang / DEG).toFixed(1)} deg, ${(part.k / G).toFixed(3)} g, squeal ${part.sq.toFixed(2)}; full ${(full.ang / DEG).toFixed(1)} deg, ${(full.k / G).toFixed(3)} g, front at ${full.x.toFixed(2)} of its peak slip, squeal ${full.sq.toFixed(2)}`);
       }
     });

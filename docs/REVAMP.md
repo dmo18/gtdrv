@@ -768,6 +768,11 @@ Car spec table: fields that change in `VEHICLE_SPECS` (W3). Start values; the ba
 - `lockRate` and `returnRate` are new fields: units of full lock per second. The steer value
   moves toward the input at `lockRate` when moving away from center and at `returnRate` when
   moving toward it. `1 / lockRate` must sit in `LOCK_TIME`, `1 / returnRate` in `RETURN_TIME`.
+  DRIVE (0.10.1, docs/PLAN_V3.md 13) changed this for every player car (all but the service
+  vehicles, which keep the rule above): `lockRate` 5.5 and `returnRate` 5 (`LOCK_RATE`,
+  `RETURN_RATE` in vehicle.js), full lock in 0.18 s (`DRIVE_LOCK_TIME` 0.15 to 0.20 s) and back in
+  0.2 s (`RETURN_TARGET`), so a slow thumb, not the car, sets the pace. The buttons still take
+  0.25 to 0.40 s to full lock at the wheels (`BUTTON_TIME`, their own 0.3 s ramp).
   They replace the per-mode `steerRate` and the 1.6 return factor. At speed the rate may fall,
   but never below `1 / LOCK_TIME_FAST_MAX`.
 - `steerMax` is the true wheel angle at walking pace in both modes (`lockK` = 1 in both), so
@@ -814,7 +819,9 @@ What differs:
 |---|---|---|
 | Steady lateral grip on full lock | 1.00 to 1.12 times `spec.grip` | 0.88 to 1.00 times `spec.grip` |
 | Tire past its peak | force sags at most 6 % | force sags 18 to 22 % |
-| Full steering input at speed asks for | 1.15 of lateral grip (the front pushes wide a little, with tire noise; 0.10.0, HANDLE) | 1.10 of lateral grip (too much lock scrubs speed and runs wide) |
+| Full steering input at speed asks for | 1.00 of lateral grip: the tightest turn the car makes at that speed without sliding, the front at 0.95 of its peak (`ASK`, `USE`), quiet; more input always turns more (DRIVE, 0.10.1; 0.10.0 asked 1.15 and pushed wide) | 1.15 of lateral grip (too much lock scrubs speed and runs wide, with tire noise; HANDLE) |
+| Player input shaping by speed (the player's input only, `steerShape`; AI planners send a share of the lock unchanged) | steer x becomes sign(x) * abs(x)^e, e rising smoothly from 1 at 15 mph to 1.8 at 70 mph (times the preset's `shapeK` on the rise): small thumb moves are small lane corrections on the highway, full input is still full lock, no dead zone (DRIVE) | the same |
+| Yaw damping near the center of the wheel | the assist firms up under 0.15 of input (`calm`), so a released car is straight within 0.5 s, with no weave (DRIVE) | the light damper only |
 | Stability assist (yaw and slide correction) | on; body slip held under 8 degrees (rear drive 16) | off, apart from a light yaw damper; the car can spin |
 | Traction control | on; drive is cut in a slide, no less than 30 % kept | off; rear drive cars step out under power |
 | Handbrake | slide capped (slip 0.6 rad) and it recovers by itself | free; holds the slide until released |
@@ -875,8 +882,21 @@ the `lockRate` and `returnRate` above.
 The first-run "Choose steering" dialog stays (W4), with the wheel as the default.
 
 Chase camera (W3, src/render/chasecam.js): rolls up to 2 degrees into the turn and lags yaw by a
-0.18 s time constant; pitch follows braking up to 1.5 degrees. Same in both modes. Off under
+0.12 s time constant (DRIVE, 0.10.1; was 0.18 s); pitch follows braking up to 1.5 degrees. The
+chase views look up to 4 degrees into the turn by the steering (`CAMERA.lookDeg`, eased over
+0.1 s) instead of the slow sideways shift from the yaw rate (it swayed after each correction).
+Hood and cockpit are unchanged. Same in both modes. Roll and pitch off under
 `prefers-reduced-motion`.
+
+Thumb driver (DRIVE, test/thumb-driver.test.js with the model in test/thumbdriver.js): a driver
+that sees the car 180 ms late, moves its input at most 4 units per second in steps of 0.08 with
+seeded noise of 0.04 and steers by pure pursuit drives the real `stepVehicle` (Arcade,
+Standard; the presets too) for the sedan, SUV, pickup, sports car and box truck: 90 degree right
+and left turns at 20 mph between 2-lane streets (3.3 m lanes) inside the lane edges, lane changes
+at 45 and 65 mph settled within 0.3 m in under 2.5 s with at most one overshoot, a 60 m radius
+curve at 40 mph within 0.5 m, a U-turn in a 12 m street (cars), a slalom of six cones 20 m apart
+at 30 mph clearing each cone with the body; trail braking keeps at least 70 % of the steering
+response.
 
 ### 6.4 Menu map
 

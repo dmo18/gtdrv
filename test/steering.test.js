@@ -190,10 +190,13 @@ test('handling presets: values, default standard, enum validation, one table wit
   // 0.9.0 re-pin (deliberate): the lab's own steer-scale table (lockScale,
   // speedReduction, gripFeel), which no car read, is gone; PRESET_VALUES is
   // now the one table the car model reads (entities/vehicle.js).
+  // DRIVE re-pin (deliberate, docs/PLAN_V3.md 13): each preset also scales
+  // the player's input shaping by speed (shapeK: Relaxed finer, Sharp more direct).
   assert.deepEqual(PRESETS, ['standard', 'relaxed', 'sharp']);
-  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 }, 'standard is today');
-  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 });
-  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85 });
+  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 }, 'standard is today');
+  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3, shapeK: 1.2 });
+  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85, shapeK: 0.75 });
+  assert.ok(PRESET_VALUES.relaxed.shapeK > 1 && PRESET_VALUES.sharp.shapeK < 1);
   assert.ok(PRESET_VALUES.relaxed.lockK < 1 && PRESET_VALUES.sharp.lockK > 1);
   for (const id of PRESETS) assert.deepEqual(presetParams(id), PRESET_VALUES[id], `${id}: the car reads the same row`);
   assert.equal(activePreset(), 'standard');

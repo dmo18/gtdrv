@@ -62,6 +62,14 @@ export const PROP_SOLIDS = {
   drive: { mode: 'flat' },
   bay: { mode: 'flat' }, // its static cars are the lot layer's 'car' shapes
   path: { mode: 'flat' },
+  // 0.11.0 lot kinds (docs/PLAN_V3.md 13, LOTS).
+  sign: { r: 0.1, h: 2.3, mode: 'break', breakSpeed: 3, slow: 0.03, fall: 'pole' },
+  loading: { mode: 'flat' },
+  // A bed of low shrubs (on paving with a 45 cm curb): stops a car.
+  bed: { box: 'feat', h: 0.9, mode: 'solid' },
+  rack: { box: 'feat', h: 1.0, mode: 'break', breakSpeed: 4, slow: 0.04, fall: 'chunk' },
+  flagpole: { r: 0.12, h: 9, mode: 'break', breakSpeed: 8, slow: 0.1, fall: 'pole' },
+  dumpster: { box: [1.9, 1.3], h: 1.3, mode: 'solid' },
 };
 // Lot trees are drawn with a canopy radius (f.r up to 1.2 m); the trunk is
 // what a car hits.

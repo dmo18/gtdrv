@@ -20,6 +20,10 @@
 //
 // `steerMode: 'proportional'` is kept for older readers: every steer value
 // (player or AI) is now a share of the car's speed-dependent lock.
+// `steerShape: true` marks this as the player's input: a car shapes its
+// steer by speed (src/entities/vehicle.js shapeSteerBySpeed, task DRIVE:
+// small thumb moves give small corrections on the highway, full input is
+// still full lock). AI controls do not carry it and are not shaped.
 // A source may carry `steerKey` (-1, 0 or 1, the keyboard): poll() ramps
 // its steer like the steering buttons, one fixed 1/60 s step per poll.
 const STEP = 1 / 60; // the fixed simulation step
@@ -30,6 +34,7 @@ export function createInput() {
   const pressedSet = new Set();
   const input = {
     steerMode: 'proportional',
+    steerShape: true,
     steer: 0, throttle: 0, brake: 0, handbrake: false,
     moveX: 0, moveY: 0, sprint: false, pitch: 0, boost: false,
     lookX: 0, lookY: 0,

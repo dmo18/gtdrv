@@ -4,10 +4,16 @@ import { createRouter, createTracker, turnPhrase, formatTurnDistance, shortStree
 // or an adventure is tracked, or a map waypoint is set, an arrow in the HUD
 // status row points to where to go, with the distance; on the road network
 // (car, tank, on foot) the same goal gets a route (src/core/route.js): the
-// line on both maps, the turn strip ("In 300 ft, turn right onto Alton Rd")
-// and the distance along the road. The street line under the HUD names the
-// street the player is on (city.streetAt). A burning player's car shows a
-// red "Get out!" prompt.
+// line on both maps and the distance along the road. Turn by turn (the one
+// line turn pill "200 ft · SW 1st Ave" in the stack's second row, and its
+// chimes) shows only for a goal the player chose or accepted: a map
+// destination, a running activity or mission. A merely tracked adventure
+// keeps the small distance pill only, and the Phone check never shows it.
+// A U-turn is only asked for after UTURN_WAIT_S of the route still wanting
+// one; until then the route is searched again every REPLAN_S as the car
+// drives on, so a way ahead replaces it. The street label under the minimap
+// names the street the player is on (city.streetAt). A burning player's car
+// shows a red "Get out!" prompt.
 
 // Degrees to turn an "up" arrow so it points at the target as seen from a
 // camera facing `camHeading`. Heading 0 faces +x and increases toward +z,
@@ -24,6 +30,13 @@ const GOAL_MOVE_M = 25; // a goal that moves farther than this gets a new route
 const PREP_M = 152; // 500 ft: the first chime before a turn
 const NOW_M = 18; // the chime at the turn
 const STREET_EVERY = 0.25; // seconds between street lookups
+export const UTURN_WAIT_S = 3; // the route has wanted a U-turn this long before the pill asks for one
+export const REPLAN_S = 1; // while it wants one, search again this often (a way ahead wins)
+// Goals that get turn by turn: chosen (waypoint) or accepted (activity, mission).
+export const NAV_SOURCES = { waypoint: true, activity: true, mission: true };
+export function wantsTurnByTurn(src, checking) {
+  return !checking && NAV_SOURCES[src] === true;
+}
 
 // The distance as the strip shows it changes in steps: a number that only
 // changes with the text (no strings made per frame).
@@ -56,6 +69,31 @@ export function navLines(tr, out) {
   return out;
 }
 
+// The one line of the turn pill for a tracker state: { kind, text, soon }
+// into `out`. "200 ft · SW 1st Ave"; at the turn the verb ("Turn right ·
+// SW 1st Ave"); "U-turn · S Miami Ave"; "0.4 mi · Lincoln Rd" before the end.
+const CAP_VERB = { uturn: 'U-turn' };
+export function navPill(tr, out) {
+  const t = tr.next();
+  if (!t) { out.kind = ''; out.text = ''; out.soon = false; return out; }
+  const d = tr.toTurn;
+  out.kind = t.kind;
+  out.soon = d < PREP_M;
+  const name = t.name || '';
+  let head;
+  if (t.kind === 'arrive') head = d > 15 ? formatTurnDistance(d) : 'Arriving';
+  else if (CAP_VERB[t.kind]) head = CAP_VERB[t.kind];
+  else if (d > 15) head = formatTurnDistance(d);
+  else {
+    const phrase = turnPhrase({ kind: t.kind, name: '' });
+    head = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+  }
+  if (name) out.text = head + ' \u00b7 ' + name;
+  else if (t.kind !== 'arrive' && d > 15 && !CAP_VERB[t.kind]) out.text = head + ' \u00b7 ' + turnPhrase(t);
+  else out.text = head;
+  return out;
+}
+
 export function createObjective(game) {
   let shownAngle = 1e9, shownDist = -1, shownOn = null, shownText = '';
   let distText = '';
@@ -65,7 +103,8 @@ export function createObjective(game) {
   const router = canRoute ? createRouter(city) : null;
   const tracker = router ? createTracker(router) : null;
   const routed = { x: 0, z: 0, src: '', on: false, legal: true };
-  const lines = { kind: '', l1: '', l2: '', soon: false };
+  const lines = { kind: '', text: '', soon: false };
+  let uturnT = 0, replanT = 0; // seconds the route has wanted a U-turn; time to the next search
   const street = { edge: -1, name: '', cross: '', d: 0, side: 1 };
   let streetT = 0, streetShown = '', crossShown = '';
   let chimeTurn = -1, chimeStage = 0, chimeRev = -1;
@@ -191,8 +230,23 @@ export function createObjective(game) {
       const p = game.player;
       if (!tracker || !p || !routed.on) return;
       tracker.update(p.x, p.z, headingOf(p), speedOf(p), dt);
-      if (tracker.arrived) onArrive();
+      if (tracker.arrived) { onArrive(); uturnT = 0; return; }
+      // A route that starts with (or next asks for) a U-turn: search again as
+      // the car drives on; only after UTURN_WAIT_S does the pill ask for it.
+      const t = tracker.active && tracker.route.ok ? tracker.next() : null;
+      if (t && t.kind === 'uturn') {
+        uturnT += dt;
+        replanT -= dt;
+        if (replanT <= 0 && uturnT < UTURN_WAIT_S && speedOf(p) > 2) {
+          replanT = REPLAN_S;
+          tracker.search(p.x, p.z, headingOf(p));
+          const n = tracker.route.ok ? tracker.next() : null;
+          if (!n || n.kind !== 'uturn') uturnT = 0;
+        }
+      } else { uturnT = 0; replanT = REPLAN_S; }
     },
+    // Seconds the route has wanted a U-turn (tests).
+    get uturnWait() { return uturnT; },
     render(_alpha, dt) {
       pickGoal();
       const p = game.player;
@@ -231,13 +285,16 @@ export function createObjective(game) {
       if (!goal.on) shownText = '';
       // The turn strip and the chimes.
       if (hud.setNav) {
-        if (on && routing) {
+        const checking = !!game.phoneCheckRunning;
+        const nt = on && routing && wantsTurnByTurn(goal.src, checking) ? tracker.next() : null;
+        const holdU = !!nt && nt.kind === 'uturn' && uturnT < UTURN_WAIT_S;
+        if (nt && !holdU) {
           const b = navBucket(tracker.toTurn);
           if (b !== navB || tracker.turn !== navTurn || tracker.rev !== navRev) {
             navB = b; navTurn = tracker.turn; navRev = tracker.rev;
-            navLines(tracker, lines);
+            navPill(tracker, lines);
           }
-          hud.setNav(true, lines.kind, lines.l1, lines.l2, tracker.toTurn < PREP_M);
+          hud.setNav(true, lines.kind, lines.text, '', tracker.toTurn < PREP_M);
           if (tracker.rev !== chimeRev || tracker.turn !== chimeTurn) {
             chimeRev = tracker.rev; chimeTurn = tracker.turn;
             chimeStage = tracker.toTurn < PREP_M ? 1 : 0; // no chime for a turn already close

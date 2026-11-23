@@ -494,7 +494,8 @@ test('AI and player steering are one mapping: a share of steerLock, and the curv
   // The lock at walking pace is the true steerMax; at speed it is set by the grip.
   assert.equal(steerLock(s, 1), s.steerMax);
   assert.ok(steerLock(s, 30) < s.steerMax * 0.25, `lock at 30 m/s ${steerLock(s, 30)}`);
-  // Full input asks 115 % of the grip at speed (HANDLE, docs/PLAN_V3.md 2.4 item 4).
+  // Full input asks the mode's share of the grip at speed: Arcade 100 % (DRIVE,
+  // deliberate, was 115 %), Sim 115 % (HANDLE, docs/PLAN_V3.md 2.4 item 4).
   assert.ok(Math.abs(fullLockCurvature(s, 30) * 900 - handlingParams('arcade').ask * lateralGrip(s, 30) * 9.81) < 0.05);
 });
 
@@ -553,7 +554,8 @@ test('handling presets: standard (default), relaxed, sharp; unknown means standa
   assert.equal(getHandlingPreset(), PRESET_DEFAULT);
   assert.equal(setHandlingPreset('nonsense'), 'standard');
   assert.equal(setHandlingPreset(undefined), 'standard');
-  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 });
+  // (DRIVE, deliberate: shapeK, the input shaping by speed, joins the row.)
+  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 });
   const spec = createVehicle('sedan', 0, 0, 0).spec;
   assert.equal(steerMaxOf(spec), spec.steerMax);
   const base = presetFigures();

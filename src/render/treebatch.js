@@ -28,6 +28,10 @@ export const TREE_STRIDE = 9; // species, x, y, z, rot, sx, sy, sz, shade
 export const CELL = 50; // m
 const SHADOW_KEEP = 45; // m: cells this close stay drawn (their shadows)
 const CELL_R = CELL * 0.75 + 8; // a cell's bounding sphere (trees reach out)
+// No tree changes its shape inside this distance (m), whatever nearR the
+// caller asks for (docs/PLAN_V3.md 13, LOTS: nothing pops within 60 m of
+// the camera; the near shape's edge sits past it, with its hysteresis).
+export const NO_POP_R = 62;
 
 class TreeBatch extends THREE.BatchedMesh {
   onBeforeShadow(renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
@@ -179,7 +183,8 @@ export function createTreeBatch(species, material, cap = 4096) {
   // camera: a three.js camera (cells culled by its view) or anything
   // with a position (every cell of a shown tile drawn). nearR, farR: the
   // near shape within nearR, the far one within farR, else the distant.
-  function update(camera, nearR, farR) {
+  function update(camera, nearR0, farR0) {
+    const nearR = Math.max(NO_POP_R, nearR0), farR = Math.max(nearR + 20, farR0);
     const x = camera.position.x, z = camera.position.z;
     const cull = !!(camera.isCamera && camera.projectionMatrix);
     if (cull) {

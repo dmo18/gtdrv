@@ -14,7 +14,12 @@ export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach',
 
 export const FEATURE_KINDS = ['fence', 'hedge', 'wall', 'gate', 'drive', 'bay', 'tree', 'shrub', 'bin',
   'bench', 'planter', 'lamp', 'bollard', 'umbrella', 'stack', 'pallet', 'cabin', 'boat',
-  'path', 'sign', 'towel', 'rock', 'pile'];
+  'path', 'sign', 'towel', 'rock', 'pile',
+  // 0.11.0 (docs/PLAN_V3.md 13, LOTS): a bike rack, a flag pole, a
+  // dumpster, a loading pad, a long bed of low shrubs (curbed on paving).
+  // A tree with a base (l, w over 0) stands in a grate (square, 1.6 m) or
+  // a curbed parking island (2.3 by 4.6 m along its heading).
+  'rack', 'flagpole', 'dumpster', 'loading', 'bed'];
 
 // `v` of a `tree` feature: the species (renderer models), and of a
 // `shrub` the same list (a low version of it).
@@ -31,10 +36,23 @@ export const CARPARK_MIN = 600;
 // Bays per parking lot (a lot is a part of the land, not all of it).
 export const CARPARK_BAYS = 36;
 export const CARPARK_BAYS_MAPPED = 72;
-// Caps (phone budget).
-export const MAX_FEATURES = 24;
+// Caps (phone budget). A long feature (a bay row, a hedge, a path) counts
+// once here, however long (lotEmptiness counts its length).
+export const MAX_FEATURES = 64;
 export const MAX_PER_HA = 120;
-export const MAX_SOLID = 12;
+export const MAX_SOLID = 64;
+// Downtown and midtown: a building's piece of free land this large is a
+// surface parking lot (the commonest use of open land downtown), unless
+// the building is a public one that keeps a forecourt.
+export const CARPARK_LARGE = 1200;
+// Dressed lots over this area get at least one feature unit per
+// DENSITY_M2 of their area (lotEmptiness; test/world-density.test.js).
+export const DENSITY_MIN_AREA = 400;
+// A house's piece of land past this is a lawn (grass), not a yard.
+export const YARD_MAX = 900;
+// A public building's forecourt past this is its parking lot.
+export const FORECOURT_MAX = 4000;
+export const DENSITY_M2 = 60;
 
 const T = Object.fromEntries(LOT_TYPES.map((t, k) => [t, k]));
 const CUT = 80; // world grid that cuts long shore runs and big open pieces
@@ -392,8 +410,10 @@ export function lotTypeFor(b, district, free) {
   if (district === 'industrial' || district === 'docks' || (b && WORKS_STYLE.has(b.style))) return 'works';
   if (isMappedParking(b) && free >= CARPARK_MIN) return 'carpark';
   if (b && CARPARK_OSM.has(b.osm) && free >= CARPARK_BIG && oneInThree(b)) return 'carpark';
+  if (b && (district === 'downtown' || district === 'midtown') && free >= CARPARK_LARGE && !PLAZA_OSM.has(b.osm) && !CARPARK_OSM.has(b.osm) && b.kind !== 'house') return 'carpark';
+  if (b && PLAZA_OSM.has(b.osm) && free >= FORECOURT_MAX) return 'carpark';
   if (b && (b.h >= 30 || PLAZA_OSM.has(b.osm))) return 'plaza';
-  if (district === 'residential' || (b && (b.kind === 'house' || (b.h <= 8 && (b.x1 - b.x0) * (b.z1 - b.z0) <= 300)))) return 'yard';
+  if (district === 'residential' || (b && (b.kind === 'house' || (b.h <= 8 && (b.x1 - b.x0) * (b.z1 - b.z0) <= 300)))) return free > YARD_MAX ? 'grass' : 'yard';
   if ((district === 'downtown' || district === 'midtown') && !b && free >= CARPARK_BIG) return 'carpark';
   if (district === 'downtown' || district === 'midtown') return b ? 'plaza' : 'grass';
   return b ? 'yard' : 'grass';
@@ -469,16 +489,29 @@ function floodPiece(PS, s, k, cut) {
 // Pieces: one lot per building (cells sharing it, connected or not);
 // other classes are connected pieces, shore runs cut by the 80 m grid,
 // park, grass and open pieces cut by it only when over LOT_MAX_AREA.
+// A building's land over LOT_MAX_AREA is cut by the same 80 m grid (one
+// lot per building and grid square), so no lot is a hectare of one use.
 function piecesOf(PS, list, nList, own, mainOf, byBuilding, cell) {
-  const { W, H, N, lid, cls, queue, tmp } = PS;
+  const { W, H, N, lid, cls, queue, tmp, colKey, rowKey } = PS;
+  const cells = new Int32Array(byBuilding.length);
+  for (let q = 0; q < nList; q++) { const c = list[q]; if (cls[c] === 5) cells[mainOf[own[c]]]++; }
+  const maxCells = LOT_MAX_AREA / (cell * cell);
+  const bySquare = new Map();
   for (let q = 0; q < nList; q++) {
     const c = list[q];
     const k = cls[c];
     if (!k || lid[c] !== -1) continue;
     if (k === 5) {
       const m = mainOf[own[c]];
-      let id = byBuilding[m];
-      if (id < 0) { id = newPiece(tmp, 5, m, W, H); byBuilding[m] = id; }
+      let id;
+      if (cells[m] > maxCells) {
+        const i = c % W, key = m * 1e8 + colKey[i] + rowKey[(c - i) / W];
+        id = bySquare.get(key);
+        if (id === undefined) { id = newPiece(tmp, 5, m, W, H); bySquare.set(key, id); }
+      } else {
+        id = byBuilding[m];
+        if (id < 0) { id = newPiece(tmp, 5, m, W, H); byBuilding[m] = id; }
+      }
       lid[c] = id;
       growPiece(tmp[id], c, W);
       continue;
@@ -709,13 +742,21 @@ export function buildLots(city, inp) {
 // deterministic; `out` is cleared and filled. Feature = { kind, x, z,
 // heading, l, w, h, r, solid, v }.
 // ---------------------------------------------------------------------
+// Low planting (docs/PLAN_V3.md 13, LOTS): a hedge is a low strip with a
+// soft top, a shrub a low rounded mound.
+export const HEDGE_H = 0.95;
+export const SHRUB_H = 1.15;
 const MIN_CONTENT = { yard: 6, carpark: 9, plaza: 6, grass: 2, works: 8, beach: 5, park: 5, wateredge: 4, site: 8, verge: 0, airfield: 0 };
 const SIDE_HEADING = [Math.PI / 2, 0, Math.PI / 2, 0]; // a run along side s
+const ISLAND_EVERY = 10; // bays between two planted islands in a row
 
-// The cap on features for a lot: 120 per hectare and 24 per lot, but never
-// below what the type's minimum content needs (small yards).
+// The cap on features for one lot: LOT_CAP_PER_HA a hectare and
+// MAX_FEATURES a lot, but never below what the type's minimum content
+// needs (small yards). The core as a whole keeps to MAX_PER_HA (big
+// parking lots hold few, long features: bay rows).
+export const LOT_CAP_PER_HA = 220;
 export function featureCap(lot) {
-  return Math.min(MAX_FEATURES, Math.max(MIN_CONTENT[lot.type] || 0, Math.floor((lot.area * MAX_PER_HA) / 10000)));
+  return Math.min(MAX_FEATURES, Math.max(MIN_CONTENT[lot.type] || 0, Math.floor((lot.area * LOT_CAP_PER_HA) / 10000)));
 }
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
@@ -797,7 +838,8 @@ export function dressLot(city, lot, out = []) {
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays
     // (out never holds more than cap <= MAX_FEATURES features).
-    const flat = kind === 'drive' || kind === 'bay' || kind === 'path';
+    // (and what nothing else may stand on: beds, walls, hedges, fences)
+    const flat = kind === 'drive' || kind === 'bay' || kind === 'path' || kind === 'bed' || kind === 'wall' || kind === 'hedge' || kind === 'fence' || kind === 'loading';
     F_X[q] = x; F_Z[q] = z; F_R[q] = r; F_FLAT[q] = flat ? 1 : 0;
     if (flat) { F_COS[q] = Math.cos(heading); F_SIN[q] = Math.sin(heading); F_HL[q] = l / 2; F_HW[q] = w / 2; }
     if (isSolid) solid++;
@@ -848,8 +890,8 @@ export function dressLot(city, lot, out = []) {
   };
   const P = [0, 0];
   // A boundary segment along side s; `gap` cuts a gate opening in the middle.
-  const H_OF = { fence: 1.5, hedge: 1.6, wall: 2.0 };
-  const W_OF = { fence: 0.12, hedge: 0.9, wall: 0.3 };
+  const H_OF = { fence: 1.5, hedge: HEDGE_H, wall: 2.0 };
+  const W_OF = { fence: 0.12, hedge: 0.7, wall: 0.3 };
   const boundary = (s, kind, gap = 0, gateKind = '') => {
     const run = sideRun(s);
     if (!run) return 0;
@@ -871,25 +913,80 @@ export function dressLot(city, lot, out = []) {
   };
   const tree = () => set.trees[rng.int(0, set.trees.length - 1)];
   // Random points in the lot, kept `gapM` apart from earlier round solids.
+  // (x, z) clear by gapM of the round features so far and off every flat
+  // one (a drive, a bay, a path), r its radius; the whole disc on the lot.
+  const clearAt = (x, z, r, gapM) => {
+    for (let k = 0, n2 = out.length; k < n2; k++) {
+      const fr = F_R[k];
+      if (fr > 0 && nearer(F_X[k] - x, F_Z[k] - z, gapM + fr)) return false;
+      if (F_FLAT[k]) {
+        const dx = x - F_X[k], dz = z - F_Z[k], c = F_COS[k], s = F_SIN[k];
+        if (Math.abs(dx * c + dz * s) < F_HL[k] + r && Math.abs(-dx * s + dz * c) < F_HW[k] + r) return false;
+      }
+    }
+    return inLot(x + r, z) && inLot(x - r, z) && inLot(x, z + r) && inLot(x, z - r);
+  };
   const scatter = (count, kind, r, h, isSolid, gapM, vFn, margin = 1.5) => {
     let n = 0;
     for (let t = 0; t < count * 8 && n < count; t++) {
       const x = x0 + margin + rng.next() * (x1 - x0 - 2 * margin), z = z0 + margin + rng.next() * (z1 - z0 - 2 * margin);
-      let clear = true;
-      for (let k = 0, n2 = out.length; k < n2; k++) {
-        const fr = F_R[k];
-        if (fr > 0 && nearer(F_X[k] - x, F_Z[k] - z, gapM + fr)) { clear = false; break; }
-        if (F_FLAT[k]) {
-          // Never on a drive, a bay or a path.
-          const dx = x - F_X[k], dz = z - F_Z[k], c = F_COS[k], s = F_SIN[k];
-          if (Math.abs(dx * c + dz * s) < F_HL[k] + r && Math.abs(-dx * s + dz * c) < F_HW[k] + r) { clear = false; break; }
-        }
-      }
-      // Round solids keep their whole disc in the lot.
-      if (!clear || !inLot(x + r, z) || !inLot(x - r, z) || !inLot(x, z + r) || !inLot(x, z - r)) continue;
+      if (!clearAt(x, z, r, gapM)) continue;
       if (put(kind, x, z, rng.next() * Math.PI * 2, 0, 0, h, r, isSolid, vFn ? vFn() : set.furn)) n++;
     }
     return n;
+  };
+  // A group of n round features within `spread` m of (gx, gz): trees in a
+  // cluster, shrubs in a bed. Returns how many stood.
+  const cluster = (gx, gz, n, spread, kind, r, h, isSolid, gapM, vFn) => {
+    let got = 0;
+    for (let t = 0; t < n * 5 && got < n; t++) {
+      const a = rng.next() * Math.PI * 2, d = got || t > 2 ? spread * (0.3 + rng.next() * 0.7) : 0;
+      const x = gx + Math.cos(a) * d, z = gz + Math.sin(a) * d;
+      if (!clearAt(x, z, r, gapM)) continue;
+      const hh = kind === 'shrub' ? Math.min(SHRUB_H, h * (0.75 + rng.next() * 0.25)) : h * (0.85 + rng.next() * 0.3);
+      if (put(kind, x, z, rng.next() * Math.PI * 2, 0, 0, hh, r * (0.85 + rng.next() * 0.3), isSolid, vFn ? vFn() : set.furn)) got++;
+    }
+    return got;
+  };
+  // Points of a grid of pitch p over the lot (inset by `margin`, centered,
+  // each nudged by up to jit / 2), in row order: fn(x, z, a, b).
+  const gridPts = (p, margin, jit, fn) => {
+    const wx = x1 - x0 - 2 * margin, wz = z1 - z0 - 2 * margin;
+    if (wx < 0 || wz < 0) return;
+    const nx = Math.floor(wx / p), nz = Math.floor(wz / p);
+    const ox = x0 + margin + (wx - nx * p) / 2, oz = z0 + margin + (wz - nz * p) / 2;
+    for (let b2 = 0; b2 <= nz; b2++) {
+      for (let a = 0; a <= nx; a++) {
+        if (out.length >= cap) return;
+        fn(ox + a * p + (rng.next() - 0.5) * jit, oz + b2 * p + (rng.next() - 0.5) * jit, a, b2);
+      }
+    }
+  };
+  // A tree standing in a grate (forecourts, sidewalks of a plaza).
+  const grateTree = (x, z, h) => clearAt(x, z, 1.0, 2.5) && put('tree', x, z, 0, 1.6, 1.6, h, 1.0, true, tree());
+  // A bed of low shrubs l m long along `heading` (curbed on paving).
+  const bed = (x, z, heading, l, curb) => {
+    const ca = Math.abs(Math.cos(heading)), sa = Math.abs(Math.sin(heading));
+    const ex = ca * l / 2 + sa * 0.8, ez = sa * l / 2 + ca * 0.8;
+    // The whole bed on the lot, clear of the round features and the flats.
+    if (!inLot(x - ex, z - ez) || !inLot(x + ex, z + ez) || !inLot(x - ex, z + ez) || !inLot(x + ex, z - ez)) return false;
+    for (let k = 0, n2 = out.length; k < n2; k++) {
+      if (F_R[k] > 0) {
+        if (Math.abs(F_X[k] - x) < ex + F_R[k] + 0.6 && Math.abs(F_Z[k] - z) < ez + F_R[k] + 0.6) return false;
+      } else if (F_FLAT[k]) {
+        // The other box's extent on each axis (it lies along x or z, or near enough).
+        const c = Math.abs(F_COS[k]), sn = Math.abs(F_SIN[k]);
+        const fx = c * F_HL[k] + sn * F_HW[k], fz = sn * F_HL[k] + c * F_HW[k];
+        if (Math.abs(F_X[k] - x) < ex + fx + 0.8 && Math.abs(F_Z[k] - z) < ez + fz + 0.8) return false;
+      }
+    }
+    return putLong('bed', x, z, heading, l, 1.4, curb ? 0.45 : 0, true, tree());
+  };
+  // A low seat wall (forecourts): a stone bench wall 0.5 m high.
+  const seatWall = (x, z, heading, l) => {
+    const ca = Math.cos(heading), sa = Math.sin(heading);
+    for (const t of [-0.5, 0, 0.5]) if (!clearAt(x + ca * l * t, z + sa * l * t, 0.5, 0.6)) return false;
+    return putLong('wall', x, z, heading, l, 0.5, 0.5, true, set.furn);
   };
   const b = lot.building >= 0 ? city.buildings[lot.building] : null;
   const front = lot.front;
@@ -900,6 +997,18 @@ export function dressLot(city, lot, out = []) {
   // Outward normal of side s.
   const NX = [1, 0, -1, 0], NZ = [0, 1, 0, -1];
 
+  // Lawn planting: trees in clusters on a 17 m grid (two to four a
+  // cluster), shrub beds between them, `k` scales the trees.
+  const greens = (ar, k) => {
+    gridPts(17, 3, 5, (x, z, a, q) => {
+      if ((a + 2 * q) % 3 === 0) cluster(x, z, 2 + (rng.next() < 0.3 * k ? 1 : 0), 3.5, 'tree', 1.1, 7, true, 1.8, tree);
+      else if (!bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 10 + rng.int(0, 3), false) && !bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6, false)) cluster(x, z, 2, 1.4, 'shrub', 0.75, 1.0, false, 0.4, tree);
+    });
+    if (!out.some((f) => f.kind === 'tree' || f.kind === 'shrub')) {
+      if (!scatter(1, 'tree', 1.1, 7, true, 3, tree, 1.5)) scatter(1, 'shrub', 0.6, 1.0, false, 1.5, tree, 0.8);
+    }
+    void ar;
+  };
   switch (lot.type) {
     case 'yard': {
       // Drive from the road side to the building, beside it if it fills the front.
@@ -919,9 +1028,11 @@ export function dressLot(city, lot, out = []) {
           if (t < lo + 1.5 || t > hi - 1.5) continue;
           const len = dl >= 3 ? dl : Math.min(12, Math.abs(edgeOut - (front % 2 ? (b.z0 + b.z1) / 2 : (b.x0 + b.x1) / 2)));
           if (len < 3) continue;
-          const mid = edgeOut - (front === 0 || front === 1 ? 1 : -1) * len / 2;
+          // Kept 0.4 m short of the lot's outer edge: the road and its
+          // sidewalk own everything past it.
+          const mid = edgeOut - (front === 0 || front === 1 ? 1 : -1) * (len / 2 + 0.2);
           const x = front % 2 ? t : mid, z = front % 2 ? mid : t;
-          if (put('drive', x, z, hd, len, 3, 0, 0, false, set.furn)) { done = true; break; }
+          if (put('drive', x, z, hd, len - 0.4, 3, 0, 0, false, set.furn)) { done = true; break; }
         }
         if (!done) {
           // Small lot: a short drive on the road side of the lot.
@@ -934,35 +1045,73 @@ export function dressLot(city, lot, out = []) {
           }
         }
       }
-      for (const s of sides) boundary(s, set.bound);
+      // A low hedge or a fence round the yard; a service yard (a small
+      // building downtown) gets a fence, a dumpster and a loading pad.
+      const service = !b || b.kind !== 'house' ? lot.district === 'downtown' || lot.district === 'midtown' || lot.district === 'industrial' || lot.district === 'docks' : false;
+      for (const s of sides) boundary(s, service ? 'fence' : set.bound);
+      if (service && b) {
+        // At the back of the building, against its face.
+        const bf = (front + 2) % 4;
+        const fx = bf === 0 ? b.x1 + 2.2 : bf === 2 ? b.x0 - 2.2 : (b.x0 + b.x1) / 2;
+        const fz = bf === 1 ? b.z1 + 2.2 : bf === 3 ? b.z0 - 2.2 : (b.z0 + b.z1) / 2;
+        const hd = SIDE_HEADING[bf] + Math.PI / 2;
+        if (!put('loading', fx, fz, hd, 3.5, 6, 0, 0, false, set.furn)) put('loading', fx, fz, hd, 3, 3.5, 0, 0, false, set.furn);
+        scatter(1, 'dumpster', 1.1, 1.3, true, 1, null, 1.4);
+      }
       if (lot.seed % 3 === 0 && !scatter(1, 'bin', 0.35, 1.1, false, 1, null, 1)) scatter(1, 'bin', 0.3, 1.1, false, 0.5, null, 0.4);
-      const nt = Math.max(1, Math.min(4, Math.round(area / 90)));
-      const got = scatter(nt, rng.chance(0.6) ? 'tree' : 'shrub', 1.2, 6, true, 2.5, tree);
-      if (!got) scatter(1, 'shrub', 0.6, 1.4, false, 1.5, tree, 0.8);
+      // One or two trees, then low shrubs against the building (four
+      // plants at most: a yard is not a wood).
+      const nt = Math.max(1, Math.min(2, Math.round(area / 250)));
+      const got = scatter(nt, 'tree', 1.2, 6, true, 2.5, tree);
+      let plants = got;
+      if (b) {
+        const bx = (b.x0 + b.x1) / 2, bz = (b.z0 + b.z1) / 2;
+        const maxPlants = area > DENSITY_MIN_AREA ? 4 : 2;
+        for (let k = 0; k < 6 && plants < maxPlants; k++) {
+          // Along the front face, 1 m out.
+          const f2 = k < 3 ? front : sides[k % 3];
+          const t = (k % 3 + 0.5) / 3;
+          const sx = f2 === 0 ? b.x1 + 1 : f2 === 2 ? b.x0 - 1 : b.x0 + (b.x1 - b.x0) * t;
+          const sz = f2 === 1 ? b.z1 + 1 : f2 === 3 ? b.z0 - 1 : b.z0 + (b.z1 - b.z0) * t;
+          void bx; void bz;
+          if (clearAt(sx, sz, 0.6, 0.8) && put('shrub', sx, sz, rng.next() * 6, 0, 0, 0.8 + rng.next() * 0.3, 0.6 + rng.next() * 0.25, false, tree())) plants++;
+        }
+      }
+      if (!plants) scatter(1, 'shrub', 0.6, 1.0, false, 1.5, tree, 0.8);
+      // A foundation bed along the front face and along one side.
+      if (b && area > DENSITY_MIN_AREA) {
+        for (const f2 of [front, sides[lot.seed & 1 ? 0 : 2]]) {
+          const along = f2 % 2 ? b.x1 - b.x0 : b.z1 - b.z0;
+          const l = Math.min(14, along - 2);
+          if (l < 3) continue;
+          const bx2 = f2 === 0 ? b.x1 + 1.3 : f2 === 2 ? b.x0 - 1.3 : (b.x0 + b.x1) / 2;
+          const bz2 = f2 === 1 ? b.z1 + 1.3 : f2 === 3 ? b.z0 - 1.3 : (b.z0 + b.z1) / 2;
+          bed(bx2, bz2, SIDE_HEADING[f2], l, false) || bed(bx2, bz2, SIDE_HEADING[f2], l / 2, false);
+        }
+      }
       break;
     }
     case 'carpark': {
-      // Road-side boundary with one entrance gap.
-      const bk = set.bound === 'fence' ? 'hedge' : set.bound === 'hedge' ? 'hedge' : 'wall';
-      boundary(front, bk, 6, '');
-      const nl = Math.min(4, Math.ceil(area / 400));
-      const ntr = Math.min(4, Math.ceil(area / 300));
-      // Rows parallel to the front: bays 2.5 by 5 m, aisles 6 m.
+      // A low hedge along the road side with the entrance, and along the
+      // other sides where they are long enough (a lot border, not a wall).
+      boundary(front, 'hedge', 7, '');
+      for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 12) boundary(q, 'hedge'); }
+      // Rows parallel to the front: bays 2.5 by 5 m, aisles 6 m; every
+      // ISLAND_EVERY bays a curbed island with a tree breaks the row.
       const alongX = front === 1 || front === 3;
       const depth0 = front === 0 ? x1 : front === 1 ? z1 : front === 2 ? x0 : z0;
       const sgn = front === 0 || front === 1 ? -1 : 1; // inward
       const span0 = alongX ? x0 : z0, span1 = alongX ? x1 : z1;
       const depthLen = alongX ? z1 - z0 : x1 - x0;
-      const reserve = nl + ntr;
-      // Rows of bays: one `bay` feature per straight run (heading along the
-      // row, l = 2.5 m per bay, w = 5 m deep; the car faces across it).
-      const rows = [];
-      // A smaller lot: at most CARPARK_BAYS bays (mapped parking gets more).
-      const bayMax = isMappedParking(lot.building >= 0 && city.buildings ? city.buildings[lot.building] : null) ? CARPARK_BAYS_MAPPED : CARPARK_BAYS;
+      const rows = [], islands = [];
+      // At most half the lot in bays (12.5 m2 each), and at least the old
+      // per-lot counts (mapped parking gets more).
+      const mapped = isMappedParking(lot.building >= 0 && city.buildings ? city.buildings[lot.building] : null);
+      const bayMax = Math.max(mapped ? CARPARK_BAYS_MAPPED : CARPARK_BAYS, Math.floor((area * 0.5) / 12.5));
       let bayN = 0;
       for (let off = 4.5, row = 0; off < depthLen - 2.5 && bayN < bayMax; row++) {
         const d = depth0 + sgn * off;
-        let runA = -1, runN = 0;
+        let runA = -1, runN = 0, slot = 0;
         const flush = () => {
           if (runN >= 1 && bayN < bayMax) {
             const n = Math.min(runN, bayMax - bayN);
@@ -971,69 +1120,113 @@ export function dressLot(city, lot, out = []) {
           }
           runN = 0;
         };
-        for (let a = span0 + 1.25; a <= span1 - 1.25 + 1e-6; a += 2.5) {
+        for (let a = span0 + 2.75; a <= span1 - 2.75 + 1e-6; a += 2.5) {
           const x = alongX ? a : d, z = alongX ? d : a;
           // The whole bay on the lot: its center and both ends.
           const ex = alongX ? 0 : 2.2, ez = alongX ? 2.2 : 0;
           const ok = inLot(x, z) && inLot(x + ex, z + ez) && inLot(x - ex, z - ez) && (!inB || (!inB(x, z, 1.5) && !inB(x + ex, z + ez, 1.3) && !inB(x - ex, z - ez, 1.3)));
-          if (ok && runN < 16) { if (!runN) runA = a; runN++; } else { flush(); if (ok) { runA = a; runN = 1; } }
+          if (!ok) { flush(); slot = 0; continue; }
+          slot++;
+          if (slot > ISLAND_EVERY && runN >= ISLAND_EVERY) {
+            // This slot is an island; the row goes on after it.
+            flush();
+            islands.push(x, z);
+            slot = 0;
+            continue;
+          }
+          if (!runN) runA = a;
+          runN++;
         }
         flush();
         off += row % 2 === 0 ? 11 : 5; // bay, aisle, bay | bay, aisle, bay
       }
-      // Lamps on the aisles and trees or planters at the row ends.
-      const aisleOff = 4.5 + 5.5;
-      for (let k = 0; k < nl; k++) {
-        const a = span0 + ((k + 0.5) / nl) * (span1 - span0);
-        const d = depth0 + sgn * Math.min(aisleOff + 16 * (k % 2), depthLen - 2);
-        put('lamp', alongX ? a : d, alongX ? d : a, 0, 0, 0, 8, 0.2, true, set.furn);
+      const rowHead = alongX ? 0 : Math.PI / 2;
+      for (let k = 0; k < rows.length; k += 3) {
+        const n = rows[k + 1], a = rows[k] + ((n - 1) * 2.5) / 2, d = rows[k + 2];
+        put('bay', alongX ? a : d, alongX ? d : a, rowHead, n * 2.5, 5, 0, 0, false, rng.int(0, 3));
       }
+      // Islands with a tree (or a planter downtown when the tree will not fit).
       let nt = 0;
-      for (let k = 0; k < ntr * 3 && nt < ntr; k++) {
+      for (let k = 0; k < islands.length; k += 2) {
+        const x = islands[k], z = islands[k + 1];
+        if (put('tree', x, z, rowHead, 2.3, 4.6, 7, 1.0, true, tree())) nt++;
+      }
+      // Row-end trees on the side margins.
+      for (let k = 0; k < 8 && nt < 1; k++) {
         const a = k % 2 ? span0 + 1.5 : span1 - 1.5;
         const d = depth0 + sgn * (4.5 + 16 * Math.floor(k / 2));
         const x = alongX ? a : d, z = alongX ? d : a;
         if (set.district === 'downtown' || set.district === 'midtown' ? put('planter', x, z, 0, 0, 0, 0.9, 0.7, true, set.furn) : put('tree', x, z, 0, 0, 0, 7, 1.0, true, tree())) nt++;
       }
       if (!nt) scatter(1, 'planter', 0.7, 0.9, true, 1.5, null);
-      void reserve;
-      const rowHead = alongX ? 0 : Math.PI / 2;
-      for (let k = 0; k < rows.length; k += 3) {
-        const n = rows[k + 1], a = rows[k] + ((n - 1) * 2.5) / 2, d = rows[k + 2];
-        put('bay', alongX ? a : d, alongX ? d : a, rowHead, n * 2.5, 5, 0, 0, false, rng.int(0, 3));
+      // Light poles down the aisles, one per 450 m2 or so.
+      const nl = Math.max(1, Math.min(8, Math.ceil(area / 800)));
+      let lit = 0;
+      for (let k = 0; k < nl * 3 && lit < nl; k++) {
+        const a = span0 + ((k % nl + 0.5) / nl) * (span1 - span0);
+        const d = depth0 + sgn * Math.min(10 + 16 * Math.floor(k / nl) + (k % 2) * 16, depthLen - 2);
+        if (put('lamp', alongX ? a : d, alongX ? d : a, 0, 0, 0, 8, 0.2, true, set.furn)) lit++;
+      }
+      if (!lit) scatter(1, 'lamp', 0.2, 8, true, 1, null, 1);
+      // A sign at the entrance of a big lot.
+      if (area > 1200) {
+        const run = sideRun(front);
+        if (run) { pointOnSide(front, run[0] + 2, run[2] - (front < 2 ? 0.6 : -0.6), P); put('sign', P[0], P[1], SIDE_HEADING[front] + Math.PI / 2, 0, 0, 2.3, 0.1, false, 1); }
       }
       break;
     }
     case 'plaza': {
-      // Bollards along the road side.
+      // A forecourt: bollards along the road side, an allee of trees in
+      // grates, planters and benches between them, a bike rack and a flag
+      // pole by the building.
       const run = sideRun(front);
       if (run) {
         const [a, bb, f] = run;
-        const n = Math.max(2, Math.min(3, Math.floor((bb - a) / 4)));
+        const n = 2;
         for (let k = 0; k < n; k++) { pointOnSide(front, a + ((k + 0.5) / n) * (bb - a), f, P); put('bollard', P[0], P[1], 0, 0, 0, 0.9, 0.15, true, set.furn); }
+        // The allee: 3.5 m in from the road side, a tree every 10 m.
+        const L = bb - a, nT = Math.max(1, Math.floor(L / 10));
+        for (let k = 0; k < nT; k++) {
+          pointOnSide(front, a + ((k + 0.5) / nT) * L, f - (front < 2 ? 2.6 : -2.6), P);
+          grateTree(P[0], P[1], 7 + (k % 2));
+        }
       }
-      // One of each first (small plazas), then more by area.
       if (!scatter(1, 'planter', 0.8, 0.8, true, 2, null, 2)) scatter(1, 'planter', 0.6, 0.8, true, 1, null, 0.8);
       if (!scatter(1, 'bench', 0.6, 0.5, false, 2, null, 2)) scatter(1, 'bench', 0.5, 0.5, false, 1, null, 0.8);
-      if (!scatter(1, 'tree', 1.0, 8, true, 3, tree, 2)) scatter(1, 'tree', 0.8, 7, true, 2, tree, 1);
+      if (!out.some((q) => q.kind === 'tree') && !scatter(1, 'tree', 1.0, 8, true, 3, tree, 2)) scatter(1, 'tree', 0.8, 7, true, 2, tree, 1);
       if (set.umbrella && !scatter(1, 'umbrella', 1.4, 2.6, false, 2.5, null, 2.5)) scatter(1, 'umbrella', 1.0, 2.6, false, 1.5, null, 1.2);
-      const nt = Math.max(1, Math.min(6, Math.round(area / 150)));
-      scatter(nt - 1, 'tree', 1.0, 8, true, 3, tree, 2);
-      scatter(Math.min(2, Math.floor(area / 400)), 'planter', 0.8, 0.8, true, 2, null, 2);
-      scatter(Math.min(2, Math.floor(area / 500)), 'bench', 0.6, 0.5, false, 2, null, 2);
+      // By the building: a bike rack and a flag pole (or a sign).
+      if (b && area >= 250) {
+        const fx = front === 0 ? b.x1 + 2.5 : front === 2 ? b.x0 - 2.5 : (b.x0 + b.x1) / 2 + 4;
+        const fz = front === 1 ? b.z1 + 2.5 : front === 3 ? b.z0 - 2.5 : (b.z0 + b.z1) / 2 + 4;
+        const hd = SIDE_HEADING[front];
+        if (clearAt(fx, fz, 0.4, 1)) put('rack', fx, fz, hd, 2.6, 0.5, 1, 0, false, set.furn);
+        const gx = front % 2 ? fx - 6 : fx, gz = front % 2 ? fz : fz - 6;
+        if (clearAt(gx, gz, 0.3, 1.5)) put(lot.seed % 3 ? 'flagpole' : 'sign', gx, gz, hd, 0, 0, lot.seed % 3 ? 9 : 2.3, 0.15, lot.seed % 3 !== 0, lot.seed % 2);
+      }
+      // The rest of the paving: a 9 m grid of trees in grates, planters
+      // and benches (a pattern, not a scatter).
+      const bedHd = x1 - x0 >= z1 - z0 ? 0 : Math.PI / 2;
+      if (area > DENSITY_MIN_AREA) gridPts(9, 3, 0.6, (x, z, a, q) => {
+        const k = (a + q * 2 + (lot.seed & 3)) % 4;
+        if (k === 0) grateTree(x, z, 7.5);
+        else if (k === 1 || k === 3) { if (!bed(x, z, bedHd, 10, true)) bed(x, z, bedHd, 6, true); }
+        else if (!seatWall(x, z, bedHd, 9)) seatWall(x, z, bedHd, 5);
+      });
       if (set.umbrella) scatter(Math.min(2, Math.floor(area / 600)), 'umbrella', 1.4, 2.6, false, 2.5, null, 2.5);
       if (lot.seed % 4 === 0) scatter(1, 'bin', 0.3, 1, false, 1, null, 1.5);
       break;
     }
     case 'grass': {
+      // A small green: a path across a big one, trees in clusters, beds of
+      // shrubs.
       if (area > 1500) {
         const alongX = x1 - x0 >= z1 - z0;
         const len = (alongX ? x1 - x0 : z1 - z0) - 4;
         if (!putLong('path', cx, cz, alongX ? 0 : Math.PI / 2, len, 2, 0, false, set.furn)) put('path', cx, cz, alongX ? 0 : Math.PI / 2, Math.min(len, 10), 2, 0, 0, false, set.furn);
       }
-      const nt = Math.max(1, Math.min(cap - out.length, Math.round(area / 250)));
-      const got = scatter(nt, 'tree', 1.1, 7, true, 3, tree, 1.5);
-      if (got < nt) scatter(Math.max(1, nt - got), 'shrub', 0.6, 1.3, false, 1.5, tree, 0.8);
+      if (area >= 1500) { boundary(front, 'hedge', 5, ''); for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 15) boundary(q, 'hedge', 4, ''); } }
+      greens(area, 1);
       break;
     }
     case 'works':
@@ -1050,16 +1243,18 @@ export function dressLot(city, lot, out = []) {
       boundary(gs, fk, 7, 'gate');
       for (const q of [front, ...sides]) if (q !== gs) boundary(q, fk);
       if (lot.type === 'site') {
-        scatter(2, 'pile', 2.5, 2.2, true, 3, null, 3);
+        scatter(Math.max(2, Math.min(6, Math.round(area / 500))), 'pile', 2.5, 2.2, true, 3, null, 3);
         scatter(1, 'cabin', 1.6, 2.6, true, 3, null, 3);
-        scatter(1, 'stack', 1.4, 2.6, true, 3, null, 3);
+        scatter(Math.max(1, Math.min(4, Math.round(area / 800))), 'stack', 1.4, 2.6, true, 3, null, 3);
+        scatter(Math.max(1, Math.min(6, Math.round(area / 400))), 'pallet', 0.8, 1, false, 1.5, null, 2);
+        scatter(1, 'dumpster', 1.1, 1.3, true, 2, null, 2);
         break;
       }
       // A boat on stands by the water.
       if (city.mainShore && (city.mainShore(cx, cz) < 60 || city.mainShore(x0, z0) < 30 || city.mainShore(x1, z1) < 30)) scatter(1, 'boat', 2.2, 3, true, 3, null, 3);
       // Stacks, pallets and cabins to 20 % of the area (within the caps).
       let used = 0;
-      for (let t = 0; t < 40 && used < area * 0.2 && out.length < cap; t++) {
+      for (let t = 0; t < 60 && used < area * 0.3 && out.length < cap; t++) {
         const pick = rng.next();
         if (pick < 0.55) {
           const hd = rng.chance(0.5) ? 0 : Math.PI / 2;
@@ -1110,25 +1305,28 @@ export function dressLot(city, lot, out = []) {
       break;
     }
     case 'park': {
+      // Paths: one down the long axis, a cross path on a big park; benches
+      // and lamps along them; trees in clusters on the lawn; shrub beds.
       const alongX = x1 - x0 >= z1 - z0;
       const len = (alongX ? x1 - x0 : z1 - z0) - 4;
       const hasPath = len > 8 && (putLong('path', cx, cz, alongX ? 0 : Math.PI / 2, len, 2.5, 0, false, set.furn) || put('path', cx, cz, alongX ? 0 : Math.PI / 2, Math.min(len, 10), 2.5, 0, 0, false, set.furn));
+      const cross = (alongX ? z1 - z0 : x1 - x0) - 4;
+      if (area > 1500 && cross > 12) putLong('path', cx, cz, alongX ? Math.PI / 2 : 0, cross, 2, 0, false, set.furn);
       if (hasPath) {
-        const nb = Math.max(1, Math.min(3, Math.floor(len / 30)));
+        const nb = Math.max(1, Math.min(6, Math.floor(len / 16)));
         for (let k = 0; k < nb; k++) {
-          const a = (alongX ? x0 : z0) + 2 + ((k + 0.5) / nb) * len;
-          const x = alongX ? a : cx + 2.2, z = alongX ? cz + 2.2 : a;
+          const a = (alongX ? x0 : z0) + 2 + ((k + 0.5) / nb) * len, sd = k % 2 ? -2.2 : 2.2;
+          const x = alongX ? a : cx + sd, z = alongX ? cz + sd : a;
           put('bench', x, z, alongX ? 0 : Math.PI / 2, 1.8, 0.6, 0.5, 0, false, set.furn);
         }
-        const nl = Math.max(1, Math.min(2, Math.floor(len / 40)));
+        const nl = Math.max(1, Math.min(4, Math.floor(len / 28)));
         for (let k = 0; k < nl; k++) {
-          const a = (alongX ? x0 : z0) + 2 + (k / nl) * len + 6;
-          put('lamp', alongX ? a : cx - 2.2, alongX ? cz - 2.2 : a, 0, 0, 0, 5, 0.15, true, set.furn);
+          const a = (alongX ? x0 : z0) + 2 + ((k + 0.5) / nl) * len + 4, sd = k % 2 ? 2.2 : -2.2;
+          put('lamp', alongX ? a : cx + sd, alongX ? cz + sd : a, 0, 0, 0, 5, 0.15, true, set.furn);
         }
       }
-      const nt = Math.max(1, Math.min(cap - out.length, Math.round(area / 120)));
-      const got = scatter(nt, 'tree', 1.2, 9, true, 3.5, tree, 1.5);
-      if (got < nt) scatter(Math.min(cap - out.length, nt - got), 'shrub', 0.7, 1.5, false, 2, tree, 0.8);
+      if (area >= 1500) { boundary(front, 'hedge', 5, ''); for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 15) boundary(q, 'hedge', 4, ''); } }
+      greens(area, 1.5);
       break;
     }
     case 'wateredge': {
@@ -1156,22 +1354,80 @@ export function dressLot(city, lot, out = []) {
           pointOnSide(ws, (a + bb) / 2, fi, P);
           put('fence', P[0], P[1], SIDE_HEADING[ws], len, 0.08, 1.1, 0, true, set.furn);
         } else {
-          const nbol = Math.max(2, Math.min(4, Math.floor(len / 12)));
+          const nbol = Math.max(2, Math.min(4, Math.floor(len / 20)));
           for (let k = 0; k < nbol; k++) { pointOnSide(ws, a + ((k + 0.5) / nbol) * (bb - a), fi, P); put('bollard', P[0], P[1], 0, 0, 0, 0.7, 0.2, true, set.furn); }
         }
-        const nbe = Math.max(1, Math.floor(len / 40));
+        const nbe = Math.max(1, Math.floor(len / 28));
         for (let k = 0; k < nbe; k++) {
           pointOnSide(ws, a + ((k + 0.5) / nbe) * (bb - a), f - (ws < 2 ? 3.2 : -3.2), P);
           put('bench', P[0], P[1], SIDE_HEADING[ws], 1.8, 0.6, 0.5, 0, false, set.furn);
         }
+        // A promenade: palms every 14 m behind the benches, a lamp every 30 m.
+        const np = Math.max(1, Math.floor(len / 18));
+        for (let k = 0; k < np; k++) {
+          pointOnSide(ws, a + ((k + 0.25) / np) * (bb - a), f - (ws < 2 ? 5.2 : -5.2), P);
+          if (clearAt(P[0], P[1], 0.6, 2)) put('tree', P[0], P[1], 0, 0, 0, 9, 0.6, true, set.trees[k % set.trees.length]);
+        }
+        const nlw = Math.max(1, Math.floor(len / 30));
+        for (let k = 0; k < nlw; k++) {
+          pointOnSide(ws, a + ((k + 0.75) / nlw) * (bb - a), f - (ws < 2 ? 4.4 : -4.4), P);
+          put('lamp', P[0], P[1], SIDE_HEADING[ws], 0, 0, 5, 0.15, true, set.furn);
+        }
       }
-      if (area > 300) scatter(1, 'tree', 1, 7, true, 3, tree, 2);
+      void area;
       break;
     }
     default:
       break;
   }
+  fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tree, set, out);
   return out;
+}
+
+// The density floor (docs/PLAN_V3.md 13, LOTS): a dressed lot over
+// DENSITY_MIN_AREA left with fewer than one feature unit per DENSITY_M2
+// gets more of what its type holds, at random points, while the cap
+// allows: trees in grates, planters and benches on paving; tree clusters
+// and shrub beds on a lawn; goods in a works yard or on a site.
+function fill(lot, cap, rng, put, clearAt, grateTree, cluster, bed, seatWall, tree, set, out) {
+  if (lot.area <= DENSITY_MIN_AREA || lot.type === 'beach') return;
+  const need = lot.area / DENSITY_M2;
+  let u = lotEmptiness(out);
+  const { x0, z0, x1, z1 } = lot;
+  for (let t = 0; t < 320 && u < need && out.length < cap; t++) {
+    const x = x0 + 2 + rng.next() * (x1 - x0 - 4), z = z0 + 2 + rng.next() * (z1 - z0 - 4);
+    const n0 = out.length;
+    // Close to the cap: long things only (a bed or a seat wall of 12 m
+    // is 2.4 units in one feature).
+    const long = (need - u) / Math.max(1, cap - out.length) > 1.2;
+    switch (lot.type) {
+      case 'plaza': case 'wateredge': case 'carpark': {
+        const k = long ? 1 + (t % 2) : t % 4, hd = rng.chance(0.5) ? 0 : Math.PI / 2;
+        if (long) { if (!(k === 2 ? seatWall(x, z, hd, 12) : bed(x, z, hd, 12 + rng.int(0, 4), true))) bed(x, z, hd, 9, true); }
+        else if (k === 0) grateTree(x, z, 7.5);
+        else if (k === 2) seatWall(x, z, hd, 8 + rng.int(0, 3)) || seatWall(x, z, hd, 5);
+        else bed(x, z, hd, 8 + rng.int(0, 5), true) || bed(x, z, hd, 5, true) || bed(x, z, hd + Math.PI / 2, 5, true);
+        break;
+      }
+      case 'works': case 'site':
+        if (long) { if (clearAt(x, z, 3.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 12.2, 2.5, 2.6, true, rng.int(0, 5)); }
+        else if (t % 2 && clearAt(x, z, 2.2, 1)) put('stack', x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6.1, 2.5, 2.6, true, rng.int(0, 5));
+        else if (clearAt(x, z, 0.9, 0.8)) put('pallet', x, z, rng.next() * 3, 1.2, 1.2, 1, 0, false, rng.int(0, 2));
+        break;
+      case 'yard':
+        bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 5 + rng.int(0, 4), false);
+        break;
+      default:
+        if (!long && t % 4 === 0) cluster(x, z, 2, 3, 'tree', 1.1, 7, true, 1.8, tree);
+        else {
+          const hd = rng.chance(0.5) ? 0 : Math.PI / 2;
+          if (long) bed(x, z, hd, 13 + rng.int(0, 4), false) || bed(x, z, hd, 10, false);
+          else bed(x, z, hd, 9 + rng.int(0, 5), false) || bed(x, z, hd, 5, false) || bed(x, z, hd + Math.PI / 2, 5, false);
+        }
+        break;
+    }
+    for (let k = n0; k < out.length; k++) u += unitOf(out[k]);
+  }
 }
 
 // True when no box-like feature already in `list` is within r of (x, z).
@@ -1273,4 +1529,21 @@ export function lotDressCache(city, dress = dressLot) {
   };
   byFn.set(dress, c);
   return c;
+}
+
+// ---- How full a lot looks ----
+// Feature units of a dressed lot (docs/PLAN_V3.md 13, LOTS: at least one
+// per 60 m2 of every lot over 400 m2). A thing that stands on its own
+// (a tree, a bench, a planter, a lamp, a car bay) is one unit; a long
+// thing counts one per FEATURE_RUN m of its length (a hedge, a fence, a
+// wall, a path, a drive), so a lot ringed by a hedge reads as dressed.
+export const FEATURE_RUN = 5;
+function unitOf(f) {
+  if (f.kind === 'bay') return Math.max(1, Math.round(f.l / 2.5));
+  return f.l > FEATURE_RUN ? f.l / FEATURE_RUN : 1;
+}
+export function lotEmptiness(feats) {
+  let u = 0;
+  for (let k = 0; k < feats.length; k++) u += unitOf(feats[k]);
+  return u;
 }

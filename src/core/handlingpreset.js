@@ -13,12 +13,15 @@
 //   gripK            lateral grip multiplier
 //   assistK          stability assist (yaw and slide) gain multiplier
 //   rollK            body roll multiplier
+//   shapeK           player input shaping by speed (vehicle.js steerShapeExp):
+//                    multiplier on the exponent's rise above 1 (more is
+//                    finer at speed, less is more direct)
 export const PRESETS = ['standard', 'relaxed', 'sharp'];
 export const PRESET_LABELS = { standard: 'Standard', relaxed: 'Relaxed', sharp: 'Sharp' };
 export const PRESET_VALUES = Object.freeze({
-  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 }),
-  relaxed: Object.freeze({ lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 }),
-  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85 }),
+  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1, shapeK: 1 }),
+  relaxed: Object.freeze({ lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3, shapeK: 1.2 }),
+  sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, gripK: 1, assistK: 1.25, rollK: 0.85, shapeK: 0.75 }),
 });
 
 // Verdict ids, their button text and the Phone check token (the id itself).

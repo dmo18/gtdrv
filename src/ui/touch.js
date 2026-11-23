@@ -29,10 +29,12 @@
 import { injectStyles } from './styles.js';
 import {
   wheelCurve, steerTravel, rampSteer, angleDelta, tiltAngle, tiltToSteer, tiltFilter, sliderRaw,
-  clampSensitivity, STEER_STYLES, TILT_WAIT, WHEEL_CORE_PX,
+  clampSensitivity, STEER_STYLES, TILT_WAIT,
 } from '../core/input.js';
 import { WEAPONS, WEAPON_IDS } from '../core/weapons.js';
-import { HOLD_MS, RING_PX, WHEEL_KEEP, WHEEL_CANCEL, wheelIndex, placeWheel } from './wheel.js';
+import {
+  HOLD_MS, RING_PX, WHEEL_KEEP, WHEEL_CANCEL, WHEEL_SHOW_DEG, wheelIndex, placeWheel, createDragSteer, driveWeapons, nextInList,
+} from './wheel.js';
 
 const STICK_RANGE = 56; // px of drag for full stick
 const STICK_DEAD = 0.1;
@@ -138,6 +140,10 @@ export function createTouchControls(root, input, opts = {}) {
 
   // Generic tracker: one pointer per control, with capture.
   // handlers: { down(e), move(e), up() }
+  // A finger that lifts or is canceled anywhere ends its control even if the
+  // element missed the event (capture refused, the element hidden meanwhile):
+  // nothing stays held. `enders` holds one (pointerId, end) pair per control.
+  const enders = [];
   function track(target, handlers) {
     let id = null;
     const end = (e) => {
@@ -146,6 +152,7 @@ export function createTouchControls(root, input, opts = {}) {
       handlers.up(e);
     };
     cleanups.push(end);
+    enders.push((e) => { if (id !== null && e.pointerId === id) end(e); });
     on(target, 'pointerdown', (e) => {
       if (id !== null) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -222,6 +229,9 @@ export function createTouchControls(root, input, opts = {}) {
   });
 
   // ----- steering / stick zone: mode and style decide what it does -----
+  // The zone is the whole left 40 percent of the screen below the minimap
+  // (right 40 percent when left-handed): a thumb may start anywhere in it.
+  // The drawn wheel, pad and arrow pads only show it.
   const zone = el('div', 'rw-zone rw-stickzone', layer);
   const pad = gate(el('div', 'rw-pad rw-st-slider', layer), 'car', 'boat');
   const padKnob = el('div', 'rw-knob', pad);
@@ -231,8 +241,13 @@ export function createTouchControls(root, input, opts = {}) {
   const stick = gate(el('div', 'rw-stick', layer), 'foot', 'plane', 'heli', 'tank');
   const stickKnob = el('div', 'rw-knob', stick);
   const origin = { x: 0, y: 0 };
-  // Wheel tracking: center, last touch angle, accumulated wheel angle (deg).
-  const wh = { cx: 0, cy: 0, last: 0, angle: 0, have: false };
+  // Wheel style: a relative drag (src/ui/wheel.js createDragSteer).
+  const drag = createDragSteer();
+  // Slider: relative to where the thumb landed (like the wheel, only horizontal travel).
+  const slide = { x0: 0 };
+  // Buttons style: a thumb on the zone (not on an arrow pad) steers by side.
+  let zoneSide = 0;
+  let wheelShown = 0; // drawn wheel angle, deg
 
   // The inset in px. The custom property holds an unevaluated max(env(...)),
   // so a probe element resolves it.
@@ -266,24 +281,22 @@ export function createTouchControls(root, input, opts = {}) {
     placeBase(steerMode() ? pad : stick, p.x, p.y);
   }
 
+  // The drawn wheel follows the input (deg); spring: ease back to center.
   function setWheelAngle(deg, spring) {
-    const lock = steerTravel('wheel', sensitivity);
-    wh.angle = clamp(deg, -lock, lock);
+    const a = Math.round(clamp(deg, -WHEEL_SHOW_DEG, WHEEL_SHOW_DEG) * 10) / 10;
     wheel.classList.toggle('rw-spring', !!spring);
-    wheelRot.style.transform = wh.angle ? `rotate(${wh.angle.toFixed(1)}deg)` : '';
+    if (a === wheelShown && !spring) return;
+    wheelShown = a;
+    wheelRot.style.transform = a ? `rotate(${a.toFixed(1)}deg)` : '';
   }
-  function wheelPoint(e) {
-    const dx = e.clientX - wh.cx, dy = e.clientY - wh.cy;
-    if (dx * dx + dy * dy < WHEEL_CORE_PX * WHEEL_CORE_PX) return false;
-    // Screen y grows downward, so atan2 grows clockwise: right turn positive.
-    const a = Math.atan2(dy, dx);
-    if (wh.have) {
-      setWheelAngle(wh.angle + angleDelta(a, wh.last) * 180 / Math.PI, false);
-      setRaw(wh.angle / steerTravel('wheel', sensitivity));
-    }
-    wh.last = a;
-    wh.have = true;
-    return true;
+  function zoneSideOf(x) {
+    const b = wheelSlot();
+    return x < b ? -1 : 1;
+  }
+  // Center x of the steering slot (the arrow pads sit either side of it).
+  function wheelSlot() {
+    const p = restPosition();
+    return p.x;
   }
 
   track(zone, {
@@ -297,19 +310,19 @@ export function createTouchControls(root, input, opts = {}) {
           vibrate();
         } else if (style === 'wheel') {
           const b = wheel.getBoundingClientRect();
-          wh.cx = b.left + b.width / 2;
-          wh.cy = b.top + b.height / 2;
-          wh.have = false;
+          drag.down(e.clientX, e.clientY, b.left + b.width / 2, b.top + b.height / 2);
           wheel.classList.add('rw-active');
-          setWheelAngle(wh.angle, false);
-          wheelPoint(e);
+          setRaw(0);
+          setWheelAngle(0, false);
         } else if (style === 'slider') {
-          // Absolute: the bar stays in the steering slot and where the thumb
-          // lands is the value (docs/REVAMP.md 6.3).
-          const b = pad.getBoundingClientRect();
-          origin.x = b.left + b.width / 2;
+          // Relative: where the thumb lands is the center, the travel from
+          // there is the value (no jump wherever it lands); the knob shows it.
+          slide.x0 = e.clientX;
           pad.classList.add('rw-active');
           applySlider(e.clientX);
+        } else if (style === 'buttons') {
+          zoneSide = zoneSideOf(e.clientX);
+          if (zoneSide) btn.last = zoneSide;
         }
         return;
       }
@@ -327,18 +340,25 @@ export function createTouchControls(root, input, opts = {}) {
     },
     move(e) {
       if (steerMode()) {
-        if (style === 'wheel') wheelPoint(e);
-        else if (style === 'slider') applySlider(e.clientX);
+        if (style === 'wheel') {
+          setRaw(drag.move(e.clientX, e.clientY, sensitivity));
+          setWheelAngle(raw * WHEEL_SHOW_DEG, false);
+        } else if (style === 'slider') applySlider(e.clientX);
+        else if (style === 'buttons') {
+          const sd = zoneSideOf(e.clientX);
+          if (sd !== zoneSide) { zoneSide = sd; btn.last = sd; }
+        }
         return;
       }
       applyStick(e.clientX, e.clientY);
     },
     up() {
       if (style === 'wheel' || style === 'slider') setRaw(0);
+      drag.up();
+      zoneSide = 0;
       src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
       if (!steerMode()) src.steer = 0;
       if (mode === 'tank') { src.throttle = 0; src.brake = 0; }
-      wh.have = false;
       wheel.classList.remove('rw-active');
       setWheelAngle(0, true);
       padKnob.style.transform = '';
@@ -350,7 +370,11 @@ export function createTouchControls(root, input, opts = {}) {
   });
 
   function applySlider(x) {
-    const v = sliderRaw(x, origin.x, sensitivity);
+    // past full lock the anchor follows, so turning back answers at once
+    const full = steerTravel('slider', sensitivity);
+    if (x - slide.x0 > full) slide.x0 = x - full;
+    else if (x - slide.x0 < -full) slide.x0 = x + full;
+    const v = sliderRaw(x, slide.x0, sensitivity);
     setRaw(v);
     padKnob.style.transform = `translateX(${(v * PAD_KNOB_RANGE).toFixed(1)}px)`;
   }
@@ -387,8 +411,9 @@ export function createTouchControls(root, input, opts = {}) {
   // ----- steering buttons (style 'buttons') -----
   const btn = { left: false, right: false, last: 0 };
   const btnTarget = () => {
-    if (btn.left && btn.right) return btn.last;
-    return btn.right ? 1 : btn.left ? -1 : 0;
+    const l = btn.left || zoneSide < 0, r = btn.right || zoneSide > 0;
+    if (l && r) return btn.last;
+    return r ? 1 : l ? -1 : 0;
   };
   const sb = (b) => { b.classList.add('rw-st-buttons', 'rw-pri'); return gate(b, 'car', 'boat'); };
   sb(makeButton('rw-steerbtn rw-sleft', 'Steer left', 'left', '',
@@ -692,37 +717,56 @@ export function createTouchControls(root, input, opts = {}) {
 
   // ----- weapon wheel: hold SWAP, drag to a slice, lift to choose -----
   // A tap (under HOLD_MS) still cycles. The wheel is only open while the
-  // SWAP finger is down; docs/UI.md "Weapon wheel".
-  const wheelN = WEAPON_IDS.length;
+  // SWAP finger is down; docs/UI.md "Weapon wheel". On foot it holds every
+  // weapon; in a car or boat only the drive-by ones (WEAPONS[id].driveBy).
+  const footList = WEAPON_IDS.slice();
+  const driveList = driveWeapons(WEAPONS, WEAPON_IDS);
+  let wheelList = footList;
+  let wheelN = footList.length;
   const wheelEl = el('div', 'rw-ww', layer);
   wheelEl.setAttribute('aria-hidden', 'true');
   el('div', 'rw-ww-disc', wheelEl);
-  const wheelSlices = [];
-  for (let i = 0; i < wheelN; i++) {
-    const id = WEAPON_IDS[i];
-    const a = (i * Math.PI * 2) / wheelN;
+  const wheelSlices = {}; // weapon id -> slice element
+  for (const id of WEAPON_IDS) {
     const sl = el('div', 'rw-ww-slice', wheelEl);
     sl.setAttribute('role', 'img');
     sl.setAttribute('aria-label', WEAPONS[id].name);
-    sl.style.left = `${(RING_PX + Math.sin(a) * 74).toFixed(1)}px`;
-    sl.style.top = `${(RING_PX - Math.cos(a) * 74).toFixed(1)}px`;
+    sl.dataset.weapon = id;
     sl.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${WEAPON_ICONS[id] || ICONS.fire}</svg><span>${id.toUpperCase()}</span>`;
-    wheelSlices.push(sl);
+    wheelSlices[id] = sl;
   }
+  // Lay the slices of a list round the ring (slice 0 up, clockwise); the others hide.
+  let laidList = null;
+  function layWheel(list) {
+    wheelList = list;
+    wheelN = list.length;
+    if (laidList === list) return;
+    laidList = list;
+    for (const id of WEAPON_IDS) wheelSlices[id].style.display = list.includes(id) ? '' : 'none';
+    for (let i = 0; i < wheelN; i++) {
+      const a = (i * Math.PI * 2) / wheelN;
+      const sl = wheelSlices[list[i]];
+      sl.style.left = `${(RING_PX + Math.sin(a) * 74).toFixed(1)}px`;
+      sl.style.top = `${(RING_PX - Math.cos(a) * 74).toFixed(1)}px`;
+    }
+  }
+  layWheel(footList);
   const wheelLabel = el('div', 'rw-ww-label', wheelEl);
   const wheelCtr = { x: 0, y: 0 }; // ring center in client px
   const wheelPos = { x: 0, y: 0 };
   const wheelAvoid = [{ l: 0, t: 0, r: 0, b: 0 }, { l: 0, t: 0, r: 0, b: 0 }];
-  let wheelOpen = false, wheelSel = WHEEL_KEEP, swapTimer = 0, picker = null;
+  let wheelOpen = false, wheelSel = WHEEL_KEEP, swapTimer = 0, picker = null, swapFrom = null;
+  const drivingMode = () => mode === 'car' || mode === 'boat';
   function wheelText() {
     if (wheelSel === WHEEL_CANCEL) return 'Cancel';
-    const id = wheelSel >= 0 ? WEAPON_IDS[wheelSel] : shown.weapon;
+    const id = wheelSel >= 0 ? wheelList[wheelSel] : shown.weapon;
     return (WEAPONS[id] && WEAPONS[id].name) || '';
   }
   function wheelPaint() {
     for (let i = 0; i < wheelN; i++) {
-      wheelSlices[i].classList.toggle('rw-sel', i === wheelSel);
-      wheelSlices[i].classList.toggle('rw-cur', WEAPON_IDS[i] === shown.weapon);
+      const sl = wheelSlices[wheelList[i]];
+      sl.classList.toggle('rw-sel', i === wheelSel);
+      sl.classList.toggle('rw-cur', wheelList[i] === shown.weapon);
     }
     wheelEl.classList.toggle('rw-ww-cancel', wheelSel === WHEEL_CANCEL);
     wheelLabel.textContent = wheelText();
@@ -737,10 +781,13 @@ export function createTouchControls(root, input, opts = {}) {
   }
   function wheelShow() {
     swapTimer = 0;
-    if (!swapBtn.offsetParent) return; // SWAP is not on screen: no wheel
+    const from = swapFrom;
+    if (!from || !from.offsetParent) return; // SWAP is not on screen: no wheel
+    layWheel(drivingMode() ? driveList : footList);
+    if (wheelN < 2) return;
     const r = root.getBoundingClientRect();
-    const sb = swapBtn.getBoundingClientRect();
-    const keep = [layer.querySelector('.rw-fire'), layer.querySelector('.rw-pause')];
+    const sb = from.getBoundingClientRect();
+    const keep = [layer.querySelector(drivingMode() ? '.rw-dbfire' : '.rw-fire'), layer.querySelector('.rw-pause')];
     for (let i = 0; i < 2; i++) {
       const q = keep[i] && keep[i].getBoundingClientRect();
       if (!q || !q.width) { wheelAvoid[i].l = wheelAvoid[i].r = -1e4; wheelAvoid[i].t = wheelAvoid[i].b = -1e4; continue; }
@@ -761,31 +808,40 @@ export function createTouchControls(root, input, opts = {}) {
     input.press('cancel');
     input.release('cancel');
   }
-  function swapDown() {
-    clearTimeout(swapTimer);
-    swapTimer = setTimeout(wheelShow, HOLD_MS);
-  }
-  function swapMove(e) {
-    if (!wheelOpen) return;
-    const i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
-    if (i === wheelSel) return;
-    wheelSel = i;
-    wheelPaint();
-  }
-  // e is undefined when releaseAll closes it (blur, mode change, hidden):
-  // that never changes the weapon.
-  function swapUp(e) {
-    const lifted = !!e && e.type === 'pointerup';
-    if (wheelOpen) {
-      let i = wheelSel;
-      if (lifted && Number.isFinite(e.clientX)) i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
-      wheelClose();
-      if (lifted && i >= 0 && picker) picker(WEAPON_IDS[i]);
-      return;
-    }
-    const held = swapTimer !== 0;
-    wheelClose();
-    if (lifted && held) { input.press('swap'); input.release('swap'); } // quick tap: cycle
+  // The pointer hooks of one SWAP button (foot, or car and boat).
+  function swapHooks(btnRef) {
+    return {
+      down() {
+        swapFrom = btnRef();
+        clearTimeout(swapTimer);
+        swapTimer = setTimeout(wheelShow, HOLD_MS);
+      },
+      move(e) {
+        if (!wheelOpen) return;
+        const i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
+        if (i === wheelSel) return;
+        wheelSel = i;
+        wheelPaint();
+      },
+      // e is undefined when releaseAll closes it (blur, mode change, hidden):
+      // that never changes the weapon.
+      up(e) {
+        const lifted = !!e && e.type === 'pointerup';
+        if (wheelOpen) {
+          let i = wheelSel;
+          if (lifted && Number.isFinite(e.clientX)) i = wheelIndex(e.clientX - wheelCtr.x, e.clientY - wheelCtr.y, wheelN);
+          wheelClose();
+          if (lifted && i >= 0 && picker) picker(wheelList[i]);
+          return;
+        }
+        const held = swapTimer !== 0;
+        wheelClose();
+        if (!(lifted && held)) return;
+        // quick tap: cycle (on foot through the combat system's 'swap'; in a
+        // car or boat to the next drive-by weapon through the picker)
+        if (drivingMode()) { const nx = nextInList(driveList, shown.weapon); if (nx && picker) picker(nx); } else { input.press('swap'); input.release('swap'); }
+      },
+    };
   }
 
   // ----- secondary: folded into the fan -----
@@ -816,7 +872,15 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'radio', label: 'Radio station', icon: 'radio', text: 'RADIO', modes: ['car', 'boat'], input: 'radio' });
   addAction({ id: 'view', label: 'Change camera', icon: 'camera', text: 'VIEW', modes: ['car', 'boat', 'plane', 'heli', 'tank'], input: 'camera' });
   addAction({ id: 'swap', group: 'primary', slot: 'hand', label: 'Swap weapon', icon: 'swap', text: 'SWAP', modes: ['foot'], input: 'swap', visible: armed,
-    pointer: { down: swapDown, move: swapMove, up: swapUp } });
+    pointer: swapHooks(() => swapBtn) });
+  // SWAP while driving (car, boat): the LOCK rect, the free cell above the
+  // drive-by FIRE (docs/REVAMP.md 6.12 row "SWAP (car, boat)"). In a service
+  // vehicle EXTRA keeps that rect and SWAP sits 8 px above SIREN instead.
+  // Hold for the wheel of the drive-by weapons, tap for the next one.
+  addAction({ id: 'carswap', group: 'primary', slot: 'cswap', label: 'Swap drive-by weapon', icon: 'swap', text: 'SWAP', modes: ['car', 'boat'],
+    press() { const nx = nextInList(driveList, shown.weapon); if (nx && picker) picker(nx); },
+    visible: () => armed() && shown.drive === true && driveList.length > 1,
+    pointer: swapHooks(() => carSwapBtn) });
   addAction({ id: 'reload', label: 'Reload', icon: 'reload', text: 'RELOAD', modes: ['foot', 'car', 'boat'], input: 'reload',
     visible: () => armed() && (mode === 'foot' || shown.drive === true) });
   addAction({ id: 'run', group: 'primary', slot: 'run', label: 'Run', icon: 'run', text: 'RUN', modes: ['foot'],
@@ -824,6 +888,7 @@ export function createTouchControls(root, input, opts = {}) {
   addAction({ id: 'map', label: 'Map', icon: 'map', text: 'MAP', input: 'map' });
   addAction({ id: 'respawn', label: 'Respawn', icon: 'respawn', text: 'RESPAWN', modes: ['foot', 'car', 'boat', 'plane', 'heli', 'tank'], input: 'respawn' });
   const swapBtn = actions.find((a) => a.id === 'swap').el;
+  const carSwapBtn = actions.find((a) => a.id === 'carswap').el;
   cancelTargets.push(swapBtn, more);
 
   // ----- pause: always on screen -----
@@ -835,13 +900,17 @@ export function createTouchControls(root, input, opts = {}) {
     src.steer = 0; src.throttle = 0; src.brake = 0; src.handbrake = false; src.boost = false;
     src.moveX = 0; src.moveY = 0; src.sprint = false; src.pitch = 0;
     raw = 0;
-    btn.left = false; btn.right = false;
+    btn.left = false; btn.right = false; zoneSide = 0;
+    drag.up();
     tilt.smooth = 0;
     setWheelAngle(0, false);
     padKnob.style.transform = '';
     stickKnob.style.transform = '';
     drawTilt(0);
   }
+  const endAll = (e) => { for (let i = 0; i < enders.length; i++) enders[i](e); };
+  on(document, 'pointerup', endAll, true);
+  on(document, 'pointercancel', endAll, true);
   const stop = (e) => e.preventDefault();
   on(layer, 'contextmenu', stop);
   on(layer, 'touchstart', stop, { passive: false });
@@ -894,7 +963,7 @@ export function createTouchControls(root, input, opts = {}) {
       if (nextSens !== undefined) sensitivity = clampSensitivity(+nextSens);
       if (typeof onFallback === 'function') tilt.onFallback = onFallback;
       if (st !== style) applyStyle(st);
-      else { setWheelAngle(wh.angle, false); setRaw(raw); }
+      else setRaw(raw);
       if (st === 'tilt') {
         tilt.asked = false;
         maybeAskTilt();
@@ -943,6 +1012,7 @@ export function createTouchControls(root, input, opts = {}) {
         const ic = WEAPON_ICONS[c.weapon] || ICONS.fire;
         ammoIcon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>`;
         swapBtn.querySelector('svg').innerHTML = ic;
+        carSwapBtn.querySelector('svg').innerHTML = ic;
         if (wheelOpen) wheelPaint();
         ammoName.textContent = c.name || '';
       }
@@ -990,7 +1060,7 @@ export function createTouchControls(root, input, opts = {}) {
     // bottom (below 0 hides it), weak dims it to 40 % when it cannot act now.
     setExtra(c) {
       const can = !!(c && c.can);
-      if (can !== extraCan) { extraCan = can; refreshActions(); }
+      if (can !== extraCan) { extraCan = can; layer.classList.toggle('rw-extra-on', can); refreshActions(); }
       if (!can) return;
       const text = (c.text || 'EXTRA').slice(0, 6);
       if (text !== extraText) { extraText = text; if (extraCap) extraCap.textContent = text; }

@@ -174,6 +174,8 @@ const GRID = {
     gas: [835, 316, 72, 88], brake: [751, 316, 72, 88], exit: [843, 248, 56, 56], hand: [759, 248, 56, 56],
     fire: [671, 340, 64, 64], lock: [675, 272, 56, 56], more: [843, 180, 56, 56], ammo: [691, 60, 160, 40],
     fanX: [779, 715, 651], fanY: [180, 116], fanS: 56, slot: [16, 240, 160, 160],
+    // 0.10.1: SWAP while driving takes the LOCK rect; with EXTRA showing it sits 8 px above SIREN
+    cswap: [675, 272, 56, 56], cswapAlt: [184, 228, 56, 56],
   },
   B: {
     V: 780, H: 360,
@@ -184,6 +186,7 @@ const GRID = {
     gas: [708, 280, 64, 72], brake: [632, 280, 64, 72], exit: [716, 216, 56, 56], hand: [636, 216, 56, 56],
     fire: [560, 288, 64, 64], lock: [564, 224, 56, 56], more: [716, 152, 56, 56], ammo: [564, 56, 152, 24],
     fanX: [660, 604, 548], fanY: [156, 100], fanS: 48, slot: [16, 204, 140, 140],
+    cswap: [564, 224, 56, 56], cswapAlt: [164, 182, 56, 56],
   },
 };
 // The owner's real phone reports 748x360. The contract table has no rectangles for it, so it is
@@ -191,6 +194,11 @@ const GRID = {
 // hit boxes, keep-out rect, safe edges, inset strip, leaving the screen, contrast, the canvas)
 // runs as at the other sizes; only the exact-rectangle comparisons are skipped.
 GRID.C = { ...GRID.B, V: 748, H: 360, loose: true };
+// 0.10.1: Chrome with its bars showing on the owner's phone (748x285) and a narrower phone (690x280).
+// Loose like 748x360, with no side inset (the browser keeps the camera cut-out out of the page).
+GRID.D = { ...GRID.B, V: 748, H: 285, loose: true, insets: [0] };
+GRID.E = { ...GRID.B, V: 690, H: 280, loose: true, insets: [0] };
+const SIZES = process.env.UI_SIZES ? process.env.UI_SIZES.split(',').map((k) => GRID[k]) : [GRID.A, GRID.B, GRID.C, GRID.D, GRID.E];
 const lum = ([r, g, b]) => {
   const f = (c) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
@@ -223,7 +231,8 @@ async function liveLayout(check) {
     let states = 0, elements = 0;
     // [name, craft, armed]. 'car-garage' and 'foot-talk' have a GARAGE or TALK offer showing (docs/REVAMP.md 6.12 HG-2).
     // 'car-hood' and 'car-cockpit': the first-person views (PLAN_V3 2.8) under the same HUD contract.
-    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-garage', 'car', null], ['car-hood', 'car', null], ['car-cockpit', 'car', null], ['boat', 'boat', null],
+    // 'car-swap': a plain car (no SIREN, no EXTRA forced) where SWAP takes the LOCK rect.
+    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-swap', 'car', null], ['car-garage', 'car', null], ['car-hood', 'car', null], ['car-cockpit', 'car', null], ['boat', 'boat', null],
       ['plane-armed', 'plane', true], ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
     const setMode = (kind, armed, name) => pg.evaluate(([k, a, nm]) => {
       const g = window.__rw;
@@ -245,7 +254,7 @@ async function liveLayout(check) {
     }, [kind, armed, name]).then((ok) => { if (!ok) problems.push(`no ${name} craft in the world`); return ok; });
     // Force the transient HUD pieces on so they are measured: stars with the escape bar, health, prompt, combo,
     // the objective cell, a police toast (row 1) and a hint (row 2), the siren and the extra of a service vehicle.
-    const force = (mortal = true) => pg.evaluate((mortal) => {
+    const force = (mortal = true, plain = false) => pg.evaluate(([mortal, plain]) => {
       const g = window.__rw;
       for (const c of ['.rw-wanted', '.rw-hpmeter', '.rw-prompt']) document.querySelector(c).classList.remove('rw-none');
       document.querySelector('.rw-wanted').classList.add('rw-cooling');
@@ -259,8 +268,8 @@ async function liveLayout(check) {
         g.hud.toast('Pulled over! Off with a warning.', 3600, 'police');
         g.hud.toast('Tap EXIT to get out. Walk up to anything and tap ENTER.', 3600, 'hint');
       }
-      g.touch.setSiren(true, false);
-      g.touch.setExtra({ can: true, text: 'WATER', fill: 0.6 });
+      g.touch.setSiren(!plain, false);
+      g.touch.setExtra({ can: !plain, text: 'WATER', fill: 0.6 });
       // the GPS turn strip (NAV) with a long line, and the street line (hidden under the prompt)
       if (g.hud.setNav) g.hud.setNav(true, 'right', 'In 300 ft, turn right', 'onto Pennsylvania Ave', true);
       if (g.hud.setStreet) g.hud.setStreet('Alton Rd', '5th St');
@@ -270,7 +279,8 @@ async function liveLayout(check) {
         boost: ['car', 'boat', 'plane', 'heli'].includes(mode) ? 0.8 : -1 });
       for (const c of ['.rw-wanted']) document.querySelector(c).classList.remove('rw-none');
       document.querySelector('.rw-hpmeter').classList.toggle('rw-none', !mortal);
-    }, mortal);
+      g.touch.update(1 / 60);
+    }, [mortal, plain]);
     // Wait until every finite transition and animation has finished.
     const settle = () => pg.evaluate(async () => {
       const running = () => document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations !== Infinity && a.playState === 'running');
@@ -295,6 +305,7 @@ async function liveLayout(check) {
         const display = c.includes('rw-ammo') || c.includes('rw-tiltbar');
         let key = null;
         if (c.includes('rw-pause')) key = 'pause';
+        else if (c.includes('rw-slot-cswap')) key = 'cswap';
         else if (c.includes('rw-slot-boost') || /\brw-extra\b/.test(c)) key = 'boost'; // BOOST, or GARAGE and TALK in its cell
         else if (c.includes('rw-slot-siren')) key = 'siren';
         else if (c.includes('rw-slot-extra')) key = 'extra';
@@ -341,7 +352,7 @@ async function liveLayout(check) {
       }
       const cv = document.getElementById('game').getBoundingClientRect();
       const cs = (e) => { const s = getComputedStyle(e); return { bg: s.backgroundColor, pad: s.padding, img: s.backgroundImage }; };
-      return { out, texts, mode: g.player.mode, mortal: !document.querySelector('.rw-hpmeter').classList.contains('rw-none'), canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
+      return { out, texts, mode: g.player.mode, extraOn: document.querySelector('.rw-touch').classList.contains('rw-extra-on'), mortal: !document.querySelector('.rw-hpmeter').classList.contains('rw-none'), canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
         page: { html: cs(document.documentElement), body: cs(document.body), ui: cs(document.getElementById('ui')) },
         boot: getComputedStyle(document.getElementById('boot')).display, vw: innerWidth, vh: innerHeight };
     }).then((m) => ({ ...m, grid, L, hand, hud, name }));
@@ -362,20 +373,25 @@ async function liveLayout(check) {
           const lo = grid.V === 915;
           t = [t[0], hud === 'full' ? (lo ? 91 : 85) : (m.mortal === false ? t[1] : (lo ? 72 : 68)), t[2], t[3]];
         }
-        let x = t[0];
+        let x = t[0], y0 = t[1];
         const left = ['minimap', 'speed', 'health', 'clock', 'boostbar'].includes(key);
         const mirror = hand && ['gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more', 'boost', 'extra'].includes(key);
         if (left) x += L;
         if (mirror) x = grid.V - t[0] - t[2] + L;
         // SIREN sits beside the steering slot: it moves with the left inset and mirrors to the right edge (no inset there)
         if (key === 'siren') x = hand ? grid.V - t[0] - t[2] : t[0] + L;
-        if (Math.abs(e.x - x) > tol || Math.abs(e.y - t[1]) > tol || Math.abs(e.w - t[2]) > tol || Math.abs(e.h - t[3]) > tol) {
+        // SWAP while driving: the LOCK rect (mirrored with the cluster), or above SIREN while EXTRA shows
+        if (key === 'cswap') {
+          if (m.extraOn) { t = grid.cswapAlt; x = hand ? grid.V - t[0] - t[2] : t[0] + L; } else x = hand ? grid.V - t[0] - t[2] + L : t[0];
+          y0 = t[1];
+        }
+        if (Math.abs(e.x - x) > tol || Math.abs(e.y - y0) > tol || Math.abs(e.w - t[2]) > tol || Math.abs(e.h - t[3]) > tol) {
           bad(`${key} (${e.name}) is ${e.x.toFixed(1)},${e.y.toFixed(1)},${e.w.toFixed(1)}x${e.h.toFixed(1)}, grid says ${x},${t[1]},${t[2]}x${t[3]}`);
         }
       };
       for (const e of el) {
         if (['minimap', 'speed', 'health', 'stars', 'stack', 'objcell', 'cool', 'score', 'pause', 'prompt', 'gas', 'brake', 'exit', 'hand', 'fire', 'lock', 'more',
-          'boost', 'boostbar', 'siren', 'extra'].includes(e.key)) {
+          'boost', 'boostbar', 'siren', 'extra', 'cswap'].includes(e.key)) {
           // The foot FIRE and RUN take the pedal rects (the same size); every other key matches its own rect.
           expect(e.key, e);
         }
@@ -438,15 +454,29 @@ async function liveLayout(check) {
         if ((k.key === 'm1' || k.key === 'm2') && Math.abs(k.h - 28) > 0.5) bad(`${k.key} is ${k.h.toFixed(1)} high, not one 28 px line`);
         if (k.b > 100.5) bad(`${k.key} ends at ${k.b.toFixed(1)}, past y 100`);
       }
-      // NAV: the turn strip is centered under the stack (top 104), 48 high (38 at 360 high), never wider than the stack,
-      // and the street line takes the prompt strip's rect (never both at once)
+      // NAV (0.10.1): the turn pill is one line in the stack's second row (y 40), 28 high (at most 30), never
+      // wider than the stack, centered, and out of the middle half of the screen (it ends above 25 percent of
+      // the height). While it shows, the row 1 message moves to row 2 and row 2's own waits.
+      const stk = el.find((q) => q.key === 'stack');
       for (const k of el.filter((q) => q.key === 'nav')) {
-        const h = grid.H >= 400 ? 48 : 38, wMax = grid.V >= 900 ? 335 : 300;
-        if (Math.abs(k.y - 104) > 0.5 || Math.abs(k.h - h) > 0.5) bad(`nav strip is at y ${k.y.toFixed(1)}, ${k.h.toFixed(1)} high, want 104 and ${h}`);
-        if (k.w > wMax + 0.5) bad(`nav strip is ${k.w.toFixed(1)} wide, over ${wMax}`);
-        if (Math.abs((k.x + k.r) / 2 - grid.V / 2) > 2) bad('nav strip is not centered');
+        if (Math.abs(k.y - 40) > 0.5 || k.h > 30.5) bad(`nav pill is at y ${k.y.toFixed(1)}, ${k.h.toFixed(1)} high, want 40 and at most 30`);
+        if (stk && (k.x < stk.x - 0.5 || k.r > stk.r + 0.5)) bad(`nav pill ${k.x.toFixed(1)}..${k.r.toFixed(1)} is wider than the stack`);
+        if (Math.abs((k.x + k.r) / 2 - grid.V / 2) > 2) bad('nav pill is not centered');
+        if (k.b > 0.25 * grid.H + 0.5) bad(`nav pill ends at ${k.b.toFixed(1)}, inside the middle half of the screen`);
+        const m1 = el.find((q) => q.key === 'm1');
+        if (m1 && Math.abs(m1.y - 72) > 0.5) bad(`with the nav pill on, row 1's message is at y ${m1.y.toFixed(1)}, want 72 (row 2)`);
+        if (m1 && el.some((q) => q.key === 'm2')) bad('with the nav pill on, row 1 and row 2 both show a message');
       }
-      if (el.some((q) => q.key === 'street') && el.some((q) => q.key === 'prompt')) bad('the street line shows with the prompt');
+      // The street label sits under the minimap (11 px text, 16 high), inside the safe edge, clear of everything (overlap check above).
+      for (const k of el.filter((q) => q.key === 'street')) {
+        const mm = el.find((q) => q.key === 'minimap');
+        if (Math.abs(k.x - (L + 8)) > 1 || Math.abs(k.h - 16) > 0.5 || (mm && (k.y < mm.b - 0.5 || k.y > mm.b + 30))) bad(`street label is ${k.x.toFixed(1)},${k.y.toFixed(1)},${k.w.toFixed(1)}x${k.h.toFixed(1)}, want under the minimap at x ${L + 8}, 16 high`);
+      }
+      if (!el.some((q) => q.key === 'street')) bad('the street label is missing');
+      // SWAP while driving: one in a car or boat (the player carries a gun), none on foot
+      const cs = el.filter((q) => q.key === 'cswap').length;
+      if ((m.mode === 'car' || m.mode === 'boat') && cs !== 1) bad(`SWAP count ${cs} in ${m.name}`);
+      if (m.mode !== 'car' && m.mode !== 'boat' && cs) bad(`SWAP shows in ${m.name}`);
       // a message pill is centered in its row
       for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
         const row = grid[k.key];
@@ -457,12 +487,13 @@ async function liveLayout(check) {
       if (cell.length > 1) bad('more than one control in the BOOST cell');
       if (m.name.endsWith('garage') || m.name.endsWith('talk')) {
         if (!cell.length || /Boost/.test(cell[0].label || '') || !/garage/i.test(cell[0].label || '')) bad(`the offer does not take the BOOST cell (${cell.map((q) => q.label)})`);
-      } else if (['car', 'boat', 'plane', 'plane-armed', 'heli-armed'].includes(m.name) && !(cell.length === 1 && /Boost/.test(cell[0].label || ''))) bad('BOOST is missing');
+      } else if (['car', 'car-swap', 'boat', 'plane', 'plane-armed', 'heli-armed'].includes(m.name) && !(cell.length === 1 && /Boost/.test(cell[0].label || ''))) bad('BOOST is missing');
       if (['foot', 'tank'].includes(m.name) && cell.length) bad(`${m.name} has a control in the BOOST cell`);
       // SIREN in a car only, EXTRA in a car only; boost meter where BOOST shows
       for (const [key, want] of [['siren', 'car'], ['extra', 'car']]) {
         const have = el.filter((q) => q.key === key).length;
-        if ((m.name.startsWith(want) && have !== 1) || (!m.name.startsWith(want) && have)) bad(`${key} count ${have} in ${m.name}`);
+        const forced = m.name.startsWith(want) && m.name !== 'car-swap'; // car-swap: a plain car, nothing forced
+        if ((forced && have !== 1) || (!forced && have)) bad(`${key} count ${have} in ${m.name}`);
       }
       // armed craft: the weapon arc stays in the 352 by 220 box and off EXIT, MORE
       if (m.name.includes('armed') || m.name === 'tank') {
@@ -494,9 +525,9 @@ async function liveLayout(check) {
       if (m.boot !== 'none') bad('the title screen is still showing');
     };
 
-    for (const grid of [GRID.A, GRID.B, GRID.C]) {
+    for (const grid of SIZES) {
       await pg.setViewportSize({ width: grid.V, height: grid.H });
-      for (const L of [0, 40]) {
+      for (const L of grid.insets || [0, 40]) {
         await pg.evaluate((l) => { document.documentElement.style.setProperty('--rw-test-sl', l + 'px'); window.dispatchEvent(new Event('resize')); }, L);
         for (const hand of [false, true]) {
           await pg.evaluate((h) => window.__rw.touch.setLeftHanded(h), hand);
@@ -510,7 +541,7 @@ async function liveLayout(check) {
                   const mp = await pg.evaluate(() => { const r = document.querySelector('.rw-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
                   await pg.touchscreen.tap(mp.x, mp.y);
                 }
-                await force();
+                await force(true, name === 'car-swap');
                 await pg.waitForTimeout(states === 0 ? 500 : 60);
                 await settle();
                 const m = await measure(grid, L, hand, hud, name);
@@ -617,6 +648,7 @@ async function liveLayout(check) {
               const q = (c) => document.querySelector(c);
               g.hud.stack.reset();
               g.hud.setObjective(false, 0, '');
+              g.hud.setNav(false);
               q('.rw-wanted').classList.add('rw-none');
               q('.rw-wanted').classList.remove('rw-cooling');
               g.hud.update({ ...g.hudState, mode: 'car', speedKmh: 50, stars: 0, wanted: 0, cooling: 0, district: 'Little Havana ' + Math.random(), boost: 0.8, mortal: false });
@@ -646,6 +678,20 @@ async function liveLayout(check) {
               if (['stack', 'stars', 'objcell', 'cool', 'm1', 'm2'].includes(o.key)) continue;
               if (inter(it, o)) bad(`HG-3 ${it.key} overlaps ${o.label || o.key}`);
             }
+            // HG-3 with turn by turn (0.10.1): the turn pill takes row 1's place, the police toast shows in row 2,
+            // the hint waits; everything inside the stack box, no overlaps, the pill out of the middle half
+            await pg.evaluate(() => window.__rw.hud.setNav(true, 'right', '300 ft', 'SW 1st Ave', true));
+            await settle();
+            const navItems = await pg.evaluate(() => {
+              const q = (c) => { const e = document.querySelector(c); const r = e.getBoundingClientRect(); return getComputedStyle(e).display === 'none' || !r.width ? null : { x: r.left, y: r.top, r: r.right, b: r.bottom, kind: e.className, text: e.textContent }; };
+              return { nav: q('.rw-nav'), m1: q('.rw-m1'), m2: q('.rw-m2') };
+            });
+            if (!navItems.nav || navItems.nav.y !== 40 || navItems.nav.b > 68.5) bad(`HG-3 nav pill is ${JSON.stringify(navItems.nav)}, want row 1 (y 40, 28 high)`);
+            if (!navItems.m1 || !/rw-k-police/.test(navItems.m1.kind) || Math.abs(navItems.m1.y - 72) > 0.5) bad(`HG-3 with nav: the police toast is not in row 2 (${JSON.stringify(navItems.m1)})`);
+            if (navItems.m2) bad('HG-3 with nav: the hint shows too');
+            if (navItems.nav && navItems.m1 && inter(navItems.nav, navItems.m1)) bad('HG-3 with nav: the pill overlaps the police toast');
+            if (navItems.nav && (navItems.nav.x < box.x - 0.5 || navItems.nav.r > box.r + 0.5)) bad('HG-3 with nav: the pill leaves the stack box');
+            await pg.evaluate(() => window.__rw.hud.setNav(false));
             // after the police toast ends the objective line takes row 1; the score and info toasts were dropped or waited
             await pg.evaluate(() => window.__rw.hud.tick(1.6));
             await settle();
@@ -945,33 +991,50 @@ try {
   const tick = (n, dt = 1 / 60) => page.evaluate(([k, d]) => { for (let i = 0; i < k; i++) rw.touch.update(d); }, [n, dt]);
   const near = (a, b, tol = 0.02) => Math.abs(a - b) <= tol;
 
-  // ---- car: steering wheel (default style) ----
+  // ---- car: steering wheel (default style). 0.10.1: a RELATIVE drag (src/ui/wheel.js): the
+  // input comes from the thumb's travel since touch-down (horizontal, or rotation about the wheel
+  // center, the larger), 55 px is full input at sensitivity 1, never from where the thumb is. ----
   check('default steering style is wheel', (await page.evaluate(() => rw.touch.getSteering().style)) === 'wheel');
   const wb = await wheelBox();
   check('wheel ~150px bottom-left', wb.vis && Math.abs(wb.w - 150) < 2 && wb.x < 200 && wb.y > 412 - 140, JSON.stringify(wb));
-  let p0 = rimPt(wb, 0);
+  let p0 = rimPt(wb, 90); // 3 o'clock on the rim
   await down(1, p0.x, p0.y);
-  check('touching the wheel alone does not steer', (await read('rw.input.steer')) === 0);
-  await turn(1, wb, 0, 60);
+  check('touching the wheel at 3 o\'clock does not steer (no absolute angle)', (await read('rw.input.steer')) === 0);
+  await up(1);
+  await down(1, wb.x - 10, wb.y + 10);
+  await drag(1, wb.x - 10, wb.y + 10, wb.x + 17.5, wb.y + 10, 4);
   let st60 = await read('rw.input.steer');
-  check('wheel 60 deg -> 0.545 of 110 deg lock through the curve', near(st60, await shape(60 / 110)), `${st60}`);
-  check('wheel graphic rotates', /rotate\(6\d(\.\d)?deg\)|rotate\(59\.\ddeg\)/.test(await wheelRot()), await wheelRot());
-  await turn(1, wb, 60, 150);
-  check('wheel past 120 deg -> full right', (await read('rw.input.steer')) === 1);
-  await turn(1, wb, 150, -150, 8);
-  check('wheel turned back past center -> full left', (await read('rw.input.steer')) === -1);
-  // The finger went 30 deg past the stop; turning back moves the wheel at once.
-  await turn(1, wb, -150, -60);
-  const stm30 = await read('rw.input.steer');
-  check('wheel back to -20 deg -> proportional left (110 deg lock)', near(stm30, await shape(-20 / 110)), `${stm30}`);
+  check('wheel: 27.5 px right -> half input through the curve', near(st60, await shape(0.5)), `${st60}`);
+  check('wheel graphic rotates right', /rotate\(\d/.test(await wheelRot()), await wheelRot());
+  await drag(1, wb.x + 17.5, wb.y + 10, wb.x + 80, wb.y + 10, 6);
+  check('wheel: 55 px or more right -> full right', (await read('rw.input.steer')) === 1);
+  await drag(1, wb.x + 80, wb.y + 10, wb.x + 52.5, wb.y + 10, 3);
+  const back = await read('rw.input.steer');
+  check('wheel: turning back from full lock answers at once (27.5 px back -> half)', near(back, await shape(0.5)), `${back}`);
+  await drag(1, wb.x + 52.5, wb.y + 10, wb.x - 60, wb.y + 10, 10);
+  check('wheel: dragged on left -> full left', (await read('rw.input.steer')) === -1);
   await shot('car-wheel-active-915x412.png');
   await up(1);
   check('wheel released -> steer 0', (await read('rw.input.steer')) === 0);
   check('wheel springs back to center', (await wheelRot()) === '' && await page.evaluate(() => document.querySelector('.rw-wheel').classList.contains('rw-spring')));
-  // Grabbing the wheel off-center (anywhere in the zone) is relative to the touch.
+  // Below the center a slide right still steers right (a turning wheel would go left).
+  await down(1, wb.x - 30, wb.y + 50);
+  await drag(1, wb.x - 30, wb.y + 50, wb.x + 10, wb.y + 50, 6);
+  check('wheel: below the center a slide right steers right', (await read('rw.input.steer')) > 0.5);
+  await up(1);
+  // Crossing the center: no jump to the other lock.
+  await down(1, wb.x - 40, wb.y + 1);
+  const crossing = [];
+  for (let i = 1; i <= 8; i++) { await move(1, wb.x - 40 + i * 10, wb.y + 1); crossing.push(await read('rw.input.steer')); }
+  check('wheel: dragging through the center rises smoothly, never jumps to full left', crossing.every((v, i) => v >= 0 && (i === 0 || v >= crossing[i - 1])), crossing.map((v) => v.toFixed(2)).join(' '));
+  await up(1);
+  // Grabbing anywhere in the zone, far from the wheel: no jump; rotation about the center: down the right side turns right.
   await down(1, wb.x + 120, wb.y - 20);
   check('grab away from the rim: no jump', (await read('rw.input.steer')) === 0);
-  await move(1, wb.x + 115, wb.y + 30);
+  await up(1);
+  p0 = rimPt(wb, 60);
+  await down(1, p0.x, p0.y);
+  await turn(1, wb, 60, 100, 4);
   check('drag down on the right side turns right', (await read('rw.input.steer')) > 0.05);
   await up(1);
 
@@ -980,7 +1043,7 @@ try {
   check('gas held -> throttle 1', (await read('rw.input.throttle')) === 1);
   p0 = rimPt(wb, 0);
   await down(1, p0.x, p0.y);
-  await turn(1, wb, 0, 130);
+  await turn(1, wb, 0, 90);
   const both = await read('[rw.input.throttle, rw.input.steer]');
   check('throttle 1 while steering', both[0] === 1 && both[1] === 1, JSON.stringify(both));
   await shot('car-active-915x412.png');
@@ -1021,19 +1084,24 @@ try {
   await shot('car-buttons-780x360.png');
   await page.setViewportSize({ width: 915, height: 412 });
 
-  // ---- steering style: slider (absolute, 90 px from the bar center is full lock, docs/REVAMP.md 6.3) ----
+  // ---- steering style: slider. 0.10.1: relative like the wheel, 90 px of travel from where the
+  // thumb landed is full lock (docs/REVAMP.md 6.3 travel); the knob shows the value. ----
   await page.evaluate(() => rw.touch.setSteering('slider', 1));
   const pb = await page.evaluate(() => { const r = document.querySelector('.rw-pad').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await down(1, pb.x + 45, pb.y);
+  check('slider: landing off center gives no steer (relative)', (await read('rw.input.steer')) === 0);
+  await drag(1, pb.x + 45, pb.y, pb.x + 90, pb.y, 3);
   const s55 = await read('rw.input.steer');
-  check('slider: where the thumb lands is the value (45 px -> raw 0.5, curved)', near(s55, await shape(0.5)) && s55 > 0.4 && s55 < 0.5, `${s55}`);
-  await drag(1, pb.x + 45, pb.y, pb.x + 120, pb.y);
+  check('slider: 45 px of travel -> raw 0.5, curved', near(s55, await shape(0.5)) && s55 > 0.4 && s55 < 0.5, `${s55}`);
+  await drag(1, pb.x + 90, pb.y, pb.x + 160, pb.y);
   check('slider 90+ px -> full right', (await read('rw.input.steer')) === 1);
-  await drag(1, pb.x + 120, pb.y, pb.x - 300, pb.y, 16);
+  await drag(1, pb.x + 160, pb.y, pb.x - 300, pb.y, 16);
   check('slider far left (off the bar) still steers full left', (await read('rw.input.steer')) === -1);
-  await move(1, pb.x, pb.y);
-  check('slider center -> 0', (await read('rw.input.steer')) === 0);
+  await move(1, pb.x - 300 + 90, pb.y);
+  check('slider back 90 px from full left -> 0', Math.abs(await read('rw.input.steer')) < 1e-9);
+  await up(1);
   await page.evaluate(() => rw.touch.setSteering('slider', 1.5));
+  await down(1, pb.x, pb.y);
   await move(1, pb.x + 45, pb.y);
   const s55b = await read('rw.input.steer');
   check('higher sensitivity -> more steer', s55b > s55 + 0.1 && near(s55b, await shape(45 / 60)), `${s55b} vs ${s55}`);
@@ -1122,10 +1190,9 @@ try {
   const lmore = await center('More controls');
   check('lefty: more button and fan on the left, the fan opens beside and above it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y <= lmore.y + 1, JSON.stringify([lh.x, lmore.x]));
   await tapMore();
-  p0 = rimPt(lw, 0);
-  await down(1, p0.x, p0.y);
-  await turn(1, lw, 0, 60);
-  check('lefty: wheel steers', near(await read('rw.input.steer'), await shape(60 / 110)));
+  await down(1, lw.x - 10, lw.y + 10);
+  await drag(1, lw.x - 10, lw.y + 10, lw.x + 17.5, lw.y + 10, 4);
+  check('lefty: wheel steers (27.5 px -> half)', near(await read('rw.input.steer'), await shape(0.5)));
   await up(1);
   await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
   await down(4, 420, 120);

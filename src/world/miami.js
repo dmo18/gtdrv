@@ -9,6 +9,7 @@
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
 import { roadProfile, pairDivided, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
+import { buildRoadGeo } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
@@ -2136,6 +2137,9 @@ export function createMiamiCity(data, opts = {}) {
   // Divided roads (2.1 item 4): one-way carriageways of one name paired,
   // with a raised median as wide as the data gap leaves.
   graphStats.paired = pairDivided(nodes, edges, edgesNear);
+  // Junction polygons, strip ends, bends and tapers (world/junctions.js).
+  const roadGeo = buildRoadGeo(nodes, edges);
+  lap('junctions');
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
     let best = Infinity;
@@ -3421,6 +3425,8 @@ export function createMiamiCity(data, opts = {}) {
     landmarkSites,
     // Region edges (3.4): generated road ends and the travel pads.
     roadEnds, travelPads,
+    // Junction polygons and trimmed strip ends (docs/MAP.md "Junctions").
+    roadGeo,
   };
 
   // ---- 11b. Lots: every free land cell typed and dressed (world/lots.js). ----

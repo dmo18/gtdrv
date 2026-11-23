@@ -14,12 +14,18 @@ const DEG = Math.PI / 180;
 
 // Original generic aircraft. Names are invented.
 // width is the wing span (planes) or the rotor diameter (helicopters).
+// Plane flight (docs/PLAN_V3.md section 13, AIR): rotate is the lift-off
+// speed (m/s) and groundAccel the take-off run's push at standstill (m/s2);
+// maxDive is the steepest nose-down the stick asks for; rollMax and
+// pitchMax cap how fast (rad/s) bank and nose move, so a thumb cannot
+// snap the plane around. turnGain scales the coordinated turn for bank.
 export const AIRCRAFT_SPECS = {
   prop: {
     id: 'prop', label: 'Pipwick', kind: 'plane',
     length: 7.6, width: 10.4, height: 2.6, mass: 900, health: 400,
     maxSpeed: 65, stallSpeed: 22, thrust: 6.5, groundBrake: 9,
-    maxBank: 55 * DEG, maxClimb: 35 * DEG, rollRate: 3.2, pitchRate: 2.2, turnGain: 2.6,
+    maxBank: 55 * DEG, maxClimb: 35 * DEG, rollRate: 3.2, pitchRate: 2.2, turnGain: 2.4,
+    rotate: 34, groundAccel: 3.3, maxDive: 30 * DEG, rollMax: 90 * DEG, pitchMax: 30 * DEG,
     floats: false, hitRadius: 1.6,
     colors: [0xe8e2d0, 0xd9542b, 0x2f6fb5, 0xf0b429, 0x4f9d69],
   },
@@ -28,6 +34,7 @@ export const AIRCRAFT_SPECS = {
     length: 6.0, width: 6.8, height: 2.3, mass: 650, health: 350,
     maxSpeed: 72, stallSpeed: 20, thrust: 9, groundBrake: 9,
     maxBank: 80 * DEG, maxClimb: 60 * DEG, rollRate: 5.5, pitchRate: 3.4, turnGain: 2.2,
+    rotate: 30, groundAccel: 4.2, maxDive: 45 * DEG, rollMax: 200 * DEG, pitchMax: 55 * DEG,
     floats: false, hitRadius: 1.4,
     colors: [0xd81e2a, 0xf2d21b, 0x1c2f5e, 0x18a0a0, 0xf5f5f5],
   },
@@ -35,7 +42,8 @@ export const AIRCRAFT_SPECS = {
     id: 'seaplane', label: 'Ottermere', kind: 'plane',
     length: 8.4, width: 11.6, height: 3.5, mass: 1300, health: 500,
     maxSpeed: 58, stallSpeed: 24, thrust: 6.8, groundBrake: 7,
-    maxBank: 50 * DEG, maxClimb: 32 * DEG, rollRate: 2.6, pitchRate: 1.9, turnGain: 2.5,
+    maxBank: 50 * DEG, maxClimb: 32 * DEG, rollRate: 2.6, pitchRate: 1.9, turnGain: 2.3,
+    rotate: 32, groundAccel: 5.0, maxDive: 28 * DEG, rollMax: 75 * DEG, pitchMax: 26 * DEG,
     floats: true, hitRadius: 1.8,
     colors: [0xf2efe6, 0xe07a1f, 0x2a9d8f, 0x3a5fa8, 0xc9c13a],
   },
@@ -43,7 +51,8 @@ export const AIRCRAFT_SPECS = {
     id: 'jet', label: 'Velloria', kind: 'plane',
     length: 12.5, width: 12.2, height: 3.9, mass: 4200, health: 600,
     maxSpeed: 120, stallSpeed: 40, thrust: 7, groundBrake: 11,
-    maxBank: 62 * DEG, maxClimb: 45 * DEG, rollRate: 3.0, pitchRate: 2.0, turnGain: 3.2,
+    maxBank: 62 * DEG, maxClimb: 45 * DEG, rollRate: 3.0, pitchRate: 2.0, turnGain: 3.0,
+    rotate: 55, groundAccel: 4.8, maxDive: 35 * DEG, rollMax: 80 * DEG, pitchMax: 26 * DEG,
     floats: false, hitRadius: 2.0,
     colors: [0xf4f4f0, 0x23272e, 0x7a1f2b, 0x1f4e79, 0xb8a36a],
   },
@@ -73,7 +82,8 @@ export const AIRCRAFT_SPECS = {
     id: 'fighter', label: 'Gannetfang', kind: 'plane',
     length: 13.4, width: 9.6, height: 3.6, mass: 9000, health: 700,
     maxSpeed: 130, stallSpeed: 30, thrust: 14, groundBrake: 14,
-    maxBank: 85 * DEG, maxClimb: 70 * DEG, rollRate: 4.6, pitchRate: 3.1, turnGain: 3.4,
+    maxBank: 85 * DEG, maxClimb: 70 * DEG, rollRate: 4.6, pitchRate: 3.1, turnGain: 3.2,
+    rotate: 38, groundAccel: 14, maxDive: 45 * DEG, rollMax: 180 * DEG, pitchMax: 45 * DEG,
     floats: false, hitRadius: 1.9,
     noStall: true, cruise: 0.45, autoLevel: 1.5, afterburner: 0.6,
     mounts: ['nosegun', 'missile', 'bomb'], armor: { bullet: 0.3 }, engine: 'turbine',
@@ -429,13 +439,15 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
     a.onWater = true;
   }
   const onWater = a.onWater;
-  const vto = s.stallSpeed * 1.1;
+  const vto = s.rotate || s.stallSpeed * 1.1;
   let vf = a.speed;
 
   if (throttle > 0.02) {
     if (vf > -0.5) {
-      const r = clamp(vf / s.maxSpeed, 0, 1);
-      vf += s.thrust * throttle * thrustK(a, s) * (1 - r * r) * dt;
+      // The take-off run: a firm push that fades toward rotation speed, so
+      // the prop plane uses about 250 to 400 m of runway.
+      const u = clamp(vf / vto, 0, 1.5);
+      vf += (s.groundAccel || s.thrust) * throttle * thrustK(a, s) * (1 - 0.35 * u * u) * dt;
     } else {
       vf = approach(vf, 0, s.groundBrake * throttle * dt);
     }
@@ -451,15 +463,19 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   }
   // Rolling (or water) resistance; idle bleeds speed, parked holds still.
   const av = Math.abs(vf);
-  let decel = onWater ? 1.0 + 0.09 * av : 0.4 + 0.012 * av;
+  // On water the hull climbs onto the step above 12 m/s and drags less.
+  let decel = onWater ? 1.0 + 0.09 * Math.min(av, 12) + 0.01 * Math.max(0, av - 12) : 0.4 + 0.012 * av;
   if (throttle <= 0.02 && !(brake > 0.02 && vf <= 0.5)) decel += onWater ? 1.2 : 1.4;
   if (!manned) decel += 8;
   vf = approach(vf, 0, decel * dt);
 
-  // Nose wheel (or water rudder) steering.
+  // Nose wheel (or water rudder) steering. It fades hard with speed, so a
+  // thumb still holding bank after touchdown does not swerve off the
+  // runway: about 8 degrees a second at 30 m/s.
   let auth = clamp(vf / (onWater ? 3 : 5), -1, 1);
   if (onWater && vf >= 0 && auth < 0.3 && manned) auth = 0.3;
-  const yaw = a.steer * (onWater ? 0.55 : 0.95) * auth / (1 + Math.abs(vf) / 25);
+  const fade = vf / 12;
+  const yaw = a.steer * (onWater ? 0.55 : 0.95) * auth / (1 + fade * fade);
   a.heading = angleDiff(a.heading + yaw * dt, 0);
 
   const ch = Math.cos(a.heading), sh = Math.sin(a.heading);
@@ -501,8 +517,8 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   }
   a.y = onWater ? 0 : surf;
 
-  // Lift off with up-stick at take-off speed, or by itself a bit above.
-  if (throttle > 0.3 && vf >= vto && (pitchIn > 0.1 || vf >= s.stallSpeed * 1.3)) {
+  // Lift off with a light pull past rotation speed, or by itself a bit above.
+  if (throttle > 0.3 && vf >= vto && (pitchIn > 0.1 || vf >= vto * 1.12)) {
     a.onGround = false;
     a.onWater = false;
     a.y += 0.05;
@@ -510,20 +526,47 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
   }
 }
 
+// Stick shaping for one thumb: a dead band around center, wider while the
+// thumb is pushing sideways, so a turn does not also climb or dive.
+function shapePitch(p, steer) {
+  const dead = 0.1 + 0.2 * Math.abs(steer);
+  const m = Math.abs(p);
+  if (m <= dead) return 0;
+  return (p > 0 ? 1 : -1) * (m - dead) / (1 - dead);
+}
+
+// Move v toward target with a first-order lag of rate k (1/s), never
+// faster than max (units/s).
+function ease(v, target, k, max, dt) {
+  const d = clamp((target - v) * Math.min(1, k * dt), -max * dt, max * dt);
+  return v + d;
+}
+
+// Arcade flight (docs/PLAN_V3.md section 13): the stick banks and the
+// plane turns by itself toward the bank (coordinated, no slip); up/down
+// moves the nose at a limited rate; hands off, wings and nose come back
+// to level flight; below stall speed the nose drops and the plane sinks.
 function planeAir(a, s, pitchIn, throttle, brake, dt, world, abTarget) {
   const vs = s.stallSpeed;
   let v = a.airspeed;
+  const surf = surfaceAt(world, a.x, a.z);
+  const h = a.y - surf;
 
-  // Bank follows the stick and levels by itself; bank makes the turn.
-  a.roll += (a.steer * s.maxBank - a.roll) * Math.min(1, s.rollRate * dt);
+  // Bank follows the stick at a capped roll rate and levels by itself.
+  const rollMax = s.rollMax || 3;
+  a.roll = ease(a.roll, a.steer * s.maxBank, s.rollRate, rollMax, dt);
   if (s.autoLevel && Math.abs(a.steer) < 0.05) a.roll = approach(a.roll, 0, s.autoLevel * dt);
   // Arcade jets: a throttle floor while flying, afterburner at full THRUST.
-  if (s.cruise && a.engineOn && throttle < s.cruise && !(brake > 0.02)) {
-    throttle = s.cruise;
+  // The floor fades out below 150 m so THRUST released lets them land.
+  const floor = s.cruise ? s.cruise * clamp((h - 60) / 90, 0, 1) : 0;
+  if (floor > 0 && a.engineOn && throttle < floor && !(brake > 0.02)) {
+    throttle = floor;
     a.throttle = throttle;
   }
   if (s.afterburner) a.afterburner = approach(a.afterburner, abTarget, 2.5 * dt);
-  const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs), -1.1, 1.1);
+  // Coordinated turn: the bank turns the plane, a little more briskly than
+  // real (turnGain), and never faster than a slow-flight floor allows.
+  const turn = clamp(s.turnGain * G * clamp(Math.tan(a.roll), -2.4, 2.4) / Math.max(v, vs * 1.5), -1.1, 1.1);
   a.heading = angleDiff(a.heading + turn * dt, 0);
 
   // Stall: soft, the nose drops until speed returns. noStall craft never
@@ -533,27 +576,36 @@ function planeAir(a, s, pitchIn, throttle, brake, dt, world, abTarget) {
   else if (v > vs * 1.08) a.stalled = false;
   const slow = s.noStall ? clamp((1.1 * vs - v) / (0.3 * vs), 0, 1.5) : clamp((1.35 * vs - v) / (0.35 * vs), 0, 2);
 
-  const surf = surfaceAt(world, a.x, a.z);
-  const h = a.y - surf;
-  let want = pitchIn * s.maxClimb - slow * 0.3;
+  const pIn = shapePitch(pitchIn, a.steer);
+  const maxDive = s.maxDive || s.maxClimb;
+  // Hands off (pIn 0) the nose trims to level flight; speed protection
+  // eases it down when slow, so the plane never stalls on its own.
+  let want = (pIn > 0 ? pIn * s.maxClimb : pIn * maxDive) - slow * 0.3;
   if (a.stalled) want = Math.min(want, -0.25);
   if (pitchIn > -0.2 && h < 10 && want < 0.06) {
     // Near the ground: power on climbs away, power off flares for landing.
+    // The flare aims at a sink rate, 0.5 m/s at the wheels, at any speed.
     if (throttle > 0.3) want = a.stalled ? want : 0.06;
-    else want = Math.max(want, -(0.03 + h * 0.02));
+    else want = Math.max(want, -Math.asin(Math.min(0.5, (0.6 + 0.45 * Math.max(0, h)) / Math.max(v, 1))));
   }
   if (a.y > CEILING - 60) want = Math.min(want, (CEILING - a.y) * 0.01);
-  want = clamp(want, -s.maxClimb - 0.3, s.maxClimb);
-  a.pitch += (want - a.pitch) * Math.min(1, s.pitchRate * dt);
+  want = clamp(want, -maxDive - 0.3, s.maxClimb);
+  a.pitch = ease(a.pitch, want, s.pitchRate, s.pitchMax || 1, dt);
 
   // Speed: thrust, drag, and the trade with climbing or diving.
   const r = v / s.maxSpeed;
   // A boosted craft pulls full thrust (the jet's afterburner needs it).
   let acc = s.thrust * (a.boostLevel > throttle ? a.boostLevel : throttle) * thrustK(a, s) - s.thrust * r * r - G * Math.sin(a.pitch);
-  acc -= Math.abs(Math.sin(a.roll)) * 0.6;
+  // Hard turns bleed speed, but the bleed fades out well above the stall.
+  const bank = Math.min(Math.abs(a.roll), 1.2);
+  acc -= 2.5 * (1 / Math.cos(bank) - 1) * clamp((v - 1.25 * vs) / (0.3 * vs), 0, 1);
+  // Landing assist: THRUST released low over the ground, flaps and drag
+  // ease a fast plane down to about 1.4 x stall speed for the flare.
+  if (throttle < 0.3 && h < 40) acc -= 4 * clamp((v - 1.4 * vs) / (0.5 * vs), 0, 1);
   // The air brake cannot drag the plane into a stall.
   if (brake > 0.02) acc -= 9 * brake * clamp((v - 1.1 * vs) / (0.3 * vs), 0, 1);
-  if (s.noStall && slow > 0) acc = Math.max(acc, 0) + s.thrust * slow;
+  // (Power off and hands off it glides instead, and settles in the flare.)
+  if (s.noStall && slow > 0 && (throttle > 0.3 || pIn > 0)) acc = Math.max(acc, 0) + s.thrust * slow;
   v = clamp(v + acc * dt, s.noStall ? vs : 0, s.maxSpeed * 1.35);
   a.airspeed = v;
 
@@ -591,7 +643,9 @@ function planeTouchdown(a, s) {
   a.onWater = mvWater;
   a.stalled = false;
   a.vy = 0;
-  if (sink > 9 || bank > 45 * DEG || a.pitch < -26 * DEG) {
+  // Forgiving landings: under 4 m/s of sink with the wings within 15
+  // degrees is a good one; up to 9 m/s and 40 degrees it holds together.
+  if (sink > 9 || bank > 40 * DEG || a.pitch < -26 * DEG) {
     crash(a, Math.max(sink, a.airspeed * 0.5));
     return;
   }
@@ -599,10 +653,10 @@ function planeTouchdown(a, s) {
   a.touchdownSpeed = sink;
   a.gearCompress = clamp(sink / 6, 0.1, 1);
   let vf = a.airspeed * Math.cos(a.pitch);
-  if (sink > 5 || bank > 25 * DEG) {
+  if (sink >= 4 || bank >= 15 * DEG) {
     // Hard landing: it holds together, at a price.
     a.impact = sink;
-    damageAircraft(a, 30 + Math.max(0, sink - 5) * 40 + Math.max(0, bank - 25 * DEG) * 300);
+    damageAircraft(a, 20 + Math.max(0, sink - 4) * 35 + Math.max(0, bank - 15 * DEG) * 300);
     vf *= 0.8;
   }
   a.speed = vf;

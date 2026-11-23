@@ -197,8 +197,12 @@ VEHICLE_SPECS.citybus = newClass('truck', 'citybus', 'Crosstown', 'bus',
 //             give (gripLong with ABS): ABS works at full brake on dry
 //             ground, the 60-0 mph figure comes from the tires, and half
 //             pedal is still about half the stop
-// Steering back to center takes 0.25 s for every class (returnRate 4).
-export const RETURN_RATE = 4;
+// Steering timing for every player car (task DRIVE, docs/PLAN_V3.md 13):
+// the wheels reach full lock in 0.18 s (lockRate 5.5) and come back to
+// center in 0.2 s (returnRate 5), so a slow thumb, not the car, sets the
+// pace. The service vehicles keep their own slower rates.
+export const LOCK_RATE = 5.5;
+export const RETURN_RATE = 5;
 export const CLASS_HANDLING = {
   compact: { grip: 0.83, gripLong: 1.011, rollDeg: 4.5, steerMax: 0.607, power: 79, brake: 9.99 },
   midsize: { grip: 0.84, gripLong: 1.012, rollDeg: 4.5, steerMax: 0.603, power: 107, brake: 10 },
@@ -219,7 +223,8 @@ export const CLASS_HANDLING = {
   schoolbus: { grip: 0.52, gripLong: 0.658, rollDeg: 5, steerMax: 0.695, power: 265, brake: 6.5 },
   citybus: { grip: 0.52, gripLong: 0.658, rollDeg: 5, steerMax: 0.602, power: 274, brake: 6.5 },
 };
-for (const id in CLASS_HANDLING) Object.assign(VEHICLE_SPECS[id], CLASS_HANDLING[id], { returnRate: RETURN_RATE });
+for (const id in CLASS_HANDLING) Object.assign(VEHICLE_SPECS[id], CLASS_HANDLING[id]);
+for (const id in VEHICLE_SPECS) Object.assign(VEHICLE_SPECS[id], { lockRate: LOCK_RATE, returnRate: RETURN_RATE });
 // The driver's eye of each new body (car frame, the driver on the left),
 // from the cabin it is built with (carbody eyePoint; test/carmesh checks).
 const FLEET_EYES = {
@@ -362,6 +367,7 @@ const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
 const REAR_K = 1.08; // rear tires a little grippier than the front: the car settles at the limit (both modes)
 const TC_X = 1.0; // traction control starts at the rear peak slip
 const ASK_V1 = 10, ASK_V2 = 20; // m/s: the full-input ask ramps in between
+const CALM_BAND = 0.15; // steer share under which the Arcade yaw damper firms up (HANDLING calm)
 const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arcade, at its limit)
 
 // Two handling modes, module-wide (every car at once), docs/REVAMP.md 6.3.
@@ -377,10 +383,19 @@ const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arca
 //            full input (the sag below) and to drag, so the steady
 //            full-lock lateral g is lat * spec.grip
 //   fall     tire force sag past the peak slip
-//   ask      share of lateral grip that full steering input asks for
-//            (2.4 item 4: 1.15, so past the limit the front pushes wide
-//            with a slip angle and tire noise, a little more lock than
-//            the grip can use, never a silent cut of the lock)
+//   ask      share of lateral grip (the steady figure above) that full
+//            steering input asks for. Arcade 1.00 (task DRIVE): full input
+//            is the tightest turn the car makes at that speed without
+//            sliding, never more. Sim 1.15 (2.4 item 4): past the limit
+//            the front pushes wide with a slip angle and tire noise.
+//   use      share of the front tire's peak force full input uses (the
+//            slip angle steerAngle builds in): Arcade 0.95, so on full lock
+//            the front works just under its peak, quiet, and never slides
+//            (its tire friction, cal, sits a little above the steady grip);
+//            Sim the same as ask (past the peak)
+//   calm     Arcade: extra yaw damping (per second) near the center of
+//            the steering, so a released wheel settles straight with no
+//            weave; 0 in Sim
 //   assist   stability assist (yaw and slide correction) on
 //   yawK / yawFirm  yaw assist gains (under / over rotating); sim keeps a
 //            light damper only
@@ -393,11 +408,11 @@ const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arca
 //   squeal   tire squeal onset in multiples of the peak slip
 const HANDLING = {
   arcade: {
-    lat: [1.25, 1.10], cal: [1.015, 1.03], fall: 0.05, ask: 1.15, assist: true, yawK: 10, yawFirm: 4, betaK: 150,
+    lat: [1.25, 1.10], cal: [1.055, 1.085], fall: 0.05, ask: 1, use: 0.95, calm: 6, assist: true, yawK: 16, yawFirm: 10, betaK: 150,
     tc: true, cutMin: 0.3, hbCap: true, hbBeta: 0.6, hbYaw: 2.2, transfer: 0.5, squeal: 1.05,
   },
   sim: {
-    lat: [1.0, 1.0], cal: [1.04, 1.04], fall: 0.2, ask: 1.15, assist: false, yawK: 1.2, yawFirm: 3, betaK: 0,
+    lat: [1.0, 1.0], cal: [1.04, 1.04], fall: 0.2, ask: 1.15, use: 1.15, calm: 0, assist: false, yawK: 1.2, yawFirm: 3, betaK: 0,
     tc: false, cutMin: 1, hbCap: false, hbBeta: 0, hbYaw: 0, transfer: 1, squeal: 0.9,
   },
 };
@@ -558,27 +573,42 @@ function askAt(au) {
   const k = au <= ASK_V1 ? 0 : au >= ASK_V2 ? 1 : (au - ASK_V1) / (ASK_V2 - ASK_V1);
   return 1 + (H.ask - 1) * k;
 }
+// The share of the front tire's peak full input uses at speed au: the
+// mode's `use` where it is under 1 (Arcade, at every speed); where it is
+// over 1 (Sim) it ramps in with the ask.
+function useAt(au) {
+  if (H.use <= 1) return H.use;
+  return askAt(au) * H.use / H.ask;
+}
+
+// The geometric wheel angle of the whole grip-limited turn at speed au
+// asking `ask` of the lateral grip: the angle whose kinematic curvature
+// tan(angle) / L is that turn (task DRIVE: the atan keeps a town-speed
+// turn from asking a few percent more than the grip).
+function geoAngle(d, spec, au, ask) {
+  return Math.atan(d.L * ask * lateralGrip(spec, au) * G / Math.max(au * au, 1));
+}
 
 // Wheel angle for a share q of the grip-limited turn at this speed: the
 // geometric angle q * geo (geo: the whole grip-limited turn, asking `ask`
 // of the grip) plus the slip angles the tires need for that share of grip
-// on the curve tireCurve (front at q * ask of its peak, rear at the share
+// on the curve tireCurve (front at q * use of its peak, rear at the share
 // its extra REAR_K grip leaves).
-function gripAngle(d, geo, ask, q) {
-  const yF = q * ask;
+function gripAngle(d, geo, use, q) {
+  const yF = q * use;
   const xF = yF < 1 ? 1 - Math.sqrt(1 - yF) : yF;
-  const yR = Math.min(1, q * Math.min(1, ask) / REAR_K);
+  const yR = Math.min(1, q * Math.min(1, use) / REAR_K);
   const xR = 1 - Math.sqrt(1 - yR);
   return q * geo + d.apF * xF - d.apR * xR;
 }
 // The share of the grip-limited turn that full lock reaches: 1 when the
 // grip, not the lock, is the limit.
-function lockShare(d, geo, ask, smax) {
-  if (gripAngle(d, geo, ask, 1) <= smax) return 1;
+function lockShare(d, geo, use, smax) {
+  if (gripAngle(d, geo, use, 1) <= smax) return 1;
   let lo = 0, hi = 1;
   for (let i = 0; i < 14; i++) {
     const m = (lo + hi) / 2;
-    if (gripAngle(d, geo, ask, m) > smax) hi = m;
+    if (gripAngle(d, geo, use, m) > smax) hi = m;
     else lo = m;
   }
   return lo;
@@ -601,15 +631,15 @@ export function steerAngle(spec, u, s) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
   const as = s < 0 ? -s : s > 1 ? 1 : s;
-  const ask = askAt(au);
-  const geo = d.L * ask * lateralGrip(spec, au) * G / Math.max(au * au, 1);
+  const ask = askAt(au), use = useAt(au);
+  const geo = geoAngle(d, spec, au, ask);
   const smax = steerMaxOf(spec);
-  const q = lockShare(d, geo, ask, smax);
+  const q = lockShare(d, geo, use, smax);
   let ang;
-  if (q === 1) ang = gripAngle(d, geo, ask, as);
+  if (q === 1) ang = gripAngle(d, geo, use, as);
   else {
     const w = lockBlend(au);
-    ang = w * gripAngle(d, geo, ask, as * q) + (1 - w) * as * smax;
+    ang = w * gripAngle(d, geo, use, as * q) + (1 - w) * as * smax;
   }
   return s < 0 ? -ang : ang;
 }
@@ -627,12 +657,34 @@ function steerGeo(spec, u, s) {
   const d = derive(spec);
   const au = u < 0 ? -u : u;
   const ask = askAt(au);
-  const geo = d.L * ask * lateralGrip(spec, au) * G / Math.max(au * au, 1);
+  const geo = geoAngle(d, spec, au, ask);
   const smax = steerMaxOf(spec);
-  const q = lockShare(d, geo, ask, smax);
+  const q = lockShare(d, geo, useAt(au), smax);
   if (q === 1) return s * geo;
   const w = lockBlend(au);
   return s * (w * q * geo + (1 - w) * smax);
+}
+
+// Player input shaping by speed (task DRIVE, docs/REVAMP.md 6.3): the
+// player's steer x (-1..1) becomes sign(x) * |x|^e, the exponent rising
+// smoothly from 1 at SHAPE_V1 (15 mph) to SHAPE_EXP (1.8) at SHAPE_V2
+// (70 mph), times the preset's shapeK on the rise. Small thumb moves give
+// small lane corrections on the highway, full input is still full lock,
+// and the response stays monotonic (no dead zone). Only controls flagged
+// `steerShape` (the player's input, src/core/input.js) are shaped; the AI
+// planners send a share of the lock and get it unchanged.
+export const SHAPE_V1 = 15 / 2.23694, SHAPE_V2 = 70 / 2.23694, SHAPE_EXP = 1.8;
+export function steerShapeExp(u) {
+  const au = u < 0 ? -u : u;
+  const t = au <= SHAPE_V1 ? 0 : au >= SHAPE_V2 ? 1 : (au - SHAPE_V1) / (SHAPE_V2 - SHAPE_V1);
+  return 1 + (SHAPE_EXP - 1) * presetValues().shapeK * t * t * (3 - 2 * t);
+}
+export function shapeSteerBySpeed(x, u) {
+  const e = steerShapeExp(u);
+  if (e === 1 || x === 0) return x;
+  const ax = x < 0 ? -x : x;
+  const y = Math.pow(ax > 1 ? 1 : ax, e);
+  return x < 0 ? -y : y;
 }
 
 // Move the steering value toward its target: away from the center at
@@ -669,6 +721,7 @@ export function stepVehicle(v, controls, dt, world) {
   let steerIn = 0, throttle = 0, brake = 0, handbrake = false, wantBoost = false;
   if (controls) {
     steerIn = clamp(+controls.steer || 0, -1, 1);
+    if (controls.steerShape) steerIn = shapeSteerBySpeed(steerIn, v.vx * Math.cos(v.heading) + v.vz * Math.sin(v.heading));
     throttle = clamp(+controls.throttle || 0, 0, 1);
     brake = clamp(+controls.brake || 0, 0, 1);
     handbrake = !!controls.handbrake;
@@ -821,8 +874,12 @@ export function stepVehicle(v, controls, dt, world) {
         if (H.tc && d.frontDrive < 1 && xr > TC_X) driveScale = Math.min(driveScale, clamp(1 - (xr - TC_X) * 4, H.cutMin, 1));
       }
       const eY = r - yawRef;
-      // Damp yaw toward the steering's intent; firmer when over-rotating.
-      const firm = (eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) * (H.assist ? presetValues().assistK : 1);
+      // Damp yaw toward the steering's intent; firmer when over-rotating,
+      // and (Arcade, `calm`) firmer still near the center of the wheel, so
+      // a car let go after a lane change settles straight without a weave.
+      const near = v.steer < 0 ? -v.steer : v.steer;
+      const calm = H.calm > 0 && near < CALM_BAND ? H.calm * (1 - near / CALM_BAND) : 0;
+      const firm = ((eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) + calm) * (H.assist ? presetValues().assistK : 1);
       assistMz -= d.iz * firm * eY;
     } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {
       // Arcade handbrake: a big slide, but held short of a spin-out.

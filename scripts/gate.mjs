@@ -1,5 +1,5 @@
 // Runs the publish gate in order and stops at the first failure.
-// Usage: npm run gate            lint, test, release:check (after build), smoke --extra
+// Usage: npm run gate            lint, test, release:check (after build), smoke --extra, touch-test
 //        npm run gate -- --ui    also runs the ui-test (about 8 minutes)
 //        npm run gate -- --regions  also loads and drives every Miami region
 //                                (scripts/smoke-regions.mjs, PLAN_V2 5.4)
@@ -14,6 +14,8 @@ const steps = [
   ['build', node, ['scripts/build.mjs']],
   ['release:check', node, ['scripts/release-check.mjs']],
   ['smoke --extra', node, ['scripts/smoke.mjs', '--extra']],
+  // multi-touch steering at the owner's phone sizes: no lost, stolen, reversed or stuck steer (docs/UI.md)
+  ['touch-test', node, ['scripts/touch-test.mjs']],
 ];
 if (regions) steps.push(['smoke regions', node, ['scripts/smoke-regions.mjs', '--no-build']]);
 if (ui) steps.push(['ui-test', node, ['scripts/ui-test.mjs']]);

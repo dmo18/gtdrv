@@ -28,7 +28,7 @@ const CSS = `
 .rw-touch.rw-hidden { display: none; }
 .rw-zone { position: absolute; pointer-events: auto; }
 .rw-look { left: 40%; right: 0; top: 0; bottom: 0; }
-.rw-stickzone { left: 0; width: 40%; top: 35%; bottom: 0; }
+.rw-stickzone { left: 0; width: 40%; top: calc(var(--rw-st) + 100px); bottom: 0; } /* the whole left 40 percent under the minimap */
 
 /* steering styles: only the chosen one shows (car and boat) */
 .rw-touch:not(.rw-steer-wheel) .rw-st-wheel,
@@ -213,7 +213,11 @@ const CSS = `
 .rw-slot-gun, .rw-slot-cannon { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
 .rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
 .rw-slot-bomb { --x: 100px; --y: 108px; }
-.rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 184px; --y: 84px; }
+.rw-slot-alock, .rw-slot-tlock, .rw-slot-extra, .rw-slot-cswap { --x: 184px; --y: 84px; }
+/* SWAP while driving (car, boat): the LOCK rect above the drive-by FIRE. In a service vehicle EXTRA keeps
+   that rect and SWAP moves 8 px above SIREN (beside the steering slot, mirrored with it). */
+.rw-extra-on .rw-btn.rw-slot-cswap { right: auto; left: calc(var(--rw-sl) + var(--sx)); bottom: calc(var(--rw-sb) + var(--sy) + 64px); }
+.rw-lefty.rw-extra-on .rw-btn.rw-slot-cswap { left: auto; right: calc(var(--rw-sr) + var(--sx)); }
 /* SIREN: 8 px beside the steering slot on the side toward the screen center, centered on its height
    (915x412: 184, 292; 780x360: 164, 246). It moves with the left inset and mirrors with the slot. */
 .rw-btn.rw-slot-siren { right: auto; left: calc(var(--rw-sl) + var(--sx)); bottom: calc(var(--rw-sb) + var(--sy)); width: var(--ew); height: var(--ew); }
@@ -260,7 +264,7 @@ const CSS = `
   .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 88px; }
   .rw-slot-hand, .rw-slot-bomb { --x: 88px; --y: 88px; }
   .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 156px; }
-  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 160px; --y: 80px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra, .rw-slot-cswap { --x: 160px; --y: 80px; }
   .rw-touch { --sx: 164px; --sy: 58px; }
   .rw-slot-msl, .rw-slot-coax { --x: calc(160px + var(--ew) + 8px); --y: 80px; }
   .rw-slot-det { --x: 288px; --y: 80px; }
@@ -282,13 +286,31 @@ const CSS = `
   .rw-brake, .rw-slot-run { --x: calc(8px + var(--pw) + 8px); }
   .rw-slot-hand, .rw-slot-bomb { --x: 72px; }
   .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 136px; }
-  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra { --x: 144px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra, .rw-slot-cswap { --x: 144px; }
   .rw-slot-msl, .rw-slot-coax { --x: calc(144px + var(--ew) + 8px); }
   .rw-more, .rw-extra, .rw-slot-boost { width: 48px; height: 48px; }
   .rw-extra, .rw-slot-boost { --y: calc(var(--my) + 56px); }
   .rw-sec {
     --x: calc(var(--mx) + 56px + var(--c, 0) * 56px); --y: calc(var(--my) + var(--r, 0) * 56px);
   }
+}
+/* Short screens (300 px high or less: Chrome with its bars showing, 748x285 and 690x280 on the owner's
+   phone). The right column cannot hold GAS, EXIT, MORE, BOOST and pause above each other, so:
+   pedals and FIRE are 56 high in the bottom row; EXIT, HAND and the LOCK rect (SWAP, EXTRA) the row above;
+   MORE above EXIT with the fan in two rows of 48 cells left of it (rows at y H-184 and H-240); BOOST (and the
+   GARAGE and TALK offers) take a fourth column beside the LOCK rect, 48 wide, so it stays clear of the
+   keep-out rect (x 64 percent) down to 690 wide. Checked with no side inset (the browser keeps the cut-out). */
+@media (max-height: 300px) {
+  .rw-touch { --pw: 56px; --ph: 56px; --fw: 56px; --mx: 8px; --my: 136px; }
+  .rw-brake, .rw-slot-run { --x: calc(8px + var(--pw) + 8px); }
+  .rw-exit, .rw-enter, .rw-mode-tank .rw-exit { --x: 8px; --y: 72px; }
+  .rw-slot-hand, .rw-slot-bomb { --x: 72px; --y: 72px; }
+  .rw-dbfire, .rw-slot-gun, .rw-slot-cannon { --x: 136px; }
+  .rw-lock, .rw-chipbtn, .rw-slot-alock, .rw-slot-tlock, .rw-slot-extra, .rw-slot-cswap { --x: 136px; --y: 72px; }
+  .rw-slot-msl, .rw-slot-coax { --x: 200px; --y: 8px; width: 48px; height: 48px; }
+  .rw-more, .rw-extra, .rw-slot-boost { width: 48px; height: 48px; }
+  .rw-extra, .rw-slot-boost { --x: 200px; --y: 72px; }
+  .rw-sec { --x: calc(var(--mx) + 56px + var(--c, 0) * 56px); --y: calc(var(--my) + var(--r, 0) * 56px); }
 }
 
 /* weapon wheel: hold SWAP, drag, lift. A 216 px ring placed at the SWAP
@@ -609,6 +631,16 @@ const CSS = `
 }
 @media (max-height: 380px) and (max-width: 779px) {
   .rw-prompt { width: 240px; margin-left: -120px; }
+  .rw-tr { width: 120px; }
+}
+/* Short screens (300 px high or less): the stack ends 8 px left of the fan's third column (V - 232), the
+   stars move to the left end of the status row so the objective cell fits beside them; the score is 24
+   high; the combo line and the Full mode ammo panel are dropped (the score toast and FIRE's count carry them). */
+@media (max-height: 300px) {
+  .rw-stack { width: min(300px, calc(100vw - 464px)); margin-left: calc(min(300px, calc(100vw - 464px)) / -2); }
+  .rw-wanted { left: 0; margin-left: 0; }
+  .rw-money { height: 24px; line-height: 24px; font-size: 16px; }
+  .rw-combo, .rw-btn.rw-ammo { display: none !important; }
 }
 `;
 

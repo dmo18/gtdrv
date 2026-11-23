@@ -77,9 +77,16 @@ export const LAT_SHARE = [0.96, 1.04];
 export const LAT_G_LINE = [0.9, 1.1];
 export const ORDINARY_CARS = ['compact', 'sedan', 'taxi'];
 export const LAT_TEST_SPEEDS = [15, 30]; // m/s; a car whose top speed is under 36 uses 0.8 * maxSpeed for the second
-export const LOCK_TIME = [0.25, 0.40]; // s, center to full lock, at 0 to 10 m/s
+export const LOCK_TIME = [0.25, 0.40]; // s, center to full lock, at 0 to 10 m/s (service vehicles)
 export const RETURN_TIME = [0.20, 0.30]; // s, full lock to center, hands off
-export const RETURN_TARGET = 0.25; // s, every fleet class (2.4 item 4)
+// Player cars (every car but the service vehicles; task DRIVE, PLAN_V3 13,
+// deliberate: was LOCK_TIME and a 0.25 s return): the wheels reach full lock
+// in 0.15 to 0.2 s and come back in 0.2 s, so a slow thumb sets the pace.
+export const DRIVE_LOCK_TIME = [0.15, 0.20];
+export const RETURN_TARGET = 0.2; // s, every player car
+// The steering buttons ramp their target over 0.3 s (input.js): a held
+// button reaches full lock at the wheels in this time (the old LOCK_TIME).
+export const BUTTON_TIME = [0.25, 0.40];
 export const LOCK_TIME_FAST_MAX = 0.55; // s, at 30 m/s
 // Steering lock at full input and walking pace, degrees: 33 to 36 for cars
 // (2.4 item 2); trucks, buses and the vans cut further on longer wheelbases
@@ -136,10 +143,13 @@ export const HB_TURN = { mph: 25, street: 12, endDeg: 15, except: ['truck', 'sem
 // its full weight transfer), never a snap: the yaw rate rises no more than
 // `yawRise`, the body slip stays under `slipDeg` and is not growing 2 s on.
 export const LIFT_OFF = { mph: 80, share: 0.8, yawRise: { arcade: 0.25, sim: 0.5 }, slipDeg: { arcade: 5, sim: 9 } };
-// Past the limit (2.4 item 4): at 20 m/s full input gives more wheel angle
-// than `share` of it, the same curvature within `same`, the front past its
-// peak and tire squeal of at least `squeal`.
-export const PUSH = { speed: 20, share: 0.85, same: 0.04, squeal: 0.15 };
+// Past the limit (2.4 item 4, Sim since task DRIVE): at 20 m/s full input
+// gives more wheel angle than `share` of it, the same curvature within
+// `same`, the front past its peak and tire squeal of at least `squeal`.
+// Arcade (task DRIVE): full input stays under the limit, so its curvature
+// is at least `grow` times that of `share` (monotonic to the last bit of
+// travel), the front under `frontMax` of its peak slip and no squeal.
+export const PUSH = { speed: 20, share: 0.85, same: 0.04, squeal: 0.15, grow: 1.1, frontMax: 1, quiet: 0.02 };
 
 // Steering accuracy and braking accuracy limits (6.3, tests A1 to A5 and B1 to B4).
 export const A1_LINEAR = 0.12; // curvature share error at 0.25, 0.5, 0.75
@@ -157,7 +167,12 @@ export const BRAKE_PEDAL_S = 1.0;
 // Assist rows of the Arcade versus Sim table.
 export const ARCADE_SLIP_MAX_DEG = { fwd: 8, rwd: 16 };
 export const SAG = { arcade: [0, 0.06], sim: [0.18, 0.22] };
-export const ASK = { arcade: 1.15, sim: 1.15 }; // full input asks 115 % of the grip (2.4 item 4), both modes
+// Full input asks this share of the steady lateral grip. Sim 1.15 (2.4 item
+// 4: past the limit the front pushes wide). Arcade 1.00 (task DRIVE,
+// deliberate, was 1.15): the tightest turn the car makes without sliding,
+// with the front at USE of its peak, quiet, never pushing wide.
+export const ASK = { arcade: 1, sim: 1.15 };
+export const USE = { arcade: 0.95, sim: 1.15 };
 export const HB_SLIP_CAP = 0.6; // rad, Arcade handbrake slide cap
 export const SQUEAL = { arcade: 1.05, sim: 0.9 };
 // Touch curve and travel.
@@ -170,7 +185,9 @@ export const SLALOM = {
   cones: 6, clear: 0.4, keep: 0.95,
 };
 // Chase camera (6.3): roll into the turn, yaw lag, pitch under braking.
-export const CAMERA = { rollMaxDeg: 2, yawLag: 0.18, pitchMaxDeg: 1.5 };
+// Task DRIVE: the chase views follow the car's yaw with a 0.12 s lag (was
+// 0.18) and look up to lookDeg into the turn by the steering.
+export const CAMERA = { rollMaxDeg: 2, yawLag: 0.12, pitchMaxDeg: 1.5, lookDeg: 4 };
 
 // Handling presets (docs/PLAN_V3.md 2.4 item 5; vehicle.js HANDLING_PRESETS,
 // settings.handlingPreset, default 'standard'): how far each one moves a

@@ -45,6 +45,26 @@ const HIT_MARK_T = 0.2;
 const DMG_T = 1.1;
 const NO_TARGET_T = 0.9;
 
+// The weapon wheel's pick (touch.js). On foot through the combat system. In
+// a car or boat the drive-by fires the last gun (arms.lastGun), so a pick of
+// a drive-by weapon sets that and announces it with the same weaponSwitch
+// event a SWAP tap sends (the HUD toasts the name). Returns true on a change.
+const SWITCH = { actor: null, weapon: null };
+export function pickWeapon(game, id) {
+  const p = game && game.player;
+  const w = p && p.walker;
+  const wpn = WEAPONS[id];
+  if (!w || !w.arms || !wpn) return false;
+  const v = p.vehicle;
+  if (!v) return !!(game.combat && game.combat.pickWeapon && game.combat.pickWeapon(id));
+  if ((v.kind !== 'car' && v.kind !== 'boat') || !wpn.driveBy || w.arms.lastGun === id) return false;
+  w.arms.lastGun = id;
+  SWITCH.actor = w;
+  SWITCH.weapon = id;
+  if (game.events && game.events.emit) game.events.emit('weaponSwitch', SWITCH);
+  return true;
+}
+
 export function createCombatHud(game, uiRoot) {
   // ---------------- controller state ----------------
   const st = {
@@ -390,7 +410,7 @@ export function createCombatHud(game, uiRoot) {
   const armsCtl = game.touch ? registerArmsControls(game, game.touch) : null;
   // Hold SWAP for the weapon wheel: the touch layer hands back a weapon id.
   if (game.touch && game.touch.setWeaponPicker) {
-    game.touch.setWeaponPicker((id) => { if (game.combat && game.combat.pickWeapon) game.combat.pickWeapon(id); });
+    game.touch.setWeaponPicker((id) => pickWeapon(game, id));
   }
   const cview = { pip: false, px: -1, py: -1, box: false, bx: -1, by: -1, bs: -1, locked: null, arrow: false, aa: 99 };
   const ray = { x: 0, y: 0, z: 0, fx: 1, fy: 0, fz: 0 };

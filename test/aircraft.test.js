@@ -80,8 +80,11 @@ test('the jet needs more runway than the trainer', () => {
     return a.x;
   };
   const p = dist('prop'), j = dist('jet');
-  assert.ok(j > p * 2, `prop ${p} jet ${j}`);
-  assert.ok(j < 900);
+  // AIR (docs/PLAN_V3.md section 13): the trainer now uses a real take-off
+  // run of 250 to 400 m (was about 55 m), so the jet cannot need twice that
+  // and still fit the 710 m runway; it needs clearly more, and fits.
+  assert.ok(j > p * 1.5, `prop ${p} jet ${j}`);
+  assert.ok(j < 600);
 });
 
 test('level flight holds altitude with throttle and neutral stick', () => {

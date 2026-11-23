@@ -10,6 +10,7 @@
 // The answer is a pure function of the city and the point.
 
 import { divideOf, GUTTER } from './roadprofile.js';
+import { inJunctionArea, curbsAt, walkOf, walkLeftOf, medianBand } from './junctions.js';
 
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
@@ -63,6 +64,10 @@ export function createGround(city) {
   // Per edge, precomputed: node a, unit direction, length, half width,
   // outer reach (half width + sidewalk), median offset and half width.
   const NE = edges.length;
+  // The junction polygons and trimmed strips of a real map (world/
+  // junctions.js); null on the island (node boxes and capsules).
+  const geo = city.roadGeo || null;
+  const cellJ = geo ? new Array(W * H).fill(null) : null;
   const ax = new Float64Array(NE), az = new Float64Array(NE), ux = new Float64Array(NE), uz = new Float64Array(NE);
   const len = new Float64Array(NE), hw = new Float64Array(NE), reach = new Float64Array(NE);
   const mo = new Float64Array(NE), mh = new Float64Array(NE);
@@ -75,6 +80,8 @@ export function createGround(city) {
     mo[k] = medianOffset(e);
     mh[k] = medianHalf(e);
     reach[k] = hw[k] + Math.max(sidewalkOf(e), 2 * mh[k]);
+    // A taper or a mitered end reaches a little past the plain strip.
+    if (geo) reach[k] = reach[k] * 1.6 + 1;
     if (reach[k] > maxReach) maxReach = reach[k];
   }
   const scratch = [];
@@ -110,9 +117,52 @@ export function createGround(city) {
     }
     nk.sort((a, b) => a - b);
     cellN[c] = nk.length ? Int32Array.from(nk) : EMPTY;
+    if (geo) {
+      const jl = [];
+      for (let q = 0; q < 2 * keep.length; q++) {
+        const e = edges[keep[q >> 1]];
+        const J = geo.junctions[geo.nodeJ[q & 1 ? e.b : e.a]];
+        if (J && !jl.includes(J.id) && J.x0 <= mx + h && J.x1 >= mx - h && J.z0 <= mz + h && J.z1 >= mz - h) jl.push(J.id);
+      }
+      jl.sort((a, b) => a - b);
+      cellJ[c] = jl.length ? Int32Array.from(jl) : EMPTY;
+    }
     return cellE[c];
   }
   const shore = typeof city.shoreDist === 'function' ? city.shoreDist : null;
+
+  // Real map: inside a junction polygon is road; else within a strip's
+  // curbs between its ends (exact taper and miter), else its sidewalk or
+  // median band beside the curbs (from the node at a junction end, where
+  // the polygon and the sidewalk corners take over).
+  function geoSurface(x, z, c) {
+    const js = cellJ[c];
+    for (let q = 0; q < js.length; q++) {
+      const J = geo.junctions[js[q]];
+      if (inJunctionArea(J, x, z)) return 1;
+    }
+    const es = cellE[c];
+    let side = false, median = false;
+    for (let q = 0; q < es.length; q++) {
+      const k = es[q];
+      if (geo.inner[k]) continue;
+      const e = edges[k];
+      const d = (x - ax[k]) * ux[k] + (z - az[k]) * uz[k];
+      if (d < -reach[k] || d > len[k] + reach[k]) continue;
+      const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
+      if (Math.abs(s) > reach[k]) continue;
+      const qa = 2 * k, qb = qa + 1;
+      const d0 = geo.jEnd[qa] >= 0 ? 0 : geo.trim[qa] + geo.miter[qa] * s;
+      const d1 = geo.jEnd[qb] >= 0 ? len[k] : len[k] - geo.trim[qb] + geo.miter[qb] * s;
+      if (d < d0 || d > d1) continue;
+      const C = curbsAt(geo, e, d);
+      if (s >= C.l && s <= C.r) return 1;
+      if (s > C.r) { if (s <= C.r + walkOf(e)) side = true; continue; }
+      const m = medianBand(e);
+      if (m > 0) { if (s >= C.l - m) median = true; } else if (s >= C.l - walkLeftOf(e)) side = true;
+    }
+    return median ? 3 : side ? 2 : 0;
+  }
 
   // Kind of ground at (x, z): 0 off any road, 1 road, 2 sidewalk, 3 median.
   function surfaceAt(x, z) {
@@ -121,6 +171,7 @@ export function createGround(city) {
     if (i < 0 || j < 0 || i >= W || j >= H) return 0;
     const c = j * W + i;
     const es = cellE[c] || build(c, cx, cz);
+    if (geo) return geoSurface(x, z, c);
     const ns = cellN[c];
     let side = false;
     for (let q = 0; q < ns.length; q++) {
