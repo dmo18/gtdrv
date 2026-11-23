@@ -17,6 +17,7 @@ import { stepBoost, CAR_BOOST } from './boost.js';
 import { SERVICE_SPECS } from './servicevehicles.js'; // V1 service vehicles, merged below the reward cars
 import { wetGrip, wetUnderSteer, wetBrake, wetTopSpeed, windPush, lightnessOfMass } from '../core/weather.js';
 import { groundFn, SEA_LEVEL } from '../world/ground.js';
+import { PRESETS, setActivePreset, activePreset, presetValues, validPreset } from '../core/handlingpreset.js';
 
 const WIND = { x: 0, z: 0 };
 
@@ -294,42 +295,29 @@ export function getHandlingMode() {
 // 'relaxed' (slower steering, softer assist, more roll, a little less
 // grip) or 'sharp' (quicker steering, 35 degree lock at walking pace, more
 // assist, less roll). Module-wide like the mode; on top of either mode.
-//   lockK / returnK  steering rate multipliers
-//   lockDeg          lowest full-lock wheel angle at walking pace (0: the spec's)
-//   gripK            lateral grip multiplier
-//   assistK          stability assist (yaw and slide) gain multiplier
-//   rollK            body roll multiplier
-export const HANDLING_PRESETS = ['standard', 'relaxed', 'sharp'];
-const PRESET_ROWS = {
-  standard: { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 },
-  relaxed: { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 },
-  sharp: { lockK: 1.25, returnK: 1.2, lockDeg: 35, gripK: 1, assistK: 1.25, rollK: 0.85 },
-};
-let handlingPreset = 'standard';
-let P = PRESET_ROWS.standard;
-let LOCK_MIN = 0; // rad, P.lockDeg
+// The one table and the active name live in core/handlingpreset.js
+// (PRESET_VALUES, read here every step through presetValues()).
+export const HANDLING_PRESETS = PRESETS;
 // Pick the preset for every car; anything else means 'standard'.
 export function setHandlingPreset(name) {
-  handlingPreset = PRESET_ROWS[name] ? name : 'standard';
-  P = PRESET_ROWS[handlingPreset];
-  LOCK_MIN = (P.lockDeg * Math.PI) / 180;
-  return handlingPreset;
+  return setActivePreset(name);
 }
 export function getHandlingPreset() {
-  return handlingPreset;
+  return activePreset();
 }
 // A copy of a preset's row (tests, the lab).
 export function presetParams(name) {
-  return Object.assign({}, PRESET_ROWS[PRESET_ROWS[name] ? name : 'standard']);
+  return Object.assign({}, presetValues(validPreset(name)));
 }
 // Full-lock wheel angle at walking pace under the preset.
 export function steerMaxOf(spec) {
-  return spec.steerMax > LOCK_MIN ? spec.steerMax : LOCK_MIN;
+  const lockMin = (presetValues().lockDeg * Math.PI) / 180;
+  return spec.steerMax > lockMin ? spec.steerMax : lockMin;
 }
 
 // Lateral tire friction of a spec in the current mode.
 export function lateralGrip(spec) {
-  return H.latK * spec.grip * P.gripK;
+  return H.latK * spec.grip * presetValues().gripK;
 }
 
 // Normalized engine torque, peak around 60% of the redline.
@@ -526,7 +514,7 @@ export function stepVehicle(v, controls, dt, world) {
 
   // ---- Steering: one rate limit (the car's lockRate / returnRate), the
   // same for the player and the AI. steer is a share of the lock.
-  v.steer = steerToward(v.steer, steerIn, d.lockRate * P.lockK, d.returnRate * P.returnK, dt);
+  v.steer = steerToward(v.steer, steerIn, d.lockRate * presetValues().lockK, d.returnRate * presetValues().returnK, dt);
   const delta = steerAngle(s, vf0, v.steer);
   const deltaGeo = steerGeo(s, vf0, v.steer);
   v.steerAngle = delta;
@@ -644,7 +632,7 @@ export function stepVehicle(v, controls, dt, world) {
         const sl = Math.atan2(vl - b * r, Math.max(avf, V0));
         const over = Math.abs(sl) - d.betaAllow - d.apR;
         if (over > 0) {
-          assistMz += d.iz * H.betaK * P.assistK * (sl > 0 ? over : -over);
+          assistMz += d.iz * H.betaK * presetValues().assistK * (sl > 0 ? over : -over);
           if (H.tc) driveScale = clamp(1 - over * 5, H.cutMin, 1);
         }
         // Traction control: ease the drive off as the driven rear tires
@@ -654,7 +642,7 @@ export function stepVehicle(v, controls, dt, world) {
       }
       const eY = r - yawRef;
       // Damp yaw toward the steering's intent; firmer when over-rotating.
-      const firm = (eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) * (H.assist ? P.assistK : 1);
+      const firm = (eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) * (H.assist ? presetValues().assistK : 1);
       assistMz -= d.iz * firm * eY;
     } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {
       // Arcade handbrake: a big slide, but held short of a spin-out.
@@ -800,7 +788,7 @@ export function stepVehicle(v, controls, dt, world) {
   // ---- Body motion: damped springs for pitch (dive/squat) and roll.
   if (hitBefore > 0) bump(v, hitBefore);
   const pitchEq = clamp(axAvg * 0.0065, -0.075, 0.06);
-  const rollEq = clamp(-ayAvg * 0.0075 * P.rollK, -0.1, 0.1);
+  const rollEq = clamp(-ayAvg * 0.0075 * presetValues().rollK, -0.1, 0.1);
   const w = 9, z2 = 2 * 0.5 * w;
   v.pitchV += (w * w * (pitchEq - v.pitch) - z2 * v.pitchV) * dt;
   v.pitch += v.pitchV * dt;

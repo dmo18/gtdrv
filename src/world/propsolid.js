@@ -103,6 +103,7 @@ export function propBlocked(city, x, z) {
 // along the seawalls there. Worked out once per city and kept. Only a
 // real map with Miami's fields has them (else an empty list).
 const palmCache = new WeakMap();
+const NO_PALM_LOTS = new Set(['carpark', 'yard', 'works', 'site']);
 export function miamiPalmSpots(city) {
   let out = palmCache.get(city);
   if (out) return out;
@@ -145,6 +146,10 @@ export function miamiPalmSpots(city) {
         if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
         if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
         if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || propBlocked(city, jx, jz)) continue;
+        // Not in a parking lot, a yard, a works or a site: their bays,
+        // drives and fences are the lot's own (world/lots.js dressLot).
+        const lot = city.lotAt ? city.lotAt(jx, jz) : null;
+        if (lot && NO_PALM_LOTS.has(lot.type)) continue;
         out.push(jx, jz, 7.5 + hash(jx, jz + 5) * 4.5);
       }
     }

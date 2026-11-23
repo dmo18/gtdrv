@@ -30,7 +30,8 @@ import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
 import { addProps } from './props.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
-import { makeMaterials, COL, addSurfaces, addBlock, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { groundFn } from '../world/ground.js';
 import { lotGround, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
 
@@ -761,7 +762,7 @@ export function buildRealCity(city, collision, opts = {}) {
       realRoads(city, B, [], t.edges.slice(a, a + 1), own);
       if (over()) { yield 'roads'; ts = now(); }
     }
-    for (const b of t.blocks) addBlock(B, b, DR);
+    for (const b of t.blocks) addBlock(B, b, DR, groundY, false);
     if (over()) { yield 'roads'; ts = now(); }
     addSurfaces(city, B, DR, own);
     if (over()) { yield 'roads'; ts = now(); }
@@ -831,13 +832,24 @@ export function buildRealCity(city, collision, opts = {}) {
       B[key] = null;
       if (over()) { yield 'mesh'; ts = now(); }
     }
+    // A rebuild (a prop broke or stood again): the old meshes go only now,
+    // so the tile never shows a gap while the new one is made.
+    const was = t.group ? t.shown : false;
+    if (t.group) {
+      group.remove(t.group);
+      for (const m of t.meshes) {
+        m.geometry.dispose();
+        const i = tiered.indexOf(m);
+        if (i >= 0) tiered.splice(i, 1);
+      }
+    }
     t.group = g;
     t.small = small;
     t.meshes = meshes;
     t.trees = meshes.filter((m) => m.name === 'trees-detail');
     t.treeOn = null;
     t.mid = false;
-    g.visible = false;
+    g.visible = was;
     // Static: world matrices worked out once here, never per frame (the
     // city group is left out of the scene's matrix walk, see freezeStatic).
     g.matrixAutoUpdate = false;
@@ -863,6 +875,16 @@ export function buildRealCity(city, collision, opts = {}) {
 
   // ---- The streamer: called every drawn frame with the camera. ----
   let job = null, jobTile = null;
+  // Tiles to draw again (a street or lot prop broke or stood again; props.js
+  // and lotmesh.js leave a broken one out), and the breaks not yet back.
+  const stale = new Uint8Array(NT);
+  const brokenAt = [];
+  function propBreak(x, z) {
+    const k = tileOf(x, z);
+    if (k < 0 || k >= NT) return;
+    if (tiles[k].group) stale[k] = 1;
+    brokenAt.push({ x, z, k });
+  }
   // speed: the player's speed (m/s), set by the caller (graphics.js)
   // before each update; hold: new tiles are held back this frame.
   const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {}, speed: 0, hold: false };
@@ -893,7 +915,14 @@ export function buildRealCity(city, collision, opts = {}) {
   // tile that should be near now, e.g. at start or for a screenshot).
   function update(camera, budgetMs = 3) {
     const x = camera.position.x, z = camera.position.z, hy = Math.max(0, camera.position.y) * 0.6;
-    let changed = false, best = null, bd = Infinity, near = 0;
+    let changed = false, best = null, bd = Infinity, near = 0, redo = null;
+    // Broken props standing again: their tiles are drawn again with them.
+    for (let i = brokenAt.length - 1; i >= 0; i--) {
+      const p = brokenAt[i];
+      if (city.propBroken && city.propBroken(p.x, p.z)) continue;
+      if (tiles[p.k].group) stale[p.k] = 1;
+      brokenAt.splice(i, 1);
+    }
     // Flying high or fast: no new street tiles (flush still builds).
     const hold = budgetMs !== Infinity && (camera.position.y > FLY_HOLD.height || stats.speed > FLY_HOLD.speed);
     stats.hold = hold;
@@ -914,6 +943,7 @@ export function buildRealCity(city, collision, opts = {}) {
         }
         if (show) {
           near++;
+          if (stale[k] && !redo && t !== jobTile) redo = t;
           const mid = d > (t.mid ? LOD.mid - LOD.hyst / 2 : LOD.mid);
           if (mid !== t.mid) {
             t.mid = mid;
@@ -940,8 +970,13 @@ export function buildRealCity(city, collision, opts = {}) {
     const t0 = now();
     while (now() - t0 < budget) {
       if (!job) {
-        if (!best) break;
-        if (budgetMs === Infinity && bd >= LOD.near) break;
+        if (!best || (budgetMs === Infinity && bd >= LOD.near)) {
+          // Nothing new to build: a shown tile whose props changed.
+          if (!redo) break;
+          best = redo;
+          redo = null;
+        }
+        stale[best.k] = 0;
         jobTile = best;
         job = tileJob(best);
         best = null;
@@ -1000,7 +1035,7 @@ export function buildRealCity(city, collision, opts = {}) {
     lotLayer = attachLotCollision(city, collision, dress);
     buildFar();
   }
-  ud.stream = { update, flush, reset, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
+  ud.stream = { update, flush, reset, propBreak, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
 
   // Start: the tiles round the spawn point.
   flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });
@@ -1012,10 +1047,10 @@ export function buildRealCity(city, collision, opts = {}) {
 }
 
 
-// Height of the ground something stands on (as citymesh).
+// Height of the ground something stands on (as citymesh): the physics
+// ground where it is raised (sidewalks, medians) and on a block, which is
+// drawn on it (citymesh.js addBlock), else the drawn open land.
 function makeGroundY(city) {
-  const blockAt = city.blockAt;
   const onExtra = (x, z) => (city.extraLand || []).some((r) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1);
-  return (x, z) => (blockAt(x, z) ? 0.16 : city.mainShore(x, z) > 30 || onExtra(x, z) ? -0.06 : -0.12);
+  return drawnGroundY(city, groundFn(city), city.blockAt, onExtra);
 }
-

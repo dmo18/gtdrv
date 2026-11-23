@@ -12,7 +12,9 @@ test('without a parameter the stored choice is used, then Miami', () => {
   assert.equal(mapFromSearch('', 'island'), 'island');
   assert.equal(mapFromSearch('', 'miami'), 'miami');
   assert.equal(mapFromSearch('', null), DEFAULT_MAP);
-  assert.equal(DEFAULT_MAP, 'miami-downtown');
+  // 0.9.0 re-pin (deliberate): a new game starts in the Beach (DEFAULT_REGION);
+  // Downtown stays CORE_REGION, the designed first view.
+  assert.equal(DEFAULT_MAP, 'miami-beach');
 });
 
 test('junk values are ignored (allow-list only)', () => {

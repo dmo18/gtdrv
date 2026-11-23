@@ -6,10 +6,10 @@ import {
   STEER_STYLES, TILT_LOCK_DEG, TILT_DEAD_DEG, TILT_SMOOTH, TILT_WAIT, CURVE_LINEAR, WHEEL_CORE_PX, SLIDER_W,
 } from '../src/core/input.js';
 import { defaultProgress, sanitizeProgress } from '../src/core/save.js';
-import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode, lateralGrip } from '../src/entities/vehicle.js';
+import { createVehicle, stepVehicle, setHandlingMode, getHandlingMode, lateralGrip, setHandlingPreset, getHandlingPreset, presetParams } from '../src/entities/vehicle.js';
 import { createRng, angleDiff } from '../src/core/rng.js';
 import {
-  PRESETS, PRESET_VALUES, VERDICTS, validPreset, validVerdict, setActivePreset, activePreset, presetValues, steerScale, SPEED_FULL,
+  PRESETS, PRESET_VALUES, VERDICTS, validPreset, validVerdict, setActivePreset, activePreset, presetValues,
 } from '../src/core/handlingpreset.js';
 
 test('wheel curve: odd, rising, 0.444 at half, slope 0.85 at the center; sensitivity changes travel only', () => {
@@ -185,25 +185,26 @@ test('player input asks for proportional steering; settings sanitise', () => {
   assert.equal(sens(Infinity), 1);
 });
 
-test('handling presets: values, default standard, enum validation, steer scale', () => {
+test('handling presets: values, default standard, enum validation, one table with the car', () => {
+  // 0.9.0 re-pin (deliberate): the lab's own steer-scale table (lockScale,
+  // speedReduction, gripFeel), which no car read, is gone; PRESET_VALUES is
+  // now the one table the car model reads (entities/vehicle.js).
   assert.deepEqual(PRESETS, ['standard', 'relaxed', 'sharp']);
-  assert.deepEqual(PRESET_VALUES.standard, { lockScale: 1, speedReduction: 0, gripFeel: 1 }, 'standard is today');
-  assert.deepEqual(PRESET_VALUES.relaxed, { lockScale: 0.85, speedReduction: 0.25, gripFeel: 0.94 });
-  assert.deepEqual(PRESET_VALUES.sharp, { lockScale: 1.15, speedReduction: 0.05, gripFeel: 1.06 });
-  assert.ok(PRESET_VALUES.relaxed.lockScale < 1 && PRESET_VALUES.sharp.lockScale > 1);
+  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 }, 'standard is today');
+  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 });
+  assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 35, gripK: 1, assistK: 1.25, rollK: 0.85 });
+  assert.ok(PRESET_VALUES.relaxed.lockK < 1 && PRESET_VALUES.sharp.lockK > 1);
+  for (const id of PRESETS) assert.deepEqual(presetParams(id), PRESET_VALUES[id], `${id}: the car reads the same row`);
   assert.equal(activePreset(), 'standard');
   assert.equal(setActivePreset('sharp'), 'sharp');
   assert.equal(presetValues(), PRESET_VALUES.sharp);
+  assert.equal(getHandlingPreset(), 'sharp', 'the car follows the one active preset');
+  assert.equal(setHandlingPreset('relaxed'), 'relaxed');
+  assert.equal(activePreset(), 'relaxed');
   assert.equal(setActivePreset('bogus'), 'standard');
+  assert.equal(getHandlingPreset(), 'standard');
   assert.equal(presetValues('relaxed'), PRESET_VALUES.relaxed);
   for (const bad of ['', 'Sharp', 5, null, undefined, ['sharp'], {}]) assert.equal(validPreset(bad), 'standard');
-  // standard never changes the steer share; relaxed gives less lock and less still when fast
-  for (const u of [0, 5, 15, 30, 60]) assert.equal(steerScale(u, 'standard'), 1);
-  assert.equal(steerScale(0, 'relaxed'), 0.85);
-  assert.ok(steerScale(SPEED_FULL, 'relaxed') < steerScale(10, 'relaxed') && steerScale(10, 'relaxed') < 0.85);
-  assert.ok(Math.abs(steerScale(SPEED_FULL, 'relaxed') - 0.85 * 0.75) < 1e-12);
-  assert.equal(steerScale(90, 'relaxed'), steerScale(SPEED_FULL, 'relaxed'));
-  assert.ok(steerScale(0, 'sharp') > 1);
   // settings: absent reads as standard / none, only enums are kept
   assert.equal(defaultProgress().settings.handlingPreset, undefined);
   for (const id of PRESETS) assert.equal(sanitizeProgress({ settings: { handlingPreset: id } }).settings.handlingPreset, id);

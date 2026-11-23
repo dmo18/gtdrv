@@ -44,6 +44,7 @@ const WALK_CLEAR = 1.8;
 const SLIVER = 30;
 // Lots and infill start this far past the curb (the sidewalk band).
 const LOT_SETBACK = 4;
+const SETBACK_IN = LOT_SETBACK - 1e-6;
 // A data signal or stop sign this close to a junction belongs to it.
 const SIGNAL_SNAP = 22;
 const HOUSE = new Set(['house', 'detached', 'terrace', 'semidetached_house', 'bungalow']);
@@ -1841,9 +1842,12 @@ export function createMiamiCity(data, opts = {}) {
       // The curb and LOT_SETBACK m beyond it (the drawn sidewalk, 1.8 or
       // 3 m, and a verge; lots and infill start past it, as before). A
       // median wider than that band is a lot in its middle.
-      stampCapsule(R, g[0], g[1], g[2], g[3], e.width / 2 + LOT_SETBACK, 1);
+      stampCapsule(R, g[0], g[1], g[2], g[3], e.width / 2 + SETBACK_IN, 1);
     }
-    for (const n of nodes) stampRect(R, n.x - n.hx - LOT_SETBACK, n.z - n.hz - LOT_SETBACK, n.x + n.hx + LOT_SETBACK, n.z + n.hz + LOT_SETBACK, 1);
+    // (A cell center exactly LOT_SETBACK from a junction box, common with
+    // 0.1 m boxes on the 5 m lattice, is free: the band is just short of it,
+    // so rounding cannot leave such a cell outside both the band and a lot.)
+    for (const n of nodes) stampRect(R, n.x - n.hx - SETBACK_IN, n.z - n.hz - SETBACK_IN, n.x + n.hx + SETBACK_IN, n.z + n.hz + SETBACK_IN, 1);
     const owner = labelBuf.fill(-1); // free since the blocks step
     const LX0 = land.x0, LZ0 = land.z0;
     const stampOwner = (k) => stampOwnerBox(owner, buildings[k], k, LX0, LZ0, W, H);

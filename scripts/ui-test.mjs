@@ -210,7 +210,9 @@ async function liveLayout(check) {
     const errs = [];
     pg.on('pageerror', (e) => errs.push(String(e)));
     pg.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
-    await pg.goto(`${base}?autostart`);
+    // 0.9.0: the default region is the Beach, which has no tank; the live
+    // states put the player in every craft, so they run on Downtown.
+    await pg.goto(`${base}?autostart&map=miami-downtown`);
     await pg.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
     await pg.waitForTimeout(1500);
     // The fleet is made nearest first over the first seconds of play (H1): wait for it before freezing the clock.
@@ -257,6 +259,9 @@ async function liveLayout(check) {
       }
       g.touch.setSiren(true, false);
       g.touch.setExtra({ can: true, text: 'WATER', fill: 0.6 });
+      // the GPS turn strip (NAV) with a long line, and the street line (hidden under the prompt)
+      if (g.hud.setNav) g.hud.setNav(true, 'right', 'In 300 ft, turn right', 'onto Pennsylvania Ave', true);
+      if (g.hud.setStreet) g.hud.setStreet('Alton Rd', '5th St');
       // the speed readout, the health meter (hard mode) and the boost meter, through the real update
       const mode = g.player.mode;
       g.hud.update({ ...g.hudState, mode: mode === 'foot' ? 'foot' : 'car', speedKmh: 60, mortal: mortal, health: 80, maxHealth: 100,
@@ -317,12 +322,14 @@ async function liveLayout(check) {
       add('score', document.querySelector('.rw-score'), false);
       add('combo', document.querySelector('.rw-combo'), false);
       add('prompt', document.querySelector('.rw-prompt'), false);
+      add('nav', document.querySelector('.rw-nav'), false);
+      add('street', document.querySelector('.rw-street'), false);
       add('steer', document.querySelector('.rw-wheel'), false);
       add('steer', document.querySelector('.rw-pad'), false);
       add('steer', document.querySelector('.rw-stick'), false);
       // text on pills: color, background (own), opacity along the chain
       const texts = [];
-      for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-m1', '.rw-m2', '.rw-objcell', '.rw-wanted', '.rw-prompt', '.rw-ammo .rw-face']) {
+      for (const sel of ['.rw-speedbox', '.rw-score', '.rw-combo', '.rw-clock', '.rw-m1', '.rw-m2', '.rw-objcell', '.rw-wanted', '.rw-prompt', '.rw-nav', '.rw-street', '.rw-ammo .rw-face']) {
         const e = document.querySelector(sel);
         if (!e || !vis(e)) continue;
         const cs = getComputedStyle(e);
@@ -413,6 +420,9 @@ async function liveLayout(check) {
           const a = items[i], b = items[j];
           // (4) at 780x360 left-handed with a left inset, the mirrored FIRE-rect button reaches 20 px into the prompt strip
           if (grid.V === 780 && hand && L > 0 && [a, b].some((q) => q.key === 'prompt') && [a, b].some((q) => q.key === 'fire')) continue;
+          // (5) NAV: the turn strip sits under the stack, inside the stack's columns; the left-handed fan with a left
+          // inset reaches into it as into the stack box (1)
+          if (hand && L > 0 && [a, b].some((q) => q.key === 'nav') && [a, b].some((q) => q.key.startsWith('fan:'))) continue;
           if (inter(a, b)) bad(`${a.label || a.key} (${a.name}) overlaps ${b.label || b.key} (${b.name})`);
           else if (a.hit && b.hit && gapOf(a, b) < 7.5) {
             bad(`gap ${gapOf(a, b).toFixed(1)} between ${a.label || a.key} and ${b.label || b.key}`);
@@ -426,6 +436,15 @@ async function liveLayout(check) {
         if ((k.key === 'm1' || k.key === 'm2') && Math.abs(k.h - 28) > 0.5) bad(`${k.key} is ${k.h.toFixed(1)} high, not one 28 px line`);
         if (k.b > 100.5) bad(`${k.key} ends at ${k.b.toFixed(1)}, past y 100`);
       }
+      // NAV: the turn strip is centered under the stack (top 104), 48 high (38 at 360 high), never wider than the stack,
+      // and the street line takes the prompt strip's rect (never both at once)
+      for (const k of el.filter((q) => q.key === 'nav')) {
+        const h = grid.H >= 400 ? 48 : 38, wMax = grid.V >= 900 ? 335 : 300;
+        if (Math.abs(k.y - 104) > 0.5 || Math.abs(k.h - h) > 0.5) bad(`nav strip is at y ${k.y.toFixed(1)}, ${k.h.toFixed(1)} high, want 104 and ${h}`);
+        if (k.w > wMax + 0.5) bad(`nav strip is ${k.w.toFixed(1)} wide, over ${wMax}`);
+        if (Math.abs((k.x + k.r) / 2 - grid.V / 2) > 2) bad('nav strip is not centered');
+      }
+      if (el.some((q) => q.key === 'street') && el.some((q) => q.key === 'prompt')) bad('the street line shows with the prompt');
       // a message pill is centered in its row
       for (const k of el.filter((q) => q.key === 'm1' || q.key === 'm2')) {
         const row = grid[k.key];
@@ -703,8 +722,9 @@ async function liveLayout(check) {
           return out;
         });
         const hitM = (o) => Math.min(mp.btn.r, o.r) - Math.max(mp.btn.x, o.x) > 0.5 && Math.min(mp.btn.b, o.b) - Math.max(mp.btn.y, o.y) > 0.5;
-        check(`${tag}: Map button 48 high, names the map, clear of everything else on the title`, mp.btn.h >= 47.5 && mp.btn.r <= w - 7.5 && /Downtown/.test(mp.label) && !mp.others.some(hitM), JSON.stringify(mp));
-        check(`${tag}: map picker fits without scrolling, six cards 48+, Downtown marked, closes`, mp.box.r <= w + 0.5 && mp.box.b <= h + 0.5 && mp.scroll <= 1 && mp.cards === 6 && mp.small === 0 && JSON.stringify(mp.current) === '["miami-downtown"]' && mp.closed, JSON.stringify(mp));
+        // 0.9.0 re-pin (deliberate): with no stored choice the title names and marks the default region, the Beach.
+        check(`${tag}: Map button 48 high, names the map, clear of everything else on the title`, mp.btn.h >= 47.5 && mp.btn.r <= w - 7.5 && /Miami Beach/.test(mp.label) && !mp.others.some(hitM), JSON.stringify(mp));
+        check(`${tag}: map picker fits without scrolling, six cards 48+, Beach marked, closes`, mp.box.r <= w + 0.5 && mp.box.b <= h + 0.5 && mp.scroll <= 1 && mp.cards === 6 && mp.small === 0 && JSON.stringify(mp.current) === '["miami-beach"]' && mp.closed, JSON.stringify(mp));
       }
       await tc.close();
     }
@@ -759,11 +779,12 @@ async function liveLayout(check) {
       const dv = await lp.evaluate(() => {
         const g = window.__rw;
         const rc = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+        const before = g.player.mode;
         g.menu.open('handlinglab');
         document.querySelector('[data-role="labdrive"]').click();
         const fin = document.querySelector('[data-role="labdrive-finish"]');
         if (!fin) return { skipped: true };
-        const out = { fin: rc(fin), mode: g.player.mode, car: g.player.vehicle && g.player.vehicle.spec && g.player.vehicle.spec.id };
+        const out = { before, fin: rc(fin), mode: g.player.mode, car: g.player.vehicle && g.player.vehicle.spec && g.player.vehicle.spec.id };
         fin.click();
         const card = document.querySelector('.rw-pc-labcard');
         out.card = rc(card);
@@ -774,9 +795,11 @@ async function liveLayout(check) {
         out.on = g.player.mode;
         return out;
       });
+      // 0.9.0 re-pin (deliberate): the Beach start is in a car, so the end of the
+      // drive is checked against the mode before it (back in the saved car, or on foot).
       check(`handling lab ${w}x${h}: test drive puts the player in a car, Finish is 48+, the verdict card fits on screen, a tap saves and ends the drive`,
         !dv.skipped && dv.mode === 'car' && dv.fin.h >= 47.5 && dv.card.x >= -0.5 && dv.card.r <= w + 0.5 && dv.card.y >= -0.5 && dv.card.b <= h + 0.5
-        && dv.btns.every((b) => b.h >= 47.5 && b.w >= 47.5) && dv.after === 'heavy' && dv.closed && dv.on === 'foot', JSON.stringify(dv));
+        && dv.btns.every((b) => b.h >= 47.5 && b.w >= 47.5) && dv.after === 'heavy' && dv.closed && dv.on === dv.before, JSON.stringify(dv));
       check(`handling lab ${w}x${h}: no page errors`, lerrs.length === 0, lerrs.slice(0, 2).join(' | '));
       await lc.close();
     }

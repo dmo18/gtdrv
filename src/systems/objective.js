@@ -1,6 +1,13 @@
 import { formatDistance } from '../core/units.js';
-// Objective arrow: while a race or delivery is running (or a map waypoint is
-// set) an arrow in the HUD status row points to where to go, with the distance.
+import { createRouter, createTracker, turnPhrase, formatTurnDistance, shortStreet as shortName } from '../core/route.js';
+// Objective arrow and GPS: while a race or delivery is running, a mission
+// or an adventure is tracked, or a map waypoint is set, an arrow in the HUD
+// status row points to where to go, with the distance; on the road network
+// (car, tank, on foot) the same goal gets a route (src/core/route.js): the
+// line on both maps, the turn strip ("In 300 ft, turn right onto Alton Rd")
+// and the distance along the road. The street line under the HUD names the
+// street the player is on (city.streetAt). A burning player's car shows a
+// red "Get out!" prompt.
 
 // Degrees to turn an "up" arrow so it points at the target as seen from a
 // camera facing `camHeading`. Heading 0 faces +x and increases toward +z,
@@ -12,12 +19,59 @@ export function objectiveAngle(px, pz, camHeading, tx, tz) {
   return (d * 180) / Math.PI;
 }
 
-// The arrow and the distance live in the HUD's status row (hud.setObjective);
-// a new or changed objective also shows once as a row 1 line (docs/REVAMP.md 6.12).
+const ROAD_MODES = { car: true, tank: true, foot: true };
+const GOAL_MOVE_M = 25; // a goal that moves farther than this gets a new route
+const PREP_M = 152; // 500 ft: the first chime before a turn
+const NOW_M = 18; // the chime at the turn
+const STREET_EVERY = 0.25; // seconds between street lookups
+
+// The distance as the strip shows it changes in steps: a number that only
+// changes with the text (no strings made per frame).
+export function navBucket(d) {
+  if (!(d > 15)) return -1;
+  const ft = d * 3.28084;
+  if (ft < 975) return Math.round(ft / (ft < 100 ? 10 : 50));
+  return 10000 + Math.round(d / 160.9344);
+}
+
+// Pure parts (node tests): the strip lines for a tracker state.
+// Returns { kind, l1, l2, soon } into `out`.
+export function navLines(tr, out) {
+  const t = tr.next();
+  if (!t) { out.kind = ''; out.l1 = ''; out.l2 = ''; out.soon = false; return out; }
+  const d = tr.toTurn;
+  out.kind = t.kind;
+  out.soon = d < PREP_M;
+  const phrase = turnPhrase(t);
+  const at = phrase.indexOf(' onto ');
+  const verb = at >= 0 ? phrase.slice(0, at) : phrase;
+  const rest = at >= 0 ? phrase.slice(at + 1) : '';
+  if (t.kind === 'arrive') {
+    out.l1 = d > 15 ? 'In ' + formatTurnDistance(d) + ', arrive' : 'Arriving';
+    out.l2 = t.name ? 'at ' + t.name : '';
+  } else {
+    out.l1 = d > 15 ? 'In ' + formatTurnDistance(d) + ', ' + verb : verb.charAt(0).toUpperCase() + verb.slice(1);
+    out.l2 = rest;
+  }
+  return out;
+}
+
 export function createObjective(game) {
   let shownAngle = 1e9, shownDist = -1, shownOn = null, shownText = '';
   let distText = '';
-  const goal = { x: 0, z: 0, on: false, text: '' };
+  const goal = { x: 0, z: 0, on: false, text: '', src: '' };
+  const city = game.city;
+  const canRoute = !!(city && Array.isArray(city.nodes) && city.nodes.length > 1 && Array.isArray(city.edges) && city.edges.length);
+  const router = canRoute ? createRouter(city) : null;
+  const tracker = router ? createTracker(router) : null;
+  const routed = { x: 0, z: 0, src: '', on: false, legal: true };
+  const lines = { kind: '', l1: '', l2: '', soon: false };
+  const street = { edge: -1, name: '', cross: '', d: 0, side: 1 };
+  let streetT = 0, streetShown = '', crossShown = '';
+  let chimeTurn = -1, chimeStage = 0, chimeRev = -1;
+  let alertCraft = null;
+  let navB = -2, navTurn = -1, navRev = -1;
+
   function pickGoal() {
     goal.on = false;
     const act = game.activities && game.activities.active;
@@ -28,6 +82,7 @@ export function createObjective(game) {
         goal.z = cp.z;
         goal.on = true;
         goal.text = act.course.name || 'Next checkpoint';
+        goal.src = 'activity';
         return;
       }
     }
@@ -37,6 +92,7 @@ export function createObjective(game) {
       goal.z = m.z;
       goal.on = true;
       goal.text = m.label || 'Objective';
+      goal.src = 'mission';
       return;
     }
     // The tracked adventure (systems/adventures.js): the arrow points at
@@ -47,6 +103,7 @@ export function createObjective(game) {
       goal.z = adv.z;
       goal.on = true;
       goal.text = adv.label || 'Adventure';
+      goal.src = 'adventure';
       return;
     }
     const w = game.waypoint;
@@ -55,22 +112,116 @@ export function createObjective(game) {
       goal.z = w.z;
       goal.on = true;
       goal.text = 'Waypoint';
+      goal.src = 'waypoint';
     }
   }
 
-  return {
+  // Keep the tracker's goal in step with the objective (a new search only
+  // when the goal, its source or the legal rule changed).
+  function syncRoute(force) {
+    if (!tracker) return;
+    const p = game.player;
+    const want = goal.on && !!p && ROAD_MODES[p.mode] === true;
+    const legal = !p || p.mode !== 'foot';
+    if (!want) {
+      if (routed.on) { tracker.clear(); routed.on = false; }
+      return;
+    }
+    const moved = Math.hypot(goal.x - routed.x, goal.z - routed.z) > GOAL_MOVE_M;
+    if (force || !routed.on || moved || routed.src !== goal.src || routed.legal !== legal) {
+      routed.on = true; routed.x = goal.x; routed.z = goal.z; routed.src = goal.src; routed.legal = legal;
+      tracker.setGoal(goal.x, goal.z, legal);
+    }
+  }
+  function headingOf(p) {
+    return p.vehicle ? p.vehicle.heading : (p.walker ? p.walker.heading : (p.heading || 0));
+  }
+  function speedOf(p) {
+    const v = p.vehicle;
+    if (v) return Math.abs(v.speed || 0);
+    return p.walker ? Math.abs(p.walker.speed || 0) : 0;
+  }
+
+  function onArrive() {
+    if (game.hud && game.hud.toast) game.hud.toast('You have arrived', 3, 'objective');
+    if (goal.src === 'waypoint' && game.waypoint) {
+      game.waypoint = null;
+      if (game.map && game.map.clearWaypoint) game.map.clearWaypoint();
+    }
+    tracker.clear();
+    routed.on = false;
+    routed.src = 'arrived';
+  }
+
+  // The burning event (systems/combat.js): the player's own car on fire.
+  if (game.events && game.events.on) {
+    game.events.on('burning', (e) => {
+      if (!e || !e.craft) return;
+      const p = game.player;
+      if (e.on && p && e.craft === p.vehicle) {
+        alertCraft = e.craft;
+        if (game.hud && game.hud.setAlert) game.hud.setAlert('Get out!');
+      } else if (!e.on && e.craft === alertCraft) {
+        alertCraft = null;
+        if (game.hud && game.hud.setAlert) game.hud.setAlert(null);
+      }
+    });
+  }
+
+  const sys = {
     name: 'objective',
     angle: 0,
     distance: 0,
+    tracker,
+    get route() { return tracker ? tracker.route : null; },
     get visible() { return goal.on; },
-    render() {
+    goalLabel: () => (goal.on ? goal.text : ''),
+    // True while a route is drawn and followed.
+    get routing() { return !!(tracker && tracker.active && tracker.route.ok && !tracker.arrived); },
+    // Pick the goal and search right away (the full map calls this after a tap, while paused).
+    refresh() {
+      pickGoal();
+      syncRoute(true);
+      const p = game.player;
+      if (tracker && tracker.active && p) tracker.update(p.x, p.z, headingOf(p), 0, 0);
+    },
+    fixedUpdate(dt) {
+      pickGoal();
+      syncRoute(false);
+      const p = game.player;
+      if (!tracker || !p || !routed.on) return;
+      tracker.update(p.x, p.z, headingOf(p), speedOf(p), dt);
+      if (tracker.arrived) onArrive();
+    },
+    render(_alpha, dt) {
       pickGoal();
       const p = game.player;
+      const hud = game.hud;
+      const routing = sys.routing && goal.on;
       if (goal.on && p) {
         this.angle = objectiveAngle(p.x, p.z, game.camHeading || 0, goal.x, goal.z);
-        this.distance = Math.hypot(goal.x - p.x, goal.z - p.z);
+        this.distance = routing ? tracker.remaining : Math.hypot(goal.x - p.x, goal.z - p.z);
       }
-      const hud = game.hud;
+      // The street line and the burning alert first (no goal needed).
+      if (hud && hud.setStreet && p) {
+        streetT -= dt > 0 ? dt : 0;
+        if (streetT <= 0) {
+          streetT = STREET_EVERY;
+          let name = '', cross = '';
+          if (p.mode !== 'plane' && p.mode !== 'heli' && p.mode !== 'boat' && city && city.streetAt) {
+            const r = city.streetAt(p.x, p.z, street, headingOf(p));
+            if (r) { name = r.name; cross = r.cross; }
+          }
+          if (name !== streetShown || cross !== crossShown) {
+            streetShown = name; crossShown = cross;
+            hud.setStreet(shortName(name), shortName(cross));
+          }
+        }
+      }
+      if (alertCraft && hud && hud.setAlert && (!p || p.vehicle !== alertCraft || !alertCraft.burning)) {
+        alertCraft = null;
+        hud.setAlert(null);
+      }
       if (!hud || !hud.setObjective) return;
       const on = goal.on && !game.paused;
       if (on !== shownOn) {
@@ -78,6 +229,27 @@ export function createObjective(game) {
         if (!on) hud.setObjective(false, 0, '');
       }
       if (!goal.on) shownText = '';
+      // The turn strip and the chimes.
+      if (hud.setNav) {
+        if (on && routing) {
+          const b = navBucket(tracker.toTurn);
+          if (b !== navB || tracker.turn !== navTurn || tracker.rev !== navRev) {
+            navB = b; navTurn = tracker.turn; navRev = tracker.rev;
+            navLines(tracker, lines);
+          }
+          hud.setNav(true, lines.kind, lines.l1, lines.l2, tracker.toTurn < PREP_M);
+          if (tracker.rev !== chimeRev || tracker.turn !== chimeTurn) {
+            chimeRev = tracker.rev; chimeTurn = tracker.turn;
+            chimeStage = tracker.toTurn < PREP_M ? 1 : 0; // no chime for a turn already close
+            if (tracker.toTurn < NOW_M) chimeStage = 2;
+          }
+          const t = tracker.next();
+          if (t && t.kind !== 'arrive' && game.events) {
+            if (chimeStage === 0 && tracker.toTurn < PREP_M) { chimeStage = 1; game.events.emit('ui'); }
+            else if (chimeStage === 1 && tracker.toTurn < NOW_M) { chimeStage = 2; game.events.emit('checkpoint', 'nav'); }
+          }
+        } else hud.setNav(false);
+      }
       if (!on) return;
       if (goal.text !== shownText) {
         shownText = goal.text;
@@ -92,4 +264,5 @@ export function createObjective(game) {
       hud.setObjective(true, a, distText);
     },
   };
+  return sys;
 }

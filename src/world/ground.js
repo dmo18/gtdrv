@@ -9,6 +9,8 @@
 // id), so a call costs a handful of segment distances and allocates nothing.
 // The answer is a pure function of the city and the point.
 
+import { divideOf, GUTTER } from './roadprofile.js';
+
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
 export const SEA_LEVEL = -0.6; // m, the water surface (game.js SEA_Y)
@@ -16,16 +18,30 @@ export const SEA_SLOPE = 0.4; // m of drop per m out from the water line
 export const SEA_FLOOR = -2.2; // m, deepest the shallows go
 const CELL = 32;
 
+// The sidewalk beside an edge: its own `sidewalk` (a real map's profile,
+// the island's block ring), SIDEWALK_W on an edge without one; none on a
+// bridge or causeway.
 function sidewalkOf(e) {
-  if (Number.isFinite(e.sidewalk)) return e.sidewalk;
-  return e.bridge || e.causeway ? 0 : SIDEWALK_W;
+  if (e.bridge || e.causeway) return 0;
+  return Number.isFinite(e.sidewalk) ? e.sidewalk : SIDEWALK_W;
 }
 
-// The center offset of an edge's raised median (to the right of the node
-// line, docs/MAP.md "The divide"), NaN when it has none.
+// The raised median of a paired one-way (docs/MAP.md edge contract): it
+// is not part of `width`; the edge owns the band along its left curb,
+// `median / 2` wide, drawn up to 4 m (render/citymesh.js realRoads: a
+// wider median is lot ground in its middle). The left curb is the divide
+// of the one-way (roadprofile.js divideOf, the left lane edge) less the
+// gutter and the left parking lane. Center offset to the right of the node
+// line, NaN when there is none; medianHalf is half the band.
+const MEDIAN_BAND = 4;
+function medianHalf(e) {
+  return e.median > 0 && !e.bridge ? Math.min(e.median / 2, MEDIAN_BAND) / 2 : 0;
+}
 function medianOffset(e) {
-  if (!(e.median > 0) || !(e.laneW > 0)) return NaN;
-  return -e.width / 2 + 0.3 + (e.parkL || 0) + (e.lanesB || 0) * e.laneW + e.median / 2;
+  const h = medianHalf(e);
+  if (!(h > 0) || !(e.laneW > 0)) return NaN;
+  const curb = divideOf(e) - GUTTER - (e.parkL || 0) - (e.lanesB || 0) * e.laneW - (e.center || 0) / 2;
+  return curb - h;
 }
 
 export function createGround(city) {
@@ -56,9 +72,9 @@ export function createGround(city) {
     const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1e-6;
     ax[k] = a.x; az[k] = a.z; ux[k] = dx / L; uz[k] = dz / L; len[k] = L;
     hw[k] = e.width / 2;
-    reach[k] = hw[k] + sidewalkOf(e);
     mo[k] = medianOffset(e);
-    mh[k] = (e.median || 0) / 2;
+    mh[k] = medianHalf(e);
+    reach[k] = hw[k] + Math.max(sidewalkOf(e), 2 * mh[k]);
     if (reach[k] > maxReach) maxReach = reach[k];
   }
   const scratch = [];
@@ -112,23 +128,28 @@ export function createGround(city) {
       const ex = Math.abs(x - n.x) - (n.hx || 0), ez = Math.abs(z - n.z) - (n.hz || 0);
       if (ex <= 0 && ez <= 0) return 1;
     }
-    let road = false;
+    let road = false, median = false;
     for (let q = 0; q < es.length; q++) {
       const k = es[q];
       const d2 = segD2(x, z, k);
       const r = reach[k];
       if (d2 > r * r) continue;
       const h = hw[k];
-      if (d2 <= h * h) {
-        if (mh[k] > 0) {
-          // Signed offset to the right of the node line.
-          const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
-          if (Math.abs(s - mo[k]) < mh[k]) return 3;
+      if (d2 <= h * h) { road = true; continue; }
+      if (mh[k] > 0) {
+        // Signed offset to the right of the node line: the left side of a
+        // divided one-way is its median band (no sidewalk), the right side
+        // its sidewalk.
+        const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
+        if (s < mo[k] + mh[k]) {
+          if (Math.abs(s - mo[k]) <= mh[k]) median = true;
+          continue;
         }
-        road = true;
-      } else side = true;
+        if (d2 > (h + sidewalkOf(edges[k])) ** 2) continue;
+      }
+      side = true;
     }
-    return road ? 1 : side ? 2 : 0;
+    return road ? 1 : median ? 3 : side ? 2 : 0;
   }
 
   function groundAt(x, z) {

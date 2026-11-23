@@ -3,7 +3,7 @@
 // more: everything is available from the start and the only progression
 // is score (src/systems/score.js).
 import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
-import { setHandlingMode } from '../entities/vehicle.js';
+import { setHandlingMode, setHandlingPreset } from '../entities/vehicle.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { RULES } from '../core/weapons.js';
 import { DISTRICTS } from '../world/citygen.js';
@@ -42,6 +42,8 @@ export function createEconomy(game, storage) {
     if (game.audio && game.audio.setVolume) game.audio.setVolume(volumeFromSettings(s));
     if (game.input) game.input.invertPitch = s.invertPitch;
     setHandlingMode(s.handling);
+    // The Handling lab preset (absent reads as 'standard').
+    setHandlingPreset(s.handlingPreset);
     // Hard mode: the player can be hurt and killed (the death flow is combat.js).
     RULES.invulnerable = s.mortal !== true;
     if (game.touch && game.touch.setLeftHanded) game.touch.setLeftHanded(s.leftHanded);

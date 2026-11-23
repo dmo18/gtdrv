@@ -49,13 +49,17 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // footprint (outside the core). All six change: nodes and edges (graph and
 // edge fields), buildings, and lots and the lot grid that follow them.
 // A change here means the build changed: find out why before re-pinning.
+// 0.9.0 integration re-pin (deliberate): nodes and edges as MAP left them;
+// lots, lot grids (and the North's infill buildings) after the lot band
+// keeps a cell exactly LOT_SETBACK from a junction box free (world-density's
+// two missed cells), and site gates move to a long side.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '2396c3b4', edges: '5a266754', buildings: '1e4c554c', lots: 'f4b99ceb', lotGrid: '9f1c0370' },
-  'miami-downtown': { nodes: '4ff513f1', edges: '88eaf928', buildings: '1043fe9b', lots: '13f2e574', lotGrid: 'c912f48e' },
-  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: '2686c288', lots: 'cf50be29', lotGrid: '7eef0caa' },
-  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '41257f1b', lots: '0916328d', lotGrid: '8ed5230d' },
-  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'd768b63c', lots: '76885555', lotGrid: '31fcbae9' },
-  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: '1baefd1e', lots: '26c85a9c', lotGrid: 'dcab3406' },
+[WHOLE_BOX]: { nodes: '2396c3b4', edges: '5a266754', buildings: '1e4c554c', lots: 'd01f1a7f', lotGrid: '15923ee0' },
+  'miami-downtown': { nodes: '4ff513f1', edges: '88eaf928', buildings: '1043fe9b', lots: 'ee572ab3', lotGrid: '6f448a01' },
+  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: '2686c288', lots: 'ffc51318', lotGrid: '2f187719' },
+  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '519e29ef', lots: '248c5b55', lotGrid: '40de85d6' },
+  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'd768b63c', lots: 'dc63a084', lotGrid: 'd81ec6b2' },
+  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: '1baefd1e', lots: 'a1443502', lotGrid: 'c350c3bf' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

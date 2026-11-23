@@ -5,8 +5,8 @@ import { fillAbout } from './title.js';
 // Settings, Help), Settings in four groups, destructive actions on their own
 // confirm screens, and a registry for screens other systems add.
 // All text goes through textContent / DOM APIs, never innerHTML.
-import { setHandlingMode } from '../entities/vehicle.js';
-import { PRESETS, PRESET_LABELS, VERDICTS, VERDICT_LABELS, validPreset, validVerdict, setActivePreset } from '../core/handlingpreset.js';
+import { setHandlingMode, setHandlingPreset } from '../entities/vehicle.js';
+import { PRESETS, PRESET_LABELS, VERDICTS, VERDICT_LABELS, validPreset, validVerdict } from '../core/handlingpreset.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { nextStation, stationInfo } from '../core/radio.js';
 import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
@@ -236,7 +236,8 @@ export function createMenu(root, game, economy) {
   let armed = null; // key of the confirm row waiting for its second tap
   let phone = null; // the Phone check (created on first use)
   let labDrive = null; // the Handling lab test drive (created on first use)
-  if (game.progress && game.progress.settings) setActivePreset(game.progress.settings.handlingPreset);
+  // The Handling lab preset every car uses (entities/vehicle.js), at load.
+  if (game.progress && game.progress.settings) setHandlingPreset(game.progress.settings.handlingPreset);
   const parents = new Map(); // screen id -> the screen Back returns to
   const screens = new Map(); // registered screens: id -> { id, title, render }
 
@@ -252,7 +253,7 @@ export function createMenu(root, game, economy) {
         game.timeLocked = false;
       }
     }
-    setActivePreset(st.handlingPreset); // the Handling lab preset (core/handlingpreset.js)
+    setHandlingPreset(st.handlingPreset); // the Handling lab preset (entities/vehicle.js)
     if (economy && economy.applySettings) { economy.applySettings(); return; }
     const s = settings();
     if (game.audio && game.audio.setVolume) game.audio.setVolume(volumeFromSettings(s));
@@ -561,7 +562,7 @@ export function createMenu(root, game, economy) {
   function renderHandlingLab() {
     const s = settings();
     body.appendChild(segRow('Preset', PRESETS.map((id) => [id, PRESET_LABELS[id]]), validPreset(s.handlingPreset), 'preset', (id) => {
-      settings().handlingPreset = id; commit(); render();
+      settings().handlingPreset = id; setHandlingPreset(id); commit(); render();
     }));
     body.appendChild(sliderRow('Steering sensitivity', 'steerSensitivity', {
       min: 50, max: 150, step: 5, dflt: 1, toUi: (v) => Math.round(v * 100),

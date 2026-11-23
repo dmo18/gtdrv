@@ -912,8 +912,16 @@ export function dressLot(city, lot, out = []) {
     case 'works':
     case 'site': {
       const fk = lot.type === 'site' ? 'fence' : set.bound === 'wall' ? 'wall' : 'fence';
-      boundary(front, fk, 7, 'gate');
-      for (const s of sides) boundary(s, fk);
+      // The gate goes in the front; a front too short for it (a lot in
+      // pieces round its building) gives the gate to the longest side.
+      let gs = front;
+      const runLen = (q) => { const r = sideRun(q); return r ? r[1] - r[0] - 1 : 0; };
+      if (runLen(front) < 9) {
+        let bl = runLen(front);
+        for (const q of sides) { const l = runLen(q); if (l > bl) { bl = l; gs = q; } }
+      }
+      boundary(gs, fk, 7, 'gate');
+      for (const q of [front, ...sides]) if (q !== gs) boundary(q, fk);
       if (lot.type === 'site') {
         scatter(2, 'pile', 2.5, 2.2, true, 3, null, 3);
         scatter(1, 'cabin', 1.6, 2.6, true, 3, null, 3);

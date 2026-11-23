@@ -83,6 +83,72 @@ function check(name, ok, detail = '') {
 }
 
 const browser = await (await loadChromium()).launch();
+
+async function mapScreen() {
+  const { buildGame, serve } = await import('./build.mjs');
+  await buildGame();
+  const srv = await serve(0);
+  const gbr = await (await loadChromium()).launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  try {
+    for (const [W, H] of [[915, 412], [780, 360]]) {
+      const pg = await (await gbr.newContext({ viewport: { width: W, height: H }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 })).newPage();
+      const errs = [];
+      pg.on('pageerror', (e) => errs.push(String(e)));
+      await pg.goto(`http://127.0.0.1:${srv.address().port}/?autostart`);
+      await pg.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
+      await pg.waitForTimeout(1500);
+      await pg.evaluate(() => { const g = window.__rw; g.paused = true; g.touch.setVisible(false); g.map.fullMap.open({ x: g.player.x, z: g.player.z, heading: g.player.heading, waypoint: null, markers: g.map.allMarkers }); });
+      await pg.waitForTimeout(200);
+      const btns = await pg.evaluate(() => ['map-zoom-in', 'map-zoom-out', 'map-northup'].map((r) => { const b = document.querySelector(`[data-role="${r}"]`).getBoundingClientRect(); return [r, b.width, b.height, b.left, b.top, b.right, b.bottom]; }));
+      check(`map ${W}: zoom and north-up buttons 48+ and on screen`, btns.every((b) => b[1] >= 48 && b[2] >= 48 && b[3] >= 0 && b[4] >= 0 && b[5] <= W && b[6] <= H), JSON.stringify(btns));
+      const z0 = await pg.evaluate(() => window.__rw.map.fullMap.getView().zoom);
+      await pg.locator('[data-role="map-zoom-in"]').tap();
+      const z1 = await pg.evaluate(() => window.__rw.map.fullMap.getView().zoom);
+      await pg.locator('[data-role="map-zoom-out"]').tap();
+      const z2 = await pg.evaluate(() => window.__rw.map.fullMap.getView().zoom);
+      check(`map ${W}: + and - zoom`, z1 > z0 * 1.5 && Math.abs(z2 - z0) < 1e-6, [z0, z1, z2].join(' '));
+      const labels = await pg.evaluate(() => { const f = window.__rw.map.fullMap; f.renderNow(); return f.getStats().labels; });
+      // About 2.6 km by 1.2 km round the start (half of it ocean): every street with room for its name.
+      check(`map ${W}: at least ${W > 900 ? 18 : 14} street names at the opening scale`, labels >= (W > 900 ? 18 : 14), String(labels));
+      await pg.screenshot({ path: path.join(out, `map-streets-${W}x${H}.png`) });
+      // Tap a spot 140 px up and left: a route with its summary.
+      await pg.touchscreen.tap(W / 2 - 140, H / 2 - 100);
+      await pg.waitForTimeout(150);
+      const r = await pg.evaluate(() => { const g = window.__rw, f = g.map.fullMap; f.renderNow(); const t = g.objective.tracker; return { wp: !!g.waypoint, ok: t.route.ok, n: t.route.n, pts: f.getStats().routePts, pill: document.querySelector('[data-role="map-route"]').hidden ? '' : document.querySelector('[data-role="map-route"]').textContent }; });
+      check(`map ${W}: a tap sets a destination and draws the route with its summary`, r.wp && r.ok && r.pts > 1 && / (ft|mi), \d+ min/.test(r.pill), JSON.stringify(r));
+      await pg.screenshot({ path: path.join(out, `map-route-${W}x${H}.png`) });
+      const nt = await pg.evaluate(() => { const f = window.__rw.map.fullMap; const b = f.getView(); return [b.width, b.height]; });
+      const tgl = await pg.evaluate(() => window.__rw.progress.settings.mapNorthUp === true);
+      await pg.locator('[data-role="map-northup"]').tap();
+      check(`map ${W}: the north-up switch flips the setting`, (await pg.evaluate(() => window.__rw.progress.settings.mapNorthUp === true)) !== tgl);
+      await pg.locator('[data-role="map-northup"]').tap();
+      // Hold: cleared.
+      await pg.evaluate(([w, h]) => {
+        const cv = document.querySelector('.rw-map-canvas');
+        const o = { pointerId: 7, pointerType: 'touch', clientX: w / 2 + 60, clientY: h / 2 + 40, bubbles: true, isPrimary: true };
+        cv.dispatchEvent(new PointerEvent('pointerdown', o));
+        window.__lp = o;
+      }, nt);
+      await pg.waitForTimeout(800);
+      await pg.evaluate(() => document.querySelector('.rw-map-canvas').dispatchEvent(new PointerEvent('pointerup', window.__lp)));
+      const cl = await pg.evaluate(() => ({ wp: window.__rw.waypoint, routing: window.__rw.objective.routing, pill: document.querySelector('[data-role="map-route"]').hidden }));
+      check(`map ${W}: a long press clears the destination and the route`, cl.wp === null && !cl.routing && cl.pill, JSON.stringify(cl));
+      // Back to the game with a route: the turn strip and the street line read.
+      await pg.evaluate(() => { const g = window.__rw, c = g.city; const n = c.nodes.find((q) => q.edges.some((i) => c.edges[i].name === 'Washington Avenue') && q.edges.some((i) => c.edges[i].name === 'Lincoln Road')); g.map.fullMap.close(); g.paused = false; g.waypoint = { x: n.x, z: n.z }; g.objective.refresh(); });
+      await pg.waitForTimeout(600);
+      const hud = await pg.evaluate(() => { const n = document.querySelector('.rw-nav'), s = document.querySelector('.rw-street'); const r = n.getBoundingClientRect(); return { nav: getComputedStyle(n).display !== 'none' ? n.textContent : '', y: r.top, b: r.bottom, street: getComputedStyle(s).display !== 'none' ? s.textContent : '' }; });
+      check(`map ${W}: the turn strip reads "In ... ft/mi, turn/bear ... onto ..." clear of the keep-out rect`, /^In [\d.]+ (ft|mi), .+onto .+/.test(hud.nav) && hud.b <= 0.4 * H, JSON.stringify(hud));
+      check(`map ${W}: the street line names the street`, /\S/.test(hud.street), JSON.stringify(hud));
+      await pg.screenshot({ path: path.join(out, `nav-hud-${W}x${H}.png`) });
+      check(`map ${W}: no page errors`, errs.length === 0, errs.join(' | '));
+      await pg.close();
+    }
+  } finally {
+    await gbr.close();
+    srv.close();
+  }
+}
+
 try {
   const ctx = await browser.newContext({ viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
@@ -372,7 +438,8 @@ try {
   await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
   await tab('Settings');
   await grp('game');
-  check('game group: the Map row names the current map', (await page.locator('[data-role="map"]').innerText()).includes('Downtown and the Bay'));
+  // 0.9.0 re-pin (deliberate): with no stored choice the current map is the default region, the Beach.
+  check('game group: the Map row names the current map', (await page.locator('[data-role="map"]').innerText()).includes('Miami Beach and the Islands'));
   await page.locator('[data-role="newgame"]').tap();
   check('New game screen opens', (await page.locator('.rw-menu-title').innerText()) === 'New game' && (await page.locator('.rw-menu-confirmrow').count()) === 2);
   await page.screenshot({ path: path.join(out, 'newgame-915x412.png') });
@@ -413,18 +480,20 @@ try {
   // Map choice: one card per region and the island; one tap on another map stores it and reloads behind a veil.
   await page.locator('.rw-menu-back').tap();
   await page.locator('[data-role="map"]').tap();
-  check('Map choice: five regions and the island, Downtown marked', (await page.locator('.rw-mp-card').count()) === 6 && (await page.locator('.rw-mp-card[data-map="miami-downtown"]').getAttribute('data-current')) === 'true'
+  // 0.9.0 re-pin (deliberate): the default region, the Beach, is the one marked.
+  check('Map choice: five regions and the island, Beach marked', (await page.locator('.rw-mp-card').count()) === 6 && (await page.locator('.rw-mp-card[data-map="miami-beach"]').getAttribute('data-current')) === 'true'
     && (await page.locator('.rw-mp-card[data-current="true"]').count()) === 1);
   const mapNames = await page.locator('.rw-mp-card b').allInnerTexts();
   check('Map choice: clear names', JSON.stringify(mapNames) === JSON.stringify(['Downtown and the Bay', 'Miami Beach and the Islands', 'Wynwood and the North Side', 'Little Havana and Civic Center', 'The Roads and the South Shore', 'Classic island']), JSON.stringify(mapNames));
   const cardBox = await page.locator('.rw-mp-card').first().boundingBox();
   check('Map choice: touch targets 48+', cardBox.height >= 48 && cardBox.width >= 48, JSON.stringify(cardBox));
   await page.screenshot({ path: path.join(out, 'mapchoice-915x412.png') });
-  await page.locator('[data-role="map-miami-downtown"]').tap();
+  // 0.9.0 re-pin (deliberate): the current map is the Beach now, Downtown the other one.
+  await page.locator('[data-role="map-miami-beach"]').tap();
   check('Map choice: the current map does nothing', (await ev(() => localStorage.getItem('rustwater.map'))) === null && (await page.locator('[data-role="map-veil"]').count()) === 0);
-  await Promise.all([page.waitForNavigation().catch(() => {}), page.locator('[data-role="map-miami-beach"]').tap()]);
+  await Promise.all([page.waitForNavigation().catch(() => {}), page.locator('[data-role="map-miami-downtown"]').tap()]);
   await page.waitForFunction(() => window.rw);
-  check('Map choice: one tap saves the map and restarts', (await ev(() => localStorage.getItem('rustwater.map'))) === 'miami-beach');
+  check('Map choice: one tap saves the map and restarts', (await ev(() => localStorage.getItem('rustwater.map'))) === 'miami-downtown');
   await ev(() => localStorage.removeItem('rustwater.map'));
 
   // Registered screens (W11 adds Garage, Garages, Adventures this way).
@@ -530,6 +599,15 @@ try {
 } finally {
   await browser.close();
   server.close();
+}
+
+// The map screen in the real game (NAV, docs/PLAN_V3.md 2.7): zoom buttons, the north-up switch, street names,
+// tap to route (line, summary, HUD turn strip), hold to clear. The Beach region, 915x412 and 780x360.
+// Runs on its own page, so a failure above does not hide it.
+try {
+  await mapScreen();
+} catch (e) {
+  failures.push('map screen exception: ' + (e && e.stack || e));
 }
 
 if (failures.length) {

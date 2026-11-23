@@ -11,6 +11,7 @@ import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 import { paintLines, divideOf, CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
+import { groundFn } from '../world/ground.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
 export const COL = {
@@ -276,16 +277,41 @@ export function addSurfaces(city, B, DR, own = null) {
   }
 }
 
-// A city block: curb, sidewalk and whatever fills the middle.
-export function addBlock(B, b, DR) {
+// Height of the drawn ground something stands on: the physics ground
+// (world/ground.js groundAt) where it is raised or on a block, else the
+// drawn open land (LAND_Y by the water, lower further out).
+export function drawnGroundY(city, ground, blockAt, onExtra) {
+  return (x, z) => {
+    const g = ground(x, z);
+    if (blockAt(x, z)) return g > BLOCK_Y ? g : BLOCK_Y;
+    if (g > 0) return g;
+    return city.mainShore(x, z) > 30 || onExtra(x, z) ? -0.06 : -0.12;
+  };
+}
+
+// A city block: curb, sidewalk and whatever fills the middle, drawn on
+// the ground the physics stands on (world/ground.js groundAt, `ground`):
+// the island's sidewalk ring at the curb height its edges' sidewalk gives,
+// the middle at the ground there (0: the lawn, plaza or yard a car drives
+// onto from the curb). `ring` false (a real map, whose edges draw their
+// own sidewalks) draws only the middle. Without `ground`, the old raised
+// block (+0.16).
+export const BLOCK_Y = 0.004; // just over the lot and land surfaces
+export function addBlock(B, b, DR, ground = null, ring = true) {
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
   const pv = B.sidewalk.at(cx, cz);
-  const Y = 0.16, KW = 0.3;
-  pv.walls(b.x0, b.z0, b.x1, b.z1, -0.05, Y, COL.curb, 4.8, 4.8, 0.6, 0.95);
-  pv.ring(b.x0, b.z0, b.x1, b.z1, KW, Y, COL.curb);
-  const tone = shade(COL.sidewalk, 0.94 + ((b.id * 37) % 10) * 0.012);
-  pv.ring(b.x0 + KW, b.z0 + KW, b.x1 - KW, b.z1 - KW, SIDEWALK - KW, Y, tone, 0.97, 1);
-  const ix0 = b.x0 + SIDEWALK, iz0 = b.z0 + SIDEWALK, ix1 = b.x1 - SIDEWALK, iz1 = b.z1 - SIDEWALK;
+  const KW = 0.3;
+  const ringY = ground ? Math.max(BLOCK_Y, ground(b.x0 + SIDEWALK / 2, cz)) : 0.16;
+  const Y = ground ? Math.max(BLOCK_Y, ground(cx, cz)) : 0.16;
+  if (ring) {
+    pv.walls(b.x0, b.z0, b.x1, b.z1, -0.05, ringY, COL.curb, 4.8, 4.8, 0.6, 0.95);
+    pv.ring(b.x0, b.z0, b.x1, b.z1, KW, ringY, COL.curb);
+    const tone = shade(COL.sidewalk, 0.94 + ((b.id * 37) % 10) * 0.012);
+    pv.ring(b.x0 + KW, b.z0 + KW, b.x1 - KW, b.z1 - KW, SIDEWALK - KW, ringY, tone, 0.97, 1);
+    // The step down from the sidewalk to a lower middle.
+    if (ringY > Y + 0.01) pv.innerWalls(b.x0 + SIDEWALK, b.z0 + SIDEWALK, b.x1 - SIDEWALK, b.z1 - SIDEWALK, Y, ringY, COL.curb, 0.6, 0.95);
+  }
+  const ix0 = b.x0 + (ring ? SIDEWALK : 0), iz0 = b.z0 + (ring ? SIDEWALK : 0), ix1 = b.x1 - (ring ? SIDEWALK : 0), iz1 = b.z1 - (ring ? SIDEWALK : 0);
   const d = b.district;
   if (d === 'park') {
     // Lawns in the four corners, paths crossing at a round plaza.
@@ -408,10 +434,11 @@ export function buildCityMesh(city, collision) {
     return null;
   });
   const onExtra = (x, z) => (city.extraLand || []).some((r) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1);
+  const groundAt = groundFn(city);
   const C = {
     city, collision, ...B, R: T.details.rects, DR, glows: [],
-    // Height of the ground something stands on.
-    groundY: (x, z) => (blockAt(x, z) ? 0.16 : city.mainShore(x, z) > 30 || onExtra(x, z) ? -0.06 : -0.12),
+    // Height of the ground something stands on (drawnGroundY).
+    groundY: drawnGroundY(city, groundAt, blockAt, onExtra),
   };
   const LY = 0.015, DY = 0.02;
 
@@ -557,7 +584,7 @@ export function buildCityMesh(city, collision) {
   }
 
   // --- City blocks: curb, sidewalk and whatever fills the middle. ---
-  for (const b of city.blocks) addBlock(B, b, DR);
+  for (const b of city.blocks) addBlock(B, b, DR, groundAt, true);
 
   // --- Buildings (their collision boxes come from world/collision.js). ---
   fillCollision(city, collision);

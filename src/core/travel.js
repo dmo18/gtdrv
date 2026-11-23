@@ -3,7 +3,7 @@
 // arrival pose from the link table, and the one save that writes the
 // target region's session and the map choice before the page reloads.
 // Pure: runs in node tests (no DOM, no three.js).
-import { REGIONS, regionFor, inRegion, regionsAt, DEFAULT_REGION } from '../world/regions.js';
+import { REGIONS, regionFor, inRegion, regionsAt, DEFAULT_REGION, CORE_REGION } from '../world/regions.js';
 import { ADVENTURE_DEFS } from '../world/adventures.js';
 import { GARAGE_DEFS } from '../world/garages.js';
 import { MIAMI_SPOTS } from '../world/miami-spots.js';
@@ -139,7 +139,9 @@ export function travelSave(storage, progress, fromId, toId, car, player, pose) {
 export const insideRegion = (id, x, z, margin = 0) => inRegion(id, x, z, margin);
 
 // The region that holds an adventure (rule: its giver; a garage giver is
-// the garage's own place, the start is the start place of Downtown).
+// the garage's own place; a 'start' giver is the designed start place,
+// which stays in Downtown, CORE_REGION, even now that new games start
+// in the Beach).
 export function adventureRegion(def) {
   const g = def && def.giver;
   if (!g) return DEFAULT_REGION;
@@ -148,7 +150,7 @@ export function adventureRegion(def) {
     const gd = GARAGE_DEFS.find((q) => q.id === g.garage);
     if (gd) { x = gd.x; z = gd.z; }
   } else if (g.type === 'start') {
-    return DEFAULT_REGION;
+    return CORE_REGION;
   }
   const ids = regionsAt(x, z);
   return ids.length ? ids[0] : DEFAULT_REGION;

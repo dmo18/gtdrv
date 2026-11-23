@@ -230,8 +230,10 @@ test('migration: stored miami becomes the region of the saved position, once', (
 
 test('migration: no saved position or no choice at all', () => {
   const st = store({ [MAP_CHOICE_KEY]: 'miami' });
-  assert.equal(migrateMapChoice(st), 'miami-downtown');
-  assert.equal(st.getItem(MAP_CHOICE_KEY), 'miami-downtown');
+  // 0.9.0 re-pin (deliberate): a new game starts in the Beach (DEFAULT_REGION);
+  // Downtown stays CORE_REGION, the designed first view.
+  assert.equal(migrateMapChoice(st), 'miami-beach');
+  assert.equal(st.getItem(MAP_CHOICE_KEY), 'miami-beach');
   // a new player (nothing stored, no Miami session): nothing is written
   const fresh = store();
   assert.equal(migrateMapChoice(fresh), null);
@@ -249,8 +251,9 @@ test('migration: no saved position or no choice at all', () => {
   assert.equal(loadProgress(both).mapSessions['miami-beach'].mode, 'foot');
   // a start-mode Miami session has nothing to copy
   const startOnly = store({ [SAVE_KEY]: withSession(miamiSession(0, 0, 'start')), [MAP_CHOICE_KEY]: 'miami' });
-  assert.equal(migrateMapChoice(startOnly), 'miami-downtown');
-  assert.equal(loadProgress(startOnly).mapSessions['miami-downtown'], undefined);
+  // (0.9.0 re-pin, deliberate: no position means the default region, the Beach.)
+  assert.equal(migrateMapChoice(startOnly), 'miami-beach');
+  assert.equal(loadProgress(startOnly).mapSessions['miami-beach'], undefined);
 });
 
 test('migration never throws on broken storage', () => {

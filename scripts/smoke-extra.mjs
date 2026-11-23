@@ -767,7 +767,11 @@ export default async function extra(page, check) {
     await page.evaluate(() => { window.__stuckCraft.wrecked = true; });
     const ex = await exitState();
     check(boarded && ex.ok && ex.onFoot && ex.shore > 0, `a wrecked boat far out at sea lets the player out on land (${JSON.stringify(ex)})`);
-    // A craft that explodes over the sea with the player aboard.
+    // A craft that explodes over the sea with the player aboard. The page
+    // loop is held while it is set up: real frames between the two calls
+    // let the unpowered heli drop into the sea first (a ditch, not the
+    // blast), which made this check depend on the machine's frame rate.
+    const wasRunning = await page.evaluate(() => { const g = window.__rw; const r = g.loop.running; g.loop.stop(); return r; });
     const boarded2 = await spawnAndBoard('heli', { x: sea.x, z: sea.z, y: 25 });
     const boom = await page.evaluate(() => {
       const g = window.__rw;
@@ -779,6 +783,7 @@ export default async function extra(page, check) {
       return { wrecked: !!c.wrecked, onFoot: !g.player.vehicle && g.player.mode === 'foot', shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
     });
     check(boarded2 && !boom.wrecked && !boom.onFoot, `the player cannot die: a blast over the sea leaves the craft and pilot unharmed (${JSON.stringify(boom)})`);
+    if (wasRunning) await page.evaluate(() => window.__rw.loop.start());
   }
 
   // ---- Wrecks break apart and vanish (docs/COMBAT.md) ----
@@ -795,8 +800,10 @@ export default async function extra(page, check) {
     g.combat.damage(car, 1e5, null, 'blast');
     const listedAfterBlast = g.vehicles.includes(car);
     // The hull lies 60 s now and sinks away over 2 s (REVAMP 6.7, W6).
+    // 0.9.0 (PLAN_V3 2.3 item 4): a car burns 8 s before it explodes, so
+    // the 60 to 64 s are counted from the explosion (wreckedAt).
     let at30 = false;
-    for (let i = 0; i < 60 * 65; i++) {
+    for (let i = 0; i < 60 * 75; i++) {
       g.step(1 / 60);
       if (i === 60 * 30) at30 = g.vehicles.includes(car) && !car.removed;
       if (car.wrecked && wreckedAt < 0) wreckedAt = i;
@@ -810,7 +817,8 @@ export default async function extra(page, check) {
   check(wreck.booms >= 1 && wreck.wreckedAt >= 0 && wreck.listedAfterBlast, `a destroyed car explodes and is wrecked (${JSON.stringify(wreck)})`);
   check(wreck.maxDebris >= 14 && wreck.maxDebris <= 96, `the wreck throws 14 to 96 parts (${wreck.maxDebris})`);
   check(wreck.at30, 'the burnt hull still stands 30 s after the blast');
-  check(wreck.removedAt > 60 * 60 && wreck.removedAt < 60 * 64 && !wreck.listed && wreck.meshGone, `the hull is removed from game.vehicles 60 to 64 s after the blast (${wreck.removedAt} steps)`);
+  const lay = wreck.removedAt - wreck.wreckedAt;
+  check(wreck.removedAt > 0 && lay > 60 * 60 && lay < 60 * 64 && !wreck.listed && wreck.meshGone, `the hull is removed from game.vehicles 60 to 64 s after the explosion (${lay} steps; fire ${wreck.wreckedAt} steps)`);
 
   // ---- Cops are killable; missiles and blasts hit what they should (docs/COMBAT.md) ----
   // Shoot the officers of a patrol car through the car; then a missile from the
@@ -1085,7 +1093,9 @@ export default async function extra(page, check) {
   // check is done by now), drives for 300 steps with zero page errors. ----
   {
     const url = new URL(page.url());
-    url.search = '?autostart';
+    // 0.9.0: a new game starts in the Beach; the courses and the Wynwood
+    // ramp this step drives are Downtown's, so it asks for that region.
+    url.search = '?autostart&map=miami-downtown';
     const mp = page;
     const errs = [];
     mp.on('pageerror', (e) => errs.push(String(e)));
@@ -1125,7 +1135,7 @@ export default async function extra(page, check) {
       await mp.keyboard.up('ArrowUp');
       await mp.screenshot({ path: 'shots/miami.png' });
     }
-    check(ok && m && m.map === 'miami', `the default page starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
+    check(ok && m && m.map === 'miami', `the Downtown page starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
     check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);
 
     // Milestone 2: on Miami, start one land race, one boat course and one

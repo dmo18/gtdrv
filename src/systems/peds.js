@@ -523,7 +523,7 @@ export function crowdAt(district, clock) {
 }
 // Walkers a block or plaza holds at this hour.
 export function blockCapacity(b, clock) {
-  const d = DENSITY[b.district] || 0;
+  const d = b.dens || DENSITY[b.district] || 0;
   if (!(d > 0)) return 0;
   const per = b.seg ? b.len : 2 * (b.x1 - b.x0 + b.z1 - b.z0 - INSET * 4);
   return Math.min(BLOCK_MAX, Math.round((per / 100) * d * crowdAt(b.district, clock)));
@@ -536,6 +536,7 @@ const SEA = -150; // this far out at sea nobody is simulated
 const CELL = 128;
 const SIDE_GAP = 2.4; // walking line, meters beyond the curb
 const SEG_MIN = 20; // shortest sidewalk line worth using
+const PED_DENSITY = 3.2; // walkers per 100 m on each line of a pedestrian street
 
 // Walkable places: the city blocks plus the sidewalk on both sides of
 // every street in the core, as lines walked out and back (real maps).
@@ -559,21 +560,45 @@ function buildAreas(city) {
       if (city.inCore && !city.inCore(mx, mz)) continue;
       const district = city.districtOf(mx, mz);
       if (!(DENSITY[district] > 0)) continue;
-      const off = e.width / 2 + SIDE_GAP;
-      for (let side = -1; side <= 1; side += 2) {
-        const ax = na.x + ux * t0 - uz * off * side, az = na.z + uz * t0 + ux * off * side;
-        const bx = ax + ux * len, bz = az + uz * len;
-        areas.push({
-          id: areas.length, x0: Math.min(ax, bx), z0: Math.min(az, bz), x1: Math.max(ax, bx), z1: Math.max(az, bz),
-          district, seg: true, ax, az, ux, uz, len, ok: 0,
-        });
+      // The walking line SIDE_GAP past each curb: the cross section's
+      // middle lies `off` right of the node line (a tight divided pair),
+      // and a divided one-way has its raised median, not a sidewalk, along
+      // its left curb (docs/MAP.md edge contract).
+      const mid = e.off || 0;
+      if (e.ped) {
+        // A pedestrian street is paved curb to curb: two busy lines on the
+        // street itself, a quarter of its width either side of the middle.
+        for (let side = -1; side <= 1; side += 2) pushLine(areas, na, ux, uz, t0, len, mid + side * e.width / 4, district, PED_DENSITY, true);
+        continue;
       }
+      for (let side = -1; side <= 1; side += 2) {
+        if (side < 0 && e.median > 0) continue;
+        pushLine(areas, na, ux, uz, t0, len, mid + side * (e.width / 2 + SIDE_GAP), district, 0, false);
+      }
+    }
+  }
+  // Parks, plazas and beaches (real maps): a stroll along the long axis of
+  // each big enough lot, kept on that lot (lineUsable). Parks and beaches
+  // count as their own district for the hour of the crowd.
+  if (city.lots && city.lotAt) {
+    for (const l of city.lots) {
+      if (!WALK_LOTS.has(l.type)) continue;
+      const w = l.x1 - l.x0, h = l.z1 - l.z0, long = Math.max(w, h);
+      if (!(long >= SEG_MIN + 8) || !(Math.min(w, h) >= 8)) continue;
+      const cx = (l.x0 + l.x1) / 2, cz = (l.z0 + l.z1) / 2;
+      if (city.inCore && !city.inCore(cx, cz)) continue;
+      const district = l.type === 'plaza' ? l.district : l.type;
+      if (!(DENSITY[district] > 0)) continue;
+      const ux = w >= h ? 1 : 0, uz = w >= h ? 0 : 1, len = long - 8;
+      LP.x = cx - ux * (long / 2); LP.z = cz - uz * (long / 2);
+      pushLine(areas, LP, ux, uz, 4, len, 0, district, 0, true);
+      areas[areas.length - 1].lot = l.id;
     }
   }
   const grid = new Map();
   for (let i = 0; i < areas.length; i++) {
     const b = areas[i];
-    if (!(DENSITY[b.district] > 0)) continue;
+    if (!((b.dens || DENSITY[b.district]) > 0)) continue;
     for (let cx = Math.floor(b.x0 / CELL); cx <= Math.floor(b.x1 / CELL); cx++) {
       for (let cz = Math.floor(b.z0 / CELL); cz <= Math.floor(b.z1 / CELL); cz++) {
         const key = cx * 8192 + cz;
@@ -586,6 +611,19 @@ function buildAreas(city) {
   return { areas, grid };
 }
 
+const WALK_LOTS = new Set(['park', 'plaza', 'beach']);
+const LP = { x: 0, z: 0 };
+
+// One walking line `o` m right of the node line, `len` m from t0 on.
+function pushLine(areas, na, ux, uz, t0, len, o, district, dens, onStreet) {
+  const ax = na.x + ux * t0 - uz * o, az = na.z + uz * t0 + ux * o;
+  const bx = ax + ux * len, bz = az + uz * len;
+  areas.push({
+    id: areas.length, x0: Math.min(ax, bx), z0: Math.min(az, bz), x1: Math.max(ax, bx), z1: Math.max(az, bz),
+    district, seg: true, ax, az, ux, uz, len, ok: 0, dens, onStreet,
+  });
+}
+
 // A sidewalk line is used once checked clear of buildings and the road
 // (done on first use, so the city start pays nothing).
 function lineUsable(city, b) {
@@ -593,7 +631,12 @@ function lineUsable(city, b) {
   let bad = 0, n = 0;
   for (let s = 0; s < b.len; s += 6, n++) {
     pointAt(b, s);
-    if ((city.inBuilding && city.inBuilding(PT.x, PT.z, 0.6)) || (city.onRoad && city.onRoad(PT.x, PT.z))) bad++;
+    if ((city.inBuilding && city.inBuilding(PT.x, PT.z, 0.6)) || (!b.onStreet && city.onRoad && city.onRoad(PT.x, PT.z))) bad++;
+    else if (b.lot !== undefined) {
+      // A lot stroll: on that lot, on land, off every road.
+      const l = city.lotAt(PT.x, PT.z);
+      if (!l || l.id !== b.lot || (city.onRoad && city.onRoad(PT.x, PT.z)) || (city.isLand && !city.isLand(PT.x, PT.z))) bad++;
+    }
   }
   b.ok = bad <= n * 0.15 ? 1 : 2;
   return b.ok === 1;
@@ -712,7 +755,7 @@ export function createPeds(game, { max = 30 } = {}) {
             if (!lineUsable(city, b)) continue;
           }
           cand[n] = i;
-          candW[n] = DENSITY[b.district] * (d < 40 ? 3 : d < 80 ? 2 : 1);
+          candW[n] = (b.dens || DENSITY[b.district]) * (d < 40 ? 3 : d < 80 ? 2 : 1);
           total += candW[n];
           n++;
         }

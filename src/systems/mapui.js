@@ -19,7 +19,25 @@ export function createMapUi(game, uiRoot) {
   const layers = [];
   // What the full map draws: the plain markers, then every layer's (rebuilt in place each frame).
   const all = [];
-  const state = { x: 0, z: 0, heading: 0, zoomMeters: 190, blips, blipCount: 0, waypoint: null, markers: all };
+  const settings = () => (game.progress && game.progress.settings) || {};
+  // route: the GPS route (src/core/route.js, followed by systems/objective.js) or null;
+  // routeSeg its cursor. northUp: the minimap switch (heading-up by default).
+  const state = { x: 0, z: 0, heading: 0, zoomMeters: 190, blips, blipCount: 0, waypoint: null, markers: all, route: null, routeSeg: 0, northUp: false };
+  const routeView = { route: null, seg: 0, remaining: 0, eta: 0, label: '' };
+  let waypointLabel = '';
+  // The route the full map draws (and its summary), read when it redraws.
+  function routeInfo() {
+    const o = game.objective;
+    const tr = o && o.tracker;
+    if (!o || !o.routing || !tr) return null;
+    routeView.route = tr.route;
+    routeView.seg = tr.seg;
+    routeView.remaining = tr.remaining;
+    routeView.eta = tr.eta;
+    routeView.label = o.goalLabel ? o.goalLabel() : '';
+    if (routeView.label === 'Waypoint' && waypointLabel) routeView.label = waypointLabel;
+    return routeView;
+  }
   let zoom = 190;
   let pausedByMap = false;
 
@@ -29,9 +47,21 @@ export function createMapUi(game, uiRoot) {
     : null;
   const fullMap = createFullMap(uiRoot, renderer, {
     travel,
+    routeInfo,
+    northUp: settings().mapNorthUp === true,
+    onNorthUp(on) {
+      const st = game.progress && game.progress.settings;
+      if (st) st.mapNorthUp = !!on;
+      minimap.invalidate();
+      game.events.emit('progress');
+      game.events.emit('ui');
+    },
     onWaypoint(p) {
       state.waypoint = p ? { x: p.x, z: p.z } : null;
+      waypointLabel = p && p.label ? p.label : '';
       game.waypoint = state.waypoint;
+      // Route now (the game is paused under the map) so the line shows at once.
+      if (game.objective && game.objective.refresh) game.objective.refresh();
       game.events.emit('ui');
     },
     onClose() {
@@ -62,6 +92,14 @@ export function createMapUi(game, uiRoot) {
     },
     // The markers drawn on both maps, plain ones first.
     allMarkers: all,
+    // The destination is gone (arrived): both maps forget the pin.
+    clearWaypoint() {
+      state.waypoint = null;
+      waypointLabel = '';
+      game.waypoint = null;
+      fullMap.setWaypoint(null);
+    },
+    routeInfo,
     removeMarker(m) {
       const i = markers.indexOf(m);
       if (i >= 0) markers.splice(i, 1);
@@ -74,6 +112,7 @@ export function createMapUi(game, uiRoot) {
           pausedByMap = !game.paused;
           game.paused = true;
           game.touch.setVisible(false);
+          state.northUp = settings().mapNorthUp === true;
           fullMap.open(state);
         }
       }
@@ -132,6 +171,10 @@ export function createMapUi(game, uiRoot) {
         b.r = m.r || 0;
       }
       state.blipCount = n;
+      // The GPS line and the north-up switch.
+      const o = game.objective;
+      if (o && o.routing && o.tracker) { state.route = o.tracker.route; state.routeSeg = o.tracker.seg; } else { state.route = null; state.routeSeg = 0; }
+      state.northUp = settings().mapNorthUp === true;
       // Under the title the HUD is hidden: the map raster waits for play (or main.js's idle build).
       if (uiRoot && uiRoot.style && uiRoot.style.visibility === 'hidden' && !renderer.built) return;
       minimap.draw(state);

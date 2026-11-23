@@ -208,28 +208,33 @@ export const onCallDraw = (kind, r) => (kind === 'ambulance' || kind === 'firetr
 // yard on the Port's industrial land (no legal yard on the river strip);
 // patrol bases Downtown and in Little Havana. The third garbage truck is
 // in a Downtown lot, not Wynwood: the rule "one of each kind within 600 m
-// by road of the start" wins over the home table.
+// by road of the start" wins over the home table. 0.9.0: lots now start
+// 4 m past the curb (world/miami.js LOT_SETBACK), so twelve lot homes moved
+// 1.5 to 33 m onto their lots (the nearest spot that passes every rule),
+// and the three curb homes moved to the nearest curb bay the real parking
+// lanes still have (16 to 103 m; the tow bay to the nearest one within
+// 600 m by road of the start, 318 m north).
 export const SERVICE_SPOTS = [
-  { kind: 'firetruck', x: -1438.8, z: 952.8, heading: -0.024, name: 'Harbor Fire House' },
-  { kind: 'firetruck', x: -1426.3, z: 952.8, heading: -0.024, name: 'Harbor Fire House' },
-  { kind: 'ambulance', x: -1416.3, z: 952.8, heading: -0.024, name: 'Harbor Fire House' },
+  { kind: 'firetruck', x: -1440.3, z: 956.3, heading: -0.024, name: 'Harbor Fire House' },
+  { kind: 'firetruck', x: -1426.3, z: 956.3, heading: -0.024, name: 'Harbor Fire House' },
+  { kind: 'ambulance', x: -1412.3, z: 956.3, heading: -0.024, name: 'Harbor Fire House' },
   { kind: 'firetruck', x: -2261.3, z: 727.8, heading: 1.546, name: 'Calle Fire House' },
   { kind: 'ambulance', x: -2261.3, z: 717.8, heading: 1.546, name: 'Calle Fire House' },
-  { kind: 'firetruck', x: 2203.8, z: 944.8, heading: 0.84, name: 'Port Fire Station' },
-  { kind: 'ambulance', x: -2636.3, z: -1087.3, heading: -0.024, name: 'Tideline Medical Center' },
+  { kind: 'firetruck', x: 2205.3, z: 944.8, heading: 0.84, name: 'Port Fire Station' },
+  { kind: 'ambulance', x: -2644.3, z: -1092.3, heading: -0.024, name: 'Tideline Medical Center' },
   { kind: 'ambulance', x: -2683.3, z: -1092.3, heading: 1.558, name: 'Tideline Medical Center' },
-  { kind: 'garbage', x: -2216.3, z: -2144.8, heading: -1.6, name: 'City Yard', yard: true },
+  { kind: 'garbage', x: -2234.8, z: -2171.3, heading: -1.6, name: 'City Yard', yard: true },
   { kind: 'garbage', x: -2288.8, z: -2142.3, heading: 3.112, name: 'City Yard', yard: true },
   { kind: 'garbage', x: -1053.8, z: 302.8, heading: 1.536, name: 'Bayside Bin Depot' },
-  { kind: 'towtruck', x: 1306.3, z: 600.3, heading: 0.416, name: 'Sunline Towing', yard: true },
-  { kind: 'towtruck', x: 1261.3, z: 580.3, heading: 0.416, name: 'Sunline Towing', yard: true },
-  { kind: 'towtruck', x: -1009.87, z: 1248.81, heading: -1.3511, name: 'Sunline Towing curb bay', curb: true },
-  { kind: 'police', x: -1488.8, z: 985.3, heading: 0.067, name: 'Central Patrol Base' },
-  { kind: 'police', x: -1488.8, z: 980.3, heading: 0.067, name: 'Central Patrol Base' },
-  { kind: 'police', x: -2321.3, z: 582.8, heading: -1.605, name: 'Ocho Patrol Base' },
-  { kind: 'police', x: -2316.3, z: 582.8, heading: -1.605, name: 'Ocho Patrol Base' },
-  { kind: 'police', x: -952.18, z: -128.88, heading: 1.4846, name: 'Biscayne patrol bay', curb: true },
-  { kind: 'police', x: -1112.17, z: 1656.9, heading: 1.7987, name: 'Brickell patrol bay', curb: true },
+  { kind: 'towtruck', x: 1306.8, z: 598.8, heading: 0.416, name: 'Sunline Towing', yard: true },
+  { kind: 'towtruck', x: 1261.8, z: 578.8, heading: 0.416, name: 'Sunline Towing', yard: true },
+  { kind: 'towtruck', x: -1053.16, z: 948.3, heading: -2.462, name: 'Sunline Towing curb bay', curb: true },
+  { kind: 'police', x: -1492.8, z: 985.3, heading: 0.067, name: 'Central Patrol Base' },
+  { kind: 'police', x: -1488.8, z: 977.3, heading: 0.067, name: 'Central Patrol Base' },
+  { kind: 'police', x: -2321.3, z: 586.8, heading: -1.605, name: 'Ocho Patrol Base' },
+  { kind: 'police', x: -2316.3, z: 586.8, heading: -1.605, name: 'Ocho Patrol Base' },
+  { kind: 'police', x: -964.83, z: -118.63, heading: 3.1043, name: 'Biscayne patrol bay', curb: true },
+  { kind: 'police', x: -1174.5, z: 1739.29, heading: -2.9102, name: 'Brickell patrol bay', curb: true },
 ];
 export const SPOT_RULES = {
   counts: { firetruck: 4, ambulance: 4, garbage: 3, towtruck: 3, police: 6 },

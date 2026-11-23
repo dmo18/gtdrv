@@ -210,10 +210,16 @@ import { regionFor, inRegion } from '../src/world/regions.js';
 
 const RAMPS = {
   'miami-downtown': ['stunt_wynwood_kicker', 'stunt_little_havana_hop', 'stunt_edgewater_launch', 'stunt_palm_island_skip', 'stunt_dock_kicker', 'stunt_dock_splash'],
-  'miami-beach': ['stunt_palm_island_skip', 'stunt_miami_beach_launch'],
+  // 0.9.0 re-pin (deliberate): with the real street data the Beach's generated
+  // ramp is a leap (stunt_miami_beach_leap), no longer the launch.
+  'miami-beach': ['stunt_palm_island_skip', 'stunt_miami_beach_leap'],
   'miami-north': ['stunt_wynwood_kicker', 'stunt_edgewater_launch', 'stunt_dock_kicker', 'stunt_dock_splash'],
-  'miami-west': ['stunt_little_havana_hop', 'stunt_civic_center_skip'],
-  'miami-south': ['stunt_bay_heights_kicker', 'stunt_shenandoah_hop'],
+  // 0.9.0 re-pin (deliberate): the West's generated ramp follows the settled
+  // lots (junction-band boundary cells are lots now), a Little Havana launch.
+  'miami-west': ['stunt_little_havana_hop', 'stunt_little_havana_launch'],
+  // 0.9.0 re-pin (deliberate): the South's two generated ramps follow the
+  // settled lots too.
+  'miami-south': ['stunt_bay_heights_hop', 'stunt_shenandoah_kicker'],
 };
 
 test('regions: every region has at least two ramps, on land or in the water, clear of buildings, inside the crop', () => {

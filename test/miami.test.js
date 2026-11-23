@@ -410,17 +410,18 @@ test('street name signs: real names from the data at signal junctions, clear of 
   assert.equal(plates[top.indexOf('Biscayne Boulevard')], 'Biscayne Blvd');
 });
 
-test('map choice: Downtown is the default, ?map=island still reaches the island', () => {
-  assert.equal(DEFAULT_MAP, 'miami-downtown');
-  assert.equal(mapFromSearch(''), 'miami-downtown');
-  assert.equal(mapFromSearch('?autostart'), 'miami-downtown');
+test('map choice: the Beach is the default, ?map=island still reaches the island', () => {
+  // 0.9.0 re-pin (deliberate): new games start in the Beach (DEFAULT_REGION).
+  assert.equal(DEFAULT_MAP, 'miami-beach');
+  assert.equal(mapFromSearch(''), 'miami-beach');
+  assert.equal(mapFromSearch('?autostart'), 'miami-beach');
   assert.equal(mapFromSearch('?map=miami'), 'miami');
   assert.equal(mapFromSearch('?autostart&map=miami'), 'miami');
   assert.equal(mapFromSearch('?map=island'), 'island');
   assert.equal(mapFromSearch('?autostart&map=island'), 'island');
-  assert.equal(mapFromSearch('?map=Miami%00'), 'miami-downtown');
-  assert.equal(mapFromSearch('?map=elsewhere'), 'miami-downtown');
-  assert.equal(mapFromSearch('%%%'), 'miami-downtown');
+  assert.equal(mapFromSearch('?map=Miami%00'), 'miami-beach');
+  assert.equal(mapFromSearch('?map=elsewhere'), 'miami-beach');
+  assert.equal(mapFromSearch('%%%'), 'miami-beach');
 });
 
 test('deterministic: the same data builds the same city', () => {

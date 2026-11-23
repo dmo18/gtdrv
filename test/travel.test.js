@@ -28,7 +28,9 @@ test('picker: five regions and the classic island, clear names, all valid map id
   }
   assert.equal(mapName('island'), 'Classic island');
   assert.equal(mapName('nonsense'), '');
-  assert.equal(pickerCurrent('junk'), 'miami-downtown');
+  // 0.9.0 re-pin (deliberate): a new game starts in the Beach (DEFAULT_REGION);
+  // Downtown stays CORE_REGION, the designed first view.
+  assert.equal(pickerCurrent('junk'), 'miami-beach');
   assert.equal(pickerCurrent('island'), 'island');
   assert.equal(pickerCurrent('miami-west'), 'miami-west');
 });
@@ -170,12 +172,14 @@ test('an adventure tracked in another region shows where it is', () => {
 });
 
 import { mapFromSearch, DEFAULT_MAP } from '../src/world/maps.js';
-test('mapFromSearch: every id by URL and by stored choice, unknown falls back to Downtown', () => {
+test('mapFromSearch: every id by URL and by stored choice, unknown falls back to the Beach', () => {
   for (const id of MAP_IDS) {
     assert.equal(mapFromSearch('?map=' + id), id);
     assert.equal(mapFromSearch('', id), id);
   }
-  assert.equal(DEFAULT_MAP, 'miami-downtown');
-  assert.equal(mapFromSearch('', 'miami-nowhere'), 'miami-downtown');
+  // 0.9.0 re-pin (deliberate): a new game starts in the Beach (DEFAULT_REGION);
+  // Downtown stays CORE_REGION, the designed first view.
+  assert.equal(DEFAULT_MAP, 'miami-beach');
+  assert.equal(mapFromSearch('', 'miami-nowhere'), 'miami-beach');
   assert.equal(mapFromSearch('?map=miami-beach', 'island'), 'miami-beach', 'the URL wins');
 });

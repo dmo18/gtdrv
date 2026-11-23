@@ -138,6 +138,9 @@ export function generateCity(seed = 20261) {
       avenue: width === AVENUE_W,
       length: Math.hypot(b.x - a.x, b.z - a.z),
       ...islandProfile(width),
+      // The block's sidewalk ring meets the curb (render/citymesh.js
+      // addBlock): the ground (world/ground.js) raises the same band.
+      sidewalk: SIDEWALK,
     };
     edges.push(e);
     a.edges.push(e.id);

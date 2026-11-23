@@ -12,7 +12,8 @@ import * as THREE from 'three';
 import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { garageRemove } from '../core/garage.js';
 import { createPointIndex, beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } from '../core/spatial.js';
-import { createLotCarField, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull, LOT_Y } from '../render/lotmesh.js';
+import { createLotCarField, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull } from '../render/lotmesh.js';
+import { groundFn } from '../world/ground.js';
 import { createVehicleMesh } from '../render/vehiclemesh.js';
 import { paintMaterial, carGlassMaterial, wheelMaterial } from '../render/vehiclemats.js';
 
@@ -47,6 +48,7 @@ export const LOT_NEAR_MAX = 6; // at most this many real bodies at once
 function createLotCarView(game, field) {
   const scene = game.scene;
   if (!scene || typeof THREE.InstancedMesh !== 'function') return null;
+  const ground = game.city ? groundFn(game.city) : null;
   const root = new THREE.Group();
   root.name = 'lotcars';
   scene.add(root);
@@ -132,7 +134,8 @@ function createLotCarView(game, field) {
         const si = field.spec[i];
         // Heading h (x ahead, z toward +z) is a turn of -h about y.
         tmp.makeRotationY(-field.yaw[i]);
-        tmp.setPosition(field.x[i], LOT_Y, field.z[i]);
+        // On the ground the moving cars stand on (world/ground.js).
+        tmp.setPosition(field.x[i], ground ? ground(field.x[i], field.z[i]) : 0, field.z[i]);
         if (field.dist[i] < view.nearM && nReal < LOT_NEAR_MAX) {
           nReal++;
           const r = realOf(si);
@@ -216,25 +219,38 @@ export function createParkedCars(game) {
     if (s.lot || s.start) return true;
     if (s.lane) return s.lane === 1;
     let best = null, bd = 1e9;
-    city.edgesNear(s.x, s.z, 14, nearEdges);
-    for (let k = 0; k < nearEdges.length; k++) {
-      const e = city.edges[nearEdges[k]];
+    // The island city has no edge index: every edge is looked at.
+    const listed = typeof city.edgesNear === 'function';
+    if (listed) city.edgesNear(s.x, s.z, 14, nearEdges);
+    const nE = listed ? nearEdges.length : city.edges.length;
+    for (let k = 0; k < nE; k++) {
+      const e = city.edges[listed ? nearEdges[k] : k];
       const a = city.nodes[e.a];
-      const t = Math.max(0, Math.min(e.length, (s.x - a.x) * e.ux + (s.z - a.z) * e.uz));
-      const d = Math.hypot(s.x - (a.x + e.ux * t), s.z - (a.z + e.uz * t));
+      const { ux, uz } = edgeDir(e);
+      const t = Math.max(0, Math.min(e.length, (s.x - a.x) * ux + (s.z - a.z) * uz));
+      const d = Math.hypot(s.x - (a.x + ux * t), s.z - (a.z + uz * t));
       if (d < bd) { bd = d; best = e; }
     }
     let ok = true;
     if (best) {
       if (best.parkL !== undefined || best.parkR !== undefined) {
         const a = city.nodes[best.a];
+        const { ux, uz } = edgeDir(best);
         // Right of a -> b is (-uz, ux).
-        const right = (s.x - a.x) * -best.uz + (s.z - a.z) * best.ux > 0;
+        const right = (s.x - a.x) * -uz + (s.z - a.z) * ux > 0;
         ok = !!(right ? best.parkR : best.parkL);
       } else ok = !best.avenue && !best.bridge && !best.causeway;
     }
     s.lane = ok ? 1 : 2;
     return ok;
+  }
+  // An edge's unit direction (island edges carry no ux, uz).
+  const DIR = { ux: 0, uz: 0 };
+  function edgeDir(e) {
+    if (e.ux !== undefined) { DIR.ux = e.ux; DIR.uz = e.uz; return DIR; }
+    const a = city.nodes[e.a], b = city.nodes[e.b], l = e.length || 1;
+    DIR.ux = (b.x - a.x) / l; DIR.uz = (b.z - a.z) / l;
+    return DIR;
   }
   let sortX = 0, sortZ = 0;
   const d2 = (s) => (s.x - sortX) * (s.x - sortX) + (s.z - sortZ) * (s.z - sortZ);
@@ -470,6 +486,8 @@ export function createParkedCars(game) {
     },
     fixedUpdate(dt) {
       beginSpawnStep(game, SPAWNER.parked);
+      // The lot bay cars that collide are the ones drawn at this hour.
+      if (game.collision && game.collision.setLotHour) game.collision.setLotHour(game.clock ?? 12);
       timer -= dt;
       if (timer <= 0) {
         timer = 0.5;

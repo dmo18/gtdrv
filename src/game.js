@@ -71,6 +71,7 @@ import { attachExplore } from './world/adventures.js';
 import { createAdventures } from './systems/adventures.js';
 import { createGarages, favoriteCar } from './systems/garages.js';
 import { registerExploreScreens } from './ui/explore.js';
+import { SEA_LEVEL } from './world/ground.js';
 
 const SKY = 0x9fc8e8;
 
@@ -125,7 +126,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   scene.add(cityMesh);
   // Animated sea in place of the flat placeholder. Sea level sits a
   // little below the land so waves never wash over the beach.
-  const SEA_Y = -0.6;
+  const SEA_Y = SEA_LEVEL; // world/ground.js: the one water surface
   cityMesh.remove(cityMesh.userData.water);
   const water = createWater({});
   // Draw the sea "behind" the land wherever the two nearly touch, so
@@ -429,6 +430,11 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   // Downed and back: fresh at a quiet road, police lose interest, nothing lost.
   let snapCam = false;
   game.snapCam = () => { snapCam = true; };
+  // A broken prop leaves its street tile (drawn again without it).
+  events.on('propBreak', (b) => {
+    const st = cityMesh.userData.stream;
+    if (st && st.propBreak) st.propBreak(b.x, b.z);
+  });
   events.on('respawn', () => {
     if (game.police && game.police.heat) resetHeat(game.police.heat, 3);
     game.player.wanted = 0;

@@ -18,6 +18,73 @@ function bar(cls, parent) {
 }
 
 
+
+// The GPS turn strip (docs/PLAN_V3.md 2.7 item 3), the street line and the
+// red alert prompt. Own style element (styles.js is the HUD grid's file).
+// Turn strip: centered under the top center stack (y 104, 48 high; 38 at
+// 360 high), clear of the keep-out rect (y >= 40 % of the height). Street
+// line: the prompt strip's rect while no prompt shows.
+const NAV_CSS = `
+.rw-nav {
+  position: absolute; left: 0; right: 0; margin: 0 auto; top: calc(var(--rw-st) + 104px);
+  width: fit-content; max-width: 335px; min-width: 200px; height: 48px; padding: 0 12px 0 4px;
+  display: flex; align-items: center; gap: 8px; border-radius: 10px;
+  background: rgba(8, 22, 44, 0.86); border: 2px solid #3d8bff; color: #fff; pointer-events: none;
+}
+.rw-nav.rw-none { display: none; }
+.rw-nav.rw-soon { border-color: #ffd34d; }
+.rw-navicon { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 8px; background: #2a6fe0; display: flex; align-items: center; justify-content: center; }
+.rw-navicon svg { width: 32px; height: 32px; display: block; }
+.rw-nav.rw-soon .rw-navicon { background: #c98a00; }
+.rw-navtext { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+.rw-navl1 { font-size: 18px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rw-navl2 { font-size: 15px; font-weight: 700; color: #ffe08a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rw-street {
+  position: absolute; left: 50%; bottom: calc(var(--rw-sb) + 8px); width: 300px; height: 28px; margin-left: -150px;
+  font-size: 14px; font-weight: 800; line-height: 28px; text-align: center; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;
+  pointer-events: none;
+}
+.rw-street small { font-weight: 600; font-size: 12px; color: #d8d2c8; margin-left: 6px; }
+.rw-street.rw-none, .rw-prompt:not(.rw-none) ~ .rw-street { display: none; }
+.rw-prompt.rw-alert { background: #b3261e; border-color: #ffb4a8; color: #fff; font-size: 16px; font-weight: 900; letter-spacing: 0.04em; }
+.rw-prompt.rw-alert.rw-in { animation: rw-alert-in 0.5s ease-out 2; }
+@keyframes rw-alert-in { 0% { transform: scale(1.12); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .rw-prompt.rw-alert.rw-in { animation: none; } }
+@media (max-height: 380px) {
+  .rw-nav { max-width: 300px; height: 38px; min-width: 180px; gap: 6px; }
+  .rw-navicon { flex-basis: 30px; width: 30px; height: 30px; }
+  .rw-navicon svg { width: 26px; height: 26px; }
+  .rw-navl1 { font-size: 15px; }
+  .rw-navl2 { font-size: 13px; }
+}
+@media (max-height: 380px) and (max-width: 779px) {
+  .rw-street { width: 240px; margin-left: -120px; }
+}
+`;
+function injectNavStyles() {
+  if (document.getElementById('rw-nav-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'rw-nav-styles';
+  st.textContent = NAV_CSS;
+  document.head.appendChild(st);
+}
+
+// Turn arrows for the strip (24 x 24, white strokes), by turn kind.
+const ARROW = {
+  right: 'M8 21V11h9M13 7l4 4-4 4',
+  left: 'M16 21V11H7M11 7l-4 4 4 4',
+  'slight-right': 'M9 21v-7l7-7M11 6h5v5',
+  'slight-left': 'M15 21v-7L8 7M13 6H8v5',
+  'sharp-right': 'M8 21V6l9 9M17 9v6h-6',
+  'sharp-left': 'M16 21V6l-9 9M7 9v6h6',
+  uturn: 'M16 21V9a4 4 0 0 0-8 0v7M4 13l4 4 4-4',
+  merge: 'M7 21c0-6 5-8 5-12V4M17 21c0-6-5-8-5-12M8 8l4-4 4 4',
+  exit: 'M8 21V3M8 15l8-8M11 6h5v5',
+  depart: 'M12 21V4M7 9l5-5 5 5',
+  arrive: 'M12 21c-5-6-6-9-6-11a6 6 0 0 1 12 0c0 2-1 5-6 11zM12 8.5v.1',
+};
+export const NAV_KINDS = Object.keys(ARROW);
+
 export const MAP_SHRINK_MS = 5000; // the expanded minimap shrinks after this long untouched
 
 // ---------------------------------------------------------------------------
@@ -124,6 +191,7 @@ export function createTopStack() {
 
 export function createHud(root) {
   injectStyles();
+  injectNavStyles();
   if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
 
   const hud = el('div', 'rw-hud', root);
@@ -232,6 +300,20 @@ export function createHud(root) {
   boostEl.setAttribute('aria-valuemax', '100');
   const boostFill = el('div', 'rw-boostfill', boostEl);
   const promptEl = el('div', 'rw-prompt rw-pill rw-none', hud);
+  // The street line (city.streetAt): in the prompt strip's place while no prompt shows.
+  const streetEl = el('div', 'rw-street rw-pill rw-none', hud);
+  const streetName = document.createTextNode('');
+  streetEl.appendChild(streetName);
+  const streetCross = el('small', '', streetEl);
+  // GPS turn strip under the top center stack: arrow, "In 300 ft, turn right", "onto Alton Rd".
+  const navEl = el('div', 'rw-nav rw-none', hud);
+  navEl.setAttribute('role', 'status');
+  const navIcon = el('i', 'rw-navicon', navEl);
+  navIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d=""/></svg>';
+  const navPath = navIcon.querySelector('path');
+  const navText = el('div', 'rw-navtext', navEl);
+  const navL1 = el('div', 'rw-navl1', navText);
+  const navL2 = el('div', 'rw-navl2', navText);
 
   let fullMode = false;
 
@@ -242,6 +324,7 @@ export function createHud(root) {
     veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
     fx: undefined, boost: undefined, boostOn: undefined, boostLock: undefined,
     objOn: undefined, objAngle: 1e9, objDist: undefined,
+    navOn: false, navKind: '', navL1: '', navL2: '', navSoon: false, street: '', cross: '', streetOn: false, alert: null,
   };
   // The stack timers run on UI time, 10 times a second (never game logic).
   let clockMs = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -400,12 +483,50 @@ export function createHud(root) {
     if (distText !== last.objDist) { last.objDist = distText; objText.textContent = distText; }
   }
 
+  // The bottom prompt. A red alert (setAlert) takes the strip over while it
+  // lasts; the normal prompt comes back after it.
+  function paintPrompt() {
+    const v = last.alert || last.prompt;
+    promptEl.classList.toggle('rw-none', !v);
+    promptEl.classList.toggle('rw-alert', !!last.alert);
+    if (v) promptEl.textContent = v;
+  }
   function setPrompt(text) {
     const v = text || null;
     if (v === last.prompt) return;
     last.prompt = v;
-    promptEl.classList.toggle('rw-none', !v);
-    if (v) promptEl.textContent = v;
+    paintPrompt();
+  }
+  // A short red prompt ("Get out!" in a burning car), or null to clear it.
+  function setAlert(text) {
+    const v = text || null;
+    if (v === last.alert) return;
+    last.alert = v;
+    promptEl.classList.remove('rw-in');
+    paintPrompt();
+    if (v) { void promptEl.offsetWidth; promptEl.classList.add('rw-in'); }
+  }
+
+  // GPS turn strip: on, the turn kind (NAV_KINDS), line 1 ("In 300 ft,
+  // turn right"), line 2 ("onto Alton Rd"), soon (the turn is near: amber).
+  // Called every frame; touches the DOM only on change.
+  function setNav(on, kind, l1, l2, soon) {
+    const v = !!on;
+    if (v !== last.navOn) { last.navOn = v; navEl.classList.toggle('rw-none', !v); }
+    if (!v) return;
+    if (kind !== last.navKind) { last.navKind = kind; navPath.setAttribute('d', ARROW[kind] || ARROW.depart); }
+    if (l1 !== last.navL1) { last.navL1 = l1; navL1.textContent = l1; }
+    if (l2 !== last.navL2) { last.navL2 = l2; navL2.textContent = l2 || ''; navL2.style.display = l2 ? '' : 'none'; }
+    const sn = !!soon;
+    if (sn !== last.navSoon) { last.navSoon = sn; navEl.classList.toggle('rw-soon', sn); }
+  }
+  // The street line: "Alton Rd" and, smaller, the next cross street ahead.
+  function setStreet(name, cross) {
+    const n = name || '', c = name && cross ? cross : '';
+    const on = !!n;
+    if (on !== last.streetOn) { last.streetOn = on; streetEl.classList.toggle('rw-none', !on); }
+    if (n !== last.street) { last.street = n; streetName.nodeValue = n; }
+    if (c !== last.cross) { last.cross = c; streetCross.textContent = c ? 'next: ' + c : ''; }
   }
 
   // 'minimal' (default) or 'full': Full shows the clock (and the touch layer keeps its fan open).
@@ -423,5 +544,5 @@ export function createHud(root) {
     hud.remove();
   }
 
-  return { update, toast, tick, setObjective, canHint: stack.canHint, stack, setPrompt, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
+  return { update, toast, tick, setObjective, canHint: stack.canHint, stack, setPrompt, setAlert, setNav, setStreet, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
 }

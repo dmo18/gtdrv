@@ -16,7 +16,7 @@
 // PROP_SOLIDS entry) is breakable: breakShape switches it and its group
 // (`grp`) off and queues a break record; stepBroken brings it back after
 // BREAK_BACK_T s when the given point (the player) is BREAK_BACK_FAR away.
-import { dressLot, eachBay, lotDressCache } from './lots.js';
+import { dressLot, eachBay, lotDressCache, lotFill, FILL_MAX } from './lots.js';
 import { PROP_SOLIDS, createPropLayer, setBreakGroup } from './propsolid.js';
 import { createEdgeLayer } from './edgelines.js';
 import { attachGround } from './ground.js';
@@ -308,6 +308,10 @@ export function createCollisionWorld() {
     layers[0] = layer;
     joined = null;
   }
+  // The game clock (h) for the lot layer's bay cars (createLotLayer setHour).
+  function setLotHour(hour) {
+    if (layers[0] && layers[0].setHour) layers[0].setHour(hour);
+  }
   // Another lazy layer ({ name, cell(cx, cz) }), or a replacement for the
   // one of the same name. Its shapes are not in boxes / circles.
   function addLayer(layer) {
@@ -411,7 +415,7 @@ export function createCollisionWorld() {
   }
 
   return {
-    addBox, addCircle, addSegment, setEnabled, resolveCircle, raycast, lineClear, heightAt, setLotLayer, addLayer, layerNamed,
+    addBox, addCircle, addSegment, setEnabled, resolveCircle, raycast, lineClear, heightAt, setLotLayer, setLotHour, addLayer, layerNamed,
     breakShape, stepBroken, isBroken, breaks,
     get breakSeq() { return breakSeq; },
     get brokenCount() { return broken.length; },
@@ -554,13 +558,17 @@ function listedBays(city) {
 }
 
 // The static car of one bay (center bx, bz of a row feature with variant
-// v): -1 when the bay stays empty (a listed spot, or the other half of
-// the bays), else a number in 0..0.55 that picks its color and facing.
-// The renderer draws exactly the cars this says are there.
-export function bayCar(city, bx, bz, v) {
+// v) when the lot is `fill` full (lots.js lotFill; FILL_MAX, the most a
+// lot ever holds, by default): -1 when the bay stays empty (a listed spot,
+// or a hash at or over the fill), else the hash u in 0..fill that picks
+// its color and facing. One rule for both: the renderer (render/lotmesh.js
+// lotCarAt) draws a car where this says there is one at the hour's fill,
+// and the lot layer switches a bay car's shapes off at an hour whose fill
+// leaves that bay empty (setHour).
+export function bayCar(city, bx, bz, v, fill = FILL_MAX) {
   const key = Math.round(bx * 2) * 65536 + Math.round(bz * 2);
   const u = cellHash(Math.round(bx * 3), Math.round(bz * 3) + v);
-  return listedBays(city).has(key) || u > 0.55 ? -1 : u;
+  return listedBays(city).has(key) || u >= fill ? -1 : u;
 }
 
 // Collision shapes for the features of one lot (pushed to `list` when
@@ -616,10 +624,14 @@ export function addBayCars(city, collision, feats, n, list = null) {
     const f = feats[q];
     if (f.kind !== 'bay') continue;
     eachBay(f, (bx, bz, ch) => {
-      if (bayCar(city, bx, bz, f.v) < 0) return;
+      const u = bayCar(city, bx, bz, f.v);
+      if (u < 0) return;
       const cx = Math.cos(ch), cz = Math.sin(ch);
       const a = collision.addCircle(bx - cx * 1.2, bz - cz * 1.2, 1.0, 1.4, 'car');
       const b = collision.addCircle(bx + cx * 1.2, bz + cz * 1.2, 1.0, 1.4, 'car');
+      // The bay's hash: the lot layer turns the car off at a lower fill.
+      if (a) a.bayU = u;
+      if (b) b.bayU = u;
       made += 2;
       if (list) list.push(a, b);
     });
@@ -704,6 +716,18 @@ export function createLotLayer(city, dress = dressLot) {
 
   const cellLists = new Array(NC).fill(null);
   const lotShapes = new Array(lots.length).fill(null);
+  // The bay cars by the hour (setHour): NaN until a game sets the clock,
+  // when every bay car up to FILL_MAX stands (tests, tools).
+  let fillHour = NaN;
+  const carShapes = [], carLots = [];
+  function setHour(hour) {
+    const h = Math.floor((((hour % 24) + 24) % 24) * 2) / 2;
+    if (!(h >= 0) || h === fillHour) return;
+    fillHour = h;
+    for (let i = 0; i < carShapes.length; i++) {
+      carShapes[i].off = carShapes[i].bayU >= lotFill(carLots[i], h);
+    }
+  }
   const stats = { cells: 0, lots: 0, shapes: 0 };
   const F_EMPTY = [];
 
@@ -715,7 +739,13 @@ export function createLotLayer(city, dress = dressLot) {
     const feats = cache.get(lot) || F_EMPTY;
     list = [];
     addLotSolids(SHAPE_SINK, feats, feats.length, list);
+    const n0 = list.length;
     addBayCars(city, SHAPE_SINK, feats, feats.length, list);
+    for (let i = n0; i < list.length; i++) {
+      carShapes.push(list[i]);
+      carLots.push(lot);
+      if (fillHour === fillHour) list[i].off = list[i].bayU >= lotFill(lot, fillHour);
+    }
     lotShapes[k] = list;
     stats.lots++;
     stats.shapes += list.length;
@@ -762,5 +792,5 @@ export function createLotLayer(city, dress = dressLot) {
     allShapes(() => n++);
     return n;
   }
-  return { cell, allShapes, prepare, count, shapesOf, stats, cache };
+  return { cell, allShapes, prepare, count, shapesOf, stats, cache, setHour };
 }

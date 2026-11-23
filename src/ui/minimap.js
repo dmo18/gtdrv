@@ -3,6 +3,8 @@
 //
 // Coordinates: x east, z south, meters. Heading 0 faces +x and grows toward +z.
 import { fillMapPicker } from './mappicker.js';
+import { shortStreet, formatEta } from '../core/route.js';
+import { formatDistance } from '../core/units.js';
 
 const MAP_PX = 2048;
 const COL = {
@@ -49,6 +51,15 @@ const ACT_STYLE = {
   stunt: { color: '#b48cff', name: 'Stunt jump' },
 };
 const LABEL_ZOOM = 2; // full-map zoom at which marker labels appear
+// GPS route line (src/core/route.js): a bright blue line with a dark edge, white chevrons on the full map.
+export const ROUTE_COLOR = '#3d8bff';
+const ROUTE_EDGE = 'rgba(6, 16, 34, 0.9)';
+const LONG_PRESS_MS = 600; // full map: a long press clears the destination
+const MAX_LABELS = 160; // street names drawn at once on the full map
+const STREET_PX_PER_M = 0.35; // a real map opens at this scale round the player (about a mile across)
+// Road class rank for street name priority (bigger first).
+const SLOT_TRY = [0, -0.2, 0.2, -0.35, 0.35]; // where along its slot a name may sit
+const CLASS_RANK = { motorway: 6, trunk: 5, primary: 4, secondary: 3, tertiary: 2, causeway: 3 };
 
 // Adventure and garage markers (src/systems/adventures.js, through mapui.addLayer): an adventure is
 // a ring with a question mark, a check mark once done; a garage is the garage glyph; the tracked
@@ -256,6 +267,8 @@ export function createMinimap(canvas, mapRenderer) {
     const blips = s.blips;
     if (blips) for (let i = 0; i < blips.length; i++) sum += blips[i].x * 1.37 + blips[i].z * 0.73 + (blips[i].label ? blips[i].label.length * 0.011 : 0);
     if (s.waypoint) sum += s.waypoint.x * 3.1 + s.waypoint.z * 2.3;
+    if (s.route && s.route.ok) sum += s.route.rev * 7.7 + (s.routeSeg | 0) * 0.37;
+    if (s.northUp) sum += 0.5;
     return sum;
   }
 
@@ -272,7 +285,8 @@ export function createMinimap(canvas, mapRenderer) {
 
     const pxPerM = R / s.zoomMeters; // screen px per meter
     const k = pxPerM / mapScale; // map px -> screen px
-    const rot = -Math.PI / 2 - s.heading;
+    // Heading-up (default) turns the map with the craft; north-up keeps north at the top.
+    const rot = s.northUp ? 0 : -Math.PI / 2 - s.heading;
     const cos = Math.cos(rot) * k, sin = Math.sin(rot) * k;
     mapRenderer.worldToMap(s.x, s.z, tmp);
 
@@ -289,8 +303,31 @@ export function createMinimap(canvas, mapRenderer) {
     ctx.drawImage(mapRenderer.canvas, 0, 0);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    // Waypoint and blips (screen space).
+    // The route ahead: a thick line under everything else (screen space, clipped by the rim).
     const c = Math.cos(rot), sn = Math.sin(rot);
+    const rt = s.route;
+    if (rt && rt.ok && rt.n > 1) {
+      const reach = s.zoomMeters * 2.5;
+      const i0 = Math.max(0, Math.min(rt.n - 2, s.routeSeg | 0));
+      const a0 = rt.cum[i0];
+      ctx.beginPath();
+      ctx.moveTo(cx + (c * (rt.x[i0] - s.x) - sn * (rt.z[i0] - s.z)) * pxPerM, cy + (sn * (rt.x[i0] - s.x) + c * (rt.z[i0] - s.z)) * pxPerM);
+      for (let i = i0 + 1; i < rt.n; i++) {
+        const dx = rt.x[i] - s.x, dz = rt.z[i] - s.z;
+        ctx.lineTo(cx + (c * dx - sn * dz) * pxPerM, cy + (sn * dx + c * dz) * pxPerM);
+        if (rt.cum[i] - a0 > reach) break;
+      }
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = ROUTE_EDGE;
+      ctx.lineWidth = 8;
+      ctx.stroke();
+      ctx.strokeStyle = ROUTE_COLOR;
+      ctx.lineWidth = 5;
+      ctx.stroke();
+    }
+
+    // Waypoint and blips (screen space).
     if (s.waypoint) {
       project(s.waypoint.x - s.x, s.waypoint.z - s.z);
       ctx.fillStyle = '#ffffff';
@@ -393,7 +430,12 @@ export function createMinimap(canvas, mapRenderer) {
     ctx.textBaseline = 'middle';
     ctx.fillText('N', nx, ny + 0.5);
 
-    // Player arrow (always pointing up).
+    // Player arrow (pointing up heading-up; along the heading north-up).
+    if (s.northUp) {
+      ctx.translate(cx, cy);
+      ctx.rotate(s.heading + Math.PI / 2);
+      ctx.translate(-cx, -cy);
+    }
     ctx.fillStyle = PLAYER_COLOR;
     ctx.strokeStyle = '#1a120d';
     ctx.lineWidth = 2;
@@ -405,6 +447,7 @@ export function createMinimap(canvas, mapRenderer) {
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   // project() writes into px/py/clamped (module-level scratch via closure).
@@ -425,7 +468,7 @@ export function createMinimap(canvas, mapRenderer) {
 
   return {
     draw(s) {
-      curRot = -Math.PI / 2 - s.heading;
+      curRot = s.northUp ? 0 : -Math.PI / 2 - s.heading;
       curK = R / s.zoomMeters;
       draw(s);
     },
@@ -478,6 +521,24 @@ const MAP_CSS = `
   padding: 10px; border-radius: 16px; background: rgba(14,26,32,0.96); border: 2px solid ${COL.accent}; touch-action: pan-y;
 }
 .rw-map-travelh { font-size: 13px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 4px 8px; }
+.rw-map-zoom {
+  position: absolute; right: calc(var(--rw-map-sr) + 14px); top: calc(var(--rw-map-st) + 76px);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.rw-map-zoom button, .rw-map-north {
+  width: 48px; height: 48px; border-radius: 12px; border: 2px solid rgba(246,239,230,0.5); padding: 0;
+  background: ${COL.panel}; color: ${COL.text}; font: inherit; font-size: 26px; font-weight: 800; line-height: 1; cursor: pointer; touch-action: manipulation;
+}
+.rw-map-north {
+  position: absolute; left: calc(var(--rw-map-sl) + 10px); top: calc(var(--rw-map-st) + 52px);
+  width: auto; height: 48px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 700;
+}
+.rw-map-route {
+  position: absolute; left: 50%; top: calc(var(--rw-map-st) + 12px); transform: translateX(-50%); max-width: 44%;
+  padding: 7px 14px; border-radius: 999px; background: rgba(8, 22, 44, 0.9); border: 2px solid ${ROUTE_COLOR};
+  font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.rw-map-route[hidden] { display: none; }
 .rw-map-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .rw-map-legend canvas { width: 18px; height: 18px; }
 `;
@@ -611,7 +672,53 @@ function drawIcon(g, type, color, s) {
   }
 }
 
-export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel = null } = {}) {
+// Street name runs for the full map: straight stretches of one name (edges
+// joined through junctions while the road goes on straight), biggest roads
+// first. Built once per renderer, on the first open.
+function buildStreetRuns(city) {
+  const nodes = city.nodes || [], edges = city.edges || [];
+  const used = new Uint8Array(edges.length);
+  const runs = [];
+  const next = (e, at) => { // the straight same-name continuation of e at node `at`
+    const n = nodes[at];
+    if (!n || !n.edges) return null;
+    const tx = e.b === at ? e.ux : -e.ux, tz = e.b === at ? e.uz : -e.uz;
+    let best = null, bd = 0.95;
+    for (const id of n.edges) {
+      const o = edges[id];
+      if (o === e || used[id] || o.name !== e.name) continue;
+      const ox = o.a === at ? o.ux : -o.ux, oz = o.a === at ? o.uz : -o.uz;
+      const d = ox * tx + oz * tz;
+      if (d > bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+  for (const e0 of edges) {
+    if (!e0.name || used[e0.id]) continue;
+    used[e0.id] = 1;
+    let len = e0.length || 0;
+    let endB = e0.b, endA = e0.a;
+    for (let e = e0, at = e0.b, g = 0; g < 200; g++) {
+      const o = next(e, at);
+      if (!o) break;
+      used[o.id] = 1; len += o.length || 0;
+      at = o.a === at ? o.b : o.a; e = o; endB = at;
+    }
+    for (let e = e0, at = e0.a, g = 0; g < 200; g++) {
+      const o = next(e, at);
+      if (!o) break;
+      used[o.id] = 1; len += o.length || 0;
+      at = o.a === at ? o.b : o.a; e = o; endA = at;
+    }
+    const A = nodes[endA], B = nodes[endB];
+    if (!A || !B || len < 40) continue;
+    runs.push({ name: e0.name, short: shortStreet(e0.name), x0: A.x, z0: A.z, x1: B.x, z1: B.z, len, rank: (CLASS_RANK[e0.cls] || (e0.avenue ? 2 : 1)) - (e0.ped ? 1 : 0) });
+  }
+  runs.sort((a, b) => b.rank - a.rank || b.len - a.len || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return runs;
+}
+
+export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel = null, routeInfo = null, onNorthUp = null, northUp = false } = {}) {
   injectCss();
   const city = mapRenderer.city;
   const el = document.createElement('div');
@@ -623,7 +730,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   el.appendChild(canvas);
   const title = document.createElement('div');
   title.className = 'rw-map-title';
-  title.innerHTML = 'Rustwater<small>Drag to pan, pinch to zoom, tap to set a waypoint</small>';
+  title.innerHTML = 'Rustwater<small>Tap to go there, hold to clear</small>';
   el.appendChild(title);
   const closeBtn = document.createElement('button');
   closeBtn.className = 'rw-map-close';
@@ -637,10 +744,42 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   const toast = document.createElement('div');
   toast.className = 'rw-map-toast';
   el.appendChild(toast);
+  // Zoom buttons (next to pinch), the minimap's north-up switch and the route summary.
+  const zoomBox = document.createElement('div');
+  zoomBox.className = 'rw-map-zoom';
+  const zoomBtn = (txt, role, label, f) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = txt; b.dataset.role = role; b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => { setZoom(view.zoom * f, cw / 2, ch / 2); schedule(); });
+    zoomBox.appendChild(b);
+    return b;
+  };
+  zoomBtn('+', 'map-zoom-in', 'Zoom in', 1.8);
+  zoomBtn('\u2212', 'map-zoom-out', 'Zoom out', 1 / 1.8);
+  el.appendChild(zoomBox);
+  let north = !!northUp;
+  const northBtn = document.createElement('button');
+  northBtn.type = 'button';
+  northBtn.className = 'rw-map-north';
+  northBtn.dataset.role = 'map-northup';
+  const paintNorth = () => {
+    northBtn.textContent = north ? 'Minimap: north up' : 'Minimap: heading up';
+    northBtn.setAttribute('aria-pressed', String(north));
+  };
+  paintNorth();
+  northBtn.addEventListener('click', () => { north = !north; paintNorth(); if (onNorthUp) onNorthUp(north); });
+  el.appendChild(northBtn);
+  const routeEl = document.createElement('div');
+  routeEl.className = 'rw-map-route';
+  routeEl.dataset.role = 'map-route';
+  routeEl.hidden = true;
+  el.appendChild(routeEl);
   // The Travel list (PLAN_V2 3.4): every region, tap to go. travel = { current, go(id) -> message or '' }.
   let travelPanel = null;
+  let travelBtn = null;
   if (travel) {
     const tb = document.createElement('button');
+    travelBtn = tb;
     tb.className = 'rw-map-travelbtn';
     tb.type = 'button';
     tb.dataset.role = 'map-travel';
@@ -679,6 +818,13 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   let dirty = false;
   const pointers = new Map(); // id -> {x, y}
   let gesture = null;
+  // A real map's region box: the view fits it, and the rest is dimmed.
+  const crop = city.crop && Number.isFinite(city.crop.x0) ? city.crop : null;
+  let runs = null; // street name runs, on first open
+  const runBoxes = new Float32Array((MAX_LABELS + 8) * 4);
+  const placedRun = new Array(MAX_LABELS).fill('');
+  const textW = new Map(); // label -> width at the label font
+  const stats = { labels: 0, routePts: 0, roads: 0 };
 
   function buildLegend() {
     legend.textContent = '';
@@ -743,9 +889,13 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     ch = el.clientHeight || window.innerHeight;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
-    fitPpm = Math.min(cw, ch) / ((city.mapHalf || city.size) * 0.95 * 2);
+    fitPpm = crop
+      ? Math.min(cw / ((crop.x1 - crop.x0) * 1.04), ch / ((crop.z1 - crop.z0) * 1.04))
+      : Math.min(cw, ch) / ((city.mapHalf || city.size) * 0.95 * 2);
     view.ppm = fitPpm * view.zoom;
   }
+  // Highest zoom: street level (about 5 px per meter) on a real map.
+  const maxZoom = () => Math.max(8, 5 / fitPpm);
 
   const toWorld = (sx, sy, out) => {
     out.x = view.cx + (sx - cw / 2) / view.ppm;
@@ -760,6 +910,11 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   const tmpW = { x: 0, z: 0 }, tmpS = { x: 0, y: 0 };
 
   function clampView() {
+    if (crop) {
+      view.cx = Math.max(crop.x0, Math.min(crop.x1, view.cx));
+      view.cz = Math.max(crop.z0, Math.min(crop.z1, view.cz));
+      return;
+    }
     const lim = (city.mapHalf || city.size * 1.6) * 0.95;
     view.cx = Math.max(-lim, Math.min(lim, view.cx));
     view.cz = Math.max(-lim, Math.min(lim, view.cz));
@@ -769,11 +924,183 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     // Zoom keeping the world point under screen (ax, ay) fixed.
     toWorld(ax, ay, tmpW);
     const wx = tmpW.x, wz = tmpW.z;
-    view.zoom = Math.max(0.6, Math.min(8, z));
+    view.zoom = Math.max(0.6, Math.min(maxZoom(), z));
     view.ppm = fitPpm * view.zoom;
     view.cx = wx - (ax - cw / 2) / view.ppm;
     view.cz = wz - (ay - ch / 2) / view.ppm;
     clampView();
+  }
+
+  // Road strips as vector lines (only the ones in view).
+  function drawRoads() {
+    const nodes = city.nodes, edges = city.edges;
+    if (!nodes || !edges) return;
+    const mx = 40 / view.ppm;
+    toWorld(0, 0, tmpW);
+    const wx0 = tmpW.x - mx, wz0 = tmpW.z - mx;
+    toWorld(cw, ch, tmpW);
+    const wx1 = tmpW.x + mx, wz1 = tmpW.z + mx;
+    g.lineCap = 'round';
+    for (let pass = 0; pass < 2; pass++) {
+      g.strokeStyle = pass ? COL.avenue : COL.road;
+      for (let i = 0; i < edges.length; i++) {
+        const e = edges[i];
+        if (!!e.avenue !== (pass === 1)) continue;
+        const a = nodes[e.a], b = nodes[e.b];
+        if ((a.x < wx0 && b.x < wx0) || (a.x > wx1 && b.x > wx1) || (a.z < wz0 && b.z < wz0) || (a.z > wz1 && b.z > wz1)) continue;
+        g.lineWidth = Math.max(1.5, (e.width || 8) * view.ppm);
+        g.beginPath();
+        toScreen(a.x, a.z, tmpS); g.moveTo(tmpS.x, tmpS.y);
+        toScreen(b.x, b.z, tmpS); g.lineTo(tmpS.x, tmpS.y);
+        g.stroke();
+        stats.roads++;
+      }
+    }
+  }
+
+  // The route still ahead: a blue line with white chevrons every 64 px.
+  function drawRoute() {
+    stats.routePts = 0;
+    const info = routeInfo ? routeInfo() : null;
+    const r = info && info.route;
+    if (!r || !r.ok || r.n < 2) return;
+    const i0 = Math.max(0, Math.min(r.n - 2, info.seg | 0));
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    g.beginPath();
+    for (let i = i0; i < r.n; i++) {
+      toScreen(r.x[i], r.z[i], tmpS);
+      if (i === i0) g.moveTo(tmpS.x, tmpS.y); else g.lineTo(tmpS.x, tmpS.y);
+    }
+    const w = Math.max(5, Math.min(12, 4 * view.ppm));
+    g.strokeStyle = ROUTE_EDGE;
+    g.lineWidth = w + 4;
+    g.stroke();
+    g.strokeStyle = ROUTE_COLOR;
+    g.lineWidth = w;
+    g.stroke();
+    stats.routePts = r.n - i0;
+    // Chevrons along the line, pointing the way.
+    const gap = 64, cs = Math.max(3.5, w * 0.55);
+    let carry = gap / 2;
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 2.2;
+    toScreen(r.x[i0], r.z[i0], tmpS);
+    let px = tmpS.x, py = tmpS.y;
+    g.beginPath();
+    for (let i = i0 + 1; i < r.n; i++) {
+      toScreen(r.x[i], r.z[i], tmpS);
+      const dx = tmpS.x - px, dy = tmpS.y - py, L = Math.hypot(dx, dy);
+      if (L > 0.01) {
+        const ux = dx / L, uy = dy / L;
+        let t = carry;
+        while (t < L) {
+          const x = px + ux * t, y = py + uy * t;
+          if (x > -20 && y > -20 && x < cw + 20 && y < ch + 20) {
+            g.moveTo(x - ux * cs - uy * cs, y - uy * cs + ux * cs);
+            g.lineTo(x, y);
+            g.lineTo(x - ux * cs + uy * cs, y - uy * cs - ux * cs);
+          }
+          t += gap;
+        }
+        carry = t - L;
+      }
+      px = tmpS.x; py = tmpS.y;
+    }
+    g.stroke();
+  }
+
+  // Street names along their roads, biggest roads first, never overlapping;
+  // a name shows once its stretch is long enough on screen to hold it.
+  function drawStreetNames() {
+    stats.labels = 0;
+    if (!city.nodes || !city.edges) return;
+    if (!runs) runs = buildStreetRuns(city);
+    if (!runs.length || view.ppm < 0.035) return;
+    g.font = '700 12px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    // The map's own buttons and panels are taken first: no name under them.
+    let reserved = 0;
+    const cr = canvas.getBoundingClientRect();
+    for (const b of [title, northBtn, zoomBox, closeBtn, legend, routeEl, travelBtn]) {
+      if (!b || b.hidden || reserved >= 8) continue;
+      const r = b.getBoundingClientRect();
+      if (!(r.width > 0)) continue;
+      const o = reserved * 4;
+      runBoxes[o] = r.left - cr.left - 4; runBoxes[o + 1] = r.top - cr.top - 4;
+      runBoxes[o + 2] = r.right - cr.left + 4; runBoxes[o + 3] = r.bottom - cr.top + 4;
+      reserved++;
+    }
+    let placed = 0;
+    for (let k = 0; k < runs.length && placed < MAX_LABELS; k++) {
+      const rn = runs[k];
+      const L = rn.len * view.ppm;
+      let w = textW.get(rn.short);
+      if (w === undefined) { w = g.measureText(rn.short).width; textW.set(rn.short, w); }
+      if (L < w + 24) continue;
+      toScreen(rn.x0, rn.z0, tmpS);
+      const sx0 = tmpS.x, sy0 = tmpS.y;
+      toScreen(rn.x1, rn.z1, tmpS);
+      const sx1 = tmpS.x, sy1 = tmpS.y;
+      if ((sx0 < 0 && sx1 < 0) || (sx0 > cw && sx1 > cw) || (sy0 < 0 && sy1 < 0) || (sy0 > ch && sy1 > ch)) continue;
+      let ang = Math.atan2(sy1 - sy0, sx1 - sx0);
+      if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+      const ca = Math.abs(Math.cos(ang)), sa = Math.abs(Math.sin(ang));
+      const hw = w / 2 + 3, hh = 7;
+      const ex = ca * hw + sa * hh, ey = sa * hw + ca * hh;
+      const count = Math.max(1, Math.min(4, Math.floor(L / (w * 5 + 200))));
+      for (let j = 0; j < count && placed < MAX_LABELS; j++) {
+        // The slot's middle first, then a little either side, until one is free.
+        let x = 0, y = 0, free = false;
+        for (let c = 0; c < SLOT_TRY.length && !free; c++) {
+          const t = (j + 0.5 + SLOT_TRY[c]) / count;
+          x = sx0 + (sx1 - sx0) * t; y = sy0 + (sy1 - sy0) * t;
+          if (x < ex || y < ey || x > cw - ex || y > ch - ey) continue; // inside the screen
+          let hit = false;
+          for (let q = 0; q < placed + reserved && !hit; q++) {
+            const o = q * 4;
+            hit = x - ex < runBoxes[o + 2] && x + ex > runBoxes[o] && y - ey < runBoxes[o + 3] && y + ey > runBoxes[o + 1];
+          }
+          free = !hit;
+        }
+        if (!free) continue;
+        // The same name close by already (a divided road's other half): once is enough.
+        let twin = false;
+        for (let q = 0; q < placed && !twin; q++) {
+          if (placedRun[q] !== rn.short) continue;
+          const o = (q + reserved) * 4;
+          twin = Math.abs((runBoxes[o] + runBoxes[o + 2]) / 2 - x) < 170 && Math.abs((runBoxes[o + 1] + runBoxes[o + 3]) / 2 - y) < 170;
+        }
+        if (twin) continue;
+        placedRun[placed] = rn.short;
+        const o = (placed + reserved) * 4;
+        runBoxes[o] = x - ex; runBoxes[o + 1] = y - ey; runBoxes[o + 2] = x + ex; runBoxes[o + 3] = y + ey;
+        placed++;
+        g.save();
+        g.translate(x, y);
+        g.rotate(ang);
+        g.lineWidth = 3.5;
+        g.strokeStyle = 'rgba(14, 22, 28, 0.92)';
+        g.strokeText(rn.short, 0, 0);
+        g.fillStyle = rn.rank >= 3 ? '#fff3c4' : '#f2f2ee';
+        g.fillText(rn.short, 0, 0);
+        g.restore();
+      }
+    }
+    stats.labels = placed;
+  }
+
+  // The route summary pill: "To Waypoint: 1.2 mi, 4 min".
+  function paintRouteInfo() {
+    const info = routeInfo ? routeInfo() : null;
+    const r = info && info.route;
+    if (!r || !r.ok) { routeEl.hidden = true; return; }
+    const left = Math.max(0, info.remaining !== undefined ? info.remaining : r.length);
+    const eta = info.eta !== undefined ? info.eta : r.time;
+    routeEl.textContent = (info.label ? info.label + ': ' : '') + formatDistance(left) + ', ' + formatEta(eta) + (r.partial ? ' (nearest road)' : '');
+    routeEl.hidden = false;
   }
 
   function render() {
@@ -785,6 +1112,23 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     toScreen(-mapRenderer.half, -mapRenderer.half, tmpS);
     g.imageSmoothingQuality = 'high';
     g.drawImage(mapRenderer.canvas, tmpS.x, tmpS.y, mapRenderer.size * k, mapRenderer.size * k);
+    // Zoomed past the raster: the roads again as sharp lines.
+    stats.roads = 0;
+    if (view.ppm > mapRenderer.scale * 1.3) drawRoads();
+    // Other regions dimmed: only this region's box is in full color.
+    if (crop) {
+      toScreen(crop.x0, crop.z0, tmpS);
+      const x0 = tmpS.x, y0 = tmpS.y;
+      toScreen(crop.x1, crop.z1, tmpS);
+      const x1 = tmpS.x, y1 = tmpS.y;
+      g.fillStyle = 'rgba(6, 12, 16, 0.55)';
+      if (y0 > 0) g.fillRect(0, 0, cw, y0);
+      if (y1 < ch) g.fillRect(0, y1, cw, ch - y1);
+      if (x0 > 0) g.fillRect(0, Math.max(0, y0), x0, Math.min(ch, y1) - Math.max(0, y0));
+      if (x1 < cw) g.fillRect(x1, Math.max(0, y0), cw - x1, Math.min(ch, y1) - Math.max(0, y0));
+    }
+    drawStreetNames();
+    drawRoute();
 
     // POIs.
     const iconS = 13;
@@ -886,14 +1230,16 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     if (goal) {
       toScreen(goal.x, goal.z, tmpS);
       g.save();
-      g.setLineDash([8, 7]);
-      g.strokeStyle = '#ffd34d';
-      g.lineWidth = 3;
-      g.beginPath();
-      g.moveTo(px, py);
-      g.lineTo(tmpS.x, tmpS.y);
-      g.stroke();
-      g.setLineDash([]);
+      if (!stats.routePts) { // no road route: the straight line
+        g.setLineDash([8, 7]);
+        g.strokeStyle = '#ffd34d';
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(tmpS.x, tmpS.y);
+        g.stroke();
+        g.setLineDash([]);
+      }
       g.fillStyle = 'rgba(255, 211, 77, 0.28)';
       g.strokeStyle = '#ffd34d';
       g.lineWidth = 4;
@@ -944,9 +1290,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     if (waypoint) {
       toScreen(waypoint.x, waypoint.z, tmpS);
       if (Math.hypot(sx - tmpS.x, sy - (tmpS.y - 14)) < 30 || Math.hypot(sx - tmpS.x, sy - tmpS.y) < 30) {
-        waypoint = null;
-        if (onWaypoint) onWaypoint(null);
-        schedule();
+        clearWaypoint(false);
         return;
       }
     }
@@ -963,10 +1307,21 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
       }
     }
     if (near) { waypoint.x = near.x; waypoint.z = near.z; }
-    showToast(near ? 'Waypoint set to ' + near.name : '');
-    if (onWaypoint) onWaypoint({ x: waypoint.x, z: waypoint.z });
+    showToast(near ? 'Route to ' + near.name : '');
+    if (onWaypoint) onWaypoint({ x: waypoint.x, z: waypoint.z, label: near ? near.name : '' });
+    paintRouteInfo();
     schedule();
   }
+  function clearWaypoint(say) {
+    const had = !!waypoint;
+    waypoint = null;
+    if (onWaypoint) onWaypoint(null);
+    if (say && had) showToast('Destination cleared');
+    paintRouteInfo();
+    schedule();
+  }
+  let pressTimer = 0;
+  const stopPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = 0; } };
   let toastTimer = 0;
   function showToast(text) {
     toast.textContent = text;
@@ -990,10 +1345,23 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
       gesture = { sx: pts[0].x, sy: pts[0].y, cx: view.cx, cz: view.cz, t: performance.now(), moved: false };
     } else gesture = null;
   }
+  // Hold one finger still: the destination is cleared (and the lift is no tap).
+  function armPress() {
+    stopPress();
+    if (pointers.size !== 1 || !gesture || gesture.moved) return;
+    const gs = gesture;
+    pressTimer = setTimeout(() => {
+      pressTimer = 0;
+      if (gesture !== gs || gs.moved || pointers.size !== 1) return;
+      gs.moved = true;
+      clearWaypoint(true);
+    }, LONG_PRESS_MS);
+  }
   canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic or ended pointer */ }
     pointers.set(e.pointerId, localPos(e));
     startGesture();
+    armPress();
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId) || !gesture) return;
@@ -1006,7 +1374,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
       schedule();
     } else if (pts.length === 1 && gesture.sx !== undefined) {
       const dx = p.x - gesture.sx, dy = p.y - gesture.sy;
-      if (!gesture.moved && Math.hypot(dx, dy) > 10) gesture.moved = true;
+      if (!gesture.moved && Math.hypot(dx, dy) > 10) { gesture.moved = true; stopPress(); }
       if (gesture.moved) {
         view.cx = gesture.cx - dx / view.ppm;
         view.cz = gesture.cz - dy / view.ppm;
@@ -1018,7 +1386,12 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
   function endPointer(e, canceled) {
     if (!pointers.has(e.pointerId)) return;
     const p = pointers.get(e.pointerId);
-    const wasTap = !canceled && pointers.size === 1 && gesture && !gesture.moved && performance.now() - gesture.t < 600;
+    const still = !canceled && pointers.size === 1 && gesture && !gesture.moved;
+    const held = still ? performance.now() - gesture.t : 0;
+    const wasTap = still && held < LONG_PRESS_MS;
+    // A busy frame can hold the timer back: a still finger lifted late is the long press too.
+    if (still && !wasTap && pressTimer) { gesture.moved = true; clearWaypoint(true); }
+    stopPress();
     pointers.delete(e.pointerId);
     if (wasTap) tap(p.x, p.y);
     startGesture();
@@ -1041,6 +1414,7 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     pointers.clear();
     gesture = null;
     toast.style.opacity = '0';
+    stopPress();
     if (onClose) onClose();
   }
   closeBtn.addEventListener('click', close);
@@ -1050,17 +1424,48 @@ export function createFullMap(root, mapRenderer, { onWaypoint, onClose, travel =
     open(state) {
       st = { x: state.x, z: state.z, heading: state.heading, markers: state.markers || null };
       waypoint = state.waypoint ? { x: state.waypoint.x, z: state.waypoint.z } : null;
+      if (state.northUp !== undefined) { north = !!state.northUp; paintNorth(); }
       buildLegend();
       el.classList.add('rw-map-open');
       opened = true;
       view.zoom = 1;
       resize();
-      view.cx = 0;
-      view.cz = 0;
+      if (crop) {
+        // A real map opens round the player at street-name scale (zoom out for the whole region).
+        view.zoom = Math.max(1, Math.min(maxZoom(), STREET_PX_PER_M / fitPpm));
+        view.cx = st.x;
+        view.cz = st.z;
+        // With a destination: both the player and it in view (zoomed out as needed).
+        const info = routeInfo ? routeInfo() : null;
+        const dest = waypoint || (info && info.route && info.route.ok ? { x: info.route.destX, z: info.route.destZ } : null);
+        if (dest) {
+          const dx = Math.abs(dest.x - st.x) + 160, dz = Math.abs(dest.z - st.z) + 160;
+          const ppm = Math.min((cw - 160) / dx, (ch - 190) / dz);
+          view.zoom = Math.max(1, Math.min(view.zoom, ppm / fitPpm));
+          view.cx = (dest.x + st.x) / 2;
+          view.cz = (dest.z + st.z) / 2;
+        }
+        view.ppm = fitPpm * view.zoom;
+        clampView();
+      } else {
+        view.cx = 0;
+        view.cz = 0;
+      }
+      paintRouteInfo();
       render();
     },
     close,
     isOpen: () => opened,
+    // The destination was cleared or changed outside the map (arrival).
+    setWaypoint(p) { waypoint = p ? { x: p.x, z: p.z } : null; paintRouteInfo(); schedule(); },
+    // Redraw (the route changed while open).
+    refresh() { paintRouteInfo(); schedule(); },
+    // Zoom to a level (1 = fit) round the view center; tests and the zoom buttons.
+    setZoom(z) { setZoom(z, cw / 2, ch / 2); schedule(); },
+    centerOn(x, z) { view.cx = x; view.cz = z; clampView(); schedule(); },
+    // What the last frame drew (tests): street names, route points, vector roads.
+    getStats: () => ({ labels: stats.labels, routePts: stats.routePts, roads: stats.roads }),
+    renderNow: () => { if (opened) render(); },
     // Read-only view info, handy for tests.
     getView: () => ({ cx: view.cx, cz: view.cz, ppm: view.ppm, zoom: view.zoom, width: cw, height: ch }),
   };

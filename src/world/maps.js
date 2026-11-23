@@ -4,7 +4,7 @@
 // node tests.
 /* global __PROD__ */
 import { DISTRICTS } from './citygen.js';
-import { REGION_IDS, regionFor, loadRegionData, WHOLE_BOX } from './regions.js';
+import { REGION_IDS, regionFor, loadRegionData, WHOLE_BOX, DEFAULT_REGION } from './regions.js';
 
 // The island's name for its coast (the economy's 'shore' flag).
 export const SHORE_NAME = 'The Strand';
@@ -13,7 +13,9 @@ export const SHORE_NAME = 'The Strand';
 // ids load one region each.
 export const MAP_IDS = ['island', WHOLE_BOX, ...REGION_IDS];
 
-export const DEFAULT_MAP = 'miami-downtown';
+// A new player (no URL choice, no stored choice) plays the default region,
+// the Beach (regions.js DEFAULT_REGION, 0.9.0).
+export const DEFAULT_MAP = DEFAULT_REGION;
 
 // The URL parameter wins (tests and links); otherwise the map the player
 // picked in Settings (stored as its own key, see main.js); otherwise Miami.

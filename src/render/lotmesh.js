@@ -15,6 +15,8 @@ import { lotStamps } from './props.js';
 import { bayCar } from '../world/collision.js';
 import { lotDressCache, lotFill, dressLot } from '../world/lots.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
+import { PROP_SOLIDS } from '../world/propsolid.js';
+const BREAKS = new Set(Object.keys(PROP_SOLIDS).filter((k) => PROP_SOLIDS[k].mode === 'break'));
 
 // A flat quad through four corners (as citymesh's orientedQuad; kept
 // here so the two modules do not import each other).
@@ -280,9 +282,13 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
   const y = LOT_Y;
   const R = C.R || {};
+  // A breakable feature lying broken (world/collision.js isBroken) is left
+  // out of a tile rebuilt after the break, as the street props are.
+  const gone = C.city && typeof C.city.propBroken === 'function' ? C.city.propBroken : null;
   let drawn = 0;
   for (let q = from; q < n; q++) {
     const f = feats[q];
+    if (gone && BREAKS.has(f.kind) && gone(f.x, f.z)) continue;
     const x = f.x, z = f.z, h = f.heading || 0;
     const ca = Math.cos(h), sa = Math.sin(h);
     const hl = (f.l || 0) / 2, hw = (f.w || 0) / 2;
@@ -491,8 +497,7 @@ export function lotCarColor(specIdx, r) {
 // here, the parked-car system puts a real car in it), else the bay's hash
 // u in 0..fill. Same hash as the collision world.
 export function lotCarAt(city, bx, bz, v, fill) {
-  const u = bayCar(city, bx, bz, v);
-  return u >= 0 && u < fill ? u : -1;
+  return bayCar(city, bx, bz, v, fill);
 }
 
 function hash2(x, z, k) {
