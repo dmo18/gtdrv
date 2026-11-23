@@ -1410,7 +1410,7 @@ export function dressLot(city, lot, out = []) {
     default:
       break;
   }
-  fill(lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out);
+  fill(city, lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out);
   return out;
 }
 
@@ -1419,13 +1419,22 @@ export function dressLot(city, lot, out = []) {
 // gets more of what its type holds, at random points, while the cap
 // allows: trees in grates, planters and benches on paving; tree clusters
 // and shrub beds on a lawn; goods in a works yard or on a site.
-function fill(lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out) {
+const FILL_CELLS = new Int32Array(4096);
+function fill(city, lot, cap, rng, put, putLong, clearAt, grateTree, cluster, bed, seatWall, tree, set, out) {
   if (lot.area <= DENSITY_MIN_AREA || lot.type === 'beach') return;
   const need = lot.area / DENSITY_M2;
   let u = lotEmptiness(out);
-  const { x0, z0, x1, z1 } = lot;
+  if (u >= need) return;
+  // Points are drawn from the lot's own cells (a lot can be a thin strip
+  // round its building: most of its box is not the lot).
+  const G = city.lotGrid, cell = G.cell;
+  const i0 = Math.round((lot.x0 - G.x0) / cell), i1 = Math.round((lot.x1 - G.x0) / cell), j0 = Math.round((lot.z0 - G.z0) / cell), j1 = Math.round((lot.z1 - G.z0) / cell);
+  let nc = 0;
+  for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) if (G.id[j * G.w + i] === lot.id && nc < FILL_CELLS.length) FILL_CELLS[nc++] = j * G.w + i;
+  if (!nc) return;
   for (let t = 0, miss = 0; t < 240 && miss < 60 && u < need && out.length < cap; t++) {
-    const x = x0 + 2 + rng.next() * (x1 - x0 - 4), z = z0 + 2 + rng.next() * (z1 - z0 - 4);
+    const c = FILL_CELLS[Math.floor(rng.next() * nc)];
+    const x = G.x0 + ((c % G.w) + rng.next()) * cell, z = G.z0 + (Math.floor(c / G.w) + rng.next()) * cell;
     const n0 = out.length;
     // Close to the cap: long things only (a bed or a seat wall of 12 m
     // is 2.4 units in one feature).
