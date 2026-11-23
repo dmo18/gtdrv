@@ -213,6 +213,8 @@ async function liveLayout(check) {
     await pg.goto(`${base}?autostart`);
     await pg.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
     await pg.waitForTimeout(1500);
+    // The fleet is made nearest first over the first seconds of play (H1): wait for it before freezing the clock.
+    await pg.waitForFunction(() => !window.__rw.fleet || window.__rw.fleet.ready, null, { timeout: 60000 });
     // Stop the simulation clock from moving things (crafts, camera) while we measure.
     await pg.evaluate(() => { window.__rw.loop.stop && window.__rw.loop.stop(); });
     const problems = [];
