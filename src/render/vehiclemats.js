@@ -475,12 +475,33 @@ function setStrip(tex, cells) {
 const GLYPHS = {
   R: [30, 17, 17, 30, 20, 18, 17], W: [17, 17, 17, 21, 21, 21, 10], '-': [0, 0, 0, 31, 0, 0, 0],
   4: [2, 6, 10, 18, 31, 2, 2], 8: [14, 17, 17, 14, 17, 17, 14], 2: [14, 17, 1, 2, 4, 8, 31], 1: [4, 12, 4, 4, 4, 4, 14],
+  T: [31, 4, 4, 4, 4, 4, 4], A: [14, 17, 17, 31, 17, 17, 17], X: [17, 17, 10, 4, 10, 17, 17], I: [14, 4, 4, 4, 4, 4, 14],
+  S: [15, 16, 16, 14, 1, 1, 30], C: [14, 17, 16, 16, 16, 17, 14], H: [17, 17, 17, 31, 17, 17, 17], O: [14, 17, 17, 17, 17, 17, 14],
+  L: [16, 16, 16, 16, 16, 16, 31], B: [30, 17, 17, 30, 17, 17, 30], U: [17, 17, 17, 17, 17, 17, 14], P: [30, 17, 17, 30, 16, 16, 16],
 };
 export const PLATE_TEXT = 'RWT H82';
+// Sign words in the free rows of each atlas half, over the plate's
+// columns (x 80..127): rows 0..7 ('top') and 24..31 ('low'); half 0 is the
+// front (head) half, 1 the rear (tail) half. Background and letter colors.
+export const SIGN_TEXT = {
+  taxi: { half: 0, row: 'top', text: 'TAXI', bg: 0xf4c81c, fg: 0x141414 },
+  school: { half: 0, row: 'low', text: 'SCHOOL', bg: 0xf2b400, fg: 0x141414 },
+  bus: { half: 1, row: 'top', text: 'BUS', bg: 0xf2b400, fg: 0x141414 },
+  stop: { half: 1, row: 'low', text: 'STOP', bg: 0xc4121c, fg: 0xf4f4f4 },
+};
+// The atlas rectangle (u, v within one half, 0..1) of a sign word, inset
+// half a texel so linear filtering never reaches the next row.
+export function signUV(key) {
+  const t = SIGN_TEXT[key];
+  const x0 = 80 + Math.floor((48 - t.text.length * 6 + 1) / 2) - 1;
+  const x1 = x0 + t.text.length * 6 + 1;
+  const y0 = t.row === 'top' ? 0 : 24;
+  return { u0: (x0 + 0.5) / 128, u1: (x1 - 0.5) / 128, v0: (y0 + 0.5) / 32, v1: (y0 + 7.5) / 32, half: t.half, bg: t.bg };
+}
 // RGBA pixels of one half of the lamp atlas (128 x 32), one 16 px column
 // per strip cell: lens cells 0..3, housing cell 4, then the plate in
 // cells 5..7 (x 80..127, rows 8..23). Pure, so tests can read it.
-export function lampAtlasPixels(base) {
+export function lampAtlasPixels(base, half = -1) {
   const Wd = 128, Hd = 32;
   const d = new Uint8Array(Wd * Hd * 4);
   const put = (x, y, hex) => {
@@ -507,6 +528,19 @@ export function lampAtlasPixels(base) {
     }
     cx += 6;
   }
+  // Sign words of this half (none on the light bar's atlas).
+  for (const k in SIGN_TEXT) {
+    const t = SIGN_TEXT[k];
+    if (t.half !== half) continue;
+    const y0 = t.row === 'top' ? 0 : 24;
+    for (let y = y0; y < y0 + 8; y++) for (let x = 80; x < Wd; x++) put(x, y, t.bg);
+    let tx = 80 + Math.floor((48 - t.text.length * 6 + 1) / 2);
+    for (const ch of t.text) {
+      const g = GLYPHS[ch];
+      for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) if (g[r] & (16 >> c)) put(tx + c, y0 + 7 - r, t.fg);
+      tx += 6;
+    }
+  }
   return d;
 }
 function atlasTex(pixels, w) {
@@ -522,7 +556,7 @@ const TAIL_BASE = [0x8a161a, 0x8a7e80, 0xc08a3a, 0x8a161a, 0x2a0507];
 const BAR_BASE = [0x8a1a1e, 0x1a2a8a, 0xe8e8e8, 0x1a1b1e, 0x1a1b1e];
 // Front half and rear half side by side (256 x 32).
 export function lampPairPixels() {
-  const a = lampAtlasPixels(HEAD_BASE), b = lampAtlasPixels(TAIL_BASE);
+  const a = lampAtlasPixels(HEAD_BASE, 0), b = lampAtlasPixels(TAIL_BASE, 1);
   const d = new Uint8Array(256 * 32 * 4);
   for (let y = 0; y < 32; y++) {
     d.set(a.subarray(y * 512, y * 512 + 512), y * 1024);

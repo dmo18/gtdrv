@@ -34,29 +34,32 @@ const G = 9.81;
 //   away from / back toward the center), accel (rough launch acceleration,
 //   m/s^2, informative). Tuned to the bands of src/entities/handlingbands.js.
 export const VEHICLE_SPECS = {
+  // The fleet of docs/FLEET.md: the compact sedan (the hatchback retired).
   compact: {
-    id: 'compact', label: 'Bramlet', body: 'hatch',
-    length: 3.8, width: 1.7, height: 1.45, wheelBase: 2.4, wheelRadius: 0.3,
-    mass: 1100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.8, grip: 0.95, steerMax: 0.43,
+    id: 'compact', label: 'Marlow', body: 'sedan',
+    length: 4.45, width: 1.76, height: 1.43, wheelBase: 2.62, wheelRadius: 0.32,
+    mass: 1350, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.8, grip: 0.95, steerMax: 0.43,
     lockRate: 3.3, returnRate: 4.2,
     drive: 'fwd', gears: 5, power: 58, firstGear: 13, cgFront: 0.62,
-    health: 700, colors: [0xc8402e, 0x3a7bd5, 0xe8e2d0, 0x6bbf59, 0xf0a030],
+    health: 700, colors: [0xeeeeec, 0x1b1c1f, 0xa9adb2, 0x5c6167, 0x8e1b1f, 0x2b4a7a, 0x3f5a4a],
   },
+  // The full-size sedan (the Selwick retired); the taxi and the police car
+  // share its body.
   sedan: {
-    id: 'sedan', label: 'Selwick', body: 'sedan',
-    length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
+    id: 'sedan', label: 'Brigham', body: 'sedan',
+    length: 4.85, width: 1.85, height: 1.47, wheelBase: 2.95, wheelRadius: 0.35,
     mass: 1450, maxSpeed: 51.4, reverseSpeed: 9, accel: 3.5, brake: 10.1, grip: 0.95, steerMax: 0.48,
     lockRate: 3.3, returnRate: 4.2,
     drive: 'fwd', gears: 5, power: 92, firstGear: 14, cgFront: 0.6,
-    health: 900, colors: [0x2f3b4c, 0x8a8f96, 0xd9d9d9, 0x5a1f24, 0x1f4a3a, 0x202020],
+    health: 900, colors: [0x1b1c1f, 0xeeeeec, 0xa9adb2, 0x4a4f55, 0x1c2a44, 0x5a1a20, 0x6b6052],
   },
   sports: {
-    id: 'sports', label: 'Vexari R', body: 'coupe',
-    length: 4.4, width: 1.95, height: 1.2, wheelBase: 2.6, wheelRadius: 0.34,
-    mass: 1400, maxSpeed: 70, reverseSpeed: 10, accel: 7, brake: 11.3, grip: 1.18, steerMax: 0.45,
+    id: 'sports', label: 'Kestrel', body: 'coupe',
+    length: 4.55, width: 1.93, height: 1.23, wheelBase: 2.72, wheelRadius: 0.34,
+    mass: 1550, maxSpeed: 70, reverseSpeed: 10, accel: 7, brake: 11.3, grip: 1.18, steerMax: 0.45,
     lockRate: 3.8, returnRate: 5.0,
     drive: 'rwd', gears: 6, power: 220, firstGear: 18, cgFront: 0.45,
-    health: 750, colors: [0xd81e2a, 0xf2d21b, 0x1e6fd8, 0xf5f5f5, 0x111111, 0xff7a1a],
+    health: 750, colors: [0xc8161e, 0xeeeeec, 0x111214, 0xe8b60f, 0x1e5fc8, 0x9aa0a6],
   },
   // The secret car (world/secrets.js): a sports-car chassis, 10 percent
   // quicker at the top. `pedSafe`: knocking people down costs it nothing.
@@ -69,52 +72,54 @@ export const VEHICLE_SPECS = {
     health: 850, colors: [0x0f9e92],
   },
   muscle: {
-    id: 'muscle', label: 'Thundrel', body: 'coupe',
-    length: 4.8, width: 1.95, height: 1.35, wheelBase: 2.85, wheelRadius: 0.36,
-    mass: 1700, maxSpeed: 61.5, reverseSpeed: 9, accel: 5, brake: 10.6, grip: 1.0, steerMax: 0.48,
+    id: 'muscle', label: 'Redtail', body: 'coupe',
+    length: 4.8, width: 1.92, height: 1.38, wheelBase: 2.72, wheelRadius: 0.36,
+    mass: 1750, maxSpeed: 61.5, reverseSpeed: 9, accel: 5, brake: 10.6, grip: 1.0, steerMax: 0.48,
     lockRate: 3.3, returnRate: 4.2,
     drive: 'rwd', gears: 5, power: 215, firstGear: 21, cgFront: 0.55,
-    health: 1000, colors: [0x14213d, 0xa31621, 0x2d6a4f, 0xe9c46a, 0x101010],
+    health: 1000, colors: [0x111214, 0xa31621, 0x1d3f8a, 0xeeeeec, 0x4a5a3a, 0xd86a14, 0x8a8f96],
   },
   pickup: {
-    id: 'pickup', label: 'Dunskar', body: 'pickup',
+    id: 'pickup', label: 'Fieldhand', body: 'pickup',
     length: 5.3, width: 2.0, height: 1.85, wheelBase: 3.2, wheelRadius: 0.42,
     mass: 2100, maxSpeed: 44.7, reverseSpeed: 8, accel: 3, brake: 9.0, grip: 0.85, steerMax: 0.47,
     lockRate: 3.0, returnRate: 3.8,
     drive: 'awd', gears: 5, power: 112, firstGear: 16, cgFront: 0.57,
-    health: 1100, colors: [0x7a4b2a, 0x3d5a40, 0xb8b8b0, 0x1c3f75, 0x8c1c13],
+    health: 1100, colors: [0xf0f0ee, 0xf0f0ee, 0xa9adb2, 0x15161a, 0x8e1b1f, 0x233a5c],
   },
+  // The conventional cargo van (the one-box van retired).
   van: {
-    id: 'van', label: 'Portaby', body: 'van',
-    length: 5.0, width: 2.0, height: 2.2, wheelBase: 3.0, wheelRadius: 0.36,
-    mass: 2200, maxSpeed: 40.2, reverseSpeed: 7, accel: 2.4, brake: 8.7, grip: 0.82, steerMax: 0.45,
+    id: 'van', label: 'Cartway', body: 'van',
+    length: 5.95, width: 2.03, height: 2.1, wheelBase: 3.3, wheelRadius: 0.38,
+    mass: 2500, maxSpeed: 40.2, reverseSpeed: 7, accel: 2.4, brake: 8.7, grip: 0.82, steerMax: 0.45,
     lockRate: 2.8, returnRate: 3.6,
     drive: 'fwd', gears: 4, power: 100, firstGear: 12, cgFront: 0.58,
-    health: 1100, colors: [0xf0f0ea, 0x5b6770, 0x2a5d8a, 0xc9a227],
+    health: 1100, colors: [0xf0f0ee, 0xf0f0ee, 0xa9adb2, 0x5c6167, 0x1c2a44, 0x15161a],
   },
   taxi: {
-    id: 'taxi', label: 'Selwick Cab', body: 'sedan',
-    length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33,
+    id: 'taxi', label: 'Brigham Cab', body: 'sedan',
+    length: 4.85, width: 1.85, height: 1.47, wheelBase: 2.95, wheelRadius: 0.35,
     mass: 1500, maxSpeed: 51.4, reverseSpeed: 9, accel: 3.5, brake: 10.1, grip: 0.95, steerMax: 0.48,
     lockRate: 3.3, returnRate: 4.2,
     drive: 'fwd', gears: 5, power: 92, firstGear: 14, cgFront: 0.6,
-    health: 900, colors: [0xf2c21b],
+    health: 900, colors: [0xf2b80f],
   },
   police: {
-    id: 'police', label: 'Selwick Patrol', body: 'sedan', police: true, // siren and lights (src/core/yield.js: hasSiren)
+    id: 'police', label: 'Brigham Patrol', body: 'sedan', police: true, // siren and lights (src/core/yield.js: hasSiren)
     length: 4.8, width: 1.9, height: 1.45, wheelBase: 2.85, wheelRadius: 0.34,
     mass: 1700, maxSpeed: 60.4, reverseSpeed: 10, accel: 4.5, brake: 9.6, grip: 1.05, steerMax: 0.49,
     lockRate: 3.6, returnRate: 4.5,
     drive: 'awd', gears: 6, power: 140, firstGear: 21, cgFront: 0.56,
-    health: 1200, colors: [0x1b2433],
+    health: 1200, colors: [0x121315],
   },
+  // The conventional box truck (the cab-over truck retired).
   truck: {
-    id: 'truck', label: 'Bulkora', body: 'truck',
+    id: 'truck', label: 'Stockman', body: 'truck',
     length: 7.5, width: 2.4, height: 3.3, wheelBase: 4.4, wheelRadius: 0.5,
     mass: 7500, maxSpeed: 31.3, reverseSpeed: 6, accel: 1.3, brake: 7.4, grip: 0.70, steerMax: 0.42,
     lockRate: 2.6, returnRate: 3.4,
     drive: 'rwd', gears: 6, power: 190, firstGear: 6.5, cgFront: 0.5,
-    health: 2000, colors: [0xe8e8e8, 0x2b4c7e, 0x9b2226, 0x386641],
+    health: 2000, colors: [0xeeeeec, 0xeeeeec, 0x1c3f75, 0x8e1b1f, 0x2f5a3a, 0x15161a],
   },
 };
 // The three reward cars of docs/REVAMP.md 6.6 (the Ghostwake pattern: an
@@ -123,9 +128,13 @@ function rewardCar(base, id, label, power, o) {
   const b = VEHICLE_SPECS[base];
   return Object.assign({}, b, { id, label, power: Math.round(b.power * power), reward: true }, o);
 }
-VEHICLE_SPECS.sunchaser = rewardCar('muscle', 'sunchaser', 'Sunchaser', 1.08, { maxSpeed: 64.0, grip: 1.05, brake: 10.0, colors: [0xff5a1f] });
+// The reward cars keep the size and mass of the chassis they were built on
+// (the fleet changed those specs' bodies).
+const OLD_MUSCLE = { length: 4.8, width: 1.95, height: 1.35, wheelBase: 2.85, wheelRadius: 0.36, mass: 1700 };
+const OLD_SEDAN = { length: 4.6, width: 1.85, height: 1.45, wheelBase: 2.75, wheelRadius: 0.33, mass: 1450 };
+VEHICLE_SPECS.sunchaser = rewardCar('muscle', 'sunchaser', 'Sunchaser', 1.08, { ...OLD_MUSCLE, maxSpeed: 64.0, grip: 1.05, brake: 10.0, colors: [0xff5a1f] });
 VEHICLE_SPECS.tidewinder = rewardCar('pickup', 'tidewinder', 'Tidewinder', 1.15, { maxSpeed: 49.0, grip: 0.92, brake: 9.6, firstGear: 20, health: 1400, colors: [0x1f8a8a] });
-VEHICLE_SPECS.nightheron = rewardCar('sedan', 'nightheron', 'Night Heron', 1.4, { maxSpeed: 58.0, grip: 1.05, brake: 9.6, colors: [0x1a1a2e] });
+VEHICLE_SPECS.nightheron = rewardCar('sedan', 'nightheron', 'Night Heron', 1.4, { ...OLD_SEDAN, maxSpeed: 58.0, grip: 1.05, brake: 9.6, colors: [0x1a1a2e] });
 // The first three bodies of the American fleet (docs/FLEET.md, PLAN_V3
 // 2.6): their own size, body and driver's eye point (car frame: x ahead,
 // y up, z right; the driver sits on the left), handling of the base
@@ -134,7 +143,7 @@ function fleetCar(base, id, label, body, size, eye, colors) {
   return Object.assign({}, VEHICLE_SPECS[base], { id, label, body, colors, eye }, size);
 }
 VEHICLE_SPECS.midsize = fleetCar('sedan', 'midsize', 'Avenel', 'sedan',
-  { length: 4.9, width: 1.86, height: 1.45, wheelBase: 2.83, wheelRadius: 0.345 }, { x: -0.39, y: 1.17, z: -0.34 },
+  { length: 4.9, width: 1.86, height: 1.45, wheelBase: 2.83, wheelRadius: 0.345, mass: 1500 }, { x: -0.39, y: 1.17, z: -0.34 },
   [0xeeeeec, 0x1b1c1f, 0xa9adb2, 0x5c6167, 0x1f3556, 0x8e1b1f, 0x6b5a4a]);
 VEHICLE_SPECS.suv = fleetCar('pickup', 'suv', 'Tallgrass', 'suv',
   { length: 5.35, width: 2.06, height: 1.92, wheelBase: 3.07, wheelRadius: 0.41 }, { x: -0.17, y: 1.64, z: -0.4 },
@@ -142,6 +151,53 @@ VEHICLE_SPECS.suv = fleetCar('pickup', 'suv', 'Tallgrass', 'suv',
 VEHICLE_SPECS.crewcab = fleetCar('pickup', 'crewcab', 'Ironbark', 'pickup',
   { length: 5.9, width: 2.03, height: 1.95, wheelBase: 3.68, wheelRadius: 0.41 }, { x: -0.21, y: 1.68, z: -0.4 },
   [0xf0f0ee, 0x15161a, 0x8f9499, 0x7a1416, 0x233a5c, 0x4f5546]);
+// The other new classes (task FLEET): the handling of the nearest existing
+// chassis (HANDLE gives them their own), their own size, mass and paint.
+// The buses' wheels cut further than the truck's (a bus turns in a 72 to
+// 86 ft circle, PLAN_V3 2.4, on a far longer wheelbase): `extra`.
+function newClass(base, id, label, body, size, colors, extra) {
+  return Object.assign({}, VEHICLE_SPECS[base], { id, label, body, colors }, size, extra || {});
+}
+VEHICLE_SPECS.crossover = newClass('sedan', 'crossover', 'Sandpiper', 'crossover',
+  { length: 4.75, width: 1.88, height: 1.7, wheelBase: 2.75, wheelRadius: 0.37, mass: 1750 },
+  [0xeeeeec, 0x1b1c1f, 0xa9adb2, 0x5c6167, 0x2b4a7a, 0x7a1a20, 0x6b6052]);
+VEHICLE_SPECS.convertible = newClass('sedan', 'convertible', 'Shoreline', 'coupe',
+  { length: 4.95, width: 1.88, height: 1.4, wheelBase: 2.85, wheelRadius: 0.35, mass: 1750 },
+  [0xeeeeec, 0xa31621, 0x1b1c1f, 0x2e6fb0, 0xe8d9b0, 0x9aa0a6]);
+VEHICLE_SPECS.minivan = newClass('van', 'minivan', 'Homestead', 'van',
+  { length: 5.18, width: 1.99, height: 1.78, wheelBase: 3.03, wheelRadius: 0.36, mass: 2050 },
+  [0xeeeeec, 0xa9adb2, 0x1b1c1f, 0x5c6167, 0x1c2a44, 0x5a1a20]);
+VEHICLE_SPECS.semi = newClass('truck', 'semi', 'Plainsman', 'truck',
+  { length: 6.8, width: 2.5, height: 3.25, wheelBase: 3.9, wheelRadius: 0.52, mass: 8500 },
+  [0xeeeeec, 0x8e1b1f, 0x1c3f75, 0x15161a, 0x5c6167, 0x2f5a3a]);
+VEHICLE_SPECS.schoolbus = newClass('truck', 'schoolbus', 'Larkfield', 'bus',
+  { length: 11.6, width: 2.44, height: 3.05, wheelBase: 6.4, wheelRadius: 0.5, mass: 12000 },
+  [0xf2b400], { steerMax: 0.59 });
+VEHICLE_SPECS.citybus = newClass('truck', 'citybus', 'Crosstown', 'bus',
+  { length: 12.2, width: 2.59, height: 3.2, wheelBase: 7.2, wheelRadius: 0.5, mass: 13500 },
+  [0xf2f2ee], { steerMax: 0.59 });
+// The driver's eye of each new body (car frame, the driver on the left),
+// from the cabin it is built with (carbody eyePoint; test/carmesh checks).
+const FLEET_EYES = {
+  compact: [-0.29, 1.14, -0.32],
+  police: [-0.38, 1.17, -0.35],
+  taxi: [-0.37, 1.19, -0.34],
+  crossover: [-0.22, 1.41, -0.35],
+  muscle: [-0.41, 1.1, -0.34],
+  sports: [-0.55, 0.95, -0.33],
+  convertible: [-0.36, 1.13, -0.33],
+  minivan: [0.05, 1.44, -0.38],
+  van: [0.43, 1.62, -0.41],
+  truck: [1.42, 2.08, -0.48],
+  semi: [0.29, 2.56, -0.5],
+  schoolbus: [4.47, 1.96, -0.53],
+  citybus: [4.76, 2.12, -0.57],
+  pickup: [0.05, 1.58, -0.39],
+};
+for (const id in FLEET_EYES) {
+  const [x, y, z] = FLEET_EYES[id];
+  VEHICLE_SPECS[id].eye = { x, y, z };
+}
 Object.assign(VEHICLE_SPECS, SERVICE_SPECS, { police: Object.assign(VEHICLE_SPECS.police, { siren: true }) });
 
 let nextId = 1;

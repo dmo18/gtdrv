@@ -25,16 +25,17 @@ const FIRST_FILL_S = 1; // the start fill may use spots inside MIN_R for this lo
 // Room left under the live cap for moving traffic and the police.
 export const PARKED_RESERVE = 24;
 
-// The sedan and hatchback roles are the fleet bodies (docs/FLEET.md):
-// midsize sedan, full-size SUV, crew-cab pickup.
+// Curbside parked cars by district (docs/FLEET.md): SUVs, crossovers and
+// pickups about half; convertibles and sports cars at the beach; vans and
+// box trucks where work is done. No buses or semis at the curb.
 const MIX = {
-  downtown: ['midsize', 'midsize', 'taxi', 'sports', 'suv', 'van'],
-  midtown: ['midsize', 'suv', 'crewcab', 'pickup', 'van', 'muscle'],
-  residential: ['suv', 'midsize', 'pickup', 'crewcab', 'muscle'],
-  docks: ['pickup', 'van', 'truck', 'crewcab'],
-  industrial: ['pickup', 'van', 'truck', 'crewcab'],
-  beach: ['sports', 'suv', 'muscle', 'midsize', 'sports'],
-  park: ['suv', 'midsize'],
+  downtown: ['midsize', 'midsize', 'sedan', 'compact', 'taxi', 'suv', 'suv', 'crossover', 'crossover', 'crewcab', 'minivan', 'van', 'sports'],
+  midtown: ['midsize', 'sedan', 'compact', 'suv', 'suv', 'crossover', 'crossover', 'crewcab', 'crewcab', 'minivan', 'van', 'muscle'],
+  residential: ['midsize', 'compact', 'sedan', 'suv', 'suv', 'crossover', 'crossover', 'crewcab', 'crewcab', 'minivan', 'minivan', 'muscle', 'convertible'],
+  docks: ['crewcab', 'pickup', 'van', 'van', 'truck', 'suv', 'midsize'],
+  industrial: ['crewcab', 'pickup', 'van', 'van', 'truck', 'truck', 'suv'],
+  beach: ['convertible', 'convertible', 'sports', 'sports', 'muscle', 'suv', 'crossover', 'midsize', 'compact', 'crewcab'],
+  park: ['suv', 'crossover', 'midsize', 'minivan', 'compact'],
 };
 
 

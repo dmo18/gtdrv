@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
-import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile, FLEET_MODELS, buildCarL1, buildCarL2, loftRings, eyePoint } from '../src/render/carbody.js';
+import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile, FLEET_MODELS, buildCarL1, buildCarL2, loftRings, eyePoint, styleFor } from '../src/render/carbody.js';
 import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from '../src/render/vehiclemesh.js';
 import { lampAtlasPixels, PLATE_TEXT, CLS } from '../src/render/vehiclemats.js';
 import * as THREE from 'three';
@@ -11,8 +11,12 @@ import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTE
 
 const tris = (g) => g.index.count / 3;
 
-// The ten road vehicles (the reward cars are checked with them).
-const ROAD = ['compact', 'sedan', 'taxi', 'police', 'sports', 'muscle', 'ghostwake', 'pickup', 'van', 'truck'];
+// The road vehicles on the older single-body kit (the reward cars, the
+// secret car, the old pickup they share a chassis with); the fleet of
+// docs/FLEET.md has its own tests below.
+const OLD = ['ghostwake', 'sunchaser', 'tidewinder', 'nightheron'];
+// Heavy fleet bodies may use 1.5 times the triangle budgets.
+const heavy = (id) => !!styleFor(VEHICLE_SPECS[id]).heavy;
 
 test('car LOD triangle budgets: near 6k..9k, mid under 1.5k, far light', () => {
   for (const id of Object.keys(VEHICLE_SPECS)) {
@@ -45,12 +49,12 @@ function callsAt(m, d) {
   return n;
 }
 
-test('a car is 4 draw calls near and mid (5 with a light bar), 1 far', () => {
-  for (const id of ['sedan', 'police', 'truck', 'compact']) {
+test('an older car is 4 draw calls near and mid, 1 far', () => {
+  for (const id of ['sunchaser', 'nightheron', 'tidewinder']) {
     const spec = VEHICLE_SPECS[id];
     const m = createVehicleMesh(spec, spec.colors[0]);
     const ud = m.userData;
-    const want = id === 'police' ? 5 : 4;
+    const want = 4;
     assert.equal(callsAt(m, 6), want, id + ' near');
     assert.equal(callsAt(m, 40), want, id + ' mid');
     assert.equal(ud.far.visible, false);
@@ -71,7 +75,7 @@ test('a car is 4 draw calls near and mid (5 with a light bar), 1 far', () => {
 
 test('near model: see-through glass, cabin, contact shadow, lamps that follow a crumple', () => {
   const classes = (g) => new Set(g.attributes.aCls.array);
-  for (const id of ROAD) {
+  for (const id of [...OLD, ...FLEET_MODELS]) {
     const r = buildCar(VEHICLE_SPECS[id], true);
     const gc = classes(r.glass), bc = classes(r.body);
     assert.ok(gc.has(CLS.GLASS) && gc.has(CLS.SHADOW), id + ' glass and shadow');
@@ -87,13 +91,14 @@ test('near model: see-through glass, cabin, contact shadow, lamps that follow a 
       hi = Math.max(hi, u.getX(i));
     }
     assert.ok(lo === 0 && hi >= 0.7 && hi <= 0.9, `${id} shadow ${lo}..${hi}`);
+    if (FLEET_MODELS.includes(id)) continue;
     const mid = buildCar(VEHICLE_SPECS[id], true, true);
     assert.ok(classes(mid.body).has(CLS.GLASS) && classes(mid.glass).has(CLS.SHADOW), id + ' mid glass opaque, shadow kept');
   }
 });
 
 test('wheels: one instanced draw, front wheels steer and all spin', () => {
-  const spec = VEHICLE_SPECS.sedan;
+  const spec = VEHICLE_SPECS.tidewinder;
   const m = createVehicleMesh(spec, spec.colors[0]);
   const ud = m.userData;
   const v = { x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, y: 0, spec, steerAngle: 0.3, wheelSpin: 1.1, health: spec.health };
@@ -118,14 +123,15 @@ test('wheels: one instanced draw, front wheels steer and all spin', () => {
 });
 
 // Side outline of a car at 50 m on a 915 x 412 screen with a 50 degree
-// field of view (about 8.8 px per meter): the mid model (what draws at
-// that distance) plus its lamps and light bar, rasterised.
+// field of view (about 8.8 px per meter): the level drawn at that distance
+// (a fleet body's L1, an older car's mid model with its lamps) and the
+// light bar, rasterised. Wide enough for the buses.
 function outline(id) {
   const spec = VEHICLE_SPECS[id];
   const pxm = 412 / (2 * 50 * Math.tan((25 * Math.PI) / 180));
-  const r = buildCar(spec, true, true);
+  const r = FLEET_MODELS.includes(id) ? { body: buildCarL1(spec), lamps: null } : buildCar(spec, true, true);
   const geos = [r.body, r.lamps];
-  const Wp = 80, Hp = 36;
+  const Wp = 128, Hp = 40;
   const grid = new Uint8Array(Wp * Hp);
   const addGeo = (g, dy = 0, dx = 0) => {
     const P = g.attributes.position, I = g.index.array;
@@ -164,12 +170,15 @@ function outline(id) {
   return { grid, hash: (h >>> 0).toString(16) };
 }
 
-test('silhouettes: the ten road vehicles have distinct outlines at 50 m', () => {
-  const o = ROAD.map((id) => [id, outline(id)]);
-  assert.equal(new Set(o.map(([, s]) => s.hash)).size, ROAD.length, 'hashes differ');
-  // And not by a stray pixel: every pair differs in at least 12 pixels.
+test('silhouettes: the fleet and the older road cars have distinct outlines at 50 m', () => {
+  const ids = [...FLEET_MODELS, 'ghostwake'];
+  const o = ids.map((id) => [id, outline(id)]);
+  assert.equal(new Set(o.map(([, s]) => s.hash)).size, ids.length, 'hashes differ');
+  // And not by a stray pixel: every pair differs in at least 12 pixels
+  // (the taxi is the sedan's body by design: its sign and paint tell it).
   for (let i = 0; i < o.length; i++) {
     for (let j = i + 1; j < o.length; j++) {
+      if (o[i][0] === 'sedan' && o[j][0] === 'taxi') continue;
       let d = 0;
       const a = o[i][1].grid, b = o[j][1].grid;
       for (let k = 0; k < a.length; k++) d += a[k] !== b[k] ? 1 : 0;
@@ -178,14 +187,15 @@ test('silhouettes: the ten road vehicles have distinct outlines at 50 m', () => 
   }
 });
 
-test('bodies are distinct: low sports car, tall van, truck with cab', () => {
+test('bodies are distinct: low sports car, tall van, taller trucks and buses', () => {
   const box = (id) => {
-    const g = buildCar(VEHICLE_SPECS[id], false).body;
+    const g = buildCarL2(VEHICLE_SPECS[id]);
     g.computeBoundingBox();
     return g.boundingBox;
   };
-  const sports = box('sports'), van = box('van'), sedan = box('sedan');
-  assert.ok(sports.max.y < sedan.max.y && sedan.max.y < van.max.y);
+  const sports = box('sports'), van = box('van'), sedan = box('sedan'), truck = box('truck'), bus = box('schoolbus');
+  assert.ok(sports.max.y < sedan.max.y && sedan.max.y < van.max.y && van.max.y < truck.max.y);
+  assert.ok(bus.max.x - bus.min.x > 11 && truck.max.x - truck.min.x > 7.3);
 });
 
 test('wheel styles: 5 to 10 spokes, several distinct looks', () => {
@@ -309,28 +319,57 @@ test('walk pose: legs swing opposite, knees only fold backward', () => {
 });
 
 // ---- the fleet bodies (docs/FLEET.md): three levels, smooth, American --------------
-test('fleet: the three bodies, each with a spec, an invented name and US paint', () => {
-  assert.deepEqual(FLEET_MODELS, ['midsize', 'suv', 'crewcab']);
+// The sixteen classes of PLAN_V3 2.4 (the taxi shares the full-size sedan's
+// row), and the work pickup on the old pickup chassis.
+const CLASSES = ['compact', 'midsize', 'sedan', 'police', 'taxi', 'crossover', 'suv', 'crewcab', 'muscle', 'sports', 'convertible', 'minivan', 'van', 'truck', 'semi', 'schoolbus', 'citybus', 'pickup'];
+
+test('fleet: the sixteen classes and the work pickup, each with a spec, an invented name and US paint', () => {
+  assert.deepEqual(FLEET_MODELS, CLASSES);
+  const fixed = ['police', 'taxi', 'schoolbus', 'citybus']; // one livery each
   for (const id of FLEET_MODELS) {
     const s = VEHICLE_SPECS[id];
-    assert.ok(s && s.id === id && /^[A-Z][a-z]+$/.test(s.label), id);
-    assert.ok(s.colors.length >= 5, id + ' palette');
+    assert.ok(s && s.id === id && /^[A-Z][a-z]+( [A-Z][a-z]+)?$/.test(s.label), id);
+    assert.ok(fixed.includes(id) ? s.colors.length >= 1 : s.colors.length >= 5, id + ' palette');
+    // The sedan keeps no eye of its own: test/carinterior checks the per-kind
+    // default on it.
+    assert.ok(s.mass > 1000 && s.length > 4.4 && (s.eye || id === 'sedan'), id);
   }
+  assert.equal(new Set(FLEET_MODELS.map((id) => VEHICLE_SPECS[id].label)).size, FLEET_MODELS.length, 'names differ');
   // American proportions: long, wide, the SUV and the pickup tall.
-  const m = VEHICLE_SPECS.midsize, u = VEHICLE_SPECS.suv, p = VEHICLE_SPECS.crewcab;
+  const V = VEHICLE_SPECS;
+  const m = V.midsize, u = V.suv, p = V.crewcab;
   assert.ok(m.length >= 4.8 && m.wheelBase >= 2.8 && m.width >= 1.84);
   assert.ok(u.length >= 5.2 && u.height >= 1.85 && u.width >= 2.0);
   assert.ok(p.length >= 5.8 && p.wheelBase >= 3.6 && p.height >= 1.9);
+  // (The compact, the sedan, the taxi, the police car and the box truck keep
+  // the footprint the chassis tests of other systems were tuned on.)
+  assert.ok(V.compact.length >= 4.4 && V.sedan.length >= 4.8 && V.police.length >= 4.8 && V.taxi.length === V.sedan.length);
+  assert.ok(V.sports.height < 1.3 && V.muscle.height < 1.42 && V.minivan.height > 1.7 && V.van.height >= 2.0);
+  assert.ok(V.truck.length >= 7.5 && V.schoolbus.length >= 11 && V.citybus.length >= 12 && V.semi.wheelRadius >= 0.5);
+  // Taxi yellow, school bus yellow, police black (with white doors).
+  assert.ok(V.taxi.colors[0] === 0xf2b80f && V.schoolbus.colors[0] === 0xf2b400 && V.police.colors[0] < 0x202020);
 });
 
-test('fleet: triangles per level (L0 about 6,000 with 4 draws, L1 about 1,200 in 1, L2 about 260 in 1)', () => {
+test('fleet: the hatchback, the one-box van and the cab-over truck are retired', () => {
+  // Their ids carry the compact sedan, the conventional cargo van and the
+  // box truck: a trunk, a hood ahead of the windshield, a cab with a nose.
+  for (const id of ['compact', 'van', 'truck']) {
+    const { sh, gs } = loftRings(VEHICLE_SPECS[id], 0);
+    assert.ok(sh.x1 - gs.xA >= 1.25, id + ' hood');
+    assert.notEqual(VEHICLE_SPECS[id].body, 'hatch');
+  }
+  assert.ok(loftRings(VEHICLE_SPECS.compact, 0).gs.xC - loftRings(VEHICLE_SPECS.compact, 0).sh.x0 > 0.7, 'compact trunk');
+});
+
+test('fleet: triangles per level (L0 about 6,000 with 4 draws, L1 about 1,300 in 1, L2 about 290 in 1; trucks and buses up to 1.5 times)', () => {
   for (const id of FLEET_MODELS) {
     const spec = VEHICLE_SPECS[id];
     const s = vehicleStats(spec);
+    const k = heavy(id) ? 1.5 : 1;
     assert.ok(s.fleet, id);
-    assert.ok(s.near >= 5500 && s.near <= 6800, `${id} L0 ${s.near}`);
-    assert.ok(s.midAll >= 1000 && s.midAll <= 1400, `${id} L1 ${s.midAll}`);
-    assert.ok(s.far >= 220 && s.far <= 300, `${id} L2 ${s.far}`);
+    assert.ok(s.near >= 5500 && s.near <= 6800 * k, `${id} L0 ${s.near}`);
+    assert.ok(s.midAll >= 1000 && s.midAll <= 1400 * k, `${id} L1 ${s.midAll}`);
+    assert.ok(s.far >= 220 && s.far <= 300 * k, `${id} L2 ${s.far}`);
     assert.equal(tris(buildCarL1(spec)), s.midAll);
     assert.equal(tris(buildCarL2(spec)), s.far);
   }
@@ -348,21 +387,24 @@ test('fleet: draw calls per level (4, 1, 1) and the level switches', () => {
     const spec = VEHICLE_SPECS[id];
     const m = createVehicleMesh(spec, spec.colors[0]);
     const ud = m.userData;
-    assert.equal(drawn(m), 4, id + ' L0');
+    // The police car's light bar is one more draw at every level.
+    const bar = id === 'police' ? 1 : 0;
+    assert.equal(!!ud.bar, !!bar, id + ' light bar');
+    assert.equal(drawn(m), 4 + bar, id + ' L0');
     assert.ok(ud.body.visible && ud.glass.visible && ud.lamps.visible && ud.wheels[0].visible);
     setVehicleNearLevel(m, 1);
-    assert.equal(drawn(m), 1, id + ' L1');
+    assert.equal(drawn(m), 1 + bar, id + ' L1');
     assert.ok(ud.bodyMid.visible && !ud.body.visible && !ud.glass.visible && !ud.lamps.visible && !ud.wheels[0].visible);
     setVehicleLod(m, true);
-    assert.equal(drawn(m), 1, id + ' L2');
+    assert.equal(drawn(m), 1 + bar, id + ' L2');
     assert.ok(ud.far.visible && !ud.bodyMid.visible);
     // game.js writes the wheels' and lamps' visibility for its 75 m rule.
     for (const w of ud.wheels) w.visible = true;
     ud.head.visible = true;
     assert.equal(ud.level, 1);
-    assert.equal(drawn(m), 1, id + ' back to L1');
+    assert.equal(drawn(m), 1 + bar, id + ' back to L1');
     setVehicleNearLevel(m, 0);
-    assert.equal(drawn(m), 4, id + ' back to L0');
+    assert.equal(drawn(m), 4 + bar, id + ' back to L0');
     // Only the body levels cast sun shadows.
     assert.ok(ud.body.castShadow && ud.bodyMid.castShadow && ud.far.castShadow && !ud.glass.castShadow);
   }
@@ -424,13 +466,22 @@ test('fleet: smooth lofts, the turn between neighboring sections stays small exc
   }
 });
 
+const BUSES = ['schoolbus', 'citybus'];
 test('fleet: not a box: sloped windshield, rounded hood falling to the nose, roof highest, wheel arches', () => {
   for (const id of FLEET_MODELS) {
     const spec = VEHICLE_SPECS[id];
     const { sh, gs } = loftRings(spec, 0);
-    // Windshield raked: run over rise at least 0.9 (about 42 degrees from vertical).
+    const bus = BUSES.includes(id);
+    // Windshield raked: run over rise at least 0.9 (about 42 degrees from
+    // vertical); a truck's stands steeper, a flat-front bus's is upright.
     const rise = gs.roofY - gs.baseY(gs.xA), run = gs.xA - gs.xR1;
-    assert.ok(run / rise > 0.9, `${id} windshield run ${run.toFixed(2)} rise ${rise.toFixed(2)}`);
+    if (!heavy(id)) assert.ok(run / rise > 0.9, `${id} windshield run ${run.toFixed(2)} rise ${rise.toFixed(2)}`);
+    else if (!bus) assert.ok(run / rise > 0.2, `${id} windshield run ${run.toFixed(2)} rise ${rise.toFixed(2)}`);
+    if (bus) {
+      // A flat front: the windshield at the nose, under a header (the sign).
+      assert.ok(sh.x1 - gs.xA < 0.2 && gs.xH > gs.xR1 && gs.roofY - gs.roof(gs.xH) > 0.3, `${id} flat front`);
+      continue;
+    }
     // Hood: from the windshield base the deck never rises toward the nose and drops
     // at least 6 cm over its last 40 cm; it crowns (center over edge).
     let prev = Infinity;
@@ -461,17 +512,49 @@ test('fleet: not a box: sloped windshield, rounded hood falling to the nose, roo
     const ring = G[gi], top = ring[(ring.length - 1) / 2];
     const edge = ring.reduce((w, p) => (p[1] > top[1] - 0.06 ? Math.max(w, Math.abs(p[2])) : w), 0);
     assert.ok(edge < gs.baseW(mx) - 0.06, `${id} roof ${edge.toFixed(2)} vs base ${gs.baseW(mx).toFixed(2)}`);
-    // Wheel arches: the sill lifts over each wheel to clear the tire.
+    // Wheel arches: the sill lifts over each wheel to clear the tire (a
+    // truck's cab has its front wheel only).
     for (const wx of sh.wheels) {
       assert.ok(sh.bottom(wx) >= sh.wr + sh.R - 0.01, `${id} arch over ${wx}`);
-      assert.ok(sh.bottom((sh.wheels[0] + sh.wheels[1]) / 2) < sh.bottom(wx) - 0.3, `${id} sill between the wheels`);
+      if (sh.wheels.length === 2) assert.ok(sh.bottom((sh.wheels[0] + sh.wheels[1]) / 2) < sh.bottom(wx) - 0.3, `${id} sill between the wheels`);
     }
     // Trunk or bed behind the cabin (no hatchback): a sedan's deck behind
-    // the rear glass, a pickup's bed, an SUV's upright tailgate.
-    if (id === 'midsize') assert.ok(gs.xC - sh.x0 > 0.75, 'sedan trunk');
+    // the rear glass, a pickup's bed, an SUV's upright tailgate, a box or a
+    // fifth wheel behind a truck's cab.
+    if (['compact', 'midsize', 'sedan', 'police', 'taxi', 'convertible'].includes(id)) assert.ok(gs.xC - sh.x0 > 0.75, `${id} trunk`);
     if (id === 'crewcab') assert.ok(sh.bed && sh.bed[1] - sh.bed[0] > 1.5, 'pickup bed');
-    if (id === 'suv') assert.ok(gs.xR0 - gs.xC < 0.12, 'SUV upright tailgate');
+    if (id === 'pickup') assert.ok(sh.bed && sh.bed[1] - sh.bed[0] > 1.9 && gs.xA - gs.xC < 1.7, 'regular cab, long bed');
+    if (id === 'suv' || id === 'minivan' || id === 'van') assert.ok(gs.xR0 - gs.xC < 0.12, `${id} upright tailgate`);
+    if (id === 'truck') assert.ok(sh.S.box && sh.x0 - sh.S.box.x0 * sh.L > 4.2, 'box behind the cab');
+    if (id === 'semi') assert.ok(sh.S.frame && sh.x0 + spec.length / 2 > 2.4, 'frame behind the cab');
   }
+});
+
+test('fleet: the face of each role: taxi sign, police bar and push bar, school bus sign and stop arm', () => {
+  const words = (id) => {
+    // Sign words sit in the atlas rows above and below the plate (v under
+    // 0.25 or over 0.75 in the plate's columns).
+    const g = buildCar(VEHICLE_SPECS[id], true).lamps, uv = g.attributes.uv;
+    const out = new Set();
+    for (let i = 0; i < uv.count; i++) {
+      const u = uv.getX(i), v = uv.getY(i), uh = u < 0.5 ? u * 2 : u * 2 - 1;
+      if (uh >= 0.625 && (v < 0.25 || v > 0.75)) out.add((u < 0.5 ? 'h' : 't') + (v < 0.5 ? 'top' : 'low'));
+    }
+    return out;
+  };
+  assert.deepEqual([...words('taxi')], ['htop'], 'TAXI on the roof sign');
+  assert.deepEqual([...words('schoolbus')].sort(), ['hlow', 'tlow', 'ttop'], 'SCHOOL BUS and STOP');
+  assert.equal(words('sedan').size, 0);
+  // The taxi's sign and the police car's bar stand on the roof.
+  const top = (g) => { g.computeBoundingBox(); return g.boundingBox.max.y; };
+  assert.ok(top(buildCar(VEHICLE_SPECS.taxi, true).body) > VEHICLE_SPECS.taxi.height + 0.2);
+  const pm = createVehicleMesh(VEHICLE_SPECS.police);
+  assert.ok(pm.userData.bar && pm.userData.bar.position.y > VEHICLE_SPECS.police.height - 0.1);
+  // White doors on the black police car (livery), a push bar ahead of the nose.
+  const pb = buildCar(VEHICLE_SPECS.police, true).body;
+  assert.ok(classPts(pb, CLS.LIVERY).length > 50, 'white doors');
+  pb.computeBoundingBox();
+  assert.ok(pb.boundingBox.max.x > VEHICLE_SPECS.police.length / 2 + 0.05, 'push bar');
 });
 
 // Points of a geometry by class (aCls).
@@ -493,9 +576,11 @@ test('fleet: four wheels, rear plate only, head and tail lamps at every level', 
     const uv = near.lamps.attributes.uv, P = near.lamps.attributes.position;
     let head = 0, tail = 0, plateF = 0, plateR = 0;
     for (let i = 0; i < uv.count; i++) {
-      const u = uv.getX(i);
-      if (u < 0.5) { if (u >= 0.3125) plateF++; else head++; } else if (u >= 0.8125) plateR++; else tail++;
-      if (u >= 0.8125) assert.ok(P.getX(i) < 0, id + ' plate at the rear');
+      const u = uv.getX(i), v = uv.getY(i);
+      // The plate's cells (v 0.25 to 0.75; sign words sit above and below).
+      const plate = v >= 0.25 && v <= 0.75;
+      if (u < 0.5) { if (u >= 0.3125) plateF += plate ? 1 : 0; else head++; } else if (u >= 0.8125) plateR += plate ? 1 : 0; else tail++;
+      if (u >= 0.8125 && plate) assert.ok(P.getX(i) < 0, id + ' plate at the rear');
     }
     assert.ok(head > 50 && tail > 50 && plateR >= 4 && plateF === 0, `${id} lamps ${head}/${tail}, plates ${plateF}/${plateR}`);
     // L1 and L2: rubber around each of the four wheel centers, lamps (GLOW)
@@ -515,6 +600,7 @@ test('fleet: four wheels, rear plate only, head and tail lamps at every level', 
 
 test('fleet: the driver sits on the left; the eye point in the spec is in the cabin', () => {
   for (const id of FLEET_MODELS) {
+    if (id === 'sedan') continue; // no eye of its own (see above)
     const spec = VEHICLE_SPECS[id];
     const e = spec.eye;
     assert.ok(e && Number.isFinite(e.x) && Number.isFinite(e.y) && Number.isFinite(e.z), id);
@@ -532,6 +618,9 @@ test('fleet: the driver sits on the left; the eye point in the spec is in the ca
     const left = cab.filter((q) => q[2] < -0.15).length, right = cab.filter((q) => q[2] > 0.15).length;
     assert.ok(left > right, `${id} steering wheel side ${left} left, ${right} right`);
   }
-  // Sedan eye lowest, the SUV and pickup high.
-  assert.ok(VEHICLE_SPECS.midsize.eye.y < 1.3 && VEHICLE_SPECS.suv.eye.y > 1.5 && VEHICLE_SPECS.crewcab.eye.y > 1.5);
+  // Sedan eye low, the sports car lowest, the SUV and pickup high, trucks
+  // and buses higher.
+  const E = (id) => VEHICLE_SPECS[id].eye.y;
+  assert.ok(E('midsize') < 1.3 && E('suv') > 1.5 && E('crewcab') > 1.5 && E('sports') < E('midsize'));
+  assert.ok(E('truck') > 2 && E('semi') > 2.2 && E('schoolbus') > 1.8 && E('citybus') > 1.8);
 });

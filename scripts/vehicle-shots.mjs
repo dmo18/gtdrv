@@ -277,6 +277,8 @@ import * as THREE from 'three';
 import { VEHICLE_SPECS, createVehicle } from './src/entities/vehicle.js';
 import { createVehicleMesh, updateVehicleMesh, setVehicleLod, setVehicleNearLevel, vehicleStats } from './src/render/vehiclemesh.js';
 import { FLEET_MODELS } from './src/render/carbody.js';
+import { fitServiceMesh } from './src/render/servicebody.js';
+import { SERVICE_IDS } from './src/entities/servicevehicles.js';
 const W = innerWidth, H = innerHeight;
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -306,12 +308,13 @@ ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 const cam = new THREE.PerspectiveCamera(30, 1, 0.3, 3000);
 // Paint per body in the sheets: white, dark blue, red (fleet colors).
-const PAINT = { midsize: 0x1f3556, suv: 0xeeeeec, crewcab: 0x7a1416 };
+const PAINT = { midsize: 0x1f3556, suv: 0xeeeeec, crewcab: 0x7a1416, compact: 0x8e1b1f, sedan: 0x1b1c1f, crossover: 0x2b4a7a, muscle: 0xa31621, sports: 0xe8b60f, convertible: 0xeeeeec, minivan: 0xa9adb2, van: 0xf0f0ee, truck: 0x1c3f75, semi: 0x8e1b1f };
 const cars = {};
-for (const id of FLEET_MODELS) {
+// The fleet and the four service vehicles (their US details: sheet 'service').
+for (const id of [...FLEET_MODELS, ...SERVICE_IDS]) {
   const spec = VEHICLE_SPECS[id];
   const v = createVehicle(id, 0, 0, 0);
-  const m = createVehicleMesh(spec, PAINT[id] || spec.colors[0]);
+  const m = fitServiceMesh(createVehicleMesh(spec, PAINT[id] || spec.colors[0]), spec);
   updateVehicleMesh(m, v, 1, 0);
   m.visible = false;
   scene.add(m);
@@ -323,7 +326,7 @@ function setLevel(c, lvl) {
   c.m.updateMatrixWorld(true);
 }
 // Camera azimuth from the car's nose (+x) toward its right (+z).
-const VIEWS = { side: { az: Math.PI / 2 + 0.0, el: 0.06 }, front: { az: 0, el: 0.1 }, threequarter: { az: 0.68, el: 0.16 }, rear: { az: Math.PI - 0.68, el: 0.16 } };
+const VIEWS = { side: { az: Math.PI / 2 + 0.0, el: 0.06 }, left: { az: -Math.PI / 2, el: 0.06 }, front: { az: 0, el: 0.1 }, threequarter: { az: 0.68, el: 0.16 }, rear: { az: Math.PI - 0.68, el: 0.16 }, top: { az: 0.9, el: 0.7 } };
 function aim(c, view, aspect, dist) {
   const V = VIEWS[view];
   const L = c.spec.length, Hh = c.spec.height;
@@ -331,8 +334,9 @@ function aim(c, view, aspect, dist) {
   cam.fov = dist ? (2 * Math.atan(((H - 18) / 3 / 412) * Math.tan((27.5 * Math.PI) / 180)) * 180) / Math.PI : 30;
   cam.aspect = aspect;
   const tanV = Math.tan((cam.fov * Math.PI) / 360), tanH = tanV * aspect;
-  const span = view === 'front' ? c.spec.width * 1.5 : view === 'side' ? L * 1.12 : L * 1.0;
-  const d = dist || Math.max(span / 2 / tanH, Hh * 0.75 / tanV) + (view === 'side' ? c.spec.width / 2 : L / 2);
+  const flat = view === 'side' || view === 'left';
+  const span = view === 'front' ? c.spec.width * 1.5 : flat ? L * 1.12 : L * 1.0;
+  const d = dist || Math.max(span / 2 / tanH, Hh * 0.75 / tanV) + (flat ? c.spec.width / 2 : L / 2);
   cam.position.set(Math.cos(V.az) * Math.cos(V.el) * d, Hh * 0.45 + Math.sin(V.el) * d, Math.sin(V.az) * Math.cos(V.el) * d);
   cam.lookAt(0, Hh * 0.45, 0);
   cam.updateProjectionMatrix();
@@ -371,6 +375,7 @@ window.sheet = (cells, cols, rows, title) => {
 };
 window.stats = () => FLEET_MODELS.map((id) => id + ' ' + JSON.stringify(vehicleStats(VEHICLE_SPECS[id])));
 window.models = FLEET_MODELS.map((id) => [id, VEHICLE_SPECS[id].label]);
+window.services = SERVICE_IDS.map((id) => [id, VEHICLE_SPECS[id].label]);
 window.__ready = true;
 `;
 }
@@ -407,21 +412,36 @@ async function fleetShots() {
     const models = await page.evaluate(() => window.models);
     const LV = ['L0 near', 'L1 one draw', 'L2 shell'];
     const shots = [];
-    for (const view of ['side', 'front', 'threequarter']) {
-      const cells = [];
-      for (let lv = 0; lv < 3; lv++) for (const [id, label] of models) cells.push({ id, level: lv, view, label: `${label} (${id}) ${LV[lv]}` });
-      shots.push([view, cells, 3, 3, `Fleet ${view}: rows L0, L1, L2`]);
+    // `--only=a,b` limits the sheets to some bodies (quicker rounds).
+    const only = opt('only') ? opt('only').split(',') : null;
+    const pick = only ? models.filter(([id]) => only.includes(id)) : models;
+    // Line-ups: every body at L0 in one view, six to a row.
+    for (const view of ['side', 'front', 'threequarter', 'rear']) {
+      const cells = models.map(([id, label]) => ({ id, level: 0, view, label: `${label} (${id})` }));
+      shots.push(['lineup-' + view, cells, 6, 3, `Fleet line-up, ${view}, L0`]);
     }
-    for (const [id, label] of models) {
+    const services = await page.evaluate(() => window.services);
+    {
+      const cells = [];
+      for (const view of ['side', 'threequarter', 'rear']) for (const [id, label] of services) cells.push({ id, level: 0, view, label: `${label} (${id}) ${view}` });
+      shots.push(['service', cells, 4, 3, 'Service vehicles, L0: side, three-quarter, rear']);
+    }
+    for (const lv of [1, 2]) {
+      const cells = models.map(([id, label]) => ({ id, level: lv, view: 'threequarter', label: `${label} ${LV[lv]}` }));
+      shots.push(['lineup-L' + lv, cells, 6, 3, `Fleet line-up, three-quarter, ${LV[lv]}`]);
+    }
+    for (const [id, label] of pick) {
       const cells = [];
       for (let lv = 0; lv < 3; lv++) for (const view of ['side', 'front', 'threequarter', 'rear']) cells.push({ id, level: lv, view, label: `${LV[lv]} ${view}` });
       shots.push([id, cells, 4, 3, `${label} (${id}): rows L0, L1, L2`]);
     }
     // Each level at a distance it is drawn at, at the phone's scale (the
     // tile is a crop of a 915x412 screen with a 55 degree view).
-    const far = [];
-    for (const [id, label] of models) for (const [lv, d] of [[0, 15], [1, 40], [2, 90]]) far.push({ id, level: lv, view: 'threequarter', dist: d, label: `${label} ${LV[lv]} at ${d} m` });
-    shots.push(['distance', far, 3, 3, 'Each level at its distance, phone scale']);
+    for (let g = 0; g < models.length; g += 6) {
+      const far = [];
+      for (const [id, label] of models.slice(g, g + 6)) for (const [lv, d] of [[0, 15], [1, 40], [2, 90]]) far.push({ id, level: lv, view: 'threequarter', dist: d, label: `${label} ${LV[lv]} ${d} m` });
+      shots.push(['distance-' + (g / 6 + 1), far, 6, 3, 'Each level at its distance, phone scale (columns: L0 15 m, L1 40 m, L2 90 m)']);
+    }
     for (const [name, cells, cols, rows, title] of shots) {
       const info = await page.evaluate(([c, a, b, t]) => window.sheet(c, a, b, t), [cells, cols, rows, title]);
       const file = join(dir, name + '.png');

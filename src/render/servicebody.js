@@ -38,7 +38,7 @@ function cabStyle(L, len, o) {
   const sh = o.shell, nose = o.nose, drop = o.drop;
   const ws = o.ws; // windshield base, meters behind the nose
   return {
-    range: [t(0), 0.5], pF: o.pF || 12, pR: 14, flare: 0.02, q: 5, lean: o.lean || [0.06, 0.03, 0, 0], face: o.face || 'truck',
+    range: [t(0), 0.5], pF: o.pF || 12, pR: 14, flare: 0.02, q: 5, lean: o.lean || [0.06, 0.03, 0, 0], face: o.face || 'truckOld',
     top: [[t(0), sh], [t(len - nose), sh], [t(len - nose * 0.35), sh - drop * 0.55], [t(len), sh - drop]],
     belt: [[t(0), sh - 0.02], [t(len - nose), sh - 0.02], [t(len - nose * 0.35), sh - 0.02 - drop * 0.55], [t(len), sh - 0.02 - drop]],
     bottom: [[t(0), o.bottom], [t(len), o.bottom]],
@@ -52,7 +52,7 @@ function cabStyle(L, len, o) {
 // Cab length per vehicle (m) and where the working body starts.
 export const CAB = { firetruck: 3.1, ambulance: 2.05, garbage: 2.35, towtruck: 3.0 };
 addCarStyle('firetruck', cabStyle(9.0, CAB.firetruck, { shell: 0.43, nose: 0.25, drop: 0.08, bottom: 0.2, ws: 0.12, rake: 0.18, roof: 0.88, side0: 0.25, b: 1.38, seams: [1.3, 2.75] }));
-addCarStyle('ambulance', cabStyle(6.2, CAB.ambulance, { shell: 0.42, nose: 0.75, drop: 0.13, bottom: 0.2, ws: 0.85, rake: 0.55, roof: 0.82, side0: 0.2, b: null, seams: [1.05], face: 'van', pF: 5, lean: [0.12, 0.05, 0, 0] }));
+addCarStyle('ambulance', cabStyle(6.2, CAB.ambulance, { shell: 0.42, nose: 0.75, drop: 0.13, bottom: 0.2, ws: 0.85, rake: 0.55, roof: 0.82, side0: 0.2, b: null, seams: [1.05], face: 'vanOld', pF: 5, lean: [0.12, 0.05, 0, 0] }));
 addCarStyle('garbage', cabStyle(8.2, CAB.garbage, { shell: 0.38, nose: 0.25, drop: 0.07, bottom: 0.17, ws: 0.1, rake: 0.2, roof: 0.8, side0: 0.3, b: null, seams: [2.0] }));
 addCarStyle('towtruck', cabStyle(6.8, CAB.towtruck, { shell: 0.5, nose: 1.45, drop: 0.07, bottom: 0.22, ws: 1.5, rake: 0.32, roof: 0.92, side0: 0.15, b: null, seams: [1.2], pF: 8, lean: [0.08, 0.04, 0, 0] }));
 
@@ -168,6 +168,9 @@ function workBody(spec, lod) {
     }
     // Pump panel behind the cab, between cab and body.
     slab(a, ALLOY, CLS.CHROME, xb1, cab0 + 0.02, 0.62, y1 - 0.1, W * 0.94);
+    // A US engine's white cab roof over the red.
+    const roofY = styleFor(spec).gh.roof * H;
+    slab(a, 0xf2f2ee, CLS.LIVERY, cab0 + 0.12, L / 2 - 0.45, roofY + 0.02, roofY + 0.09, W * 0.9);
     truckCabBits(a, spec, cab0, near);
   } else if (spec.id === 'ambulance') {
     const y0 = 0.96, y1 = H, xb1 = cab0 + 0.08;
@@ -179,12 +182,10 @@ function workBody(spec, lod) {
       box(a, 0xd0121a, CLS.LIVERY, xb1 - xr - 0.1, 0.34, 0.012, (xr + xb1) / 2, 1.38, z);
       box(a, 0x1d4fa8, CLS.LIVERY, xb1 - xr - 0.1, 0.06, 0.012, (xr + xb1) / 2, 1.62, z);
       box(a, 0xd0121a, CLS.LIVERY, CAB.ambulance - 0.9, 0.16, 0.012, cab0 + 0.55, 1.1, s * (W / 2 - 0.02));
-      // The invented Careline mark on the box side: a blue disc with a
-      // white wave through it (no cross, no real emblem).
-      if (near) {
-        a.geo(new THREE.CircleGeometry(0.32, 18), 0x1d4fa8, CLS.LIVERY, place(-1.7, 2.12, z * 1.002, 0, s > 0 ? 0 : Math.PI, 0));
-        for (let k = 0; k < 4; k++) box(a, 0xffffff, CLS.LIVERY, 0.16, 0.05, 0.012, -1.92 + k * 0.15, 2.12 + (k % 2 ? 0.05 : -0.05), z * 1.004, 0, 0, k % 2 ? -0.6 : 0.6);
-      }
+      // A plain blue cross on the box side (a generic medical mark: no
+      // star of life, no red cross).
+      box(a, 0x1d4fa8, CLS.LIVERY, 0.54, 0.17, 0.012, -1.7, 2.12, z * 1.002);
+      box(a, 0x1d4fa8, CLS.LIVERY, 0.17, 0.54, 0.012, -1.7, 2.12, z * 1.002);
       // Corner posts.
       for (const x of [xr + 0.06, xb1 - 0.02]) box(a, 0xe2e2de, CLS.LIVERY, 0.06, y1 - y0, 0.06, x, (y0 + y1) / 2, s * (W / 2 - 0.02));
     }
@@ -196,6 +197,9 @@ function workBody(spec, lod) {
     // Rear doors with windows, grab rails, step.
     rearWall(a, spec, xr + 0.06, 0.55, y1, 0xeeeeea, CLS.LIVERY);
     box(a, SEAM, CLS.TRIM, 0.016, y1 - y0 - 0.2, 0.02, xr + 0.02, (y0 + y1) / 2, 0);
+    // The cross on the rear doors too, between the windows.
+    box(a, 0x1d4fa8, CLS.LIVERY, 0.012, 0.13, 0.34, xr + 0.012, 1.72, 0);
+    box(a, 0x1d4fa8, CLS.LIVERY, 0.012, 0.34, 0.13, xr + 0.012, 1.72, 0);
     for (const s of [1, -1]) {
       box(a, GLASS, CLS.GLASS, 0.014, 0.42, 0.62, xr + 0.015, 2.15, s * 0.45);
       box(a, 0xd0121a, CLS.LIVERY, 0.014, 0.3, 0.9, xr + 0.015, 1.38, s * 0.5);
@@ -212,54 +216,49 @@ function workBody(spec, lod) {
     }
     box(a, DARK, CLS.TRIM, 0.14, 0.24, W * 0.94, L / 2 - 0.1, 0.46, 0);
   } else if (spec.id === 'garbage') {
-    const y0 = 1.12, y1 = H - 0.08, xb1 = cab0 - 0.12;
-    // Hopper body (paint) with ribs, a rear tailgate, a top lip.
-    slab(a, WHITE, CLS.PAINT, xr + 0.75, xb1, y0, y1, W * 0.98);
+    // A US rear loader: the body (paint) with ribs, a big rear hopper unit
+    // with a sloped back, the loading sill and the dark hopper mouth, cart
+    // tippers on the sill, riding steps and grab rails.
+    const y0 = 1.12, y1 = H - 0.08, xb1 = cab0 - 0.12, xh = xr + 1.7;
+    slab(a, WHITE, CLS.PAINT, xh, xb1, y0, y1, W * 0.98);
     skirt(a, DARK, CLS.TRIM, xr + 0.05, xb1, 0.62, y0, W * 0.98, ax, wr);
     slab(a, DARK, CLS.TRIM, xr + 0.05, xb1, 0.62, y0, W * 0.6);
     const nr = near ? 16 : 4;
     for (const s of [1, -1]) {
       for (let k = 0; k <= nr; k++) {
-        const x = xr + 0.85 + (xb1 - xr - 1.0) * k / nr;
+        const x = xh + 0.1 + (xb1 - xh - 0.2) * k / nr;
         box(a, 0x1f5a28, CLS.LIVERY, 0.08, y1 - y0, 0.05, x, (y0 + y1) / 2, s * (W * 0.49 + 0.02));
       }
-      box(a, 0xe8e8e2, CLS.LIVERY, xb1 - xr - 0.85, 0.22, 0.012, (xr + 0.75 + xb1) / 2, 1.5, s * (W * 0.49 + 0.05));
+      box(a, 0xe8e8e2, CLS.LIVERY, xb1 - xh, 0.22, 0.012, (xh + xb1) / 2, 1.5, s * (W * 0.49 + 0.05));
     }
-    // The hopper's rounded roof and the hazard chevrons on the tailgate.
-    a.geo(new THREE.CylinderGeometry(W * 0.49, W * 0.49, xb1 - xr - 0.75, near ? 32 : 8, 1, false, 0, Math.PI), WHITE, CLS.PAINT,
-      placeS((xr + 0.75 + xb1) / 2, y1 - 0.02, 0, 0, 0, Math.PI / 2, 0.32, 1, 1));
+    // The body's rounded roof.
+    a.geo(new THREE.CylinderGeometry(W * 0.49, W * 0.49, xb1 - xh, near ? 32 : 8, 1, false, 0, Math.PI), WHITE, CLS.PAINT,
+      placeS((xh + xb1) / 2, y1 - 0.02, 0, 0, 0, Math.PI / 2, 0.32, 1, 1));
+    // The rear hopper unit: a tall front, a back sloping down to the sill.
+    // (Painted like the body; its back leans in toward the top.)
+    a.geo(new THREE.BoxGeometry(1.3, y1 + 0.06 - 0.9, W * 0.97), WHITE, CLS.PAINT, place(xr + 1.05, (y1 + 0.06 + 0.9) / 2, 0));
+    a.geo(new THREE.BoxGeometry(0.55, y1 - 0.9, W * 0.97), WHITE, CLS.PAINT, place(xr + 0.36, (y1 + 0.9) / 2 - 0.04, 0, 0, 0, -0.12));
+    box(a, ALLOY, CLS.ALLOY, 0.06, y1 - 1.7, W * 0.9, xr + 0.15, (y1 + 1.7) / 2, 0, 0, 0, -0.12);
+    // The hopper mouth (dark) over the loading sill, the sill itself.
+    box(a, 0x0e0f10, CLS.TRIM, 0.04, 0.62, W * 0.8, xr - 0.005, 1.32, 0);
+    box(a, DARK, CLS.TRIM, 0.3, 0.12, W * 0.94, xr - 0.08, 0.98, 0);
+    // Hazard chevrons below the sill, cart tippers on it.
     if (near) {
-      for (let k = 0; k < 6; k++) {
-        box(a, k % 2 ? 0x18181a : 0xe8b818, CLS.LIVERY, 0.012, 0.16, 0.5, xr + 0.04, 0.7 + k * 0.001, (k - 2.5) * 0.36, 0.7, 0, 0);
-      }
+      for (let k = 0; k < 6; k++) box(a, k % 2 ? 0x18181a : 0xe8b818, CLS.LIVERY, 0.012, 0.16, 0.36, xr - 0.02, 0.76, (k - 2.5) * 0.36);
     }
-    // Tailgate: the sloping back with its packer.
-    const tg = new THREE.BoxGeometry(0.85, y1 - 0.6, W * 0.97);
-    a.geo(tg, ALLOY, CLS.ALLOY, place(xr + 0.45, (y1 + 0.6) / 2, 0, 0, 0, -0.16));
-    if (near) {
-      box(a, DARK, CLS.TRIM, 0.06, 0.9, W * 0.8, xr + 0.08, 1.1, 0, 0, 0, -0.16);
-      for (const s of [1, -1]) box(a, CHROME, CLS.CHROME, 0.1, 1.6, 0.1, xr + 0.35, 1.9, s * (W / 2 - 0.1), 0, 0, -0.16);
-    }
-    // Side loader on the curb side (+z) behind the cab: its mast and the
-    // hopper mouth above it (the arm with the bin is drawn while it runs).
-    const lx = cab0 - 0.75;
-    box(a, DARK, CLS.TRIM, 0.5, 1.6, 0.18, lx, 1.55, W / 2 + 0.08);
-    box(a, 0xe8b818, CLS.LIVERY, 0.52, 0.12, 0.2, lx, 0.8, W / 2 + 0.09);
-    slab(a, DARK, CLS.TRIM, lx - 0.55, lx + 0.55, y1 - 0.02, y1 + 0.12, 0.6, W / 2 - 0.35);
-    rearWall(a, spec, xr + 0.06, 0.62, 1.0, DARK, CLS.TRIM);
+    for (const s of [1, -1]) box(a, 0xe8b818, CLS.LIVERY, 0.12, 0.3, 0.46, xr - 0.16, 1.1, s * 0.55);
+    rearWall(a, spec, xr + 0.06, 0.62, 0.9, DARK, CLS.TRIM);
     box(a, DARK, CLS.TRIM, 0.3, 0.06, W * 0.96, xr - 0.06, 0.6, 0);
     if (near) {
-      // Packer rams on the tailgate, riding steps and grab rails at the
-      // back, side marker lamps, the arm's folded claws, a fuel tank.
+      // Packer rams up the sides of the hopper, riding steps and grab rails
+      // at the back, side marker lamps, a fuel tank.
       for (const sd of [1, -1]) {
-        a.geo(new THREE.CylinderGeometry(0.07, 0.07, 1.5, 20, 1), CHROME, CLS.CHROME, place(xr + 0.95, 2.2, sd * (W / 2 - 0.05), 0, 0, 0.7));
-        a.geo(new THREE.CylinderGeometry(0.1, 0.1, 0.9, 20, 1), DARK, CLS.TRIM, place(xr + 1.25, 2.6, sd * (W / 2 - 0.05), 0, 0, 0.7));
+        a.geo(new THREE.CylinderGeometry(0.07, 0.07, 1.5, 20, 1), CHROME, CLS.CHROME, place(xr + 1.2, 2.1, sd * (W / 2 - 0.05), 0, 0, 0.5));
         box(a, ALLOY, CLS.ALLOY, 0.35, 0.05, 0.5, xr - 0.12, 0.45, sd * (W / 2 - 0.35));
-        a.geo(new THREE.CylinderGeometry(0.025, 0.025, 1.0, 10, 1), CHROME, CLS.CHROME, place(xr - 0.02, 1.4, sd * (W / 2 - 0.2)));
-        for (let k = 0; k < 4; k++) box(a, 0xe8a020, CLS.LIVERY, 0.12, 0.06, 0.02, xr + 1.2 + k * 1.5, 1.05, sd * (W * 0.49 + 0.03));
+        a.geo(new THREE.CylinderGeometry(0.025, 0.025, 1.0, 10, 1), CHROME, CLS.CHROME, place(xr - 0.02, 1.55, sd * (W / 2 - 0.2)));
+        for (let k = 0; k < 4; k++) box(a, 0xe8a020, CLS.LIVERY, 0.12, 0.06, 0.02, xh + 0.3 + k * 1.3, 1.05, sd * (W * 0.49 + 0.03));
       }
-      for (const dz of [-0.25, 0.25]) box(a, 0xe8b818, CLS.LIVERY, 0.08, 0.55, 0.06, lx + 0.1, 1.05, W / 2 + 0.2 + dz * 0.2, 0.3 * Math.sign(dz), 0, 0);
-      a.geo(new THREE.CylinderGeometry(0.28, 0.28, 1.2, 28, 1), ALLOY, CLS.CHROME, place(lx - 1.6, 0.85, -(W / 2 - 0.35), 0, 0, Math.PI / 2));
+      a.geo(new THREE.CylinderGeometry(0.28, 0.28, 1.2, 28, 1), ALLOY, CLS.CHROME, place(cab0 - 1.0, 0.85, -(W / 2 - 0.35), 0, 0, Math.PI / 2));
     }
     truckCabBits(a, spec, cab0, near);
   } else if (spec.id === 'towtruck') {
@@ -343,6 +342,15 @@ function tailLamps(spec, lite) {
   const a = new Acc();
   const L = spec.length, W = spec.width;
   const x = -L / 2 - (spec.id === 'towtruck' ? -0.27 : 0.01);
+  // The rear plate (Florida: rear only), in the tail half's plate cells.
+  if (!lite) {
+    const px = spec.id === 'garbage' ? x - 0.24 : x - 0.03, py = spec.id === 'garbage' ? 0.62 : 0.78;
+    const col = [1, 1, 1];
+    const ids = [[-0.15, -0.075, 0, 0], [0.15, -0.075, 1, 0], [0.15, 0.075, 1, 1], [-0.15, 0.075, 0, 1]]
+      .map(([zz, yy, u, v]) => a.vert(px, py + yy, -zz, -1, 0, 0, col, 0, 0.5 + (0.625 + (1 - u) * 0.375) * 0.5, 0.25 + v * 0.5));
+    a.tri(ids[0], ids[2], ids[1]);
+    a.tri(ids[0], ids[3], ids[2]);
+  }
   const ys = spec.id === 'ambulance' ? [0.62, 2.55] : [0.55];
   const cell = (c) => 0.5 + (c + 0.5) / 16;
   for (const y of ys) {
@@ -557,10 +565,11 @@ export function attachServiceLook(game, sys) {
       arm.visible = false;
       return;
     }
-    const W = v.spec.width, H = v.spec.height;
     const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
-    const lx = v.spec.length / 2 - CAB.garbage - 0.75;
-    // The bin's ground place in the truck's frame, then up the side, over the top.
+    // A rear loader: the cart tipper at the back takes the bin from the
+    // curb, raises it to the sill and tips it forward into the hopper.
+    const rx = -v.spec.length / 2 - 0.42, ry = 1.05;
+    // The bin's ground place in the truck's frame, then to the sill, tipped.
     const bx = sv.binX - v.x, bz = sv.binZ - v.z;
     const gx = bx * ch + bz * sh, gz = -bx * sh + bz * ch;
     const t = sv.lift, L = EXTRAS.lift;
@@ -568,17 +577,17 @@ export function attachServiceLook(game, sys) {
     const smooth = (k) => k * k * (3 - 2 * k);
     if (t < L.raise) {
       const k = smooth(t / L.raise);
-      x = gx + (lx - gx) * k; z = gz + (W / 2 + 0.45 - gz) * k; y = 0.55 + (H - 0.6) * k; tip = 0;
+      x = gx + (rx - gx) * k; z = gz * (1 - k); y = 0.55 + (ry - 0.55) * k; tip = 0;
     } else if (t < L.raise + L.tip) {
       const k = (t - L.raise) / L.tip;
-      x = lx; z = W / 2 + 0.45 - 0.5 * Math.sin(Math.PI * k); y = H - 0.05 + 0.35 * Math.sin(Math.PI * k); tip = 2.3 * Math.sin(Math.PI * k);
+      x = rx + 0.15 * Math.sin(Math.PI * k); z = 0; y = ry + 0.55 * Math.sin(Math.PI * k); tip = 2.2 * Math.sin(Math.PI * k);
     } else {
       const k = smooth((t - L.raise - L.tip) / L.lower);
-      x = lx + (gx - lx) * k; z = W / 2 + 0.45 + (gz - W / 2 - 0.45) * k; y = H - 0.05 - (H - 0.6) * k; tip = 0;
+      x = rx + (gx - rx) * k; z = gz * k; y = ry - (ry - 0.55) * k; tip = 0;
     }
     const wx = v.x + x * ch - z * sh, wz = v.z + x * sh + z * ch;
-    // Bin body and lid (tipped about the truck's long axis, toward the hopper).
-    e.set(-tip, -v.heading, 0, 'YXZ');
+    // Bin body and lid, tipped about the truck's cross axis toward the hopper.
+    e.set(0, -v.heading, -tip, 'YXZ');
     q.setFromEuler(e);
     p.set(wx, y, wz);
     s.set(0.62, 1.05, 0.62);
@@ -589,11 +598,12 @@ export function attachServiceLook(game, sys) {
     s.set(0.66, 0.07, 0.66);
     m4.compose(p, q, s);
     arm.setMatrixAt(2, m4);
-    // Arm from the mast to the bin.
-    const mx = v.x + lx * ch - (W / 2 + 0.1) * sh, mz = v.z + lx * sh + (W / 2 + 0.1) * ch, my = 1.4;
-    const ax = wx - mx, ay = y - my, az = wz - mz, al = Math.hypot(ax, ay, az) || 0.01;
+    // The tipper's arm from the sill to the bin.
+    const ax = -v.spec.length / 2 - 0.05;
+    const mx = v.x + ax * ch, mz = v.z + ax * sh, my = 0.95;
+    const dx = wx - mx, dy = y - my, dz = wz - mz, al = Math.hypot(dx, dy, dz) || 0.01;
     p.set((wx + mx) / 2, (y + my) / 2, (wz + mz) / 2);
-    q.setFromUnitVectors(UP, p2.set(ax / al, ay / al, az / al));
+    q.setFromUnitVectors(UP, p2.set(dx / al, dy / al, dz / al));
     s.set(0.14, al, 0.14);
     m4.compose(p, q, s);
     arm.setMatrixAt(0, m4);

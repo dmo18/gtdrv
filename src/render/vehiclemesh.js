@@ -328,13 +328,21 @@ function createFleetMesh(spec, col, e) {
   wNear.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   wNear.boundingSphere = e.wheelSphere;
   group.add(wNear);
+  // The police car's light bar (one more draw at every level; the service
+  // look swaps in the lightbar.js geometry, servicebody fitServiceMesh).
+  let bar = null;
+  if (spec.id === 'police') {
+    bar = new THREE.Mesh(lightBarGeometry(), LAMP.bar0);
+    bar.position.set(e.anchors.roofX, e.anchors.roofY - 0.01, 0);
+    rig.add(bar);
+  }
   group.rotation.order = 'YXZ';
   const L = spec.length;
   const ud = group.userData = {
     spec, color: col, rig, body, bodyMid, bodyLod: body, far, glass, glassLevels: [glass],
     head: lamps, tail: lamps, lamps, lampLevels: [lamps],
     wheels: [wNear], wheelLevels: [wNear], wheelMatrix: wNear.instanceMatrix,
-    bar: null, barRed: null, barBlue: null, glowMesh: null,
+    bar, barRed: bar, barBlue: bar, glowMesh: null,
     anchors: e.anchors,
     fleet: true, level: 0, nearLevel: 0, lodFar: false,
     hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,

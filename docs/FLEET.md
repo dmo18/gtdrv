@@ -84,6 +84,50 @@ Names: invented words, no maker. Further names for FLEET, to be checked the same
 Marlow (compact), Brigham (full-size sedan), Sandpiper (crossover), Redtail (muscle),
 Kestrel (sports), Shoreline (convertible), Homestead (minivan), Cartway (cargo van).
 
+### 3.1 The other thirteen (task FLEET)
+
+All on the same kit and levels (`FLEET_STYLES` in src/render/carbody.js). Spec ids keep
+the old ids where a role existed, so every system that spawns them gets the new body:
+
+| spec id | name | class | length, width, height; wheelbase | notes |
+|---|---|---|---|---|
+| `compact` | Marlow | compact sedan | 4.45, 1.76, 1.43; 2.62 | the hatchback retired; a trunk, a rounder Avenel |
+| `sedan` | Brigham | full-size sedan | 4.85, 1.85, 1.47; 2.95 | formal roof, big chrome grille, long trunk; the player's first car |
+| `police` | Brigham Patrol | police cruiser | 4.80, 1.90, 1.45; 2.85 | black, white doors and roof, push bar, spotlight, light bar (lightbar.js) |
+| `taxi` | Brigham Cab | taxi | as the sedan | cab yellow, lit-box roof sign with TAXI front and back, check band |
+| `crossover` | Sandpiper | crossover SUV | 4.75, 1.88, 1.70; 2.75 | raked liftgate, three side windows, roof rails |
+| `muscle` | Redtail | muscle coupe | 4.80, 1.92, 1.38; 2.72 | longest hood, fastback, power dome, ducktail, tri-bar tail lamps |
+| `sports` | Kestrel | sports car | 4.55, 1.93, 1.23; 2.72 | front-mid engine, cabin set back, wide hips, side skirts |
+| `convertible` | Shoreline | convertible cruiser | 4.95, 1.88, 1.40; 2.85 | two long doors, dark canvas top up |
+| `minivan` | Homestead | minivan | 5.18, 1.99, 1.78; 3.03 | short sloped hood, long roof, sliding-door track |
+| `van` | Cartway | cargo van | 5.95, 2.03, 2.10; 3.30 | conventional long nose (the one-box van retired), windowless load box, rear door windows |
+| `truck` | Stockman | box truck | 7.50, 2.40, 3.30; 4.40 | conventional cab (the cab-over retired), rounded box with roll-up door |
+| `semi` | Plainsman | semi tractor | 6.80, 2.50, 3.25; 3.90 | long-nose day cab, tall chrome grille, stacks, fifth wheel, tandem (second axle drawn) |
+| `schoolbus` | Larkfield | school bus | 11.6, 2.44, 3.05; 6.40 | flat front, yellow, white roof, SCHOOL BUS headers, warning lamps, stop arm, rub rails |
+| `citybus` | Crosstown | city bus | 12.2, 2.59, 3.20; 7.20 | low floor, two curb-side doors, amber route sign, roof pods, bike rack |
+| `pickup` | Fieldhand | work pickup | 5.30, 2.00, 1.85; 3.20 | the old pickup's chassis on the kit: the Ironbark's nose, a regular cab, a long bed; no old-kit body is left in traffic or lots |
+
+The compact, sedan, taxi, police car and box truck keep (near enough) the footprint and
+mass their chassis had: other systems' tests are tuned on them (the tow test's 1,450 kg
+sedan, the sea-wall rail at 1.85 m width, the slalom on the sedan's yaw inertia, the
+patrol bays' 4.8 m boxes). HANDLE may grow them to the 2.4 table's sizes.
+
+Kit additions: window posts (`gh.posts`, a bus's even run), a deep header over the side
+glass (`gh.rail`) and over the windshield (`gh.hdr`), a canvas soft top, a roof livery
+color, `range` cabs with a rounded box or a frame behind (`box`, `frame`), sign words in
+the lamp atlas (TAXI, SCHOOL, BUS, STOP: vehiclemats `SIGN_TEXT`), `eyeDrop`. Trucks and
+buses (`heavy`) may use 1.5 times the triangle budgets.
+
+Spawn mix (src/systems/traffic.js `MIX`, parked.js): SUVs, crossovers and pickups about
+half of the traffic; downtown and beach taxis; beach convertibles and sports cars; box
+trucks, cargo vans and semis in docks and industrial areas; a bus in one arterial spawn
+of eight (`pickBus`, at most two; the school bus 6:30 to 17:00).
+
+Service vehicles keep their bodies with US details: rear plates only, the fire engine's
+white cab roof over the red, a plain blue cross on the ambulance (no star of life, no red
+cross), the garbage truck a rear loader (rear hopper, sill, cart tippers; the bin goes in
+at the back).
+
 ## 4. Paint (US street palette)
 
 White and black are the most common, then silver and gray, then blue and red. Each
@@ -135,10 +179,11 @@ Automatic (test/carmesh.test.js, the fleet tests):
   steering wheel is in front of the left seat.
 
 By eye: `node scripts/vehicle-shots.mjs --fleet` renders the review sheets to
-`dist/fleet/` (915x412 at 2x, headless Chromium with SwiftShader): `side.png`,
-`front.png`, `threequarter.png` (the three bodies, rows L0, L1, L2), one sheet per body
-with a rear view (`midsize.png`, `suv.png`, `crewcab.png`), and `distance.png` (each
-level at a distance it is drawn at, at the phone's scale). In the running game:
+`dist/fleet/` (915x412 at 2x, headless Chromium with SwiftShader): line-ups of all
+bodies (`lineup-side.png`, `-front`, `-threequarter`, `-rear`, `-L1`, `-L2`), one sheet
+per body (`<id>.png`, rows L0, L1, L2 by side, front, three-quarter, rear),
+`service.png` and `distance-1..3.png` (each level at a distance it is drawn at, at the
+phone's scale). `--only=id,id` limits the per-body sheets. In the running game:
 `node scripts/vehicle-shots.mjs --game --size=915x412 g:suv:side:11`.
 
 Budgets: the Normal street view stays within 210 calls and 295k triangles on the Beach

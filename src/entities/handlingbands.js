@@ -18,7 +18,10 @@ export const LOCK_TIME_FAST_MAX = 0.55; // s, at 30 m/s
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %
 export const BANDS = { // [min, max]
-  compact: { r0: [5.0, 6.5], t60: [9, 11], top: [95, 105], stop: [34, 42] },
+  // compact, sedan, taxi, police, sports, muscle, van and truck carry the
+  // fleet's bodies (docs/FLEET.md): their new size and mass on the old
+  // drivetrain, so the heavier ones are slower off the line until HANDLE.
+  compact: { r0: [5.0, 6.5], t60: [10, 12.5], top: [95, 105], stop: [34, 42] },
   sedan: { r0: [5.0, 6.5], t60: [7.5, 9], top: [110, 120], stop: [34, 42] },
   taxi: { r0: [5.0, 6.5], t60: [7.5, 9.5], top: [110, 120], stop: [34, 42] },
   police: { r0: [5.0, 6.5], t60: [6, 7], top: [130, 140], stop: [33, 40] },
@@ -38,6 +41,15 @@ export const BANDS = { // [min, max]
   midsize: { r0: [5.0, 6.5], t60: [7.5, 9], top: [110, 120], stop: [34, 42] },
   suv: { r0: [6.0, 7.5], t60: [9, 11], top: [95, 105], stop: [36, 44] },
   crewcab: { r0: [6.5, 8.0], t60: [9, 11], top: [95, 105], stop: [36, 44] },
+  // The rest of the fleet (task FLEET): the base chassis' handling (sedan
+  // for the crossover and the convertible, van for the minivan, truck for
+  // the semi and the buses) on their own size and mass, until HANDLE.
+  crossover: { r0: [5.0, 6.5], t60: [8.5, 10.2], top: [105, 118], stop: [34, 42] },
+  convertible: { r0: [5.0, 6.5], t60: [8.5, 10.2], top: [105, 118], stop: [34, 42] },
+  minivan: { r0: [6.0, 7.5], t60: [9.5, 11.5], top: [83, 95], stop: [40, 46] },
+  semi: { r0: [8.0, 10.0], t60: [20, 25], top: [64, 75], stop: [46, 55] },
+  schoolbus: { r0: [8.5, 10.5], t60: [29, 35], top: [64, 75], stop: [46, 55] },
+  citybus: { r0: [9.6, 11.6], t60: [33, 40], top: [64, 75], stop: [46, 55] },
   ...SERVICE_BANDS,
 };
 // r0: radius (m) of the path of the car's center at 2 m/s on full lock.

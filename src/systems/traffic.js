@@ -751,18 +751,38 @@ export function driveStep(dr, v, dt, ctx = {}) {
 
 // --- The game system. ---
 
-// The sedan and hatchback roles are the fleet bodies (docs/FLEET.md):
-// midsize sedan, full-size SUV, crew-cab pickup.
-const MIX = {
-  downtown: ['midsize', 'taxi', 'taxi', 'midsize', 'suv', 'sports', 'van'],
-  midtown: ['midsize', 'suv', 'taxi', 'van', 'pickup', 'crewcab', 'muscle'],
-  residential: ['suv', 'midsize', 'pickup', 'midsize', 'muscle', 'van'],
-  docks: ['pickup', 'truck', 'van', 'truck', 'pickup', 'midsize'],
-  industrial: ['truck', 'pickup', 'van', 'pickup', 'crewcab', 'truck'],
-  beach: ['sports', 'suv', 'muscle', 'midsize', 'crewcab'],
-  park: ['suv', 'midsize'],
-  airfield: ['van', 'pickup', 'midsize'],
+// The fleet of docs/FLEET.md by district: SUVs, crossovers and pickups
+// about half of the traffic; taxis downtown and at the beach, where
+// convertibles and sports cars are common too; box trucks, cargo vans and
+// semis in the docks and industrial areas. Buses join on arterials
+// (pickBus). Retired and never drawn: the hatchback, the one-box van, the
+// cab-over truck (their ids now carry the compact sedan, the cargo van and
+// the box truck).
+export const MIX = {
+  downtown: ['taxi', 'taxi', 'taxi', 'sedan', 'sedan', 'midsize', 'midsize', 'compact', 'suv', 'suv', 'suv', 'suv', 'crossover', 'crossover', 'crossover', 'crossover', 'crewcab', 'crewcab', 'minivan', 'van', 'truck', 'sports'],
+  midtown: ['midsize', 'midsize', 'sedan', 'compact', 'taxi', 'suv', 'suv', 'suv', 'crossover', 'crossover', 'crossover', 'crewcab', 'crewcab', 'crewcab', 'minivan', 'minivan', 'van', 'truck', 'muscle', 'convertible'],
+  residential: ['midsize', 'midsize', 'compact', 'compact', 'sedan', 'suv', 'suv', 'suv', 'crossover', 'crossover', 'crossover', 'crewcab', 'crewcab', 'pickup', 'minivan', 'minivan', 'muscle', 'convertible', 'van', 'sports'],
+  docks: ['crewcab', 'crewcab', 'pickup', 'pickup', 'suv', 'crossover', 'van', 'van', 'truck', 'truck', 'semi', 'semi', 'midsize'],
+  industrial: ['truck', 'truck', 'truck', 'semi', 'semi', 'van', 'van', 'van', 'crewcab', 'crewcab', 'pickup', 'pickup', 'suv', 'crossover', 'midsize'],
+  beach: ['convertible', 'convertible', 'convertible', 'sports', 'sports', 'sports', 'taxi', 'taxi', 'taxi', 'muscle', 'suv', 'suv', 'crossover', 'crossover', 'crewcab', 'midsize', 'compact', 'minivan'],
+  park: ['suv', 'suv', 'crossover', 'crossover', 'midsize', 'minivan', 'compact', 'crewcab'],
+  airfield: ['van', 'van', 'crewcab', 'suv', 'midsize', 'truck', 'crossover'],
 };
+
+// Buses on arterials (primary, secondary and trunk roads, the grid's
+// avenues): one spawn in BUS_SHARE there is a bus, at most BUS_MAX alive;
+// the school bus by day on school days' hours, the city bus at any hour.
+const ARTERIAL = new Set(['trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link']);
+export const BUS_SHARE = 0.12, BUS_MAX = 2, SCHOOL_HOURS = [6.5, 17];
+export function isArterial(e) {
+  return !!(e && (ARTERIAL.has(e.cls) || e.avenue));
+}
+export function pickBus(rng, clock, edge, alive) {
+  if (!isArterial(edge) || alive >= BUS_MAX) return null;
+  if (rng.next() >= BUS_SHARE) return null;
+  const school = clock >= SCHOOL_HOURS[0] && clock < SCHOOL_HOURS[1];
+  return school && rng.next() < 0.4 ? 'schoolbus' : 'citybus';
+}
 
 const SPAWN_MIN = 90, SPAWN_MAX = 220;
 const DESPAWN = 280, OUT_OF_VIEW = 120;
@@ -780,6 +800,8 @@ export function createTraffic(game, { max = 14 } = {}) {
   // draw per spawn, so the ordinary mix keeps its random sequence.
   const svcRng = createRng(61101);
   const svcAlive = [];
+  // Buses: their own seeded draw too.
+  const busRng = createRng(61102);
   // Every car body is built once in the first seconds of play (one every
   // six steps), so the first ambulance or fire truck later is no hitch.
   const warmer = createWarmer(Object.keys(VEHICLE_SPECS).map((id) => ['car', VEHICLE_SPECS[id]]), 6, 2);
@@ -884,7 +906,10 @@ export function createTraffic(game, { max = 14 } = {}) {
     svcAlive.length = 0;
     for (let i = 0; i < cars.length; i++) if (cars[i].spec.service && !cars[i].removed) svcAlive.push(cars[i]);
     const svc = pickTrafficService(svcRng, game.clock, svcAlive, LP.x, LP.z, city.inCore ? city.inCore(LP.x, LP.z) : true);
-    const v = createVehicle(svc || rng.pick(kinds), LP.x, LP.z, LP.heading, rng);
+    let buses = 0;
+    for (let i = 0; i < cars.length; i++) if (cars[i].spec.body === 'bus' && !cars[i].removed) buses++;
+    const bus = svc ? null : pickBus(busRng, game.clock, e, buses);
+    const v = createVehicle(svc || bus || rng.pick(kinds), LP.x, LP.z, LP.heading, rng);
     const dr = createDriver(city, rng);
     placeDriver(dr, v, be, bf, bd, bl);
     // One in four ambulance or fire truck spawns is on call: siren and
