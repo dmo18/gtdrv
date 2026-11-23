@@ -59,12 +59,12 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // into the corner, off the junction polygon), buildings (the road strips
 // they keep clear of moved). Lots and lot grids: the LOTS task re-pins.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '9c5d6f60', edges: '733ec414', buildings: '48dee23c', lots: 'd01f1a7f', lotGrid: '15923ee0' },
-  'miami-downtown': { nodes: '2df589ce', edges: '42de42cb', buildings: '29b8852e', lots: 'ee572ab3', lotGrid: '6f448a01' },
-  'miami-beach': { nodes: 'd559277b', edges: 'f8ee2f15', buildings: 'b7236251', lots: 'ffc51318', lotGrid: '2f187719' },
+[WHOLE_BOX]: { nodes: 'cf7612c7', edges: '733ec414', buildings: '48dee23c', lots: 'd01f1a7f', lotGrid: '15923ee0' },
+  'miami-downtown': { nodes: '54f7059d', edges: '42de42cb', buildings: '29b8852e', lots: 'ee572ab3', lotGrid: '6f448a01' },
+  'miami-beach': { nodes: 'ff4a09f0', edges: 'f8ee2f15', buildings: 'b7236251', lots: 'ffc51318', lotGrid: '2f187719' },
   'miami-north': { nodes: '14fc1aee', edges: '337da624', buildings: 'b0e601a9', lots: '248c5b55', lotGrid: '40de85d6' },
-  'miami-west': { nodes: 'bbdcff70', edges: 'e974bccf', buildings: 'a44fb8ea', lots: 'dc63a084', lotGrid: 'd81ec6b2' },
-  'miami-south': { nodes: '8584367c', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'a1443502', lotGrid: 'c350c3bf' },
+  'miami-west': { nodes: '0605fba3', edges: 'e974bccf', buildings: 'a44fb8ea', lots: 'dc63a084', lotGrid: 'd81ec6b2' },
+  'miami-south': { nodes: '5f4098c0', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'a1443502', lotGrid: 'c350c3bf' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

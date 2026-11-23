@@ -163,7 +163,12 @@ for (const id of REGIONS) {
           // 40 m over the road, back from the car, looking at the lot.
           const ax = p.lx - p.x, az = p.lz - p.z, L = Math.hypot(ax, az) || 1;
           const ux = L > 5 ? ax / L : Math.cos(p.heading), uz = L > 5 ? az / L : Math.sin(p.heading);
-          g.camera.position.set(p.x - Math.cos(p.heading) * 12, 40, p.z - Math.sin(p.heading) * 12);
+          // Over a building (a tower by the road): higher, so the view
+          // is not inside it.
+          const ex = p.x - Math.cos(p.heading) * 12, ez = p.z - Math.sin(p.heading) * 12;
+          const mx = (ex + p.lx) / 2, mz = (ez + p.lz) / 2;
+          const high = g.city.inBuilding(ex, ez, 6) || g.city.inBuilding(mx, mz, 4);
+          g.camera.position.set(ex, high ? 75 : 40, ez);
           g.camera.lookAt(p.x + ux * Math.max(30, Math.min(70, L)), 0, p.z + uz * Math.max(30, Math.min(70, L)));
           g.camera.updateMatrixWorld();
           if (st) st.flush(g.camera);

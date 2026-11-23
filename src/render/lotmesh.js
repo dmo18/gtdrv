@@ -234,8 +234,8 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 // time it is drawn. Colors from SHRUB_GREENS (and FLOWERS where `bloom`).
 // No allocation. Returns the triangles made.
 const PROF = 6; // profile points: base, shoulder, top edge, top edge, shoulder, base
-const PC = [1, 1, 0.5, -0.5, -1, -1], PS = [0, 0, 1, 1, 0, 0];
-const PN = [1, 0.9, 0.35, -0.35, -0.9, -1], PNY = [0, 0.44, 0.94, 0.94, 0.44, 0];
+const PC = [1, 1, 0.7, -0.7, -1, -1], PS = [0, 0, 1, 1, 0, 0];
+const PN = [1, 0.85, 0.3, -0.3, -0.85, -1], PNY = [0, 0.53, 0.95, 0.95, 0.53, 0];
 export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump, bloom = 0) {
   const ca = Math.cos(heading), sa = Math.sin(heading);
   const rx = -sa, rz = ca; // across the strip
@@ -253,7 +253,9 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
     const q = bump ? cellHash(Math.round(cx * 3), Math.round(cz * 3)) : 0.5;
     // Ends round in: a little lower and narrower.
     const endK = k === 0 || k === n - 1 ? 0.8 : 1;
-    const hh = h * (1 + (q - 0.5) * 0.7 * bump) * (endK === 1 ? 1 : 0.92);
+    // A bed (bump 1) rises and dips section by section: a row of mounds.
+    const dip = bump > 0.5 && k % 2 ? 0.62 : 1;
+    const hh = h * dip * (1 + (q - 0.5) * 0.5 * bump) * (endK === 1 ? 1 : 0.92);
     const hw = hw0 * (1 + (q - 0.5) * 0.4 * bump) * endK;
     const flower = bloom && q > 0.72;
     const col = flower ? FLOWERS[(Math.round(cx * 7) & 255) % FLOWERS.length] : bump > 0.5 ? SHRUB_GREENS[(Math.round(q * 97) + k) % SHRUB_GREENS.length] : color;
@@ -266,7 +268,7 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
       const j = edge ? 0 : (cellHash(k * 7 + p + Math.round(cx * 5), p * 13 + Math.round(cz * 5)) - 0.5) * (0.35 + bump * 0.5);
       const yy = edge ? y0 : Math.min(y0 + h * 1.12, y0 + (hh - top) + PS[p] * top + j * top * 0.6);
       const across = PC[p] * hw * (edge ? 0.92 : 1 + j * 0.5);
-      const sh = (0.58 + 0.5 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.45);
+      const sh = (0.55 + 0.5 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.7) * (bump > 0.5 && k % 2 ? 0.85 : 1);
       const tip = j * 0.8;
       const nx = rx * PN[p] + ca * tip, nz = rz * PN[p] + sa * tip, ny = PNY[p];
       const nl = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
@@ -332,7 +334,7 @@ function shrubMound(B, x, z, y, r, h, v, rot) {
   const col = SHRUB_GREENS[v % SHRUB_GREENS.length];
   const hh = Math.min(1.2, h);
   // One mound, its upper half and a little more (the rest is under the ground).
-  B.blob(x, y + hh * 0.3, z, r, hh * 0.7, r * 0.92, col, 7, 4, 0.62, 1.1);
+  B.blob(x, y + hh * 0.3, z, r, hh * 0.7, r * 0.92, col, 6, 4, 0.62, 1.1);
   void rot;
 }
 
@@ -376,7 +378,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
+        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : 0), y + curb, curb ? 0.55 : 0.8, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 1.7, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
         break;
       }
       case 'wall': {
@@ -580,8 +582,8 @@ export const LOT_CAR_CAP_MAX = 60; // the most a quality tier may ask for
 // The sedan and hatchback roles are the fleet bodies (docs/FLEET.md),
 // drawn as their L2 shell (systems/parked.js).
 export const LOT_CAR_MIX = {
-  // Downtown: three bodies (each body in view is a draw; the paint varies).
-  downtown: ['midsize', 'midsize', 'taxi', 'suv', 'midsize', 'suv'],
+  // Downtown: two bodies (each body in view is a draw and a shadow draw; the paint varies).
+  downtown: ['midsize', 'midsize', 'suv', 'midsize', 'suv', 'midsize'],
   midtown: ['midsize', 'suv', 'crewcab', 'pickup', 'van', 'muscle', 'midsize'],
   residential: ['suv', 'midsize', 'pickup', 'midsize', 'muscle', 'crewcab'],
   beach: ['sports', 'suv', 'muscle', 'midsize', 'pickup', 'suv'],

@@ -1009,6 +1009,12 @@ export function dressLot(city, lot, out = []) {
   // Outward normal of side s.
   const NX = [1, 0, -1, 0], NZ = [0, 1, 0, -1];
 
+  // A low rail fence (1 m) along the road side of a green, with a gap.
+  const lowFence = (q) => {
+    const n0 = out.length;
+    boundary(q, 'fence', 5, '');
+    for (let k = n0; k < out.length; k++) out[k].h = 1.0;
+  };
   // Lawn planting: trees in clusters on a 17 m grid (two to four a
   // cluster), shrub beds between them, `k` scales the trees.
   const greens = (ar, k) => {
@@ -1249,7 +1255,7 @@ export function dressLot(city, lot, out = []) {
         }
         void ok;
       }
-      if (area >= 1500) { boundary(front, 'hedge', 5, ''); for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 15) boundary(q, 'hedge', 4, ''); } }
+      if (area >= 1500) lowFence(front);
       greens(area, 1);
       break;
     }
@@ -1349,7 +1355,7 @@ export function dressLot(city, lot, out = []) {
           put('lamp', alongX ? a : cx + sd, alongX ? cz + sd : a, 0, 0, 0, 5, 0.15, true, set.furn);
         }
       }
-      if (area >= 1500) { boundary(front, 'hedge', 5, ''); for (const q of sides) { const r = sideRun(q); if (r && r[1] - r[0] >= 15) boundary(q, 'hedge', 4, ''); } }
+      if (area >= 1500) lowFence(front);
       greens(area, 1.5);
       break;
     }
