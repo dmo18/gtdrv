@@ -28,6 +28,9 @@ export const LOT_MAX_AREA = 6400;
 export const LOT_MIN_AREA = 100;
 export const LOT_MIN_WIDTH = 10;
 export const CARPARK_MIN = 600;
+// Bays per parking lot (a lot is a part of the land, not all of it).
+export const CARPARK_BAYS = 36;
+export const CARPARK_BAYS_MAPPED = 72;
 // Caps (phone budget).
 export const MAX_FEATURES = 24;
 export const MAX_PER_HA = 120;
@@ -256,19 +259,36 @@ function infillParcel(inp, district, P, pi, pj, cx, cz, out) {
 // ---------------------------------------------------------------------
 // Lots.
 // ---------------------------------------------------------------------
-const CARPARK_OSM = new Set(['parking', 'garage', 'garages', 'retail', 'commercial', 'hospital', 'school', 'university', 'college', 'train_station']);
+// Mapped parking (OSM amenity=parking, garage, garages) makes a parking lot from
+// a modest lot; the other kinds of building only get one on a large lot, and
+// then only on a third of them (a hash of the building's corner, so the rule
+// is a function of its arguments). A building carrying `parking` or
+// `amenity: 'parking'` (the map data's own field, once it has one) counts as
+// mapped whatever its `osm` says.
+const PARKING_MAPPED_OSM = new Set(['parking', 'garage', 'garages']);
+const CARPARK_OSM = new Set(['retail', 'commercial', 'hospital', 'school', 'university', 'college', 'train_station']);
 const PLAZA_OSM = new Set(['public', 'museum', 'library', 'church', 'cathedral', 'synagogue', 'hotel', 'cruise_terminal']);
 const WORKS_STYLE = new Set(['shed', 'hangar', 'container']);
+// Free area (m2) a lot needs to be a parking lot of an unmapped kind.
+export const CARPARK_BIG = 1800;
+export function isMappedParking(b) {
+  return !!b && (PARKING_MAPPED_OSM.has(b.osm) || b.parking === true || b.amenity === 'parking');
+}
+// One in three, by the building's corner.
+function oneInThree(b) {
+  return ((Math.imul(Math.round(b.x0 * 4) | 0, 73856093) ^ Math.imul(Math.round(b.z0 * 4) | 0, 19349663)) >>> 0) % 3 === 0;
+}
 
 // The type rule table (6.2 step 5) for a lot from steps 4c and 4d.
 export function lotTypeFor(b, district, free) {
   if (b && b.osm === 'construction') return 'site';
   if (district === 'airfield') return 'airfield';
   if (district === 'industrial' || district === 'docks' || (b && WORKS_STYLE.has(b.style))) return 'works';
-  if (b && CARPARK_OSM.has(b.osm) && free >= CARPARK_MIN) return 'carpark';
+  if (isMappedParking(b) && free >= CARPARK_MIN) return 'carpark';
+  if (b && CARPARK_OSM.has(b.osm) && free >= CARPARK_BIG && oneInThree(b)) return 'carpark';
   if (b && (b.h >= 30 || PLAZA_OSM.has(b.osm))) return 'plaza';
   if (district === 'residential' || (b && (b.kind === 'house' || (b.h <= 8 && (b.x1 - b.x0) * (b.z1 - b.z0) <= 300)))) return 'yard';
-  if ((district === 'downtown' || district === 'midtown') && !b && free >= CARPARK_MIN) return 'carpark';
+  if ((district === 'downtown' || district === 'midtown') && !b && free >= CARPARK_BIG) return 'carpark';
   if (district === 'downtown' || district === 'midtown') return b ? 'plaza' : 'grass';
   return b ? 'yard' : 'grass';
 }
@@ -810,11 +830,18 @@ export function dressLot(city, lot, out = []) {
       // Rows of bays: one `bay` feature per straight run (heading along the
       // row, l = 2.5 m per bay, w = 5 m deep; the car faces across it).
       const rows = [];
-      for (let off = 4.5, row = 0; off < depthLen - 2.5; row++) {
+      // A smaller lot: at most CARPARK_BAYS bays (mapped parking gets more).
+      const bayMax = isMappedParking(lot.building >= 0 && city.buildings ? city.buildings[lot.building] : null) ? CARPARK_BAYS_MAPPED : CARPARK_BAYS;
+      let bayN = 0;
+      for (let off = 4.5, row = 0; off < depthLen - 2.5 && bayN < bayMax; row++) {
         const d = depth0 + sgn * off;
         let runA = -1, runN = 0;
         const flush = () => {
-          if (runN >= 1) rows.push(runA, runN, d);
+          if (runN >= 1 && bayN < bayMax) {
+            const n = Math.min(runN, bayMax - bayN);
+            rows.push(runA, n, d);
+            bayN += n;
+          }
           runN = 0;
         };
         for (let a = span0 + 1.25; a <= span1 - 1.25 + 1e-6; a += 2.5) {
@@ -1033,6 +1060,29 @@ export function lotShares(lots, keep = () => true) {
   }
   for (const t of LOT_TYPES) a[t] = total ? a[t] / total : 0;
   return { share: a, total };
+}
+
+// ---- How full a parking lot is ----
+// Share of the bays holding a car, by the lot's district and the hour:
+// [day, night]. Residential lots fill up at night, the rest empty out. Never
+// below 0.2 and never above 0.55 (a lot is never full; the collision world
+// of world/collision.js only knows cars up to 0.55).
+export const FILL_BY_DISTRICT = {
+  downtown: [0.55, 0.2], midtown: [0.5, 0.2], residential: [0.3, 0.55], beach: [0.5, 0.2],
+  docks: [0.3, 0.2], industrial: [0.3, 0.2], park: [0.35, 0.2],
+};
+export const FILL_MIN = 0.2, FILL_MAX = 0.55;
+// The fill of lot `lot` at `hour` (0 to 24): the day and night values blended
+// by a daylight curve (noon 1, midnight 0), a small seeded offset per lot
+// (so two lots never match), clamped to FILL_MIN..FILL_MAX. Hours go by
+// half hours, so the cars of a lot appear one at a time as the day goes.
+export function lotFill(lot, hour) {
+  const f = FILL_BY_DISTRICT[lot.district] || FILL_BY_DISTRICT.midtown;
+  const h = Math.floor((((hour % 24) + 24) % 24) * 2) / 2;
+  const w = 0.5 + 0.5 * Math.cos(((h - 13) * Math.PI) / 12);
+  const jit = (((lot.seed >>> 6) & 255) / 255 - 0.5) * 0.12;
+  const v = f[1] + (f[0] - f[1]) * w + jit;
+  return v < FILL_MIN ? FILL_MIN : v > FILL_MAX ? FILL_MAX : v;
 }
 
 // The single bays of a `bay` feature (a row): calls fn(x, z, heading) per

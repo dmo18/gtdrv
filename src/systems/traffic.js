@@ -9,7 +9,7 @@
 // edge it is on (A -> B), a curve through the next junction (B -> C) and
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
-import { lanePoint, lanesPerDirection, laneOffset, signalState } from '../world/citygen.js';
+import { lanePoint, lanesPerDirection, laneOffset, signalState, canDrive } from '../world/citygen.js';
 import { createVehicle, steerLock, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
 import { exitPosition } from '../entities/onfoot.js';
@@ -38,6 +38,17 @@ const LEFT_R = 11; // left turns are wide so opposing left turns pass
 const CAUSEWAY_WEIGHT = 0;
 
 const laneSpeedOf = (e) => (e.causeway ? LANE_SPEED.causeway : e.avenue ? LANE_SPEED.avenue : LANE_SPEED.street);
+// Lanes of an edge driven away from node `from` (docs/MAP.md "Edge contract").
+const lanesFrom = (e, from) => lanesPerDirection(e, e.a === from);
+// A stop sign at node n for traffic arriving on edge e (world/miami.js:
+// the minor approaches, or all of them where none is a main road).
+const STOP_WAIT = 0.8; // s at a standstill on the line
+function stopSignFor(city, n, e) {
+  if (!n.stop || n.signal) return false;
+  if (!e.avenue) return true;
+  for (let i = 0; i < n.edges.length; i++) if (!city.edges[n.edges[i]].avenue) return false;
+  return true;
+}
 const extAt = (node, e) => (e.horizontal ? node.hx : node.hz);
 const otherEnd = (e, from) => (e.a === from ? e.b : e.a);
 
@@ -70,6 +81,7 @@ export function createDriver(city, rng) {
     mode: 0, // 0 normal, 1 backing up, 2 steering around
     modeTime: 0, tries: 0, aroundVeh: null, offset: 0, override: 0,
     junctions: 0, targetSpeed: 0, inJunction: false,
+    stopDone: false, stopWait: 0, // the stop sign of the junction ahead
     stuck: false, dead: false,
     yld: createYield(), yShift: 0, // giving way to a siren (src/core/yield.js)
   };
@@ -112,7 +124,11 @@ function pickNext(dr, edgeId, nodeId) {
     if (r <= 0) return id;
   }
   if (last === edgeId) {
-    // Only excluded roads lead on: take one anyway rather than U-turn.
+    // Only excluded roads lead on: a legal one anyway (a one-way is never
+    // entered against its direction), else back the way it came where
+    // that is legal, else anything rather than stand.
+    for (let i = 0; i < n.edges.length; i++) if (n.edges[i] !== edgeId && canDrive(city.edges[n.edges[i]], nodeId) && !city.edges[n.edges[i]].causeway) return n.edges[i];
+    if (canDrive(city.edges[edgeId], nodeId)) return edgeId;
     for (let i = 0; i < n.edges.length; i++) if (n.edges[i] !== edgeId) return n.edges[i];
   }
   return last;
@@ -120,18 +136,24 @@ function pickNext(dr, edgeId, nodeId) {
 
 function weightOf(dr, ea, fa, eb, fb) {
   const e = dr.city.edges[eb];
+  // One-way streets only along their direction (real traffic keeps the law).
+  if (!canDrive(e, fb)) return 0;
   let w = turnType(dr.city, ea, fa, eb, fb) === STRAIGHT ? 1.7 : 1;
   if (e.causeway) w *= CAUSEWAY_WEIGHT;
   return w;
 }
 
-function laneFor(dr, edgeId, turnOut, prevLane, prevEdge) {
+// The lane on edge `edgeId` driven away from `from`: lane 0 is the inner
+// (left) lane, so left turns and U-turns take it and right turns the
+// outer one; straight on keeps the lane it had where it can.
+function laneFor(dr, edgeId, from, turnOut, prevLane, prevEdge) {
   const e = dr.city.edges[edgeId];
-  if (lanesPerDirection(e) < 2) return 0;
-  if (turnOut === RIGHT) return 1;
+  const n = lanesFrom(e, from);
+  if (n < 2) return 0;
+  if (turnOut === RIGHT) return n - 1;
   if (turnOut === LEFT || turnOut === UTURN) return 0;
-  if (prevEdge >= 0 && lanesPerDirection(dr.city.edges[prevEdge]) > 1) return prevLane;
-  return dr.rng.next() < 0.5 ? 0 : 1;
+  if (prevEdge >= 0 && prevLane < n) return prevLane;
+  return Math.min(n - 1, Math.floor(dr.rng.next() * n));
 }
 
 function setPt(dr, i, x, z) {
@@ -252,11 +274,13 @@ export function placeDriver(dr, v, edgeId, from, d = 0, lane = -1) {
   dr.f1 = otherEnd(city.edges[edgeId], from);
   dr.e1 = pickNext(dr, edgeId, dr.f1);
   dr.t1 = turnType(city, dr.e0, dr.f0, dr.e1, dr.f1);
-  dr.l0 = lane >= 0 ? Math.min(lane, lanesPerDirection(city.edges[edgeId]) - 1) : laneFor(dr, edgeId, dr.t1, 0, -1);
+  dr.l0 = lane >= 0 ? Math.min(lane, lanesFrom(city.edges[edgeId], from) - 1) : laneFor(dr, edgeId, from, dr.t1, 0, -1);
   dr.f2 = otherEnd(city.edges[dr.e1], dr.f1);
   dr.e2 = pickNext(dr, dr.e1, dr.f2);
   dr.t2 = turnType(city, dr.e1, dr.f1, dr.e2, dr.f2);
-  dr.l1 = laneFor(dr, dr.e1, dr.t2, dr.l0, dr.e0);
+  dr.l1 = laneFor(dr, dr.e1, dr.f1, dr.t2, dr.l0, dr.e0);
+  dr.stopDone = false;
+  dr.stopWait = 0;
   buildPath(dr);
   dr.seg = 0;
   dr.mode = 0;
@@ -287,7 +311,9 @@ function advance(dr) {
   dr.f2 = otherEnd(city.edges[dr.e1], dr.f1);
   dr.e2 = pickNext(dr, dr.e1, dr.f2);
   dr.t2 = turnType(city, dr.e1, dr.f1, dr.e2, dr.f2);
-  dr.l1 = laneFor(dr, dr.e1, dr.t2, dr.l0, dr.e0);
+  dr.l1 = laneFor(dr, dr.e1, dr.f1, dr.t2, dr.l0, dr.e0);
+  dr.stopDone = false;
+  dr.stopWait = 0;
   buildPath(dr);
   dr.seg = 0;
   dr.junctions++;
@@ -391,7 +417,8 @@ function attachNearest(dr, v) {
       const a = city.nodes[from], b = city.nodes[otherEnd(e, from)];
       const ux = (b.x - a.x) / e.length, uz = (b.z - a.z) / e.length;
       const d = clamp((v.x - a.x) * ux + (v.z - a.z) * uz, 0, e.length);
-      const lanes = lanesPerDirection(e);
+      if (!canDrive(e, from)) continue;
+      const lanes = lanesFrom(e, from);
       for (let l = 0; l < lanes; l++) {
         lanePoint(city, e, from, d, l, LP);
         const dist = Math.hypot(v.x - LP.x, v.z - LP.z);
@@ -582,6 +609,14 @@ export function driveStep(dr, v, dt, ctx = {}) {
       if (sp < 0.5 && distLine < 2) dr.oncomingTime += dt;
     }
     if (dr.exitBlocked) mustStop = true;
+    // A stop sign: a full stop on the line, then on (giving way as above).
+    if (!dr.stopDone && stopSignFor(city, T, e0)) {
+      if (sp < 0.4 && distLine < 2.5) {
+        dr.stopWait += dt;
+        if (dr.stopWait >= STOP_WAIT) dr.stopDone = true;
+      }
+      if (!dr.stopDone) mustStop = true;
+    }
   }
   if (mustStop) vt = Math.min(vt, distLine <= 0.3 ? 0 : Math.sqrt(2 * STOP_DECEL * (distLine - 0.3)));
 
@@ -592,7 +627,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
   const yFree = dr.mode === 0 && !dr.inJunction;
   const yOn = yl.on && yFree;
   const yStop = yFree && !(sp > 1 && s < dr.cum[IB] && dr.cum[IB] - s - halfL < 14);
-  if (yOn) dr.yShift = curbShift(e0.width || 9, laneOffset(e0, dr.l0), v.spec.width / 2, !!e0.avenue && dr.l0 === 0);
+  if (yOn) dr.yShift = curbShift(e0.width || 9, laneOffset(e0, dr.l0, dr.f0 === e0.a), v.spec.width / 2, !!e0.avenue && dr.l0 === 0);
 
   // Car (or anything) ahead on the path.
   let obsLimited = false;
@@ -809,12 +844,12 @@ export function createTraffic(game, { max = 14 } = {}) {
     for (let k = 0; k < 8; k++) {
       const e = city.edges[near[rng.int(0, near.length - 1)]];
       if (e.causeway && CAUSEWAY_WEIGHT <= 0) continue;
-      const from = rng.next() < 0.5 ? e.a : e.b;
+      const from = e.oneway ? e.a : rng.next() < 0.5 ? e.a : e.b;
       const to = otherEnd(e, from);
       const d0 = extAt(city.nodes[from], e) + 12, d1 = e.length - extAt(city.nodes[to], e) - 22;
       if (d1 <= d0) continue;
       const d = rng.range(d0, d1);
-      const lane = rng.int(0, lanesPerDirection(e) - 1);
+      const lane = rng.int(0, lanesFrom(e, from) - 1);
       lanePoint(city, e, from, d, lane, LP);
       const qx = LP.x, qz = LP.z;
       const dist = Math.hypot(qx - p.x, qz - p.z);
@@ -901,8 +936,10 @@ export function createTraffic(game, { max = 14 } = {}) {
     const spAlong = same ? bt : be.length - bt; // spawn distance from fwdFrom
     let placed = 0;
     for (let i = 0; i < n; i++) {
-      const oncoming = i % 2 === 1;
+      // A one-way start street: everyone with the traffic.
+      const oncoming = i % 2 === 1 && !be.oneway;
       const from = oncoming ? backFrom : fwdFrom;
+      if (!canDrive(be, from)) continue;
       const dMin = extAt(city.nodes[from], be) + 12, dMax = be.length - extAt(city.nodes[oncoming ? fwdFrom : backFrom], be) - 22;
       // Spread along the street ahead of the spawn; if a spot is taken or
       // off the street, slide it along until one is free (never within
@@ -913,7 +950,7 @@ export function createTraffic(game, { max = 14 } = {}) {
         const ahead = base + SEED_SLIDE[k];
         const dd = oncoming ? be.length - (spAlong + ahead) : spAlong + ahead;
         if (dd < dMin || dd > dMax) continue;
-        lane = k === 0 ? rng.int(0, lanesPerDirection(be) - 1) : lane;
+        lane = k === 0 ? rng.int(0, lanesFrom(be, from) - 1) : lane;
         lanePoint(city, be, from, dd, lane, SEED_LP);
         qx = SEED_LP.x;
         qz = SEED_LP.z;

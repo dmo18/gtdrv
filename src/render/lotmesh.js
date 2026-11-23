@@ -13,6 +13,8 @@
 // Every consumer treats a city without lots (the island) as "no lots".
 import { lotStamps } from './props.js';
 import { bayCar } from '../world/collision.js';
+import { lotDressCache, lotFill, dressLot } from '../world/lots.js';
+import { VEHICLE_SPECS } from '../entities/vehicle.js';
 
 // A flat quad through four corners (as citymesh's orientedQuad; kept
 // here so the two modules do not import each other).
@@ -256,16 +258,8 @@ const BORDER_LAY = { s: 0.4, c: 0, n: 1 };
 
 // ---- dressing ----
 
-const CARS = [0xe8e8e6, 0x2a2c30, 0x8a9096, 0xb8bcc0, 0x7a1e22, 0x1e3a6a, 0x3c5a48, 0xc8b89a, 0x5a2a4a, 0xd0a030];
 const HEDGE = 0x3f6e34, WALLS = [0xe6dccb, 0xd4d0c8, 0xf0e8da, 0xc4b8a4], CONTAINERS = [0xb4442c, 0x2c5a8a, 0x3a7a4a, 0xd89a2a, 0x8a8e92, 0x6a3a6a];
 const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
-
-// One parked car, about 4.4 by 1.8 m, centered at (x, z), facing h.
-function parkedCar(P, x, z, y, h, col) {
-  P.obox(x, z, 2.2, 0.88, y + 0.18, y + 0.95, h, col, col, 0.55, 1);
-  P.obox(x - Math.cos(h) * 0.25, z - Math.sin(h) * 0.25, 1.15, 0.78, y + 0.95, y + 1.42, h, 0x2a3036, shadeHex(col, 0.92), 0.8, 1);
-  P.obox(x, z, 2.05, 0.92, y, y + 0.2, h, 0x141516, 0x141516);
-}
 
 // A run of see-through panels (picket or mesh picture) along a line.
 function panels(D, r, ax, az, bx, bz, y, hgt, color) {
@@ -284,7 +278,6 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 // paint, sidewalk, ao, glow, trees, treesDetail) and returns how many it
 // drew. stamps: lotStamps(C), made once per tile.
 export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
-  const city = C.city;
   const y = LOT_Y;
   const R = C.R || {};
   let drawn = 0;
@@ -331,8 +324,9 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
       case 'bay': {
         // One bay (2.5 by 5 m: l across the row, w the depth) or a row of
         // them when l is longer (W1 emits rows, eachBay splits them the
-        // same way): side lines, and parked cars where bayCar says (about
-        // half of the bays the parked-car system does not fill).
+        // same way): the side lines only. The cars are not part of the tile:
+        // the lot car field (createLotCarField, drawn by systems/parked.js)
+        // parks real car bodies in them by lot, hour and view.
         const lb = C.paint.at(x, z);
         const bw = 2.5, nb = Math.max(1, Math.round((f.l || bw) / bw)), depth = f.w || 5;
         const half = (nb * bw) / 2, dh = depth / 2;
@@ -343,15 +337,6 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
           const px = x + ca * o, pz = z + sa * o;
           orientedQuad(lb, px - ca * 0.06 - cx * dh, pz - sa * 0.06 - cz * dh, px + ca * 0.06 - cx * dh, pz + sa * 0.06 - cz * dh,
             px + ca * 0.06 + cx * dh, pz + sa * 0.06 + cz * dh, px - ca * 0.06 + cx * dh, pz - sa * 0.06 + cz * dh, y + 0.02, 0xeeeee6);
-        }
-        for (let s = 0; s < nb; s++) {
-          const o = -half + (s + 0.5) * bw;
-          const bx = x + ca * o, bz = z + sa * o;
-          const u = bayCar(city, bx, bz, f.v);
-          if (u < 0) continue;
-          const ch = h + Math.PI / 2 + (u < 0.2 ? Math.PI : 0) + (u - 0.27) * 0.08;
-          parkedCar(C.solid.at(bx, bz), bx, bz, y, ch, CARS[(u * 97 | 0) % CARS.length]);
-          C.ao.at(bx, bz).aoDisc(bx, bz, 2.4, y + 0.012, 0.6, 6);
         }
         break;
       }
@@ -464,4 +449,308 @@ export function* lotJob(C, lots, dress, over) {
     if (stats) { stats.lots++; stats.features += n; }
     if (over()) yield 'lots';
   }
+}
+
+// ---- Cars in the bays ----
+// The cars of a lot are not baked into the tile: they depend on the hour and
+// on what is in view. createLotCarField picks, a few times a second, the
+// bays near the camera that hold a car (by lot fill, see world/lots.js
+// lotFill, and the bay hash of world/collision.js bayCar), at most `cap`
+// of them, nearest first. systems/parked.js draws them: the real car body
+// (vehiclemesh) up close, lotHull below beyond that, both instanced.
+
+export const LOT_CAR_CAP = 40; // static parked cars in view, default
+export const LOT_CAR_CAP_MAX = 60; // the most a quality tier may ask for
+// Which cars stand in the lots of a district (spec ids of VEHICLE_SPECS).
+export const LOT_CAR_MIX = {
+  downtown: ['sedan', 'sedan', 'taxi', 'compact', 'sports', 'van', 'sedan'],
+  midtown: ['sedan', 'compact', 'compact', 'pickup', 'van', 'muscle', 'sedan'],
+  residential: ['compact', 'sedan', 'pickup', 'sedan', 'muscle', 'compact'],
+  beach: ['sports', 'compact', 'muscle', 'sedan', 'pickup', 'compact'],
+  docks: ['pickup', 'van', 'sedan', 'compact'],
+  industrial: ['pickup', 'van', 'compact', 'sedan'],
+  park: ['compact', 'sedan', 'pickup'],
+};
+// Every spec id a lot can show, in a fixed order (the index is stored per car).
+export const LOT_CAR_SPECS = [...new Set(Object.values(LOT_CAR_MIX).flat())];
+const MIX_IDX = {};
+for (const k of Object.keys(LOT_CAR_MIX)) MIX_IDX[k] = LOT_CAR_MIX[k].map((id) => LOT_CAR_SPECS.indexOf(id));
+// Paint by fleet palette: the spec's own colors, plus the two most common
+// street colors (white and black), so a lot is not a row of one hue.
+const COMMON = [0xe8e8e6, 0x24272b];
+export function lotCarColor(specIdx, r) {
+  const spec = VEHICLE_SPECS[LOT_CAR_SPECS[specIdx]];
+  const cols = spec.colors;
+  const n = cols.length + COMMON.length;
+  const k = Math.floor(r * n);
+  return k < cols.length ? cols[k] : COMMON[k - cols.length];
+}
+
+// The car in one bay: the bay center (bx, bz), the row's variant v and the
+// lot's fill. -1 when the bay is empty (see bayCar: a listed spot is empty
+// here, the parked-car system puts a real car in it), else the bay's hash
+// u in 0..fill. Same hash as the collision world.
+export function lotCarAt(city, bx, bz, v, fill) {
+  const u = bayCar(city, bx, bz, v);
+  return u >= 0 && u < fill ? u : -1;
+}
+
+function hash2(x, z, k) {
+  let h = Math.imul(x * 374761393 ^ z * 668265263 ^ k * 2246822519, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+const FIELD_CELL = 128;
+// The field of static bay cars of one city. Make it once, call update(...)
+// a few times a second, read the arrays n, x, z, yaw (heading, rad), spec
+// (index in LOT_CAR_SPECS), color (hex), dist (m). No allocation in update.
+export function createLotCarField(city, opts = {}) {
+  const range = opts.range || 150;
+  const dress = opts.dress || dressLot;
+  const MAX = LOT_CAR_CAP_MAX;
+  const field = {
+    n: 0, cap: opts.cap || LOT_CAR_CAP,
+    x: new Float32Array(MAX), z: new Float32Array(MAX), yaw: new Float32Array(MAX),
+    spec: new Uint8Array(MAX), color: new Uint32Array(MAX), dist: new Float32Array(MAX),
+    stats: { lots: 0, bays: 0, updates: 0 },
+    update: null,
+  };
+  // Parking lots by 128 m cell.
+  const grid = new Map();
+  const cx0 = (v) => Math.floor(v / FIELD_CELL);
+  for (const lot of city.lots || []) {
+    if (!lot || lot.type !== 'carpark') continue;
+    for (let i = cx0(lot.x0); i <= cx0(lot.x1); i++) {
+      for (let j = cx0(lot.z0); j <= cx0(lot.z1); j++) {
+        const key = i * 65536 + j;
+        let a = grid.get(key);
+        if (!a) grid.set(key, (a = []));
+        a.push(lot);
+      }
+    }
+  }
+  field.lotCount = () => { let n = 0; for (const a of grid.values()) n += a.length; return n; };
+  const cache = lotDressCache(city, dress);
+  const seen = new Set();
+  // (cx, cz): the camera; (fx, fz): its look direction on the ground
+  // (unit); hour: the clock; cap: cars wanted (default field.cap).
+  field.update = (cx, cz, fx, fz, hour, cap = field.cap) => {
+    const want = Math.min(MAX, Math.max(0, cap | 0));
+    let n = 0;
+    field.stats.updates++;
+    seen.clear();
+    const r2 = range * range;
+    const i0 = cx0(cx - range), i1 = cx0(cx + range), j0 = cx0(cz - range), j1 = cx0(cz + range);
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        const list = grid.get(i * 65536 + j);
+        if (!list) continue;
+        for (let li = 0; li < list.length; li++) {
+          const lot = list[li];
+          if (seen.has(lot.id)) continue;
+          seen.add(lot.id);
+          const qx = cx < lot.x0 ? lot.x0 - cx : cx > lot.x1 ? cx - lot.x1 : 0;
+          const qz = cz < lot.z0 ? lot.z0 - cz : cz > lot.z1 ? cz - lot.z1 : 0;
+          if (qx * qx + qz * qz > r2) continue;
+          field.stats.lots++;
+          const fill = lotFill(lot, hour);
+          const mix = MIX_IDX[lot.district] || MIX_IDX.midtown;
+          const feats = cache.get(lot);
+          for (let q = 0; q < feats.length; q++) {
+            const f = feats[q];
+            if (f.kind !== 'bay') continue;
+            const nb = Math.max(1, Math.round(f.l / 2.5));
+            const ca = Math.cos(f.heading), sa = Math.sin(f.heading);
+            const half = (nb * 2.5) / 2;
+            for (let s = 0; s < nb; s++) {
+              const o = -half + (s + 0.5) * 2.5;
+              const bx = f.x + ca * o, bz = f.z + sa * o;
+              const dx = bx - cx, dz = bz - cz;
+              const d2 = dx * dx + dz * dz;
+              if (d2 > r2) continue;
+              const d = Math.sqrt(d2);
+              // In view: ahead within about 57 degrees, or close by.
+              if (d > 14 && dx * fx + dz * fz < 0.54 * d) continue;
+              field.stats.bays++;
+              if (n >= want && d >= field.dist[n - 1]) continue;
+              const u = lotCarAt(city, bx, bz, f.v, fill);
+              if (u < 0) continue;
+              // Insert by distance (the arrays hold the nearest `want`).
+              let at = n < want ? n++ : want - 1;
+              while (at > 0 && field.dist[at - 1] > d) {
+                const t = at - 1;
+                field.x[at] = field.x[t]; field.z[at] = field.z[t]; field.yaw[at] = field.yaw[t];
+                field.spec[at] = field.spec[t]; field.color[at] = field.color[t]; field.dist[at] = field.dist[t];
+                at--;
+              }
+              const bi = Math.round(bx * 5), bj = Math.round(bz * 5);
+              const r1 = hash2(bi, bj, 1), r2h = hash2(bi, bj, 2), r3 = hash2(bi, bj, 3), r4 = hash2(bi, bj, 4);
+              const sp = mix[Math.floor(r1 * mix.length)];
+              field.x[at] = bx + ca * (r4 - 0.5) * 0.3;
+              field.z[at] = bz + sa * (r4 - 0.5) * 0.3;
+              // Nose in or tail in, a few degrees off the bay line.
+              field.yaw[at] = f.heading + Math.PI / 2 + (r3 < 0.3 ? Math.PI : 0) + (r2h - 0.5) * 0.12;
+              field.spec[at] = sp;
+              field.color[at] = lotCarColor(sp, hash2(bi, bj, 5));
+              field.dist[at] = d;
+            }
+          }
+        }
+      }
+    }
+    field.n = n;
+    return n;
+  };
+  return field;
+}
+
+// ---- The rounded hull for cars past the real body's range ----
+// A low-poly car (about 350 triangles): 12 stations along the length, a ring
+// of 11 points round the cross-section (sill, belt, glass or hood side, roof
+// edge, crown), wheels as 8-sided drums. Vertex colors: paint is white (the
+// instance color tints it), glass, sills and rubber are dark. No flat box
+// anywhere: the greenhouse tapers, the nose and tail round in, the roof
+// crowns. Origin: the ground center, the car points along +x, y up.
+// Returns { pos, nor, col, idx, tris } (typed arrays).
+const HULL_BODY = {
+  // t along the car from the tail (0) to the nose (1): rear window base,
+  // roof start, roof end, windshield base; belt height share of the car's.
+  hatch: { w1: 0.08, r0: 0.26, r1: 0.52, w0: 0.7, belt: 0.54 },
+  sedan: { w1: 0.2, r0: 0.35, r1: 0.6, w0: 0.72, belt: 0.55 },
+  coupe: { w1: 0.2, r0: 0.4, r1: 0.55, w0: 0.7, belt: 0.6 },
+  pickup: { w1: 0.34, r0: 0.38, r1: 0.6, w0: 0.72, belt: 0.58 },
+  van: { w1: 0.1, r0: 0.24, r1: 0.56, w0: 0.8, belt: 0.5 },
+  truck: { w1: 0.5, r0: 0.54, r1: 0.7, w0: 0.78, belt: 0.5 },
+};
+const GLASS = 0.012, DARK = 0.05, RUBBER = 0.02;
+
+export function buildLotHull(spec) {
+  const P = HULL_BODY[spec.body] || HULL_BODY.sedan;
+  const L = spec.length, W = spec.width, H = spec.height, hw = W / 2;
+  const yb = 0.17; // ground clearance of the body
+  const ts = [0, 0.025, 0.07, P.w1, P.r0, (P.r0 + P.r1) / 2, P.r1, P.w0, 0.86, 0.94, 0.98, 1];
+  ts.sort((a, b) => a - b);
+  const NS = ts.length;
+  const NJ = 11;
+  const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // Grid of ring points [station][j] -> (x, y, z).
+  const G = new Float32Array(NS * NJ * 3);
+  const roofAt = new Float32Array(NS);
+  for (let i = 0; i < NS; i++) {
+    const t = ts[i];
+    const x = (t - 0.5) * L;
+    // Belt line: the trunk and hood tuck down at the ends.
+    const belt = H * P.belt * (0.9 + 0.1 * sm(0, 0.16, t)) * (1 - 0.1 * sm(0.78, 1, t));
+    let roof = belt, glass = 0;
+    if (t > P.w1 && t < P.w0) {
+      const up = sm(P.w1, P.r0, t), down = 1 - sm(P.r1, P.w0, t);
+      const k = t < (P.r0 + P.r1) / 2 ? up : down;
+      roof = belt + (H - belt) * k;
+      glass = 1;
+    }
+    roofAt[i] = glass;
+    // The ends round in: narrower and lower at the tail and the nose.
+    const end = Math.min(sm(0, 0.07, t), sm(1, 0.93, t));
+    const w = hw * (0.8 + 0.2 * end);
+    const lo = yb + 0.06 * (1 - end);
+    const sill = lo + 0.13;
+    const cabin = glass ? 1 : 0;
+    const topIn = cabin ? 0.8 : 0.93; // the greenhouse tumbles home
+    const crown = 0.05 * (cabin ? 1 : 0.5);
+    const pts = [
+      [0.8, lo], [1, sill], [1, belt - 0.02], [topIn, roof - 0.02], [0.52, roof + crown * 0.4], [0, roof + crown],
+      [-0.52, roof + crown * 0.4], [-topIn, roof - 0.02], [-1, belt - 0.02], [-1, sill], [-0.8, lo],
+    ];
+    for (let j = 0; j < NJ; j++) {
+      const o = (i * NJ + j) * 3;
+      G[o] = x; G[o + 1] = pts[j][1]; G[o + 2] = pts[j][0] * w;
+    }
+  }
+  const pos = [], nor = [], col = [], idx = [];
+  const vp = (i, j) => [G[(i * NJ + j) * 3], G[(i * NJ + j) * 3 + 1], G[(i * NJ + j) * 3 + 2]];
+  // Smooth normal of grid point (i, j): across the neighbors, facing out.
+  const nrm = (i, j) => {
+    const a = vp(Math.max(0, i - 1), j), b = vp(Math.min(NS - 1, i + 1), j);
+    const c = vp(i, Math.max(0, j - 1)), d = vp(i, Math.min(NJ - 1, j + 1));
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [d[0] - c[0], d[1] - c[1], d[2] - c[2]];
+    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const p = vp(i, j);
+    const out = [0, p[1] - 0.6 * H, p[2]];
+    if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0) n = [-n[0], -n[1], -n[2]];
+    const l = Math.hypot(n[0], n[1], n[2]) || 1;
+    return [n[0] / l, n[1] / l, n[2] / l];
+  };
+  const emit = (p, n, c) => { pos.push(p[0], p[1], p[2]); nor.push(n[0], n[1], n[2]); col.push(c, c, c); return pos.length / 3 - 1; };
+  const tri = (a, b, c, flip) => (flip ? idx.push(a, c, b) : idx.push(a, b, c));
+  for (let i = 0; i + 1 < NS; i++) {
+    const slope = roofAt[i] && roofAt[i + 1] && (ts[i + 1] <= P.r0 + 1e-6 || ts[i] >= P.r1 - 1e-6);
+    const cabin = roofAt[i] && roofAt[i + 1];
+    for (let j = 0; j + 1 < NJ; j++) {
+      // Segment j..j+1 of the ring: 0 and 9 sills, 1 and 8 lower side, 2 and
+      // 7 glass (cabin) or hood side, 3, 6 roof edge (glass on the slopes),
+      // 4, 5 roof.
+      const side = j === 0 || j === 9 ? 'sill' : j === 1 || j === 8 ? 'low' : j === 2 || j === 7 ? 'win' : 'roof';
+      let c = 1;
+      if (side === 'sill') c = DARK;
+      else if (side === 'win') c = cabin ? GLASS : 1;
+      else if (side === 'roof' && slope) c = j === 3 || j === 6 || j === 4 || j === 5 ? GLASS : 1;
+      const a = emit(vp(i, j), nrm(i, j), c), b = emit(vp(i + 1, j), nrm(i + 1, j), c);
+      const d = emit(vp(i, j + 1), nrm(i, j + 1), c), e = emit(vp(i + 1, j + 1), nrm(i + 1, j + 1), c);
+      // Wound so the face points out: the ring runs right side up over to
+      // the left, stations run tail to nose.
+      tri(a, b, d, false); tri(b, e, d, false);
+    }
+  }
+  // Tail and nose caps: a fan round the ring's middle, paint.
+  for (const end of [0, 1]) {
+    const i = end ? NS - 1 : 0;
+    const nx = end ? 1 : -1;
+    let cy = 0;
+    for (let j = 0; j < NJ; j++) cy += G[(i * NJ + j) * 3 + 1] / NJ;
+    const hub = emit([G[i * NJ * 3], cy, 0], [nx, 0, 0], 1);
+    const ring = [];
+    for (let j = 0; j < NJ; j++) ring.push(emit(vp(i, j), [nx, 0, 0], j === 0 || j === NJ - 1 ? DARK : 1));
+    for (let j = 0; j + 1 < NJ; j++) tri(hub, ring[j], ring[j + 1], end === 0);
+  }
+  // Wheels: drums of 8 sides, the outer face closed.
+  const { wheelBase = L * 0.6, wheelRadius = 0.32 } = spec;
+  const wr = wheelRadius, ww = 0.22;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const cx = sx * wheelBase / 2, cz = sz * (hw - ww / 2 - 0.01);
+      const base = pos.length / 3;
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        const nrmv = [ca, sa, 0];
+        emit([cx + ca * wr, wr + sa * wr, cz - sz * ww / 2], nrmv, RUBBER);
+        emit([cx + ca * wr, wr + sa * wr, cz + sz * ww / 2], nrmv, RUBBER);
+      }
+      for (let k = 0; k < 8; k++) {
+        const k2 = (k + 1) % 8;
+        const a = base + k * 2, b = base + k * 2 + 1, c = base + k2 * 2, d = base + k2 * 2 + 1;
+        tri(a, c, b, sz < 0); tri(b, c, d, sz < 0);
+      }
+      const hub = emit([cx, wr, cz + sz * ww / 2], [0, 0, sz], 0.18);
+      const rim = [];
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        rim.push(emit([cx + Math.cos(a) * wr * 0.9, wr + Math.sin(a) * wr * 0.9, cz + sz * ww / 2], [0, 0, sz], 0.1));
+      }
+      for (let k = 0; k < 8; k++) tri(hub, rim[k], rim[(k + 1) % 8], sz < 0);
+    }
+  }
+  // Wind every triangle so its face looks the way its vertex normals do.
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const d = (uy * vz - uz * vy) * nor[a] + (uz * vx - ux * vz) * nor[a + 1] + (ux * vy - uy * vx) * nor[a + 2];
+    if (d < 0) { const q = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = q; }
+  }
+  return {
+    pos: Float32Array.from(pos), nor: Float32Array.from(nor), col: Float32Array.from(col),
+    idx: Uint16Array.from(idx), tris: idx.length / 3,
+  };
 }

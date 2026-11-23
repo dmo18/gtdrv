@@ -1,9 +1,11 @@
 // Street life: trees, lamps, traffic lights, benches, signs and the
 // island's landmarks. Small things are stamped from a handful of
 // template shapes into the per-tile prop meshes, so the whole lot costs
-// a few draw calls. Only big things get colliders.
+// a few draw calls. Collision is not made here: the street props' shapes
+// are world/propsolid.js (fillPropCollision), the landmarks' world/collision.js.
 import { MeshBuilder } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
+import { PALM_PLACES, miamiPalmSpots as palmSpots } from '../world/propsolid.js';
 
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
 const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
@@ -343,63 +345,11 @@ function makeLotTemplates(rng, R) {
 }
 const lotTemplateCache = new WeakMap();
 
-// Which Miami streets get palms (the rest get round shade trees).
-const PALM_PLACES = new Set(['Brickell', 'Downtown Miami', 'Brickell Key', 'Bayfront Park', 'Park West', 'Edgewater', 'Margaret Pace Park', 'Museum Park',
-  'Miami Beach', 'Watson Island', 'Fisher Island', 'Venetian Islands', 'Hibiscus Island', 'Palm Island', 'Virginia Key', 'Miami']);
-
-// Named boulevards lined with palms whatever their width.
-const PALM_STREET = /Southwest 8th Street|Brickell Avenue|Brickell Bay|Biscayne Boulevard|Bayshore|Ocean Drive|Collins Avenue|Alton Road|Venetian|MacArthur|Coral Way|Port Boulevard/;
-
-// Where the extra Miami palms stand (x, z, height triples): down the
-// avenues of the palm neighborhoods and the named palm boulevards, and
-// along the seawalls there. Worked out once per city (the whole map is
-// scanned) and kept, so a streamed tile only filters the list.
-const palmCache = new WeakMap(), templateCache = new WeakMap();
-function miamiPalmSpots(city, lamps, hash, blocked) {
-  let out = palmCache.get(city);
-  if (out) return out;
-  out = [];
-  const lampNear = new Set();
-  for (const l of lamps) lampNear.add(Math.round(l.x / 4) * 100000 + Math.round(l.z / 4));
-  const nearLamp = (x, z) => {
-    const i = Math.round(x / 4), j = Math.round(z / 4);
-    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (lampNear.has((i + a) * 100000 + j + b)) return true;
-    return false;
-  };
-  for (const e of city.edges) {
-    if (e.causeway || e.bridge) continue;
-    const named = !!(e.name && PALM_STREET.test(e.name));
-    if (e.width < 18 && !named) continue;
-    const a = city.nodes[e.a], bn = city.nodes[e.b];
-    if (!named && !PALM_PLACES.has(city.placeOf((a.x + bn.x) / 2, (a.z + bn.z) / 2))) continue;
-    const half = e.width / 2, rx = -e.uz, rz = e.ux;
-    for (const sd of [-1, 1]) {
-      for (let d = (a.hx || 0) + 8; d + 8 <= e.length - (bn.hx || 0); d += 13) {
-        const x = a.x + e.ux * d + rx * sd * (half + 1.15), z = a.z + e.uz * d + rz * sd * (half + 1.15);
-        // Diagonal streets have no block beside them: any open land will do.
-        const ground = city.blockAt(x, z) || (city.isLand && city.isLand(x, z) && city.onRoad && !city.onRoad(x, z));
-        if (!ground || (city.inBuilding && city.inBuilding(x, z, 1)) || nearLamp(x, z)) continue;
-        out.push(x, z, 8 + hash(x, z + 5) * 4);
-      }
-    }
-  }
-  if (city.mainShore && city.bounds) {
-    const B = city.bounds, st = 15;
-    for (let z = B.z0 + 7; z < B.z1; z += st) {
-      for (let x = B.x0 + 7; x < B.x1; x += st) {
-        const sd = city.mainShore(x, z);
-        if (sd < 4 || sd >= 4 + st * 0.7) continue;
-        const jx = x + (hash(x, z) - 0.5) * 6, jz = z + (hash(z, x) - 0.5) * 6;
-        const s2 = city.mainShore(jx, jz);
-        if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
-        if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
-        if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || blocked(jx, jz)) continue;
-        out.push(jx, jz, 7.5 + hash(jx, jz + 5) * 4.5);
-      }
-    }
-  }
-  palmCache.set(city, out);
-  return out;
+// The Miami avenue and seawall palms: world/propsolid.js (their trunks are
+// solid there). Kept for the callers' argument order.
+const templateCache = new WeakMap();
+function miamiPalmSpots(city) {
+  return palmSpots(city);
 }
 
 // Upright picture centered at (x, z), facing direction `rot`.
@@ -576,7 +526,7 @@ function drawTravelPad(P, pad) {
 // lists: the items of one streamed tile ({ props, furniture, signals,
 // palms }); null: the whole city.
 export function addProps(C, own = null, side = true, lists = null) {
-  const { city, collision } = C;
+  const { city } = C;
   const mine = (x, z) => !own || own(x, z);
   const { T, rng } = baseTemplates(city);
   const R = C.R;
@@ -638,30 +588,31 @@ export function addProps(C, own = null, side = true, lists = null) {
     C.ao.at(x, z).aoDisc(x, z, h * 0.22, gy + 0.012, 0.72, 6);
   }
 
+  // A prop a car sheared off is left out of a tile built (or rebuilt)
+  // while it lies broken (world/collision.js isBroken, through the city).
+  const gone = typeof city.propBroken === 'function' ? city.propBroken : null;
+
   // ---- the original scattered trees, palms and lamps ----
   const lamps = [];
   for (const p of lists ? lists.props : city.props) {
     if (p.type === 'lamp') {
       lamps.push(p);
-      if (mine(p.x, p.z)) C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
+      if (mine(p.x, p.z) && !(gone && gone(p.x, p.z))) C.plain.at(p.x, p.z).add(T.lamp, p.x, C.groundY(p.x, p.z) - 0.02, p.z, p.rot || 0, 1, (p.h || 7) / 7, 1);
       continue;
     }
     if (blocked(p.x, p.z)) continue;
     if (p.type === 'tree') {
-      if (side) collision.addCircle(p.x, p.z, p.r, p.h, 'tree');
       if (mine(p.x, p.z)) tree(p.x, p.z, p.h, 0, true);
     } else if (p.type === 'palm') {
-      if (side) collision.addCircle(p.x, p.z, 0.3, p.h, 'tree');
       if (mine(p.x, p.z)) palm(p.x, p.z, p.h, 0);
     }
   }
 
   // ---- Miami: palms down the avenues and along the seawalls ----
   if (MT) {
-    const spots = lists ? lists.palms : miamiPalmSpots(city, lamps, hash, blocked);
+    const spots = lists ? lists.palms : miamiPalmSpots(city);
     for (let i = 0; i < spots.length; i += 3) {
       const x = spots[i], z = spots[i + 1], h = spots[i + 2];
-      if (side) collision.addCircle(x, z, 0.3, h, 'tree');
       if (mine(x, z)) palm(x, z, h, 0);
     }
   }
@@ -669,8 +620,8 @@ export function addProps(C, own = null, side = true, lists = null) {
   // ---- street furniture ----
   for (const f of lists ? lists.furniture : city.furniture || []) {
     const { x, z, rot, q, v } = f;
-    if (side && (f.type === 'streettree' || f.type === 'palmtree')) collision.addCircle(x, z, 0.22, f.type === 'palmtree' ? 6 : 5, 'tree');
     if (!mine(x, z)) continue;
+    if (gone && f.type !== 'streettree' && f.type !== 'palmtree' && gone(x, z)) continue;
     const P = C.plain.at(x, z, q), D = C.detail.at(x, z, q);
     const y = C.groundY(x, z);
     const ay = y + 0.012;
@@ -858,9 +809,8 @@ export function addProps(C, own = null, side = true, lists = null) {
     }
   }
 
-  // ---- dock cranes ----
+  // ---- dock cranes (their legs' collision: world/collision.js fillLandmarkCollision) ----
   for (const c of L.cranes) {
-    if (side) for (const ox of [-7, 7]) for (const oz of [-6, 6]) collision.addCircle(c.x + ox, c.z + oz, 0.9, 27, 'crane');
     if (!mine(c.x, c.z)) continue;
     const P = C.plain.at(c.x, c.z);
     const col = c.v < 0.5 ? 0xc8502c : 0xd8a030, dark = hexShade(col, 0.7);
@@ -888,7 +838,6 @@ export function addProps(C, own = null, side = true, lists = null) {
   if (L.lighthouse && side) {
     const { x, z } = L.lighthouse;
     C.glows.push({ x, y: 24 + 1.9, z, r: 1, g: 0.92, b: 0.7, size: 7 });
-    collision.addCircle(x, z, 3.7, 24 + 5, 'lighthouse');
   }
   if (L.lighthouse && mine(L.lighthouse.x, L.lighthouse.z)) {
     const { x, z } = L.lighthouse;
@@ -917,5 +866,5 @@ export function addProps(C, own = null, side = true, lists = null) {
     C.plain.at(x, z).cyl(x, z, -0.1, 6.2, 0.09, 0.06, 5, 0xe8e4dc);
   }
 
-  return { lamps, bulbs, palms: MT ? miamiPalmSpots(city, lamps, hash, blocked) : [] };
+  return { lamps, bulbs, palms: MT ? miamiPalmSpots(city) : [] };
 }

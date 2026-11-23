@@ -799,3 +799,88 @@ or tall feature (bridge nodes excepted). Start view: 69 buildings within
 in node: about 1.9 to 2.2 s wall on a loaded 4-core machine (1.2 to 2.0
 s before), about 0.3 s more CPU. `dressLot` about 0.02 ms a lot warm.
 The lot grid keeps 16 MB (Int32 ids and Uint8 types). No new data file.
+
+## Edge contract
+
+Version 0.9.0 (docs/PLAN_V3.md 2.1 items 3 to 5, 11; seam of 5.1). Written
+before the code and kept stable: SOLID, LOTS and NAV build on it. Every
+city edge (`city.edges[k]`, Miami and the island) carries the fields below;
+`src/world/roadprofile.js` (pure) is the only place that decides them for
+Miami. Distances in meters. "Forward" is travel from node `a` to node `b`
+(`ux, uz` is that unit direction); "right" is the right-hand side of the
+direction of travel, (-uz, ux) for forward travel. Traffic keeps right.
+
+| field | type | meaning |
+|---|---|---|
+| `lanesF` | int >= 0 | driving lanes carrying traffic a to b |
+| `lanesB` | int >= 0 | driving lanes carrying traffic b to a; 0 on a one-way edge |
+| `laneW` | m | width of one driving lane: 3.3 (11 ft), 3.6 (12 ft) on trunk and motorway |
+| `parkL` | m | parking lane on the left curb, seen travelling a to b (0 or 2.4) |
+| `parkR` | m | parking lane on the right curb, seen travelling a to b (0 or 2.4) |
+| `median` | m | raised median (0: none). Only on a paired one-way (`divided`): the data gap between its left curb and its partner's; the edge owns the half along its left curb (`median / 2` wide, curbed, planted from 1.5 m), which is not part of `width` |
+| `width` | m | curb to curb: `(lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER` (GUTTER 0.3) |
+| `oneway` | bool | true: traffic only a to b (`lanesB` 0); the edge is stored in its legal direction |
+| `name` | string | the real street name ('' when the data has none) |
+
+Optional, 0 or absent on most edges: `center` (m, a painted two-way left-turn
+lane in the middle of a two-way road with an odd tagged lane count; part of
+`width`), `off` (m, the whole cross section moved this far to the right of
+the node line: only on a paired one-way whose data gap is under 1.0 m, so
+the two left curbs meet on the middle line and the two yellow edge lines
+read as one double yellow; every strip, lane and curb is measured from
+`node line + off`), `pair` (the partner edge id of a divided road).
+
+Also on every edge, derived (old callers): `avenue` = two or more lanes each
+way (`min(lanesF, lanesB) >= 2`, or a one-way of 3 or more); optional
+`sidewalk` (1.8 residential, 3.0 downtown and on Lincoln Road; the 0.15 m curb
+is `CURB_H`), `ped` (true on a pedestrian street: Lincoln Road Mall, Espanola
+Way; drivable in the sandbox), `divided` (true when two one-way ways were
+paired into this edge; `median` then holds the data gap). Island edges
+(citygen) get the same fields with values that keep their old lanes exactly:
+a street (11 m) is 1 + 1 lanes of 4.0 m with 1.2 m parking each side; an
+avenue (18 m) 2 + 2 lanes of 3.5 m, a 1.7 m painted `center` and 0.85 m
+parking each side (lane centers 2.0, 2.6 and 6.1 m as before).
+
+Cross section, from the left curb to the right curb seen travelling a to b:
+gutter, `parkL`, the `lanesB` lanes, `center`, the `lanesF` lanes, `parkR`,
+gutter. The middle of `width` lies `off` to the right of the node line.
+The divide (center line of a two-way road, middle of its turn lane; the left
+lane edge of a one-way) lies at
+`s = off - width / 2 + GUTTER + parkL + lanesB * laneW + center / 2` to the
+right of the node line (0 on a symmetric two-way road). Helpers in
+roadprofile.js: `roadProfile(way, opts)`, `divideOf(edge)`,
+`paintLines(edge, out)`, `pairDivided(nodes, edges, edgesNear)`, and the
+constants `LANE_W` 3.3, `LANE_W_FAST` 3.6, `PARK_W` 2.4, `GUTTER` 0.3,
+`CURB_H` 0.15, `SIDEWALK_RES` 1.8, `SIDEWALK_WIDE` 3.0.
+
+Functions (src/world/citygen.js, pure, no allocation; `forward` defaults to
+true so old callers keep working on symmetric roads):
+
+- `lanesPerDirection(edge, forward = true)`: `forward ? lanesF : lanesB`
+  (legacy edges without `lanesF`: 2 on an avenue, else 1).
+- `laneOffset(edge, lane = 0, forward = true)`: the lane's center, in meters
+  to the right of the node line seen in the direction of travel. Lane 0 is
+  the innermost lane (next to the divide; the leftmost lane of a one-way),
+  higher lanes are further right. Forward:
+  `s + center / 2 + (lane + 0.5) * laneW`; backward:
+  `-s + center / 2 + (lane + 0.5) * laneW`. `lane` is clamped to the lanes
+  of that direction. Always > 0 on a two-way road (right of the center).
+- `lanePoint(city, edge, from, d, lane = 0, out)`: the point `d` m from node
+  `from` along the edge on that lane, `out = { x, z, heading }`; the direction
+  is `from === edge.a` (forward) or not. On a one-way edge driven from `b`
+  (illegal) it still gives a point inside the strip (the forward lane's
+  offset), so callers must check `canDrive(edge, from)`.
+- `canDrive(edge, from)`: false only for a one-way edge entered from `b`.
+- `city.streetAt(x, z, out?, heading?)`: the street under (x, z):
+  `{ edge, name, cross, d, side }` or null off every road. `edge` the edge id
+  whose curb-to-curb strip holds the point (nearest center line wins), `name`
+  its name (the nearest named edge within 40 m when it has none), `cross` the
+  name of the next named cross street ahead (in the direction of `heading`
+  when given, else the edge's forward direction; '' when none), `d` the signed offset from the node line (right positive),
+  `side` 1 forward half, -1 backward half. Pure, grid indexed, no allocation
+  when `out` is given.
+
+Nodes keep `signal` (traffic light) and gain `stop` (all-way or minor stop
+sign, from the data's `highway=stop` nodes) and `blade` (true: street-name
+blades stand at this junction). `city.streetNames.atlas` lists every name of
+the region in sign-atlas order; `plateIndex(name)` gives its slot.

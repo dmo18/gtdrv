@@ -143,14 +143,24 @@ test('lots: the type rule table (6.2 step 5)', () => {
   assert.equal(lotTypeFor(b({}), 'airfield', 900), 'airfield');
   assert.equal(lotTypeFor(b({}), 'docks', 900), 'works');
   assert.equal(lotTypeFor(b({ style: 'shed' }), 'downtown', 900), 'works');
-  assert.equal(lotTypeFor(b({ osm: 'retail' }), 'midtown', 900), 'carpark');
+  // Mapped parking (amenity=parking, garage) makes a parking lot from 600 m2;
+  // other buildings only from CARPARK_BIG, and on one in three of them.
+  assert.equal(lotTypeFor(b({ osm: 'parking' }), 'midtown', 900), 'carpark');
+  assert.equal(lotTypeFor(b({ osm: 'garage' }), 'midtown', 900), 'carpark');
+  assert.equal(lotTypeFor(b({ osm: 'parking' }), 'midtown', 500), 'plaza');
+  assert.equal(lotTypeFor(b({ parking: true }), 'midtown', 900), 'carpark', 'the map data\'s own field');
+  assert.equal(lotTypeFor(b({ amenity: 'parking' }), 'midtown', 900), 'carpark');
+  assert.equal(lotTypeFor(b({ osm: 'retail' }), 'midtown', 900), 'plaza');
+  assert.equal(lotTypeFor(b({ osm: 'retail' }), 'midtown', 1900), 'carpark');
+  assert.equal(lotTypeFor(b({ osm: 'retail', x0: 7, x1: 37 }), 'midtown', 1900), 'plaza', 'two in three stay plazas');
   assert.equal(lotTypeFor(b({ osm: 'retail' }), 'midtown', 500), 'plaza');
   assert.equal(lotTypeFor(b({ h: 40 }), 'residential', 300), 'plaza');
   assert.equal(lotTypeFor(b({ osm: 'hotel' }), 'residential', 300), 'plaza');
   assert.equal(lotTypeFor(b({}), 'residential', 300), 'yard');
   assert.equal(lotTypeFor(b({ kind: 'house' }), 'midtown', 300), 'yard');
   assert.equal(lotTypeFor(b({ h: 7, x1: 15, z1: 15 }), 'downtown', 300), 'yard');
-  assert.equal(lotTypeFor(null, 'downtown', 900), 'carpark');
+  assert.equal(lotTypeFor(null, 'downtown', 900), 'grass');
+  assert.equal(lotTypeFor(null, 'downtown', 1900), 'carpark');
   assert.equal(lotTypeFor(b({}), 'downtown', 900), 'plaza');
   assert.equal(lotTypeFor(null, 'midtown', 400), 'grass');
   assert.equal(lotTypeFor(null, 'park', 400), 'grass');

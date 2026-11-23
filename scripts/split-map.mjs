@@ -13,7 +13,9 @@
 // whole file):
 // - roads, buildings and parks whose bounding box comes within SPLIT_MARGIN
 //   m of the region's crop (the build keeps only roads that cross the
-//   crop, buildings and parks that start inside it);
+//   crop, buildings and parks that start inside it), and so are parking
+//   areas, beaches, piers, slipways, barrier lines, signals and stop signs
+//   (0.9.0);
 // - every coastline, water shape and label (small: about 35 KB; the
 //   build votes land and sea with the whole coastline);
 // - `buildingIds`, `region` and `crop` (see splitRegion).
@@ -50,11 +52,24 @@ export function nearCrop(feature, crop, m = SPLIT_MARGIN) {
 // `region` and `crop`, then the kept features in source order.
 // `buildingIds`: the source index of each kept building, so a box's
 // footprint id (`fp`) is the same as in a whole-file build.
+// Feature lists cut to the crop (plus SPLIT_MARGIN); the others (coast,
+// water, labels: small) are kept whole. Signal and stop points (flat
+// decimeter pairs) are cut the same way.
+const CUT = new Set(['roads', 'buildings', 'parks', 'parking', 'beaches', 'piers', 'slipways', 'barriers']);
+const POINTS = new Set(['signals', 'stops']);
+function cutPoints(v, crop, m = SPLIT_MARGIN) {
+  const out = [];
+  for (let i = 0; i + 1 < v.length; i += 2) {
+    const x = v[i] / 10, z = v[i + 1] / 10;
+    if (x >= crop.x0 - m && x <= crop.x1 + m && z >= crop.z0 - m && z <= crop.z1 + m) out.push(v[i], v[i + 1]);
+  }
+  return out;
+}
 export function splitRegion(data, region) {
   const out = {};
   for (const k of Object.keys(data)) {
     const v = data[k];
-    out[k] = k === 'roads' || k === 'buildings' || k === 'parks' ? v.filter((f) => nearCrop(f, region.crop)) : v;
+    out[k] = CUT.has(k) ? v.filter((f) => nearCrop(f, region.crop)) : POINTS.has(k) ? cutPoints(v, region.crop) : v;
   }
   out.buildingIds = [];
   data.buildings.forEach((f, k) => { if (nearCrop(f, region.crop)) out.buildingIds.push(k); });

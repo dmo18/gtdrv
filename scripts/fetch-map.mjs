@@ -9,7 +9,15 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, 'build', 'osm-cache');
 const OUT = path.join(ROOT, 'src', 'world', 'data', 'miami.json');
-const BOX = { s: 25.745, n: 25.815, w: -80.225, e: -80.135 };
+// The data box. 0.9.0 (docs/PLAN_V3.md 2.1 item 1) moved only the east
+// edge, -80.135 to -80.115, so the whole of South Beach and the ocean front
+// are in. The origin and the projection stay those of the first box
+// (ORIGIN_BOX's center, lat 25.78, lon -80.18): every saved position, id
+// and placed thing keeps its meaning, and the old tiles keep their cache
+// keys (the east strip is fetched as extra tiles after them, so the
+// features of the old box keep their order and their source indices).
+const ORIGIN_BOX = { s: 25.745, n: 25.815, w: -80.225, e: -80.135 };
+const BOX = { s: 25.745, n: 25.815, w: -80.225, e: -80.115 };
 const TILE = 0.04;
 const MIN_TILE = 0.002;
 const UA = 'rustwater-map-build/0.1 (dev tool)';
@@ -58,6 +66,9 @@ const nodes = new Map(); // id -> [lat, lon]
 const ways = new Map(); // id -> {refs, tags}
 const rels = new Map(); // id -> {members, tags}
 const placeNodes = new Map();
+// Point features read from node tags (2.1 item 2): traffic signals, stop
+// signs and slipways. id -> kind.
+const pointNodes = new Map();
 
 const unesc = (s) => s.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const attr = (line, name) => {
@@ -89,6 +100,9 @@ function parseXml(text) {
       else if (cur.kind === 'node') {
         const t = cur.tags;
         if (t.name && (t.place || t.railway === 'station' || t.amenity)) placeNodes.set(cur.id, { tags: t, ll: nodes.get(cur.id) });
+        if (t.highway === 'traffic_signals') pointNodes.set(cur.id, 'signal');
+        else if (t.highway === 'stop') pointNodes.set(cur.id, 'stop');
+        else if (t.leisure === 'slipway') pointNodes.set(cur.id, 'slipway');
       }
       cur = null;
     }
@@ -96,7 +110,7 @@ function parseXml(text) {
 }
 
 // ---- projection ----
-const lat0 = (BOX.s + BOX.n) / 2, lon0 = (BOX.w + BOX.e) / 2;
+const lat0 = (ORIGIN_BOX.s + ORIGIN_BOX.n) / 2, lon0 = (ORIGIN_BOX.w + ORIGIN_BOX.e) / 2;
 const R = 6371008.8;
 const kx = (Math.PI / 180) * R * Math.cos((lat0 * Math.PI) / 180);
 const kz = (Math.PI / 180) * R;
@@ -178,26 +192,78 @@ function stitch(wayList) {
   return rings;
 }
 
-async function main() {
-  const cols = Math.ceil((BOX.e - BOX.w) / TILE - 1e-9), rows = Math.ceil((BOX.n - BOX.s) / TILE - 1e-9);
-  const tw = (BOX.e - BOX.w) / cols, th = (BOX.n - BOX.s) / rows;
-  console.log(`Fetching ${cols}x${rows} tiles (cache: ${CACHE})`);
+// The tiles: the first box's grid (its cached tiles), then the east strip
+// ORIGIN_BOX.e .. BOX.e in the same rows.
+function tileList() {
+  const out = [];
+  const cols = Math.ceil((ORIGIN_BOX.e - ORIGIN_BOX.w) / TILE - 1e-9), rows = Math.ceil((BOX.n - BOX.s) / TILE - 1e-9);
+  const tw = (ORIGIN_BOX.e - ORIGIN_BOX.w) / cols, th = (BOX.n - BOX.s) / rows;
   for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const texts = await fetchBox(BOX.w + c * tw, BOX.s + r * th, BOX.w + (c + 1) * tw, BOX.s + (r + 1) * th);
-      for (const t of texts) parseXml(t);
-    }
+    for (let c = 0; c < cols; c++) out.push([ORIGIN_BOX.w + c * tw, BOX.s + r * th, ORIGIN_BOX.w + (c + 1) * tw, BOX.s + (r + 1) * th]);
+  }
+  if (BOX.e > ORIGIN_BOX.e) {
+    for (let r = 0; r < rows; r++) out.push([ORIGIN_BOX.e, BOX.s + r * th, BOX.e, BOX.s + (r + 1) * th]);
+  }
+  return out;
+}
+
+// Road tags kept (2.1 item 2). oneway: 1 along the way, -1 against it
+// (`oneway=-1`); roundabouts and motorways are one-way by default.
+const ONEWAY_YES = new Set(['yes', 'true', '1']);
+function onewayOf(t) {
+  if (ONEWAY_YES.has(t.oneway)) return 1;
+  if (t.oneway === '-1' || t.oneway === 'reverse') return -1;
+  if (t.oneway === 'no') return undefined;
+  if (t.junction === 'roundabout' || t.highway === 'motorway' || t.highway === 'motorway_link') return 1;
+  return undefined;
+}
+const intTag = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 && n < 20 ? n : undefined;
+};
+// maxspeed in mph (the US tag is "30 mph"; a bare number is km/h).
+function mphOf(v) {
+  if (!v) return undefined;
+  const m = /^(\d+)\s*(mph)?/.exec(v);
+  if (!m) return undefined;
+  const n = parseInt(m[1], 10);
+  return m[2] ? n : Math.round(n / 1.609);
+}
+const PED_MALLS = new Set(['Lincoln Road', 'Espanola Way', 'Española Way']);
+const BARRIER_LINES = new Set(['wall', 'retaining_wall', 'fence', 'guard_rail', 'hedge', 'jersey_barrier', 'city_wall', 'handrail']);
+
+async function main() {
+  const tiles = tileList();
+  console.log(`Fetching ${tiles.length} tiles (cache: ${CACHE})`);
+  for (const [w, s, e, n] of tiles) {
+    const texts = await fetchBox(w, s, e, n);
+    for (const t of texts) parseXml(t);
   }
   console.log(`Parsed ${nodes.size} nodes, ${ways.size} ways, ${rels.size} relations`);
 
   const roads = [], buildings = [], water = [], coast = [], parks = [], labels = [];
+  const parking = [], beaches = [], piers = [], slipways = [], barriers = [];
   const inBox = (x, z) => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
 
   for (const w of ways.values()) {
     const t = w.tags;
-    if (t.highway && !['proposed', 'construction', 'platform', 'bus_stop', 'elevator', 'footway', 'steps', 'path', 'track', 'cycleway', 'corridor', 'bridleway'].includes(t.highway)) {
+    // The two pedestrian streets of South Beach (2.1 item 8): Lincoln Road
+    // Mall is mapped as a footway; it is kept as a `pedestrian` way
+    // (`mall: 1`), drivable in the sandbox.
+    const mall = t.highway === 'footway' && PED_MALLS.has(t.name);
+    if (mall) {
       const pts = simplify(wayPts(w), TOL);
-      if (pts.length >= 2) roads.push({ class: t.highway, name: t.name || undefined, oneway: t.oneway === 'yes' ? 1 : undefined, bridge: t.bridge && t.bridge !== 'no' ? 1 : undefined, lanes: t.lanes ? parseInt(t.lanes, 10) || undefined : undefined, p: flat(pts) });
+      if (pts.length >= 2) roads.push({ class: 'pedestrian', name: t.name, mall: 1, p: flat(pts) });
+    } else if (t.highway && !['proposed', 'construction', 'platform', 'bus_stop', 'elevator', 'footway', 'steps', 'path', 'track', 'cycleway', 'corridor', 'bridleway'].includes(t.highway)) {
+      const pts = simplify(wayPts(w), TOL);
+      if (pts.length >= 2) {
+        roads.push({
+          class: t.highway, name: t.name || undefined, oneway: onewayOf(t), bridge: t.bridge && t.bridge !== 'no' ? 1 : undefined,
+          lanes: intTag(t.lanes), lf: intTag(t['lanes:forward']), lb: intTag(t['lanes:backward']), mph: mphOf(t.maxspeed),
+          turn: t['turn:lanes'] ? t['turn:lanes'].slice(0, 60) : undefined, svc: t.highway === 'service' && t.service ? t.service : undefined,
+          area: t.area === 'yes' ? 1 : undefined, p: flat(pts),
+        });
+      }
     } else if (t.building && t.building !== 'no' && closed(w)) {
       const pts = simplify(wayPts(w).slice(0, -1), TOL);
       if (pts.length >= 3 && Math.abs(area(pts)) > 15) buildings.push({ h: buildingHeight(t), kind: t.building === 'yes' ? undefined : t.building, name: t.name || undefined, p: flat(pts) });
@@ -212,12 +278,47 @@ async function main() {
       const s = simplify(wayPts(w).slice(0, -1), TOL);
       if (s.length >= 3) parks.push({ kind: t.leisure || t.landuse, name: t.name || undefined, p: flat(s) });
     }
+    // 0.9.0 features (2.1 item 2). Checked apart from the chain above, so
+    // the old feature lists stay exactly as they were.
+    if (t.amenity === 'parking' && closed(w)) {
+      // No business names: only the kind of the lot.
+      const s = simplify(wayPts(w).slice(0, -1), TOL);
+      if (s.length >= 3 && Math.abs(area(s)) > 20) parking.push({ kind: t.parking || undefined, p: flat(s) });
+    } else if (t.natural === 'beach' && closed(w)) {
+      const s = simplify(wayPts(w).slice(0, -1), TOL);
+      if (s.length >= 3) beaches.push({ name: t.name || undefined, p: flat(s) });
+    }
+    if (t.man_made === 'pier') {
+      const pts = wayPts(w);
+      const s = closed(w) ? simplify(pts.slice(0, -1), TOL) : simplify(pts, TOL);
+      if (s.length >= 2) piers.push({ area: closed(w) && t.area !== 'no' ? 1 : undefined, name: t.name || undefined, p: flat(s) });
+    }
+    if (t.leisure === 'slipway') {
+      const s = simplify(wayPts(w), TOL);
+      if (s.length >= 2) slipways.push({ p: flat(s) });
+    }
+    if (t.barrier && BARRIER_LINES.has(t.barrier)) {
+      const s = simplify(wayPts(w), TOL);
+      if (s.length >= 2) barriers.push({ kind: t.barrier, p: flat(s) });
+    }
   }
 
   // multipolygon water and parks (outer rings only)
   for (const rel of rels.values()) {
     const t = rel.tags;
     if (t.type !== 'multipolygon') continue;
+    if (t.amenity === 'parking' || t.natural === 'beach') {
+      const outer = rel.members.filter((m) => m.type === 'way' && m.role === 'outer').map((m) => ways.get(m.ref)).filter(Boolean);
+      for (const ring of stitch(outer)) {
+        const pts = [];
+        for (const ref of ring.slice(0, -1)) { const n = nodes.get(ref); if (n) pts.push(proj(n)); }
+        const s = simplify(pts, TOL);
+        if (s.length < 3) continue;
+        if (t.amenity === 'parking') parking.push({ kind: t.parking || undefined, p: flat(s) });
+        else beaches.push({ name: t.name || undefined, p: flat(s) });
+      }
+      continue;
+    }
     const isWater = t.natural === 'water', isPark = t.leisure === 'park' || t.landuse === 'grass' || t.landuse === 'forest';
     if (!isWater && !isPark) continue;
     const outer = rel.members.filter((m) => m.type === 'way' && m.role === 'outer').map((m) => ways.get(m.ref)).filter(Boolean);
@@ -242,6 +343,20 @@ async function main() {
     labels.push({ name: t.name, kind: t.place || (t.railway === 'station' ? 'station' : t.amenity), x: r1(x), z: r1(z) });
   }
 
+  // Signals, stop signs and slipway points: absolute integer decimeters,
+  // [x0, z0, x1, z1, ...], inside the box, in node id order.
+  const signals = [], stops = [];
+  for (const [id, kind] of [...pointNodes.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))) {
+    const ll = nodes.get(id);
+    if (!ll) continue;
+    const [x, z] = proj(ll);
+    if (!inBox(x, z)) continue;
+    const xi = Math.round(x * 10), zi = Math.round(z * 10);
+    if (kind === 'signal') signals.push(xi, zi);
+    else if (kind === 'stop') stops.push(xi, zi);
+    else slipways.push({ p: [xi, zi] });
+  }
+
   const out = {
     attribution: ATTRIBUTION,
     encoding: 'Polyline field p is delta-encoded integer decimeters [x0,z0,dx,dz,...]; decode: x=sum(dx)/10 meters. Label x,z are plain meters.',
@@ -250,6 +365,10 @@ async function main() {
     bounds: { minX: r1(bounds.minX), maxX: r1(bounds.maxX), minZ: r1(bounds.minZ), maxZ: r1(bounds.maxZ) },
     latLonBox: BOX,
     roads, buildings, water, coastline: coast, parks, labels,
+    // 0.9.0 (docs/PLAN_V3.md 2.1 item 2; docs/MAP.md "Contents").
+    parking, beaches, piers, slipways, barriers,
+    points: 'signals and stops are absolute integer decimeters [x0, z0, x1, z1, ...]',
+    signals, stops,
   };
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   const json = JSON.stringify(out);
@@ -258,6 +377,7 @@ async function main() {
   console.log('Bounds (m):', JSON.stringify(out.bounds));
   console.log('Now run node scripts/split-map.mjs to write the region files (docs/PLAN_V2.md 3.6).');
   console.log(`Counts: roads ${roads.length}, buildings ${buildings.length}, water ${water.length}, coastline ${coast.length}, parks ${parks.length}, labels ${labels.length}`);
+  console.log(`  parking ${parking.length}, beaches ${beaches.length}, piers ${piers.length}, slipways ${slipways.length}, barriers ${barriers.length}, signals ${signals.length / 2}, stops ${stops.length / 2}`);
   console.log(`Wrote ${OUT} (${(json.length / 1e6).toFixed(2)} MB)`);
   if (failed.length) console.log('FAILED tiles:', failed.join(', '));
 }

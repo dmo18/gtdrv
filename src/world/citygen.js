@@ -3,6 +3,7 @@
 //
 // Coordinates: x = east, z = south, meters. The ground is flat (y = 0).
 import { createRng, TAU } from '../core/rng.js';
+import { profileLaneOffset } from './roadprofile.js';
 
 export const SIDEWALK = 4;
 export const STREET_W = 11;
@@ -136,6 +137,7 @@ export function generateCity(seed = 20261) {
       width,
       avenue: width === AVENUE_W,
       length: Math.hypot(b.x - a.x, b.z - a.z),
+      ...islandProfile(width),
     };
     edges.push(e);
     a.edges.push(e.id);
@@ -706,13 +708,36 @@ export function generateCity(seed = 20261) {
   };
 }
 
-// Center-line offset of a driving lane, measured to the right of the
-// direction of travel. Streets have one lane each way, avenues two.
-export function laneOffset(edge, lane = 0) {
-  if (edge.avenue) return lane === 0 ? 2.6 : 6.1;
-  return 2.0;
+// The edge contract's lane fields for an island edge (docs/MAP.md "Edge
+// contract"), chosen so the lanes stay exactly where they were: a street
+// is 1 + 1 lanes of 4.0 m (centers 2.0 m off the line), an avenue 2 + 2
+// lanes of 3.5 m round a 1.7 m painted center (centers 2.6 and 6.1 m).
+export function islandProfile(width) {
+  if (width === AVENUE_W) return { lanesF: 2, lanesB: 2, laneW: 3.5, parkL: 0.85, parkR: 0.85, median: 0, center: 1.7, oneway: false, name: '' };
+  return { lanesF: 1, lanesB: 1, laneW: 4.0, parkL: 1.2, parkR: 1.2, median: 0, center: 0, oneway: false, name: '' };
 }
-export const lanesPerDirection = (edge) => (edge.avenue ? 2 : 1);
+
+// Center-line offset of a driving lane, measured to the right of the
+// node line seen in the direction of travel (docs/MAP.md "Edge
+// contract"): lane 0 next to the divide. `forward`: travel a -> b. Edges
+// without the contract's fields (old saves, hand-made edges) keep the old
+// rule: streets one lane 2.0 m off, avenues 2.6 and 6.1 m.
+export function laneOffset(edge, lane = 0, forward = true) {
+  if (edge.lanesF === undefined) {
+    if (edge.avenue) return lane === 0 ? 2.6 : 6.1;
+    return 2.0;
+  }
+  return profileLaneOffset(edge, lane, forward);
+}
+// Lanes carrying traffic in one direction (forward: a -> b).
+export function lanesPerDirection(edge, forward = true) {
+  if (edge.lanesF === undefined) return edge.avenue ? 2 : 1;
+  const n = forward ? edge.lanesF : edge.lanesB;
+  // Backward on a one-way: the forward lanes (callers check canDrive).
+  return n > 0 ? n : edge.lanesF || 1;
+}
+// False only for a one-way edge entered from its b end.
+export const canDrive = (edge, from) => !edge.oneway || from === edge.a;
 
 // World position on a lane. `from` is the node id being driven away
 // from, `d` is meters traveled from that node's center.
@@ -720,7 +745,7 @@ export function lanePoint(city, edge, from, d, lane = 0, out = { x: 0, z: 0, hea
   const a = city.nodes[from];
   const b = city.nodes[edge.a === from ? edge.b : edge.a];
   const dx = (b.x - a.x) / edge.length, dz = (b.z - a.z) / edge.length;
-  const off = laneOffset(edge, lane);
+  const off = laneOffset(edge, lane, edge.a === from);
   // Right-hand side of travel direction (dx,dz) is (-dz, dx).
   out.x = a.x + dx * d - dz * off;
   out.z = a.z + dz * d + dx * off;

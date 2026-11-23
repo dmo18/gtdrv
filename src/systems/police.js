@@ -38,6 +38,11 @@ import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
 export const TOWN_LIMIT = 22; // m/s
 export const HEAVY_SPEEDING = 6; // m/s over the limit that counts
 export const RAM_SPEED = 6; // closing speed (m/s) that counts as ramming
+// No star for car contact under 11 mph of relative speed, or for breaking
+// props (docs/PLAN_V3.md 2.3 item 6): RAM_SPEED (13.4 mph) is above it, and
+// a startled pedestrian counts only with the car at this speed or more.
+export const STAR_CONTACT_MPH = 11;
+export const STAR_CONTACT = STAR_CONTACT_MPH / 2.23694; // m/s
 export const MAX_HEAT = 4;
 export const SIGHT = 90; // police see this far, given a clear line
 let sightNow = SIGHT; // SIGHT shortened by fog (updated each tick)
@@ -809,7 +814,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     });
     ev.on('pedStartled', (ped) => {
       const p = game.player, pv = p.vehicle;
-      if (!pv || pv.kind !== 'car' || Math.abs(pv.speed) < 3 || !ped) return;
+      if (!pv || pv.kind !== 'car' || Math.abs(pv.speed) < STAR_CONTACT || !ped) return;
       if (Math.hypot(ped.x - p.x, ped.z - p.z) < 16 && pedCool <= 0) {
         startled = true;
         pedCool = 1.5;

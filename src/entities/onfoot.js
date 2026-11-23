@@ -1,6 +1,7 @@
 // The player on foot: a small circle that walks, sprints, slides along
 // walls and shorelines, and can find a craft to climb into. Pure logic.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
+import { groundFn } from '../world/ground.js';
 
 const WALK = 2.4; // m/s at full stick
 const SPRINT = 6; // m/s at full stick
@@ -105,8 +106,9 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
       if (d2 >= rr * rr) continue;
       const d = Math.sqrt(d2);
       if (d > 1e-6) {
-        // Remember a hard hit for combat (closing speed along the push).
-        const closing = ((c.vx || 0) - w.vx) * (ex / d) + ((c.vz || 0) - w.vz) * (ez / d);
+        // Remember a hit for combat: the car's own speed toward the walker
+        // (never the walker's, docs/PLAN_V3.md 2.3 item 5).
+        const closing = (c.vx || 0) * (ex / d) + (c.vz || 0) * (ez / d);
         if (closing > w.bumpV) {
           w.bumpBy = c;
           w.bumpV = closing;
@@ -136,6 +138,10 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
   }
   w.x = nx;
   w.z = nz;
+  // Feet on the ground (curbs, the sea floor at a beach).
+  const city = world && world.city;
+  const g = city ? groundFn(city) : null;
+  if (g) w.y = g(nx, nz);
 
   // Velocity is what actually happened, so walls stop the walk cycle.
   if (dt > 0) {

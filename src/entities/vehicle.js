@@ -16,6 +16,7 @@ import { clamp, angleDiff } from '../core/rng.js';
 import { stepBoost, CAR_BOOST } from './boost.js';
 import { SERVICE_SPECS } from './servicevehicles.js'; // V1 service vehicles, merged below the reward cars
 import { wetGrip, wetUnderSteer, wetBrake, wetTopSpeed, windPush, lightnessOfMass } from '../core/weather.js';
+import { groundFn, SEA_LEVEL } from '../world/ground.js';
 
 const WIND = { x: 0, z: 0 };
 
@@ -143,6 +144,12 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     boostMeter: 1, boostLevel: 0, boostLock: false, boostOn: false,
     health: spec.health,
     color,
+    // Ground following (docs/PLAN_V3.md 2.2 item 5): wheel ground heights
+    // (front-right, front-left, rear-right, rear-left), the ground plane's
+    // pitch and roll, each wheel's offset from that plane, curb jolts.
+    wg: new Float32Array(4), wheelDy: new Float32Array(4), gPitch: 0, gRoll: 0, pgPitch: 0, pgRoll: 0,
+    grounded: false, jolt: 0, jolts: 0, joltCool: 0, wade: 0,
+    propHits: 0,
     px: x, pz: z, pheading: heading, ppitch: 0, proll: 0,
     roll: 0, pitch: 0, rollV: 0, pitchV: 0, suspension: 0,
     gear: 1, rpm: IDLE, shiftT: 0, sinceShift: 0, spin: 0, revHold: 0,
@@ -157,19 +164,48 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
   };
 }
 
-export function damageVehicle(v, amount) {
-  if (!(amount > 0)) return;
+// The damage rule (docs/PLAN_V3.md 2.3 item 1): every damageVehicle call
+// passes through it, fn(vehicle, amount, kind, source) -> the amount to
+// apply. src/systems/combat.js sets it (the "cannot die" floor, Hard mode).
+// kind: 'crash' (wall, prop or car contact), 'prop' (shearing a prop),
+// or whatever the caller names. null: the amount as given.
+let damageRule = null;
+export function setDamageRule(fn) {
+  damageRule = typeof fn === 'function' ? fn : null;
+}
+export function getDamageRule() {
+  return damageRule;
+}
+
+// Returns the damage applied. A car wrecked by a crash (not by fire or a
+// weapon) is marked crashWreck: it does not explode.
+export function damageVehicle(v, amount, kind = 'crash', source = null) {
+  if (!(amount > 0)) return 0;
+  if (damageRule) {
+    amount = damageRule(v, amount, kind, source);
+    if (!(amount > 0)) return 0;
+  }
   v.health -= amount;
   if (v.health <= 0) {
     v.health = 0;
+    if (!v.wrecked && (kind === 'crash' || kind === 'prop')) v.crashWreck = true;
     v.wrecked = true;
   }
+  return amount;
 }
 
+// Crash damage starts at 11 mph of closing speed (2.3 item 3).
+export const CRASH_MIN = 11 / 2.23694; // m/s
+// Shearing a breakable prop: a small fixed knock (Hard mode only, by the rule).
+export const PROP_BREAK_DAMAGE = 10;
+// Car on car: the lighter car takes at most this much more than an even
+// share (and the heavier at least the low share).
+export const MASS_SHARE = [0.6, 1.3];
+
 // Damage from a collision with closing speed c (m/s).
-function impactDamage(c) {
-  if (c <= 4) return 0;
-  const e = c - 4;
+export function impactDamage(c) {
+  if (c <= CRASH_MIN) return 0;
+  const e = c - CRASH_MIN;
   return e * 8 + e * e * 0.15;
 }
 
@@ -253,9 +289,47 @@ export function getHandlingMode() {
   return handlingMode;
 }
 
+// Handling presets (docs/PLAN_V3.md 2.4 item 5, the Handling lab's first
+// form): settings.handlingPreset, 'standard' (default, today's car),
+// 'relaxed' (slower steering, softer assist, more roll, a little less
+// grip) or 'sharp' (quicker steering, 35 degree lock at walking pace, more
+// assist, less roll). Module-wide like the mode; on top of either mode.
+//   lockK / returnK  steering rate multipliers
+//   lockDeg          lowest full-lock wheel angle at walking pace (0: the spec's)
+//   gripK            lateral grip multiplier
+//   assistK          stability assist (yaw and slide) gain multiplier
+//   rollK            body roll multiplier
+export const HANDLING_PRESETS = ['standard', 'relaxed', 'sharp'];
+const PRESET_ROWS = {
+  standard: { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 },
+  relaxed: { lockK: 0.8, returnK: 0.85, lockDeg: 0, gripK: 0.95, assistK: 0.85, rollK: 1.3 },
+  sharp: { lockK: 1.25, returnK: 1.2, lockDeg: 35, gripK: 1, assistK: 1.25, rollK: 0.85 },
+};
+let handlingPreset = 'standard';
+let P = PRESET_ROWS.standard;
+let LOCK_MIN = 0; // rad, P.lockDeg
+// Pick the preset for every car; anything else means 'standard'.
+export function setHandlingPreset(name) {
+  handlingPreset = PRESET_ROWS[name] ? name : 'standard';
+  P = PRESET_ROWS[handlingPreset];
+  LOCK_MIN = (P.lockDeg * Math.PI) / 180;
+  return handlingPreset;
+}
+export function getHandlingPreset() {
+  return handlingPreset;
+}
+// A copy of a preset's row (tests, the lab).
+export function presetParams(name) {
+  return Object.assign({}, PRESET_ROWS[PRESET_ROWS[name] ? name : 'standard']);
+}
+// Full-lock wheel angle at walking pace under the preset.
+export function steerMaxOf(spec) {
+  return spec.steerMax > LOCK_MIN ? spec.steerMax : LOCK_MIN;
+}
+
 // Lateral tire friction of a spec in the current mode.
 export function lateralGrip(spec) {
-  return H.latK * spec.grip;
+  return H.latK * spec.grip * P.gripK;
 }
 
 // Normalized engine torque, peak around 60% of the redline.
@@ -364,7 +438,8 @@ export function steerAngle(spec, u, s) {
   const ask = askAt(au);
   const geo = d.L * ask * lateralGrip(spec) * G / Math.max(au * au, 1);
   const full = geo + d.apF * ask - d.apR * XR_REAR;
-  if (full >= spec.steerMax) return s * spec.steerMax;
+  const smax = steerMaxOf(spec);
+  if (full >= smax) return s * smax;
   const yF = as * ask;
   const xF = yF < 1 ? 1 - Math.sqrt(1 - yF) : yF;
   const yR = Math.min(1, as * Math.min(1, ask) / REAR_K);
@@ -388,7 +463,8 @@ function steerGeo(spec, u, s) {
   const ask = askAt(au);
   const geo = d.L * ask * lateralGrip(spec) * G / Math.max(au * au, 1);
   const full = geo + d.apF * ask - d.apR * XR_REAR;
-  return full >= spec.steerMax ? s * spec.steerMax : s * geo;
+  const smax = steerMaxOf(spec);
+  return full >= smax ? s * smax : s * geo;
 }
 
 // Move the steering value toward its target: away from the center at
@@ -450,7 +526,7 @@ export function stepVehicle(v, controls, dt, world) {
 
   // ---- Steering: one rate limit (the car's lockRate / returnRate), the
   // same for the player and the AI. steer is a share of the lock.
-  v.steer = steerToward(v.steer, steerIn, d.lockRate, d.returnRate, dt);
+  v.steer = steerToward(v.steer, steerIn, d.lockRate * P.lockK, d.returnRate * P.returnK, dt);
   const delta = steerAngle(s, vf0, v.steer);
   const deltaGeo = steerGeo(s, vf0, v.steer);
   v.steerAngle = delta;
@@ -505,6 +581,10 @@ export function stepVehicle(v, controls, dt, world) {
     driveF = pedal * torque(Math.min(rEng, 1)) * d.P * (1 + (CAR_BOOST.force - 1) * bLevel) / (RP * vRed) * limiter;
     if (reversing) driveF *= -0.8;
     if (v.shiftT > 0) driveF *= 0.2; // torque dip while the clutch is out
+    // Badly dented (under 30 percent): 15 percent less power (2.3 item 2).
+    if (v.health < s.health * 0.3) driveF *= 0.85;
+    // Wading: the water takes the drive away (gone at 0.5 m).
+    if (v.wade > 0) driveF *= 1 - v.wade;
   }
   // Engine braking at the driven wheels when off the pedal.
   let engBrake = 0;
@@ -563,7 +643,7 @@ export function stepVehicle(v, controls, dt, world) {
         const sl = Math.atan2(vl - b * r, Math.max(avf, V0));
         const over = Math.abs(sl) - d.betaAllow - d.apR;
         if (over > 0) {
-          assistMz += d.iz * H.betaK * (sl > 0 ? over : -over);
+          assistMz += d.iz * H.betaK * P.assistK * (sl > 0 ? over : -over);
           if (H.tc) driveScale = clamp(1 - over * 5, H.cutMin, 1);
         }
         // Traction control: ease the drive off as the driven rear tires
@@ -573,7 +653,7 @@ export function stepVehicle(v, controls, dt, world) {
       }
       const eY = r - yawRef;
       // Damp yaw toward the steering's intent; firmer when over-rotating.
-      const firm = eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK;
+      const firm = (eY * r > 0 && Math.abs(r) > Math.abs(yawRef) ? H.yawFirm : H.yawK) * (H.assist ? P.assistK : 1);
       assistMz -= d.iz * firm * eY;
     } else if (handbrake && H.hbCap && avf > 2 && !v.wrecked) {
       // Arcade handbrake: a big slide, but held short of a spin-out.
@@ -719,7 +799,7 @@ export function stepVehicle(v, controls, dt, world) {
   // ---- Body motion: damped springs for pitch (dive/squat) and roll.
   if (hitBefore > 0) bump(v, hitBefore);
   const pitchEq = clamp(axAvg * 0.0065, -0.075, 0.06);
-  const rollEq = clamp(-ayAvg * 0.0075, -0.1, 0.1);
+  const rollEq = clamp(-ayAvg * 0.0075 * P.rollK, -0.1, 0.1);
   const w = 9, z2 = 2 * 0.5 * w;
   v.pitchV += (w * w * (pitchEq - v.pitch) - z2 * v.pitchV) * dt;
   v.pitch += v.pitchV * dt;
@@ -755,9 +835,14 @@ export function stepVehicle(v, controls, dt, world) {
   const city = world && world.city;
   if (city && typeof city.shoreDist === 'function') keepOnLand(v, city);
 
+  // Wheels on the ground (not while a stunt ramp or a flight owns y).
+  v.jolt = 0;
+  if (v.joltCool > 0) v.joltCool = Math.max(0, v.joltCool - dt);
+  if (city && !(v.air && v.air.on) && !v.stuntRamp && !v.tossing && !(v.wreckFade > 0)) followGround(v, groundFn(city), dt);
+
   if (maxClose > 0) {
     v.impact = maxClose;
-    damageVehicle(v, impactDamage(maxClose));
+    damageVehicle(v, impactDamage(maxClose), 'crash', null);
     bump(v, maxClose);
   }
   v.speed = v.vx * Math.cos(v.heading) + v.vz * Math.sin(v.heading);
@@ -781,17 +866,33 @@ function bump(v, close) {
 }
 
 // Resolve the three body circles against static geometry. Returns the
-// largest normal closing speed of this sub-step (0 if none).
+// largest normal closing speed of this sub-step (0 if none). A breakable
+// prop met faster than its breakSpeed shears off (collision.breakShape):
+// the car loses its `slow` share of speed and goes on through.
 function collideStatic(v, col) {
   const s = v.spec;
   const r = s.width / 2;
   const inertiaK = 12 / (s.length * s.length + s.width * s.width);
+  const y = Number.isFinite(v.y) ? v.y : 0;
   let maxClose = 0;
   for (let i = 0; i < 3; i++) {
     const off = circleOffset(s, i);
     const ox = Math.cos(v.heading) * off, oz = Math.sin(v.heading) * off;
     const cx = v.x + ox, cz = v.z + oz;
-    const res = col.resolveCircle(cx, cz, r);
+    let res = col.resolveCircle(cx, cz, r, y);
+    for (let tries = 0; tries < 3 && res.brk && col.breakShape; tries++) {
+      const b = res.brk;
+      const pvx = v.vx - v.yawRate * oz, pvz = v.vz + v.yawRate * ox;
+      const close = -(pvx * res.bnx + pvz * res.bnz);
+      if (!(close > b.brk.breakSpeed)) break;
+      col.breakShape(b, v.vx, v.vz, v);
+      const keep = 1 - (b.brk.slow || 0);
+      v.vx *= keep;
+      v.vz *= keep;
+      v.propHits = (v.propHits || 0) + 1;
+      if (damageRule) damageVehicle(v, PROP_BREAK_DAMAGE, 'prop', b);
+      res = col.resolveCircle(cx, cz, r, y);
+    }
     if (!res.hit) continue;
     const dx = res.x - cx, dz = res.z - cz;
     const d = Math.hypot(dx, dz);
@@ -824,9 +925,17 @@ function collideStatic(v, col) {
   return maxClose;
 }
 
+// The last net at the water's edge. With sea walls and rails (city.edgeLines,
+// world/edgelines.js) it acts only 3 m out past the shore line (a beach or
+// a gap let the car that far) and never on a pier; without them it keeps
+// the car's center 2 m inside the shore, as before the walls.
+export const LAND_NET = 3;
 function keepOnLand(v, city) {
   const d = city.shoreDist(v.x, v.z);
-  if (!(d < 2)) return;
+  const walled = !!city.edgeLines;
+  const lim = walled ? -LAND_NET : 2;
+  if (!(d < lim)) return;
+  if (walled && city.isGround && city.isGround(v.x, v.z)) return;
   // Inward direction is the gradient of shore distance.
   const e = 1;
   let gx = city.shoreDist(v.x + e, v.z) - city.shoreDist(v.x - e, v.z);
@@ -835,7 +944,7 @@ function keepOnLand(v, city) {
   if (!(gl > 1e-9)) return;
   gx /= gl;
   gz /= gl;
-  const push = Math.min(2 - d, 4) * 0.5;
+  const push = Math.min(lim - d, 4) * 0.5;
   v.x += gx * push;
   v.z += gz * push;
   const vin = v.vx * gx + v.vz * gz;
@@ -843,6 +952,103 @@ function keepOnLand(v, city) {
     v.vx -= vin * gx;
     v.vz -= vin * gz;
   }
+}
+
+// ---- Ground following ----
+// Wheel points: half the wheelbase ahead and behind the center, the track
+// 0.15 m inside the body sides. A wheel's ground stepping up more than
+// JOLT_H in a step is a curb: a jolt in the springs, and above JOLT_V a
+// share JOLT_LOSS of the speed per axle (5 percent across a curb).
+export const JOLT_H = 0.08, JOLT_V = 10 / 2.23694, JOLT_LOSS = 0.025;
+export const CLEARANCE = 0.14; // m: the body never sits lower than this under the center's ground
+export const BOG_DEPTH = 0.5; // m of water that stops a car (a beach)
+const WX = new Float64Array(4), WZ = new Float64Array(4), WY = new Float64Array(4);
+function followGround(v, g, dt) {
+  if (!g) return;
+  const s = v.spec;
+  const c = Math.cos(v.heading), sn = Math.sin(v.heading);
+  const hb = (s.wheelBase || s.length * 0.6) / 2, ht = Math.max(0.3, s.width / 2 - 0.15);
+  if (!v.wg) { v.wg = new Float32Array(4); v.wheelDy = new Float32Array(4); }
+  let up = 0, down = 0;
+  for (let i = 0; i < 4; i++) {
+    const lo = i < 2 ? hb : -hb, la = i % 2 === 0 ? ht : -ht; // along, across (right +)
+    const x = v.x + c * lo - sn * la, z = v.z + sn * lo + c * la;
+    WX[i] = x; WZ[i] = z;
+    const y = g(x, z);
+    WY[i] = y;
+    if (v.grounded) {
+      const dy = y - v.wg[i];
+      if (dy > up) up = dy;
+      if (-dy > down) down = -dy;
+    }
+    v.wg[i] = y;
+  }
+  const fA = (WY[0] + WY[1]) / 2, rA = (WY[2] + WY[3]) / 2;
+  const rS = (WY[0] + WY[2]) / 2, lS = (WY[1] + WY[3]) / 2;
+  const yc = (fA + rA) / 2;
+  v.pgPitch = v.gPitch;
+  v.pgRoll = v.gRoll;
+  v.gPitch = Math.atan2(fA - rA, 2 * hb);
+  v.gRoll = Math.atan2(lS - rS, 2 * ht);
+  for (let i = 0; i < 4; i++) {
+    const plane = yc + (i < 2 ? 0.5 : -0.5) * (fA - rA) + (i % 2 === 0 ? -0.5 : 0.5) * (lS - rS);
+    v.wheelDy[i] = WY[i] - plane;
+  }
+  const gc = g(v.x, v.z);
+  v.y = yc > gc - CLEARANCE ? yc : gc - CLEARANCE;
+  v.vy = 0;
+  if (!v.grounded) {
+    v.grounded = true;
+    v.pgPitch = v.gPitch;
+    v.pgRoll = v.gRoll;
+  }
+  // Curbs.
+  const j = up > down ? up : down;
+  if (j > JOLT_H) {
+    v.jolt = j;
+    v.jolts = (v.jolts || 0) + 1;
+    const k = Math.min(1, j / 0.3);
+    if (k > v.suspension) v.suspension = k;
+    v.pitchV += (up > down ? -1 : 1) * k * 0.6;
+    if (up > JOLT_H && !(v.joltCool > 0)) {
+      const sp = Math.hypot(v.vx, v.vz);
+      if (sp > JOLT_V) {
+        v.vx *= 1 - JOLT_LOSS;
+        v.vz *= 1 - JOLT_LOSS;
+      }
+      v.joltCool = 0.12;
+    }
+  }
+  // Wading: drive fades and the car slows to a stop at BOG_DEPTH; it can
+  // still back out (motion toward shallower water is kept).
+  const depth = SEA_LEVEL - gc;
+  v.wade = depth > 0 ? Math.min(1, depth / BOG_DEPTH) : 0;
+  if (v.wade > 0) {
+    const drag = Math.exp(-v.wade * v.wade * 4 * dt);
+    v.vx *= drag;
+    v.vz *= drag;
+    if (v.wade >= 1) {
+      // Seaward is downhill on the sea floor.
+      let sx = g(v.x - 1, v.z) - g(v.x + 1, v.z), sz = g(v.x, v.z - 1) - g(v.x, v.z + 1);
+      const sl = Math.hypot(sx, sz);
+      if (sl > 1e-6) {
+        sx /= sl; sz /= sl;
+        const out = v.vx * sx + v.vz * sz;
+        if (out > 0) { v.vx -= out * sx; v.vz -= out * sz; }
+      }
+    }
+  }
+}
+
+// The world height of wheel i's bottom (0 front-right, 1 front-left,
+// 2 rear-right, 3 rear-left): the body plane plus the wheel's own travel.
+export function wheelBottomY(v, i) {
+  const s = v.spec;
+  const hb = (s.wheelBase || s.length * 0.6) / 2, ht = Math.max(0.3, s.width / 2 - 0.15);
+  const lo = i < 2 ? hb : -hb, la = i % 2 === 0 ? ht : -ht;
+  const y = Number.isFinite(v.y) ? v.y : 0;
+  const dy = v.wheelDy ? v.wheelDy[i] : 0;
+  return y + Math.tan(v.gPitch || 0) * lo - Math.tan(v.gRoll || 0) * la + dy;
 }
 
 // Vehicle-vs-vehicle contact using the same 3 circles per car. Separates
@@ -905,9 +1111,13 @@ export function collideVehicles(a, b) {
     const close = -rvn;
     if (close > a.impact) a.impact = close;
     if (close > b.impact) b.impact = close;
+    // By the closing speed of the two; the lighter car takes a little
+    // more, within MASS_SHARE (was up to 1.7 times an even share).
     const dmg = impactDamage(close);
-    damageVehicle(a, dmg * 2 * sb.mass / (sa.mass + sb.mass));
-    damageVehicle(b, dmg * 2 * sa.mass / (sa.mass + sb.mass));
+    const ka = clamp(2 * sb.mass / (sa.mass + sb.mass), MASS_SHARE[0], MASS_SHARE[1]);
+    const kb = clamp(2 * sa.mass / (sa.mass + sb.mass), MASS_SHARE[0], MASS_SHARE[1]);
+    damageVehicle(a, dmg * ka, 'crash', b);
+    damageVehicle(b, dmg * kb, 'crash', a);
   }
   return true;
 }

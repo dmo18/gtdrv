@@ -304,11 +304,11 @@ function makePaint(rng, N) {
 
 // ------------------------------------------------------------ atlas tool ----
 // Packs named pictures onto one canvas in rows and remembers where.
-function createAtlas(size) {
-  const c = canvas(size), e = canvas(size);
+function createAtlas(size, height = size) {
+  const c = canvas(size, height), e = canvas(size, height);
   const g = c.getContext('2d'), ge = e.getContext('2d');
   ge.fillStyle = '#000';
-  ge.fillRect(0, 0, size, size);
+  ge.fillRect(0, 0, size, height);
   let x = 0, y = 0, rowH = 0;
   const rects = {};
   return {
@@ -320,7 +320,7 @@ function createAtlas(size) {
         y += rowH;
         rowH = 0;
       }
-      if (y + h > size) {
+      if (y + h > height) {
         // Out of room: leave this picture out rather than stop the game.
         // Its users check for the missing entry (props.js, buildings.js).
         console.warn('atlas full, skipped: ' + name);
@@ -337,7 +337,7 @@ function createAtlas(size) {
       g.restore();
       ge.restore();
       const p = 0.75; // keep clear of the neighbors when mipmapped
-      rects[name] = { u0: (x + p) / size, u1: (x + w - p) / size, v0: 1 - (y + h - p) / size, v1: 1 - (y + p) / size, w, h };
+      rects[name] = { u0: (x + p) / size, u1: (x + w - p) / size, v0: 1 - (y + h - p) / height, v1: 1 - (y + p) / height, w, h };
       x += w;
       rowH = Math.max(rowH, h);
     },
@@ -1110,7 +1110,27 @@ function fitText(g, text, w, h, family, weight = 'bold') {
 }
 
 function makeDetails(rng, streetNames) {
-  const A = createAtlas(1024);
+  // The sign atlas holds every street name of the region (docs/PLAN_V3.md
+  // 2.1 item 11): past 32 names the atlas doubles in height and the
+  // plates (white on green, drawn last) get a little lower.
+  const many = streetNames.length > 32;
+  const A = createAtlas(1024, many ? 2048 : 1024);
+  const addPlates = () => {
+    const ph = many ? 24 : 32;
+    streetNames.forEach((name, i) => {
+      A.add('plate' + i, 128, ph, (g, ge, w, h) => {
+        g.fillStyle = '#1f5a3c';
+        g.fillRect(0, 0, w, h);
+        g.strokeStyle = '#f4f4ec';
+        g.lineWidth = 2;
+        g.strokeRect(2, 2, w - 4, h - 4);
+        g.fillStyle = '#f4f4ec';
+        fitText(g, name, w - 12, many ? 16 : 19, 'sans-serif');
+        g.fillText(name, w / 2, h / 2 + 1);
+        ge.fillStyle = '#000';
+      });
+    });
+  };
   // Shop signs: lit box signs, so the same art goes on the glow layer.
   SHOP_NAMES.forEach(([name, bg, fg, family], i) => {
     A.add('sign' + i, 256, 64, (g, ge, w, h) => {
@@ -1148,20 +1168,8 @@ function makeDetails(rng, streetNames) {
       ge.fillRect(0, 0, w, h);
     });
   });
-  // Street name plates.
-  streetNames.forEach((name, i) => {
-    A.add('plate' + i, 128, 32, (g, ge, w, h) => {
-      g.fillStyle = '#1f5a3c';
-      g.fillRect(0, 0, w, h);
-      g.strokeStyle = '#f4f4ec';
-      g.lineWidth = 2;
-      g.strokeRect(2, 2, w - 4, h - 4);
-      g.fillStyle = '#f4f4ec';
-      fitText(g, name, w - 12, 19, 'sans-serif');
-      g.fillText(name, w / 2, h / 2 + 1);
-      ge.fillStyle = '#000';
-    });
-  });
+  // Street name plates (the island's 32 here, as before).
+  if (!many) addPlates();
   // House window: white trim, two sashes. Lit warm at night.
   const houseWindow = (lit, curtain) => (g, ge, w, h) => {
     g.fillStyle = '#f6f4ee';
@@ -1411,6 +1419,8 @@ function makeDetails(rng, streetNames) {
     ge.fillStyle = '#fff';
     ge.fillRect(0, 0, w, h);
   });
+  // Every name of a Miami region: in the added rows below.
+  if (many) addPlates();
   return {
     map: toTexture(A.c, { repeat: false }),
     emissiveMap: toTexture(A.e, { repeat: false, aniso: 4 }),

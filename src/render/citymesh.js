@@ -10,6 +10,7 @@ import { addBuilding, shade } from './buildings.js';
 import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
+import { paintLines, divideOf, CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
 export const COL = {
@@ -805,30 +806,108 @@ export function realRoads(city, B, nodes, edges, own = null) {
     const ux = e.ux ?? (b.x - a.x) / e.length, uz = e.uz ?? (b.z - a.z) / e.length;
     const rx = -uz, rz = ux;
     const half = e.width / 2;
+    // The cross section's middle lies `off` right of the node line (a
+    // paired one-way pulled against its partner; docs/MAP.md).
+    const off = e.off || 0;
     const prof = e.avenue ? PROFILE_AVENUE : PROFILE_STREET;
     const scale = half / prof[prof.length - 1][0];
     // A tone of its own per edge (from its id, so every tile agrees).
     const t = shade(COL.asphalt, 0.9 + 0.16 * edgeHash(e.id));
     const s0 = Math.min(a.hx, e.length * 0.3), s1 = e.length - Math.min(b.hx, e.length * 0.3);
     const segs = Math.max(1, Math.round((s1 - s0) / ROAD_PIECE));
+    // Raised strips beside the road (2.1 item 7): sidewalks with a 0.15 m
+    // curb on streets with a profile, and the median half a paired
+    // one-way owns along its left curb (planted from 1.5 m).
+    const walk = e.lanesF !== undefined && !e.bridge && !e.causeway && !e.ped ? e.sidewalk || 0 : 0;
+    const med = e.median > 0 && !e.bridge ? e.median / 2 : 0;
     for (let sg = 0; sg < segs; sg++) {
       const d0 = s0 + ((s1 - s0) * sg) / segs, d1 = s0 + ((s1 - s0) * (sg + 1)) / segs;
-      const px0 = a.x + ux * d0, pz0 = a.z + uz * d0, px1 = a.x + ux * d1, pz1 = a.z + uz * d1;
+      const px0 = a.x + ux * d0 + rx * off, pz0 = a.z + uz * d0 + rz * off, px1 = a.x + ux * d1 + rx * off, pz1 = a.z + uz * d1 + rz * off;
       if (own && !own((px0 + px1) / 2, (pz0 + pz1) / 2)) continue;
+      if (e.ped) {
+        // A pedestrian street: one paving of pavers curb to curb, flush.
+        const pb = B.sidewalk.at((px0 + px1) / 2, (pz0 + pz1) / 2);
+        const w = half + (e.sidewalk || 0);
+        orientedQuad(pb, px0 + rx * w, pz0 + rz * w, px1 + rx * w, pz1 + rz * w, px1 - rx * w, pz1 - rz * w, px0 - rx * w, pz0 - rz * w, 0.005, COL.plaza);
+        continue;
+      }
       const bld = B.asphalt.at((px0 + px1) / 2, (pz0 + pz1) / 2);
       for (let k = 0; k < prof.length - 1; k++) {
         const o0 = prof[k][0] * scale, o1 = prof[k + 1][0] * scale, sa = prof[k][1], sb = prof[k + 1][1];
         orientedQuad(bld, px0 + rx * o1, pz0 + rz * o1, px1 + rx * o1, pz1 + rz * o1, px1 + rx * o0, pz1 + rz * o0, px0 + rx * o0, pz0 + rz * o0, 0, t, sb, sb, sa, sa);
       }
+      if (walk > 0 || med > 0) {
+        const wb = B.sidewalk.at((px0 + px1) / 2, (pz0 + pz1) / 2);
+        const L = d1 - d0;
+        const strip = (lo, hi, sb2, col) => orientedQuad(sb2, px0 + rx * hi, pz0 + rz * hi, px1 + rx * hi, pz1 + rz * hi, px1 + rx * lo, pz1 + rz * lo, px0 + rx * lo, pz0 + rz * lo, CURB_H, col);
+        if (walk > 0) {
+          strip(half, half + walk, wb, COL.sidewalk);
+          wb.wall(px1 + rx * half, pz1 + rz * half, px0 + rx * half, pz0 + rz * half, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+          if (med <= 0) {
+            strip(-half - walk, -half, wb, COL.sidewalk);
+            wb.wall(px0 - rx * half, pz0 - rz * half, px1 - rx * half, pz1 - rz * half, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+          }
+        }
+        if (med > 0) {
+          const mb = e.median > MEDIAN_PLANT ? B.grass.at((px0 + px1) / 2, (pz0 + pz1) / 2) : wb;
+          strip(-half - med, -half, mb, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+          wb.wall(px0 - rx * half, pz0 - rz * half, px1 - rx * half, pz1 - rz * half, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+        }
+      }
     }
     if (own && !own((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
+    if (e.ped) continue;
     // Painted lines.
     const lb = B.paint.at((a.x + b.x) / 2, (a.z + b.z) / 2);
     const line = (d0, d1, o0, o1, col) => {
       orientedQuad(lb, a.x + ux * d0 + rx * o1, a.z + uz * d0 + rz * o1, a.x + ux * d1 + rx * o1, a.z + uz * d1 + rz * o1,
         a.x + ux * d1 + rx * o0, a.z + uz * d1 + rz * o0, a.x + ux * d0 + rx * o0, a.z + uz * d0 + rz * o0, 0.015, col);
     };
-    if (e.avenue) {
+    if (e.lanesF !== undefined && city.map === 'miami') {
+      // US paint from the profile (world/roadprofile.js paintLines):
+      // double yellow center, white dashed lane lines (10 ft dash, 30 ft
+      // gap), yellow left edge on one-ways and divided roads, parking lane
+      // lines; no zebra anywhere.
+      paintLines(e, PAINT);
+      const ds0 = s0 + 1, ds1 = s1 - 1;
+      for (let k = 0; k < PAINT.length; k += 2) {
+        const o = PAINT[k], kind = PAINT[k + 1];
+        if (kind === 'yellow2') {
+          line(ds0, ds1, o - 0.27, o - 0.12, COL.yellow);
+          line(ds0, ds1, o + 0.12, o + 0.27, COL.yellow);
+        } else if (kind === 'yellow' || kind === 'turn') {
+          line(ds0, ds1, o - 0.07, o + 0.07, COL.yellow);
+          if (kind === 'turn') {
+            const inner = o < 0 ? o + 0.3 : o - 0.3;
+            for (let d = s0 + 4; d < s1 - 6; d += 12) line(d, d + 3, inner - 0.07, inner + 0.07, COL.yellow);
+          }
+        } else if (kind === 'white') {
+          line(ds0, ds1, o - 0.07, o + 0.07, COL.line);
+        } else if (kind === 'park') {
+          line(ds0, ds1, o - 0.05, o + 0.05, COL.line);
+        } else {
+          for (let d = s0 + 4; d < s1 - 6; d += 12) line(d, d + 3, o - 0.07, o + 0.07, COL.line);
+        }
+      }
+      // A white stop bar across the lanes coming in and a two-line
+      // crosswalk at each end with a signal or a stop sign.
+      if (s1 - s0 > 14 && !e.causeway) {
+        const sdiv = divideOf(e), L0 = off - half + 0.3, R0 = off + half - 0.3;
+        for (const [n, d, dir] of [[a, s0, 1], [b, s1, -1]]) {
+          if (!n.edges || n.edges.length < 3 || !(n.signal || n.stop)) continue;
+          // Crosswalk: two 0.3 m lines 3 m apart, curb to curb.
+          const c0 = d + dir * 0.6, c1 = d + dir * 3.6;
+          line(Math.min(c0, c0 + dir * 0.3), Math.max(c0, c0 + dir * 0.3), L0, R0, COL.line);
+          line(Math.min(c1, c1 - dir * 0.3), Math.max(c1, c1 - dir * 0.3), L0, R0, COL.line);
+          // Stop bar on the incoming lanes (into b: the forward half).
+          const incoming = dir < 0 ? true : !e.oneway;
+          if (!incoming) continue;
+          const sb0 = d + dir * 4.4;
+          const lo = dir < 0 ? (e.oneway ? L0 + e.parkL : sdiv) : L0 + e.parkL, hi = dir < 0 ? R0 - e.parkR : sdiv;
+          line(Math.min(sb0, sb0 + dir * 0.45), Math.max(sb0, sb0 + dir * 0.45), Math.min(lo, hi), Math.max(lo, hi), COL.line);
+        }
+      }
+    } else if (e.avenue) {
       line(s0 + 2, s1 - 2, -0.35, -0.15, COL.yellow);
       line(s0 + 2, s1 - 2, 0.15, 0.35, COL.yellow);
       for (let d = s0 + 4; d < s1 - 6; d += 9) {
@@ -840,29 +919,19 @@ export function realRoads(city, B, nodes, edges, own = null) {
     } else {
       for (let d = s0 + 4; d < s1 - 6; d += 9) line(d, d + 3, -0.08, 0.08, COL.line);
     }
-    if (city.map === 'miami' && s1 - s0 > 14 && !e.causeway) {
-      // Edge lines along the curbs.
-      line(s0 + 1, s1 - 1, half - 0.62, half - 0.48, COL.line);
-      line(s0 + 1, s1 - 1, -half + 0.48, -half + 0.62, COL.line);
-      // Crosswalk crossing and a stop line at each end that meets a junction.
-      const ends = [[a, s0 + 0.8, 1, -1], [b, s1 - 0.8, -1, 1]];
-      for (const [n, d, dir, lane] of ends) {
-        if (!n.edges || n.edges.length < 3) continue;
-        for (let o = -half + 0.9; o < half - 0.9; o += 1.1) line(Math.min(d, d + dir * 3), Math.max(d, d + dir * 3), o, o + 0.55, COL.line);
-        const ds = d + dir * 3.9;
-        const o0 = e.oneway ? -half + 0.6 : lane < 0 ? -half + 0.6 : 0.25, o1 = e.oneway ? half - 0.6 : lane < 0 ? -0.25 : half - 0.6;
-        line(Math.min(ds, ds + dir * 0.45), Math.max(ds, ds + dir * 0.45), o0, o1, COL.line);
-      }
-    }
     // Bridges and the causeway over water: concrete deck sides.
     if (e.bridge || e.causeway) {
       const wb = B.sidewalk.at((a.x + b.x) / 2, (a.z + b.z) / 2);
       const L = e.length;
-      wb.wall(a.x + rx * half, a.z + rz * half, b.x + rx * half, b.z + rz * half, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
-      wb.wall(b.x - rx * half, b.z - rz * half, a.x - rx * half, a.z - rz * half, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
+      const hr = half + off, hl = half - off;
+      wb.wall(a.x + rx * hr, a.z + rz * hr, b.x + rx * hr, b.z + rz * hr, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
+      wb.wall(b.x - rx * hl, b.z - rz * hl, a.x - rx * hl, a.z - rz * hl, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
     }
   }
 }
+
+// Paint scratch (paintLines output), reused.
+const PAINT = [];
 
 function edgeHash(id) {
   let h = Math.imul(id + 1, 0x9e3779b1);

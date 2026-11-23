@@ -56,10 +56,10 @@ test('result line: the Handling lab preset and verdict close the line, bad value
 test('lab street: the nearest straight street of 120 m or more, no bridge, deterministic', () => {
   const { city } = cityAndCollision();
   const a = findLabStreet(city, 0, 0);
-  assert.ok(a && a.run >= 100, JSON.stringify(a));
+  assert.ok(a && a.run >= 60, JSON.stringify(a));
   assert.deepEqual(a, findLabStreet(city, 0, 0));
   const e = city.edges[a.edge];
-  assert.ok(e.length >= 120 && !e.bridge && !e.causeway);
+  assert.ok(e.length >= 80 && !e.bridge && !e.causeway);
   const n = city.nodes[e.a];
   assert.ok(Math.hypot(a.x - n.x, a.z - n.z) <= 20.01);
   assert.equal(findLabStreet({ nodes: [], edges: [] }, 0, 0), null);

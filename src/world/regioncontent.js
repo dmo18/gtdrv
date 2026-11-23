@@ -11,7 +11,8 @@
 // before the garages are placed; it does nothing on the whole box, on the
 // island, or on Downtown (which already has everything).
 import { MIAMI_SPOTS, MIAMI_COURSES } from './miami-spots.js';
-import { REGIONS, inRegion, holdsAll, pointsIn, PLACE_MARGIN, DEFAULT_REGION } from './regions.js';
+import { REGIONS, inRegion, holdsAll, pointsIn, PLACE_MARGIN, CORE_REGION } from './regions.js';
+import { laneOffset } from './citygen.js';
 import { SECRET_IDS, placeSecrets, openGroundNear } from './secrets.js';
 import { buildSpecCourses, roadPath, gateIsClear, waterLineClear } from './courses.js';
 import { generateRegionRamps } from './stunts.js';
@@ -123,8 +124,10 @@ function snapStart(city, st) {
     const a = city.nodes[e.a], b = city.nodes[e.b];
     if (hyp((a.x + b.x) / 2 - st.x, (a.z + b.z) / 2 - st.z) > e.length + 400) continue;
     const fwd = Math.cos(st.heading) * e.ux + Math.sin(st.heading) * e.uz >= 0;
+    if (e.oneway && !fwd) continue;
     const from = fwd ? a : b, ux = fwd ? e.ux : -e.ux, uz = fwd ? e.uz : -e.uz;
-    const off = e.avenue ? 2.6 : 2.0;
+    // The right-hand lane (docs/MAP.md "Edge contract"), as the build's spawn.
+    const off = laneOffset(e, (fwd ? e.lanesF : e.lanesB) - 1, fwd);
     for (let d = Math.min(e.length / 2, 12); d <= e.length - 12; d += 2) {
       const dd = fwd ? d : e.length - d;
       const x = from.x + ux * dd - uz * off, z = from.z + uz * dd + ux * off;
@@ -346,7 +349,8 @@ export function attachRegionContent(city) {
   const region = city && city.region;
   if (!region || city.regionContent || !city.nodes || !city.lots || !city.lots.length) return city;
   city.regionContent = true;
-  const generated = region.id !== DEFAULT_REGION;
+  // The core region (Downtown) has its hand tables; the others get generated content.
+  const generated = region.id !== CORE_REGION;
   if (generated) dressRegion(city);
 
   // The secrets the region holds (Downtown's came with the build).

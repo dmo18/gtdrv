@@ -88,6 +88,9 @@ export const MIAMI_SPOTS = {
     { name: 'Watson Island North Beach', src: 'Watson Island', x0: 60, z0: -900, x1: 900, z1: -760 },
     // The sandy causeway shore by the Rickenbacker Causeway (south edge of the box).
     { name: 'Rickenbacker Causeway Beach', src: 'Rickenbacker Causeway', x0: 0, z0: 3540, x1: 1000, z1: 3891 },
+    // The Atlantic beach of Miami Beach (0.9.0, the east strip), from
+    // South Pointe to the north edge of the box.
+    { name: 'South Beach', src: 'Lummus Park', x0: 4950, z0: -3891, x1: 6508, z1: 1700 },
   ],
 
   // Gullwing Airfield on an invented islet in open water in north
@@ -122,7 +125,7 @@ export const MIAMI_SPOTS = {
     { key: 'industrial', x0: -4600, z0: -3950, x1: -2700, z1: -1700 },
     { key: 'residential', x0: -4600, z0: 400, x1: -2700, z1: 3950 },
     { key: 'residential', x0: -2700, z0: 1900, x1: -600, z1: 3950 },
-    { key: 'residential', x0: 2700, z0: -3950, x1: 4600, z1: 2700 },
+    { key: 'residential', x0: 2700, z0: -3950, x1: 6600, z1: 2700 },
     { key: 'park', x0: 1500, z0: 2700, x1: 4600, z1: 3950 },
     { key: 'residential', x0: -2700, z0: 250, x1: -1650, z1: 2000 },
     { key: 'industrial', x0: -2700, z0: -2700, x1: -1400, z1: -1900 },
@@ -136,6 +139,9 @@ export const MIAMI_SPOTS = {
     // built land.
     { key: 'midtown', x0: 0, z0: -950, x1: 1100, z1: -150 },
     { key: 'park', x0: -820, z0: 380, x1: -480, z1: 1000 },
+    // South Beach east of Washington Avenue to the ocean (0.9.0, the east
+    // strip): the pastel ocean-front district.
+    { key: 'beach', x0: 4600, z0: -1900, x1: 6600, z1: 1700 },
     { key: 'park', x0: -900, z0: -820, x1: -480, z1: -520 },
     { key: 'park', x0: -720, z0: -1330, x1: -480, z1: -1060 },
   ],
@@ -207,6 +213,16 @@ export const MIAMI_SPOTS = {
     { name: 'Palm Island Skip', street: 'Palm Avenue', x: 1800, z: 20 },
   ],
 
+  // Infill style per neighborhood (docs/PLAN_V3.md 2.1 item 9): a box of
+  // generated infill in the rect gets 2 to 4 floors (pastel `beach`
+  // palette, flat roofs) unless it may be a tower: within `towerWater` m
+  // of the water (the bay front and the ocean front) or `towerReach` m of
+  // one of `towerStreets`. Later rects win.
+  infillStyles: [
+    { name: 'Mid-Beach', x0: 3550, z0: -3950, x1: 6600, z1: -1900, floors: [2, 6], district: 'residential', towerWater: 40 },
+    { name: 'South Beach', x0: 3550, z0: -1900, x1: 6600, z1: 1700, floors: [2, 4], district: 'beach', towerWater: 40, towerStreets: ['West Avenue'], towerReach: 60 },
+  ],
+
   // Neighborhood names for the HUD (placeOf). Later entries win. Each
   // `src` is the map-data feature (label, street, park, building or
   // water name) the name is taken from; a test checks it is in the data.
@@ -225,7 +241,12 @@ export const MIAMI_SPOTS = {
     { name: 'Wynwood', src: 'Wynwood Walls', x0: -2700, z0: -3950, x1: -1700, z1: -2700 },
     { name: 'Midtown', src: 'Midtown', x0: -1700, z0: -3450, x1: -480, z1: -2700 },
     { name: 'Design District', src: 'Design District', x0: -1700, z0: -3950, x1: -480, z1: -3450 },
-    { name: 'Miami Beach', src: 'Miami Beach', x0: 2700, z0: -3950, x1: 4600, z1: 1700 },
+    { name: 'Miami Beach', src: 'Miami Beach', x0: 2700, z0: -3950, x1: 6600, z1: 1700 },
+    // South Beach (0.9.0): the owner's ground, south of Dade Boulevard.
+    { name: 'South Beach', src: 'South Beach', x0: 3550, z0: -1900, x1: 6600, z1: 1700 },
+    { name: 'South of Fifth', src: 'South of Fifth Boardwalk', x0: 3900, z0: 600, x1: 6600, z1: 1700 },
+    { name: 'Flamingo Park', src: 'Flamingo Park', x0: 4250, z0: -700, x1: 4560, z1: -250 },
+    { name: 'Lummus Park', src: 'Lummus Park', x0: 4930, z0: -800, x1: 5250, z1: 560 },
     { name: 'Fisher Island', src: 'Fisher Island', x0: 3300, z0: 1700, x1: 4600, z1: 2700 },
     { name: 'Virginia Key', src: 'Virginia Key Beach North Point Park', x0: 1500, z0: 2700, x1: 4600, z1: 3950 },
     { name: 'Overtown', src: 'Overtown Transit Village North', x0: -2700, z0: -1700, x1: -1450, z1: 400 },

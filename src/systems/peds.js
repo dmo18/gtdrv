@@ -7,6 +7,7 @@
 // runs in node tests. The second half is the game system that spawns,
 // recycles and draws them.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
+import { groundFn } from '../world/ground.js';
 import { createPersonMesh, updatePersonMesh, personGeometry, PERSON_PALETTES } from '../render/personmesh.js';
 import { asideNeed, collectSirens, ASIDE_WALK, ASIDE_HOLD } from '../core/yield.js';
 import { initActor, resetActor, addActor, removeActor, layDown } from './combat.js';
@@ -445,7 +446,8 @@ export function stepPed(ped, dt, ctx) {
       const push = fast ? rr - d : Math.min(rr - d, 5 * dt);
       if (d > 1e-6) {
         // Remember a hard hit for combat (closing speed along the push).
-        const closing = ((c.vx || 0) - ped.vx) * (ex / d) + ((c.vz || 0) - ped.vz) * (ez / d);
+        // The car's own speed toward the ped (never the ped's, PLAN_V3 2.3 item 5).
+        const closing = (c.vx || 0) * (ex / d) + (c.vz || 0) * (ez / d);
         if (closing > (ped.bumpV || 0)) {
           ped.bumpBy = c;
           ped.bumpV = closing;
@@ -474,6 +476,8 @@ export function stepPed(ped, dt, ctx) {
   }
   ped.x = nx;
   ped.z = nz;
+  // On the ground (curbs): the same height function as the cars.
+  if (city) ped.y = groundFn(city)(nx, nz);
 
   const dist = Math.hypot(nx - ox, nz - oz);
   ped.speed = dist / dt;

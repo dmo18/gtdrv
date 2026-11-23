@@ -708,6 +708,78 @@ async function liveLayout(check) {
       }
       await tc.close();
     }
+    // Handling lab (docs/PLAN_V3.md 2.4 item 5) at the owner's phone and the two grid sizes: every control
+    // inside the screen, 48 px high, no overlap, no scrolling; the test drive's finish button and verdict card fit too.
+    for (const [w, h] of [[748, 360], [780, 360], [915, 412]]) {
+      const lc = await br.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+      const lp = await lc.newPage();
+      const lerrs = [];
+      lp.on('pageerror', (e) => lerrs.push(String(e)));
+      await lp.goto(`${base}?autostart`);
+      await lp.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
+      await lp.waitForTimeout(1000);
+      for (const L of [0, 40]) {
+        const r = await lp.evaluate((l) => {
+          document.documentElement.style.setProperty('--rw-test-sl', l + 'px');
+          const g = window.__rw;
+          g.menu.open('settings');
+          const rc = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+          const out = { rows: 0, controls: 0, bad: [] };
+          const measure = (tag) => {
+            const body = document.querySelector('.rw-menu-body');
+            const bb = rc(body);
+            const items = [...body.querySelectorAll('button, input')].filter((e) => e.offsetParent);
+            const boxes = items.map((e) => [e, rc(e)]);
+            out.controls += boxes.length;
+            for (const [e, b] of boxes) {
+              const name = e.getAttribute('aria-label') || e.textContent || e.type;
+              if (e.tagName === 'BUTTON' && (b.h < 47.5 || b.w < 47.5)) out.bad.push(`${tag} ${name}: ${b.w}x${b.h} under 48`);
+              if (b.r > innerWidth + 0.5 || b.x < l - 0.5 || b.y < bb.y - 0.5) out.bad.push(`${tag} ${name}: outside the screen`);
+            }
+            for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+              const a = boxes[i][1], b = boxes[j][1];
+              if (Math.min(a.r, b.r) - Math.max(a.x, b.x) > 0.5 && Math.min(a.b, b.b) - Math.max(a.y, b.y) > 0.5) out.bad.push(`${tag} overlap ${boxes[i][0].textContent} / ${boxes[j][0].textContent}`);
+            }
+            if (body.scrollHeight > body.clientHeight + 1) out.bad.push(`${tag} scrolls (${body.scrollHeight} > ${body.clientHeight})`);
+          };
+          // Controls group: six rows, the Handling lab row among them.
+          const ctl = [...document.querySelectorAll('.rw-menu-groups button')].find((b) => /Controls/.test(b.textContent));
+          if (ctl) ctl.click();
+          out.rows = document.querySelectorAll('.rw-menu-body .rw-menu-setting').length;
+          measure('controls');
+          document.querySelector('[data-role="handlinglab"]').click();
+          out.title = document.querySelector('.rw-menu-title').textContent;
+          measure('lab');
+          return out;
+        }, L);
+        const tag = `handling lab ${w}x${h} L${L}`;
+        check(`${tag}: Controls has 6 rows, the lab opens, every control 48+, inside the screen, no overlap, no scrolling`, r.rows === 6 && r.title === 'Handling lab' && r.controls >= 12 && r.bad.length === 0, JSON.stringify(r));
+      }
+      // The test drive overlay: Finish at the top center, then the verdict card.
+      const dv = await lp.evaluate(() => {
+        const g = window.__rw;
+        const rc = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+        g.menu.open('handlinglab');
+        document.querySelector('[data-role="labdrive"]').click();
+        const fin = document.querySelector('[data-role="labdrive-finish"]');
+        if (!fin) return { skipped: true };
+        const out = { fin: rc(fin), mode: g.player.mode, car: g.player.vehicle && g.player.vehicle.spec && g.player.vehicle.spec.id };
+        fin.click();
+        const card = document.querySelector('.rw-pc-labcard');
+        out.card = rc(card);
+        out.btns = [...card.querySelectorAll('button')].map((e) => rc(e));
+        card.querySelector('[data-verdict="heavy"]').click();
+        out.after = g.progress.settings.handlingVerdict;
+        out.closed = !document.querySelector('.rw-pc-lab');
+        out.on = g.player.mode;
+        return out;
+      });
+      check(`handling lab ${w}x${h}: test drive puts the player in a car, Finish is 48+, the verdict card fits on screen, a tap saves and ends the drive`,
+        !dv.skipped && dv.mode === 'car' && dv.fin.h >= 47.5 && dv.card.x >= -0.5 && dv.card.r <= w + 0.5 && dv.card.y >= -0.5 && dv.card.b <= h + 0.5
+        && dv.btns.every((b) => b.h >= 47.5 && b.w >= 47.5) && dv.after === 'heavy' && dv.closed && dv.on === 'foot', JSON.stringify(dv));
+      check(`handling lab ${w}x${h}: no page errors`, lerrs.length === 0, lerrs.slice(0, 2).join(' | '));
+      await lc.close();
+    }
     for (const p of problems.slice(0, 400)) console.log('   ', p);
     check(`live layout: ${states} states, ${elements} elements: no overlap, gap, size, keep-out, inset, grid, contrast or cut-out problem`, problems.length === 0, `(${problems.length} problems)`);
     check('live layout: no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

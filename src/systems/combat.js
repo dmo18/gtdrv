@@ -23,6 +23,7 @@
 //   into CRAFT_HOOKS below (tasks 32 and 33 fill them).
 import { createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
+import { setDamageRule } from '../entities/vehicle.js';
 import {
   RULES, WEAPONS, MOUNTS, createArms, nextWeapon, selectWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
@@ -48,8 +49,19 @@ export const BODY_LIE_T = 30, BODY_MAX = 12;
 export const DOWN_T = 1.6, GETUP_T = 0.6, OUT_LIE_T = BODY_LIE_T, FADE_T = 1;
 export const PLAYER_DOWN_T = 2.5, PLAYER_FADE_T = 1;
 export const REGEN_DELAY = 5, REGEN_RATE = 10;
-export const RAM_MIN = 4; // m/s closing speed that knocks a person down
-export const RAM_DMG = 4; // damage per m/s of closing speed
+// People and cars (docs/PLAN_V3.md 2.3 item 5): the car's own speed only,
+// never the walker's. Under NUDGE_MPH a nudge; up to KNOCK_MPH the person
+// stumbles aside (no damage, no star); over it they are knocked down and,
+// in Hard mode, take (mph - KNOCK_MPH) * RAM_DMG_PER_MPH. A parked car
+// never hurts anyone, a person never hurts a car.
+export const MPH = 2.23694;
+export const NUDGE_MPH = 5, KNOCK_MPH = 15, RAM_DMG_PER_MPH = 3;
+export const STUMBLE_PUSH = 1.6; // m/s sideways shove of a stumble
+export const RAM_MIN = KNOCK_MPH / MPH; // m/s car speed that knocks a person down
+export const RAM_DMG = RAM_DMG_PER_MPH * MPH; // damage per m/s over RAM_MIN
+// Crash damage (2.3 items 2 and 3): in the default "cannot die" mode a
+// crash never takes the player's car under CRASH_FLOOR of its health.
+export const CRASH_FLOOR = 0.15;
 export const BLAST_DMG = 120, BLAST_CRAFT_MULT = 1.5;
 export const CRAFT_BLAST_R = 10, CRAFT_PUSH = 12, CRAFT_PUSH_MAX = 14;
 // Bigger craft blow up bigger (REVAMP 6.7 "Scale by craft"): damage radius
@@ -70,7 +82,13 @@ export const craftPush = (scale) => Math.min(CRAFT_PUSH_MAX, CRAFT_PUSH + Math.m
 const CB = { r: CRAFT_BLAST_R, scale: 1 };
 // Blast throw: cars are launched (and flipped), people ragdoll.
 export const TOSS_G = 9.81;
-export const BURN_BELOW = 0.25, BURN_RATE = 0.03, BURN_T = 6;
+// Fire before explosion, always (2.3 item 4): a car catches fire only from
+// weapon, blast or fire damage that leaves it under BURN_BELOW of its
+// health (crash damage alone never lights it), burns BURN_T s, then
+// explodes. Weapon damage that would take a car to zero leaves it at 1
+// and alight instead.
+export const BURN_BELOW = 0.2, BURN_RATE = 0.03, BURN_T = 8;
+const NO_FIRE_KINDS = { ram: true, crash: true, prop: true };
 export const MAX_DEPTH = 2;
 export const RATE_WINDOW = 0.5, RATE_MAX = 3, QUEUE_DELAY = 0.3, CHAIN_DELAY = 0.25;
 export const LIVE_T = 1.2; // seconds an explosion counts as "live"
@@ -415,6 +433,10 @@ function damageCraft(game, c, amount, source, kind, px, pz) {
   c.lastHitBy = source;
   c.lastKind = kind;
   c.combatHit = true;
+  const maxH = (c.spec && c.spec.health) || 1000;
+  if (!NO_FIRE_KINDS[kind] && c.health < maxH * BURN_BELOW) c.ignite = true;
+  // A car always burns before it blows up.
+  if (c.kind === 'car' && c.health <= 0 && !NO_FIRE_KINDS[kind] && !c.doused && !(c.burning && c.burnT >= BURN_T)) c.health = 1;
   if (c.occ) hurtOccupants(game, c, amount, source, kind, hitY);
   c.hitT = HIT_FLASH;
   // Depth an explosion of this craft would have (blast chains count up).
@@ -429,6 +451,9 @@ function damageCraft(game, c, amount, source, kind, px, pz) {
   if (c.health <= 0) {
     c.health = 0;
     c.wrecked = true;
+    // Rammed or crushed to nothing: a wreck, not a blast.
+    const crash = c.kind === 'car' && NO_FIRE_KINDS[kind];
+    if (crash) c.crashWreck = true;
     if (isPlayerSource(game, source) && c !== game.player.vehicle) {
       const t = EV.takedown;
       t.target = c;
@@ -438,7 +463,9 @@ function damageCraft(game, c, amount, source, kind, px, pz) {
       emit(game, 'takedown');
     }
     const sys = game.combat;
-    if (sys && sys.craftDestroyed) sys.craftDestroyed(c, c.chainDepth || 0);
+    if (crash) {
+      if (c.occ) killOccupants(game, c, source, kind);
+    } else if (sys && sys.craftDestroyed) sys.craftDestroyed(c, c.chainDepth || 0);
   }
   return applied;
 }
@@ -1821,13 +1848,14 @@ export function createCombat(game, { seed = 23023 } = {}) {
         const max = (c.spec && c.spec.health) || 1000;
         damage(game, c, max * BURN_RATE * dt, c.lastHitBy, 'fire');
         if (c.burning && c.burnT >= BURN_T && !c.wrecked) {
+          c.ignite = false;
           c.health = 0;
           c.wrecked = true;
           craftDestroyed(c, c.chainDepth || 0);
         }
         continue;
       }
-      if (c.wrecked || c.removed || !(c.combatHit || sys.burnAll)) continue;
+      if (c.wrecked || c.removed || !(c.ignite || sys.burnAll)) continue;
       const max = (c.spec && c.spec.health) || 1000;
       if (c.health < max * BURN_BELOW && burningCount < CAPS.burning && (c.chainDepth || 0) <= MAX_DEPTH && !c.doused) {
         c.burning = true;
@@ -2370,6 +2398,8 @@ export function createCombat(game, { seed = 23023 } = {}) {
     else if (v.kind === 'car' || v.kind === 'boat') fire(w, dx, dy, dz, v, w.arms.lastGun);
   }
 
+  // Car and person contact (2.3 item 5): by the car's own speed, and only
+  // when the car moves toward the person.
   function stepBumps() {
     const actors = game.actors;
     for (let i = 0; i < actors.length; i++) {
@@ -2377,14 +2407,74 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const c = a.bumpBy;
       if (!c) continue;
       a.bumpBy = null;
-      const v = a.bumpV;
       a.bumpV = 0;
-      if (!(v > RAM_MIN) || !canBeHit(a)) continue;
-      const sp = Math.sqrt(c.vx * c.vx + c.vz * c.vz) || 1;
-      setPush((c.vx / sp) * v * 0.5, (c.vz / sp) * v * 0.5);
-      setFall(c.vx, c.vz, Math.min(FALL_RAM_MAX, FALL_RAM_K * v), Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * v));
-      damage(game, a, RAM_DMG * v, c, 'ram');
+      if (!canBeHit(a)) continue;
+      const cvx = c.vx || 0, cvz = c.vz || 0;
+      const sp = Math.sqrt(cvx * cvx + cvz * cvz);
+      const toX = a.x - c.x, toZ = a.z - c.z;
+      if (!(cvx * toX + cvz * toZ > 0)) continue; // the person walked into it
+      const mph = sp * MPH;
+      if (mph < NUDGE_MPH) continue;
+      if (mph < KNOCK_MPH) {
+        // Stumble aside: a shove away from the car's path, nothing more.
+        const l = Math.sqrt(toX * toX + toZ * toZ) || 1;
+        a.kx = (a.kx || 0) + (toX / l) * STUMBLE_PUSH;
+        a.kz = (a.kz || 0) + (toZ / l) * STUMBLE_PUSH;
+        a.stumbleT = 0.6;
+        continue;
+      }
+      setPush((cvx / sp) * sp * 0.5, (cvz / sp) * sp * 0.5);
+      setFall(cvx, cvz, Math.min(FALL_RAM_MAX, FALL_RAM_K * sp), Math.min(RAM_THROW_MAX, RAM_THROW_UP + RAM_THROW_PER * sp));
+      damage(game, a, Math.max(1, (mph - KNOCK_MPH) * RAM_DMG_PER_MPH), c, 'ram');
     }
+  }
+
+  // The crash rule for every car (vehicle.js damageVehicle): the floor of
+  // the default mode for the player's car, props cost nothing outside Hard.
+  function crashRule(v, amount, kind) {
+    if (kind === 'prop') return RULES.invulnerable ? 0 : amount;
+    if (kind !== 'crash') return amount;
+    const p = game.player;
+    if (RULES.invulnerable && p && p.vehicle === v) {
+      const floor = ((v.spec && v.spec.health) || 1000) * CRASH_FLOOR;
+      const room = v.health - floor;
+      return room > 0 ? Math.min(amount, room) : 0;
+    }
+    return amount;
+  }
+  setDamageRule(crashRule);
+
+  // A car the player sits in that a crash wrecked: they get out (it does
+  // not explode, 2.3 item 3).
+  function stepCrashWreck() {
+    const p = game.player;
+    const c = p && p.vehicle;
+    if (c && c.kind === 'car' && c.wrecked && c.crashWreck && !c.burning) ejectPlayer(c);
+  }
+
+  // Props broken by cars (collision.breakShape): 'propBreak' events for
+  // the look, the sound and the score (no wanted stars), and broken props
+  // standing again after a while out of view.
+  let breakSeen = 0;
+  const PB = { type: '', x: 0, z: 0, h: 0, vx: 0, vz: 0, speed: 0, spray: 0, fall: '', by: null, byPlayer: false };
+  function stepPropBreaks(dt) {
+    const col = game.collision;
+    if (!col || !col.breaks) return;
+    const p = game.player;
+    if (col.stepBroken) col.stepBroken(dt, p ? p.x : 0, p ? p.z : 0);
+    const seq = col.breakSeq;
+    if (seq === breakSeen) return;
+    const ring = col.breaks, n = ring.length;
+    const from = Math.max(breakSeen, seq - n);
+    for (let k = from; k < seq; k++) {
+      const r = ring[k % n];
+      PB.type = r.type; PB.x = r.x; PB.z = r.z; PB.h = r.h; PB.vx = r.vx; PB.vz = r.vz;
+      PB.speed = r.speed; PB.spray = r.spray; PB.fall = r.fall; PB.by = r.by;
+      PB.byPlayer = !!(p && r.by && r.by === p.vehicle);
+      if (game.events && game.events.emit) game.events.emit('propBreak', PB);
+    }
+    breakSeen = seq;
+    PB.by = null;
   }
 
   const sys = {
@@ -2440,6 +2530,8 @@ export function createCombat(game, { seed = 23023 } = {}) {
       if (vs) for (let i = 0; i < vs.length; i++) if (vs[i] && vs[i].arms) stepCraftArms(vs[i].arms, dt);
       playerControls(dt);
       stepBumps();
+      stepCrashWreck();
+      stepPropBreaks(dt);
       stepProjectiles(dt);
       stepStickies(dt);
       stepQueue(dt);

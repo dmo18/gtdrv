@@ -7,7 +7,8 @@
 //
 // Coordinates: x east, z south, meters, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
-import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W, lanePoint } from './citygen.js';
+import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
+import { roadProfile, pairDivided, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
@@ -36,7 +37,13 @@ const DRIVE = new Set([
   'trunk', 'primary', 'secondary', 'tertiary', 'trunk_link', 'primary_link', 'secondary_link',
   'tertiary_link', 'residential', 'unclassified', 'living_street', 'motorway', 'motorway_link',
 ]);
-const BIG = new Set(['trunk', 'primary', 'secondary']);
+// A block keeps this ring clear inside its curbs (the widest sidewalk);
+// a building outside a block keeps WALK_CLEAR m from the curb.
+const WALK_RING = SIDEWALK_WIDE;
+const WALK_CLEAR = 1.8;
+const SLIVER = 30;
+// A data signal or stop sign this close to a junction belongs to it.
+const SIGNAL_SNAP = 22;
 const HOUSE = new Set(['house', 'detached', 'terrace', 'semidetached_house', 'bungalow']);
 const SHED = new Set(['warehouse', 'industrial', 'garages', 'garage', 'service', 'shed']);
 const SKIP_BUILDING = new Set(['roof', 'patio']);
@@ -77,6 +84,10 @@ export function decodePolyline(p) {
   }
   return out;
 }
+
+// The derived `avenue` flag of the edge contract: two or more lanes each
+// way, or a one-way of three or more.
+const isAvenue = (p) => (p.oneway ? p.lanesF >= 3 : Math.min(p.lanesF, p.lanesB) >= 2);
 
 const segDist2 = (px, pz, ax, az, bx, bz) => {
   const dx = bx - ax, dz = bz - az;
@@ -895,10 +906,26 @@ export function createMiamiCity(data, opts = {}) {
   // Where a road leaves the crop: x, z on the crop line, then the unit
   // direction out of it (for the generated road ends, 3.4).
   const cuts = [];
+  // The district key at a point straight from the hand table (the raster
+  // comes later): for the sidewalk width of a road.
+  const districtKeyAt = (x, z) => {
+    let k = 'midtown';
+    for (const d of S.districts) if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) k = d.key;
+    return k;
+  };
   for (const r of data.roads) {
-    if (!DRIVE.has(r.class)) continue;
+    // Pedestrian streets: only the named malls (2.1 item 8), drivable.
+    if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) continue;
     if (r.name && /tunnel/i.test(r.name)) continue;
     const pts = decodePolyline(r.p);
+    if (r.oneway === -1) {
+      // Stored against the traffic: reverse, so every one-way runs along its points.
+      for (let i = 0, j = pts.length - 2; i < j; i += 2, j -= 2) {
+        const tx = pts[i], tz = pts[i + 1];
+        pts[i] = pts[j]; pts[i + 1] = pts[j + 1];
+        pts[j] = tx; pts[j + 1] = tz;
+      }
+    }
     {
       let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
       for (let k = 0; k < pts.length; k += 2) { if (pts[k] < bx0) bx0 = pts[k]; if (pts[k] > bx1) bx1 = pts[k]; if (pts[k + 1] < bz0) bz0 = pts[k + 1]; if (pts[k + 1] > bz1) bz1 = pts[k + 1]; }
@@ -930,9 +957,11 @@ export function createMiamiCity(data, opts = {}) {
       // Bridges that land near the water are approaches to a crossing: kept.
       if (n && on / n > 0.6 && L > 50 && !nearWater(pts[0], pts[1]) && !nearWater(pts[m - 2], pts[m - 1])) continue;
     }
-    const oneway = !!r.oneway;
-    const avenue = !oneway && (BIG.has(r.class) || (r.lanes || 0) >= 4);
-    const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: avenue ? AVENUE_W : STREET_W };
+    // The cross section (world/roadprofile.js; docs/MAP.md "Edge contract").
+    const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]) });
+    const oneway = prof.oneway;
+    const avenue = isAvenue(prof);
+    const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || 0 };
     // Split at the crop edge: only runs of vertices inside it.
     let run = [];
     const flush = () => {
@@ -1059,11 +1088,15 @@ export function createMiamiCity(data, opts = {}) {
     const old = m.get(b);
     if (old === undefined || ways[wi].width > ways[old].width) m.set(b, wi);
   };
+  // One-way ways: the directed rep pairs they run along (the edges are
+  // stored in their legal direction, docs/MAP.md "Edge contract").
+  const legal = new Set();
   for (let s = 0; s < segA.length; s++) {
     const a = find(segA[s]), b = find(segB[s]);
     if (a === b) continue;
     link(a, b, segW[s]);
     link(b, a, segW[s]);
+    if (ways[segW[s]].oneway) legal.add(a * 1e7 + b);
   }
   for (const s of S.links || []) {
     // Hand-made links: nearest representative to each end.
@@ -1077,13 +1110,15 @@ export function createMiamiCity(data, opts = {}) {
     };
     const a = near(s[0], s[1]), b = near(s[2], s[3]);
     if (a >= 0 && b >= 0 && a !== b) {
-      ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: STREET_W, pts: [] });
+      const prof = roadProfile({ class: 'unclassified' });
+      ways.push({ cls: 'unclassified', name: '', bridge: false, oneway: false, avenue: false, width: prof.width, prof, mph: 0, lanesTag: 0, pts: [] });
       link(a, b, ways.length - 1);
       link(b, a, ways.length - 1);
     }
   }
   const posX = (r) => px[r] / pn[r], posZ = (r) => pz[r] / pn[r];
-  const sameKind = (w1, w2) => w1 === w2 || (ways[w1].width === ways[w2].width && ways[w1].bridge === ways[w2].bridge && ways[w1].cls === ways[w2].cls && ways[w1].name === ways[w2].name);
+  const sameKind = (w1, w2) => w1 === w2 || (ways[w1].width === ways[w2].width && ways[w1].bridge === ways[w2].bridge && ways[w1].cls === ways[w2].cls && ways[w1].name === ways[w2].name &&
+    ways[w1].oneway === ways[w2].oneway && ways[w1].prof.lanesF === ways[w2].prof.lanesF);
   // Chains between junctions, simplified (Douglas-Peucker) into edges.
   const isBreak = (r) => {
     const m = adj.get(r);
@@ -1102,18 +1137,37 @@ export function createMiamiCity(data, opts = {}) {
     }
     return n;
   };
-  const edgeKey = new Set();
+  const edgeKey = new Map();
   const addEdge = (na, nb, wi) => {
     if (na === nb) return;
     const k = na < nb ? na * 1e6 + nb : nb * 1e6 + na;
-    if (edgeKey.has(k)) return;
-    edgeKey.add(k);
-    const A = nodes[na], Bn = nodes[nb], w = ways[wi];
+    const w = ways[wi];
+    const old = edgeKey.get(k);
+    if (old !== undefined) {
+      // Both carriageways of a tight one-way pair between the same two
+      // junctions: one two-way road (2.1 item 4, gap under 1 m).
+      const e = edges[old];
+      if (e.oneway && w.oneway && e.a === nb && e.name === w.name) {
+        e.oneway = false;
+        e.lanesB = w.prof.lanesF;
+        e.parkL = w.prof.parkR;
+        e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
+        e.avenue = isAvenue(e);
+        e.merged = true;
+      }
+      return;
+    }
+    const A = nodes[na], Bn = nodes[nb];
     const dx = Bn.x - A.x, dz = Bn.z - A.z, length = Math.hypot(dx, dz);
     if (length < 0.5) return;
+    edgeKey.set(k, edges.length);
+    const P = w.prof;
     edges.push({
-      id: edges.length, a: na, b: nb, horizontal: Math.abs(dx) >= Math.abs(dz), width: w.width, avenue: w.avenue, length,
+      id: edges.length, a: na, b: nb, horizontal: Math.abs(dx) >= Math.abs(dz), width: P.width, avenue: w.avenue, length,
       ux: dx / length, uz: dz / length, bridge: w.bridge, oneway: w.oneway, cls: w.cls, name: w.name,
+      // The edge contract (docs/MAP.md), from world/roadprofile.js.
+      lanesF: P.lanesF, lanesB: P.lanesB, laneW: P.laneW, parkL: P.parkL, parkR: P.parkR, median: 0, center: P.center,
+      off: 0, sidewalk: P.sidewalk, ped: P.ped, divided: false, pair: -1, mph: w.mph, lanesTag: w.lanesTag || 0,
     });
   };
   const visited = new Set();
@@ -1136,12 +1190,16 @@ export function createMiamiCity(data, opts = {}) {
       }
     };
     dp(0, chain.length - 1);
-    let prev = nodeFor(chain[0]);
+    let prev = nodeFor(chain[0]), prevI = 0;
+    const oneway = ways[wi].oneway;
     for (let i = 1; i < chain.length; i++) {
       if (!keep[i]) continue;
       const n = nodeFor(chain[i]);
-      addEdge(prev, n, wi);
+      // A one-way edge runs the way its way runs (first step of the piece).
+      if (oneway && !legal.has(chain[prevI] * 1e7 + chain[prevI + 1]) && legal.has(chain[prevI + 1] * 1e7 + chain[prevI])) addEdge(n, prev, wi);
+      else addEdge(prev, n, wi);
       prev = n;
+      prevI = i;
     }
   };
   const walkFrom = (start, next) => {
@@ -1192,13 +1250,18 @@ export function createMiamiCity(data, opts = {}) {
   }
   const islet = anchor ? { x0: AF.isletX0, z0: anchor.z - 205, x1: AF.isletX1, z1: anchor.z - 205 + IW } : null;
   const roadHalf = STREET_W / 2;
+  const causewayProf = roadProfile({ class: 'tertiary', bridge: 1 });
   let gate = null;
   const extraLand = [];
   if (islet) {
     gate = { id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z, hx: roadHalf, hz: roadHalf, edges: [], signal: false };
     nodes.push(gate);
     const L = gate.x - anchor.x;
-    edges.push({ id: edges.length, a: anchor.id, b: gate.id, horizontal: true, width: STREET_W, avenue: false, length: L, ux: 1, uz: 0, causeway: true, bridge: false, oneway: false, cls: 'causeway', name: 'Gullwing Causeway' });
+    const P = causewayProf;
+    edges.push({
+      id: edges.length, a: anchor.id, b: gate.id, horizontal: true, width: P.width, avenue: false, length: L, ux: 1, uz: 0, causeway: true, bridge: false, oneway: false, cls: 'causeway', name: 'Gullwing Causeway',
+      lanesF: P.lanesF, lanesB: P.lanesB, laneW: P.laneW, parkL: 0, parkR: 0, median: 0, center: 0, off: 0, sidewalk: 0, ped: false, divided: false, pair: -1, mph: 35, lanesTag: 0,
+    });
     anchor.edges.push(edges.length - 1);
     gate.edges.push(edges.length - 1);
     const causewayRect = { x0: anchor.x - 30, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 30, z1: anchor.z + roadHalf + 4 };
@@ -1270,19 +1333,78 @@ export function createMiamiCity(data, opts = {}) {
   if (gate && (gate.id >= nodes.length || nodes[gate.id] !== gate)) throw new Error('miami: the airfield causeway is not on the main road network');
   // Junction boxes: half the widest road, kept short of the edges.
   for (const n of nodes) {
+    n.stop = false;
+    n.blade = false;
+    n.signalSrc = '';
     if (n.i < 0) continue;
-    let half = 0, minLen = Infinity, avenue = false;
+    let half = 0, minLen = Infinity;
     for (const eid of n.edges) {
       const e = edges[eid];
       half = Math.max(half, e.width / 2);
       minLen = Math.min(minLen, e.length);
-      if (e.avenue) avenue = true;
     }
     const deg = n.edges.length;
     const want = deg === 2 ? 2 : half;
     n.hx = n.hz = Math.max(1, Math.min(want, minLen * 0.4));
     if (deg === 2) n.bend = true;
-    n.signal = deg >= 3 && avenue;
+  }
+  // Signals and stop signs where the data has them (2.1 item 6): each
+  // data point goes to the nearest junction within SIGNAL_SNAP m.
+  {
+    const juncGrid = new Map();
+    const JG = 32;
+    for (const n of nodes) {
+      if (n.i < 0 || n.edges.length < 3) continue;
+      const k = Math.floor(n.x / JG) * 100000 + Math.floor(n.z / JG);
+      let l = juncGrid.get(k);
+      if (!l) juncGrid.set(k, (l = []));
+      l.push(n);
+    }
+    const nearestJunction = (x, z) => {
+      let best = null, bd = SIGNAL_SNAP * SIGNAL_SNAP;
+      const ci = Math.floor(x / JG), cj = Math.floor(z / JG);
+      for (let dj = -1; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          const l = juncGrid.get((ci + di) * 100000 + cj + dj);
+          if (!l) continue;
+          for (const n of l) {
+            const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+            if (d < bd) { bd = d; best = n; }
+          }
+        }
+      }
+      return best;
+    };
+    const sig = data.signals || [], stp = data.stops || [];
+    for (let k = 0; k + 1 < sig.length; k += 2) {
+      const n = nearestJunction(sig[k] / 10, sig[k + 1] / 10);
+      if (n) { n.signal = true; n.signalSrc = 'data'; }
+    }
+    for (let k = 0; k + 1 < stp.length; k += 2) {
+      const n = nearestJunction(stp[k] / 10, stp[k + 1] / 10);
+      if (n && !n.signal) n.stop = true;
+    }
+    // Generated only where the data has none at a junction of two named
+    // streets: a signal where a road of two lanes each way meets another
+    // named street (the old rule), with no data signal or stop sign
+    // within 60 m (dual carriageways put several nodes on one crossing).
+    const hasData = sig.length + stp.length > 0;
+    const dataNear = (x, z) => {
+      for (let k = 0; k + 1 < sig.length; k += 2) if ((sig[k] / 10 - x) ** 2 + (sig[k + 1] / 10 - z) ** 2 < 3600) return true;
+      for (let k = 0; k + 1 < stp.length; k += 2) if ((stp[k] / 10 - x) ** 2 + (stp[k + 1] / 10 - z) ** 2 < 3600) return true;
+      return false;
+    };
+    for (const n of nodes) {
+      if (n.i < 0 || n.edges.length < 3 || n.signal || n.stop) continue;
+      let avenue = false, n1 = '', two = false;
+      for (const eid of n.edges) {
+        const e = edges[eid];
+        if (e.avenue) avenue = true;
+        if (e.name && !n1) n1 = e.name;
+        else if (e.name && e.name !== n1) two = true;
+      }
+      if (avenue && two && (!hasData || !dataNear(n.x, n.z))) { n.signal = true; n.signalSrc = 'gen'; }
+    }
   }
   lap('network');
 
@@ -1307,7 +1429,8 @@ export function createMiamiCity(data, opts = {}) {
   };
   const EB = [0, 0, 0, 0];
   const edgeIndex = buildIndex(edges.length, (k) => {
-    const e = edges[k], a = nodes[e.a], b = nodes[e.b], r = e.width / 2 + 1;
+    // + 4 m: room for a paired one-way's `off` (set just below).
+    const e = edges[k], a = nodes[e.a], b = nodes[e.b], r = e.width / 2 + 4;
     EB[0] = Math.min(a.x, b.x) - r; EB[1] = Math.min(a.z, b.z) - r; EB[2] = Math.max(a.x, b.x) + r; EB[3] = Math.max(a.z, b.z) + r;
     return EB;
   });
@@ -1333,6 +1456,16 @@ export function createMiamiCity(data, opts = {}) {
         }
       }
     }
+  };
+  // Divided roads (2.1 item 4): one-way carriageways of one name paired,
+  // with a raised median as wide as the data gap leaves.
+  graphStats.paired = pairDivided(nodes, edges, edgesNear);
+  // The strip of an edge: its node line moved `off` to the right.
+  const SEG = [0, 0, 0, 0];
+  const stripOf = (e) => {
+    const a = nodes[e.a], b = nodes[e.b], o = e.off || 0;
+    SEG[0] = a.x - e.uz * o; SEG[1] = a.z + e.ux * o; SEG[2] = b.x - e.uz * o; SEG[3] = b.z + e.ux * o;
+    return SEG;
   };
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
@@ -1385,8 +1518,8 @@ export function createMiamiCity(data, opts = {}) {
   for (const r of extraLand) stampRect(land, r.x0, r.z0, r.x1, r.z1, 1);
   const visual = land.data.slice(); // land as drawn: real land, islet and causeway
   for (const e of edges) {
-    const a = nodes[e.a], b = nodes[e.b];
-    stampCapsule(land, a.x, a.z, b.x, b.z, e.width / 2 + 3, 1);
+    const g = stripOf(e);
+    stampCapsule(land, g[0], g[1], g[2], g[3], e.width / 2 + 3 + (e.median || 0) / 2, 1);
   }
   lap('shore.stamp');
   const fieldAll = signedField(land);
@@ -1428,11 +1561,17 @@ export function createMiamiCity(data, opts = {}) {
   // ---- 6. Blocks: road-free land regions that are nearly rectangles. ----
   const blocks = [];
   let parkCells; // 1 park or forest, 2 grass (data.parks)
+  let blockLab; // region label (its first cell) per land cell, -1 off land and on roads
   {
     const road = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, CELL);
     for (const e of edges) {
-      const a = nodes[e.a], b = nodes[e.b];
-      stampCapsule(road, a.x, a.z, b.x, b.z, e.width / 2, 1);
+      const g = stripOf(e);
+      stampCapsule(road, g[0], g[1], g[2], g[3], e.width / 2, 1);
+      if (e.median > 0) {
+        // The median half along the left curb is not a block.
+        const o = -(e.width / 2 + e.median / 4);
+        stampCapsule(road, g[0] - e.uz * o, g[1] + e.ux * o, g[2] - e.uz * o, g[3] + e.ux * o, e.median / 4 + 0.5, 1);
+      }
     }
     for (const n of nodes) stampRect(road, n.x - n.hx, n.z - n.hz, n.x + n.hx, n.z + n.hz, 1);
     // Park and forest, and grass, polygons (also the lot masks, 8b).
@@ -1453,6 +1592,8 @@ export function createMiamiCity(data, opts = {}) {
     const cj0 = Math.max(0, Math.floor((crop.z0 - land.z0) / CELL)), cj1 = Math.min(H - 1, Math.floor((crop.z1 - land.z0) / CELL));
     // Every road-free land region of the crop window, in scan order.
     const regions = floodRegions(W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, queue, FB);
+    // The block (road-free land region) of each cell, for the infill rule.
+    blockLab = lab.slice();
     for (let r = 0; r < regions.length; r += 7) {
       {
         const qt = regions[r], bi0 = regions[r + 1], bi1 = regions[r + 2], bj0 = regions[r + 3], bj1 = regions[r + 4], parks = regions[r + 5], ok = regions[r + 6] === 1;
@@ -1536,6 +1677,11 @@ export function createMiamiCity(data, opts = {}) {
         const bi0 = rects[4 * k], bj0 = rects[4 * k + 1], bi1 = rects[4 * k + 2], bj1 = rects[4 * k + 3];
         const bx0 = bi0 === 0 ? x0 : x0 + bi0 * BC, bz0 = bj0 === 0 ? z0 : z0 + bj0 * BC;
         const bx1 = bi1 === cw - 1 ? x1 : x0 + (bi1 + 1) * BC, bz1 = bj1 === ch - 1 ? z1 : z0 + (bj1 + 1) * BC;
+        // 0.9.0: a footprint's extra pieces under SLIVER m2 are left out
+        // (the first, largest piece always stays): they cost a box each
+        // for a strip nobody sees, and the Beach's real footprints (the
+        // east strip) must fit the region budget.
+        if (k > 0 && (bx1 - bx0) * (bz1 - bz0) < SLIVER) continue;
         placeBox(bx0, bz0, bx1, bz1, h, kindTag, srcIds ? srcIds[fp] : fp);
       }
     }
@@ -1545,12 +1691,12 @@ export function createMiamiCity(data, opts = {}) {
     const blk = blockAt(cx, cz);
     if (blk) {
       // Inside a block: keep the sidewalk ring clear.
-      x0 = Math.max(x0, blk.x0 + SIDEWALK); z0 = Math.max(z0, blk.z0 + SIDEWALK);
-      x1 = Math.min(x1, blk.x1 - SIDEWALK); z1 = Math.min(z1, blk.z1 - SIDEWALK);
+      x0 = Math.max(x0, blk.x0 + WALK_RING); z0 = Math.max(z0, blk.z0 + WALK_RING);
+      x1 = Math.min(x1, blk.x1 - WALK_RING); z1 = Math.min(z1, blk.z1 - WALK_RING);
     } else {
-      // Trim the side facing a road until it is 1.5 m clear of the curb.
+      // Trim the side facing a road until it is clear of the sidewalk.
       TR.x0 = x0; TR.z0 = z0; TR.x1 = x1; TR.z1 = z1;
-      if (!trimRect(TR, 1.5, 3)) return;
+      if (!trimRect(TR, WALK_CLEAR, 3)) return;
       x0 = TR.x0; z0 = TR.z0; x1 = TR.x1; z1 = TR.z1;
     }
     if (x1 - x0 < 3 || z1 - z0 < 3 || (x1 - x0) * (z1 - z0) < 12) return;
@@ -1676,10 +1822,15 @@ export function createMiamiCity(data, opts = {}) {
     const near = new Uint8Array(NC);
     const R = { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: near };
     for (const e of edges) {
-      const a = nodes[e.a], b = nodes[e.b];
-      stampCapsule(R, a.x, a.z, b.x, b.z, e.width / 2 + SIDEWALK, 1);
+      const g = stripOf(e);
+      // The curb, the sidewalk and a 1 m verge; the median strip.
+      stampCapsule(R, g[0], g[1], g[2], g[3], e.width / 2 + (e.sidewalk || 0) + 1, 1);
+      if (e.median > 0) {
+        const o = -(e.width / 2 + e.median / 4);
+        stampCapsule(R, g[0] - e.uz * o, g[1] + e.ux * o, g[2] - e.uz * o, g[3] + e.ux * o, e.median / 4 + 0.5, 1);
+      }
     }
-    for (const n of nodes) stampRect(R, n.x - n.hx - SIDEWALK, n.z - n.hz - SIDEWALK, n.x + n.hx + SIDEWALK, n.z + n.hz + SIDEWALK, 1);
+    for (const n of nodes) stampRect(R, n.x - n.hx - WALK_RING, n.z - n.hz - WALK_RING, n.x + n.hx + WALK_RING, n.z + n.hz + WALK_RING, 1);
     const owner = labelBuf.fill(-1); // free since the blocks step
     const LX0 = land.x0, LZ0 = land.z0;
     const stampOwner = (k) => stampOwnerBox(owner, buildings[k], k, LX0, LZ0, W, H);
@@ -1757,7 +1908,55 @@ export function createMiamiCity(data, opts = {}) {
     for (const p of S.piers) keep.push({ x: p.x, z: p.z, r: 40 });
     for (const r of S.ramps || []) keep.push({ x: r.x, z: r.z, r: 40 });
     for (const l of S.landmarks || []) keep.push({ x: l.x, z: l.z, r: (l.r || 20) + 10 });
-    const infill = planInfill({ W, H, x0: land.x0, z0: land.z0, cell: CELL, free, bdist, water, mask, districtOf, seed, keep });
+    const planned = planInfill({ W, H, x0: land.x0, z0: land.z0, cell: CELL, free, bdist, water, mask, districtOf, seed, keep });
+    // The infill rule (docs/PLAN_V3.md 2.1 item 9): real footprints
+    // always; infill only on blocks with no footprint at all (outside the
+    // core, whose density the first view was tuned on), and then by the
+    // neighborhood's style (MIAMI_SPOTS.infillStyles): floors, palette and
+    // where towers may stand (by the water, or along a named street).
+    const cellAt = (x, z) => {
+      const i = Math.floor((x - land.x0) / CELL), j = Math.floor((z - land.z0) / CELL);
+      return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i;
+    };
+    const fpBlock = new Uint8Array(NC);
+    for (const b of buildings) {
+      if (b.fp < 0) continue;
+      for (const [x, z] of [[(b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2], [b.x0 + 0.5, b.z0 + 0.5], [b.x1 - 0.5, b.z1 - 0.5], [b.x0 + 0.5, b.z1 - 0.5], [b.x1 - 0.5, b.z0 + 0.5]]) {
+        const c = cellAt(x, z);
+        const L = c >= 0 && blockLab ? blockLab[c] : -1;
+        if (L >= 0) fpBlock[L] = 1;
+      }
+    }
+    const styles = S.infillStyles || [];
+    const styleAt = (x, z) => {
+      let st = null;
+      for (const r of styles) if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) st = r;
+      return st;
+    };
+    const towerNear = [];
+    const infill = [];
+    for (const f of planned) {
+      const cx = (f.x0 + f.x1) / 2, cz = (f.z0 + f.z1) / 2;
+      if (!(cx >= MIAMI_CORE.x0 && cx <= MIAMI_CORE.x1 && cz >= MIAMI_CORE.z0 && cz <= MIAMI_CORE.z1)) {
+        const c = cellAt(cx, cz);
+        const L = c >= 0 && blockLab ? blockLab[c] : -1;
+        if (L >= 0 && fpBlock[L]) continue;
+      }
+      const st = styleAt(cx, cz);
+      if (st) {
+        const c = cellAt(cx, cz);
+        let tower = c >= 0 && water[c] < (st.towerWater || 0) / CELL;
+        if (!tower && st.towerStreets) {
+          edgesNear(cx, cz, st.towerReach || 60, towerNear);
+          for (const id of towerNear) if (st.towerStreets.includes(edges[id].name)) tower = true;
+        }
+        const floors = st.floors[0] + Math.floor(f.color * 997 % 1 * (st.floors[1] - st.floors[0] + 1));
+        if (!tower || f.h < floors * 3.2) f.h = Math.round(floors * 3.2 + 1);
+        f.kind = 'building';
+        if (st.district) f.district = st.district;
+      }
+      infill.push(f);
+    }
     for (const f of infill) {
       const pal = PALETTES[f.district] || PALETTES.midtown;
       addBuilding(f.x0, f.z0, f.x1, f.z1, f.h, f.district, f.kind, pal[Math.floor(f.color * pal.length)], f.osm, -1, true);
@@ -1809,9 +2008,9 @@ export function createMiamiCity(data, opts = {}) {
     if (c < 0) return false;
     for (let k = edgeIndex.start[c]; k < edgeIndex.start[c + 1]; k++) {
       const e = edges[edgeIndex.items[k]];
-      const a = nodes[e.a], b = nodes[e.b];
+      const g = stripOf(e);
       const h = e.width / 2 + 0.3;
-      if (segDist2(x, z, a.x, a.z, b.x, b.z) < h * h) return true;
+      if (segDist2(x, z, g[0], g[1], g[2], g[3]) < h * h) return true;
     }
     return false;
   };
@@ -1847,10 +2046,12 @@ export function createMiamiCity(data, opts = {}) {
       if (e.name !== S.spawn.street || e.causeway) continue;
       const a = nodes[e.a], b = nodes[e.b];
       for (let d = Math.min(e.length / 2, 12); d <= e.length - 12; d += 2) {
-        // Right-hand lane of the direction closest to the wanted heading.
+        // Right-hand lane of the direction closest to the wanted heading
+        // (a one-way only along its own direction).
         const fwd = Math.cos(S.spawn.heading) * e.ux + Math.sin(S.spawn.heading) * e.uz >= 0;
+        if (e.oneway && !fwd) continue;
         const from = fwd ? a : b, ux = fwd ? e.ux : -e.ux, uz = fwd ? e.uz : -e.uz;
-        const off = e.avenue ? 2.6 : 2.0;
+        const off = laneOffset(e, (fwd ? e.lanesF : e.lanesB) - 1, fwd);
         const dd = fwd ? d : e.length - d;
         LP.x = from.x + ux * dd - uz * off;
         LP.z = from.z + uz * dd + ux * off;
@@ -1885,14 +2086,19 @@ export function createMiamiCity(data, opts = {}) {
         props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
       }
     }
-    if (!e.avenue && !e.causeway && !e.bridge && usable > 14) {
+    if (!e.causeway && !e.bridge && usable > 14) {
+      // Curb spots only in the parking lanes of the profile (2.1 item 3),
+      // in the middle of the lane; cars face the traffic of their side (on
+      // a one-way street both curbs face its direction).
       for (const side of [-1, 1]) {
+        const park = side > 0 ? e.parkR : e.parkL;
+        if (!(park > 0)) continue;
         for (let d = startPad + 3; d < e.length - endPad - 3; d += 6.5) {
           if (!rng.chance(0.22)) continue;
-          const off = side * (half - 1.25);
+          const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
           const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rzv * off;
           if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
-          const heading = side > 0 ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
+          const heading = side > 0 || e.oneway ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
           parkingSpots.push({ x, z, heading, lot: false });
         }
       }
@@ -2095,9 +2301,14 @@ export function createMiamiCity(data, opts = {}) {
     landmarks.runwayLights.push({ x: runway.x0 - 1.5, z, color: 0x40ff70 }, { x: runway.x1 + 1.5, z, color: 0xff4030 });
   }
 
-  // Street name signs (the sign textures hold 32 names): the names that
-  // meet most often at signal junctions (ties: the longer road), then a
-  // sign on a corner of every signal junction where two of them cross.
+  // Street names (2.1 item 11): the sign atlas holds every name of the
+  // region (`atlas`, the names that meet most often at signals first, then
+  // the longer road, then by name), and street blades (white on green)
+  // stand at every signal and every junction of two named streets: one
+  // post on a corner between the two, one blade along each road. Stop
+  // signs stand where the data has them, on the minor approaches (all of
+  // them where no approach is a main road). `x`, `z` (16 each) and
+  // `plates` (the short forms, atlas order) as before for old callers.
   const nameLen = new Map(), nameHits = new Map();
   for (const e of edges) if (e.name && !e.causeway) nameLen.set(e.name, (nameLen.get(e.name) || 0) + e.length);
   const namesAt = (n) => {
@@ -2113,35 +2324,62 @@ export function createMiamiCity(data, opts = {}) {
     const ns = namesAt(n);
     if (ns.length >= 2) for (const nm of ns) nameHits.set(nm, (nameHits.get(nm) || 0) + 1);
   }
-  const topNames = [...nameLen.keys()]
-    .sort((p, q) => (nameHits.get(q) || 0) - (nameHits.get(p) || 0) || nameLen.get(q) - nameLen.get(p) || (p < q ? -1 : 1))
-    .slice(0, 32);
+  const atlas = [...nameLen.keys()]
+    .sort((p, q) => (nameHits.get(q) || 0) - (nameHits.get(p) || 0) || nameLen.get(q) - nameLen.get(p) || (p < q ? -1 : 1));
+  const topNames = atlas.slice(0, 32);
   while (topNames.length < 32) topNames.push('Biscayne Bay');
-  const streetNames = { x: topNames.slice(0, 16), z: topNames.slice(16, 32), plates: topNames.map(plateText) };
-  {
-    const plateOf = new Map(topNames.map((nm, k) => [nm, k]));
-    for (const n of nodes) {
-      if (!n.signal || n.i < 0) continue;
-      // The two signed roads: the first edge of each of two names.
-      let ea = null, eb = null;
-      for (const eid of n.edges) {
-        const e = edges[eid];
-        if (!plateOf.has(e.name)) continue;
-        if (!ea) ea = e;
-        else if (e.name !== ea.name && !eb) eb = e;
-      }
-      if (!ea || !eb) continue;
+  const plateOf = new Map(atlas.map((nm, k) => [nm, k]));
+  const streetNames = { x: topNames.slice(0, 16), z: topNames.slice(16, 32), atlas, plates: atlas.map(plateText), plateIndex: (nm) => (plateOf.has(nm) ? plateOf.get(nm) : -1) };
+  let bladeCount = 0, stopCount = 0;
+  for (const n of nodes) {
+    if (n.i < 0 || n.edges.length < 3) continue;
+    // The two signed roads: the first edge of each of two names.
+    let ea = null, eb = null;
+    for (const eid of n.edges) {
+      const e = edges[eid];
+      if (!plateOf.has(e.name)) continue;
+      if (!ea) ea = e;
+      else if (e.name !== ea.name && !eb) eb = e;
+    }
+    if (ea && eb) {
       // Directions away from the junction along each road.
       const dir = (e) => (e.a === n.id ? 1 : -1);
       const ax = ea.ux * dir(ea), az = ea.uz * dir(ea), bx = eb.ux * dir(eb), bz = eb.uz * dir(eb);
-      // The corner between them, clear of both carriageways.
-      const x = n.x + ax * (eb.width / 2 + 1.6) + bx * (ea.width / 2 + 1.6);
-      const z = n.z + az * (eb.width / 2 + 1.6) + bz * (ea.width / 2 + 1.6);
-      if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
-      // Each plate runs along its own road.
-      furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
+      // The corner between them, clear of both carriageways; else the
+      // other corners in turn.
+      for (const [sa, sb] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const x = n.x + sa * ax * (eb.width / 2 + 1.0) + sb * bx * (ea.width / 2 + 1.0);
+        const z = n.z + sa * az * (eb.width / 2 + 1.0) + sb * bz * (ea.width / 2 + 1.0);
+        if (onRoad(x, z) || inBuilding(x, z, 0.8) || mainShore(x, z) < 2) continue;
+        // Each blade runs along its own road.
+        furniture.push({ type: 'streetsign', x, z, rot: 0, q: 0, v: 0, a: plateOf.get(ea.name), b: plateOf.get(eb.name), ra: Math.atan2(az, ax), rb: Math.atan2(bz, bx) });
+        n.blade = true;
+        bladeCount++;
+        break;
+      }
+    }
+    if (!n.stop) continue;
+    let main = false;
+    for (const eid of n.edges) if (edges[eid].avenue) main = true;
+    for (const eid of n.edges) {
+      const e = edges[eid];
+      if (main && e.avenue) continue;
+      // Traffic comes in on this edge only if it may drive toward n.
+      if (e.oneway && e.b !== n.id) continue;
+      const o = nodes[e.a === n.id ? e.b : e.a];
+      const l = Math.hypot(n.x - o.x, n.z - o.z) || 1;
+      const tx = (n.x - o.x) / l, tz = (n.z - o.z) / l;
+      const fwd = e.b === n.id;
+      // The right curb of the approach, seen driving toward n.
+      const rc = fwd ? e.width / 2 + (e.off || 0) : e.width / 2 - (e.off || 0);
+      const x = n.x - tx * (n.hx + 1.5) - tz * (rc + 0.7), z = n.z - tz * (n.hx + 1.5) + tx * (rc + 0.7);
+      if (onRoad(x, z) || inBuilding(x, z, 0.5)) continue;
+      furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
+      stopCount++;
     }
   }
+  graphStats.blades = bladeCount;
+  graphStats.stopSigns = stopCount;
 
   // Land drawn as horizontal runs of `cell` size (renderer and minimap).
   function landRuns(cell = 8) {
@@ -2188,6 +2426,72 @@ export function createMiamiCity(data, opts = {}) {
       const a = nodes[e.a], b = nodes[e.b], h = r + e.width / 2;
       if (segDist2(x, z, a.x, a.z, b.x, b.z) <= h * h) out.push(e.id);
     });
+    return out;
+  }
+  // The street under a point (docs/MAP.md "Edge contract", 2.1 item 11):
+  // the edge whose strip holds it, its name, the next named cross street
+  // ahead. Cross streets are found once per edge end at build (through
+  // bends and junctions along the same name), so a query only scans the
+  // point's grid cell. No allocation when `out` is given.
+  const crossF = new Array(edges.length).fill(''), crossB = new Array(edges.length).fill('');
+  {
+    const crossFrom = (e0, toward) => {
+      let e = e0, n = nodes[toward];
+      for (let guard = 0; guard < 40; guard++) {
+        let next = null, bestDot = -2;
+        const tx = e.b === n.id ? e.ux : -e.ux, tz = e.b === n.id ? e.uz : -e.uz;
+        for (const id of n.edges) {
+          if (id === e.id) continue;
+          const o = edges[id];
+          if (o.name && o.name !== e0.name && n.edges.length > 2) return o.name;
+          const ox = o.a === n.id ? o.ux : -o.ux, oz = o.a === n.id ? o.uz : -o.uz;
+          const dot = ox * tx + oz * tz;
+          if ((!o.name || o.name === e0.name) && dot > bestDot) { bestDot = dot; next = o; }
+        }
+        if (!next || bestDot < 0.3) return '';
+        e = next;
+        n = nodes[e.a === n.id ? e.b : e.a];
+      }
+      return '';
+    };
+    for (const e of edges) {
+      crossF[e.id] = crossFrom(e, e.b);
+      crossB[e.id] = crossFrom(e, e.a);
+    }
+  }
+  let nameBest = null, nameBd = Infinity, nameX = 0, nameZ = 0;
+  const nameScan = (e) => {
+    if (!e.name) return;
+    const g = stripOf(e);
+    const d = segDist2(nameX, nameZ, g[0], g[1], g[2], g[3]);
+    if (d < nameBd) { nameBd = d; nameBest = e; }
+  };
+  function streetAt(x, z, out = { edge: -1, name: '', cross: '', d: 0, side: 1 }, heading) {
+    const c = gridCell(x, z);
+    if (c < 0) return null;
+    let best = null, bd = Infinity;
+    for (let k = edgeIndex.start[c]; k < edgeIndex.start[c + 1]; k++) {
+      const e = edges[edgeIndex.items[k]];
+      const g = stripOf(e);
+      const d2 = segDist2(x, z, g[0], g[1], g[2], g[3]);
+      const h = e.width / 2 + 0.3;
+      if (d2 <= h * h && d2 < bd) { bd = d2; best = e; }
+    }
+    if (!best) return null;
+    const e = best, a = nodes[e.a];
+    const d = (x - a.x) * -e.uz + (z - a.z) * e.ux;
+    let name = e.name;
+    if (!name) {
+      nameBest = null; nameBd = 1600; nameX = x; nameZ = z;
+      edgesInRect(x - 40, z - 40, x + 40, z + 40, nameScan);
+      name = nameBest ? nameBest.name : '';
+    }
+    const fwd = heading === undefined || Math.cos(heading) * e.ux + Math.sin(heading) * e.uz >= 0;
+    out.edge = e.id;
+    out.name = name;
+    out.cross = fwd ? crossF[e.id] : crossB[e.id];
+    out.d = d;
+    out.side = d >= divideOf(e) ? 1 : -1;
     return out;
   }
   function buildingsNear(x0, z0, x1, z1, out) {
@@ -2375,7 +2679,7 @@ export function createMiamiCity(data, opts = {}) {
     courses: [], secretSpots: [], secretGarage: null, rampSpots: [], courseSpec: S.courses || null, texts: S.texts || null,
     shoreDist, mainShore, isLand, isGround, districtOf, onRoad, placeOf, placeNames: placeNames.slice(1),
     nodeAt: () => null,
-    blockAt, edgesNear, buildingsNear, landRuns, landTarget, inBuilding,
+    blockAt, edgesNear, buildingsNear, landRuns, landTarget, inBuilding, streetAt,
     // Drawn land (no road strips): 1 = land, sampled at cell centers.
     landGrid: { x0: land.x0, z0: land.z0, cell: CELL, w: W, h: H, data: visual },
     crop, cut, bounds: { x0: land.x0, z0: land.z0, x1: land.x0 + W * CELL, z1: land.z0 + H * CELL },

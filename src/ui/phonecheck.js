@@ -578,16 +578,20 @@ export function createPhoneCheck(game, root, opts = {}) {
 // more that is not a bridge or causeway.
 // ---------------------------------------------------------------------------
 export const LAB_MIN_EDGE = 120;
+export const LAB_FALLBACK_EDGE = 80;
 export const LAB_CLEAR_RADIUS = 160;
 export function findLabStreet(city, x, z) {
   if (!city || !city.nodes || !city.edges) return null;
   let best = null, bestD = Infinity;
-  for (const e of city.edges) {
-    if (!(e.length >= LAB_MIN_EDGE) || e.bridge || e.causeway) continue;
-    const a = city.nodes[e.a], b = city.nodes[e.b];
-    if (!a || !b) continue;
-    const d = Math.hypot((a.x + b.x) / 2 - x, (a.z + b.z) / 2 - z);
-    if (d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && best && e.id < best.id)) { bestD = d; best = e; }
+  for (const minLen of [LAB_MIN_EDGE, LAB_FALLBACK_EDGE]) { // short blocks only when no long street exists
+    for (const e of city.edges) {
+      if (!(e.length >= minLen) || e.bridge || e.causeway) continue;
+      const a = city.nodes[e.a], b = city.nodes[e.b];
+      if (!a || !b) continue;
+      const d = Math.hypot((a.x + b.x) / 2 - x, (a.z + b.z) / 2 - z);
+      if (d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && best && e.id < best.id)) { bestD = d; best = e; }
+    }
+    if (best) break;
   }
   if (!best) return null;
   const a = city.nodes[best.a], b = city.nodes[best.b];
@@ -633,8 +637,9 @@ export function createLabDrive(game, root, opts = {}) {
     finish() {
       if (!st.active) return;
       st.active = false;
+      if (st.panel) { st.panel.remove(); st.panel = null; }
       const p = game.player;
-      if (p && p.vehicle === st.car && game.exitVehicle) game.exitVehicle();
+      if (p && p.vehicle === st.car && game.exitVehicle) safe(() => game.exitVehicle());
       if (st.car) safe(() => game.removeVehicle(st.car));
       if (st.saved && p) {
         p.walker.x = p.walker.px = st.saved.x;

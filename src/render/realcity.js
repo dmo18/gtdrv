@@ -607,9 +607,11 @@ export function buildRealCity(city, collision, opts = {}) {
         const a = city.nodes[e.a], b = city.nodes[e.b];
         const n = Math.max(1, Math.round(e.length / ROAD_PIECE));
         const half = e.width / 2, rx = -e.uz * half, rz = e.ux * half;
+        // The strip's middle `off` right of the node line (docs/MAP.md).
+        const ox = -e.uz * (e.off || 0), oz = e.ux * (e.off || 0);
         for (let q = 0; q < n; q++) {
-          const x0 = a.x + ((b.x - a.x) * q) / n, z0 = a.z + ((b.z - a.z) * q) / n;
-          const x1 = a.x + ((b.x - a.x) * (q + 1)) / n, z1 = a.z + ((b.z - a.z) * (q + 1)) / n;
+          const x0 = a.x + ox + ((b.x - a.x) * q) / n, z0 = a.z + oz + ((b.z - a.z) * q) / n;
+          const x1 = a.x + ox + ((b.x - a.x) * (q + 1)) / n, z1 = a.z + oz + ((b.z - a.z) * (q + 1)) / n;
           if (tileOf((x0 + x1) / 2, (z0 + z1) / 2) !== t.k) continue;
           orientedQuad(plain, x0 + rx, z0 + rz, x1 + rx, z1 + rz, x1 - rx, z1 - rz, x0 - rx, z0 - rz, FAR_ROAD_Y, 0x55585d);
         }

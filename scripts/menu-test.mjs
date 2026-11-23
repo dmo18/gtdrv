@@ -240,7 +240,7 @@ try {
   check('settings: four groups', (await page.locator('.rw-menu-groups button').count()) === 4);
   const rowCount = () => page.locator('.rw-menu-body .rw-menu-setting').count();
   await grp('controls');
-  check('controls: 5 rows', (await rowCount()) === 5);
+  check('controls: 6 rows (steering, sensitivity, handling, Handling lab, left-handed, invert)', (await rowCount()) === 6 && (await page.locator('[data-role="handlinglab"]').count()) === 1);
   await grp('sound');
   check('sound: 6 rows, no music on/off switch', (await rowCount()) === 6 && (await page.locator('[data-setting="music"]').count()) === 0);
   await grp('game');
@@ -288,6 +288,28 @@ try {
   check('settings: handling applied at once and saved', (await ev(() => window.rw.getHandlingMode())) === 'sim' && (await progress()).settings.handling === 'sim' && (await stored()).settings.handling === 'sim');
   check('settings: sim marked', (await page.locator('.rw-menu-body [data-handling="sim"]').getAttribute('aria-checked')) === 'true'
     && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'false');
+  // Handling lab: presets, sensitivity, test drive, one-tap verdict (docs/PLAN_V3.md 2.4 item 5).
+  await page.locator('[data-role="handlinglab"]').tap();
+  check('lab: opens with its own title', (await page.locator('.rw-menu-title').innerText()) === 'Handling lab');
+  check('lab: three presets, standard marked by default', (await page.locator('.rw-menu-body [data-preset]').count()) === 3
+    && (await page.locator('.rw-menu-body [data-preset="standard"]').getAttribute('aria-checked')) === 'true');
+  check('lab: sensitivity slider, test drive button and four verdicts', (await page.locator('.rw-menu-body [data-setting="steerSensitivity"]').count()) === 1
+    && (await page.locator('[data-role="labdrive"]').count()) === 1 && (await page.locator('.rw-menu-body [data-verdict]').count()) === 4
+    && (await page.locator('.rw-menu-body [data-verdict][aria-checked="true"]').count()) === 0);
+  await page.locator('.rw-menu-body [data-preset="sharp"]').tap();
+  check('lab: preset saved', (await progress()).settings.handlingPreset === 'sharp' && (await stored()).settings.handlingPreset === 'sharp'
+    && (await page.locator('.rw-menu-body [data-preset="sharp"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('.rw-menu-body [data-verdict="twitchy"]').tap();
+  check('lab: verdict saved and marked', (await progress()).settings.handlingVerdict === 'twitchy' && (await stored()).settings.handlingVerdict === 'twitchy'
+    && (await page.locator('.rw-menu-body [data-verdict="twitchy"]').getAttribute('aria-checked')) === 'true');
+  await page.screenshot({ path: path.join(out, 'settings-lab-915x412.png') });
+  await page.locator('.rw-menu-back').tap();
+  check('lab: Back returns to Settings, Controls shows the preset', (await page.locator('.rw-menu-groups').isVisible())
+    && (await page.locator('[data-role="handlinglab"]').innerText()) === 'Sharp');
+  await ev(() => { window.rw.game.progress.settings.handlingPreset = 'tight'; window.rw.game.events.emit('progress'); });
+  await page.locator('[data-role="handlinglab"]').tap();
+  check('lab: a bad stored preset reads as standard', (await page.locator('.rw-menu-body [data-preset="standard"]').getAttribute('aria-checked')) === 'true');
+  await page.locator('.rw-menu-back').tap();
   await page.locator('[data-setting="invertPitch"]').tap();
   await page.locator('[data-setting="leftHanded"]').tap();
   await grp('game');

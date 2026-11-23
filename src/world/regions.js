@@ -16,7 +16,12 @@
 // never throws for it.
 
 // The data box (the bounds of src/world/data/miami.json, whole meters).
-export const BOX = { x0: -4505, z0: -3891, x1: 4505, z1: 3891 };
+// 0.9.0 (docs/PLAN_V3.md 2.1 item 1): the data reaches the Atlantic, so
+// only x1 grew (4505 to 6508); the origin, x0, z0 and z1 are as before,
+// and so is the raster lattice anchored at (x0, z0) (miami.js
+// RASTER_LATTICE): saved positions, ids and placed things keep their
+// meaning.
+export const BOX = { x0: -4505, z0: -3891, x1: 6508, z1: 3891 };
 
 // The filter margins (PLAN_V2 3.2, 3.5 rule 6).
 export const PLACE_MARGIN = 40;
@@ -24,7 +29,12 @@ export const GARAGE_MARGIN = 60;
 // A start place keeps this far from every region edge (3.3).
 export const START_EDGE = 300;
 
-export const DEFAULT_REGION = 'miami-downtown';
+// The region a new game starts in (2.1 item 10, owner decision 1): the
+// Beach, on Ocean Drive at 10th Street. CORE_REGION is the
+// region that holds the old core crop and its designed first view
+// (MIAMI_SPOTS.startView, Southeast 1st Street).
+export const DEFAULT_REGION = 'miami-beach';
+export const CORE_REGION = 'miami-downtown';
 
 // The map id of the whole box: tests, benches and a development build
 // (`?map=miami`); not in the picker.
@@ -61,8 +71,15 @@ export const REGIONS = [
     ],
   },
   {
-    id: 'miami-beach', name: 'Miami Beach and the Islands', crop: { x0: 1400, z0: -3891, x1: 4505, z1: 3891 },
-    start: { street: 'Alton Road', x: 3904.7, z: -495.1, heading: -1.596 },
+    id: 'miami-beach', name: 'Miami Beach and the Islands', crop: { x0: 1400, z0: -3891, x1: 6508, z1: 3891 },
+    // Ocean Drive at 10th Street (2.1 item 10), just north of the
+    // junction. The plan asks for "facing north, the sea on the right",
+    // but the data maps Ocean Drive from 5th to 15th Street as one-way
+    // southbound (oneway=yes, 1 lane), so the legal start faces south with
+    // Lummus Park and the sea on the left; flip `heading` (to -1.38) only
+    // with the owner's word.
+    // The numbers are the snapped lane point (test/regioncontent.test.js).
+    start: { street: 'Ocean Drive', x: 4957.9, z: -124.5, heading: 1.766 },
     links: [
       L('downtown-beach-macarthur', 'miami-downtown', 'MacArthur Causeway', 1400, 176),
       L('north-beach-tuttle', 'miami-north', 'Julia Tuttle Causeway', 1400, -3392),

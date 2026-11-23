@@ -8,7 +8,20 @@
 // query touches it, from the lots overlapping the cell in lot id order.
 // What a cell holds is a pure function of the city, so a query gives the
 // same answer whenever and however often cells were touched before.
+// More lazy layers work the same way (addLayer): the street props
+// (world/propsolid.js) and the sea walls and rails (world/edgelines.js).
+//
+// Shapes: kind 0 axis-aligned box, kind 1 circle, kind 2 capsule segment
+// (x0, z0)-(x1, z1) of radius r (sea walls, rails). A shape with `brk` (its
+// PROP_SOLIDS entry) is breakable: breakShape switches it and its group
+// (`grp`) off and queues a break record; stepBroken brings it back after
+// BREAK_BACK_T s when the given point (the player) is BREAK_BACK_FAR away.
 import { dressLot, eachBay, lotDressCache } from './lots.js';
+import { PROP_SOLIDS, createPropLayer } from './propsolid.js';
+import { createEdgeLayer } from './edgelines.js';
+import { attachGround } from './ground.js';
+
+export const BREAK_BACK_T = 120, BREAK_BACK_FAR = 150, BREAK_RING = 16;
 
 const CELL = 32;
 const NO_ITEMS = [];
@@ -17,11 +30,14 @@ export function createCollisionWorld() {
   const cells = new Map();
   const boxes = [];
   const circles = [];
+  const segments = [];
   const key = (cx, cz) => cx * 73856093 ^ cz * 19349663;
   const cellOf = (v) => Math.floor(v / CELL);
-  // The lazy lot layer (null: none) and its cells' lists.
-  let lotLayer = null;
-  const lotList = (cx, cz) => (lotLayer ? lotLayer.cell(cx, cz) : NO_ITEMS);
+  // Lazy layers: slot 0 the lots (setLotLayer), then the others in the
+  // order added (addLayer). A null slot is skipped.
+  const layers = [null];
+  let NL = 1;
+  const layerList = (L, cx, cz) => (L ? L.cell(cx, cz) : NO_ITEMS);
 
   function insert(item, x0, z0, x1, z1) {
     for (let cx = cellOf(x0); cx <= cellOf(x1); cx++) {
@@ -51,13 +67,24 @@ export function createCollisionWorld() {
     return c;
   }
 
+  // A capsule segment (sea walls, rails): every point within r of the
+  // segment from (x0, z0) to (x1, z1).
+  function addSegment(x0, z0, x1, z1, r = 0.25, h = 0.9, tag = null) {
+    const g = { kind: 2, x0, z0, x1, z1, r, h, tag, stamp: 0, off: false, brk: null };
+    segments.push(g);
+    insert(g, Math.min(x0, x1) - r, Math.min(z0, z1) - r, Math.max(x0, x1) + r, Math.max(z0, z1) + r);
+    return g;
+  }
+
   // Switches a shape (from addBox or addCircle) off or back on.
   function setEnabled(shape, on) {
     shape.off = !on;
   }
 
   let stamp = 0;
-  const out = { x: 0, z: 0, nx: 0, nz: 0, hit: false, depth: 0 };
+  // brk: the breakable shape with the deepest contact (null: none), with
+  // its contact normal and depth.
+  const out = { x: 0, z: 0, nx: 0, nz: 0, hit: false, depth: 0, brk: null, bnx: 0, bnz: 0, bdepth: 0 };
 
   // Push a circle out of everything it overlaps. Returns a shared
   // result object: new position, last contact normal, deepest overlap.
@@ -71,13 +98,15 @@ export function createCollisionWorld() {
     out.nz = 0;
     out.hit = false;
     out.depth = 0;
+    out.brk = null;
+    out.bdepth = 0;
     stamp++;
     const cx0 = cellOf(x - r), cx1 = cellOf(x + r);
     const cz0 = cellOf(z - r), cz1 = cellOf(z + r);
     for (let cx = cx0; cx <= cx1; cx++) {
       for (let cz = cz0; cz <= cz1; cz++) {
-        for (let pass = 0; pass < 2; pass++) {
-          const list = pass ? lotList(cx, cz) : cells.get(key(cx, cz));
+        for (let pass = 0; pass <= NL; pass++) {
+          const list = pass ? layerList(layers[pass - 1], cx, cz) : cells.get(key(cx, cz));
           if (!list) continue;
           for (let i = 0; i < list.length; i++) {
             const it = list[i];
@@ -109,6 +138,25 @@ export function createCollisionWorld() {
                 else nz = 1;
                 depth = m + r;
               }
+            } else if (it.kind === 2) {
+              const sx = it.x1 - it.x0, sz = it.z1 - it.z0;
+              const L2 = sx * sx + sz * sz;
+              let t = L2 > 1e-12 ? ((out.x - it.x0) * sx + (out.z - it.z0) * sz) / L2 : 0;
+              if (t < 0) t = 0; else if (t > 1) t = 1;
+              const dx = out.x - (it.x0 + sx * t), dz = out.z - (it.z0 + sz * t);
+              const rr = r + it.r;
+              const d2 = dx * dx + dz * dz;
+              if (d2 >= rr * rr) continue;
+              const d = Math.sqrt(d2);
+              if (d > 1e-6) {
+                nx = dx / d;
+                nz = dz / d;
+              } else {
+                const l = Math.sqrt(L2) || 1;
+                nx = -sz / l;
+                nz = sx / l;
+              }
+              depth = rr - d;
             } else {
               const dx = out.x - it.x, dz = out.z - it.z;
               const rr = r + it.r;
@@ -125,6 +173,12 @@ export function createCollisionWorld() {
             out.nz = nz;
             out.hit = true;
             if (depth > out.depth) out.depth = depth;
+            if (it.brk && depth > out.bdepth) {
+              out.brk = it;
+              out.bnx = nx;
+              out.bnz = nz;
+              out.bdepth = depth;
+            }
           }
         }
       }
@@ -161,6 +215,11 @@ export function createCollisionWorld() {
           }
         }
         if (ok && t0 <= t1 && t0 < best) best = t0;
+      } else if (it.kind === 2) {
+        // Ray against a capsule, as against its swept circle: sampled at the
+        // closest approach of the ray to the segment's line, then refined.
+        const t = rayCapsule(x, z, dx, dz, it);
+        if (t >= 0 && t < best) best = t;
       } else {
         const ox = x - it.x, oz = z - it.z;
         const b = ox * dx + oz * dz;
@@ -190,8 +249,10 @@ export function createCollisionWorld() {
         if (list) best = rayList(list, x, z, dx, dz, best);
       }
     }
-    if (lotLayer) {
-      // Lot cells: only those the ray passes through (column by column,
+    for (let li = 0; li < NL; li++) {
+      const L = layers[li];
+      if (!L) continue;
+      // Layer cells: only those the ray passes through (column by column,
       // the z span of the ray in the column, padded by a millimeter), so
       // a long ray fills few cells. A shape the ray hits is in the cell
       // of the hit point, which is one of them.
@@ -207,7 +268,7 @@ export function createCollisionWorld() {
         }
         const c0 = cellOf(Math.min(za, zb) - 1e-3), c1 = cellOf(Math.max(za, zb) + 1e-3);
         for (let cz = Math.max(c0, cz0); cz <= Math.min(c1, cz1); cz++) {
-          const list = lotLayer.cell(cx, cz);
+          const list = L.cell(cx, cz);
           if (list.length) best = rayList(list, x, z, dx, dz, best);
         }
       }
@@ -226,14 +287,16 @@ export function createCollisionWorld() {
   // roof an aircraft or a dropped object would land on.
   function heightAt(x, z) {
     let h = 0;
-    for (let pass = 0; pass < 2; pass++) {
-      const list = pass ? lotList(cellOf(x), cellOf(z)) : cells.get(key(cellOf(x), cellOf(z)));
+    for (let pass = 0; pass <= NL; pass++) {
+      const list = pass ? layerList(layers[pass - 1], cellOf(x), cellOf(z)) : cells.get(key(cellOf(x), cellOf(z)));
       if (!list) continue;
       for (let i = 0; i < list.length; i++) {
         const it = list[i];
         if (it.off) continue;
         if (it.kind === 0) {
           if (x >= it.x0 && x <= it.x1 && z >= it.z0 && z <= it.z1 && it.h > h) h = it.h;
+        } else if (it.kind === 2) {
+          if (segDist2(x, z, it) <= it.r * it.r && it.h > h) h = it.h;
         } else if ((x - it.x) * (x - it.x) + (z - it.z) * (z - it.z) <= it.r * it.r && it.h > h) h = it.h;
       }
     }
@@ -242,13 +305,32 @@ export function createCollisionWorld() {
 
   // The lazy lot layer (attachLotCollision), or null to drop it.
   function setLotLayer(layer) {
-    lotLayer = layer;
+    layers[0] = layer;
     joined = null;
   }
-  // boxes and circles hold every shape: reading them makes all of the
-  // lot layer's shapes (not its cells) and lists them after the static
-  // ones, by lot id, whatever was touched before.
+  // Another lazy layer ({ name, cell(cx, cz) }), or a replacement for the
+  // one of the same name. Its shapes are not in boxes / circles.
+  function addLayer(layer) {
+    for (let i = 1; i < layers.length; i++) {
+      if (layers[i] && layers[i].name === layer.name) {
+        layers[i] = layer;
+        return layer;
+      }
+    }
+    layers.push(layer);
+    NL = layers.length;
+    return layer;
+  }
+  const layerNamed = (name) => {
+    for (let i = 1; i < layers.length; i++) if (layers[i] && layers[i].name === name) return layers[i];
+    return null;
+  };
+  // boxes and circles hold every static and lot shape: reading them makes
+  // all of the lot layer's shapes (not its cells) and lists them after the
+  // static ones, by lot id, whatever was touched before. (The street prop
+  // and edge layers are read through their own layer objects.)
   function join() {
+    const lotLayer = layers[0];
     if (joined && (!lotLayer || joined.layer === lotLayer)) return joined;
     if (!lotLayer) return { boxes, circles };
     const lb = [], lc = [];
@@ -257,26 +339,184 @@ export function createCollisionWorld() {
     return joined;
   }
 
+  // ---- Breakable props ----
+  // Ring of the last BREAK_RING breaks (pooled records, read by combat.js
+  // which turns them into 'propBreak' events): seq counts every break.
+  const breaks = [];
+  for (let i = 0; i < BREAK_RING; i++) breaks.push({ seq: 0, type: '', x: 0, z: 0, h: 0, vx: 0, vz: 0, speed: 0, spray: 0, fall: '', by: null, shape: null });
+  let breakSeq = 0;
+  const broken = []; // shapes off by a break: [shape, seconds since]
+  const brokenT = [];
+  // Breaks a breakable shape (and its group): off now, back later.
+  function breakShape(shape, vx = 0, vz = 0, by = null) {
+    if (!shape || !shape.brk || shape.off) return null;
+    const grp = shape.grp || null;
+    let cx = 0, cz = 0, n = 0;
+    if (grp) {
+      for (let i = 0; i < grp.length; i++) {
+        const g = grp[i];
+        g.off = true;
+        cx += g.kind === 0 ? (g.x0 + g.x1) / 2 : g.x;
+        cz += g.kind === 0 ? (g.z0 + g.z1) / 2 : g.z;
+        n++;
+      }
+    } else {
+      shape.off = true;
+      cx = shape.kind === 0 ? (shape.x0 + shape.x1) / 2 : shape.x;
+      cz = shape.kind === 0 ? (shape.z0 + shape.z1) / 2 : shape.z;
+      n = 1;
+    }
+    broken.push(shape);
+    brokenT.push(0);
+    const rec = breaks[breakSeq % BREAK_RING];
+    breakSeq++;
+    rec.seq = breakSeq;
+    rec.type = shape.ptype || shape.tag || '';
+    rec.x = cx / n;
+    rec.z = cz / n;
+    rec.h = shape.h;
+    rec.vx = vx;
+    rec.vz = vz;
+    rec.speed = Math.sqrt(vx * vx + vz * vz);
+    rec.spray = shape.brk.spray || 0;
+    rec.fall = shape.brk.fall || 'chunk';
+    rec.by = by;
+    rec.shape = shape;
+    return rec;
+  }
+  // Ages the broken props; those BREAK_BACK_T s old with (px, pz) at least
+  // BREAK_BACK_FAR away stand again.
+  function stepBroken(dt, px = Infinity, pz = Infinity) {
+    for (let i = broken.length - 1; i >= 0; i--) {
+      brokenT[i] += dt;
+      if (brokenT[i] < BREAK_BACK_T) continue;
+      const s = broken[i];
+      const sx = s.kind === 0 ? (s.x0 + s.x1) / 2 : s.x, sz = s.kind === 0 ? (s.z0 + s.z1) / 2 : s.z;
+      if ((sx - px) * (sx - px) + (sz - pz) * (sz - pz) < BREAK_BACK_FAR * BREAK_BACK_FAR) continue;
+      if (s.grp) for (let k = 0; k < s.grp.length; k++) s.grp[k].off = false;
+      else s.off = false;
+      broken.splice(i, 1);
+      brokenT.splice(i, 1);
+    }
+  }
+  // True when a broken prop of this type stands (stood) within r of (x, z):
+  // the renderer leaves it out of a tile it rebuilds.
+  function isBroken(x, z, r = 0.6) {
+    for (let i = 0; i < broken.length; i++) {
+      const s = broken[i];
+      const sx = s.kind === 0 ? (s.x0 + s.x1) / 2 : s.x, sz = s.kind === 0 ? (s.z0 + s.z1) / 2 : s.z;
+      if ((sx - x) * (sx - x) + (sz - z) * (sz - z) <= r * r) return true;
+    }
+    return false;
+  }
+
   return {
-    addBox, addCircle, setEnabled, resolveCircle, raycast, lineClear, heightAt, setLotLayer,
-    get boxes() { return lotLayer ? join().boxes : boxes; },
-    get circles() { return lotLayer ? join().circles : circles; },
-    get lotLayer() { return lotLayer; },
+    addBox, addCircle, addSegment, setEnabled, resolveCircle, raycast, lineClear, heightAt, setLotLayer, addLayer, layerNamed,
+    breakShape, stepBroken, isBroken, breaks,
+    get breakSeq() { return breakSeq; },
+    get brokenCount() { return broken.length; },
+    get broken() { return broken.length; },
+    get boxes() { return layers[0] ? join().boxes : boxes; },
+    get circles() { return layers[0] ? join().circles : circles; },
+    get segments() { return segments; },
+    get lotLayer() { return layers[0]; },
   };
+}
+
+// Squared distance from (x, z) to a capsule shape's segment.
+function segDist2(x, z, it) {
+  const sx = it.x1 - it.x0, sz = it.z1 - it.z0;
+  const L2 = sx * sx + sz * sz;
+  let t = L2 > 1e-12 ? ((x - it.x0) * sx + (z - it.z0) * sz) / L2 : 0;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+  const dx = x - (it.x0 + sx * t), dz = z - (it.z0 + sz * t);
+  return dx * dx + dz * dz;
+}
+
+// Distance along the unit ray (x, z) + t (dx, dz) to a capsule, or -1.
+// The capsule is the union of a slab (a rectangle about the segment) and
+// two end circles; the smallest entry t of the three is the answer.
+function rayCapsule(x, z, dx, dz, it) {
+  let best = -1;
+  const circ = (cx, cz) => {
+    const ox = x - cx, oz = z - cz;
+    const b = ox * dx + oz * dz, c = ox * ox + oz * oz - it.r * it.r;
+    const disc = b * b - c;
+    if (disc < 0) return;
+    const t = -b - Math.sqrt(disc);
+    const tt = t >= 0 ? t : c <= 0 ? 0 : -1;
+    if (tt >= 0 && (best < 0 || tt < best)) best = tt;
+  };
+  circ(it.x0, it.z0);
+  circ(it.x1, it.z1);
+  const sx = it.x1 - it.x0, sz = it.z1 - it.z0, L = Math.hypot(sx, sz);
+  if (L > 1e-9) {
+    const ux = sx / L, uz = sz / L, nx = -uz, nz = ux;
+    // Ray in the segment's frame: u along, v across.
+    const u0 = (x - it.x0) * ux + (z - it.z0) * uz, v0 = (x - it.x0) * nx + (z - it.z0) * nz;
+    const du = dx * ux + dz * uz, dv = dx * nx + dz * nz;
+    let t0 = 0, t1 = Infinity;
+    if (Math.abs(dv) < 1e-12) { if (Math.abs(v0) > it.r) t1 = -1; } else {
+      let a = (-it.r - v0) / dv, b = (it.r - v0) / dv;
+      if (a > b) { const t = a; a = b; b = t; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    }
+    if (Math.abs(du) < 1e-12) { if (u0 < 0 || u0 > L) t1 = -1; } else {
+      let a = (0 - u0) / du, b = (L - u0) / du;
+      if (a > b) { const t = a; a = b; b = t; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    }
+    if (t0 <= t1 && (best < 0 || t0 < best)) best = t0;
+  }
+  return best;
 }
 
 // The static boxes every city adds: one per building, as citymesh used
 // to add them while drawing. Pure, so node tests use the same boxes.
+// Also the lazy street prop and edge line layers (docs/PLAN_V3.md 2.2), and
+// city.groundAt.
 export function fillCollision(city, collision) {
   for (const b of city.buildings) collision.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
   fillRoadEndCollision(city, collision);
+  fillLandmarkCollision(city, collision);
+  fillPropCollision(city, collision);
+  fillEdgeCollision(city, collision);
+  attachGround(city);
+  if (collision.isBroken) city.propBroken = (x, z) => collision.broken > 0 && collision.isBroken(x, z);
   return collision;
+}
+
+// The landmarks' solids (moved from render/props.js): four legs per dock
+// crane, the lighthouse tower.
+export function fillLandmarkCollision(city, collision) {
+  const L = city.landmarks;
+  if (!L) return collision;
+  for (const c of L.cranes || []) for (const ox of [-7, 7]) for (const oz of [-6, 6]) collision.addCircle(c.x + ox, c.z + oz, 0.9, 27, 'crane');
+  if (L.lighthouse) collision.addCircle(L.lighthouse.x, L.lighthouse.z, 3.7, 24 + 5, 'lighthouse');
+  return collision;
+}
+
+// The street props (lamps, signs, signal masts, furniture, trees, palms)
+// as the lazy 'props' layer (world/propsolid.js). Returns the layer.
+export function fillPropCollision(city, collision) {
+  const layer = createPropLayer(city);
+  if (collision.addLayer) collision.addLayer(layer);
+  return layer;
+}
+
+// The sea walls and rails as the lazy 'edges' layer (world/edgelines.js).
+// Returns the layer (city.edgeLines points at it for the renderer).
+export function fillEdgeCollision(city, collision) {
+  const layer = createEdgeLayer(city);
+  if (collision.addLayer) collision.addLayer(layer);
+  city.edgeLines = layer;
+  return layer;
 }
 
 // The striped barriers of the generated road ends at a region's sea
 // edges (city.roadEnds, docs/PLAN_V2.md 3.4): a row of posts across the
 // road, 1 m apart, tag 'barrier'. Pure.
-export const BARRIER_POST_R = 0.55, BARRIER_H = 1.2;
+export const BARRIER_POST_R = PROP_SOLIDS.roadend.r, BARRIER_H = PROP_SOLIDS.roadend.h;
 export function fillRoadEndCollision(city, collision) {
   for (const re of city.roadEnds || []) {
     const b = re.barrier;
@@ -323,30 +563,46 @@ export function bayCar(city, bx, bz, v) {
   return listedBays(city).has(key) || u > 0.55 ? -1 : u;
 }
 
-// Collision shapes for the solid features of one lot (pushed to `list`
-// when given): a circle for round ones (r), a box for boxes along the
-// world axes, else a row of circles.
+// Collision shapes for the features of one lot (pushed to `list` when
+// given), by their PROP_SOLIDS entry (world/propsolid.js): 'solid' and
+// 'break' kinds get a shape, 'flat' ones none. A circle for round ones
+// (r), a box for boxes along the world axes, else a row of circles. A
+// kind missing from the table falls back to the feature's own `solid`
+// flag (test/prop-collision.test.js fails on such a kind).
 export function addLotSolids(collision, feats, n, list = null) {
   let made = 0;
-  const put = (s) => { made++; if (list) list.push(s); };
+  const put = (s) => { made++; if (list) list.push(s); return s; };
   for (let q = 0; q < n; q++) {
     const f = feats[q];
-    if (!f.solid) continue;
-    const hgt = f.h || 1.5;
-    if (f.r > 0) {
-      put(collision.addCircle(f.x, f.z, f.r, hgt, 'lot'));
-      continue;
-    }
-    const h = f.heading || 0, c = Math.cos(h), s = Math.sin(h);
-    const hl = (f.l || 0) / 2, hw = Math.max(0.15, (f.w || 0) / 2);
-    if (Math.abs(s) < 0.02 || Math.abs(c) < 0.02) {
-      const ex = Math.abs(c) * hl + Math.abs(s) * hw, ez = Math.abs(s) * hl + Math.abs(c) * hw;
-      put(collision.addBox(f.x - ex, f.z - ez, f.x + ex, f.z + ez, hgt, 'lot'));
+    const e = PROP_SOLIDS[f.kind];
+    if (e ? e.mode === 'flat' : !f.solid) continue;
+    const hgt = e && Number.isFinite(e.h) ? e.h : f.h || 1.5;
+    const first = made;
+    const round = e ? !!e.r : f.r > 0;
+    if (round) {
+      const r = e ? (e.r === 'feat' ? f.r || 0.5 : e.lotR || e.r) : f.r;
+      put(collision.addCircle(f.x, f.z, r, hgt, 'lot'));
     } else {
-      const k = Math.max(1, Math.ceil(hl / hw));
-      for (let i = 0; i <= k; i++) {
-        const o = -hl + (2 * hl * i) / k;
-        put(collision.addCircle(f.x + c * o, f.z + s * o, hw, hgt, 'lot'));
+      const fixed = e && Array.isArray(e.box);
+      const h = f.heading || 0, c = Math.cos(h), s = Math.sin(h);
+      const hl = (fixed ? e.box[0] : f.l || 0) / 2, hw = Math.max(0.15, (fixed ? e.box[1] : f.w || 0) / 2);
+      if (Math.abs(s) < 0.02 || Math.abs(c) < 0.02) {
+        const ex = Math.abs(c) * hl + Math.abs(s) * hw, ez = Math.abs(s) * hl + Math.abs(c) * hw;
+        put(collision.addBox(f.x - ex, f.z - ez, f.x + ex, f.z + ez, hgt, 'lot'));
+      } else {
+        const k = Math.max(1, Math.ceil(hl / hw));
+        for (let i = 0; i <= k; i++) {
+          const o = -hl + (2 * hl * i) / k;
+          put(collision.addCircle(f.x + c * o, f.z + s * o, hw, hgt, 'lot'));
+        }
+      }
+    }
+    if (list && e) {
+      const grp = e.mode === 'break' ? list.slice(list.length - (made - first)) : null;
+      for (let i = list.length - (made - first); i < list.length; i++) {
+        const sh = list[i];
+        sh.ptype = f.kind;
+        if (grp) { sh.brk = e; sh.grp = grp; }
       }
     }
   }
@@ -397,8 +653,8 @@ export const LOT_SHAPE_REACH = 6;
 // The shape objects of the collision world, made without a grid: the
 // lazy layer lists them in its own cells.
 const SHAPE_SINK = {
-  addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false }),
-  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false }),
+  addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null }),
+  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', grp: null }),
 };
 
 // The lots' solids as a lazy layer of `collision` (replacing any layer it
