@@ -10,6 +10,10 @@ function canvas(w, h = w) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
+  // Every texture canvas is drawn on, read back (grain, height to normal map)
+  // and uploaded once: a CPU canvas makes those reads cheap on a phone, where a
+  // GPU canvas stalls on every getImageData. The first getContext call fixes the mode.
+  c.getContext('2d', { willReadFrequently: true });
   return c;
 }
 
@@ -82,7 +86,7 @@ function normalFromHeight(height, size, strength) {
       const xl = (x + size - 1) % size, xr = (x + 1) % size;
       const dx = (height[yc + xr] - height[yc + xl]) * strength;
       const dy = (height[yd + x] - height[yu + x]) * strength;
-      const l = 1 / Math.hypot(dx, dy, 1);
+      const l = 1 / Math.sqrt(dx * dx + dy * dy + 1); // Math.hypot is several times slower
       const i = (yc + x) * 4;
       d[i] = (-dx * l * 0.5 + 0.5) * 255;
       d[i + 1] = (dy * l * 0.5 + 0.5) * 255;

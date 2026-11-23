@@ -7,9 +7,14 @@
 // runs in node tests. The second half is the game system that spawns,
 // recycles and draws them.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
-import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from '../render/personmesh.js';
+import { createPersonMesh, updatePersonMesh, personGeometry, PERSON_PALETTES } from '../render/personmesh.js';
 import { asideNeed, collectSirens, ASIDE_WALK, ASIDE_HOLD } from '../core/yield.js';
 import { initActor, resetActor, addActor, removeActor, layDown } from './combat.js';
+import { createGridIndex, beginSpawnStep, takeSpawn, spawnsLeft, SPAWNER } from '../core/spatial.js';
+
+// Pavement lines checked against the buildings and the road in one step at
+// most (each is checked once; the rest wait for a later step).
+export const LINE_CHECKS_PER_STEP = 6;
 
 const INSET = 2; // walking line, metres inside the block edge
 const RADIUS = 0.35;
@@ -605,6 +610,24 @@ export function createPeds(game, { max = 30 } = {}) {
   let active = 0;
   let first = true;
   let hidden = false;
+  let lineChecks = 0; // pavement lines checked this step
+  let lineSkipped = false; // a pick passed over lines left for a later step
+  let fillLeft = 0; // spawns the last scan asked for, made a couple a step
+  let firstLeft = 1; // s: the start fill may place people anywhere for this long
+  let misses = 0;
+  let warmTick = 0, warmNext = 0; // body geometry of every look, built ahead
+  // Blocks with a pavement loop, in a grid (nearestBlock no longer walks
+  // every block).
+  const loopIds = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.seg || b.district === 'airfield' || b.x1 - b.x0 < INSET * 2 + 2 || b.z1 - b.z0 < INSET * 2 + 2) continue;
+    loopIds.push(i);
+  }
+  const loopIndex = createGridIndex(loopIds.length, (k, o) => {
+    const b = blocks[loopIds[k]];
+    o.x0 = b.x0; o.z0 = b.z0; o.x1 = b.x1; o.z1 = b.z1;
+  }, 96);
 
   function freeSlot() {
     for (let i = 0; i < slots.length; i++) if (!slots[i].ped.active) return slots[i];
@@ -677,7 +700,13 @@ export function createPeds(game, { max = 30 } = {}) {
           const fx = Math.max(Math.abs(px - b.x0), Math.abs(px - b.x1));
           const fz = Math.max(Math.abs(pz - b.z0), Math.abs(pz - b.z1));
           if (Math.hypot(fx, fz) < nearMin) continue;
-          if (b.seg && !lineUsable(city, b)) continue;
+          if (b.seg) {
+            if (!b.ok) {
+              if (lineChecks >= LINE_CHECKS_PER_STEP) { lineSkipped = true; continue; } // checked on a later step
+              lineChecks++;
+            }
+            if (!lineUsable(city, b)) continue;
+          }
           cand[n] = i;
           candW[n] = DENSITY[b.district] * (d < 40 ? 3 : d < 80 ? 2 : 1);
           total += candW[n];
@@ -703,7 +732,8 @@ export function createPeds(game, { max = 30 } = {}) {
     const ped = slot.ped;
     const rng = game.rng;
     const park = block.district === 'park' && !block.seg;
-    const kind = park ? (rng.chance(0.5) ? 'jog' : 'loop') : rng.chance(0.14) && active + 1 < cap() ? 'chat' : 'loop';
+    let kind = park ? (rng.chance(0.5) ? 'jog' : 'loop') : rng.chance(0.14) && active + 1 < cap() ? 'chat' : 'loop';
+    if (kind === 'chat' && spawnsLeft(game) < 2) kind = 'loop'; // a pair is two spawns
     let fallback = false;
     let ok = false;
     for (let tries = 0; tries < 10 && !ok; tries++) {
@@ -720,6 +750,7 @@ export function createPeds(game, { max = 30 } = {}) {
       ped.active = false;
       return false;
     }
+    takeSpawn(game);
     if (kind === 'jog') {
       const r = game.collision.resolveCircle(ped.x, ped.z, RADIUS, 0);
       setPos(ped, r.x, r.z);
@@ -729,6 +760,7 @@ export function createPeds(game, { max = 30 } = {}) {
     if (kind === 'chat') {
       const other = freeSlot();
       if (other && (!game.actors || addActor(game, other.ped))) {
+        takeSpawn(game);
         pairWith(ped, other.ped);
         onBlock[block.id]++;
         active++;
@@ -742,7 +774,10 @@ export function createPeds(game, { max = 30 } = {}) {
   function scan() {
     const px = game.player.x, pz = game.player.z;
     // A teleport or respawn: fill again around the new place at once.
-    if (Number.isFinite(lastX) && Math.hypot(px - lastX, pz - lastZ) > JUMP) first = true;
+    if (Number.isFinite(lastX) && Math.hypot(px - lastX, pz - lastZ) > JUMP) {
+      first = true;
+      firstLeft = 1;
+    }
     lastX = px;
     lastZ = pz;
     // Recycle the far ones and count.
@@ -767,16 +802,43 @@ export function createPeds(game, { max = 30 } = {}) {
       deactivate(slots[far]);
       active--;
     }
-    let budget = first ? limit + 6 : active < limit * 0.6 ? 3 : 1;
-    let misses = 0;
-    while (active < limit && budget-- > 0) {
-      if (!spawnOne(px, pz, first) && ++misses > 3) break;
+    fillLeft = first ? limit + 6 : active < limit * 0.6 ? 3 : 1;
+    misses = 0;
+    fill();
+  }
+
+  // The spawns the last scan asked for, a couple a step through the shared
+  // spawn gate (core/spatial.js): the start crowd fills over the first
+  // second instead of in one step.
+  function fill() {
+    if (fillLeft <= 0) return;
+    const px = game.player.x, pz = game.player.z;
+    const limit = cap();
+    while (fillLeft > 0 && active < limit && spawnsLeft(game) > 0) {
+      lineSkipped = false;
+      if (spawnOne(px, pz, first)) {
+        fillLeft--;
+        continue;
+      }
+      // Lines still to check: not a miss, try again next step.
+      if (lineSkipped) break;
+      fillLeft--;
+      if (++misses > (first ? 12 : 3)) {
+        fillLeft = 0;
+        break;
+      }
     }
-    first = false;
+    if (active >= limit) fillLeft = 0;
+    if (fillLeft <= 0 && firstLeft <= 0) first = false;
   }
 
   // Nearest block that has a pavement loop (for a ped placed off-loop).
   function nearestBlock(x, z) {
+    const k = loopIndex.nearest(x, z, 4000);
+    if (k >= 0) return blocks[loopIds[k]];
+    return nearestBlockScan(x, z);
+  }
+  function nearestBlockScan(x, z) {
     let best = null, bd = Infinity;
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
@@ -862,13 +924,26 @@ export function createPeds(game, { max = 30 } = {}) {
       if (hidden) {
         hidden = false;
         first = true;
+        firstLeft = 1;
         timer = 0;
+      }
+      beginSpawnStep(game, SPAWNER.peds);
+      lineChecks = 0;
+      // Meshes built ahead: one look's body (near or far) every third step
+      // in the first seconds, so a new face in the crowd later is no hitch.
+      if (game.scene && warmNext < PERSON_PALETTES.length * 2 && ++warmTick % 3 === 0) {
+        personGeometry(PERSON_PALETTES[warmNext >> 1], warmNext & 1);
+        warmNext++;
       }
       timer -= dt;
       if (timer <= 0) {
         timer = 0.5;
         scan();
-      }
+      } else fill();
+      if (first) {
+        firstLeft -= dt;
+        if (firstLeft <= 0 && fillLeft <= 0) first = false;
+      } else firstLeft = 0;
       ctx.vehicles = game.vehicles;
       ctx.player = p;
       collectSirens(game.vehicles, ctx.sirens);

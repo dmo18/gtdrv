@@ -242,3 +242,67 @@ test('the real map: the spawn street lots are dressed, fast enough to stream', (
   assert.ok(slices >= lots.length, 'a slice per lot at least');
   assert.ok(ms / slices < 2, `average slice ${(ms / slices).toFixed(2)} ms`);
 });
+
+test('streaming: static matrices, packed far level, no tiles in fast or high flight, tree detail by distance', async () => {
+  const { buildRealCity, FLY_HOLD, TREE_DETAIL_R, TILE } = await import('../src/render/realcity.js');
+  const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
+  const city = createMiamiCity(data);
+  const rect = { u0: 0, u1: 1, v0: 0, v1: 1, w: 64, h: 64 };
+  const rects = new Proxy({}, { get: (o, k) => (typeof k === 'string' ? rect : undefined) });
+  const tex = new Proxy({}, { get: (o, k) => (k === 'decals' || k === 'details' ? { rects } : {}) });
+  const warn = console.warn;
+  console.warn = () => {};
+  let group;
+  try {
+    group = buildRealCity(city, createCollisionWorld(), { textures: tex });
+  } finally {
+    console.warn = warn;
+  }
+  const st = group.userData.stream;
+  // The city is left out of the per-frame matrix walk; its parts never
+  // recompute their matrices.
+  assert.equal(group.matrixWorldAutoUpdate, false);
+  let auto = 0;
+  group.traverse((o) => { if (o.matrixAutoUpdate && o.name !== 'windsock') auto++; });
+  assert.equal(auto, 0, 'static parts');
+  // Far level: packed vertex data.
+  const far = [];
+  group.traverse((o) => { if (o.isMesh && o.name === 'far') far.push(o); });
+  assert.ok(far.length > 0);
+  for (const m of far) {
+    assert.ok(m.geometry.attributes.normal.array instanceof Int8Array && m.geometry.attributes.normal.normalized);
+    assert.ok(m.geometry.attributes.color.array instanceof Uint8Array && m.geometry.attributes.color.normalized);
+  }
+  // Flying high or fast over unbuilt streets: nothing new is started.
+  const s = city.spawn;
+  const cam = { position: { x: s.x + 3 * TILE, y: FLY_HOLD.height + 20, z: s.z } };
+  const built0 = st.stats.built;
+  for (let i = 0; i < 40; i++) st.update(cam, 3);
+  assert.equal(st.stats.built, built0, 'high: no tiles');
+  cam.position.y = 2;
+  st.stats.speed = FLY_HOLD.speed + 10;
+  for (let i = 0; i < 40; i++) st.update(cam, 3);
+  assert.equal(st.stats.built, built0, 'fast: no tiles');
+  st.stats.speed = 10;
+  for (let i = 0; i < 400 && st.stats.built === built0; i++) st.update(cam, 3);
+  assert.ok(st.stats.built > built0, 'slow and low: tiles build again');
+  // Tile groups added later are static too.
+  for (const t of st.tiles) if (t.group) assert.equal(t.group.matrixAutoUpdate, false);
+  // Tree detail by distance (Normal tier), at the spawn street.
+  cam.position.x = s.x;
+  cam.position.z = s.z;
+  st.flush(cam);
+  st.update(cam, 3);
+  let near = 0, far2 = 0;
+  for (const t of st.tiles) {
+    if (!t.group || !t.shown) continue;
+    for (const m of t.trees) {
+      const bb = m.geometry.boundingBox;
+      const dx = Math.max(bb.min.x - cam.position.x, 0, cam.position.x - bb.max.x), dz = Math.max(bb.min.z - cam.position.z, 0, cam.position.z - bb.max.z);
+      const d = Math.hypot(dx, dz);
+      if (d > TREE_DETAIL_R[1] + 16) { far2++; assert.equal(m.visible, false, `tree detail ${d.toFixed(0)} m off`); }
+      if (d < TREE_DETAIL_R[1]) { near++; assert.equal(m.visible, true); }
+    }
+  }
+  assert.ok(near > 0 && far2 > 0, `near ${near}, far ${far2}`);
+});

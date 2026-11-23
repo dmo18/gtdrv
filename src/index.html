@@ -28,6 +28,10 @@
   #boot h1 { position: absolute; left: calc(24px + var(--sl)); top: calc(20px + var(--st)); margin: 0; height: 40px; font-size: 36px; line-height: 40px; letter-spacing: 0.08em; color: #e2733a; font-weight: 800; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7); }
   #boot p { margin: 0; }
   #bootmsg { position: absolute; left: calc(24px + var(--sl)); top: calc(66px + var(--st)); max-width: 40vw; font-size: 14px; line-height: 20px; padding: 2px 8px; margin-left: -8px; border-radius: 6px; background: rgba(0, 0, 0, 0.6); color: #fff; }
+  /* Loading bar under the message: fixed size and place (748x360 up to 915x412), never wider than the map button's left edge. */
+  #bootbar { position: absolute; left: calc(24px + var(--sl)); top: calc(96px + var(--st)); width: min(300px, 38vw); height: 6px; border-radius: 3px; background: rgba(0, 0, 0, 0.6); overflow: hidden; }
+  #bootbar[hidden] { display: none; }
+  #bootbarfill { display: block; width: 0; height: 100%; background: #e2733a; }
   #bootbtns { position: absolute; left: 50%; bottom: calc(24px + var(--sb)); transform: translateX(-50%); display: flex; gap: 16px; }
   #bootbtns button { width: 180px; height: 56px; font: inherit; font-size: 20px; font-weight: 700; border-radius: 999px; cursor: pointer; touch-action: manipulation; }
   #play { color: #14110f; background: #e2733a; border: 2px solid #e2733a; order: 2; }
@@ -53,6 +57,7 @@
   <button id="mapbtn" class="rw-mapbtn" type="button" aria-label="Choose a map">Map</button>
   <button id="aboutbtn" class="rw-aboutbtn" type="button">About</button>
   <p id="bootmsg">Loading the island&hellip;</p>
+  <div id="bootbar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="bootbarfill"></span></div>
   <div id="bootbtns">
     <button id="continue" type="button" hidden>Continue</button>
     <button id="play" type="button" disabled></button>

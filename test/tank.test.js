@@ -429,6 +429,9 @@ test('fleet: tanks wait at their spots and respawn there when far from the playe
     removeVehicle(v) { const i = vehicles.indexOf(v); if (i >= 0) vehicles.splice(i, 1); v.removed = true; },
   };
   const fleet = createFleet(game);
+  // Craft are made in play, nearest first, one a step (docs/PLAN_V2.md H1).
+  for (let i = 0; i < 600 && !fleet.ready; i++) fleet.fixedUpdate(DT);
+  assert.ok(fleet.ready, 'every berth filled within ten seconds');
   const tanks = vehicles.filter((v) => v.kind === 'tank');
   assert.equal(tanks.length, city.tankSpots.length);
   assert.ok(tanks.length >= 3);

@@ -24,7 +24,7 @@
 // whatever is drawn: only meshes stream, never collision shapes, so the
 // simulation does not depend on when a frame happened.
 import * as THREE from 'three';
-import { ChunkedBuilder, MeshBuilder, takeFloats, takeIndices, giveBack } from './meshbuilder.js';
+import { ChunkedBuilder, MeshBuilder, takeFloats, takeIndices, giveBack, freezeStatic } from './meshbuilder.js';
 import { createTextures } from './textures.js';
 import { addBuilding, shade } from './buildings.js';
 import { lookOf } from './miamilook.js';
@@ -44,8 +44,19 @@ const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // room left for a minor garbage collection landing in one.
 // Work per slice (ms). With a young-generation collection landing in a
 // slice (2 to 3.5 ms on the test machine) a slice still stays under 5 ms.
-export const SLICE_MS = 1.2;
-const PROP_PIECE = 16;
+// Slices stay under 3 ms (docs/PLAN_V2.md section 4): SLICE_MS plus the
+// longest single piece of work (pieces are kept small below).
+export const SLICE_MS = 0.9;
+const PROP_PIECE = 6;
+// No street tiles are started while the camera is this high (m) or the
+// player moves this fast (m/s): a fast or high flight would build tiles
+// only to throw them away seconds later (docs/PLAN_V2.md 1.4, hitch 4).
+// Tiles already built stay; the far level covers the rest.
+export const FLY_HOLD = { height: 60, speed: 60 };
+// Palm fronds and tree foliage of a near tile (the 'trees-detail' quarters)
+// are drawn out to this distance (m, by quality tier: Low, Normal, High);
+// past it the trunks and canopies in 'plain' carry the tree.
+export const TREE_DETAIL_R = [70, 110, 200];
 
 // Near-tile mesh arrays come from the builders' pool (views of pooled
 // arrays, the pooled array kept on the attribute as rwPool) and go back
@@ -76,7 +87,7 @@ function onTileGeoDispose(e) {
 // tile never costs one long frame, and the scratch arrays go back to the
 // pool. The mesh (or nothing) is left in out[0]. Same result as
 // buildInto.
-const COPY = 65536; // numbers per piece
+const COPY = 32768; // numbers per piece
 function* copyInto(dst, src, n, at, over, add = 0) {
   for (let i = 0; i < n; i += COPY) {
     const e = Math.min(n, i + COPY);
@@ -133,8 +144,17 @@ function* buildSliced(cb, material, o, over, out, sub = 0) {
   for (const p of parts) if (p) { nv += p.count; ni += p.ni; }
   if (!nv) { for (const p of parts) if (p) p.release(); return; }
   const uv = cb.withUv;
-  const pos = takeFloats(nv * 3), col = takeFloats(nv * 3), nor = takeFloats(nv * 3), uvs = uv ? takeFloats(nv * 2) : null;
+  // Big new arrays are zero-filled when taken: a break after each.
+  const pos = takeFloats(nv * 3);
+  if (over()) yield 'mesh';
+  const col = takeFloats(nv * 3);
+  if (over()) yield 'mesh';
+  const nor = takeFloats(nv * 3);
+  if (over()) yield 'mesh';
+  const uvs = uv ? takeFloats(nv * 2) : null;
+  if (over()) yield 'mesh';
   const idx = takeIndices(ni, nv > 65535);
+  if (over()) yield 'mesh';
   const tiered = !!(parts[1] || parts[2]);
   const counts = [];
   let v = 0, k = 0;
@@ -258,7 +278,24 @@ varying float vRwWin;`)
   return mat;
 }
 
-// Grows typed arrays for one far block.
+// Grows typed arrays for one far block. Packed to keep memory down
+// (docs/PLAN_V2.md 1.2): normals as signed bytes, colours as bytes, the
+// window kind as a byte; the vertex arrays are dropped from the CPU once
+// on the GPU (nothing reads them back: bounds are worked out first). The
+// index stays: compactFar rewrites it.
+function packNormals(src, n) {
+  const out = new Int8Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.round(Math.max(-1, Math.min(1, src[i])) * 127);
+  return out;
+}
+function packColors(src, n) {
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.round(Math.max(0, Math.min(1, src[i])) * 255);
+  return out;
+}
+function dropArray() {
+  this.array = null;
+}
 class FarChunks {
   constructor() {
     this.parts = [];
@@ -268,15 +305,16 @@ class FarChunks {
   // lvl 0: always drawn; 1: only while the block is near (FAR_DETAIL).
   push(mb, tile, win, lvl = 0) {
     if (!mb.count) return;
-    this.parts.push({ pos: new Float32Array(mb.pos), nor: new Float32Array(mb.nor), col: new Float32Array(mb.col), idx: Uint32Array.from(mb.idx), tile, win, lvl, n: mb.count });
+    const n3 = mb.count * 3;
+    this.parts.push({ pos: new Float32Array(mb.pos), nor: packNormals(mb.nor, n3), col: packColors(mb.col, n3), idx: Uint32Array.from(mb.idx), tile, win, lvl, n: mb.count });
     this.verts += mb.count;
     this.idx += mb.idx.length;
   }
   build(material) {
     if (!this.verts) return null;
     const N = this.verts;
-    const pos = new Float32Array(N * 3), nor = new Float32Array(N * 3), col = new Float32Array(N * 3);
-    const win = new Float32Array(N);
+    const pos = new Float32Array(N * 3), nor = new Int8Array(N * 3), col = new Uint8Array(N * 3);
+    const win = new Uint8Array(N);
     const idx = N > 65535 ? new Uint32Array(this.idx) : new Uint16Array(this.idx);
     // Index ranges per tile (parts of one tile are pushed together).
     const ranges = [];
@@ -296,13 +334,14 @@ class FarChunks {
     this.parts = null;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3, true));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
     g.setAttribute('aWin', new THREE.BufferAttribute(win, 1));
     // The drawn index is a copy with the near tiles' ranges left out.
     g.setIndex(new THREE.BufferAttribute(idx.slice(), 1));
     g.index.setUsage(THREE.DynamicDrawUsage);
     g.computeBoundingSphere();
+    for (const k2 of ['position', 'normal', 'color', 'aWin']) g.attributes[k2].onUpload(dropArray);
     const m = new THREE.Mesh(g, material);
     m.matrixAutoUpdate = false;
     m.name = 'far';
@@ -702,26 +741,28 @@ export function buildRealCity(city, collision, opts = {}) {
     // Lot cells of this tile (the lot grid shares the land raster).
     const ci = (v, o, n) => Math.max(0, Math.min(n, Math.round((v - o) / G.cell)));
     const li0 = ci(t.x0, G.x0, G.w), li1 = ci(t.x1, G.x0, G.w), lj0 = ci(t.z0, G.z0, G.h), lj1 = ci(t.z1, G.z0, G.h);
-    for (let j = j0; j < j1; j += 5) {
-      realLand(city, B, i0, i1, j, Math.min(j1, j + 5));
+    for (let j = j0; j < j1; j += 2) {
+      realLand(city, B, i0, i1, j, Math.min(j1, j + 2));
       if (over()) { yield 'land'; ts = now(); }
     }
-    for (let j = lj0; j < lj1; j += 6) {
-      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 6));
+    for (let j = lj0; j < lj1; j += 3) {
+      lotGround(city, B, li0, li1, j, Math.min(lj1, j + 3));
       if (over()) { yield 'lotGround'; ts = now(); }
-      lotEdges(city, B, li0, li1, j, Math.min(lj1, j + 6));
+      lotEdges(city, B, li0, li1, j, Math.min(lj1, j + 3));
       if (over()) { yield 'lotGround'; ts = now(); }
     }
-    for (let a = 0; a < t.nodes.length; a += 8) {
-      realRoads(city, B, t.nodes.slice(a, a + 8), [], own);
+    for (let a = 0; a < t.nodes.length; a += 3) {
+      realRoads(city, B, t.nodes.slice(a, a + 3), [], own);
       if (over()) { yield 'roads'; ts = now(); }
     }
-    for (let a = 0; a < t.edges.length; a += 2) {
-      realRoads(city, B, [], t.edges.slice(a, a + 2), own);
+    for (let a = 0; a < t.edges.length; a++) {
+      realRoads(city, B, [], t.edges.slice(a, a + 1), own);
       if (over()) { yield 'roads'; ts = now(); }
     }
     for (const b of t.blocks) addBlock(B, b, DR);
+    if (over()) { yield 'roads'; ts = now(); }
     addSurfaces(city, B, DR, own);
+    if (over()) { yield 'roads'; ts = now(); }
     for (let n = 0; n < t.buildings.length; n++) {
       addBuilding(C, t.buildings[n]);
       if (over()) { yield 'buildings'; ts = now(); }
@@ -791,9 +832,15 @@ export function buildRealCity(city, collision, opts = {}) {
     t.group = g;
     t.small = small;
     t.meshes = meshes;
+    t.trees = meshes.filter((m) => m.name === 'trees-detail');
+    t.treeOn = null;
     t.mid = false;
     g.visible = false;
+    // Static: world matrices worked out once here, never per frame (the
+    // city group is left out of the scene's matrix walk, see freezeStatic).
+    g.matrixAutoUpdate = false;
     group.add(g);
+    g.updateMatrixWorld(true);
   }
 
   function dropTile(t) {
@@ -804,7 +851,7 @@ export function buildRealCity(city, collision, opts = {}) {
       const i = tiered.indexOf(m);
       if (i >= 0) tiered.splice(i, 1);
     }
-    t.group = t.small = t.meshes = null;
+    t.group = t.small = t.meshes = t.trees = null;
     if (t.shown) {
       t.shown = false;
       nearMask[t.k] = 0;
@@ -814,7 +861,27 @@ export function buildRealCity(city, collision, opts = {}) {
 
   // ---- The streamer: called every drawn frame with the camera. ----
   let job = null, jobTile = null;
-  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {} };
+  // speed: the player's speed (m/s), set by the caller (graphics.js)
+  // before each update; hold: new tiles are held back this frame.
+  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {}, speed: 0, hold: false };
+  // Tree detail by distance: each quarter mesh on within r of the camera
+  // (ground distance to its bounds, with a little hysteresis).
+  function treeDetail(t, x, z, r) {
+    const list = t.trees;
+    if (!list || !list.length) return;
+    if (!t.treeOn) t.treeOn = new Uint8Array(list.length).fill(2);
+    for (let i = 0; i < list.length; i++) {
+      const bb = list[i].geometry.boundingBox;
+      const dx = x < bb.min.x ? bb.min.x - x : x > bb.max.x ? x - bb.max.x : 0;
+      const dz = z < bb.min.z ? bb.min.z - z : z > bb.max.z ? z - bb.max.z : 0;
+      const rr = t.treeOn[i] === 1 ? r + 15 : r;
+      const on = dx * dx + dz * dz < rr * rr ? 1 : 0;
+      if (on !== t.treeOn[i]) {
+        t.treeOn[i] = on;
+        list[i].visible = on === 1;
+      }
+    }
+  }
   function dist(t, x, z, hy) {
     const dx = x < t.x0 ? t.x0 - x : x > t.x1 ? x - t.x1 : 0;
     const dz = z < t.z0 ? t.z0 - z : z > t.z1 ? z - t.z1 : 0;
@@ -825,6 +892,10 @@ export function buildRealCity(city, collision, opts = {}) {
   function update(camera, budgetMs = 3) {
     const x = camera.position.x, z = camera.position.z, hy = Math.max(0, camera.position.y) * 0.6;
     let changed = false, best = null, bd = Infinity, near = 0;
+    // Flying high or fast: no new street tiles (flush still builds).
+    const hold = budgetMs !== Infinity && (camera.position.y > FLY_HOLD.height || stats.speed > FLY_HOLD.speed);
+    stats.hold = hold;
+    const treeR = TREE_DETAIL_R[ud.tier ?? 1] ?? TREE_DETAIL_R[1];
     for (let k = 0; k < NT; k++) {
       const t = tiles[k];
       const d = dist(t, x, z, hy);
@@ -846,11 +917,12 @@ export function buildRealCity(city, collision, opts = {}) {
             t.mid = mid;
             for (const m of t.small) m.visible = !mid;
           }
+          treeDetail(t, x, z, treeR);
         } else if (d > LOD.drop && t !== jobTile) {
           dropTile(t);
           stats.dropped++;
         }
-      } else if (t !== jobTile && d < LOD.build && d < bd) {
+      } else if (!hold && t !== jobTile && d < LOD.build && d < bd) {
         bd = d;
         best = t;
       }
@@ -861,8 +933,8 @@ export function buildRealCity(city, collision, opts = {}) {
       if (!changed) for (const m of farMeshes) compactFar(m, nearMask, farDetail);
     }
     // A tile right under the camera that is not ready yet gets more time.
-    const urgent = (jobTile && dist(jobTile, x, z, hy) < LOD.near * 0.5) || (best && bd < LOD.near * 0.5);
-    const budget = budgetMs === Infinity ? Infinity : urgent ? Math.max(budgetMs, 10) : budgetMs;
+    const urgent = !hold && ((jobTile && dist(jobTile, x, z, hy) < LOD.near * 0.5) || (best && bd < LOD.near * 0.5));
+    const budget = budgetMs === Infinity ? Infinity : urgent ? Math.max(budgetMs, 6) : budgetMs;
     const t0 = now();
     while (now() - t0 < budget) {
       if (!job) {
@@ -889,6 +961,8 @@ export function buildRealCity(city, collision, opts = {}) {
           changed = true;
           t.mid = d > LOD.mid;
           for (const m of t.small) m.visible = !t.mid;
+          t.treeOn = null;
+          treeDetail(t, x, z, treeR);
         }
         if (budgetMs === Infinity) {
           // Look for the next one that should be near.
@@ -931,8 +1005,10 @@ export function buildRealCity(city, collision, opts = {}) {
   lap('near');
   ud.buildMs = now() - tStart;
   group.userData = ud;
+  freezeStatic(group, windsock ? [windsock] : []);
   return group;
 }
+
 
 // Height of the ground something stands on (as citymesh).
 function makeGroundY(city) {

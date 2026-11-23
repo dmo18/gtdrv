@@ -45,11 +45,12 @@ export function frameStats(ms) {
 // (page load to running), the map id, script heap in MB, the system with the
 // slowest single step, fullscreen, bad sounds. A field that is not known prints n/a.
 const ID_CLEAN = /[^A-Za-z0-9_.]/g;
+const MAP_CLEAN = /[^A-Za-z0-9_.-]/g; // region ids have hyphens: miami-downtown
 export function formatResult(r) {
   const ins = r.insets || { l: 0, r: 0, t: 0, b: 0 };
   const bad = r.bad && r.bad.length ? r.bad.slice().sort((a, b) => a - b).join(',') : 'none';
   const start = r.startMs > 0 ? `${(r.startMs / 1000).toFixed(1)} s` : 'n/a';
-  const map = String(r.map || '').replace(ID_CLEAN, '') || 'n/a';
+  const map = String(r.map || '').replace(MAP_CLEAN, '') || 'n/a';
   const mem = r.memMb > 0 ? `${Math.round(r.memMb)} MB` : 'n/a';
   const sysName = String((r.worstSystem && r.worstSystem.name) || '').replace(ID_CLEAN, '');
   const sys = sysName ? `${sysName} ${(r.worstSystem.ms || 0).toFixed(1)} ms` : 'n/a';
@@ -58,7 +59,7 @@ export function formatResult(r) {
     + ` | start ${start} | map ${map} | mem ${mem} | slowsys ${sys}`
     + ` | fullscreen ${r.fullscreen ? 'yes' : 'no'} | bad ${bad}`;
 }
-export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| start (\d+\.\d s|n\/a) \| map ([A-Za-z0-9_.]+|n\/a) \| mem (\d+ MB|n\/a) \| slowsys ([A-Za-z0-9_.]+ \d+\.\d ms|n\/a) \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*)$/;
+export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| start (\d+\.\d s|n\/a) \| map ([A-Za-z0-9_.-]+|n\/a) \| mem (\d+ MB|n\/a) \| slowsys ([A-Za-z0-9_.]+ \d+\.\d ms|n\/a) \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*)$/;
 
 // Times each system's own calls (fixedUpdate and always) while a check runs and
 // remembers the slowest single call. It wraps the methods in place at start()
@@ -405,7 +406,7 @@ export function createPhoneCheck(game, root, opts = {}) {
   const env = () => ({
     version: version(), w: window.innerWidth, h: window.innerHeight, insets: insets(),
     scale: game.graphics && game.graphics.res ? game.graphics.res.scale : 1, fullscreen: !!document.fullscreenElement,
-    startMs: startMs(), map: game.city && game.city.map, memMb: memoryMb(),
+    startMs: startMs(), map: game.city && (game.city.mapId || game.city.map), memMb: memoryMb(),
   });
   const el = (tag, cls, parent, text) => {
     const e = document.createElement(tag);

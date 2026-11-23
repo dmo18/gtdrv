@@ -328,7 +328,8 @@ test('first view: at least 6 moving cars, none closer than 8 m, still moving and
 test('parked cars fill the car parks near the player (6 in the first view)', () => {
   const g = miamiGame(3);
   const parked = createParkedCars(g);
-  parked.fixedUpdate(DT);
+  // The start fill is spread over the first second (two spawns a step).
+  for (let i = 0; i < 60; i++) parked.fixedUpdate(DT);
   const inView = parked.spots.filter((s) => s.vehicle && inFirstView(s.x, s.z, 80)).length;
   assert.ok(inView >= 6, `${inView} parked cars in the first view`);
   // A car park: its listed bays take cars when the player is close.

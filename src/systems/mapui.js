@@ -132,6 +132,8 @@ export function createMapUi(game, uiRoot) {
         b.r = m.r || 0;
       }
       state.blipCount = n;
+      // Under the title the HUD is hidden: the map raster waits for play (or main.js's idle build).
+      if (uiRoot && uiRoot.style && uiRoot.style.visibility === 'hidden' && !renderer.built) return;
       minimap.draw(state);
     },
   };

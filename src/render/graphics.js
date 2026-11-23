@@ -9,8 +9,11 @@
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
 import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
-import { vehicleStats } from './vehiclemesh.js';
+import { vehicleStats, noteVehicleHit, setVehicleLod } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
+import { BOAT_SPECS } from '../entities/boat.js';
+import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
+import { TANK_SPECS } from '../entities/tank.js';
 import { makeWindowAtlas } from './textures.js';
 import { patchWindows, bakeLampLight, patchLampLight, setSpotLight, CARS } from './nightlights.js';
 import { setBeamDaylight, BEAM_TAN } from './aircraftmesh.js';
@@ -100,6 +103,27 @@ function patchShaderChunks() {
 }`);
 }
 
+// The adaptive resolution's good level, per device: "scale@cap" under
+// its own key (a per-device convenience, never part of the save).
+const RES_KEY = 'rustwater.res';
+function loadRes(max) {
+  try {
+    const m = /^(\d(?:\.\d+)?)@(\d(?:\.\d+)?)$/.exec(window.localStorage.getItem(RES_KEY) || '');
+    if (!m || Math.abs(Number(m[2]) - max) > 1e-6) return 0;
+    const v = Number(m[1]);
+    return v >= 1 && v <= max ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+function saveRes(v, max) {
+  try {
+    window.localStorage.setItem(RES_KEY, `${v}@${max}`);
+  } catch {
+    /* private window or blocked storage: start at full resolution */
+  }
+}
+
 export function createGraphics(game) {
   if (game.graphics) return game.graphics;
   const { renderer, scene, camera } = game;
@@ -185,7 +209,10 @@ export function createGraphics(game) {
   // metres of hysteresis): a car is the dearest thing in the shadow map
   // pass, and past that distance its shadow is a few pixels (the contact
   // shadow under it stays).
-  const CAST_R = 48;
+  // By quality tier (Low, Normal, High): the Normal tier keeps to its
+  // draw budget (docs/PLAN_V2.md section 4: 200 calls, 250k triangles).
+  const CAST_RS = [30, 34, 48];
+  let CAST_R = CAST_RS[1];
   function markCasters() {
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {
@@ -200,6 +227,26 @@ export function createGraphics(game) {
       });
       m.userData.rwShadow = true;
       m.userData.rwCast = -1;
+    }
+  }
+  // Cars past FAR_RS (m, by tier) are drawn as the one-call far body
+  // (game.js does the same past 75 m for every tier); the player's own
+  // car never.
+  const FAR_RS = [36, 46, 75];
+  let farR = FAR_RS[1];
+  function updateCarLod() {
+    const vs = game.vehicles, cx = camera.position.x, cz = camera.position.z;
+    const own = game.player && game.player.vehicle;
+    for (let i = 0; i < vs.length; i++) {
+      const v = vs[i], m = v.mesh;
+      if (v.kind !== 'car' || !m || !m.userData.head || !m.userData.wheels) continue;
+      const ud = m.userData;
+      const dx = v.x - cx, dz = v.z - cz, d2 = dx * dx + dz * dz;
+      const r = ud.lodDist ? farR - 4 : farR;
+      const far = v !== own && d2 > r * r;
+      if (far !== (ud.lodDist === true)) ud.lodDist = far;
+      const want = far || !!v.lodFar;
+      if (want !== ud.lodFar) setVehicleLod(m, want);
     }
   }
   function updateCasters() {
@@ -391,6 +438,8 @@ export function createGraphics(game) {
     const q = shedApplied > 0 ? Math.min(q0, 0.75) : q0;
     const tier = q < 1 ? 0 : q > 1 ? 2 : 1;
     ud.tier = tier; // for tiles a streamed map builds later
+    CAST_R = CAST_RS[tier];
+    farR = FAR_RS[tier];
     for (const m of ud.tiered || []) {
       const c = m.userData.tierCounts;
       if (c) m.geometry.setDrawRange(0, c[tier]);
@@ -404,29 +453,144 @@ export function createGraphics(game) {
   // The loop's real frame time moves the pixel ratio between 0.6 and the
   // device cap (2 physical pixels per CSS pixel at most, lower for the
   // Normal and Low quality settings).
-  res = createAdaptiveRes({ max: maxRatioFor(window.devicePixelRatio || 1, game.quality), start: 1.5 });
-  let resApplied = res.scale;
+  // It starts at full resolution, or at the level that held last time
+  // on this device (kept with the cap it was found under), so a phone
+  // that holds 60 is never probed down and one that cannot starts where
+  // it settled. A level below the cap waits longer before probing up.
+  const resMax = maxRatioFor(window.devicePixelRatio || 1, game.quality);
+  const saved = loadRes(resMax);
+  res = createAdaptiveRes({ max: resMax, start: saved || resMax, firstWait: saved && saved < resMax ? 30 : 0 });
+  let resApplied = res.scale, resSaved = saved, resSavedMax = resMax;
 
   // ---- shader warm-up ----
-  // Compile every material in the scene (hidden ones too: night lamps,
-  // rain, effect pools) behind the title screen, instead of the first
-  // time each appears. Queued just after start-up so the page shows its
-  // title first; the first frame of play runs it if it has not happened.
+  // Every shader program the game can need is compiled behind the title
+  // screen, never mid-play (docs/PLAN_V2.md 1.4, hitch 3):
+  // 1. one mesh of every boat, aircraft and tank (H1 makes fleet craft
+  //    by distance, so they are not all in the scene at start) and a
+  //    damaged car join the scene, hidden, in a warm group;
+  // 2. compileAsync builds every material in the scene, hidden ones too
+  //    (night lamps, rain, effect pools), in parallel where the driver can;
+  // 3. once ready, one draw of a single pixel shows only what is hidden
+  //    (a camera layer of its own) with every hidden thing forced on and
+  //    unculled: that compiles the shadow-pass programs, which compile
+  //    does not, and uploads their buffers, so the first blast, boat or
+  //    night costs no upload either.
+  // Queued just after start-up so the page shows its title first; the
+  // first frame of play starts it if it has not happened.
   let warmed = false;
+  const warmGroup = new THREE.Group();
+  warmGroup.name = 'warm-up';
+  warmGroup.visible = false;
   if (typeof setTimeout === 'function') setTimeout(() => { if (!warmed) warmUp(); }, 0);
+  function fillWarmGroup() {
+    const K = game.kinds || {};
+    const add = (kind, spec) => {
+      const k = K[kind];
+      if (!k || !k.createMesh) return;
+      try {
+        const m = k.createMesh(spec);
+        if (m) warmGroup.add(m);
+      } catch {
+        /* drawn on first use instead */
+      }
+    };
+    for (const id in BOAT_SPECS) add('boat', BOAT_SPECS[id]);
+    for (const id in AIRCRAFT_SPECS) add(AIRCRAFT_SPECS[id].kind || 'plane', AIRCRAFT_SPECS[id]);
+    for (const id in TANK_SPECS) add('tank', TANK_SPECS[id]);
+    // A damaged, braking police car: its own paint, cracked glass and lamp
+    // states (the first crash or chase would otherwise compile them).
+    const pol = VEHICLE_SPECS.police;
+    if (pol && K.car && K.car.updateMesh) {
+      try {
+        const m = K.car.createMesh(pol);
+        noteVehicleHit(m, 1, 0, 0, 20);
+        K.car.updateMesh(m, { spec: pol, x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, health: pol.health * 0.3, brake: 1, speed: -1, driver: 'player' }, 1, 0);
+        warmGroup.add(m);
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+  const WARM_LAYER = 31;
+  const vp = new THREE.Vector4(), sci = new THREE.Vector4();
+  function warmDraw() {
+    const tagged = [], shown = [], unculled = [];
+    const walk = (o, hidden) => {
+      const h = hidden || !o.visible;
+      // Hidden things, and pools that are on but empty (effects, debris).
+      const idle = h || (o.isInstancedMesh && o.count === 0) || (o.geometry && o.geometry.drawRange && o.geometry.drawRange.count === 0);
+      if (o.isLight || (idle && (o.isMesh || o.isPoints || o.isLine || o.isSprite))) {
+        if (!o.layers.isEnabled(WARM_LAYER)) { o.layers.enable(WARM_LAYER); tagged.push(o); }
+      }
+      if (idle && o.frustumCulled) { o.frustumCulled = false; unculled.push(o); }
+      if (!o.visible) { o.visible = true; shown.push(o); }
+      const ch = o.children;
+      for (let i = 0; i < ch.length; i++) walk(ch[i], h);
+    };
+    const mask = camera.layers.mask, auto = renderer.shadowMap.autoUpdate, sct = renderer.getScissorTest();
+    renderer.getViewport(vp);
+    renderer.getScissor(sci);
+    try {
+      walk(scene, false);
+      camera.layers.set(WARM_LAYER);
+      renderer.setViewport(0, 0, 1, 1);
+      renderer.setScissor(0, 0, 1, 1);
+      renderer.setScissorTest(true);
+      renderer.shadowMap.autoUpdate = true;
+      renderer.render(scene, camera);
+    } finally {
+      for (let i = shown.length - 1; i >= 0; i--) shown[i].visible = false;
+      for (let i = 0; i < unculled.length; i++) unculled[i].frustumCulled = true;
+      for (let i = 0; i < tagged.length; i++) tagged[i].layers.disable(WARM_LAYER);
+      camera.layers.mask = mask;
+      renderer.setScissorTest(sct);
+      renderer.setScissor(sci);
+      renderer.setViewport(vp);
+      renderer.shadowMap.autoUpdate = auto;
+      renderer.shadowMap.needsUpdate = true;
+    }
+  }
+  function warmDone(t) {
+    try {
+      warmDraw();
+    } catch {
+      /* best effort */
+    }
+    scene.remove(warmGroup);
+    sys.warmMs += performance.now() - t;
+    sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
+    sys.warmDone = true;
+  }
   function warmUp() {
     warmed = true;
-    const t = performance.now();
+    let t = performance.now();
     try {
+      fillWarmGroup();
+      scene.add(warmGroup);
       // The async form lets the driver compile in parallel where it can
       // (KHR_parallel_shader_compile) instead of stalling this frame.
-      if (renderer.compileAsync) renderer.compileAsync(scene, camera).catch(() => {});
-      else renderer.compile(scene, camera);
+      if (renderer.compileAsync) {
+        renderer.compileAsync(scene, camera).then(() => warmDone(performance.now())).catch(() => warmDone(performance.now()));
+      } else {
+        renderer.compile(scene, camera);
+        warmDone(t);
+        t = performance.now();
+      }
     } catch {
       /* best effort */
     }
     sys.warmMs = performance.now() - t;
     sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
+  }
+  // For tests and tools: run the whole warm-up now.
+  function warmNow() {
+    if (!warmed) {
+      warmed = true;
+      fillWarmGroup();
+      scene.add(warmGroup);
+      renderer.compile(scene, camera);
+      warmDone(performance.now());
+    } else if (!sys.warmDone) warmDone(performance.now());
   }
 
   // ---- car shapes ahead of time ----
@@ -453,6 +617,7 @@ export function createGraphics(game) {
   schedule();
 
   let frame = 0, skyVersion = -1;
+  const streamStats = ud.stream ? ud.stream.stats : null;
   const sys = {
     name: 'graphics',
     // Measured at about 300 ms a frame on the software-rendered test
@@ -466,8 +631,19 @@ export function createGraphics(game) {
         resApplied = res.scale;
         game.resize();
       }
+      if ((frame & 63) === 0 && res.good && (res.good !== resSaved || resSavedMax !== res.max)) {
+        resSaved = res.good;
+        resSavedMax = res.max;
+        saveRes(resSaved, resSavedMax);
+      }
+      // The tile streamer holds new street tiles back in fast flight.
+      if (streamStats) {
+        const pv = game.player && game.player.vehicle;
+        streamStats.speed = pv ? Math.max(Math.abs(pv.speed || 0), Math.hypot(pv.vx || 0, pv.vz || 0)) : 0;
+      }
       if ((frame & 31) === 0) markCasters();
       if ((frame & 7) === 0) updateCasters();
+      updateCarLod();
       if ((frame & 7) === 0) updateSignals();
       frame++;
       if (sky && sky.version !== skyVersion) {
@@ -501,6 +677,8 @@ export function createGraphics(game) {
       if (ud.windsock && w) {
         ud.windsock.rotation.y = -w.windDir + Math.sin(game.time * 2.3) * 0.12;
         ud.windsock.rotation.z = -Math.max(0, 1 - w.wind / 7) * 1.1 + Math.sin(game.time * 3.1) * 0.05;
+        // The city group is static (left out of the scene's matrix walk).
+        ud.windsock.updateMatrixWorld();
       }
     },
     setBloom(on) {
@@ -523,6 +701,8 @@ export function createGraphics(game) {
     res,
     warmMs: 0,
     warmPrograms: 0,
+    warmDone: false,
+    warmNow,
     setupMs: 0,
     calls: 0, // draw calls and triangles of the last scene draw
     triangles: 0,

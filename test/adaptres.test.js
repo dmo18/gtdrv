@@ -104,3 +104,43 @@ test('device and quality caps', () => {
   assert.equal(wantsAntialias(1.5), true);
   assert.equal(wantsAntialias(3.5), true);
 });
+
+test('the resolution changes at most once in 5 seconds', () => {
+  // A device that swings between slow and very fast every half second.
+  const c = createAdaptiveRes({ max: 2, start: 1.5 });
+  let last = c.scale, lastAt = -1e9, t = 0, minGap = 1e9;
+  for (let i = 0; i < 60 * 120; i++) {
+    const dt = Math.floor(t / 0.5) % 2 ? 1 / 25 : 1 / 120;
+    t += dt;
+    const s = c.update(dt);
+    if (s !== last) {
+      minGap = Math.min(minGap, t - lastAt);
+      lastAt = t;
+      last = s;
+    }
+  }
+  assert.ok(minGap >= 5 - 1e-6, `two changes ${minGap.toFixed(2)} s apart`);
+});
+
+test('a phone that holds 60 at full resolution never leaves it', () => {
+  const c = createAdaptiveRes({ max: 1.6, start: 1.6 });
+  // Vsync-locked frames with a few long ones (garbage collection, tiles).
+  for (let i = 0; i < 60 * 300; i++) c.update(i % 400 === 0 ? 0.05 : i % 97 === 0 ? 0.034 : 1 / 60);
+  assert.equal(c.scale, 1.6);
+  assert.equal(c.changes, 0);
+  assert.equal(c.good, 1.6, 'full resolution is the good level');
+});
+
+test('good is the level that held; it is the start next time', () => {
+  // Holds 60 at or below 1.3 only.
+  const dev = (s) => (s > 1.3 ? 1 / 40 : 1 / 60);
+  const c = createAdaptiveRes({ max: 2, start: 2 });
+  for (let i = 0; i < 60 * 120; i++) c.update(dev(c.scale));
+  assert.ok(c.good > 0 && c.good <= 1.3, `good ${c.good}`);
+  assert.ok(c.good >= 1.1, `good ${c.good}`);
+  // The next run starts there and has nothing to change for a while.
+  const d = createAdaptiveRes({ max: 2, start: c.good, firstWait: 30 });
+  for (let i = 0; i < 60 * 30; i++) d.update(dev(d.scale));
+  assert.ok(d.changes <= 1, `changes ${d.changes}`);
+  assert.ok(d.scale <= 1.3 + 1e-9);
+});

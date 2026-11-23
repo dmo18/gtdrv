@@ -61,6 +61,12 @@ const ABOUT_CSS = `
 #boot .rw-about-link, .rw-about-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; color: #ffd08a; font-weight: 700; }
 #boot .rw-aboutclose { min-width: 96px; height: 48px; font: inherit; font-size: 16px; font-weight: 700; border-radius: 12px; border: 2px solid #e2733a; background: #e2733a; color: #14110f; cursor: pointer; touch-action: manipulation; }
 `;
+// 'Building streets 40 percent' (text only; label is trimmed to a short phrase).
+export function progressText(label, pct) {
+  const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  return String(label || 'Loading').slice(0, 40) + ' ' + p + ' percent';
+}
+
 export function createTitle(doc) {
   const boot = doc.getElementById('boot');
   const play = doc.getElementById('play');
@@ -69,6 +75,8 @@ export function createTitle(doc) {
   let startFn = null, contFn = null;
   const aboutBtn = doc.getElementById('aboutbtn');
   const verEl = doc.getElementById('bootver');
+  const bar = doc.getElementById('bootbar');
+  const barFill = doc.getElementById('bootbarfill');
   let aboutBox = null;
   function openAbout() {
     if (!boot || aboutBox) return;
@@ -162,6 +170,19 @@ export function createTitle(doc) {
     // Continue is only offered when a saved place can be restored.
     setCanContinue(on) { if (cont) cont.hidden = !on; },
     setMessage(text) { if (msg) msg.textContent = text; },
+    // The build progress: 'Building streets 40 percent' and the bar under it.
+    // label is a fixed phrase from main.js; pct is clamped to 0..100.
+    setProgress(label, pct) {
+      const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+      if (msg) msg.textContent = progressText(label, p);
+      if (barFill) barFill.style.width = p + '%';
+      if (bar) {
+        bar.hidden = false;
+        bar.setAttribute('aria-valuenow', String(p));
+      }
+    },
+    // Loading is over: the bar goes away (the message stays as the place's tagline).
+    endProgress() { if (bar) bar.hidden = true; },
     // true: the page background goes clear so the 3D view shows through.
     showView(on) { if (boot) boot.classList.toggle('rw-clear', !!on); },
     hide() { if (boot) boot.style.display = 'none'; },

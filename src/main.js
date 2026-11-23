@@ -1,9 +1,10 @@
-import { createGame } from './game.js';
+import { createGameSteps } from './game.js';
 import { registerServiceWorker } from './pwa.js';
 import { createTitle } from './ui/title.js';
 import { mapFromSearch, loadMapCity, MAP_CHOICE_KEY } from './world/maps.js';
 import { migrateMapChoice } from './core/save.js';
 import { takeTravelNote } from './core/travel.js';
+import { createQualityBench, neverChosen } from './core/qualitybench.js';
 
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
@@ -116,16 +117,78 @@ function goFullscreen() {
     });
 }
 
+// Gives the browser a turn to paint the progress bar between build stages: the
+// next frame, then a task. A page that never paints (hidden tab) moves on after 100 ms.
+function yieldToBrowser() {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => {
+      if (!done) {
+        done = true;
+        resolve();
+      }
+    };
+    setTimeout(go, 100);
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(go, 0));
+  });
+}
+
+// The first-run benchmark (core/qualitybench.js): about 3 s of real frames
+// behind the title, only when no quality was ever chosen. The result is
+// stored with the other settings; a failed or short run leaves things as they are.
+function runQualityBench(game) {
+  const st = game.progress && game.progress.settings;
+  if (!st || !neverChosen(st) || typeof requestAnimationFrame !== 'function') return;
+  const bench = createQualityBench();
+  let last = 0;
+  const tick = (now) => {
+    if (document.hidden || game.paused) {
+      last = 0;
+      requestAnimationFrame(tick);
+      return;
+    }
+    const dt = last ? now - last : 0;
+    last = now;
+    if (dt > 0 && bench.push(dt)) {
+      const r = bench.result();
+      if (r) {
+        st.quality = r.quality;
+        st.qualityBenchmarked = true;
+        if (game.economy && game.economy.applySettings) game.economy.applySettings();
+        game.events.emit('progress');
+      }
+      return;
+    }
+    // Play began: no more measuring (the load changes).
+    if (!title.isShown()) return;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 async function startUp() {
+  title.setProgress('Loading the map', 1);
+  await yieldToBrowser();
   const city = await loadCity();
   const mapId = (city && city.mapId) || 'island';
-  const game = createGame({
+  // The build runs in stages; between them the browser paints the bar.
+  const steps = createGameSteps({
     canvas: document.getElementById('game'),
     uiRoot: document.getElementById('ui'),
     city,
   });
+  let step = steps.next();
+  while (!step.done) {
+    title.setProgress(step.value.label, step.value.pct);
+    await yieldToBrowser();
+    step = steps.next();
+  }
+  const game = step.value;
   window.__rw = game;
+  title.setProgress('Starting', 95);
+  await yieldToBrowser();
   game.draw(1, 0);
+  title.endProgress();
   msg.textContent = (city && city.texts && city.texts.boot) || 'An island of rust, salt and bad ideas.';
   // While the title shows, the saved place is kept as it is.
   const autostart = new URLSearchParams(location.search).has('autostart');
@@ -147,6 +210,18 @@ async function startUp() {
   title.setReady(true);
   if (!autostart) markRunning();
   title.setCanContinue(game.session.canContinue());
+  // Idle work after the title is up: the first-run benchmark, then the map
+  // raster (the minimap needs it once play begins; it is not drawn at start).
+  if (!autostart) {
+    runQualityBench(game);
+    setTimeout(() => {
+      try {
+        if (game.map && game.map.renderer && game.map.renderer.ensure) game.map.renderer.ensure();
+      } catch (e) {
+        console.error(e);
+      }
+    }, 3600);
+  }
   title.onStart(() => {
     game.audio.unlock();
     // Best effort: go full screen and lock sideways. Not every browser allows it.

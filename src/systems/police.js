@@ -28,6 +28,10 @@ import { hasSiren } from '../core/yield.js';
 import { spawnPoliceHeli, setOrder as setHeliOrder } from './helipilot.js';
 import { createTank, barrelRay } from '../entities/tank.js';
 import { createTankUnit, tankDrive, tankGunnerStep } from './armor.js';
+import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
+import { VEHICLE_SPECS } from '../entities/vehicle.js';
+import { TANK_SPECS } from '../entities/tank.js';
+import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
 
 // --- Heat rules. ---
 
@@ -661,11 +665,19 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   let violence = 0, lastShotStamp = NaN, officerSees = false;
   let blockCool = 0, stepTick = 0, enabledNow = true;
   let heliPilot = null, heliWait = HELI_DELAY;
+  let renders = 0, prebuilt = 0;
   function callOffHeli() {
     if (heliPilot && heliPilot.state !== 'done' && heliPilot.state !== 'crash') setHeliOrder(heliPilot, 'leave');
     heliPilot = null;
     heliWait = HELI_DELAY;
   }
+  // The police car, tank and helicopter meshes are built in the first
+  // seconds of play, so the first chase, tank or helicopter is no hitch.
+  const warmer = createWarmer([
+    ['car', VEHICLE_SPECS.police],
+    ['tank', TANK_SPECS.rustbackpolice],
+    ['heli', AIRCRAFT_SPECS.patrolheli],
+  ], 6, 5);
   const stats = { officerShots: 0, officerHits: 0, roadblocks: 0, stepOuts: 0, blockFail: '', tanks: 0, tankShells: 0 };
 
   // --- The heat 5 police tank (existing tank, armour and combat code). ---
@@ -706,7 +718,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         bx = LP.x; bz = LP.z; bh = LP.heading;
       }
     }
-    if (best === -Infinity) return null;
+    if (best === -Infinity || !takeSpawn(game)) return null;
     const t = createTank('rustbackpolice', bx, bz, bh, game.rng);
     t.police = true;
     t.role = 'tank';
@@ -756,7 +768,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       }
     } else if (want && !idle) {
       tankWait -= dt;
-      if (tankWait <= 0) {
+      if (tankWait <= 0 && spawnsLeft(game) > 0) {
         if (spawnTank()) tankWait = TANK_REPEAT;
         else tankWait = 1;
       }
@@ -1158,7 +1170,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         be = e.id; bf = from; bd = d; bl = lane;
       }
     }
-    if (be < 0) return null;
+    if (be < 0 || !takeSpawn(game)) return null;
     const e = city.edges[be];
     lanePoint(city, e, bf, bd, bl, LP);
     const v = createVehicle('police', LP.x, LP.z, LP.heading, game.rng);
@@ -1190,6 +1202,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
   }
 
   // Heat 4: two cars parked across a road the player is heading for.
+  const blockIds = [];
   function tryRoadblock() {
     const p = game.player, pv = p.vehicle;
     if (!pv || pv.kind !== 'car') return false;
@@ -1203,7 +1216,12 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       const ahead = 140 + (tries === 1 ? -30 : tries === 2 ? 40 : 0);
       const qx = p.x + fx * ahead, qz = p.z + fz * ahead;
       let bd = 25, be = -1;
-      for (let i = 0; i < city.edges.length; i++) {
+      // Only the roads near that point (the edge grid on a real map; ids
+      // ascending, so ties go the way a full scan would).
+      const ids = city.edgesNear ? city.edgesNear(qx, qz, bd, blockIds).sort(byId) : null;
+      const ne = ids ? ids.length : city.edges.length;
+      for (let j = 0; j < ne; j++) {
+        const i = ids ? ids[j] : j;
         const e = city.edges[i];
         if (e.causeway) continue;
         const d = segDist(city, e, qx, qz);
@@ -1244,6 +1262,10 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         stats.blockFail = 'cars';
         return false;
       }
+    }
+    if (!takeSpawn(game, 2)) {
+      stats.blockFail = 'spawn gate';
+      return false;
     }
     for (let k = 0; k < 2; k++) {
       const s = k === 0 ? 1 : -1;
@@ -1338,6 +1360,8 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
     stats,
     stars: 0,
     fixedUpdate(dt) {
+      beginSpawnStep(game, SPAWNER.police);
+      warmer.step(game);
       const p = game.player;
       stepOwnSiren();
       const settings = game.progress && game.progress.settings;
@@ -1486,7 +1510,7 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
         heliWait = HELI_DELAY;
       } else if (!heliPilot && rulesFor(heat.level).heli) {
         heliWait -= dt;
-        if (heliWait <= 0 && !facts.atSea) {
+        if (heliWait <= 0 && !facts.atSea && takeSpawn(game)) {
           heliPilot = spawnPoliceHeli(game, { order: 'orbit' });
           heliWait = HELI_REPEAT;
         }
@@ -1612,13 +1636,16 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       }
       if (patrolDelay > 0) patrolDelay -= dt;
       spawnTimer -= dt;
-      if (spawnTimer <= 0) {
+      // A spawn waits a step while the shared gate is full (core/spatial.js:
+      // at most two vehicles or people a step; a roadblock is two).
+      const blockNow = heat.level >= MAX_HEAT && blocks === 0 && blockCool <= 0 && !facts.atSea && !facts.airborne;
+      if (spawnTimer <= 0 && spawnsLeft(game) >= (blockNow ? 2 : 1)) {
         spawnTimer = rulesFor(heat.level).every;
         const want = unitsFor(heat.level, max);
-        if (heat.level >= MAX_HEAT && blocks === 0 && blockCool <= 0 && !facts.atSea && !facts.airborne) {
+        if (blockNow) {
           blockCool = tryRoadblock() ? BLOCK_COOL : 3;
         } else if (heat.level > 0 && chasing < want && !facts.atSea && !facts.airborne) trySpawn('chase');
-        else if (heat.level === 0 && patrols === 0 && patrolDelay <= 0 && max > 0) trySpawn('patrol');
+        else if (heat.level === 0 && patrols === 0 && patrolDelay <= 0 && max > 0 && belowLiveCap(game)) trySpawn('patrol');
       }
     },
     render(alpha) {
@@ -1630,6 +1657,18 @@ export function createPolice(game, { max = 3, seed = 27044 } = {}) {
       const own = game.player.vehicle;
       if (own && own.siren && own.kind === 'car' && own.mesh) setVehicleLights(own.mesh, { brake: own.brake > 0.1 || own.handbrake, siren: true, time: game.time });
       if (!game.scene) return;
+      // Officer bodies built ahead, one every few frames (no mesh building
+      // when they first step out).
+      if (++renders % 6 === 3 && prebuilt < officers.length + bodies.length) {
+        const o = prebuilt < officers.length ? officers[prebuilt] : bodies[prebuilt - officers.length];
+        if (!o.mesh) {
+          o.mesh = createPersonMesh(OFFICER_LOOK);
+          if (o.mesh.rotation) o.mesh.rotation.order = 'YXZ';
+          o.mesh.visible = false;
+          game.scene.add(o.mesh);
+        }
+        prebuilt++;
+      }
       for (let i = 0; i < officers.length + bodies.length; i++) {
         const o = i < officers.length ? officers[i] : bodies[i - officers.length];
         if (!o.active) {

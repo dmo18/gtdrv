@@ -16,6 +16,7 @@ import { createDriver, driveStep } from './traffic.js';
 import { createCop, chaseStep } from './police.js';
 import { createPersonMesh, updatePersonMesh } from '../render/personmesh.js';
 import { lanePoint, lanesPerDirection } from '../world/citygen.js';
+import { beginSpawnStep, takeSpawn, spawnsLeft, SPAWNER } from '../core/spatial.js';
 import {
   initActor, resetActor, addActor, removeActor, layDown, damage, canBeHit,
   isPlayerSource, EVENT_PAYLOADS, MUZZLE_Y, craftBase,
@@ -517,6 +518,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
   const chaseCtx = { collision: game.collision, vehicles: game.vehicles, time: 0 };
   const footTarget = { x: 0, z: 0, vx: 0, vz: 0, heading: 0, y: 0, spec: null };
   let stepCount = 0;
+  let renders = 0, prebuilt = 0;
   const stats = { shots: 0, hits: 0, thinks: 0, covers: 0, fleeRolls: 0, fleeHurt: 0 };
 
   // --- Groups ---
@@ -1383,6 +1385,7 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
     },
     fixedUpdate(dt) {
       if (!game.player || !(dt > 0)) return;
+      beginSpawnStep(game, SPAWNER.crew);
       stepCount++;
       for (let i = 0; i < groups.length; i++) stepCar(groups[i], dt);
       for (let i = 0; i < members.length; i++) stepMember(members[i], dt);
@@ -1390,8 +1393,11 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
       if (stepCount % 30 === 0) sweepGroups();
       if (sys.ambient && game.city && game.city.blocks) {
         ambientTimer -= dt;
-        if (ambientTimer <= 0) {
+        // An ambient group waits for a step with the shared spawn gate free
+        // (core/spatial.js); it counts as two spawns.
+        if (ambientTimer <= 0 && spawnsLeft(game) >= 2) {
           ambientTimer = 6;
+          takeSpawn(game, 2);
           const p = game.player;
           let amb = 0;
           for (let i = 0; i < groups.length; i++) if (groups[i].ambient) amb++;
@@ -1402,6 +1408,18 @@ export function createCrew(game, { seed = 27027, ambient = true, max = CREW_MAX 
     },
     render(alpha) {
       if (!game.scene) return;
+      // Meshes built ahead: one idle member's body every few frames, so a
+      // group that turns up later costs no mesh building.
+      if (++renders % 6 === 0 && prebuilt < pool.length) {
+        const m = pool[prebuilt];
+        if (!m.mesh) {
+          m.mesh = createPersonMesh(CREW_PALETTES[prebuilt % CREW_PALETTES.length]);
+          if (m.mesh.rotation) m.mesh.rotation.order = 'YXZ';
+          m.mesh.visible = false;
+          game.scene.add(m.mesh);
+        }
+        prebuilt++;
+      }
       for (let i = 0; i < pool.length; i++) {
         const m = pool[i];
         if (!m.active) {

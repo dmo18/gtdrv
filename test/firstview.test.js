@@ -82,7 +82,8 @@ test('parked cars fill the start kerb spots first, at least 6 in the cone', () =
   const p = createParkedCars(g);
   const firstOther = p.spots.findIndex((s) => !s.start);
   assert.ok(p.spots.slice(firstOther).every((s) => !s.start), 'start spots come first');
-  p.fixedUpdate(1 / 60);
+  // The start fill is spread over the first second (two spawns a step).
+  for (let i = 0; i < 60; i++) p.fixedUpdate(1 / 60);
   const inCone = coneOf();
   let filled = 0, start = 0;
   for (const s of p.spots) {
@@ -279,7 +280,7 @@ test('each other region: traffic and parked cars fill the start view', () => {
     for (const car of g.vehicles) assert.ok(Math.hypot(car.x - v.spawn.x, car.z - v.spawn.z) < 120, id);
     const g2 = regionGame(c);
     const p = createParkedCars(g2);
-    p.fixedUpdate(1 / 60);
+    for (let i = 0; i < 60; i++) p.fixedUpdate(1 / 60); // the start fill takes the first second
     let near = 0;
     for (const s of p.spots) if (s.vehicle && Math.hypot(s.x - v.spawn.x, s.z - v.spawn.z) < 80) near++;
     assert.ok(near >= 4, `${id}: ${near} parked cars within 80 m`);

@@ -6,6 +6,7 @@ import { hudPlace } from './world/maps.js';
 import { createCollisionWorld } from './world/collision.js';
 import { buildCityMesh } from './render/citymesh.js';
 import { buildRealCity } from './render/realcity.js';
+import { createTextures } from './render/textures.js';
 import { createInput, attachKeyboard } from './core/input.js';
 import { defaultProgress } from './core/save.js';
 import { respawnPlacement } from './core/health.js';
@@ -75,7 +76,19 @@ const SKY = 0x9fc8e8;
 
 // city: a ready-made city object (the Miami map, see world/maps.js);
 // left out, the procedural island is generated as before.
-export function createGame({ canvas, uiRoot, city: givenCity = null }) {
+//
+// The build runs as a generator (createGameSteps) that yields { label, pct }
+// between stages, so main.js can give the browser a turn and draw a real
+// progress bar; createGame runs it straight through (tests, tools).
+export function createGame(opts) {
+  const it = createGameSteps(opts);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+
+export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
+  yield { label: 'Preparing', pct: 2 };
   const rng = createRng(77123);
   const city = givenCity || generateCity();
   const collision = createCollisionWorld();
@@ -97,8 +110,18 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   // Garages, adventures and locked routes go on a real map before its
   // tiles are dressed (lot dressing skips the garage rects).
   attachExplore(city);
-  // A real map (city.landGrid) is streamed in tiles round the camera.
-  const cityMesh = city.landGrid ? buildRealCity(city, collision) : buildCityMesh(city, collision);
+  yield { label: 'Painting textures', pct: 8 };
+  // A real map (city.landGrid) is streamed in tiles round the camera. Its
+  // textures are drawn in their own stage (the same set buildRealCity makes).
+  let textures = null;
+  if (city.landGrid && typeof document !== 'undefined') {
+    const sn = city.streetNames;
+    const names = sn ? sn.plates || [...sn.x.slice(0, 16), ...sn.z.slice(0, 16)] : [];
+    textures = createTextures(city.seed + 7, names);
+  }
+  yield { label: 'Building streets', pct: 20 };
+  const cityMesh = city.landGrid ? buildRealCity(city, collision, textures ? { textures } : {}) : buildCityMesh(city, collision);
+  yield { label: 'Building streets', pct: 40 };
   scene.add(cityMesh);
   // Animated sea in place of the flat placeholder. Sea level sits a
   // little below the land so waves never wash over the beach.
@@ -360,6 +383,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
     return true;
   };
 
+  yield { label: 'Placing traffic', pct: 50 };
   game.addSystem(createParkedCars(game));
   game.map = game.addSystem(createMapUi(game, uiRoot));
   game.audio = game.addSystem(createAudio(game));
@@ -375,6 +399,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   }
   game.economy = game.addSystem(createEconomy(game, storage));
   game.session = game.addSystem(createSession(game, storage));
+  yield { label: 'Placing traffic', pct: 60 };
   game.fleet = game.addSystem(createFleet(game));
   game.traffic = game.addSystem(createTraffic(game));
   // The designed first view: moving cars on the start street (6.8).
@@ -385,6 +410,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   game.police = game.addSystem(createPolice(game));
   // Combat core and the systems built on it. Registered once here; the
   // later combat tasks fill these files without touching this one.
+  yield { label: 'Setting the scene', pct: 70 };
   game.combat = game.addSystem(createCombat(game));
   game.crew = game.addSystem(createCrew(game));
   game.carjack = game.addSystem(createCarjack(game)); // after traffic, police and crew: it holds the car still
@@ -396,6 +422,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   game.stunts = game.addSystem(createStunts(game, Array.isArray(city.rampSpots) ? { spots: city.rampSpots } : {})); // ramps, jumps and stunt medals (after score)
   game.secrets = game.addSystem(createSecrets(game));
   // Exploring (after score and stunts): game.explore, then the garages on it.
+  yield { label: 'Setting the scene', pct: 80 };
   game.adventures = game.addSystem(createAdventures(game, storage));
   game.garages = game.addSystem(createGarages(game));
   game.favouriteCar = () => favouriteCar(game);
@@ -428,6 +455,7 @@ export function createGame({ canvas, uiRoot, city: givenCity = null }) {
   };
   game.addSystem(createTutorial(game));
   game.objective = game.addSystem(createObjective(game, uiRoot));
+  yield { label: 'Lighting', pct: 90 };
   game.graphics = game.addSystem(createGraphics(game));
   game.effects = game.addSystem(createEffects(game));
   game.combatFx = game.addSystem(createCombatFx(game));

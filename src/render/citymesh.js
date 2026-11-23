@@ -2,7 +2,7 @@
 // and roads, buildings (see buildings.js) and street life (props.js),
 // all merged into a few meshes per map tile.
 import * as THREE from 'three';
-import { ChunkedBuilder } from './meshbuilder.js';
+import { ChunkedBuilder, freezeStatic } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
 import { SIDEWALK } from '../world/citygen.js';
 import { createTextures } from './textures.js';
@@ -628,6 +628,7 @@ export function buildCityMesh(city, collision) {
     textures: T,
     buildMs: (typeof performance !== 'undefined' ? performance.now() : 0) - tStart,
   };
+  freezeStatic(group, windsock ? [windsock] : []);
   return group;
 }
 

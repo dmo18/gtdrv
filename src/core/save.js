@@ -163,6 +163,10 @@ export function sanitizeProgress(raw) {
         if (own(s, k) && typeof s[k] === 'boolean') d[k] = s[k];
       }
       if (own(s, 'quality') && QUALITIES.includes(s.quality)) d.quality = s.quality;
+      // The player picked a quality, or the first-run benchmark did (core/qualitybench.js): never measured again.
+      for (const k of ['qualityChosen', 'qualityBenchmarked']) {
+        if (own(s, k) && s[k] === true) d[k] = true;
+      }
       if (own(s, 'steering') && STEERING.includes(s.steering)) d.steering = s.steering;
       if (own(s, 'handling') && HANDLING.includes(s.handling)) d.handling = s.handling;
       if (own(s, 'hud') && HUD_MODES.includes(s.hud)) d.hud = s.hud;

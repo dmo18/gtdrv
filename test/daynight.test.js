@@ -98,3 +98,24 @@ test('weather and a lack of scene leave the day/night logic working', () => {
   assert.equal(game.weather.name, 'rain');
   assert.ok(game.weather.overcast > 0.9);
 });
+
+test('night layers come on one a frame, and go off at once', async () => {
+  const THREE = await import('three');
+  const scene = new THREE.Scene();
+  const game = { clock: 13, scene, camera: new THREE.PerspectiveCamera(60, 2, 0.5, 2000), cityMesh: { userData: { lamps: [{ x: 0, z: 0, h: 7 }], glows: [] } } };
+  const dn = createDayNight(game, { dayMinutes: 14 });
+  const names = ['stars', 'lamp-glow', 'lamp-pools'];
+  const on = () => names.filter((n) => scene.getObjectByName(n).visible).length;
+  dn.render(1, 1 / 60);
+  assert.equal(on(), 0, 'nothing of the night by day');
+  dn.setHour(23.5);
+  dn.render(1, 1 / 60);
+  assert.equal(on(), 1, 'one layer on the first night frame');
+  dn.render(1, 1 / 60);
+  assert.equal(on(), 2);
+  for (let i = 0; i < 4; i++) dn.render(1, 1 / 60);
+  assert.equal(on(), 3, 'all of them a few frames later');
+  dn.setHour(13);
+  dn.render(1, 1 / 60);
+  assert.equal(on(), 0, 'all off on the first day frame');
+});

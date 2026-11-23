@@ -768,7 +768,30 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     vis.nearD = new Float32Array(MAX_CARS);
     vis.lit = 0;
     vis.night = 0;
+    vis.nightObjs = [stars, lampPts, vis.pools || null, vis.streaks || null];
+    vis.nightWant = new Uint8Array(4);
     return vis;
+  }
+
+  // Night switch spread over frames (docs/PLAN_V2.md 1.4, hitch 6): the
+  // night-only layers (stars, lamp glow, pools, reflections) turn off at
+  // once but come on one a frame (revealNext), so dusk is never one long
+  // frame. Their shaders and buffers are made ready at start (graphics.js
+  // warm-up).
+  function want(i, on) {
+    const o = V.nightObjs[i];
+    if (!o) return;
+    V.nightWant[i] = on ? 1 : 0;
+    if (!on) o.visible = false;
+  }
+  function revealNext() {
+    for (let i = 0; i < V.nightObjs.length; i++) {
+      const o = V.nightObjs[i];
+      if (o && V.nightWant[i] === 1 && !o.visible) {
+        o.visible = true;
+        return;
+      }
+    }
   }
 
   // Desaturate and darken a colour toward grey by k.
@@ -886,7 +909,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
 
     const starA = night * clearSky;
     V.stars.material.opacity = starA;
-    V.stars.visible = starA > 0.02;
+    want(0, starA > 0.02);
 
     // Clouds: lit by the scene lights; a little self-glow so nights are
     // not black blobs, greyer and denser when overcast.
@@ -901,15 +924,15 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     V.clouds.visible = SHOW_PUFFS && cm.opacity > 0.02;
 
     V.lampU.uIntensity.value = V.lit;
-    V.lampPts.visible = V.lit > 0.01;
+    want(1, V.lit > 0.01);
     if (V.pools) {
       V.poolU.uIntensity.value = V.lit * (0.9 + 1.5 * night);
-      V.pools.visible = V.poolU.uIntensity.value > 0.01 && !V.ud.lampLightBaked;
+      want(2, V.poolU.uIntensity.value > 0.01 && !V.ud.lampLightBaked);
     }
     if (V.streaks) {
       const wet = V.wet ? V.wet.value : rn;
       V.streakU.uIntensity.value = V.lit * wet * (0.5 + 0.5 * night) * 0.9;
-      V.streaks.visible = V.streakU.uIntensity.value > 0.01;
+      want(3, V.streakU.uIntensity.value > 0.01);
     }
     V.headU.uIntensity.value = V.lit * (3 + 4 * night);
     V.tailU.uIntensity.value = V.lit * (0.8 + 0.8 * night);
@@ -1157,6 +1180,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       if (!V) return;
       const cam = game.camera || null;
       applySky();
+      revealNext();
       if (cam) {
         V.dome.position.copy(cam.position);
         V.stars.position.copy(cam.position);

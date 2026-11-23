@@ -263,6 +263,14 @@ export function createVehicleMesh(spec, color) {
   // graphics system the casters are already marked.
   body.castShadow = bodyMid.castShadow = far.castShadow = true;
   group.userData.rwShadow = true;
+  // No matrix work per frame for the parts (docs/PLAN_V2.md 1.4, hitch
+  // 7): only the group and the rig move, and updateVehicleMesh updates
+  // their matrices itself, so a parked car costs nothing. Parts added
+  // later (service bodies) keep their own automatic matrices.
+  group.traverse((o) => {
+    o.matrixAutoUpdate = false;
+    o.updateMatrix();
+  });
   return group;
 }
 
@@ -410,13 +418,19 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   rig.position.set(p * Math.sin(pitch), p * (2 - Math.cos(roll) - Math.cos(pitch)), -p * Math.sin(roll));
   // Rolled over by a tank (docs/ARMS.md): squashed flat; wrecked tint.
   rig.scale.y = v.crushed ? 0.45 : 1;
+  mesh.updateMatrix();
+  rig.updateMatrix();
 
   // Wheels: spin, steer, and follow part of the body's travel.
   const steer = v.steerAngle != null ? v.steerAngle : (v.steer || 0) * (v.spec.steerMax || 0.6);
   writeWheels(ud, steer, v.wheelSpin || 0, roll, pitch);
 
-  // Distance LOD (also driven by game.js through head.visible).
-  if (v.lodFar != null && !!v.lodFar !== ud.lodFar) setVehicleLod(mesh, v.lodFar);
+  // Distance LOD (also driven by game.js through head.visible, and by
+  // graphics.js through lodDist: the quality tier's own, nearer limit).
+  if (v.lodFar != null) {
+    const far = !!v.lodFar || ud.lodDist === true;
+    if (far !== ud.lodFar) setVehicleLod(mesh, far);
+  }
 
   // Damage state.
   const max = (v.spec && v.spec.health) || 1000;

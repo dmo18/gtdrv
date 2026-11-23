@@ -68,7 +68,7 @@ export const PROFILE_GROUPS = {
   explore: [/^attachExplore$/],
   mapui: [/^createMapUi$/],
   programs: [/^WebGLProgram\d*$/],
-  game: [/^createGame$/],
+  game: [/^createGame(Steps)?$/],
 };
 
 export function profileGroups(profile) {

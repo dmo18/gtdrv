@@ -291,7 +291,9 @@ test('premium craft are at their berths from the start', () => {
     addVehicle(v) { added.push(v); },
     removeVehicle() {},
   };
-  createFleet(game);
+  const fleet = createFleet(game);
+  for (let i = 0; i < 600 && !fleet.ready; i++) fleet.fixedUpdate(1 / 60);
+  assert.ok(fleet.ready, 'every berth filled within ten seconds');
   const specs = new Set(added.map((v) => v.spec.id));
   for (const id of PREMIUM) {
     const wanted = [...city.aircraftSpots, ...city.boatSpots].some((s) => s.spec === id);

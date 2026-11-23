@@ -220,8 +220,23 @@ export function createMapRenderer(city) {
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
-  redraw();
-  return { canvas, scale, half, size: MAP_PX, worldToMap, redraw, city };
+  // Drawn on first use (the first minimap frame of play or the first open of the
+  // full map), not when the game is built: it cost 0.4 s at start on a slow phone.
+  let built = false;
+  function ensure() {
+    if (built) return canvas;
+    built = true;
+    redraw();
+    return canvas;
+  }
+  return {
+    get canvas() { return ensure(); },
+    get built() { return built; },
+    ensure,
+    scale, half, size: MAP_PX, worldToMap,
+    redraw() { built = true; redraw(); },
+    city,
+  };
 }
 
 // ---------------------------------------------------------------------------

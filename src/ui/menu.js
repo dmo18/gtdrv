@@ -504,7 +504,7 @@ export function createMenu(root, game, economy) {
       body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {
       body.appendChild(segRow('HUD', [['minimal', 'Minimal'], ['full', 'Full']], s.hud, 'hud', (v) => { settings().hud = v; commit(); render(); }));
-      body.appendChild(segRow('Graphics quality', [[0.75, 'Low'], [1, 'Normal'], [1.25, 'High']], s.quality, 'quality', (v) => { settings().quality = v; commit(); render(); }));
+      body.appendChild(segRow('Graphics quality', [[0.75, 'Low'], [1, 'Normal'], [1.25, 'High']], s.quality, 'quality', (v) => { settings().quality = v; settings().qualityChosen = true; commit(); render(); }));
       if (typeof s.liveTime !== 'boolean') s.liveTime = true;
       body.appendChild(toggleRow('Live day and night', 'liveTime', true));
       body.appendChild(sliderRow('Time of day', 'timeOfDay', {

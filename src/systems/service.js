@@ -30,6 +30,7 @@ import {
   EXTRAS, SERVICE_SPOTS, SPOT_RULES, BEACON_HOLD, specSiren, specBeacon,
 } from '../entities/servicevehicles.js';
 import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
+import { beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } from '../core/spatial.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
 import { inRegion } from '../world/regions.js';
 import { resetActor } from './combat.js';
@@ -916,7 +917,18 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
   // Ordinary parked cars keep off the service homes (src/systems/parked.js
   // fills the kerb and lot bays): their bays near a home are taken.
   const parked = game.systems ? game.systems.find((q) => q && q.name === 'parked') : null;
-  if (parked && parked.spots) {
+  if (parked && parked.spots && parked.spotsNear) {
+    // The parked spots' grid index: only the bays round each home.
+    const ids = [];
+    for (const h of homes) {
+      const r = (VEHICLE_SPECS[h.s.kind] ? VEHICLE_SPECS[h.s.kind].length : 5) / 2 + 3.5;
+      parked.spotsNear(h.s.x, h.s.z, r * Math.SQRT2, ids);
+      for (let j = 0; j < ids.length; j++) {
+        const ps = parked.spots[ids[j]];
+        if (Math.abs(ps.x - h.s.x) < r && Math.abs(ps.z - h.s.z) < r) ps.used = true;
+      }
+    }
+  } else if (parked && parked.spots) {
     for (const ps of parked.spots) {
       for (const h of homes) {
         const r = (VEHICLE_SPECS[h.s.kind] ? VEHICLE_SPECS[h.s.kind].length : 5) / 2 + 3.5;
@@ -924,9 +936,10 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       }
     }
   }
-  let parkTimer = 0, first = true;
+  let parkTimer = 0, first = true, wantMore = false;
   function scanHomes() {
     const p = game.player;
+    wantMore = false;
     if (!p) return;
     const t = game.time || 0;
     for (let i = 0; i < homes.length; i++) {
@@ -950,6 +963,12 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       if (h.back > 0 && d < SPOT_RULES.respawnFar) continue;
       if (!first && d < PARK_MIN_R) continue;
       if (!game.addVehicle || !VEHICLE_SPECS[sp.kind]) continue;
+      // A couple of spawns a step across the game, under the live cap
+      // (core/spatial.js): the rest wait for the next step.
+      if (!belowLiveCap(game) || !takeSpawn(game)) {
+        wantMore = true;
+        continue;
+      }
       const v = createVehicle(sp.kind, sp.x, sp.z, sp.heading, rng);
       v.parked = true;
       v.asleep = true;
@@ -958,7 +977,7 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       h.back = 0;
       game.addVehicle(v);
     }
-    first = false;
+    if (!wantMore) first = false;
   }
 
   // =====================================================================
@@ -1024,6 +1043,7 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       }
     },
     fixedUpdate(dt) {
+      beginSpawnStep(game, SPAWNER.service);
       const p = game.player;
       const pv = p ? p.vehicle : null;
       // Leaving an emergency vehicle switches its siren off (police.js does
@@ -1070,8 +1090,8 @@ export function createService(game, { seed = 6110, spots: givenSpots = null } = 
       stepSoaked(dt);
       if (game.touch && game.touch.setExtra) game.touch.setExtra(sys.hudFor(pv));
       parkTimer -= dt;
-      if (parkTimer <= 0 && game.addVehicle) {
-        parkTimer = 0.5;
+      if ((parkTimer <= 0 || wantMore) && game.addVehicle) {
+        if (parkTimer <= 0) parkTimer = 0.5;
         scanHomes();
       }
     },

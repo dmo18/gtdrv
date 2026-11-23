@@ -10,7 +10,8 @@
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
 import { lanePoint, lanesPerDirection, laneOffset, signalState } from '../world/citygen.js';
-import { createVehicle, steerLock } from '../entities/vehicle.js';
+import { createVehicle, steerLock, VEHICLE_SPECS } from '../entities/vehicle.js';
+import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
 import { exitPosition } from '../entities/onfoot.js';
 import { clamp, createRng } from '../core/rng.js';
 import { createYield, stepYield, kerbShift, collectSirens, PULL_SPEED } from '../core/yield.js';
@@ -742,6 +743,9 @@ export function createTraffic(game, { max = 14 } = {}) {
   // draw per spawn, so the ordinary mix keeps its random sequence.
   const svcRng = createRng(61101);
   const svcAlive = [];
+  // Every car body is built once in the first seconds of play (one every
+  // six steps), so the first ambulance or fire truck later is no hitch.
+  const warmer = createWarmer(Object.keys(VEHICLE_SPECS).map((id) => ['car', VEHICLE_SPECS[id]]), 6, 2);
 
   const cap = () => {
     const q = game.quality;
@@ -836,7 +840,7 @@ export function createTraffic(game, { max = 14 } = {}) {
         be = e.id; bf = from; bd = d; bl = lane;
       }
     }
-    if (be < 0) return;
+    if (be < 0 || !takeSpawn(game)) return;
     const e = city.edges[be];
     lanePoint(city, e, bf, bd, bl, LP);
     const kinds = MIX[city.districtOf(LP.x, LP.z)] || MIX.midtown;
@@ -880,8 +884,10 @@ export function createTraffic(game, { max = 14 } = {}) {
     const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
     // The edge of the start street the spawn is on.
     let be = null, bd = Infinity, bt = 0;
-    for (let i = 0; i < city.edges.length; i++) {
-      const e = city.edges[i];
+    const ids = edgesAround(city, sp.x, sp.z, 40, nearIds);
+    const ne = ids ? ids.length : city.edges.length;
+    for (let j = 0; j < ne; j++) {
+      const e = city.edges[ids ? ids[j] : j];
       if (e.name !== sp.street) continue;
       const a = city.nodes[e.a];
       const t = clamp((sp.x - a.x) * e.ux + (sp.z - a.z) * e.uz, 0, e.length);
@@ -948,6 +954,8 @@ export function createTraffic(game, { max = 14 } = {}) {
       return cars.length;
     },
     fixedUpdate(dt) {
+      beginSpawnStep(game, SPAWNER.traffic);
+      warmer.step(game);
       const p = game.player;
       ctx.time = game.time;
       ctx.vehicles = game.vehicles;
@@ -1018,7 +1026,10 @@ export function createTraffic(game, { max = 14 } = {}) {
         refreshNear(p.x, p.z);
       }
       spawnTimer -= dt;
-      if (spawnTimer <= 0 && cars.length < cap()) {
+      // At most a couple of spawns a step across the game and no more than
+      // the live cap (core/spatial.js): when the gate is full this step the
+      // spawn waits for the next one.
+      if (spawnTimer <= 0 && cars.length < cap() && belowLiveCap(game) && spawnsLeft(game) > 0) {
         spawnTimer = cars.length < cap() / 2 ? 0.15 : 0.4;
         trySpawn();
       }

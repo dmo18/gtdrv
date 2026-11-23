@@ -454,9 +454,11 @@ export function* lotJob(C, lots, dress, over) {
     // dress fills feats, or returns its own (shared, read-only) list.
     const fs = dress(C.city, lot, feats) || feats;
     const n = fs.length;
-    // A few features at a time (a lot can hold 24 trees).
-    for (let q = 0; q < n; q += 4) {
-      drawLotFeatures(C, lot, fs, Math.min(n, q + 4), stamps, q);
+    // A few features at a time (a lot can hold 24 trees); dressing a lot
+    // the first time is a piece of its own.
+    if (over()) yield 'lots';
+    for (let q = 0; q < n; q += 2) {
+      drawLotFeatures(C, lot, fs, Math.min(n, q + 2), stamps, q);
       if (over()) yield 'lots';
     }
     if (stats) { stats.lots++; stats.features += n; }

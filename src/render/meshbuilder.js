@@ -514,3 +514,19 @@ export class ChunkedBuilder {
     return made;
   }
 }
+
+// Static scenery: no matrix work per frame (docs/PLAN_V2.md 1.4, hitch
+// 7). Every object under root gets its world matrix once, now, and root
+// is left out of the scene's per-frame matrix walk. Objects in `moving`
+// keep their own matrices; whoever moves one calls its
+// updateMatrixWorld(). Anything added under root later must be given its
+// world matrix by the code that adds it (tiles do, see tileJob).
+export function freezeStatic(root, moving = []) {
+  root.traverse((o) => {
+    if (moving.includes(o)) return;
+    o.matrixAutoUpdate = false;
+    o.updateMatrix();
+  });
+  root.updateMatrixWorld(true);
+  root.matrixWorldAutoUpdate = false;
+}

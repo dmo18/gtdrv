@@ -12,9 +12,10 @@
 // markers are made only when game.scene / game.map exist.
 // Docs: docs/SPEC.md "Stunt jumps".
 import * as THREE from 'three';
-import { generateStuntSpots, rampAt, rampHeight, groundUnder } from '../world/stunts.js';
+import { generateStuntSpots, rampHeight } from '../world/stunts.js';
 import { createAirState, beginAir, stepAir, judgeLanding, medalRank } from '../core/stunt.js';
 import { createMarkers } from '../render/markers.js';
+import { createGridIndex } from '../core/spatial.js';
 
 export const LAUNCH_VY = 1.6; // m/s climb rate at the crest that throws a craft into the air (about 23 km/h)
 export const BAD_LANDING_DAMAGE = 0.3; // share of full health
@@ -29,6 +30,38 @@ export function createStunts(game, opts = {}) {
   const spots = Array.isArray(opts.spots) ? opts.spots : game.city ? generateStuntSpots(game.city) : [];
   const events = game.events;
   const EV = { spot: null, points: 0, medal: null, air: 0, dist: 0, flips: 0, rolls: 0, ok: false, best: false };
+  // The ramps in a grid (core/spatial.js): a craft looks only at the ramps
+  // whose reach covers its cell, the same answer as rampAt / groundUnder.
+  const rampBox = (i, b) => {
+    const sp = spots[i], r = sp.r > 0 ? sp.r : 0;
+    b.x0 = sp.x - r; b.x1 = sp.x + r; b.z0 = sp.z - r; b.z1 = sp.z + r;
+  };
+  let rampIndex = createGridIndex(spots.length, rampBox, 64);
+  const rampIds = [];
+  function rampNear(x, z, water) {
+    rampIndex.near(x, z, 0, rampIds);
+    for (let j = 0; j < rampIds.length; j++) {
+      const sp = spots[rampIds[j]];
+      if (sp.water !== water) continue;
+      const dx = x - sp.x, dz = z - sp.z;
+      if (dx * dx + dz * dz > sp.r * sp.r) continue;
+      if (rampHeight(sp, x, z) > 0) return sp;
+    }
+    return null;
+  }
+  function groundNear(x, z, water) {
+    rampIndex.near(x, z, 0, rampIds);
+    let h = 0;
+    for (let j = 0; j < rampIds.length; j++) {
+      const sp = spots[rampIds[j]];
+      if (sp.water !== water) continue;
+      const dx = x - sp.x, dz = z - sp.z;
+      if (dx * dx + dz * dz > sp.r * sp.r) continue;
+      const y = rampHeight(sp, x, z);
+      if (y > h) h = y;
+    }
+    return h;
+  }
 
   // ---- map icons, start markers and ramp meshes (browser only) ----
   const marks = spots.map((s) => ({ x: s.x, z: s.z, type: 'stunt', color: MAP_COLOR, label: s.name }));
@@ -163,7 +196,7 @@ export function createStunts(game, opts = {}) {
     v.airRoll = st.roll;
     v.asleep = false;
     v.meshDirty = true;
-    const ground = groundUnder(spots, st.x, st.z, v.kind === 'boat');
+    const ground = groundNear(st.x, st.z, v.kind === 'boat');
     if ((st.y <= ground && st.vy < 0) || st.t > MAX_FLIGHT) land(v, ground);
   }
 
@@ -173,7 +206,7 @@ export function createStunts(game, opts = {}) {
       return;
     }
     const water = v.kind === 'boat';
-    const spot = rampAt(spots, v.x, v.z, water);
+    const spot = rampNear(v.x, v.z, water);
     if (!spot) {
       if (v.stuntRamp) {
         // Rolled off the end (or the side) of a ramp: back on the ground.
@@ -222,6 +255,7 @@ export function createStunts(game, opts = {}) {
     fixedUpdate(dt) {
       const vs = game.vehicles;
       if (!vs || !spots.length) return;
+      if (rampIndex.n !== spots.length) rampIndex = createGridIndex(spots.length, rampBox, 64); // ramps added
       for (let i = 0; i < vs.length; i++) {
         const v = vs[i];
         if (!v || v.removed || v.tossing || (v.kind !== 'car' && v.kind !== 'boat')) continue;
