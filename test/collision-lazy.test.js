@@ -6,15 +6,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createMiamiCity, MIAMI_CROP } from '../src/world/miami.js';
+import { createMiamiCity } from '../src/world/miami.js';
 import {
   createCollisionWorld, fillCollision, fillLotCollision, attachLotCollision, createLotLayer, LOT_SHAPE_REACH,
 } from '../src/world/collision.js';
 import { lotDressCache, dressLot } from '../src/world/lots.js';
 import { createRng } from '../src/core/rng.js';
 
-const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
-const city = createMiamiCity(data, { crop: MIAMI_CROP });
+// The Downtown region (docs/PLAN_V2.md 3.7), from its own data file.
+const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami-downtown.json', import.meta.url), 'utf8'));
+const city = createMiamiCity(data, { region: 'miami-downtown' });
 const CELL = 32;
 const cellOf = (v) => Math.floor(v / CELL);
 // A shape's values without the per-query scratch.

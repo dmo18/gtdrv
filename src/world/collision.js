@@ -269,6 +269,24 @@ export function createCollisionWorld() {
 // to add them while drawing. Pure, so node tests use the same boxes.
 export function fillCollision(city, collision) {
   for (const b of city.buildings) collision.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
+  fillRoadEndCollision(city, collision);
+  return collision;
+}
+
+// The striped barriers of the generated road ends at a region's sea
+// edges (city.roadEnds, docs/PLAN_V2.md 3.4): a row of posts across the
+// road, 1 m apart, tag 'barrier'. Pure.
+export const BARRIER_POST_R = 0.55, BARRIER_H = 1.2;
+export function fillRoadEndCollision(city, collision) {
+  for (const re of city.roadEnds || []) {
+    const b = re.barrier;
+    const px = -Math.sin(b.heading), pz = Math.cos(b.heading); // across the road
+    const n = Math.max(2, Math.ceil(b.w));
+    for (let k = 0; k <= n; k++) {
+      const t = -b.w / 2 + (b.w * k) / n;
+      collision.addCircle(b.x + px * t, b.z + pz * t, BARRIER_POST_R, BARRIER_H, 'barrier');
+    }
+  }
   return collision;
 }
 

@@ -256,6 +256,7 @@ async function main() {
   fs.writeFileSync(OUT, json);
   console.log('Origin lat/lon:', lat0, lon0);
   console.log('Bounds (m):', JSON.stringify(out.bounds));
+  console.log('Now run node scripts/split-map.mjs to write the region files (docs/PLAN_V2.md 3.6).');
   console.log(`Counts: roads ${roads.length}, buildings ${buildings.length}, water ${water.length}, coastline ${coast.length}, parks ${parks.length}, labels ${labels.length}`);
   console.log(`Wrote ${OUT} (${(json.length / 1e6).toFixed(2)} MB)`);
   if (failed.length) console.log('FAILED tiles:', failed.join(', '));

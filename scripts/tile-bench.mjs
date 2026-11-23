@@ -3,7 +3,7 @@
 // (docs/REVAMP.md W2: no slice over 5 ms) for the tiles round a few
 // points. Garbage collection pauses are timed apart (a PerformanceObserver
 // on 'gc'), so a slice is reported with and without the pauses inside it.
-// usage: node scripts/tile-bench.mjs [rounds]
+// usage: node scripts/tile-bench.mjs [rounds] [region id]
 import fs from 'node:fs';
 import { PerformanceObserver } from 'node:perf_hooks';
 import { createMiamiCity } from '../src/world/miami.js';
@@ -12,8 +12,9 @@ import { buildRealCity } from '../src/render/realcity.js';
 
 const gcs = [];
 new PerformanceObserver((l) => { for (const e of l.getEntries()) gcs.push([e.startTime, e.startTime + e.duration]); }).observe({ entryTypes: ['gc'] });
-const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
-const city = createMiamiCity(data);
+const region = process.argv[3] || null;
+const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/' + (region ? region + '.json' : 'miami.json'), import.meta.url), 'utf8'));
+const city = createMiamiCity(data, region ? { region } : {});
 const rect = { u0: 0, u1: 1, v0: 0, v1: 1, w: 64, h: 64 };
 const rects = new Proxy({}, { get: (o, k) => (typeof k === 'string' ? rect : undefined) });
 const tex = new Proxy({}, { get: (o, k) => (k === 'decals' || k === 'details' ? { rects } : {}) });

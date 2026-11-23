@@ -5,17 +5,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createMiamiCity, MIAMI_CROP } from '../src/world/miami.js';
+import { createMiamiCity } from '../src/world/miami.js';
 import { createCollisionWorld, fillCollision, fillLotCollision } from '../src/world/collision.js';
 import { buildRealCity } from '../src/render/realcity.js';
 import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
 import { createRng } from '../src/core/rng.js';
 
 const DT = 1 / 60, STEPS = 1200;
-const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami.json', import.meta.url), 'utf8'));
-// The core crop (downtown, Brickell, Overtown, Edgewater, Wynwood).
-const CROP = MIAMI_CROP;
-const city = createMiamiCity(data, { crop: CROP });
+// The Downtown region (docs/PLAN_V2.md 3.7: downtown, Brickell,
+// Overtown, Edgewater, Wynwood), from its own data file.
+const data = JSON.parse(fs.readFileSync(new URL('../src/world/data/miami-downtown.json', import.meta.url), 'utf8'));
+const city = createMiamiCity(data, { region: 'miami-downtown' });
+const CROP = city.crop;
 // Stand-in textures (node has no canvas).
 const rect = { u0: 0, u1: 1, v0: 0, v1: 1, w: 64, h: 64 };
 const rects = new Proxy({}, { get: (o, k) => (typeof k === 'string' ? rect : undefined) });

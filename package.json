@@ -11,6 +11,7 @@
     "test": "node --test \"test/*.test.js\"",
     "lint": "eslint .",
     "smoke": "node scripts/smoke.mjs",
+    "perf:scenarios": "node scripts/perf-scenarios.mjs",
     "release:check": "node scripts/release-check.mjs",
     "release:record": "node scripts/release-check.mjs --record",
     "bump": "node scripts/bump-version.mjs",

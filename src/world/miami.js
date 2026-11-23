@@ -1,17 +1,19 @@
 // The Miami map: turns the baked OpenStreetMap data (world/data/miami.json,
 // see docs/MAP.md) into the same city object generateCity() returns, so
 // traffic, police, peds, fleet and the renderer work on real streets.
-// Pure data, no drawing: runs in node tests. Milestone 1 builds a core
-// crop (MIAMI_CROP in miami-spots.js) plus the invented airfield islet.
+// Pure data, no drawing: runs in node tests. Builds the whole data box,
+// or one region of it (world/regions.js, docs/PLAN_V2.md 3), plus the
+// invented airfield islet where the region holds it.
 //
 // Coordinates: x east, z south, metres, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
-import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W } from './citygen.js';
+import { DISTRICTS, SIDEWALK, STREET_W, AVENUE_W, lanePoint } from './citygen.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, eachBay, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
+import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX } from './regions.js';
 
 export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
 
@@ -340,7 +342,7 @@ function seedRuns(wall, label, a, b, stack) {
 // Each region's vote from one coast line: +1 per sample on its land side
 // (6 m to the left of the line), -1 on its water side. Segments wholly
 // outside the raster (x0..bx1, z0..bz1) are skipped.
-function voteCoast(pts, R, label, votes, bx1, bz1) {
+function voteCoast(pts, R, label, votes, bx1, bz1, hits = null) {
   for (let k = 0; k + 3 < pts.length; k += 2) {
     const ax = pts[k], az = pts[k + 1], bx = pts[k + 2], bz = pts[k + 3];
     const L = Math.hypot(bx - ax, bz - az);
@@ -352,11 +354,73 @@ function voteCoast(pts, R, label, votes, bx1, bz1) {
       const cl = cellOf(R, px + nx * 6, pz + nz * 6), cw = cellOf(R, px - nx * 6, pz - nz * 6);
       if (cl >= 0 && label[cl] >= 0) votes[label[cl]] += 1;
       if (cw >= 0 && label[cw] >= 0) votes[label[cw]] -= 1;
+      if (hits) {
+        if (cl >= 0 && label[cl] >= 0) hits[label[cl]] = 1;
+        if (cw >= 0 && label[cw] >= 0) hits[label[cw]] = 1;
+      }
     }
   }
 }
 function applyVotes(label, votes, data, NC) {
   for (let c = 0; c < NC; c++) if (label[c] >= 0) data[c] = votes[label[c]] > 0 ? 1 : 0;
+}
+
+// The whole box's land and sea at COARSE m (coast walls along every
+// coastline and the box, regions voted as in step 1). A region build
+// asks it for the side of a region that has no coast line inside the
+// build window (West: the mainland's shore is 1.2 km east of it), which
+// the window alone cannot tell. Cached per data object.
+const COARSE = 20;
+const coarseCache = new WeakMap();
+function coarseLand(data, coast) {
+  let R = coarseCache.get(data);
+  if (R) return R;
+  const b = data.bounds;
+  const x0 = Math.ceil(b.minX), z0 = Math.ceil(b.minZ), x1 = Math.floor(b.maxX), z1 = Math.floor(b.maxZ);
+  R = makeRaster(x0 - COARSE * 4, z0 - COARSE * 4, x1 + COARSE * 4, z1 + COARSE * 4, COARSE);
+  const wall = makeRaster(R.x0, R.z0, R.x0 + R.w * COARSE, R.z0 + R.h * COARSE, COARSE);
+  for (const pts of coast) for (let k = 0; k + 3 < pts.length; k += 2) stampLine(wall, pts[k], pts[k + 1], pts[k + 2], pts[k + 3], 1);
+  stampLine(wall, x0, z0, x1, z0, 1);
+  stampLine(wall, x1, z0, x1, z1, 1);
+  stampLine(wall, x1, z1, x0, z1, 1);
+  stampLine(wall, x0, z1, x0, z0, 1);
+  const NC = R.w * R.h, label = new Int32Array(NC);
+  const n = labelRegions(wall.data, R.w, R.h, label, null);
+  const votes = new Float64Array(n);
+  for (const pts of coast) voteCoast(pts, R, label, votes, R.x0 + R.w * COARSE, R.z0 + R.h * COARSE);
+  applyVotes(label, votes, R.data, NC);
+  settleWalls(wall.data, R.data, R.w, R.h);
+  coarseCache.set(data, R);
+  return R;
+}
+
+// Regions of the fine raster that no coast sample reached and that run
+// off the raster's edge take the majority side of the coarse whole-box
+// mask over their cells.
+function voteUnreached(R, label, nLab, hits, coarse) {
+  const W = R.w, H = R.h, NC = W * H;
+  const open = new Uint8Array(nLab);
+  for (let i = 0; i < W; i++) {
+    for (const c of [i, (H - 1) * W + i]) if (label[c] >= 0 && !hits[label[c]]) open[label[c]] = 1;
+  }
+  for (let j = 0; j < H; j++) {
+    for (const c of [j * W, j * W + W - 1]) if (label[c] >= 0 && !hits[label[c]]) open[label[c]] = 1;
+  }
+  let any = false;
+  for (let k = 0; k < nLab; k++) if (open[k]) any = true;
+  if (!any) return;
+  const score = new Float64Array(nLab);
+  for (let c = 0; c < NC; c++) {
+    const k = label[c];
+    if (k < 0 || !open[k]) continue;
+    const i = c % W, j = (c - i) / W;
+    const q = cellOf(coarse, R.x0 + (i + 0.5) * R.cell, R.z0 + (j + 0.5) * R.cell);
+    score[k] += q >= 0 && coarse.data[q] ? 1 : -1;
+  }
+  for (let c = 0; c < NC; c++) {
+    const k = label[c];
+    if (k >= 0 && open[k]) R.data[c] = score[k] > 0 ? 1 : 0;
+  }
 }
 
 // Coastline wall cells (1) take the majority of their settled neighbours.
@@ -645,15 +709,67 @@ export function fullBox(data) {
   const b = data.bounds;
   return { x0: Math.ceil(b.minX) + BOX_INSET, z0: Math.ceil(b.minZ) + BOX_INSET, x1: Math.floor(b.maxX) - BOX_INSET, z1: Math.floor(b.maxZ) - BOX_INSET };
 }
-// opts: { crop, spots, seed }. data: the parsed miami.json.
+// The build window of a region (docs/PLAN_V2.md 3.4): the region's crop
+// clipped to the whole box; `box` marks the sides that are the data box's
+// own edges (land cut at the bounds and closed by a wall, as the whole
+// box), the other sides are sea edges (land cut LAND_MARGIN m past the
+// crop: a straight seawall; roads end at the crop line with a generated
+// road end). Without a region: the whole box, or `crop` (a test option)
+// with sea edges all round.
+export function buildWindow(data, region = null, crop = null) {
+  if (crop) return { crop, box: { x0: false, z0: false, x1: false, z1: false } };
+  const fb = fullBox(data);
+  if (!region) return { crop: fb, box: { x0: true, z0: true, x1: true, z1: true } };
+  const r = region.crop;
+  const box = { x0: r.x0 <= fb.x0, z0: r.z0 <= fb.z0, x1: r.x1 >= fb.x1, z1: r.z1 >= fb.z1 };
+  return { crop: { x0: Math.max(r.x0, fb.x0), z0: Math.max(r.z0, fb.z0), x1: Math.min(r.x1, fb.x1), z1: Math.min(r.z1, fb.z1) }, box };
+}
+
+// The hand tables a region build uses: MIAMI_SPOTS (or opts.spots) with
+// every placed list filtered by the region rule (regions.js inRegion),
+// plus the region's own start place and lists. A table that only works
+// whole (the course spec, the secrets) is kept when the region holds
+// every point of it, else left out (per-item placement is the job of
+// courses.js and secrets.js). Downtown filters nothing: it is MIAMI_SPOTS.
+export function regionSpots(base, region) {
+  if (!region) return base;
+  const keep = (list, own) => (list || []).filter((p) => inRegion(region, p.x, p.z)).concat(own || []);
+  const whole = (v, m) => (v && holdsAll(region, pointsIn(v), m) ? v : null);
+  const st = region.start;
+  const spawn = st ? { street: st.street, x: st.x, z: st.z, heading: st.heading } : base.spawn;
+  const one = (v) => (v && inRegion(region, v.x, v.z) ? v : null);
+  return {
+    ...base,
+    spawn,
+    startView: st ? region.startView || null : base.startView,
+    piers: keep(base.piers, region.piers),
+    seaplane: region.seaplane !== undefined ? region.seaplane : one(base.seaplane),
+    helipads: keep(base.helipads, region.helipads),
+    ramps: keep(base.ramps, region.ramps),
+    cranes: keep(base.cranes),
+    landmarks: keep(base.landmarks),
+    cinder: one(base.cinder),
+    secrets: whole(base.secrets),
+    // Course gates out on the water may lie past the crop, where the
+    // build still has sea (Downtown's Palm Island Sprint ends 100 m east
+    // of it): the spec is kept whole within the land margin.
+    courses: whole(base.courses, -LAND_MARGIN),
+  };
+}
+
+// opts: { region, crop, spots, seed }. data: the parsed miami.json, or a
+// region's own file (scripts/split-map.mjs). region: a region id or
+// object (world/regions.js): only that region is built. Without one the
+// whole data box (milestone 3); `opts.crop` (a test option, e.g.
+// MIAMI_CROP) limits it to a rect with land cut LAND_MARGIN m outside it.
 export function createMiamiCity(data, opts = {}) {
   const tStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  // The whole data box by default (milestone 3); `opts.crop` (a test
-  // option, e.g. MIAMI_CROP) limits it to a rect with land cut
-  // LAND_MARGIN m outside it.
-  const crop = opts.crop || fullBox(data);
-  const margin = opts.crop ? LAND_MARGIN : BOX_INSET;
-  const S = opts.spots || MIAMI_SPOTS;
+  const region = opts.region ? (typeof opts.region === 'string' ? regionFor(opts.region) : opts.region) : null;
+  if (opts.region && !region) throw new Error('miami: unknown region ' + String(opts.region).slice(0, 40));
+  const win = buildWindow(data, opts.crop ? null : region, opts.crop || null);
+  const crop = win.crop, boxSide = win.box;
+  const marginOf = (side) => (boxSide[side] ? BOX_INSET : LAND_MARGIN);
+  const S = regionSpots(opts.spots || MIAMI_SPOTS, region);
   const seed = opts.seed ?? 25780;
   const rng = createRng(seed);
   const timings = {};
@@ -665,7 +781,7 @@ export function createMiamiCity(data, opts = {}) {
   };
 
   // ---- 1. Land mask: coastline sides, water polygons, the river. ----
-  const cut = { x0: crop.x0 - margin, z0: crop.z0 - margin, x1: crop.x1 + margin, z1: crop.z1 + margin };
+  const cut = { x0: crop.x0 - marginOf('x0'), z0: crop.z0 - marginOf('z0'), x1: crop.x1 + marginOf('x1'), z1: crop.z1 + marginOf('z1') };
   const land = makeRaster(cut.x0 - SEA_PAD, cut.z0 - SEA_PAD, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
   const W = land.w, H = land.h, NC = W * H;
   const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
@@ -686,20 +802,21 @@ export function createMiamiCity(data, opts = {}) {
     }
     // The whole box: the data ends at the box, so coast lines that stop
     // just past it would let land and sea regions meet outside it. A wall
-    // along the box closes every region inside.
-    if (!opts.crop) {
-      stampLine(wall, cut.x0, cut.z0, cut.x1, cut.z0, 1);
-      stampLine(wall, cut.x1, cut.z0, cut.x1, cut.z1, 1);
-      stampLine(wall, cut.x1, cut.z1, cut.x0, cut.z1, 1);
-      stampLine(wall, cut.x0, cut.z1, cut.x0, cut.z0, 1);
-    }
+    // along the box closes every region inside (on a region, the sides
+    // that are the box's own).
+    if (boxSide.z0) stampLine(wall, cut.x0, cut.z0, cut.x1, cut.z0, 1);
+    if (boxSide.x1) stampLine(wall, cut.x1, cut.z0, cut.x1, cut.z1, 1);
+    if (boxSide.z1) stampLine(wall, cut.x1, cut.z1, cut.x0, cut.z1, 1);
+    if (boxSide.x0) stampLine(wall, cut.x0, cut.z1, cut.x0, cut.z0, 1);
     lap('land.coast');
     const label = labelBuf;
     const nLab = labelRegions(wall.data, W, H, label, queueBuf);
     lap('land.fill');
     const votes = new Float64Array(nLab);
-    for (const pts of coast) voteCoast(pts, land, label, votes, bx1, bz1);
+    const hits = region ? new Uint8Array(nLab) : null;
+    for (const pts of coast) voteCoast(pts, land, label, votes, bx1, bz1, hits);
     applyVotes(label, votes, land.data, NC);
+    if (region) voteUnreached(land, label, nLab, hits, coarseLand(data, coast));
     lap('land.votes');
     // Wall cells: majority of their labelled neighbours.
     settleWalls(wall.data, land.data, W, H);
@@ -749,12 +866,18 @@ export function createMiamiCity(data, opts = {}) {
   const CX0 = crop.x0, CX1 = crop.x1, CZ0 = crop.z0, CZ1 = crop.z1;
   const inCrop = (x, z) => x >= CX0 && x <= CX1 && z >= CZ0 && z <= CZ1;
   const ways = [];
+  // Where a road leaves the crop: x, z on the crop line, then the unit
+  // direction out of it (for the generated road ends, 3.4).
+  const cuts = [];
   for (const r of data.roads) {
     if (!DRIVE.has(r.class)) continue;
     if (r.name && /tunnel/i.test(r.name)) continue;
-    const fx = r.p[0] / 10, fz = r.p[1] / 10;
-    if (fx < crop.x0 - 3000 || fx > crop.x1 + 3000 || fz < crop.z0 - 3000 || fz > crop.z1 + 3000) continue;
     const pts = decodePolyline(r.p);
+    {
+      let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
+      for (let k = 0; k < pts.length; k += 2) { if (pts[k] < bx0) bx0 = pts[k]; if (pts[k] > bx1) bx1 = pts[k]; if (pts[k + 1] < bz0) bz0 = pts[k + 1]; if (pts[k + 1] > bz1) bz1 = pts[k + 1]; }
+      if (bx1 < crop.x0 || bx0 > crop.x1 || bz1 < crop.z0 || bz0 > crop.z1) continue;
+    }
     const nearWater = (x, z) => {
       for (let k = 0; k < 8; k++) {
         const c = landCell(x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40);
@@ -798,7 +921,10 @@ export function createMiamiCity(data, opts = {}) {
       if (bx > crop.x1) t = Math.min(t, (crop.x1 - ax) / dx);
       if (bz < crop.z0) t = Math.min(t, (crop.z0 - az) / dz);
       if (bz > crop.z1) t = Math.min(t, (crop.z1 - az) / dz);
-      run.push(Math.round((ax + dx * t) * 10) / 10, Math.round((az + dz * t) * 10) / 10);
+      const cx = Math.round((ax + dx * t) * 10) / 10, cz = Math.round((az + dz * t) * 10) / 10;
+      run.push(cx, cz);
+      const dl = Math.hypot(dx, dz) || 1;
+      cuts.push(cx, cz, dx / dl, dz / dl, ways.length);
     };
     for (let k = 0; k < pts.length; k += 2) {
       const x = pts[k], z = pts[k + 1];
@@ -1023,29 +1149,35 @@ export function createMiamiCity(data, opts = {}) {
   lap('graph');
 
   // ---- 3. Airfield islet and causeway (citygen's layout, placed here). ----
+  // Only where the region holds the islet and the street it leaves from
+  // (Downtown and North share Gullwing); elsewhere there is none.
+  const AF = S.airfield;
+  const IW = 300;
+  const hasAirfield = !!AF && inRegion(region, AF.x, AF.z) && inRegion(region, AF.isletX0, AF.z - 205) && inRegion(region, AF.isletX1, AF.z - 205 + IW);
   // Anchor: the shore end of the street the causeway leaves from.
   let anchor = null;
-  {
+  if (hasAirfield) {
     let bd = Infinity;
     for (const n of nodes) {
       if (!n.edges.length) continue;
-      const d = Math.hypot(n.x - S.airfield.x, n.z - S.airfield.z);
+      const d = Math.hypot(n.x - AF.x, n.z - AF.z);
       if (d < bd) { bd = d; anchor = n; }
     }
   }
-  const IW = 300;
-  const islet = { x0: S.airfield.isletX0, z0: anchor.z - 205, x1: S.airfield.isletX1, z1: anchor.z - 205 + IW };
+  const islet = anchor ? { x0: AF.isletX0, z0: anchor.z - 205, x1: AF.isletX1, z1: anchor.z - 205 + IW } : null;
   const roadHalf = STREET_W / 2;
-  const gate = { id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z, hx: roadHalf, hz: roadHalf, edges: [], signal: false };
-  nodes.push(gate);
-  {
+  let gate = null;
+  const extraLand = [];
+  if (islet) {
+    gate = { id: nodes.length, i: -1, j: -1, x: islet.x0 + 60, z: anchor.z, hx: roadHalf, hz: roadHalf, edges: [], signal: false };
+    nodes.push(gate);
     const L = gate.x - anchor.x;
     edges.push({ id: edges.length, a: anchor.id, b: gate.id, horizontal: true, width: STREET_W, avenue: false, length: L, ux: 1, uz: 0, causeway: true, bridge: false, oneway: false, cls: 'causeway', name: 'Gullwing Causeway' });
     anchor.edges.push(edges.length - 1);
     gate.edges.push(edges.length - 1);
+    const causewayRect = { x0: anchor.x - 30, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 30, z1: anchor.z + roadHalf + 4 };
+    extraLand.push(islet, causewayRect);
   }
-  const causewayRect = { x0: anchor.x - 30, z0: anchor.z - roadHalf - 4, x1: islet.x0 + 30, z1: anchor.z + roadHalf + 4 };
-  const extraLand = [islet, causewayRect];
 
   // Keep the largest connected road network only.
   const graphStats = {};
@@ -1109,7 +1241,7 @@ export function createMiamiCity(data, opts = {}) {
     edges.length = 0;
     edges.push(...keptEdges);
   }
-  if (gate.id >= nodes.length || nodes[gate.id] !== gate) throw new Error('miami: the airfield causeway is not on the main road network');
+  if (gate && (gate.id >= nodes.length || nodes[gate.id] !== gate)) throw new Error('miami: the airfield causeway is not on the main road network');
   // Junction boxes: half the widest road, kept short of the edges.
   for (const n of nodes) {
     if (n.i < 0) continue;
@@ -1247,7 +1379,7 @@ export function createMiamiCity(data, opts = {}) {
   const DC = 32;
   const dist = makeRaster(land.x0, land.z0, land.x0 + W * CELL, land.z0 + H * CELL, DC);
   for (const r of S.districts) stampRect(dist, r.x0, r.z0, r.x1, r.z1, DKEYS.indexOf(r.key));
-  stampRect(dist, islet.x0 - 60, islet.z0 - 60, islet.x1 + 60, islet.z1 + 60, DKEYS.indexOf('airfield'));
+  if (islet) stampRect(dist, islet.x0 - 60, islet.z0 - 60, islet.x1 + 60, islet.z1 + 60, DKEYS.indexOf('airfield'));
   const distCell = cellLookup(dist), distData = dist.data;
   function districtOf(x, z) {
     const c = distCell(x, z);
@@ -1353,6 +1485,9 @@ export function createMiamiCity(data, opts = {}) {
     const rects = new Int32Array(24);
     const FB4 = new Float64Array(5);
     const R2 = { x0: 0, z0: 0, cell: BC, w: 0, h: 0, data: cellsBuf };
+    // A region file (scripts/split-map.mjs) lists the source index of
+    // each building: footprint ids stay those of the whole file.
+    const srcIds = Array.isArray(data.buildingIds) ? data.buildingIds : null;
     for (let fp = 0; fp < data.buildings.length; fp++) {
       const b = data.buildings[fp];
       if (SKIP_BUILDING.has(b.kind) || !inCrop(b.p[0] / 10, b.p[1] / 10)) continue;
@@ -1375,7 +1510,7 @@ export function createMiamiCity(data, opts = {}) {
         const bi0 = rects[4 * k], bj0 = rects[4 * k + 1], bi1 = rects[4 * k + 2], bj1 = rects[4 * k + 3];
         const bx0 = bi0 === 0 ? x0 : x0 + bi0 * BC, bz0 = bj0 === 0 ? z0 : z0 + bj0 * BC;
         const bx1 = bi1 === cw - 1 ? x1 : x0 + (bi1 + 1) * BC, bz1 = bj1 === ch - 1 ? z1 : z0 + (bj1 + 1) * BC;
-        placeBox(bx0, bz0, bx1, bz1, h, kindTag, fp);
+        placeBox(bx0, bz0, bx1, bz1, h, kindTag, srcIds ? srcIds[fp] : fp);
       }
     }
   }
@@ -1403,25 +1538,28 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 8. Airfield contents (as citygen, relative to the islet). ----
   const pois = [], aircraftSpots = [], boatSpots = [], surfaces = [], helipads = [], piers = [];
-  const runway = { x0: islet.x0 + 40, z0: islet.z0 + 40, x1: islet.x1 - 30, z1: islet.z0 + 70, type: 'runway' };
-  const apron = { x0: islet.x0 + 40, z0: runway.z1, x1: islet.x0 + 470, z1: anchor.z + roadHalf + 30, type: 'apron' };
-  surfaces.push(apron, runway);
-  for (let k = 0; k < 5; k++) {
-    const hx0 = islet.x0 + 110 + k * 70;
-    addBuilding(hx0, islet.z1 - 50, hx0 + 52, islet.z1 - 14, rng.range(11, 14), 'industrial', 'warehouse');
+  let runway = null, apron = null;
+  if (islet) {
+    runway = { x0: islet.x0 + 40, z0: islet.z0 + 40, x1: islet.x1 - 30, z1: islet.z0 + 70, type: 'runway' };
+    apron = { x0: islet.x0 + 40, z0: runway.z1, x1: islet.x0 + 470, z1: anchor.z + roadHalf + 30, type: 'apron' };
+    surfaces.push(apron, runway);
+    for (let k = 0; k < 5; k++) {
+      const hx0 = islet.x0 + 110 + k * 70;
+      addBuilding(hx0, islet.z1 - 50, hx0 + 52, islet.z1 - 14, rng.range(11, 14), 'industrial', 'warehouse');
+    }
+    addBuilding(islet.x0 + 480, islet.z1 - 44, islet.x0 + 494, islet.z1 - 30, 34, 'downtown', 'building', 0xcfd6dc);
+    const rz = (runway.z0 + runway.z1) / 2;
+    aircraftSpots.push({ x: runway.x0 + 30, z: rz, heading: 0, spec: 'prop' });
+    ['stunt', 'jet', 'prop'].forEach((spec, k) => {
+      aircraftSpots.push({ x: islet.x0 + 150 + k * 60, z: runway.z1 + 34, heading: -Math.PI / 2, spec });
+    });
+    ['heli', 'heavyheli'].forEach((spec, k) => {
+      const hp = { x: islet.x0 + 360 + k * 50, z: runway.z1 + 40 };
+      helipads.push(hp);
+      aircraftSpots.push({ ...hp, heading: -Math.PI / 2, spec });
+    });
+    pois.push({ type: 'airfield', x: islet.x0 + 250, z: anchor.z - 60, label: 'Gullwing Airfield' });
   }
-  addBuilding(islet.x0 + 480, islet.z1 - 44, islet.x0 + 494, islet.z1 - 30, 34, 'downtown', 'building', 0xcfd6dc);
-  const rz = (runway.z0 + runway.z1) / 2;
-  aircraftSpots.push({ x: runway.x0 + 30, z: rz, heading: 0, spec: 'prop' });
-  ['stunt', 'jet', 'prop'].forEach((spec, k) => {
-    aircraftSpots.push({ x: islet.x0 + 150 + k * 60, z: runway.z1 + 34, heading: -Math.PI / 2, spec });
-  });
-  ['heli', 'heavyheli'].forEach((spec, k) => {
-    const hp = { x: islet.x0 + 360 + k * 50, z: runway.z1 + 40 };
-    helipads.push(hp);
-    aircraftSpots.push({ ...hp, heading: -Math.PI / 2, spec });
-  });
-  pois.push({ type: 'airfield', x: islet.x0 + 250, z: anchor.z - 60, label: 'Gullwing Airfield' });
 
   const rectDist = (r, x, z) => {
     const ix = Math.min(x - r.x0, r.x1 - x), iz = Math.min(z - r.z0, r.z1 - z);
@@ -1453,18 +1591,18 @@ export function createMiamiCity(data, opts = {}) {
     return pier;
   }
   for (const p of S.piers) addPier(p.label, p.x, p.z, p.dx, p.dz, p.boats, mainShore);
-  addPier('Airfield Dock', islet.x0 + 600, islet.z1 - 2, 0, 1, ['speedboat', 'jetski'], (x, z) => rectDist(islet, x, z));
-  {
+  if (islet) {
+    addPier('Airfield Dock', islet.x0 + 600, islet.z1 - 2, 0, 1, ['speedboat', 'jetski'], (x, z) => rectDist(islet, x, z));
     const dock = piers[piers.length - 1];
     aircraftSpots.push({ x: dock.x1 + 14, z: dock.z1 - 12, heading: Math.PI / 2, spec: 'seaplane' });
-    if (S.seaplane) aircraftSpots.push({ x: S.seaplane.x, z: S.seaplane.z, heading: S.seaplane.heading, spec: 'seaplane' });
   }
+  if (S.seaplane) aircraftSpots.push({ x: S.seaplane.x, z: S.seaplane.z, heading: S.seaplane.heading, spec: 'seaplane' });
   for (const hp of S.helipads || []) helipads.push({ x: hp.x, z: hp.z });
 
   // Depot (as citygen, explicit colours, no rng).
   const tankSpots = [];
-  let depot;
-  {
+  let depot = null;
+  if (islet) {
     const D = { x0: islet.x0 + 520, z0: runway.z1 + 12, x1: islet.x1 - 40, z1: islet.z1 - 24 };
     depot = { ...D, gate: { x: D.x0, z: 0 } };
     const WALL = 0xb7b09c, WALL_H = 2.5, T = 1.2;
@@ -1495,10 +1633,12 @@ export function createMiamiCity(data, opts = {}) {
     surfaces.push({ x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, type: 'apron', depot: true });
     pois.push({ type: 'depot', x: D.x0 + 110, z: gz, label: 'Ironbank Depot' });
   }
-  aircraftSpots.push(
-    { x: islet.x0 + 90, z: runway.z1 + 34, heading: -Math.PI / 2, spec: 'fighter' },
-    { x: islet.x0 + 448, z: runway.z1 + 40, heading: -Math.PI / 2, spec: 'patrolheli' },
-  );
+  if (islet) {
+    aircraftSpots.push(
+      { x: islet.x0 + 90, z: runway.z1 + 34, heading: -Math.PI / 2, spec: 'fighter' },
+      { x: islet.x0 + 448, z: runway.z1 + 40, heading: -Math.PI / 2, spec: 'patrolheli' },
+    );
+  }
 
   // ---- 8b. Lot rasters and infill (docs/REVAMP.md 6.2, world/lots.js). ----
   // free: drawn land clear of every road strip and its pavement and
@@ -1884,7 +2024,7 @@ export function createMiamiCity(data, opts = {}) {
   }
 
   // Landmarks: windsock, runway lights and the port cranes.
-  const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: { x: runway.x0 + 70, z: runway.z0 - 14 }, runwayLights: [] };
+  const landmarks = { lighthouse: null, cranes: [], billboards: [], windsock: runway ? { x: runway.x0 + 70, z: runway.z0 - 14 } : null, runwayLights: [] };
   // Each crane steps south from its point to the quay edge: legs (x +-7,
   // z +-6) on land, clear of buildings and roads, the boom (to z + 40)
   // out over the water.
@@ -1921,10 +2061,10 @@ export function createMiamiCity(data, opts = {}) {
       }
     }
   }
-  for (let x = runway.x0; x <= runway.x1 + 0.1; x += 35.5) {
+  for (let x = runway ? runway.x0 : 1; runway && x <= runway.x1 + 0.1; x += 35.5) {
     landmarks.runwayLights.push({ x, z: runway.z0 - 1.4, color: 0xfff2d0 }, { x, z: runway.z1 + 1.4, color: 0xfff2d0 });
   }
-  for (let k = 0; k < 6; k++) {
+  for (let k = 0; runway && k < 6; k++) {
     const z = runway.z0 + 2.5 + k * ((runway.z1 - runway.z0 - 5) / 5);
     landmarks.runwayLights.push({ x: runway.x0 - 1.5, z, color: 0x40ff70 }, { x: runway.x1 + 1.5, z, color: 0xff4030 });
   }
@@ -2048,7 +2188,7 @@ export function createMiamiCity(data, opts = {}) {
   const placeEdges = [];
   const landPlaceCell = cellLookup(landPlace), waterPlaceCell = cellLookup(waterPlace);
   function placeOf(x, z) {
-    if (x > islet.x0 - 60 && x < islet.x1 + 60 && z > islet.z0 - 60 && z < islet.z1 + 60) return DISTRICTS.airfield.name;
+    if (islet && x > islet.x0 - 60 && x < islet.x1 + 60 && z > islet.z0 - 60 && z < islet.z1 + 60) return DISTRICTS.airfield.name;
     if (mainShore(x, z) > 0) {
       const c = landPlaceCell(x, z);
       const k = c < 0 ? 0 : landPlace.data[c];
@@ -2067,12 +2207,135 @@ export function createMiamiCity(data, opts = {}) {
     const k = c < 0 ? 0 : waterPlace.data[c];
     return k ? placeNames[k] : 'Biscayne Bay';
   }
+  // ---- 10c. Road ends at the region's sea edges (docs/PLAN_V2.md 3.4).
+  // Every road cut by a crop side that is not the box's own edge ends in
+  // a generated end: a striped barrier just past the end (collision:
+  // world/collision.js fillCollision) and a round turning pad inside it,
+  // so no lane runs into a wall. A road cut over water (a bridge or
+  // causeway) ends at its bridge head on the last land: `head`, where the
+  // barrier then stands. One end per graph node (both carriageways of a
+  // dual road get their own). Data only (no rng, nothing else moves).
+  const roadEnds = [];
+  const city0 = () => ({ nodes });
+  {
+    const CUT_SNAP = MERGE + 1;
+    const seenNode = new Set();
+    const sideOf = (x, z) => {
+      const d = [x - crop.x0, crop.x1 - x, z - crop.z0, crop.z1 - z];
+      let k = 0;
+      for (let q = 1; q < 4; q++) if (d[q] < d[k]) k = q;
+      return ['x0', 'x1', 'z0', 'z1'][k];
+    };
+    for (let q = 0; q < cuts.length; q += 5) {
+      const x = cuts[q], z = cuts[q + 1], ox = cuts[q + 2], oz = cuts[q + 3];
+      const side = sideOf(x, z);
+      if (boxSide[side]) continue;
+      // The kept node this cut vertex became (merged junctions included).
+      let n = null, bd = CUT_SNAP;
+      for (const m of nodes) {
+        if (m.i < 0) continue;
+        const d = Math.hypot(m.x - x, m.z - z);
+        if (d < bd) { bd = d; n = m; }
+      }
+      if (!n || seenNode.has(n.id)) continue;
+      // The edge it ends: the one whose far end lies most against `out`.
+      let e = null, best = -Infinity;
+      for (const id of n.edges) {
+        const ed = edges[id], o = nodes[ed.a === n.id ? ed.b : ed.a];
+        const l = Math.hypot(n.x - o.x, n.z - o.z) || 1;
+        const dot = ((n.x - o.x) * ox + (n.z - o.z) * oz) / l;
+        if (dot > best) { best = dot; e = ed; }
+      }
+      if (!e || best < 0.3) continue;
+      seenNode.add(n.id);
+      const o = nodes[e.a === n.id ? e.b : e.a];
+      const l = Math.hypot(n.x - o.x, n.z - o.z) || 1;
+      const ux = (n.x - o.x) / l, uz = (n.z - o.z) / l;
+      // Over water: back along the road to the first point on real land.
+      let hx = n.x, hz = n.z, head = null;
+      const wet = !(mainShore(n.x, n.z) > 0);
+      if (wet) {
+        let cur = n, ce = e, guard = 0;
+        while (!head && ce && guard++ < 40) {
+          const far = nodes[ce.a === cur.id ? ce.b : ce.a];
+          for (let d = 0; d <= ce.length; d += 2) {
+            const px = cur.x + ((far.x - cur.x) * d) / ce.length, pz = cur.z + ((far.z - cur.z) * d) / ce.length;
+            if (mainShore(px, pz) > 1) { head = { x: Math.round(px * 10) / 10, z: Math.round(pz * 10) / 10 }; break; }
+          }
+          if (head || far.edges.length !== 2) break;
+          const nid = far.edges[0] === ce.id ? far.edges[1] : far.edges[0];
+          cur = far;
+          ce = edges[nid];
+        }
+        if (head) { hx = head.x; hz = head.z; }
+      }
+      const half = e.width / 2, reach = Math.max(n.hx, n.hz);
+      const r = half + 3;
+      roadEnds.push({
+        id: roadEnds.length, node: n.id, edge: e.id, road: e.name, side, width: e.width, bridge: e.bridge || wet, head,
+        x: n.x, z: n.z, heading: Math.atan2(uz, ux),
+        // The turning pad: a disc of paving just inside the end.
+        pad: { x: hx - ux * (head ? r + 3 : r), z: hz - uz * (head ? r + 3 : r), r },
+        // The barrier: across the road, just past the end (past the
+        // junction box where the end merged into a junction).
+        barrier: { x: hx + ux * (head ? 0 : reach + 3), z: hz + uz * (head ? 0 : reach + 3), heading: Math.atan2(uz, ux), w: e.width + 2 },
+      });
+    }
+  }
+  // Travel pads (3.4): each of the region's links snapped to the nearest
+  // road end of its road (within LINK_SNAP m), with the arrival pose 30 m
+  // inside on the right-hand lane, facing in. `twin` is the link of the
+  // same id in region `to`.
+  const travelPads = [];
+  if (region) {
+    const LINK_SNAP = 60, ARRIVE = 30;
+    const P = { x: 0, z: 0, heading: 0 };
+    for (const lk of region.links || []) {
+      let end = null, bd = LINK_SNAP;
+      for (const re of roadEnds) {
+        if (re.road !== lk.road) continue;
+        const d = Math.hypot(re.x - lk.x, re.z - lk.z);
+        if (d < bd) { bd = d; end = re; }
+      }
+      if (!end) continue;
+      // Walk in from the end along the road (through bends) ARRIVE m.
+      let cur = nodes[end.node], ce = edges[end.edge], left = ARRIVE + (end.head ? Math.hypot(end.x - end.head.x, end.z - end.head.z) : 0), guard = 0;
+      while (left > ce.length - 6 && guard++ < 20) {
+        // On through bends and junctions: the next edge of the same road
+        // that goes on most straight.
+        const far = nodes[ce.a === cur.id ? ce.b : ce.a];
+        const tx = (far.x - cur.x) / ce.length, tz = (far.z - cur.z) / ce.length;
+        let next = null, bestDot = 0.5;
+        for (const id of far.edges) {
+          if (id === ce.id) continue;
+          const ne = edges[id];
+          if (far.edges.length > 2 && ne.name !== ce.name) continue;
+          const o2 = nodes[ne.a === far.id ? ne.b : ne.a];
+          const dot = ((o2.x - far.x) * tx + (o2.z - far.z) * tz) / ne.length;
+          if (dot > bestDot) { bestDot = dot; next = ne; }
+        }
+        if (!next) break;
+        left -= ce.length;
+        cur = far;
+        ce = next;
+      }
+      lanePoint(city0(), ce, cur.id, Math.max(2, Math.min(left, ce.length - 2)), 0, P);
+      travelPads.push({
+        id: lk.id, to: lk.to, road: lk.road, end: end.id, x: end.pad.x, z: end.pad.z, r: end.pad.r, heading: end.heading,
+        arrive: { x: Math.round(P.x * 10) / 10, z: Math.round(P.z * 10) / 10, heading: Math.round(P.heading * 1000) / 1000 },
+      });
+    }
+  }
   lap('extras');
 
   const span = Math.max(Math.abs(cut.x0), Math.abs(cut.x1), Math.abs(cut.z0), Math.abs(cut.z1));
   const inCore = (x, z) => x >= MIAMI_CORE.x0 && x <= MIAMI_CORE.x1 && z >= MIAMI_CORE.z0 && z <= MIAMI_CORE.z1;
   const city = {
     map: 'miami',
+    // The map id (world/maps.js): the region's id, or 'miami' for the
+    // whole box (and the test crops). `region`: the region object, null
+    // for the whole box; `boxSides`: which crop sides are the box's own.
+    mapId: region ? region.id : WHOLE_BOX, region, boxSides: boxSide,
     seed, N: 1, xs: [0], zs: [0], wx: [STREET_W], wz: [STREET_W],
     nodes, edges, blocks, buildings,
     props, parkingSpots, spawn,
@@ -2081,7 +2344,7 @@ export function createMiamiCity(data, opts = {}) {
     // The real places, then the invented landmarks not already listed.
     mapLandmarks: MIAMI_LANDMARKS.concat(landmarkSites.filter((t) => !MIAMI_LANDMARKS.some((m) => m.landmark === t.id)).map((t) => ({ name: t.name, src: '', x: t.x, z: t.z, landmark: t.id }))),
     tankSpots, roofPads, depot,
-    airfield: { islet, runway, apron, gate },
+    airfield: islet ? { islet, runway, apron, gate } : null,
     // Activities, secrets and stunt ramps: filled in below, from the spots.
     courses: [], secretSpots: [], secretGarage: null, rampSpots: [], courseSpec: S.courses || null, texts: S.texts || null,
     shoreDist, mainShore, isLand, isGround, districtOf, onRoad, placeOf, placeNames: placeNames.slice(1),
@@ -2100,6 +2363,8 @@ export function createMiamiCity(data, opts = {}) {
     dressLot: (lot, out) => dressLot(city, lot, out),
     startView: S.startView ? { ...S.startView, spawn: { ...S.startView.spawn, x: spawn.x, z: spawn.z, heading: spawn.heading } } : null,
     landmarkSites,
+    // Region edges (3.4): generated road ends and the travel pads.
+    roadEnds, travelPads,
   };
 
   // ---- 11b. Lots: every free land cell typed and dressed (world/lots.js). ----

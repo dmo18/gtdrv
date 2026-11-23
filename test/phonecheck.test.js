@@ -5,7 +5,7 @@ import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
 import { createInput } from '../src/core/input.js';
 import { createRng } from '../src/core/rng.js';
 import {
-  frameStats, formatResult, RESULT_RE, buildRoute, createDriver, createCheckRun, SOUNDS,
+  frameStats, formatResult, RESULT_RE, createSystemTimer, buildRoute, createDriver, createCheckRun, SOUNDS,
 } from '../src/ui/phonecheck.js';
 import { makeFightGame, cityAndCollision } from './fightgame.js';
 
@@ -24,13 +24,18 @@ test('frame statistics: median, worst, frames over 33 ms', () => {
 test('result line: one ASCII line in the agreed format', () => {
   const line = formatResult({
     version: '0.5.0', w: 915, h: 412, insets: { l: 40, r: 0, t: 0, b: 0 }, median: 16.7, worst: 48.25, over33: 3,
-    scale: 0.85, fullscreen: true, bad: [5, 2],
+    scale: 0.85, fullscreen: true, bad: [5, 2], startMs: 4630, map: 'miami', memMb: 255.4, worstSystem: { name: 'parked', ms: 7.34 },
   });
   assert.match(line, RESULT_RE);
-  assert.equal(line, 'RW 0.5.0 | 915x412 inset L40 R0 T0 B0 | median 16.7 ms worst 48.3 ms | over33 3 | res 0.85 | fullscreen yes | bad 2,5');
+  assert.equal(line, 'RW 0.5.0 | 915x412 inset L40 R0 T0 B0 | median 16.7 ms worst 48.3 ms | over33 3 | res 0.85 | start 4.6 s | map miami | mem 255 MB | slowsys parked 7.3 ms | fullscreen yes | bad 2,5');
   const none = formatResult({ version: 'dev', w: 780, h: 360, median: 8.3, worst: 9, over33: 0, scale: 1, fullscreen: false, bad: [] });
   assert.match(none, RESULT_RE);
   assert.ok(none.endsWith('fullscreen no | bad none'));
+  assert.ok(none.includes('| start n/a | map n/a | mem n/a | slowsys n/a |'), none);
+  // Names are cleaned to plain ASCII so the line always matches.
+  const odd = formatResult({ version: 'dev', w: 780, h: 360, median: 8.3, worst: 9, over33: 0, scale: 1, fullscreen: false, bad: [], map: 'mi ami\u2014x', worstSystem: { name: 'a b', ms: 1 } });
+  assert.match(odd, RESULT_RE);
+  assert.ok(/\| map miamix \| mem n\/a \| slowsys ab 1\.0 ms \|/.test(odd), odd);
   assert.ok(!/[\u2013\u2014\n]/.test(line + none), 'no dashes, no newline');
 });
 
@@ -96,8 +101,9 @@ test('a short check runs: drives the route, fights, blasts, plays the eight soun
   assert.equal(game.audio.station, 'off');
   run.mark(3, true);
   run.mark(7, true);
-  const line = formatResult(run.result({ version: '0.5.0', w: 915, h: 412, insets: { l: 0, r: 0, t: 0, b: 0 }, scale: 1 }));
+  const line = formatResult(run.result({ version: '0.5.0', w: 915, h: 412, insets: { l: 0, r: 0, t: 0, b: 0 }, scale: 1, startMs: 3200, map: 'miami', memMb: 160 }));
   assert.match(line, RESULT_RE);
+  assert.ok(line.includes('| start 3.2 s | map miami | mem 160 MB | slowsys '), line);
   assert.ok(line.endsWith('bad 3,7'), line);
   assert.ok(/median 1\d\.\d ms worst 2\d\.\d ms \| over33 0/.test(line), line);
   run.finish();
@@ -160,4 +166,23 @@ test('finish never puts the player back in a car that was removed meanwhile', ()
   assert.equal(run2.start(), true);
   run2.finish();
   assert.equal(game2.player.vehicle, own2, 'back in the car left at the start');
+});
+
+test('the system timer names the slowest single call and puts the methods back', () => {
+  let t = 0;
+  const ran = [];
+  const a = { name: 'traffic', fixedUpdate(dt) { ran.push('a'); t += 2; return dt; } };
+  const b = { name: 'parked', fixedUpdate() { ran.push('b'); t += 7; }, always() { t += 1; } };
+  const c = { name: 'phonecheck', fixedUpdate() { t += 50; } };
+  const origA = a.fixedUpdate, origC = c.fixedUpdate;
+  const timer = createSystemTimer([a, b, c], () => t);
+  timer.start();
+  timer.start(); // a second start does not wrap twice
+  a.fixedUpdate(1); b.fixedUpdate(1); b.always(1); c.fixedUpdate(1);
+  assert.deepEqual(ran, ['a', 'b']);
+  assert.deepEqual(timer.worst(), { name: 'parked', ms: 7 });
+  timer.stop();
+  assert.equal(a.fixedUpdate, origA);
+  assert.equal(c.fixedUpdate, origC);
+  assert.deepEqual(createSystemTimer(null).worst(), { name: '', ms: 0 });
 });

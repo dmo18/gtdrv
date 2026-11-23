@@ -66,3 +66,24 @@ test('build budget: no stage regresses against the calibration', () => {
   }
   assert.deepEqual(bad, [], `stages over budget: ${bad.join(', ')}`);
 });
+
+// Per region (docs/PLAN_V2.md 3.7): each region built from its own data
+// file, against the same calibration (scripts/city-build-bench.mjs
+// --ratio), best of two cold runs. Measured 2026-11-23: Downtown 8.0 to
+// 9.3, the others 5.5 to 6.2; limits about 1.7 times the slowest.
+const bench = fileURLToPath(new URL('../scripts/city-build-bench.mjs', import.meta.url));
+const REGION_LIMIT = { 'miami-downtown': 16, 'miami-beach': 11, 'miami-north': 11, 'miami-west': 11, 'miami-south': 11 };
+test('build budget: each region / calibration', () => {
+  const bad = [], seen = [];
+  for (const [id, limit] of Object.entries(REGION_LIMIT)) {
+    let best = Infinity;
+    for (let k = 0; k < 2; k++) {
+      const r = spawnSync(process.execPath, [bench, '--ratio', '--region', id], { encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(r.stderr);
+      best = Math.min(best, ratioOf(JSON.parse(r.stdout.trim().split('\n').pop())));
+    }
+    seen.push(`${id} ${best.toFixed(1)}`);
+    if (best >= limit) bad.push(`${id} ${best.toFixed(2)} (limit ${limit})`);
+  }
+  assert.deepEqual(bad, [], `regions over budget: ${bad.join(', ')} (all: ${seen.join(', ')})`);
+});

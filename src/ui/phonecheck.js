@@ -41,15 +41,58 @@ export function frameStats(ms) {
 }
 
 // One line, plain ASCII: version, screen size and insets, median and worst frame
-// time, frames over 33 ms, the lowest adaptive resolution scale, fullscreen, bad sounds.
+// time, frames over 33 ms, the lowest adaptive resolution scale, the start time
+// (page load to running), the map id, script heap in MB, the system with the
+// slowest single step, fullscreen, bad sounds. A field that is not known prints n/a.
+const ID_CLEAN = /[^A-Za-z0-9_.]/g;
 export function formatResult(r) {
   const ins = r.insets || { l: 0, r: 0, t: 0, b: 0 };
   const bad = r.bad && r.bad.length ? r.bad.slice().sort((a, b) => a - b).join(',') : 'none';
+  const start = r.startMs > 0 ? `${(r.startMs / 1000).toFixed(1)} s` : 'n/a';
+  const map = String(r.map || '').replace(ID_CLEAN, '') || 'n/a';
+  const mem = r.memMb > 0 ? `${Math.round(r.memMb)} MB` : 'n/a';
+  const sysName = String((r.worstSystem && r.worstSystem.name) || '').replace(ID_CLEAN, '');
+  const sys = sysName ? `${sysName} ${(r.worstSystem.ms || 0).toFixed(1)} ms` : 'n/a';
   return `RW ${r.version || 'dev'} | ${Math.round(r.w)}x${Math.round(r.h)} inset L${Math.round(ins.l)} R${Math.round(ins.r)} T${Math.round(ins.t)} B${Math.round(ins.b)}`
     + ` | median ${r.median.toFixed(1)} ms worst ${r.worst.toFixed(1)} ms | over33 ${r.over33} | res ${r.scale.toFixed(2)}`
+    + ` | start ${start} | map ${map} | mem ${mem} | slowsys ${sys}`
     + ` | fullscreen ${r.fullscreen ? 'yes' : 'no'} | bad ${bad}`;
 }
-export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*)$/;
+export const RESULT_RE = /^RW \S+ \| \d+x\d+ inset L\d+ R\d+ T\d+ B\d+ \| median \d+\.\d ms worst \d+\.\d ms \| over33 \d+ \| res \d+\.\d\d \| start (\d+\.\d s|n\/a) \| map ([A-Za-z0-9_.]+|n\/a) \| mem (\d+ MB|n\/a) \| slowsys ([A-Za-z0-9_.]+ \d+\.\d ms|n\/a) \| fullscreen (yes|no) \| bad (none|[1-8](,[1-8])*)$/;
+
+// Times each system's own calls (fixedUpdate and always) while a check runs and
+// remembers the slowest single call. It wraps the methods in place at start()
+// and puts them back at stop(); the wrappers allocate nothing per call.
+export function createSystemTimer(systems, now) {
+  const clock = now || (() => (typeof performance !== 'undefined' ? performance.now() : 0));
+  const saved = [];
+  const worst = { name: '', ms: 0 };
+  return {
+    start() {
+      if (saved.length || !systems) return;
+      for (const s of systems) {
+        if (!s || !s.name || s.name === 'phonecheck') continue;
+        for (const key of ['fixedUpdate', 'always']) {
+          const f = s[key];
+          if (typeof f !== 'function') continue;
+          saved.push([s, key, f]);
+          s[key] = function timed(dt) {
+            const t = clock();
+            try { return f.call(s, dt); } finally {
+              const d = clock() - t;
+              if (d > worst.ms) { worst.ms = d; worst.name = s.name; }
+            }
+          };
+        }
+      }
+    },
+    stop() {
+      for (let i = saved.length - 1; i >= 0; i--) saved[i][0][saved[i][1]] = saved[i][2];
+      saved.length = 0;
+    },
+    worst: () => ({ name: worst.name, ms: worst.ms }),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The route: from the node nearest the start, always the edge that turns least
@@ -138,7 +181,7 @@ export function createCheckRun(game, opts = {}) {
   const run = {
     phase: 'idle', t: 0, sound: -1, car: null, frames, bad, source: src, minScale: 99, fullscreen: false, error: '', fixtures: 0,
   };
-  let saved = null, driver = null, fixtureCars = null, firing = 0, fought = false, blasted = false, prevStation = null, lastSound = -1;
+  let saved = null, sysTimer = null, driver = null, fixtureCars = null, firing = 0, fought = false, blasted = false, prevStation = null, lastSound = -1;
   const ev = () => game.events;
   const emit = (name, payload) => { try { if (ev() && ev().emit) ev().emit(name, payload); } catch { /* a missing hook is fine */ } };
   const safe = (fn) => { try { return fn(); } catch { return undefined; } };
@@ -166,6 +209,8 @@ export function createCheckRun(game, opts = {}) {
     run.route = route;
     run.phase = 'drive';
     run.t = 0;
+    sysTimer = createSystemTimer(game.systems);
+    sysTimer.start();
     run.fullscreen = typeof document !== 'undefined' && !!document.fullscreenElement;
     return true;
   };
@@ -266,12 +311,15 @@ export function createCheckRun(game, opts = {}) {
       median: st.median, worst: st.worst, over33: st.over33,
       scale: run.minScale === 99 ? (env.scale ?? 1) : run.minScale,
       fullscreen: run.fullscreen || !!env.fullscreen, bad: [...bad],
+      startMs: env.startMs, map: env.map, memMb: env.memMb,
+      worstSystem: sysTimer ? sysTimer.worst() : (run.lastWorst || null),
     };
   };
 
   // Put everything back: the test car and its fixtures go, the player returns.
   run.finish = function finish() {
     if (run.phase === 'idle') return;
+    if (sysTimer) { run.lastWorst = sysTimer.worst(); sysTimer.stop(); sysTimer = null; }
     src.steer = src.throttle = src.brake = 0; src.handbrake = false;
     if (game.input) game.input.release('fire');
     if (lastSound >= 0 && lastSound < SOUNDS.length) endSound(lastSound);
@@ -339,9 +387,25 @@ export function createPhoneCheck(game, root, opts = {}) {
     probe.remove();
     return o;
   }
+  // Page load to running: game.startMs or window.__rwStartMs when main.js sets one,
+  // else the 'rw-running' performance mark. 0 when none exists (printed as n/a).
+  function startMs() {
+    if (game.startMs > 0) return game.startMs;
+    if (typeof window !== 'undefined' && window.__rwStartMs > 0) return window.__rwStartMs;
+    try {
+      const m = performance.getEntriesByName('rw-running', 'mark');
+      if (m.length) return m[0].startTime;
+    } catch { /* not available */ }
+    return 0;
+  }
+  function memoryMb() {
+    const m = typeof performance !== 'undefined' ? performance.memory : null;
+    return m && m.usedJSHeapSize > 0 ? m.usedJSHeapSize / 1048576 : 0;
+  }
   const env = () => ({
     version: version(), w: window.innerWidth, h: window.innerHeight, insets: insets(),
     scale: game.graphics && game.graphics.res ? game.graphics.res.scale : 1, fullscreen: !!document.fullscreenElement,
+    startMs: startMs(), map: game.city && game.city.map, memMb: memoryMb(),
   });
   const el = (tag, cls, parent, text) => {
     const e = document.createElement(tag);
