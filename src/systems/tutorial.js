@@ -1,6 +1,19 @@
-// Short first-time hints. Each one is shown once, the first time the
-// player is in that situation, and remembered in the saved progress.
+// The first five minutes (docs/LOOP.md section e), then the short
+// first-time hints. The intro leads a new player through five beats with
+// one short line each (9 words at most) and the GPS on the next gate: a
+// traffic run, a first medal, the police and an escape, a ramp, a garage.
+// Every beat waits for what the player actually does, so it can be done in
+// any order and at any pace; Pause, Skip intro ends it and Replay intro
+// starts it again (`game.tutorial`). The step is kept in the save
+// (progress.loop.intro). No text walls: one line at a time in the top
+// stack, never while another of its lines is still up.
+//
+// After (or without) the intro: the old hints, each shown once, the first
+// time the player is in that situation.
 // One line each (docs/REVAMP.md 6.12): about 36 characters fit the narrowest hint row.
+import { loopOf } from '../core/records.js';
+import { nearestEvent } from '../world/eventspots.js';
+
 const HINTS = {
   car: ['Hold GAS to drive.', 'Steer with the wheel on the left.', 'Tap EXIT to get out of the car.', 'Walk up to a car and tap ENTER.'],
   foot: ['Left stick to walk.', 'Drag the right side to look around.', 'Hold FIRE to shoot. LOCK sticks to a target.', 'SWAP changes weapon.', 'Boats wait at the piers.', 'Aircraft are at Gullwing Airfield.'],
@@ -13,6 +26,29 @@ const HINTS = {
   tank: ['Left stick drives. Push sideways to pivot.', 'Drag the right side to aim the turret.', 'Tap CANNON for a shell, hold COAX.', 'LOCK swings the turret onto a target.'], // task 32
 };
 const FIRST = ['Open the map (top right) for races.', 'Stop in a glowing marker, tap START.'];
+
+// The intro's beats and lines (US English, 9 words at most each).
+export const INTRO_STEPS = ['run', 'medal', 'police', 'ramp', 'garage'];
+export const INTRO_LINES = {
+  run: 'Hold GAS. Drive through the blue gate.',
+  runOn: 'Pass close. Every pass counts.',
+  medalMiss: 'No medal yet. Tap RETRY.',
+  medal: 'First medal! Gates glow on the map.',
+  police: 'Red gate next: it calls the police.',
+  wanted: 'Police! Break their line of sight.',
+  escaped: 'You lost them. That pays big.',
+  ramp: 'Purple gate: hit the ramp fast.',
+  air: 'Brake flips, steer rolls. Land flat.',
+  garage: 'Last stop: a garage. Paint is free.',
+  done: 'You are set. Three dailies wait in Pause.',
+  bank: 'Stop anywhere to bank your flow.',
+  tier: 'Flow x2: everything pays double.',
+};
+export const INTRO_REPEAT_S = 35; // a beat's line comes again after this long without progress
+export const INTRO_GAP_S = 5; // seconds between two intro lines
+export const GARAGE_NEAR = 40; // m from the garage that ends the last beat
+const words = (s) => s.split(/\s+/).filter(Boolean).length;
+export const INTRO_MAX_WORDS = Math.max(...Object.values(INTRO_LINES).map(words));
 
 export function createTutorial(game) {
   const queue = [];
@@ -33,11 +69,128 @@ export function createTutorial(game) {
     // A real map words the craft hints for itself, one sentence per line.
     if (list && mode === 'foot' && texts.craft) list = list.slice(0, 4).concat(String(texts.craft).split(/(?<=[.!?])\s+/));
     if (!list || seen(mode)) return;
+    // While the intro runs it says how to drive itself; the car hints wait for its end.
+    if (introOn() && mode === 'car') return;
     mark(mode);
     for (const text of list) queue.push(text);
-    if (!seen('first')) {
+    if (!seen('first') && !introOn()) {
       mark('first');
       for (const text of FIRST) queue.push(text);
+    }
+  }
+
+  // ---- the first five minutes ----
+  const se = () => game.streetEvents || null;
+  const intro = () => loopOf(game.progress).intro;
+  const introOn = () => !!se() && se().list.length > 0 && !intro().done;
+  let lineGap = 0, sinceLine = 99, said = '';
+  let pending = ''; // a line waiting for its turn
+  let saidBank = false, saidTier = false, saidWanted = false;
+  let target = null; // what the GPS is on for this beat
+  const GAR = { x: 0, z: 0, name: 'Garage' };
+  const hudToast = (text) => { if (game.hud && game.hud.toast) game.hud.toast(text, 5, 'objective'); };
+  function say(key) {
+    pending = INTRO_LINES[key] || '';
+  }
+  function setStep(n) {
+    const it = intro();
+    it.step = n;
+    if (n >= INTRO_STEPS.length) it.done = true;
+    game.events.emit('progress');
+    aim();
+  }
+  // Point the GPS at this beat's gate (or garage).
+  function aim() {
+    const s = se();
+    if (!s) return;
+    const p = game.player;
+    const step = INTRO_STEPS[intro().step];
+    target = null;
+    beatLabel = '';
+    if (!introOn()) { s.track(null); return; }
+    if (step === 'run' || step === 'medal') target = nearestEvent(s.list, p.x, p.z, 'miss');
+    else if (step === 'police') target = s.list.find((e) => e.tpl === 'heat' && e.level === 1) || nearestEvent(s.list, p.x, p.z, 'heat');
+    else if (step === 'ramp') target = nearestEvent(s.list, p.x, p.z, 'jump');
+    else if (step === 'garage') {
+      let best = null, bd = Infinity;
+      for (const g of (game.city && game.city.garages) || []) {
+        const at = g.door || g;
+        const d = Math.hypot(at.x - p.x, at.z - p.z);
+        if (d < bd) { bd = d; best = at; }
+      }
+      if (best) { GAR.x = best.x; GAR.z = best.z; target = GAR; }
+    }
+    s.track(step === 'medal' ? null : target); // during the first run and its RETRY offer the GPS stays quiet
+  }
+  function finish() {
+    setStep(INTRO_STEPS.length);
+    say('done');
+  }
+  const stepName = () => INTRO_STEPS[intro().step] || '';
+
+  game.events.on('streetEventStart', (ev) => {
+    if (!introOn()) return;
+    if (stepName() === 'run' && ev.tpl === 'miss') { setStep(1); say('runOn'); }
+  });
+  game.events.on('streetEventEnd', (r) => {
+    if (!introOn()) return;
+    const st = stepName();
+    if ((st === 'run' || st === 'medal') && r.medal) { setStep(2); say('medal'); lineGap = 6; pendingNext = 'police'; } else if (st === 'medal' && !r.medal) say('medalMiss');
+    else if (st === 'ramp' && r.tpl === 'jump' && r.result === 'done') { setStep(4); say('air'); pendingNext = 'garage'; }
+  });
+  game.events.on('policeEscaped', () => {
+    if (!introOn()) return;
+    if (stepName() === 'police') { setStep(3); say('escaped'); pendingNext = 'ramp'; }
+  });
+  game.events.on('stunt', (e) => {
+    if (!introOn() || stepName() !== 'ramp' || !e || !e.ok) return;
+    const v = game.player.vehicle;
+    if (v && v.air && v.air.spot === e.spot && !v.air.on) { setStep(4); say('air'); pendingNext = 'garage'; }
+  });
+  game.events.on('garageFound', () => { if (introOn() && stepName() === 'garage') finish(); });
+  game.events.on('progressReset', () => { said = ''; pending = ''; pendingNext = ''; saidBank = saidTier = saidWanted = false; target = null; started = false; });
+  let pendingNext = ''; // the next beat's line, said after the line that closed the last beat
+  let started = false;
+  let beatLabel = ''; // the beat line the GPS goal carries
+
+  function stepIntro(dt) {
+    const s = se();
+    const p = game.player;
+    if (!started) {
+      started = true;
+      // A fresh start: the queue at the first light makes room.
+      if (intro().step === 0 && s.clearAhead) s.clearAhead(90);
+      aim();
+      say(stepName() === 'medal' ? 'run' : stepName());
+    }
+    sinceLine += dt;
+    if (lineGap > 0) lineGap -= dt;
+    const st = stepName();
+    // Things the player ran into by themselves.
+    const stars = game.police ? game.police.stars : 0;
+    if (stars > 0 && !saidWanted && !pending && intro().step >= 1) { saidWanted = true; say('wanted'); }
+    if (game.flow && !pending && !s.active) {
+      if (!saidTier && game.flow.tier >= 2) { saidTier = true; say('tier'); }
+      else if (!saidBank && game.flow.run >= 400 && stars === 0 && intro().step >= 2) { saidBank = true; say('bank'); }
+    }
+    if (st === 'garage' && target && Math.hypot(target.x - p.x, target.z - p.z) < GARAGE_NEAR) finish();
+    // The GPS follows the beat (a retry or an event start clears the tracked gate).
+    if (target && !s.active && s.tracked !== target && (st !== 'medal' || !(s.retryLeft > 0))) s.track(target, beatLabel);
+    // One line at a time.
+    if (!pending && pendingNext && lineGap <= 0 && sinceLine >= INTRO_GAP_S) { pending = INTRO_LINES[pendingNext] || ''; pendingNext = ''; }
+    if (!pending && !pendingNext && sinceLine >= INTRO_REPEAT_S && !s.active && stars === 0) pending = INTRO_LINES[st === 'medal' ? 'run' : st] || '';
+    if (pending && sinceLine >= (said ? INTRO_GAP_S : 0)) {
+      const beat = pending === INTRO_LINES[st === 'medal' ? 'run' : st];
+      said = pending;
+      pending = '';
+      sinceLine = 0;
+      // A beat's own line rides on the GPS goal (the objective shows its
+      // label once, in the same row); every other line is a line of its own.
+      if (beat && target && s.tracked === target && !s.active) {
+        if (beatLabel === said) hudToast(said);
+        beatLabel = said;
+        s.track(target, said);
+      } else hudToast(said);
     }
   }
 
@@ -49,18 +202,51 @@ export function createTutorial(game) {
     if (v && v.spec && (v.spec.id === 'fighter' || v.spec.id === 'patrolheli')) offer(v.spec.id);
   });
 
-  return {
+  const sys = {
     name: 'tutorial',
+    get introOn() { return introOn(); },
+    get introStep() { return introOn() ? stepName() : ''; },
+    get lastLine() { return said; },
+    // Pause, Skip intro: no more lines, the GPS lets go.
+    skip() {
+      if (!se()) return;
+      intro().step = INTRO_STEPS.length;
+      intro().done = true;
+      pending = pendingNext = '';
+      target = null;
+      se().track(null);
+      game.events.emit('progress');
+    },
+    // Pause, Replay intro: from the first beat, from wherever the player is.
+    replay() {
+      if (!se()) return;
+      intro().step = 0;
+      intro().done = false;
+      said = pending = pendingNext = '';
+      saidBank = saidTier = saidWanted = false;
+      started = false;
+      sinceLine = 99;
+      game.events.emit('progress');
+    },
     fixedUpdate(dt) {
+      // Nothing while the title screen still shows (the simulation runs behind it).
+      if (game.titleCam && game.titleCam.active) return;
+      if (introOn()) {
+        const mode = game.player.mode;
+        if (mode === 'car' || mode === 'foot') stepIntro(dt);
+      }
       if (wait === 2.5 && queue.length === 0) offer(game.player.mode);
       wait -= dt;
       if (wait > 0 || queue.length === 0) return;
-      // Hold hints back while a race is running.
+      // Hold hints back while a race or a street event is running.
       if (game.activities && game.activities.active) return;
+      if (se() && se().active) return;
       // Hints keep to their own queue while wanted or just after a police toast.
       if (game.hud.canHint && !game.hud.canHint()) return;
       game.hud.toast(queue.shift(), 4.5, 'hint');
       wait = 5.5;
     },
   };
+  game.tutorial = sys;
+  return sys;
 }

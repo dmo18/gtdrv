@@ -28,6 +28,10 @@ import { PRESETS, VERDICTS } from './handlingpreset.js';
 import { SECRET_IDS, emptySecrets, secretsDone } from '../world/secrets.js';
 import { regionFor, regionOfPoint, inRegion, DEFAULT_REGION } from '../world/regions.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
+import { kindOfSpec } from './garage.js';
+import { defaultLoop, REGION_SLUGS, TOTAL_KEYS, BEST_KEYS as LOOP_BEST_KEYS, EVENT_ID, MAX_EVENTS, MAX_DRIVEN, MAX_VALUE } from './records.js';
+import { sanitizeLook, isDefaultLook, MAX_LOOKS } from './custom.js';
+import { validDay } from './daily.js';
 
 export const SAVE_KEY = 'rustwater.save.v1';
 export const SAVE_VERSION = 3;
@@ -63,6 +67,10 @@ export function defaultProgress() {
     session: null, // last place, craft and garage (null = new game)
     mapSessions: {}, // the same for maps not being played: { mapId: session }
     secrets: emptySecrets(), // { found: [ids], ghostwake: bool }
+    // The loop (docs/LOOP.md): event medals, flow records, totals, the daily
+    // three, the first five minutes and the looks. Added without a new
+    // version: saves that lack it load with an empty one.
+    loop: defaultLoop(),
     settings: {
       master: 0.8, invertPitch: false, leftHanded: false, quality: 1, police: true,
       steering: 'wheel', steerSensitivity: 1, handling: 'arcade', hud: 'minimal',
@@ -127,6 +135,67 @@ export function sanitizeSecrets(src) {
   return out;
 }
 
+// The loop record (core/records.js defaultLoop): rebuilt field by field.
+// Event ids must match the id pattern, regions and total keys are allow
+// lists, vehicle classes must be known car specs, looks are whole numbers
+// in range; everything is capped and unknown keys are dropped.
+const EVENT_MEDALS = ['', 'bronze', 'silver', 'gold'];
+export function sanitizeLoop(raw) {
+  const out = defaultLoop();
+  if (!isObj(raw)) return out;
+  if (isObj(raw.events)) {
+    let scanned = 0, n = 0;
+    for (const k in raw.events) {
+      if (++scanned > MAX_SCAN || n >= MAX_EVENTS) break;
+      if (!own(raw.events, k) || !EVENT_ID.test(k)) continue;
+      const v = raw.events[k];
+      if (!isObj(v)) continue;
+      const m = EVENT_MEDALS.includes(v.m) ? v.m : '';
+      const b = isNum(v.b) && v.b >= 0 && v.b <= 100000 ? Math.round(v.b * 100) / 100 : NaN;
+      // a medal needs a best value; JSON turns NaN into null, which reads back as no best
+      out.events[k] = { m: Number.isFinite(b) ? m : '', b, n: Math.floor(clampNum(v.n, 99999)) };
+      n++;
+    }
+  }
+  for (const key of ['flow', 'dist']) {
+    if (!isObj(raw[key])) continue;
+    for (const s of REGION_SLUGS) {
+      if (own(raw[key], s) && isNum(raw[key][s]) && raw[key][s] > 0) out[key][s] = Math.min(key === 'dist' ? 1e12 : MAX_VALUE, key === 'dist' ? raw[key][s] : Math.floor(raw[key][s]));
+    }
+  }
+  if (isObj(raw.totals)) for (const k of TOTAL_KEYS) if (own(raw.totals, k)) out.totals[k] = Math.floor(clampNum(raw.totals[k], MAX_VALUE));
+  if (isObj(raw.best)) for (const k of LOOP_BEST_KEYS) if (own(raw.best, k)) out.best[k] = Math.round(clampNum(raw.best[k], 100000) * 10) / 10;
+  if (Array.isArray(raw.driven)) {
+    const n = Math.min(raw.driven.length, MAX_SCAN);
+    for (let i = 0; i < n && out.driven.length < MAX_DRIVEN; i++) {
+      const id = raw.driven[i];
+      if (typeof id === 'string' && kindOfSpec(id) && !out.driven.includes(id)) out.driven.push(id);
+    }
+  }
+  if (isObj(raw.daily)) {
+    const d = raw.daily;
+    if (validDay(d.day)) out.daily.day = d.day;
+    if (Array.isArray(d.done) && out.daily.day) for (let i = 0; i < 3; i++) out.daily.done[i] = d.done[i] === true;
+    out.daily.streak = Math.floor(clampNum(d.streak, 99999));
+  }
+  if (isObj(raw.intro)) {
+    out.intro.done = raw.intro.done === true;
+    out.intro.step = Number.isInteger(raw.intro.step) && raw.intro.step >= 0 && raw.intro.step <= 9 ? raw.intro.step : 0;
+  }
+  if (isObj(raw.looks)) {
+    let scanned = 0, n = 0;
+    for (const k in raw.looks) {
+      if (++scanned > MAX_SCAN || n >= MAX_LOOKS) break;
+      if (!own(raw.looks, k) || kindOfSpec(k) !== 'car') continue;
+      const l = sanitizeLook(raw.looks[k]);
+      if (isDefaultLook(l)) continue;
+      out.looks[k] = l;
+      n++;
+    }
+  }
+  return out;
+}
+
 export function sanitizeProgress(raw) {
   const p = defaultProgress();
   try {
@@ -140,6 +209,7 @@ export function sanitizeProgress(raw) {
     if (own(raw, 'session')) p.session = sanitizeSession(raw.session);
     if (own(raw, 'mapSessions')) p.mapSessions = sanitizeMapSessions(raw.mapSessions);
     if (own(raw, 'secrets')) p.secrets = sanitizeSecrets(raw.secrets);
+    if (own(raw, 'loop')) p.loop = sanitizeLoop(raw.loop);
     p.medals = readMap(raw.medals, (v) => (MEDALS.includes(v) ? v : undefined));
     p.bestTimes = readMap(raw.bestTimes, (v) => (
       isNum(v) && v > 0 && v < 86400 ? v : undefined));

@@ -104,16 +104,46 @@ const RUN = 24;
 export function lotGround(city, B, i0, i1, j0, j1) {
   const G = city.lotGrid;
   if (!G || !city.lots) return 0;
-  const { x0, z0, cell, w, type } = G;
+  // (The ground a lot cell shows is lotGrid.ground where the grid has one:
+  // the lot's own type but for the middle of a wide median, lawn.)
+  const { x0, z0, cell, w, type } = G, show = G.ground || type;
   let quads = 0;
   for (let j = j0; j < j1; j++) {
     const za = z0 + j * cell, zb = za + cell;
     let i = i0;
     while (i < i1) {
-      const t = type[j * w + i], g = GROUND_BY_T[t];
+      const g = GROUND_BY_T[type[j * w + i]] ? GROUND_BY_T[show[j * w + i]] : null;
       if (!g) { i++; continue; }
       let e = i + 1;
-      while (e < i1 && e - i < RUN && GROUND_BY_T[type[j * w + e]] === g) e++;
+      while (e < i1 && e - i < RUN && GROUND_BY_T[type[j * w + e]] && GROUND_BY_T[show[j * w + e]] === g) e++;
+      const xa = x0 + i * cell, xb = x0 + e * cell;
+      B[g.key].at((xa + xb) / 2, (za + zb) / 2).flat(xa, za, xb, zb, LOT_Y, g.col);
+      quads++;
+      i = e;
+    }
+  }
+  return quads;
+}
+
+// The fringe of the lot ground, over the same cell range: the cells in no
+// lot that lotGrid.ground gives a neighbor's ground (world/lots.js
+// spreadGround: the setback band beside every road, under sidewalks and
+// strips). Same height, color and picture as the lot ground beside it, so
+// the two are one surface that ends under the real sidewalk or curb.
+export function lotFringe(city, B, i0, i1, j0, j1) {
+  const G = city.lotGrid;
+  if (!G || !city.lots || !G.ground) return 0;
+  const { x0, z0, cell, w, type, ground } = G;
+  let quads = 0;
+  for (let j = j0; j < j1; j++) {
+    const za = z0 + j * cell, zb = za + cell;
+    let i = i0;
+    while (i < i1) {
+      const k = j * w + i;
+      const g = GROUND_BY_T[type[k]] ? null : GROUND_BY_T[ground[k]];
+      if (!g) { i++; continue; }
+      let e = i + 1;
+      while (e < i1 && e - i < RUN && !GROUND_BY_T[type[j * w + e]] && GROUND_BY_T[ground[j * w + e]] === g) e++;
       const xa = x0 + i * cell, xb = x0 + e * cell;
       B[g.key].at((xa + xb) / 2, (za + zb) / 2).flat(xa, za, xb, zb, LOT_Y, g.col);
       quads++;
@@ -135,16 +165,18 @@ const T_CARPARK = LOT_TYPES.indexOf('carpark') + 1;
 export function lotEdges(city, B, i0, i1, j0, j1) {
   const G = city.lotGrid;
   if (!G || !city.lots) return 0;
-  const { x0, z0, cell, w, h, id, type } = G;
+  // (A neighbor is judged by its drawn ground: no edging where a lawn
+  // runs on under the sidewalk.)
+  const { x0, z0, cell, w, h, id, type } = G, ground = G.ground || G.type;
   let strips = 0;
   // Which edge cell k shows toward neighbor cell n (-1 off the grid):
   // 1 lawn edge, 4 parking lot curb, 0 none.
   const edgeOf = (k, n) => {
-    const g = GROUND_BY_T[type[k]];
+    const g = GROUND_BY_T[type[k]] ? GROUND_BY_T[ground[k]] : null;
     if (!g) return 0;
-    const o = n < 0 ? null : GROUND_BY_T[type[n]];
+    const o = n < 0 ? null : GROUND_BY_T[ground[n]];
     if (g.key === 'grass') return o && o.key === 'grass' ? 0 : 1;
-    if (type[k] === T_CARPARK) return o && o.key === 'asphalt' ? 0 : 4;
+    if (ground[k] === T_CARPARK) return o && o.key === 'asphalt' ? 0 : 4;
     return 0;
   };
   // side: 0 north (-z), 1 south (+z), 2 west (-x), 3 east (+x).
@@ -210,6 +242,8 @@ const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 // Leaf colors of hedges, shrubs and beds; a bed now and then flowers.
 const SHRUB_GREENS = [0x3f6c32, 0x4a7a3a, 0x3a6230, 0x52803e, 0x44703a];
 const FLOWERS = [0xc8507a, 0xe07a3a, 0xd8c040, 0xb05ab0];
+// Planting beds: shrubs every BED_PITCH m on a strip of mulch.
+const BED_PITCH = 2.2, MULCH = 0x5a4a3a, MULCH_Y = EDGE_Y + 0.01;
 const DUMPSTERS = [0x2f5a3c, 0x2a4a6a, 0x4a4e52];
 const FLAGS = [0x2a4a8a, 0xb83a30, 0xf2f0ea, 0x2f7a50];
 
@@ -341,10 +375,45 @@ const _cl = {
 // beside it, in one of the leaf greens.
 function shrubMound(B, x, z, y, r, h, v, rot) {
   const col = SHRUB_GREENS[v % SHRUB_GREENS.length];
-  const hh = Math.min(1.2, h);
-  // One mound, its upper half and a little more (the rest is under the ground).
-  B.blob(x, y + hh * 0.3, z, r, hh * 0.7, r * 0.92, col, 6, 4, 0.62, 1.1);
+  mound(B, x, z, y, r, Math.min(1.2, h), col, 0, cellHash(Math.round(x * 4), Math.round(z * 4)));
   void rot;
+}
+
+// A low dome of leaves, in facets like the tree crowns: a five-sided
+// skirt at the ground, a smaller ring at two thirds of the height turned
+// half a side, an apex (15 triangles). Dark at the foot, light on top; q
+// (0..1) turns it and nudges its ring, so no two in a row are alike.
+// `tip`: the color of the top (a bed in flower), 0 for the leaf color.
+const MOUND_N = 5;
+function mound(B, x, z, y, r, h, col, tip, q) {
+  const nv = 2 * MOUND_N + 1;
+  B.ensure(nv, MOUND_N * 9);
+  const base = B.count, rot = q * 6.283;
+  _cl.setHex(col, THREE_SRGB);
+  const cr = _cl.r, cg = _cl.g, cb = _cl.b;
+  for (let i = 0; i < MOUND_N; i++) {
+    const a = rot + (i / MOUND_N) * 6.283, ca = Math.cos(a), sa = Math.sin(a);
+    B._vert(base + i, x + ca * r, y, z + sa * r, cr * 0.5, cg * 0.5, cb * 0.5, ca * 0.93, 0.37, sa * 0.93);
+    const b = a + 3.1416 / MOUND_N, cb2 = Math.cos(b), sb = Math.sin(b);
+    const k = 0.62 + 0.16 * cellHash(Math.round(q * 977) + i, i * 7 + Math.round(x * 3));
+    B._vert(base + MOUND_N + i, x + cb2 * r * k, y + h * (0.6 + 0.12 * k), z + sb * r * k, cr * 0.92, cg * 0.92, cb * 0.92, cb2 * 0.6, 0.8, sb * 0.6);
+  }
+  if (tip) _cl.setHex(tip, THREE_SRGB);
+  const tk = tip ? 1 : 1.12;
+  B._vert(base + 2 * MOUND_N, x, y + h, z, _cl.r * tk, _cl.g * tk, _cl.b * tk, 0, 1, 0);
+  if (B.U) B.U.fill(0, base * 2, (base + nv) * 2);
+  B.count = base + nv;
+  const I = B.I;
+  let n = B.ni;
+  for (let i = 0; i < MOUND_N; i++) {
+    const j = (i + 1) % MOUND_N, a0 = base + i, a1 = base + j, b0 = base + MOUND_N + i, b1 = base + MOUND_N + j;
+    // (Counterclockwise seen from outside, y up, the angle growing from +x to +z.)
+    I[n] = a0; I[n + 1] = b0; I[n + 2] = a1;
+    I[n + 3] = a1; I[n + 4] = b0; I[n + 5] = b1;
+    I[n + 6] = b0; I[n + 7] = base + 2 * MOUND_N; I[n + 8] = b1;
+    n += 9;
+  }
+  B.ni = n;
 }
 
 // Draws the features of one lot into the builders of C (props, detail,
@@ -387,7 +456,23 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const L = Math.max(1, 2 * hl), Wd = Math.max(0.8, 2 * hw);
         const curb = f.h > 0.05 ? f.h : 0;
         if (curb) P.obox(x, z, hl, hw, y, y + curb, h, 0xcdc6b8, 0x5e4a36, 0.7, 1);
-        softStrip(P, x, z, h, L - (curb ? 0.3 : 0), Wd - (curb ? 0.35 : -0.4), y + curb, curb ? 0.55 : 0.7, SHRUB_GREENS[f.v % SHRUB_GREENS.length], 2.4, 1, (f.v + Math.round(x)) % 3 === 0 ? 1 : 0);
+        else if (C.ground) {
+          // On a lawn: a strip of dark mulch under the shrubs.
+          const ml = hl + 0.2, mw = hw + 0.25;
+          orientedQuad(C.ground.at(x, z), x - ca * ml - sa * mw, z - sa * ml + ca * mw, x + ca * ml - sa * mw, z + sa * ml + ca * mw,
+            x + ca * ml + sa * mw, z + sa * ml - ca * mw, x - ca * ml + sa * mw, z - sa * ml - ca * mw, MULCH_Y, MULCH);
+        }
+        // Shrubs of two sizes, a big one and a small one in turn, with
+        // room between: a planted row, not one long roll.
+        const nm = Math.max(2, Math.round(L / BED_PITCH)), bloom = (f.v + Math.abs(Math.round(x))) % 3 === 0;
+        for (let k = 0; k < nm; k++) {
+          const t = ((k + 0.5) / nm - 0.5) * (L - 0.4);
+          const px = x + ca * t, pz = z + sa * t, q = cellHash(Math.round(px * 3), Math.round(pz * 3));
+          const big = (k + (f.v & 1)) % 2 === 0, r = Math.min(0.95, (Wd / 2) * (big ? 1.05 : 0.72) * (0.9 + 0.2 * q));
+          const o = (q - 0.5) * 0.3;
+          mound(P, px - sa * o, pz + ca * o, y + curb, r, (curb ? 0.5 : 0.62) * (big ? 1 : 0.7) * (0.9 + 0.25 * q) + (curb ? 0 : 0.08),
+            SHRUB_GREENS[(f.v + k) % SHRUB_GREENS.length], bloom && q > 0.55 ? FLOWERS[(f.v + k) % FLOWERS.length] : 0, q);
+        }
         break;
       }
       case 'wall': {
@@ -455,7 +540,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         else stamps.tree(x, z, y, f.h || 6, cellHash(Math.round(x * 4) + f.v, Math.round(z * 4)));
         break;
       case 'shrub':
-        shrubMound(P, x, z, y, Math.min(1.1, f.r || f.w / 2 || 0.7), f.h || 1, f.v + Math.round(x), h);
+        shrubMound(P, x, z, y, Math.min(1.1, f.r || f.w / 2 || 0.7), f.h || 1, f.v + Math.abs(Math.round(x)), h);
         break;
       case 'rack':
         if (stamps.rack) stamps.rack(x, z, y, h);
@@ -470,7 +555,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         break;
       }
       case 'dumpster': {
-        const col = DUMPSTERS[(f.v + Math.round(x)) % DUMPSTERS.length];
+        const col = DUMPSTERS[(f.v + Math.abs(Math.round(x))) % DUMPSTERS.length];
         S.obox(x, z, 0.95, 0.62, y + 0.12, y + 1.15, h, col, shadeHex(col, 0.8), 0.7, 1);
         S.obox(x, z, 1.0, 0.68, y + 1.15, y + 1.25, h, shadeHex(col, 0.75), shadeHex(col, 0.75));
         for (const s2 of [-0.75, 0.75]) S.obox(x + ca * s2, z + sa * s2, 0.08, 0.5, y, y + 0.12, h, 0x2a2c2e);

@@ -649,6 +649,88 @@ function typeCells(list, nList, lid, remap, code, typeGrid) {
   }
 }
 
+// The drawn ground per cell (lotGrid.ground): the lot types, spread
+// GROUND_RINGS cells into the land that is in no lot (the setback band
+// along every road, under the sidewalks and the strips, round building
+// corners) and into verges. The roads and sidewalks are drawn over it, so
+// a lawn ends at the real back of sidewalk line, straight along a diagonal
+// street, not at the steps of the 5 m lot raster with a band of bare land
+// between. A cell takes the commonest ground among its eight neighbors
+// (the lowest type code on a tie). Only what is drawn: lotGrid.type and
+// lotGrid.id (what a cell is) are unchanged.
+export const GROUND_RINGS = 2;
+const T_VERGE = LOT_TYPES.indexOf('verge') + 1, T_AIRFIELD = LOT_TYPES.indexOf('airfield') + 1;
+const T_PLAZA = LOT_TYPES.indexOf('plaza') + 1, T_GRASS = LOT_TYPES.indexOf('grass') + 1;
+const PED_REACH = 7; // m past a pedestrian street's paving that stays paved
+function spreadGround(city, typeGrid, land, W, H) {
+  const ground = typeGrid.slice();
+  const N = W * H;
+  for (let c = 0; c < N; c++) if (ground[c] === T_VERGE) ground[c] = 0;
+  // Beside a pedestrian street (a mall of pavers) the land in no lot is
+  // paving, whatever the lots behind it are: no lawn runs onto the mall.
+  const G = city.landGrid, cell = G.cell;
+  for (const e of city.edges || []) {
+    if (!e.ped) continue;
+    const a = city.nodes[e.a], b = city.nodes[e.b];
+    const r = e.width / 2 + (e.sidewalk || 0) + PED_REACH;
+    const i0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - r - G.x0) / cell)), i1 = Math.min(W - 1, Math.floor((Math.max(a.x, b.x) + r - G.x0) / cell));
+    const j0 = Math.max(0, Math.floor((Math.min(a.z, b.z) - r - G.z0) / cell)), j1 = Math.min(H - 1, Math.floor((Math.max(a.z, b.z) + r - G.z0) / cell));
+    const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const c = j * W + i;
+        if (ground[c] || !land[c]) continue;
+        const x = G.x0 + (i + 0.5) * cell, z = G.z0 + (j + 0.5) * cell;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2));
+        if (Math.hypot(x - a.x - dx * t, z - a.z - dz * t) <= r) ground[c] = T_PLAZA;
+      }
+    }
+  }
+  // The middle of a wide planted median (over 8 m: a raised grass band
+  // runs along each curb, world/junctions.js medianBand) is lawn, whatever
+  // lot or land lies there: no strip of paving down the middle.
+  for (const e of city.edges || []) {
+    if (!(e.median > 8) || e.bridge || !(e.width > 0)) continue;
+    const a = city.nodes[e.a], ux = e.ux, uz = e.uz, L = e.length;
+    const lc = (e.off || 0) - e.width / 2, lo = lc - e.median / 2 - 1.5;
+    const r = Math.abs(lo) + 3;
+    const bx = a.x + ux * L, bz = a.z + uz * L;
+    const i0 = Math.max(0, Math.floor((Math.min(a.x, bx) - r - G.x0) / cell)), i1 = Math.min(W - 1, Math.floor((Math.max(a.x, bx) + r - G.x0) / cell));
+    const j0 = Math.max(0, Math.floor((Math.min(a.z, bz) - r - G.z0) / cell)), j1 = Math.min(H - 1, Math.floor((Math.max(a.z, bz) + r - G.z0) / cell));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const c = j * W + i;
+        if (!land[c]) continue;
+        const x = G.x0 + (i + 0.5) * cell - a.x, z = G.z0 + (j + 0.5) * cell - a.z;
+        const d = x * ux + z * uz, o = -x * uz + z * ux;
+        if (d >= -1 && d <= L + 1 && o <= lc && o >= lo) ground[c] = T_GRASS;
+      }
+    }
+  }
+  const cnt = new Uint8Array(LOT_TYPES.length + 2);
+  let from = ground;
+  for (let ring = 0; ring < GROUND_RINGS; ring++) {
+    const to = from.slice();
+    for (let j = 1; j < H - 1; j++) {
+      for (let i = 1, c = j * W + 1; i < W - 1; i++, c++) {
+        if (from[c] || !land[c]) continue;
+        cnt.fill(0);
+        let best = 0, bn = 0;
+        for (let q = 0; q < 8; q++) {
+          const t = from[c + (q < 3 ? -W + q - 1 : q < 5 ? (q === 3 ? -1 : 1) : W + q - 6)];
+          if (!t || t === T_AIRFIELD) continue;
+          const n = ++cnt[t];
+          if (n > bn || (n === bn && t < best)) { bn = n; best = t; }
+        }
+        if (best) to[c] = best;
+      }
+    }
+    from = to;
+  }
+  // A verge no ground reached keeps the land it stands on.
+  return from;
+}
+
 // inp (from createMiamiCity): { free, owner, park, inBeach, water, queue,
 // list, nList }. park: 1 park or forest, 2 grass, per cell; inBeach(c):
 // the cell is in a beach rect; owner: building index per cell (-1 none).
@@ -722,7 +804,8 @@ export function buildLots(city, inp) {
   for (let k = 0; k < lots.length; k++) code[k] = T[lots[k].type] + 1;
   typeCells(list, nList, lid, remap, code, typeGrid);
   lap('lots.grid');
-  const lotGrid = { x0: G.x0, z0: G.z0, cell, w: W, h: H, id: lid, type: typeGrid };
+  const lotGrid = { x0: G.x0, z0: G.z0, cell, w: W, h: H, id: lid, type: typeGrid, ground: spreadGround(city, typeGrid, G.data, W, H) };
+  lap('lots.ground');
   const cellAt = (x, z) => {
     const i = Math.floor((x - G.x0) / cell), j = Math.floor((z - G.z0) / cell);
     return i < 0 || j < 0 || i >= W || j >= H ? -1 : j * W + i;
@@ -761,6 +844,7 @@ export function featureCap(lot) {
 }
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
+const NEAR_E = []; // scratch: edges round the lot being dressed
 const NEAR_S = []; // scratch: service homes round the lot being dressed
 const SERVICE_KEEP = 6.5; // m round a service home kept clear of lot features
 // Scratch per feature index of the lot being dressed (put fills it):
@@ -777,6 +861,37 @@ function nearer(dx, dz, r) {
   if (s < r2 * (1 - 1e-9)) return true;
   if (s > r2 * (1 + 1e-9)) return false;
   return Math.hypot(dx, dz) < r;
+}
+// The turn of the street grid off the axes round (x, z), in radians
+// (-pi/4 .. pi/4): the mean direction of the streets within SKEW_R m of
+// the middle of the SKEW_CELL square that holds the point, each counted by
+// its length, to the nearest quarter turn. One value a square, kept per
+// city, so the lots of a block agree and a lot costs one lookup.
+const SKEW_CELL = 60, SKEW_R = 110;
+const skewCache = new WeakMap();
+function gridSkew(city, x, z) {
+  if (!city.edgesNear || !city.nodes) return 0;
+  let m = skewCache.get(city);
+  if (!m) { m = new Map(); skewCache.set(city, m); }
+  const i = Math.floor(x / SKEW_CELL), j = Math.floor(z / SKEW_CELL), key = i * 100003 + j;
+  let v = m.get(key);
+  if (v !== undefined) return v;
+  NEAR_E.length = 0;
+  const mx = (i + 0.5) * SKEW_CELL, mz = (j + 0.5) * SKEW_CELL;
+  city.edgesNear(mx, mz, SKEW_R, NEAR_E);
+  // The mean of the directions times four (a quarter turn is one turn).
+  let sx = 0, sz = 0;
+  for (let k = 0; k < NEAR_E.length; k++) {
+    const e = city.edges[NEAR_E[k]];
+    if (!e || !(e.length > 4) || e.bridge) continue;
+    const a4 = 4 * Math.atan2(e.uz, e.ux);
+    sx += Math.cos(a4) * e.length;
+    sz += Math.sin(a4) * e.length;
+  }
+  v = sx || sz ? Math.atan2(sz, sx) / 4 : 0;
+  v = Math.abs(v) < 0.01 ? 0 : Math.round(v * 1000) / 1000;
+  m.set(key, v);
+  return v;
 }
 export function dressLot(city, lot, out = []) {
   out.length = 0;
@@ -839,6 +954,14 @@ export function dressLot(city, lot, out = []) {
     }
     return true;
   };
+  // The turn of the street grid here off the axes of the lot raster (the
+  // direction of the nearest street, to the nearest quarter turn): rows
+  // (hedges, fences, walls, beds) run along the street, not along the
+  // raster, so a hedge is parallel to its sidewalk on a street that runs
+  // at 10 degrees (the Beach) or 40 (Coral Way).
+  // (A works yard or a building site keeps its fence on the raster: it
+  // is ringed whole, and every meter of it counts toward its content.)
+  const skew = lot.type === 'works' || lot.type === 'site' ? 0 : gridSkew(city, (lot.x0 + lot.x1) / 2, (lot.z0 + lot.z1) / 2);
   // Adds a feature when its center is in the lot and the caps allow.
   const put = (kind, x0f, z0f, heading, l, w, h, r, isSolid, v) => {
     if (out.length >= cap || (isSolid && solid >= MAX_SOLID)) return false;
@@ -900,6 +1023,22 @@ export function dressLot(city, lot, out = []) {
     return out2;
   };
   const P = [0, 0];
+  // A boundary row along side s, turned to the street (skew): moved in
+  // from the side and, where that is not enough, shortened until both its
+  // ends are on the lot.
+  const SNX = [1, 0, -1, 0], SNZ = [0, 1, 0, -1];
+  const row = (kind, x, z, hd, l, w, h, s) => {
+    if (!skew) return put(kind, x, z, hd, l, w, h, 0, true, set.furn);
+    const ca = Math.cos(hd + skew), sa = Math.sin(hd + skew);
+    for (let t = 0; t < 12; t++) {
+      const ll = l * (1 - 0.15 * (t >> 2)), inset = (t & 3) * 1.25;
+      if (ll < 2) break;
+      const px = x - SNX[s] * inset, pz = z - SNZ[s] * inset, e = ll / 2 - 0.2;
+      if (!inLot(px + ca * e, pz + sa * e) || !inLot(px - ca * e, pz - sa * e)) continue;
+      return put(kind, px, pz, hd + skew, Math.round(ll * 100) / 100, w, h, 0, true, set.furn);
+    }
+    return false;
+  };
   // A boundary segment along side s; `gap` cuts a gate opening in the middle.
   const H_OF = { fence: 1.5, hedge: HEDGE_H, wall: 2.0 };
   const W_OF = { fence: 0.12, hedge: 0.7, wall: 0.3 };
@@ -912,13 +1051,13 @@ export function dressLot(city, lot, out = []) {
     const hd = SIDE_HEADING[s];
     if (!gap) {
       pointOnSide(s, (a + b) / 2, f, P);
-      return put(kind, P[0], P[1], hd, len, W_OF[kind], H_OF[kind], 0, true, set.furn) ? 1 : 0;
+      return row(kind, P[0], P[1], hd, len, W_OF[kind], H_OF[kind], s) ? 1 : 0;
     }
     const mid = a + 0.5 + len * (0.3 + rng.next() * 0.4);
     let n = 0;
     const l1 = mid - gap / 2 - (a + 0.5), l2 = b - 0.5 - (mid + gap / 2);
-    if (l1 > 1) { pointOnSide(s, a + 0.5 + l1 / 2, f, P); if (put(kind, P[0], P[1], hd, l1, W_OF[kind], H_OF[kind], 0, true, set.furn)) n++; }
-    if (l2 > 1) { pointOnSide(s, b - 0.5 - l2 / 2, f, P); if (put(kind, P[0], P[1], hd, l2, W_OF[kind], H_OF[kind], 0, true, set.furn)) n++; }
+    if (l1 > 1) { pointOnSide(s, a + 0.5 + l1 / 2, f, P); if (row(kind, P[0], P[1], hd, l1, W_OF[kind], H_OF[kind], s)) n++; }
+    if (l2 > 1) { pointOnSide(s, b - 0.5 - l2 / 2, f, P); if (row(kind, P[0], P[1], hd, l2, W_OF[kind], H_OF[kind], s)) n++; }
     if (gateKind) { pointOnSide(s, mid, f, P); if (put(gateKind, P[0], P[1], hd, gap, 0.15, 1.6, 0, false, set.furn)) n++; }
     return n;
   };
@@ -991,6 +1130,11 @@ export function dressLot(city, lot, out = []) {
         const fx = c * F_HL[k] + sn * F_HW[k], fz = sn * F_HL[k] + c * F_HW[k];
         if (Math.abs(F_X[k] - x) < ex + fx + 0.8 && Math.abs(F_Z[k] - z) < ez + fz + 0.8) return false;
       }
+    }
+    if (skew) {
+      // Turned to the street where both ends stay on the lot.
+      const ca2 = Math.cos(heading + skew), sa2 = Math.sin(heading + skew), e = l / 2 - 0.3;
+      if (inLot(x + ca2 * e, z + sa2 * e) && inLot(x - ca2 * e, z - sa2 * e) && inLot(x + ca2 * e - sa2 * 0.7, z + sa2 * e + ca2 * 0.7) && inLot(x - ca2 * e + sa2 * 0.7, z - sa2 * e - ca2 * 0.7)) heading += skew;
     }
     return putLong('bed', x, z, heading, l, 1.4, curb ? 0.45 : 0, true, tree());
   };
@@ -1095,7 +1239,7 @@ export function dressLot(city, lot, out = []) {
           if (clearAt(sx, sz, 0.6, 0.8) && put('shrub', sx, sz, rng.next() * 6, 0, 0, 0.8 + rng.next() * 0.3, 0.6 + rng.next() * 0.25, false, tree())) plants++;
         }
       }
-      if (!plants) scatter(1, 'shrub', 0.6, 1.0, false, 1.5, tree, 0.8);
+      if (!plants && !scatter(1, 'shrub', 0.6, 1.0, false, 1.5, tree, 0.8)) scatter(2, 'shrub', 0.45, 0.9, false, 0.5, tree, 0.3);
       // A foundation bed along the front face and along one side.
       if (b && area > DENSITY_MIN_AREA) {
         for (const f2 of [front, sides[lot.seed & 1 ? 0 : 2]]) {

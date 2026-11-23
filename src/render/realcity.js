@@ -31,9 +31,9 @@ import { lookOf } from './miamilook.js';
 import { addProps, treeSpecies, rectColor } from './props.js';
 import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
-import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, netRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { groundFn } from '../world/ground.js';
-import { lotGround, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
+import { lotGround, lotFringe, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
 
 export const TILE = 300; // m, a near-detail tile
@@ -49,6 +49,8 @@ const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // Slices stay under 3 ms (docs/PLAN_V2.md section 4): SLICE_MS plus the
 // longest single piece of work (pieces are kept small below).
 export const SLICE_MS = 0.9;
+// The net of narrow road gaps is found and drawn in boxes this wide (m).
+export const NET_BOX = 60;
 const PROP_PIECE = 6;
 // No street tiles are started while the camera is this high (m) or the
 // player moves this fast (m/s): a fast or high flight would build tiles
@@ -832,6 +834,7 @@ export function buildRealCity(city, collision, opts = {}) {
     }
     for (let j = lj0; j < lj1; j += 3) {
       lotGround(city, B, li0, li1, j, Math.min(lj1, j + 3));
+      lotFringe(city, B, li0, li1, j, Math.min(lj1, j + 3));
       if (over()) { yield 'lotGround'; ts = now(); }
       lotEdges(city, B, li0, li1, j, Math.min(lj1, j + 3));
       if (over()) { yield 'lotGround'; ts = now(); }
@@ -843,6 +846,15 @@ export function buildRealCity(city, collision, opts = {}) {
     for (let a = 0; a < t.edges.length; a++) {
       realRoads(city, B, [], t.edges.slice(a, a + 1), own);
       if (over()) { yield 'roads'; ts = now(); }
+    }
+    // The narrow-gap net as asphalt, in boxes of NET_BOX m (a slice each).
+    if (city.roadGeo) {
+      for (let z = t.z0; z < t.z1; z += NET_BOX) {
+        for (let x = t.x0; x < t.x1; x += NET_BOX) {
+          netRoads(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX));
+          if (over()) { yield 'roads'; ts = now(); }
+        }
+      }
     }
     // Block middles only where there is no lot ground (the island): on the real map the lots draw the
     // ground, and a second layer hid bay lines and fought with lot features.

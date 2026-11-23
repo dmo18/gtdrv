@@ -72,7 +72,36 @@ const NAV_CSS = `
   .rw-navon .rw-navrem { display: block; }
 }
 `;
+// The Flow meter and the event line (docs/LOOP.md section a). One slim
+// element: the pill under the score ("+2,450  x3") with a 4 px bar along its
+// bottom edge that fills toward the next multiplier tier; on short screens
+// (the pill is dropped there) the same bar runs along the bottom of the
+// score pill. A feed pops it, a tier up, a bank and a crash flash the
+// screen edge for a third of a second. The event line uses the prompt strip.
+const FLOW_CSS = `
+.rw-tr { --flow: 0%; --flowc: #ffb43a; }
+.rw-tr.rw-t2 { --flowc: #ffd34d; } .rw-tr.rw-t3 { --flowc: #8bd66f; } .rw-tr.rw-t4 { --flowc: #45c7dc; } .rw-tr.rw-t5 { --flowc: #ff5a8a; }
+.rw-combo, .rw-money { background-image: linear-gradient(var(--flowc), var(--flowc)); background-repeat: no-repeat; background-position: left bottom; }
+.rw-combo { background-size: var(--flow) 4px; transform-origin: right center; }
+.rw-money { background-size: 0 0; }
+.rw-combo.rw-pop { animation: rw-flow-pop 0.22s ease-out; }
+.rw-combo.rw-pop2 { animation: rw-flow-pop2 0.4s ease-out; }
+@keyframes rw-flow-pop { 0% { transform: scale(1.16); } 100% { transform: none; } }
+@keyframes rw-flow-pop2 { 0% { transform: scale(1.45); } 100% { transform: none; } }
+.rw-flowflash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 2; box-shadow: inset 0 0 70px 14px var(--flashc, #ffd34d); }
+.rw-prompt.rw-event { border-color: #ffd34d; background: rgba(20, 16, 6, 0.78); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .rw-combo.rw-pop, .rw-combo.rw-pop2 { animation: none; } }
+@media (max-height: 300px) { .rw-money { background-size: var(--flow) 3px; } }
+`;
+const TIER_COLORS = ['#ffb43a', '#ffb43a', '#ffd34d', '#8bd66f', '#45c7dc', '#ff5a8a'];
+const FLASH_COLORS = { tier: '', bank: '#8bd66f', crash: '#ff4a3a', medal: '#ffd34d' };
 function injectNavStyles() {
+  if (!document.getElementById('rw-flow-styles')) {
+    const st = document.createElement('style');
+    st.id = 'rw-flow-styles';
+    st.textContent = FLOW_CSS;
+    document.head.appendChild(st);
+  }
   if (document.getElementById('rw-nav-styles')) return;
   const st = document.createElement('style');
   st.id = 'rw-nav-styles';
@@ -276,6 +305,12 @@ export function createHud(root) {
   const scoreEl = el('div', 'rw-money rw-score rw-pill', tr);
   const comboEl = el('div', 'rw-combo rw-pill', tr);
   comboEl.style.display = 'none';
+  comboEl.setAttribute('role', 'meter');
+  comboEl.setAttribute('aria-label', 'Flow');
+  // The screen-edge flash of a tier up, a bank, a crash or a medal.
+  const flashEl = el('div', 'rw-flowflash', hud);
+  flashEl.setAttribute('aria-hidden', 'true');
+  const calm = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
   // top-center: police attention (stars, then the escape meter), only while wanted
   const wantedEl = el('div', 'rw-wanted rw-pill rw-none', stackEl);
@@ -336,6 +371,7 @@ export function createHud(root) {
     fx: undefined, boost: undefined, boostOn: undefined, boostLock: undefined,
     objOn: undefined, objAngle: 1e9, objDist: undefined,
     navOn: false, navKind: '', navText: '', navSoon: false, street: '', streetOn: false, alert: null, streetLabel: true,
+    flow: -1, tier: 1, event: null,
   };
   // The stack timers run on UI time, 10 times a second (never game logic).
   let clockMs = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -368,11 +404,25 @@ export function createHud(root) {
     }
     const pending = s.pending > 0 ? Math.floor(s.pending) : 0;
     const combo = s.combo > 1 ? s.combo : 1;
-    if (pending !== last.pending || combo !== last.combo) {
+    // The Flow meter: the run not banked yet and the multiplier, with the
+    // bar toward the next tier (s.flow 0..1, s.flowTier 1..5; absent: none).
+    const flow = s.flow > 0 ? Math.round(Math.min(1, s.flow) * 50) * 2 : 0;
+    const tier = s.flowTier > 1 ? Math.min(5, s.flowTier | 0) : 1;
+    if (pending !== last.pending || combo !== last.combo || (flow > 0) !== (last.flow > 0)) {
       last.pending = pending;
       last.combo = combo;
-      comboEl.style.display = pending > 0 ? '' : 'none';
-      if (pending > 0) comboEl.textContent = '+' + pending.toLocaleString('en-US') + (combo > 1 ? '  x' + combo : '');
+      const on = pending > 0 || combo > 1 || flow > 0;
+      comboEl.style.display = on ? '' : 'none';
+      if (on) comboEl.textContent = '+' + pending.toLocaleString('en-US') + (combo > 1 ? '  x' + combo : '');
+    }
+    if (flow !== last.flow) {
+      last.flow = flow;
+      tr.style.setProperty('--flow', flow + '%');
+    }
+    if (tier !== last.tier) {
+      tr.classList.remove('rw-t' + last.tier);
+      last.tier = tier;
+      if (tier > 1) tr.classList.add('rw-t' + tier);
     }
     // Stars 0..5 (s.stars, else the heat level); shown only while wanted.
     const stars = s.stars !== undefined ? s.stars : s.wanted;
@@ -497,10 +547,30 @@ export function createHud(root) {
   // The bottom prompt. A red alert (setAlert) takes the strip over while it
   // lasts; the normal prompt comes back after it.
   function paintPrompt() {
-    const v = last.alert || last.prompt;
+    const v = last.alert || last.event || last.prompt;
     promptEl.classList.toggle('rw-none', !v);
     promptEl.classList.toggle('rw-alert', !!last.alert);
+    promptEl.classList.toggle('rw-event', !last.alert && !!last.event);
     if (v) promptEl.textContent = v;
+  }
+  // The running street event's one line ("Passes 2/3 \u00b7 0:31"), or null.
+  // It takes the prompt strip (an alert still wins); no new HUD element.
+  function setEvent(text) {
+    const v = text || null;
+    if (v === last.event) return;
+    last.event = v;
+    paintPrompt();
+  }
+  // Flow feedback: 'feed' pops the meter, 'tier', 'bank', 'crash' and
+  // 'medal' pop it harder and flash the screen edge (not under reduced motion).
+  function flowPop(kind, tier) {
+    const big = kind !== 'feed';
+    comboEl.classList.remove('rw-pop', 'rw-pop2');
+    void comboEl.offsetWidth;
+    comboEl.classList.add(big ? 'rw-pop2' : 'rw-pop');
+    if (!big || !flashEl.animate || (calm && calm.matches)) return;
+    flashEl.style.setProperty('--flashc', FLASH_COLORS[kind] || TIER_COLORS[Math.max(1, Math.min(5, tier | 0))]);
+    flashEl.animate([{ opacity: 0.85 }, { opacity: 0 }], { duration: kind === 'bank' || kind === 'medal' ? 520 : 340, easing: 'ease-out' });
   }
   function setPrompt(text) {
     const v = text || null;
@@ -562,5 +632,5 @@ export function createHud(root) {
     hud.remove();
   }
 
-  return { update, toast, tick, setObjective, canHint: stack.canHint, stack, setPrompt, setAlert, setNav, setStreet, setStreetLabel, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
+  return { update, toast, tick, setObjective, canHint: stack.canHint, stack, setPrompt, setAlert, setEvent, flowPop, setNav, setStreet, setStreetLabel, setHudMode, dispose, minimapCanvas, getHudMode: () => (fullMode ? 'full' : 'minimal') };
 }
