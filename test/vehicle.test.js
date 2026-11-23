@@ -514,3 +514,51 @@ test('brake pedal: exact at 0, half and full, strictly rising', () => {
     last = y;
   }
 });
+
+// ---- Handling presets (docs/PLAN_V3.md 2.4 item 5): the hook the
+// Handling lab sets from settings.handlingPreset. ----
+import { setHandlingPreset, getHandlingPreset, presetParams, HANDLING_PRESETS, steerMaxOf } from '../src/entities/vehicle.js';
+import { PRESETS, PRESET_DEFAULT, PRESET_BANDS } from '../src/entities/handlingbands.js';
+
+function presetFigures() {
+  // r0: radius of the center's path at 2 m/s on full lock.
+  const v = createVehicle('sedan', 0, 0, 0);
+  v.vx = 2;
+  for (let i = 0; i < 240; i++) stepVehicle(v, { steer: 1, throttle: Math.hypot(v.vx, v.vz) < 2 ? 0.25 : 0 }, DT, null);
+  const r0 = Math.hypot(v.vx, v.vz) / Math.abs(v.yawRate);
+  // lockTime: center to full lock at 5 m/s.
+  const w = createVehicle('sedan', 0, 0, 0);
+  w.vx = 5;
+  let t = 0;
+  while (w.steer < 0.999 && t < 120) { stepVehicle(w, { steer: 1 }, DT, null); t++; }
+  // roll: steady turn at 20 m/s asking about 0.7 g.
+  const u = createVehicle('sedan', 0, 0, 0);
+  u.vx = 20;
+  for (let i = 0; i < 180; i++) stepVehicle(u, { steer: 0.5, throttle: Math.hypot(u.vx, u.vz) < 20 ? 0.6 : 0 }, DT, null);
+  return { r0, lockTime: t * DT, roll: Math.abs(u.roll) };
+}
+
+test('handling presets: standard (default), relaxed, sharp; unknown means standard; standard is today\'s car', () => {
+  assert.deepEqual(HANDLING_PRESETS, PRESETS);
+  assert.equal(getHandlingPreset(), PRESET_DEFAULT);
+  assert.equal(setHandlingPreset('nonsense'), 'standard');
+  assert.equal(setHandlingPreset(undefined), 'standard');
+  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, gripK: 1, assistK: 1, rollK: 1 });
+  const spec = createVehicle('sedan', 0, 0, 0).spec;
+  assert.equal(steerMaxOf(spec), spec.steerMax);
+  const base = presetFigures();
+  const got = {};
+  for (const p of PRESETS) {
+    assert.equal(setHandlingPreset(p), p);
+    got[p] = presetFigures();
+    for (const k of ['r0', 'lockTime', 'roll']) {
+      const ratio = got[p][k] / base[k];
+      const [lo, hi] = PRESET_BANDS[p][k];
+      assert.ok(ratio >= lo - 1e-9 && ratio <= hi + 1e-9, `${p} ${k}: ${ratio.toFixed(3)} of standard, band ${lo} to ${hi}`);
+    }
+  }
+  setHandlingPreset('sharp');
+  assert.ok(Math.abs(steerMaxOf(spec) - (35 * Math.PI) / 180) < 1e-12, 'sharp: 35 degree lock at walking pace');
+  setHandlingPreset('standard');
+  assert.deepEqual(presetFigures(), base, 'back to standard: the same car');
+});

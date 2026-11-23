@@ -58,9 +58,22 @@ export function roadProfile(way, opts = {}) {
     else if (cls === 'motorway') lanesF = 3;
     else lanesF = ONE_EACH.has(cls) && cls !== 'tertiary' ? 1 : 2;
   } else if (way.lf > 0 || way.lb > 0) {
-    lanesF = Math.max(1, way.lf | 0);
-    lanesB = Math.max(1, way.lb | 0);
-    if (lanes > lanesF + lanesB) center = laneW;
+    // lanes:forward / lanes:backward; the missing one from `lanes`, and the
+    // total kept to `lanes` where the tags disagree.
+    let f = way.lf | 0, b = way.lb | 0;
+    if (lanes) {
+      if (!f) f = lanes - b;
+      if (!b) b = lanes - f;
+    }
+    f = Math.max(1, f);
+    b = Math.max(1, b);
+    if (lanes >= 2 && f + b > lanes) {
+      b = Math.max(1, lanes - f);
+      if (f + b > lanes) f = Math.max(1, lanes - b);
+    }
+    lanesF = f;
+    lanesB = b;
+    if (lanes === f + b + 1) center = laneW;
     tagged = true;
   } else if (lanes) {
     tagged = true;
@@ -78,9 +91,13 @@ export function roadProfile(way, opts = {}) {
     lanesF = lanesB = 2;
   }
   // Parking lanes: residential and tertiary streets, not on bridges, not
-  // on a pedestrian street; a one-way street parks on both curbs too.
+  // on a pedestrian street; a one-way street parks on both curbs too. A
+  // street of three driving lanes (a turn lane counts) parks on the right
+  // curb only and one of four or more on neither, so no untagged-wide
+  // street passes MAX_UNTAGGED_W.
   const park = PARKING.has(cls) && !way.bridge && !ped ? PARK_W : 0;
-  const parkL = park, parkR = park;
+  const drive = lanesF + lanesB + (center ? 1 : 0);
+  const parkR = drive <= 3 ? park : 0, parkL = drive <= 2 ? park : 0;
   const width = (lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER;
   const district = opts.district || '';
   const sidewalk = cls === 'motorway' || cls === 'motorway_link' || way.bridge ? 0

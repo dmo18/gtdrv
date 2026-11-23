@@ -121,8 +121,13 @@ export const REGIONS = [
 
 export const REGION_IDS = REGIONS.map((r) => r.id);
 
-// Region budget (3.2), pinned by test/regions.test.js.
-export const REGION_BUDGET = { buildings: 10500, landKm2: 14 };
+// Region budget (3.2), pinned by test/regions.test.js. 0.9.0: land
+// 14 to 14.5 km2, deliberately: docs/PLAN_V3.md 2.1 item 1 grows the
+// Beach crop to the Atlantic (x 1400 to 6508, 14.3 km2 of land) and makes
+// memory the test of it (cut at z = -2400 only if it misses): measured
+// 147 MB at start against Downtown's 148 MB (0.8.0 tree: 143 and 145),
+// within the +10 MB of PLAN_V3 section 7. Buildings stay at 10500.
+export const REGION_BUDGET = { buildings: 10500, landKm2: 14.5 };
 
 // The region of an id, or null (the island, the whole box, junk). Pure.
 export function regionFor(id) {

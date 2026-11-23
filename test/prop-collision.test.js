@@ -119,7 +119,7 @@ function ram(type, heading, speed) {
   v.vx = c * speed;
   v.vz = s * speed;
   const world = { collision: col, city: flatCity, time: 0 };
-  let far = -Infinity, keep = 1, before = speed;
+  let far = -Infinity, keep = 1, before;
   const n = Math.max(150, Math.ceil(22 / speed / DT));
   for (let i = 0; i < n; i++) {
     const sp = Math.hypot(v.vx, v.vz);

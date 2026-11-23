@@ -876,9 +876,10 @@ function collideStatic(v, col) {
   const inertiaK = 12 / (s.length * s.length + s.width * s.width);
   const y = Number.isFinite(v.y) ? v.y : 0;
   let maxClose = 0;
+  const ch = Math.cos(v.heading), sh = Math.sin(v.heading);
   for (let i = 0; i < 3; i++) {
     const off = circleOffset(s, i);
-    const ox = Math.cos(v.heading) * off, oz = Math.sin(v.heading) * off;
+    const ox = ch * off, oz = sh * off;
     const cx = v.x + ox, cz = v.z + oz;
     let res = col.resolveCircle(cx, cz, r, y);
     for (let tries = 0; tries < 3 && res.brk && col.breakShape; tries++) {
@@ -898,35 +899,63 @@ function collideStatic(v, col) {
       res = col.resolveCircle(cx, cz, r, y);
     }
     if (!res.hit) continue;
-    const dx = res.x - cx, dz = res.z - cz;
-    const d = Math.hypot(dx, dz);
-    if (d < 1e-9) continue;
-    v.x += dx;
-    v.z += dz;
-    const nx = dx / d, nz = dz / d;
-    // Velocity of the contact point (linear + rotation).
-    const pvx = v.vx - v.yawRate * oz;
-    const pvz = v.vz + v.yawRate * ox;
-    const vn = pvx * nx + pvz * nz;
-    if (vn >= 0) continue;
-    const close = -vn;
-    if (close > maxClose) maxClose = close;
-    // Restitution ~0.2, softer for big crashes so wrecks do not rebound far.
-    const j = -(1 + 0.2 / (1 + close / 25)) * vn; // change in normal velocity
-    let dvx = j * nx, dvz = j * nz;
-    // Scrape: lose some tangential speed.
-    const tx = -nz, tz = nx;
-    const vt = v.vx * tx + v.vz * tz;
-    const scrape = vt * Math.min(0.3, close * 0.02);
-    dvx -= scrape * tx;
-    dvz -= scrape * tz;
-    v.vx += dvx;
-    v.vz += dvz;
-    // Off-center hits spin the car.
-    v.yawRate += (ox * dvz - oz * dvx) * inertiaK * 0.5;
-    v.yawRate = clamp(v.yawRate, -4, 4);
+    const c = contact(v, res.x - cx, res.z - cz, ox, oz, inertiaK);
+    if (c > maxClose) maxClose = c;
+  }
+  // The box corners stick out of the three circles by up to 0.2 of the
+  // width: by a sea wall or a rail they are probed too, so no corner
+  // reaches over the water (docs/PLAN_V3.md section 6 item 6).
+  const edges = col.layerNamed ? col.layerNamed('edges') : null;
+  if (edges && edges.cell(Math.floor(v.x / 32), Math.floor(v.z / 32)).length) {
+    const hl = s.length / 2 - CORNER_R, hw = s.width / 2 - CORNER_R;
+    for (let k = 0; k < 4; k++) {
+      const lo = k < 2 ? hl : -hl, la = k === 0 || k === 3 ? hw : -hw;
+      const ox = ch * lo - sh * la, oz = sh * lo + ch * la;
+      // Twice: in the corner where a rail meets a sea wall one push can
+      // land the point on the other line.
+      for (let pass = 0; pass < 2; pass++) {
+        const cx = v.x + ox, cz = v.z + oz;
+        const res = col.resolveCircle(cx, cz, CORNER_R, y);
+        if (!res.hit) break;
+        const c = contact(v, res.x - cx, res.z - cz, ox, oz, inertiaK);
+        if (c > maxClose) maxClose = c;
+      }
+    }
   }
   return maxClose;
+}
+const CORNER_R = 0.08;
+
+// One contact: move the car by the push (dx, dz) found for its body point
+// at offset (ox, oz) and bounce that point's velocity. Returns the closing
+// speed (0 if it was moving away).
+function contact(v, dx, dz, ox, oz, inertiaK) {
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-9) return 0;
+  v.x += dx;
+  v.z += dz;
+  const nx = dx / d, nz = dz / d;
+  // Velocity of the contact point (linear + rotation).
+  const pvx = v.vx - v.yawRate * oz;
+  const pvz = v.vz + v.yawRate * ox;
+  const vn = pvx * nx + pvz * nz;
+  if (vn >= 0) return 0;
+  const close = -vn;
+  // Restitution ~0.2, softer for big crashes so wrecks do not rebound far.
+  const j = -(1 + 0.2 / (1 + close / 25)) * vn; // change in normal velocity
+  let dvx = j * nx, dvz = j * nz;
+  // Scrape: lose some tangential speed.
+  const tx = -nz, tz = nx;
+  const vt = v.vx * tx + v.vz * tz;
+  const scrape = vt * Math.min(0.3, close * 0.02);
+  dvx -= scrape * tx;
+  dvz -= scrape * tz;
+  v.vx += dvx;
+  v.vz += dvz;
+  // Off-center hits spin the car.
+  v.yawRate += (ox * dvz - oz * dvx) * inertiaK * 0.5;
+  v.yawRate = clamp(v.yawRate, -4, 4);
+  return close;
 }
 
 // The last net at the water's edge. With sea walls and rails (city.edgeLines,

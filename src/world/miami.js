@@ -961,7 +961,7 @@ export function createMiamiCity(data, opts = {}) {
     const prof = roadProfile(r, { district: districtKeyAt(pts[0], pts[1]) });
     const oneway = prof.oneway;
     const avenue = isAvenue(prof);
-    const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || 0 };
+    const info = { cls: r.class, name: r.name || '', bridge: !!r.bridge, oneway, avenue, width: prof.width, prof, mph: r.mph || 0, lanesTag: r.lanes || (r.lf || 0) + (r.lb || 0) };
     // Split at the crop edge: only runs of vertices inside it.
     let run = [];
     const flush = () => {
@@ -1138,7 +1138,9 @@ export function createMiamiCity(data, opts = {}) {
     return n;
   };
   const edgeKey = new Map();
-  const addEdge = (na, nb, wi) => {
+  // both: the two carriageways of a one-way pair collapsed onto the same
+  // junctions (closer than MERGE): one two-way road (2.1 item 4).
+  const addEdge = (na, nb, wi, both = false) => {
     if (na === nb) return;
     const k = na < nb ? na * 1e6 + nb : nb * 1e6 + na;
     const w = ways[wi];
@@ -1169,6 +1171,14 @@ export function createMiamiCity(data, opts = {}) {
       lanesF: P.lanesF, lanesB: P.lanesB, laneW: P.laneW, parkL: P.parkL, parkR: P.parkR, median: 0, center: P.center,
       off: 0, sidewalk: P.sidewalk, ped: P.ped, divided: false, pair: -1, mph: w.mph, lanesTag: w.lanesTag || 0,
     });
+    if (both && w.oneway) {
+      const e = edges[edges.length - 1];
+      e.oneway = false;
+      e.lanesB = e.lanesF;
+      e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
+      e.avenue = isAvenue(e);
+      e.merged = true;
+    }
   };
   const visited = new Set();
   const pairKey = (a, b) => (a < b ? a * 1e7 + b : b * 1e7 + a);
@@ -1195,8 +1205,11 @@ export function createMiamiCity(data, opts = {}) {
     for (let i = 1; i < chain.length; i++) {
       if (!keep[i]) continue;
       const n = nodeFor(chain[i]);
-      // A one-way edge runs the way its way runs (first step of the piece).
-      if (oneway && !legal.has(chain[prevI] * 1e7 + chain[prevI + 1]) && legal.has(chain[prevI + 1] * 1e7 + chain[prevI])) addEdge(n, prev, wi);
+      // A one-way edge runs the way its way runs (first step of the piece);
+      // legal both ways: the two carriageways of a pair on one line.
+      const fw = legal.has(chain[prevI] * 1e7 + chain[prevI + 1]), bw = legal.has(chain[prevI + 1] * 1e7 + chain[prevI]);
+      if (oneway && fw && bw) addEdge(prev, n, wi, true);
+      else if (oneway && !fw && bw) addEdge(n, prev, wi);
       else addEdge(prev, n, wi);
       prev = n;
       prevI = i;

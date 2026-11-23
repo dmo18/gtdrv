@@ -8,7 +8,9 @@ never fetches anything at runtime; the file is bundled like any other asset.
     node scripts/fetch-map.mjs
 
 Downloads OSM API 0.6 tiles (about 0.04 degrees, split further when the API
-refuses more than 50000 nodes), one request at a time with a 1 s pause and
+refuses more than 50000 nodes; the 0.9.0 east strip lon -80.135 to -80.115
+comes as two extra tiles after the first box's, so the old features keep
+their order and building ids), one request at a time with a 1 s pause and
 User-Agent `rustwater-map-build/0.1 (dev tool)`. Raw responses are cached
 gzipped in `build/osm-cache` (git ignored), so re-runs do not download again.
 Delete that folder to refresh. `scripts/fetch-map.mjs` is never imported by `src/`.
@@ -22,27 +24,44 @@ is used in the game.
 
 ## Area and projection
 
-Box: lat 25.745 to 25.815, lon -80.225 to -80.135 (downtown, Brickell, Little
-Havana, part of Biscayne Bay). Origin is the box center, lat 25.78, lon -80.18.
+Box: lat 25.745 to 25.815, lon -80.225 to -80.115 (downtown, Brickell, Little
+Havana, Biscayne Bay, all of South Beach and the Atlantic front to the sand;
+0.9.0 moved only the east edge, from -80.135). Origin is the center of the
+first box (lon -80.225 to -80.135), lat 25.78, lon -80.18, and stays there.
 Equirectangular: x = (lon - lon0) * R * cos(lat0), z = -(lat - lat0) * R, with
-R = 6371008.8 m. x east, z south, meters, flat ground y = 0. Bounds are about
-x +-4506 m, z +-3892 m (9.0 km by 7.8 km).
+R = 6371008.8 m. x east, z south, meters, flat ground y = 0. Bounds are
+x -4505.8 to 6508.3 m, z +-3891.8 m (11.0 km by 7.8 km).
 
 ## Contents
 
-`roads` (class, name, oneway, bridge, lanes, p), `buildings` (h meters, kind,
+`roads` (class, name, oneway (1 along the way, -1 against it; roundabouts and
+motorways one-way by default), bridge, lanes, lf and lb (`lanes:forward`,
+`lanes:backward`), mph (`maxspeed`), turn (`turn:lanes`), svc (`service`:
+alley, parking_aisle, ...), area, mall (Lincoln Road Mall, mapped as a
+footway, kept as `pedestrian`), p), `buildings` (h meters, kind,
 name, p; height from `height`, then `building:levels` * 3.2, then a default by
 class), `water` (polygons, or `line: 1` waterways), `coastline`, `parks`,
-`labels` (name, kind, x, z). Footways, steps, paths, tracks and cycleways are
-dropped. Polylines are simplified with Douglas-Peucker at 1.5 m.
+`labels` (name, kind, x, z); 0.9.0 (PLAN_V3 2.1 item 2): `parking`
+(`amenity=parking` areas: kind, p; no names), `beaches` (`natural=beach`),
+`piers` (`man_made=pier`, lines or `area: 1`), `slipways`, `barriers`
+(`barrier` lines: wall, retaining_wall, fence, guard_rail, hedge,
+jersey_barrier, city_wall, handrail), `signals` and `stops`
+(`highway=traffic_signals` and `highway=stop` nodes, flat absolute decimeter
+pairs). No business names are taken. Footways (but the two malls), steps,
+paths, tracks and cycleways are dropped. Polylines are simplified with
+Douglas-Peucker at 1.5 m. The region files (scripts/split-map.mjs) cut the
+new lists to the crop like roads and buildings.
 
 Polyline field `p` is delta-encoded integer decimeters: `[x0, z0, dx1, dz1,
 ...]`; decode by running sum, then divide by 10. Label x, z are plain meters.
 
 ## Size
 
-About 2.4 MB plain JSON: roughly 11.7k roads, 20.7k buildings, 83 water
-shapes, 58 coastline lines, 607 parks, 82 labels. Checked by `test/mapdata.test.js`.
+2.8 MB plain JSON (0.9.0): 12,786 roads, 22,585 buildings, 95 water
+shapes, 59 coastline lines, 727 parks, 92 labels, 426 parking areas, 17
+beaches, 238 piers, 11 slipways, 228 barrier lines, 939 signals, 1,751 stop
+signs. Region files: Beach 827 KB (250 KB gzip), Downtown 896 KB, West
+871 KB, North 711 KB, South 683 KB. Checked by `test/mapdata.test.js`.
 
 ## Integration plan
 

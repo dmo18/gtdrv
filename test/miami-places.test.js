@@ -545,3 +545,72 @@ test('texts: the Miami tutorial and menu name Miami places, and the menu shows t
   for (const t of Object.values(city.texts)) assert.ok(!/[\u2013\u2014]/.test(t));
   assert.ok(city.piers.some((p) => p.label === 'Bayfront Marina') && city.boatSpots.some((b) => b.spec === 'yacht'));
 });
+
+// ---------------------------------------------------------------------
+// 0.9.0 map truth (docs/PLAN_V3.md 2.1, acceptance item 2 of section 6).
+// ---------------------------------------------------------------------
+const decodeLine = (p) => {
+  const o = [];
+  let x = 0, z = 0;
+  for (let i = 0; i < p.length; i += 2) { x += p[i]; z += p[i + 1]; o.push([x / 10, z / 10]); }
+  return o;
+};
+const lineLen = (pts) => { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; };
+const TRUTH = ['Ocean Drive', 'Collins Avenue', 'Washington Avenue', 'Lincoln Road', 'Alton Road', '5th Street', 'Española Way', 'Meridian Avenue'];
+
+test('South Beach streets: present, length within 10 % of the data, at their real place within 15 m', async () => {
+  const { BOX } = await import('../src/world/regions.js');
+  const R = 6371008.8, lat0 = data.origin.lat, lon0 = data.origin.lon;
+  const kx = (Math.PI / 180) * R * Math.cos((lat0 * Math.PI) / 180), kz = (Math.PI / 180) * R;
+  // The data box now reaches the Atlantic: east edge -80.115, same origin.
+  assert.equal(data.latLonBox.e, -80.115);
+  assert.ok(Math.abs(data.bounds.maxX - BOX.x1) < 1, `box x1 ${data.bounds.maxX}`);
+  assert.deepEqual([data.origin.lat, data.origin.lon], [25.78, -80.18]);
+  const inBox = (x, z) => x > BOX.x0 + 40 && x < BOX.x1 - 40 && z > BOX.z0 + 40 && z < BOX.z1 - 40;
+  for (const nm of TRUTH) {
+    // The data's drivable ways of the name, inside the box.
+    let want = 0;
+    const samples = [];
+    for (const r of data.roads) {
+      if (r.name !== nm || (r.class === 'service') || (r.class === 'pedestrian' && !r.mall && nm !== 'Española Way')) continue;
+      const pts = decodeLine(r.p).filter(([x, z]) => inBox(x, z));
+      want += lineLen(pts);
+      if (pts.length) samples.push(pts[Math.floor(pts.length / 2)]);
+    }
+    let got = 0;
+    // A tight one-way pair merged into one two-way edge stands for both ways.
+    for (const e of city.edges) if (e.name === nm) got += e.length * (e.merged ? 2 : 1);
+    assert.ok(want > 50, `${nm}: ${want.toFixed(0)} m in the data`);
+    assert.ok(Math.abs(got - want) <= want * 0.1 + 15, `${nm}: ${got.toFixed(0)} m drawn, ${want.toFixed(0)} m in the data`);
+    // Three sample points: the data point (lat, lon back through the
+    // projection) lies within 15 m of a drawn edge of that name.
+    const pick = [samples[0], samples[Math.floor(samples.length / 2)], samples[samples.length - 1]];
+    for (const [x, z] of pick) {
+      const lat = lat0 - z / kz, lon = lon0 + x / kx;
+      assert.ok(lat > 25.745 && lat < 25.815 && lon > -80.16 && lon < -80.115, `${nm} at ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+      const near = city.edgesNear(x, z, 15, []).some((id) => city.edges[id].name === nm);
+      assert.ok(near, `${nm}: drawn within 15 m of ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+    }
+  }
+});
+
+test('the Beach region: land to the ocean beach, under 30 % infill, the start on Ocean Drive', async () => {
+  const { DEFAULT_REGION } = await import('../src/world/regions.js');
+  const beach = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami-beach.json', import.meta.url), 'utf8')), { region: 'miami-beach' });
+  assert.equal(DEFAULT_REGION, 'miami-beach');
+  // Ocean Drive at 10th Street (the data maps it one-way southbound).
+  const s = beach.streetAt(beach.spawn.x, beach.spawn.z, undefined, beach.spawn.heading);
+  assert.ok(s && s.name === 'Ocean Drive', 'start on Ocean Drive');
+  assert.ok(beach.edges.some((e) => e.name === '10th Street' && Math.hypot(beach.nodes[e.a].x - beach.spawn.x, beach.nodes[e.a].z - beach.spawn.z) < 120), '10th Street at the start');
+  // Land runs east of Ocean Drive to the Atlantic at 5th, 10th and 15th Street.
+  for (const z of [600, -60, -800]) {
+    let x = beach.spawn.x, last = x;
+    for (; x < 6500; x += 5) if (beach.mainShore(x, z) > 0) last = x;
+    assert.ok(last > 5050, `land to x ${last} at z ${z}`);
+    assert.ok(beach.shoreDist(6300, z) < 0, 'the ocean past it');
+  }
+  // Infill (generated boxes) under 30 % of the Beach's buildings.
+  const own = beach.buildings.filter((b) => !b.depot);
+  const gen = own.filter((b) => b.gen).length;
+  assert.ok(gen / own.length < 0.3, `infill ${(100 * gen / own.length).toFixed(1)} %`);
+});

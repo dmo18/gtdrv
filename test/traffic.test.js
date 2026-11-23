@@ -362,3 +362,55 @@ test('service vehicles turn up in traffic now and then, never more than two at o
   assert.ok(seen.size >= 2, `service kinds seen: ${[...seen].join(', ') || 'none'}`);
   assert.ok(most <= 2, `${most} at once`);
 });
+
+// ---------------------------------------------------------------------
+// 0.9.0 (docs/PLAN_V3.md 2.1 items 3 to 5, acceptance item 3): real
+// traffic on the Beach keeps to the right of the center line, in a lane
+// of its own direction, and never enters a one-way street the wrong way.
+// ---------------------------------------------------------------------
+test('ten minutes of Beach traffic: every car on a legal lane, right of the center line', async () => {
+  const { divideOf } = await import('../src/world/roadprofile.js');
+  const { canDrive } = await import('../src/world/citygen.js');
+  const beach = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami-beach.json', import.meta.url), 'utf8')), { region: 'miami-beach' });
+  const col = createCollisionWorld();
+  for (const b of beach.buildings) col.addBox(b.x0, b.z0, b.x1, b.z1, b.h, b.kind);
+  const g = {
+    city: beach, collision: col, rng: createRng(11), vehicles: [], time: 0, clock: 10, quality: 1,
+    player: { x: beach.spawn.x, z: beach.spawn.z, y: 0, heading: beach.spawn.heading, vehicle: null },
+    addVehicle(v) { this.vehicles.push(v); return v; },
+    removeVehicle(v) { const i = this.vehicles.indexOf(v); if (i >= 0) this.vehicles.splice(i, 1); v.removed = true; },
+    events: { emit() {} },
+  };
+  g.world = { collision: col, city: beach, time: 0 };
+  const traffic = createTraffic(g, { max: 10 });
+  let checks = 0, wrongWay = 0, leftOfCenter = 0, junctions = 0, oneways = 0;
+  for (let k = 0; k < 60 * 600; k++) {
+    g.time += DT;
+    g.world.time = g.time;
+    for (const v of g.vehicles) stepVehicle(v, v.controls, DT, g.world);
+    traffic.fixedUpdate(DT);
+    if (k % 30) continue;
+    for (const v of g.vehicles) {
+      const dr = v.ai;
+      if (!dr || dr.e0 < 0 || dr.mode !== 0) continue;
+      const e = beach.edges[dr.e0];
+      if (!canDrive(e, dr.f0)) wrongWay++;
+      // On the edge's own stretch (not in a junction curve, not near its ends).
+      if (dr.inJunction || dr.s > dr.cum[1] - 4 || dr.s < 6) continue;
+      const F = beach.nodes[dr.f0], fwd = dr.f0 === e.a;
+      const tx = fwd ? e.ux : -e.ux, tz = fwd ? e.uz : -e.uz;
+      const lat = (v.x - F.x) * -tz + (v.z - F.z) * tx; // right of travel
+      checks++;
+      if (e.oneway) { oneways++; continue; }
+      const s = fwd ? divideOf(e) : -divideOf(e);
+      if (lat < s + 0.3) leftOfCenter++;
+    }
+    junctions = Math.max(junctions, traffic.cars.reduce((m, c) => Math.max(m, c.ai ? c.ai.junctions : 0), 0));
+  }
+  console.log(`traffic: ${checks} lane checks, ${oneways} on one-ways, ${leftOfCenter} left of center, ${wrongWay} wrong way`);
+  assert.ok(checks > 1500, `${checks} checks`);
+  assert.ok(oneways > 50, `${oneways} on one-way streets`);
+  assert.equal(wrongWay, 0, 'never the wrong way on a one-way street');
+  assert.ok(leftOfCenter <= checks * 0.005, `${leftOfCenter} of ${checks} left of the center line`);
+  assert.ok(junctions >= 3, 'cars get through junctions');
+});

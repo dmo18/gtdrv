@@ -60,6 +60,15 @@ function pickWalls(L, c, tag, want, step = 96) {
       const nl = Math.hypot(nx, nz);
       nx /= nl; nz /= nl;
       if (L.fieldAt(mx + nx, mz + nz) < L.fieldAt(mx - nx, mz - nz)) { nx = -nx; nz = -nz; }
+      // Each nearby wall piece with its own land side.
+      for (const q of round) {
+        const qx = (q.x0 + q.x1) / 2, qz = (q.z0 + q.z1) / 2;
+        let ax = -(q.z1 - q.z0), az = q.x1 - q.x0;
+        const al = Math.hypot(ax, az) || 1;
+        ax /= al; az /= al;
+        if (L.fieldAt(qx + ax, qz + az) < L.fieldAt(qx - ax, qz - az)) { ax = -ax; az = -az; }
+        q.nx = ax; q.nz = az;
+      }
       out.push({ s, mx, mz, nx, nz, tx: nz, tz: -nx, round });
     }
   }
@@ -92,12 +101,14 @@ function runAt(c, w, wcol, deg, mph) {
   for (let i = 0; i < steps; i++) {
     stepVehicle(v, { throttle: Math.hypot(v.vx, v.vz) < sp ? 1 : 0 }, DT, world);
     if (v.impact > 0) hit++;
-    // Past the line: on the water side of the nearest wall segment.
+    // Past the line: on the water side of the nearest wall segment (by
+    // that segment's own land side).
     const past = (x, z) => {
       let best = null, bd = Infinity;
       for (const q of w.round) { const d = segDist(x, z, q); if (d < bd) { bd = d; best = q; } }
       if (!best || bd > 6) return 0;
-      return L.fieldAt(x, z) <= 0 ? bd : 0;
+      const side = (x - (best.x0 + best.x1) / 2) * best.nx + (z - (best.z0 + best.z1) / 2) * best.nz;
+      return side < 0 ? bd : 0;
     };
     centerPast = Math.max(centerPast, past(v.x, v.z));
     vehicleCorners(v, corners);

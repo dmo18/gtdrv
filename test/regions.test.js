@@ -39,14 +39,23 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // kept its pin). Downtown is still today's core crop, value for value,
 // and now also the whole box inside it (test below).
 // The landmark id harbour-wheel became harbor-wheel (American pass): two buildings hashes re-pinned.
+// Re-pinned for 0.9.0 map truth (docs/PLAN_V3.md 2.1, task MAP): the data
+// file gained the east strip to lon -80.115 and new tags (same origin, the
+// old features kept their order, so building footprint ids are unchanged),
+// every edge got its cross section from world/roadprofile.js (widths,
+// lanes, one-way direction, paired divided roads, signals and stop signs
+// from the data), buildings keep a 1.8 m sidewalk (3 m inside blocks) and
+// drop footprint slivers under 30 m2, infill only on blocks with no real
+// footprint (outside the core). All six change: nodes and edges (graph and
+// edge fields), buildings, and lots and the lot grid that follow them.
 // A change here means the build changed: find out why before re-pinning.
 const PINNED = {
-  [WHOLE_BOX]: { nodes: '9168e9b8', edges: '4a77a31e', buildings: '074ef515', lots: 'a7ce2dc2', lotGrid: '241d865f' },
-  'miami-downtown': { nodes: '77fe93be', edges: 'f0b79fce', buildings: '45e7b156', lots: 'cc6516a8', lotGrid: '999d69bc' },
-  'miami-beach': { nodes: '18926d49', edges: 'be23bdba', buildings: '23dfeea4', lots: 'c957d7ae', lotGrid: '1fb74d76' },
-  'miami-north': { nodes: '7acdc0b7', edges: 'daa23eea', buildings: '37b29085', lots: 'e46ec52d', lotGrid: 'c06840ed' },
-  'miami-west': { nodes: '549d16b8', edges: 'e4348533', buildings: '03c0d066', lots: '1165f417', lotGrid: 'b03ebe39' },
-  'miami-south': { nodes: '8191f4a5', edges: 'c3067070', buildings: '13ecf657', lots: 'dc74e057', lotGrid: '4d50919c' },
+  [WHOLE_BOX]: { nodes: '4978b704', edges: '311ac11d', buildings: 'b8b867b8', lots: 'e300464d', lotGrid: '5d5e7dc1' },
+  'miami-downtown': { nodes: '28d450c1', edges: '18f9aab5', buildings: '85cba4ee', lots: '416bcf6a', lotGrid: 'fa406a8a' },
+  'miami-beach': { nodes: '623e78f0', edges: '18948af8', buildings: 'cbdcc9b1', lots: '0629cfff', lotGrid: 'e2766ddf' },
+  'miami-north': { nodes: 'f3393081', edges: '214bfab7', buildings: '85f76a6f', lots: 'df7fa5e5', lotGrid: '89ae392f' },
+  'miami-west': { nodes: '93b20d30', edges: '7ccb511d', buildings: 'ba558edb', lots: '2ba460b3', lotGrid: '45b1d1ab' },
+  'miami-south': { nodes: 'be069633', edges: 'd3decc88', buildings: 'e129e0c3', lots: 'b83cd6b0', lotGrid: '89a1f135' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

@@ -90,7 +90,9 @@ test('same object shape as the procedural city', () => {
   }
   for (const e of city.edges) {
     assert.ok(e.length > 0.4 && Number.isFinite(e.ux + e.uz) && Math.abs(Math.hypot(e.ux, e.uz) - 1) < 1e-6, `edge ${e.id}`);
-    assert.ok(e.width === 11 || e.width === 18);
+    // 0.9.0: the cross section of world/roadprofile.js (docs/MAP.md "Edge
+    // contract"), not the old two widths of 11 and 18 m.
+    assert.ok(Math.abs(e.width - ((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6)) < 0.011, `edge ${e.id} width`);
     const a = city.nodes[e.a], b = city.nodes[e.b];
     assert.ok(Math.abs(Math.hypot(b.x - a.x, b.z - a.z) - e.length) < 1e-6);
     assert.ok(a.edges.includes(e.id) && b.edges.includes(e.id));
@@ -373,13 +375,32 @@ test('edge grid: the traffic and police neighbor scans see the same edges as a f
 test('street name signs: real names from the data at signal junctions, clear of roads and buildings', () => {
   const signs = city.furniture.filter((f) => f.type === 'streetsign');
   assert.ok(signs.length >= 40, `${signs.length} signs`);
+  // 0.9.0 (docs/PLAN_V3.md 2.1 item 11): the atlas holds every street name
+  // of the map, plates in atlas order; blades at every signal and every
+  // junction of two named streets.
   const plates = city.streetNames.plates;
-  assert.equal(plates.length, 32);
+  const atlas = city.streetNames.atlas;
+  const named = new Set(city.edges.filter((e) => e.name && !e.causeway).map((e) => e.name));
+  assert.equal(atlas.length, named.size);
+  for (const nm of named) assert.ok(atlas.includes(nm), nm + ' in the sign atlas');
+  assert.equal(plates.length, atlas.length);
+  assert.equal(city.streetNames.x.length + city.streetNames.z.length, 32);
   const names = new Set(data.roads.map((r) => r.name).filter(Boolean));
-  const top = [...city.streetNames.x, ...city.streetNames.z];
+  const top = atlas;
   for (const nm of top) assert.ok(names.has(nm), `${nm} is a road in the data`);
+  const bladeShare = (() => {
+    let j = 0, b = 0;
+    for (const n of city.nodes) {
+      if (n.i < 0 || n.edges.length < 3) continue;
+      if (new Set(n.edges.map((id) => city.edges[id].name).filter(Boolean)).size < 2) continue;
+      j++;
+      if (n.blade) b++;
+    }
+    return b / j;
+  })();
+  assert.ok(bladeShare > 0.85, `blades at ${(bladeShare * 100).toFixed(0)} % of the junctions of two named streets`);
   for (const f of signs) {
-    assert.ok(f.a >= 0 && f.a < 32 && f.b >= 0 && f.b < 32 && f.a !== f.b);
+    assert.ok(f.a >= 0 && f.a < atlas.length && f.b >= 0 && f.b < atlas.length && f.a !== f.b);
     assert.ok(!city.onRoad(f.x, f.z) && !city.inBuilding(f.x, f.z, 0.5) && city.shoreDist(f.x, f.z) > 1, `sign at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`);
     // Each plate's road meets at the junction beside the sign.
     const near = city.edgesNear(f.x, f.z, 20, []).map((id) => city.edges[id].name);

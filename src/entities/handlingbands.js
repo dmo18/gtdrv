@@ -68,3 +68,17 @@ export const SLALOM = {
 };
 // Chase camera (6.3): roll into the turn, yaw lag, pitch under braking.
 export const CAMERA = { rollMaxDeg: 2, yawLag: 0.18, pitchMaxDeg: 1.5 };
+
+// Handling presets (docs/PLAN_V3.md 2.4 item 5; vehicle.js HANDLING_PRESETS,
+// settings.handlingPreset, default 'standard'): how far each one moves a
+// sedan from Standard, as [min, max] ratios to Standard's value.
+//   r0       full-lock circle at 2 m/s
+//   lockTime center to full lock at 5 m/s
+//   roll     body roll in a steady 0.7 g turn at 20 m/s
+export const PRESETS = ['standard', 'relaxed', 'sharp'];
+export const PRESET_DEFAULT = 'standard';
+export const PRESET_BANDS = {
+  standard: { r0: [1, 1], lockTime: [1, 1], roll: [1, 1] },
+  relaxed: { r0: [0.97, 1.03], lockTime: [1.15, 1.35], roll: [1.15, 1.45] },
+  sharp: { r0: [0.6, 0.85], lockTime: [0.7, 0.88], roll: [0.75, 0.95] },
+};
