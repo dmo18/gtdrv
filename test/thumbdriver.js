@@ -10,7 +10,8 @@
 //   as the eye reads it from the motion; the heading at walking pace): a point lookTime(u) seconds of
 //   travel ahead on the path (at least THUMB.lookMin m), the curvature 2 sin(alpha) / distance that
 //   reaches it, as a share of the car's full-lock curvature at that speed
-//   (a driver who knows the car), through the inverse of the car's input
+//   (a driver who knows the car: the player's own, playerLockCurvature, where
+//   the module has one, task GRIP), through the inverse of the car's input
 //   shaping when the module has one (steerShapeExp),
 // - moves the thumb no faster than 4 units of input per second,
 // - and the widget quantizes the thumb to steps of 0.08, with seeded noise
@@ -129,7 +130,7 @@ export function createThumb(mod, seed = 7) {
       const kappa = 2 * Math.sin(alpha) / Math.hypot(dx, dz);
       // Asked for more than full lock, the thumb pushes past the widget's
       // stop (full input held, noise and all) rather than stopping at it.
-      let share = kappa / mod.fullLockCurvature(v.spec, au);
+      let share = kappa / (mod.playerLockCurvature || mod.fullLockCurvature)(v.spec, au);
       share = share > PAST ? PAST : share < -PAST ? -PAST : share;
       const e = shapeExp(au);
       const want = Math.sign(share) * Math.pow(Math.abs(share), 1 / e);
@@ -480,6 +481,27 @@ export function yawDelay(mod, id, mph, steer = 1) {
   // The first step counts as 1/60 s: the answer to an input cannot be seen sooner.
   for (let i = 0; i < 90; i++) if (r[i] >= 0.63 * fin) return (i + 1) * DT;
   return Infinity;
+}
+
+// ---- Full wheel (task GRIP): full input held for 1 s from straight at a
+// held speed (0.98 of the top speed when that is lower). Heading change
+// (deg), the yaw rate, lateral g and radius at the end of the second, and
+// the peak rear slip.
+export function fullWheel(mod, id, mph, secs = 1) {
+  const u = Math.min(mph / MPH, mod.VEHICLE_SPECS[id].maxSpeed * 0.98);
+  const v = startAt(mod, id, 0, 0, 0, u), c = controls();
+  for (let i = 0; i < 30; i++) { holdSpeed(v, c, u); mod.stepVehicle(v, c, DT, {}); }
+  c.steer = 1;
+  let head = 0, last = v.heading, slip = 0;
+  for (let i = 0; i < Math.round(secs / DT); i++) {
+    holdSpeed(v, c, u);
+    mod.stepVehicle(v, c, DT, {});
+    head += Math.atan2(Math.sin(v.heading - last), Math.cos(v.heading - last));
+    last = v.heading;
+    slip = Math.max(slip, rearSlipDeg(v));
+  }
+  const r = v.yawRate, sp = v.speed;
+  return { id, mph: sp * MPH, head: head * 180 / Math.PI, yaw: r, g: sp * r / 9.81, radius: sp / Math.max(1e-6, Math.abs(r)), slip };
 }
 
 export const CARS = ['sedan', 'suv', 'pickup', 'sports', 'muscle', 'truck'];

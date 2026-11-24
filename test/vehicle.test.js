@@ -569,7 +569,8 @@ test('handling presets: standard (default), relaxed, sharp; unknown means standa
   // (DRIVE, deliberate: shapeK, the input shaping by speed, joins the row.)
   // (PLANTED, deliberate: assistK left with the stability assist; lockAdd and
   // gainK join; in Arcade every car cuts 40 degrees, Sim keeps the spec's lock.)
-  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1 });
+  // (GRIP, deliberate: arcShape and turnK, the Arcade player's shaping and turn, join.)
+  assert.deepEqual(presetParams('standard'), { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1, arcShape: 1, turnK: 1 });
   const spec = createVehicle('sedan', 0, 0, 0).spec;
   assert.ok(Math.abs(steerMaxOf(spec) - (40 * Math.PI) / 180) < 1e-12);
   setHandlingMode('sim');

@@ -531,6 +531,69 @@ function arcadeK(spec, au) {
   return k < kLock ? k : kLock;
 }
 
+// Arcade, the player's turn (task GRIP, owner round 6: "still too loose,
+// especially at high speed; a fully rotated wheel barely changed the
+// trajectory"). The player's steering (controls.steerShape) is a yaw-rate
+// command: full input asks yaw rate = playerLatG * g / speed (path
+// curvature = that over the speed), steer s asks s times it (linear), the
+// curvature reached with the planted 0.04 s lag; at walking pace it is the
+// whole lock. AI drivers keep arcadeK (their planners were tuned on it)
+// and so do the four tall service vehicles (their rollover tests).
+// TURN_G: knots (mph, g) of a car's full-input lateral acceleration, eased
+// between knots (smoothstep) and held flat past the ends.
+export const TURN_G = [[20, 2.0], [35, 2.3], [55, 2.6], [110, 2.6], [130, 2.3], [160, 2.0]];
+// Tall bodies would roll over long before a low car slides: the turn is
+// scaled by the static stability factor (track / (2 * cg height)), 1 from
+// TALL_SSF[0] up, TALL_K[0] at TALL_SSF[1], never under TALL_K[1]
+// (SUV and pickup about 0.81, the van and box truck 0.65).
+export const TALL_SSF = [1.45, 1.3], TALL_K = [0.8, 0.65];
+// Grippier cars (the sports cars) turn up to TURN_GRIP_MAX times harder:
+// spec.grip over TURN_GRIP_REF, at least 1.
+export const TURN_GRIP_REF = 0.82, TURN_GRIP_MAX = 1.1;
+function turnTable(mph) {
+  const T = TURN_G;
+  if (mph <= T[0][0]) return T[0][1];
+  for (let i = 1; i < T.length; i++) {
+    if (mph <= T[i][0]) {
+      const t = (mph - T[i - 1][0]) / (T[i][0] - T[i - 1][0]);
+      return T[i - 1][1] + (T[i][1] - T[i - 1][1]) * t * t * (3 - 2 * t);
+    }
+  }
+  return T[T.length - 1][1];
+}
+export function tallK(spec) {
+  const ssf = (spec.width - 0.25) / (2 * spec.height * 0.36);
+  if (ssf >= TALL_SSF[0]) return 1;
+  const k = 1 - (1 - TALL_K[0]) * (TALL_SSF[0] - ssf) / (TALL_SSF[0] - TALL_SSF[1]);
+  return k > TALL_K[1] ? k : TALL_K[1];
+}
+// The player's full-input lateral acceleration (g) at speed u, dry, in
+// Arcade (the preset's turnK and gripK in): at least what the AI's turn
+// gives. Sim, and the service vehicles: lateralGrip.
+export function playerLatG(spec, u = 0) {
+  const au = u < 0 ? -u : u;
+  if (!H.planted || spec.service) return lateralGrip(spec, au);
+  const kLock = Math.tan(steerMaxOf(spec)) / spec.wheelBase;
+  const base = arcadeLatA(spec, au, kLock) / G;
+  const pv = presetValues();
+  const gk = spec.grip / TURN_GRIP_REF;
+  const g = turnTable(au * MPH) * (gk < 1 ? 1 : gk > TURN_GRIP_MAX ? TURN_GRIP_MAX : gk) * tallK(spec) * pv.turnK * pv.gripK;
+  return g > base ? g : base;
+}
+function playerK(spec, au, aLat) {
+  const kLock = Math.tan(steerMaxOf(spec)) / spec.wheelBase;
+  if (au <= H.lockV[0] / MPH) return kLock;
+  const k = aLat / (au * au);
+  return k < kLock ? k : kLock;
+}
+// Path curvature (1/m) the player's full input gives at speed u (what
+// fullLockCurvature is for the AI); steer s gives s times it in Arcade.
+export function playerLockCurvature(spec, u) {
+  if (!H.planted || spec.service) return fullLockCurvature(spec, u);
+  const au = u < 0 ? -u : u;
+  return playerK(spec, au, playerLatG(spec, au) * G);
+}
+
 // Normalized engine torque, peak around 60% of the redline.
 function torque(r) {
   const t = (r - 0.6) / 0.45;
@@ -734,10 +797,16 @@ function steerGeo(spec, u, s) {
 // `steerShape` (the player's input, src/core/input.js) are shaped; the AI
 // planners send a share of the lock and get it unchanged.
 export const SHAPE_V1 = 15 / 2.23694, SHAPE_V2 = 70 / 2.23694, SHAPE_EXP = 1.2;
+// Task GRIP (deliberate): in Arcade the exponent is the preset's arcShape
+// at 70 mph (Standard and Sharp 1: linear at every speed, the yaw rate is
+// proportional to the thumb; Relaxed 1.25, the gentler curve); Sim keeps
+// SHAPE_EXP times shapeK.
 export function steerShapeExp(u) {
   const au = u < 0 ? -u : u;
   const t = au <= SHAPE_V1 ? 0 : au >= SHAPE_V2 ? 1 : (au - SHAPE_V1) / (SHAPE_V2 - SHAPE_V1);
-  return 1 + (SHAPE_EXP - 1) * presetValues().shapeK * t * t * (3 - 2 * t);
+  const pv = presetValues();
+  const rise = H.planted ? pv.arcShape - 1 : (SHAPE_EXP - 1) * pv.shapeK;
+  return rise === 0 ? 1 : 1 + rise * t * t * (3 - 2 * t);
 }
 export function shapeSteerBySpeed(x, u) {
   const e = steerShapeExp(u);
@@ -816,8 +885,12 @@ export function stepVehicle(v, controls, dt, world) {
   const pv = presetValues();
   const quick = planted && controls && controls.steerShape;
   v.steer = steerToward(v.steer, steerIn, (quick ? H.lockRate : d.lockRate) * pv.lockK, (quick ? H.returnRate : d.returnRate) * pv.returnK, dt);
-  const delta = steerAngle(s, vf0, v.steer);
-  const deltaGeo = steerGeo(s, vf0, v.steer);
+  // Arcade, the player (task GRIP): a yaw-rate command, linear in steer.
+  const turn = quick && !s.service;
+  const aTurn = turn ? playerLatG(s, vf0) * G : 0;
+  const kTurn = turn ? playerK(s, Math.abs(vf0), aTurn) : 0;
+  const deltaGeo = turn ? Math.atan(d.L * v.steer * kTurn) : steerGeo(s, vf0, v.steer);
+  const delta = turn ? deltaGeo : steerAngle(s, vf0, v.steer);
   v.steerAngle = delta;
   const cd = Math.cos(delta), sd = Math.sin(delta);
 
@@ -905,8 +978,8 @@ export function stepVehicle(v, controls, dt, world) {
   // acceleration the road gives now, how hard the rear axle is held in
   // line, and the yaw lag (a crash loosens both for v.knock seconds).
   const kGeo = Math.tan(deltaGeo) / L, sinGeo = Math.abs(Math.sin(deltaGeo));
-  const aCap = planted ? arcadeLatA(s, avf0, Math.tan(steerMaxOf(s)) / L) * wet * fLat : 0;
-  const plantA = planted ? muLat * G * H.plantK * (v.knock > 0 ? H.knockK : 1) : 0;
+  const aCap = planted ? (turn ? aTurn : arcadeLatA(s, avf0, Math.tan(steerMaxOf(s)) / L)) * wet * fLat : 0;
+  const plantA = planted ? Math.max(muLat * G, turn ? aTurn * wet : 0) * H.plantK * (v.knock > 0 ? H.knockK : 1) : 0;
   const kYaw = planted ? 1 - Math.exp(-h / (v.knock > 0 ? H.knockTau : H.yawTau)) : 0;
   for (let k = 0; k < NSUB; k++) {
     ch = Math.cos(v.heading);
@@ -1134,7 +1207,8 @@ export function stepVehicle(v, controls, dt, world) {
   const pitchEq = clamp(axAvg * 0.0065, -0.075, 0.06);
   // Arcade corners at up to 1.6 times the real car's grip: the body rolls
   // ARCADE_ROLL times the real car's roll at its own limit, not 1.6 times.
-  const rollK = planted ? ARCADE_ROLL / (H.lat[0] + (H.lat[1] - H.lat[0]) * latRamp(vf)) : 1;
+  // The player's harder turn (task GRIP) rolls ARCADE_ROLL times the table's roll at its own full input.
+  const rollK = !planted ? 1 : turn ? ARCADE_ROLL * s.grip * G / Math.max(aTurn, s.grip * G) : ARCADE_ROLL / (H.lat[0] + (H.lat[1] - H.lat[0]) * latRamp(vf));
   const rollEq = clamp(-ayAvg * d.rollPerA * pv.rollK * rollK, -ROLL_MAX, ROLL_MAX);
   const w = 9, z2 = 2 * 0.5 * w;
   v.pitchV += (w * w * (pitchEq - v.pitch) - z2 * v.pitchV) * dt;

@@ -9,13 +9,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as V from '../src/entities/vehicle.js';
-import { PLANTED, HB_TURN, HB_SLIP_CAP } from '../src/entities/handlingbands.js';
+import { PLANTED, HB_TURN, HB_SLIP_CAP, PLAYER_TURN, LANE_CHANGE_FAST } from '../src/entities/handlingbands.js';
 import {
   CARS, UTURN_CARS, LANE, LANE_CHANGE, CURVE, SLALOM, FAST, ABUSE, DELAY_MPH, DT, MPH, junctionTurn, laneChange, curve, uTurn, slalom,
-  trailBrake, runAll, formatRows, holdSpeed, rearSlipDeg, yawDelay,
+  trailBrake, runAll, formatRows, holdSpeed, rearSlipDeg, yawDelay, fullWheel,
 } from './thumbdriver.js';
 
-const { setHandlingMode, setHandlingPreset, stepVehicle, createVehicle, steerShapeExp, shapeSteerBySpeed, fullLockCurvature } = V;
+const { setHandlingMode, setHandlingPreset, stepVehicle, createVehicle, steerShapeExp, shapeSteerBySpeed, fullLockCurvature, playerLockCurvature } = V;
 const TRAIL_KEEP = 0.7; // Arcade keeps at least 70 % of the steering response under brake
 // Task PLANTED (deliberate): straight within 0.25 s of a release (was 0.5 s).
 const RELEASE = { settle: PLANTED.release, reverse: 0.004 }; // s to straight after a release, rad/s of yaw the other way
@@ -126,7 +126,8 @@ test('planted: the slip angle at the rear axle stays under 4 degrees in every th
           const u = v.speed || 20;
           stepVehicle(v, c, DT, {});
           // Yaw per meter traveled against what that input asks at that speed.
-          h += (v.heading - last) / Math.max(1e-6, u * DT) / (0.5 * fullLockCurvature(v.spec, u));
+          // (Task GRIP: the player's input asks playerLockCurvature, a yaw-rate command, not the AI's fullLockCurvature.)
+          h += (v.heading - last) / Math.max(1e-6, u * DT) / (0.5 * playerLockCurvature(v.spec, u));
           last = v.heading;
         }
         return h / 60;
@@ -160,7 +161,8 @@ test('direct: the yaw rate answers a full step within 0.12 s at 10, 30, 50 and 7
       holdSpeed(v, c, 20);
       const u = v.speed;
       stepVehicle(v, c, DT, {});
-      const k = v.yawRate / u / (Math.tan(V.steerAngle(v.spec, u, shapeSteerBySpeed(0.4, u))) / v.spec.wheelBase);
+      // (Task GRIP: the player's steer is a share of playerLockCurvature, linear.)
+      const k = v.yawRate / u / (shapeSteerBySpeed(0.4, u) * playerLockCurvature(v.spec, u));
       lo = Math.min(lo, k); hi = Math.max(hi, k);
     }
     assert.ok(lo > 0.99 && hi < 1.01, `held input: ${lo.toFixed(4)} to ${hi.toFixed(4)} of the curvature asked`);
@@ -264,45 +266,66 @@ test('release: the car settles straight within 0.25 s, no yaw back the other way
 });
 
 // (Task PLANTED, deliberate: the exponent at 70 mph is 1.2, was 1.8, which felt vague near the center.)
-test('input shaping by speed: exponent 1 to 15 mph, 1.2 at 70; full input stays full; monotonic, no dead zone', () => {
-  assert.equal(steerShapeExp(0), 1);
-  assert.equal(steerShapeExp(15 / MPH), 1);
-  assert.ok(Math.abs(steerShapeExp(70 / MPH) - 1.2) < 1e-9 && steerShapeExp(90 / MPH) === steerShapeExp(70 / MPH));
-  let last = 1;
-  for (let mph = 15; mph <= 70; mph += 5) {
-    const e = steerShapeExp(mph / MPH);
-    assert.ok(e >= last, `rises with speed (${mph} mph: ${e.toFixed(3)})`);
-    last = e;
+// (Task GRIP, owner round 6, deliberate: in Arcade / Standard the exponent is
+// 1 at every speed, the yaw rate is proportional to the thumb; the rising
+// curve, 1 to 15 mph and 1.2 at 70, is now Sim's (unchanged), and Arcade /
+// Relaxed keeps a gentler one, 1.25 at 70. Sharp is linear too.)
+test('input shaping by speed: Arcade / Standard linear; Sim 1 to 15 mph, 1.2 at 70; full input stays full; monotonic, no dead zone', () => {
+  const inSim = (fn, preset = 'standard') => { setHandlingMode('sim'); setHandlingPreset(preset); try { return fn(); } finally { setHandlingPreset('standard'); setHandlingMode('arcade'); } };
+  for (const mph of [0, 10, 15, 30, 45, 65, 70, 90, 120]) {
+    assert.equal(arcade(() => steerShapeExp(mph / MPH)), 1, `Arcade / Standard linear at ${mph} mph`);
+    assert.equal(arcade(() => steerShapeExp(mph / MPH), 'sharp'), 1, `Arcade / Sharp linear at ${mph} mph`);
   }
-  for (const mph of [5, 30, 45, 65, 80]) {
-    const u = mph / MPH;
-    assert.equal(shapeSteerBySpeed(1, u), 1);
-    assert.equal(shapeSteerBySpeed(-1, u), -1);
-    assert.equal(shapeSteerBySpeed(0, u), 0);
-    let prev = 0;
-    for (let x = 0.01; x <= 1.0001; x += 0.01) {
-      const y = shapeSteerBySpeed(x, u);
-      assert.ok(y > prev, `strictly rising at ${x.toFixed(2)}, ${mph} mph`);
-      assert.ok(Math.abs(shapeSteerBySpeed(-x, u) + y) < 1e-12, 'odd');
-      prev = y;
+  for (const [mode, preset, at70] of [['sim', 'standard', 1.2], ['arcade', 'relaxed', 1.25]]) {
+    const exp = (mph) => (mode === 'sim' ? inSim : arcade)(() => steerShapeExp(mph / MPH), preset);
+    assert.equal(exp(0), 1);
+    assert.equal(exp(15), 1);
+    assert.ok(Math.abs(exp(70) - at70) < 1e-9 && exp(90) === exp(70), `${mode} / ${preset}: ${exp(70)} at 70 mph`);
+    let last = 1;
+    for (let mph = 15; mph <= 70; mph += 5) {
+      const e = exp(mph);
+      assert.ok(e >= last, `rises with speed (${mph} mph: ${e.toFixed(3)})`);
+      last = e;
     }
   }
-  // Presets scale it: Relaxed finer, Sharp more direct; none over 1.25.
-  const at65 = (p) => arcade(() => steerShapeExp(65 / MPH), p);
+  for (const [mode, preset] of [['arcade', 'standard'], ['arcade', 'relaxed'], ['sim', 'standard']]) {
+    (mode === 'sim' ? inSim : arcade)(() => {
+      for (const mph of [5, 30, 45, 65, 80]) {
+        const u = mph / MPH;
+        assert.equal(shapeSteerBySpeed(1, u), 1);
+        assert.equal(shapeSteerBySpeed(-1, u), -1);
+        assert.equal(shapeSteerBySpeed(0, u), 0);
+        let prev = 0;
+        for (let x = 0.01; x <= 1.0001; x += 0.01) {
+          const y = shapeSteerBySpeed(x, u);
+          assert.ok(y > prev, `strictly rising at ${x.toFixed(2)}, ${mph} mph`);
+          assert.ok(Math.abs(shapeSteerBySpeed(-x, u) + y) < 1e-12, 'odd');
+          prev = y;
+        }
+      }
+    }, preset);
+  }
+  // Sim's presets scale it: Relaxed finer, Sharp more direct; none over 1.25.
+  const at65 = (p) => inSim(() => steerShapeExp(65 / MPH), p);
   assert.ok(at65('relaxed') > at65('standard') && at65('sharp') < at65('standard') && at65('sharp') > 1);
   assert.ok(arcade(() => steerShapeExp(70 / MPH), 'relaxed') <= PLANTED.shapeExp + 1e-12);
   // Only the player's input is shaped: AI controls (no steerShape) are not.
-  // (Task PLANTED, deliberate: 0.3 of input at 65 mph is 0.24 at the wheels, was under 0.15.)
+  // (Task PLANTED, deliberate: 0.3 of input at 65 mph is 0.24 at the wheels, was under 0.15.
+  // Task GRIP, deliberate: that is now Sim and Arcade / Relaxed; Arcade / Standard sends 0.3.)
   const run = (flag) => {
     const v = createVehicle('sedan', 0, 0, 0);
     v.vx = 29;
     for (let i = 0; i < 30; i++) stepVehicle(v, { steer: 0.3, throttle: 0.3, steerShape: flag }, DT, {});
     return v.steer;
   };
-  assert.ok(Math.abs(run(false) - 0.3) < 1e-9 && run(true) < 0.26 && run(true) > 0.22, `ai ${run(false)}, player ${run(true)}`);
+  for (const [fn, preset] of [[inSim, 'standard'], [arcade, 'relaxed']]) {
+    const ai = fn(() => run(false), preset), me = fn(() => run(true), preset);
+    assert.ok(Math.abs(ai - 0.3) < 1e-9 && me < 0.26 && me > 0.22, `${preset}: ai ${ai}, player ${me}`);
+  }
+  assert.ok(Math.abs(arcade(() => run(true)) - 0.3) < 1e-9, 'Arcade / Standard: the player\'s 0.3 is 0.3');
   // One step of the touch widget (0.08) at 65 mph: the lateral g it asks.
-  const u = 65 / MPH, k = fullLockCurvature(V.VEHICLE_SPECS.sedan, u) * u * u / 9.81;
-  console.log(`# 65 mph sedan: one 0.08 input step asks ${(shapeSteerBySpeed(0.08, u) * k).toFixed(3)} g (unshaped ${(0.08 * k).toFixed(3)} g); half input ${(shapeSteerBySpeed(0.5, u) * k).toFixed(3)} g; full ${k.toFixed(3)} g`);
+  const u = 65 / MPH, k = arcade(() => playerLockCurvature(V.VEHICLE_SPECS.sedan, u)) * u * u / 9.81;
+  console.log(`# 65 mph sedan, Arcade / Standard: one 0.08 input step asks ${(0.08 * k).toFixed(3)} g; half input ${(0.5 * k).toFixed(3)} g; full ${k.toFixed(3)} g (the AI's full turn ${(fullLockCurvature(V.VEHICLE_SPECS.sedan, u) * u * u / 9.81).toFixed(3)} g)`);
 });
 
 test('the steady turn grows with the input at every speed (no silent loss, full input is the most)', () => {
@@ -347,6 +370,89 @@ test('the Handling lab presets keep working with the thumb driver (Relaxed, Shar
       assert.ok(r.slip < PLANTED.slipDeg, `${tag} planted (${r.slip.toFixed(2)} deg)`);
     }
   }
+});
+
+// ---- Task GRIP (owner round 6): "still too loose, especially at high
+// speed; a fully rotated wheel barely changed the trajectory". The player's
+// full input is a strong yaw-rate command at every speed (PLAYER_TURN).
+const FIVE = ['sedan', 'suv', 'pickup', 'sports', 'truck'];
+const interp = (pts, x) => {
+  if (x <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) return pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * (x - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
+  return pts[pts.length - 1][1];
+};
+test('full wheel held 1 s (Arcade / Standard): strong at every speed, still planted; the table at 30, 50, 70, 100 mph', () => {
+  const out = [];
+  arcade(() => {
+    for (const id of FIVE) {
+      const spec = V.VEHICLE_SPECS[id], k = V.tallK(spec);
+      if (id === 'sedan' || id === 'sports') assert.equal(k, 1, `${id} is a low car`);
+      else assert.ok(k >= PLAYER_TURN.tallK[0] && k <= PLAYER_TURN.tallK[1], `${id}: tall body scale ${k.toFixed(3)}`);
+      for (const mph of [...PLAYER_TURN.speeds, 60, 90, 120]) {
+        const r = fullWheel(V, id, mph);
+        assert.ok(r.slip < PLANTED.slipDeg, `${id} at ${mph} mph: rear slip ${r.slip.toFixed(2)} deg`);
+        // The car gives what the model says (within 4 %), and that is at least the AI's own turn.
+        const want = V.playerLatG(spec, r.mph / MPH);
+        assert.ok(Math.abs(r.g / want - 1) < 0.04, `${id} at ${mph} mph: ${r.g.toFixed(2)} g, asked ${want.toFixed(2)} g`);
+        assert.ok(want >= V.lateralGrip(spec, r.mph / MPH) - 1e-9);
+        if (mph >= 60) assert.ok(r.g >= interp(PLAYER_TURN.g, mph) * k, `${id} at ${mph} mph: ${r.g.toFixed(2)} g, at least ${(interp(PLAYER_TURN.g, mph) * k).toFixed(2)}`);
+        for (const [hm, deg] of PLAYER_TURN.head) if (hm === mph) assert.ok(r.head >= deg * k, `${id} at ${mph} mph: ${r.head.toFixed(1)} deg in the first second, at least ${(deg * k).toFixed(1)}`);
+        if (mph === 70) assert.ok(r.radius <= PLAYER_TURN.r70 / k, `${id} at 70 mph: radius ${r.radius.toFixed(1)} m`);
+        if (PLAYER_TURN.speeds.includes(mph)) out.push(`${id.padEnd(6)} ${String(mph).padStart(3)} mph (${r.mph.toFixed(0).padStart(3)}): ${r.head.toFixed(1).padStart(5)} deg/1 s, ${r.yaw.toFixed(3)} rad/s, ${r.g.toFixed(2)} g, R ${r.radius.toFixed(0).padStart(3)} m, rear slip ${r.slip.toFixed(2)} deg`);
+      }
+    }
+    // Relaxed turns less and Sharp more, both still planted.
+    const s70 = (p) => arcade(() => fullWheel(V, 'sedan', 70), p);
+    const rel = s70('relaxed'), std = s70('standard'), shp = s70('sharp');
+    assert.ok(rel.g < std.g && shp.g > std.g && Math.max(rel.slip, shp.slip) < PLANTED.slipDeg, `70 mph: relaxed ${rel.g.toFixed(2)} g, standard ${std.g.toFixed(2)}, sharp ${shp.g.toFixed(2)}`);
+  });
+  // Sim is unchanged: the player's full input is the AI's (the tire model).
+  setHandlingMode('sim');
+  try {
+    for (const id of ['sedan', 'suv']) {
+      const me = fullWheel(V, id, 70);
+      assert.equal(V.playerLatG(V.VEHICLE_SPECS[id], 30), V.lateralGrip(V.VEHICLE_SPECS[id], 30));
+      assert.equal(V.playerLockCurvature(V.VEHICLE_SPECS[id], 30), fullLockCurvature(V.VEHICLE_SPECS[id], 30));
+      assert.ok(me.g < 1.2, `sim ${id} at 70 mph: ${me.g.toFixed(2)} g (the real car)`);
+    }
+  } finally { setHandlingMode('arcade'); }
+  // The AI keeps its turn: an unflagged full input at 70 mph is the old ~1.06 g.
+  arcade(() => {
+    const v = createVehicle('sedan', 0, 0, 0);
+    v.vx = 70 / MPH;
+    const c = { steer: 1, throttle: 0, brake: 0 };
+    for (let i = 0; i < 60; i++) { holdSpeed(v, c, 70 / MPH); stepVehicle(v, c, DT, {}); }
+    assert.ok(Math.abs(v.speed * v.yawRate / 9.81 - V.lateralGrip(v.spec, v.speed)) < 0.03, `AI full input ${(v.speed * v.yawRate / 9.81).toFixed(2)} g`);
+  });
+  console.log(`# full wheel held 1 s, Arcade / Standard:\n# ${out.join('\n# ')}`);
+});
+
+test('lane change at 90 mph (task GRIP): settled within 3 s, at most one overshoot; 30-seed spread printed', () => {
+  const out = [];
+  arcade(() => {
+    for (const id of CARS) {
+      if (V.VEHICLE_SPECS[id].maxSpeed * 0.95 < LANE_CHANGE_FAST.mph / MPH) continue; // the box truck tops out at 70
+      const c = laneChange(V, id, LANE_CHANGE_FAST.mph);
+      assert.ok(c.settle < LANE_CHANGE_FAST.settle, `${id} at 90 mph: settled in ${c.settle.toFixed(2)} s`);
+      assert.ok(c.overshoots <= LANE_CHANGE_FAST.overshoots, `${id} at 90 mph: ${c.overshoots} overshoots`);
+      assert.ok(c.slip < PLANTED.slipDeg && Math.abs(c.heading) < 0.03, `${id} at 90 mph: planted and straight`);
+      out.push(`${id} ${c.settle.toFixed(2)} s/${c.overshoots}`);
+    }
+    // The spread over thumb seeds (not pinned: the 0.08 thumb steps now ask
+    // 0.21 g each at 65 mph, so a few seeds settle late; see docs/REVAMP.md 6.3 GRIP).
+    for (const id of ['sedan', 'sports']) {
+      for (const mph of [65, 90]) {
+        let worst = 0, late = 0, ov = 0;
+        for (let seed = 1; seed <= 30; seed++) {
+          const c = laneChange(V, id, mph, seed);
+          worst = Math.max(worst, c.settle); ov = Math.max(ov, c.overshoots);
+          if (!(c.settle < LANE_CHANGE_FAST.settle)) late++;
+        }
+        out.push(`${id} ${mph} mph over 30 seeds: worst ${Number.isFinite(worst) ? worst.toFixed(2) : 'never'} s, ${late} over 3 s, at most ${ov} overshoots`);
+      }
+    }
+  });
+  console.log(`# lane change at 90 mph: ${out.join('; ')}`);
 });
 
 // The scenarios themselves are pure functions of the seed: twice is the same.

@@ -116,6 +116,22 @@ export const ARCADE_PLAYER_STEER = { time: [0.07, 0.10] };
 // speed; a released car is straight within `release` s; the handbrake
 // slide recovers within `recover` s of the release with no yaw the other way.
 export const PLANTED = { slipDeg: 4, delay: 0.12, release: 0.25, recover: 0.6, slideDeg: [25, 37], shapeExp: 1.25 };
+// Arcade, the player's full input (task GRIP, owner round 6, deliberate:
+// "still too loose, especially at high speed; a fully rotated wheel barely
+// changed the trajectory"; 0.11.1 gave the sedan 1.06 g, 18 degrees in the
+// first second and a 93 m radius at 70 mph). The player's steering is a
+// yaw-rate command (vehicle.js playerLatG, TURN_G): full input held 1 s
+// from straight on a level road gives at least `g` (mph, g) of lateral
+// acceleration, `head` (mph, degrees) of heading change in that second and
+// at 70 mph a radius of at most `r70` m, with the rear slip under
+// PLANTED.slipDeg. Tall bodies (SUV, pickup, vans, trucks, buses) scale
+// all of it by vehicle.js tallK, within `tallK`; a vehicle whose top speed
+// is under a test speed is measured at 0.98 of its top speed. The AI keeps
+// its own turn (ARCADE_GRIP); the four service vehicles keep theirs.
+export const PLAYER_TURN = { g: [[60, 2.2], [90, 2.0], [120, 1.8]], head: [[70, 40], [100, 30]], r70: 42, tallK: [0.65, 0.82], speeds: [30, 50, 70, 100] };
+// The thumb driver's lane change at highway speed (task GRIP): one lane at
+// `mph`, settled within `settle` s, at most one overshoot.
+export const LANE_CHANGE_FAST = { mph: 90, settle: 3, overshoots: 1 };
 export const HEAVY = ['minivan', 'van', 'suv', 'crewcab', 'pickup', 'truck', 'semi', 'schoolbus', 'citybus'];
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %
