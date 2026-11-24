@@ -15,8 +15,9 @@ const _c = new THREE.Color();
 // arrays for the garbage collector (big typed arrays are what set off
 // its long full collections). Every pooled array is a power of two long
 // (at least 256); at most POOL_MAX bytes wait in the pool, the rest is
-// left to the collector.
-const POOL_MAX = 48 << 20;
+// left to the collector. 24 MB (was 48, 0.12.3): a start already fills
+// 14 to 20 MB, and the drive grew the heap toward 200 MB with 48.
+const POOL_MAX = 24 << 20;
 const pools = { f: new Map(), u: new Map(), s: new Map() };
 let pooled = 0;
 const EMPTY_F = new Float32Array(0), EMPTY_U = new Uint32Array(0);

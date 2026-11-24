@@ -842,3 +842,10 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Soak found `keepLook` throwing (reading wheelLevels of a mesh without them) in the render loop after 0.12.0; guarded. Soak of 191 sim s now has zero errors.
 - The full 60 minute soak per region is not run overnight: it takes about 3.5 hours of wall time each here. Left for the release candidate.
 - smoke --extra 'blast over the sea' failed once on a loaded machine and passed on rerun; watch for a repeat.
+
+## 2026-11-24: 0.12.3 memory (in the tree, no version bump)
+- Cause (heap snapshot attributed by owner): createMiamiCity's scope is held by closures kept on the city (visualAt, cellAt, edgesNear), so every build raster it still pointed at stayed alive: the lot inputs (owner and queue Int32, free, park, water, near, list: about 24 MB on Beach), the block labels (Int32, 7.5 MB), the coast and base land copies. Now released once the lots are built (lotIn, labelBuf, queueBuf, parkCells, blockLab, baseLand set to null; coastLand a plain local). Output identical: regions fingerprints unchanged.
+- Mesh scratch pool cap (render/meshbuilder.js POOL_MAX) 48 to 24 MB: a start already pools 14 to 20 MB, so the cap bounds the growth in play.
+- perf-phonecheck at 4x, memory after a forced collection, before / after the check: Beach 191 / 200 MB to 153 / 162 MB; Downtown 189 / 190 MB to 160 / 161 MB. (Timing not compared: a soak shared the CPU.)
+- Gates: lint, tests (two build-time tests failed only while the CPU was shared, pass alone), menu-test, smoke --extra, smoke-regions (first run: a Downtown Play click timed out under load; rerun passed all five).
+- Left: lotGrid.id could be Int16 (2.5 to 3.8 MB; a test asserts Int32 and the fingerprint hashes bytes); tile meshes not yet drawn keep their pooled arrays (about 7 MB).

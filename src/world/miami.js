@@ -1967,9 +1967,12 @@ export function createMiamiCity(data, opts = {}) {
   const lz0 = RASTER_Z0 + Math.floor((cut.z0 - SEA_PAD - RASTER_Z0) / RASTER_LATTICE) * RASTER_LATTICE;
   const land = makeRaster(lx0, lz0, cut.x1 + SEA_PAD, cut.z1 + SEA_PAD, CELL);
   const W = land.w, H = land.h, NC = W * H;
-  const labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
-  let coastLand = null;
-  (function landMask() {
+  // Build scratch rasters (released once the lots are built: a closure kept on
+  // the city holds this scope, so whatever it still points at stays alive).
+  let labelBuf = new Int32Array(NC), queueBuf = new Int32Array(NC);
+  // (coastLand is a plain local, not held by a closure: build only.)
+  const coastLand = (function landMask() {
+    let coastLand;
     // Coastline cells form walls; regions between them are flood filled
     // and each region votes land or water from the side of the coast
     // lines it touches (OSM: land on the left of a coastline way, seen
@@ -2035,8 +2038,9 @@ export function createMiamiCity(data, opts = {}) {
         land.data.fill(0, j * W + ci1 + 1, (j + 1) * W);
       }
     }
+    return coastLand;
   })();
-  const baseLand = land.data.slice(); // before the islet: "is it real land"
+  let baseLand = land.data.slice(); // before the islet: "is it real land"
   // Hot lookups read the raster bounds from constants, not the raster
   // object (whose shape the optimizer may see change during the build).
   const landCell = cellLookup(land);
@@ -2273,6 +2277,7 @@ export function createMiamiCity(data, opts = {}) {
     const regions = floodRegions(W, ci0, ci1, cj0, cj1, baseLand, road.data, parkMask.data, lab, makeRuns());
     // The block (road-free land region) of each cell, for the infill rule.
     blockLab = lab.slice();
+    baseLand = null; // build only (last read just above)
     for (let r = 0; r < regions.length; r += 7) {
       {
         const qt = regions[r], bi0 = regions[r + 1], bi1 = regions[r + 2], bj0 = regions[r + 3], bj1 = regions[r + 4], parks = regions[r + 5], ok = regions[r + 6] === 1;
@@ -2661,6 +2666,7 @@ export function createMiamiCity(data, opts = {}) {
     }
     lap('infill.plan');
     lotIn = { free, owner, park: parkCells, inBeach, water, queue: queueBuf, list, nList, scratch8: near };
+    blockLab = null; // build only
   })();
   lap('infill');
 
@@ -3447,6 +3453,8 @@ export function createMiamiCity(data, opts = {}) {
   (function lotsAndBays() {
     lotIn.timings = timings;
     const L = buildLots(city, lotIn);
+    // The lot rasters are build scratch: drop them (some 30 MB on a region).
+    lotIn = null; labelBuf = null; queueBuf = null; parkCells = null;
     city.lots = L.lots;
     city.lotGrid = L.lotGrid;
     city.lotAt = L.lotAt;
