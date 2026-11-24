@@ -52,3 +52,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 2026-11-24 night: STREETSCAPE helper 356k. Total about 10.7M of 16M. 0.12.1 published (gate passed; geometry only, no new input paths, security review skipped by design).
 2026-11-24 night: 0.12.2 published after two CI timing flakes (whole box 3135 and 3384 ms vs 3000, runner noise; no test changed). Total about 10.8M of 16M. Remaining: RC items needing owner; full 60 min soaks not run.
 2026-11-24 night: memory helper 163k. Total about 11.0M of 16M. 0.12.3 published (heap Beach 153, Downtown 160 MB; gate passed after one timing flake). Soak resumed.
+2026-11-24: 0.12.4 published. Helpers: collisions 392k, GPS/HUD 255k, review 81k, build time 578k. Total about 12.5M of 16M.
