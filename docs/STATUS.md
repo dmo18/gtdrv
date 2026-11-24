@@ -841,3 +841,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 ## 2026-11-24: 0.12.2 look crash fix
 - Soak found `keepLook` throwing (reading wheelLevels of a mesh without them) in the render loop after 0.12.0; guarded. Soak of 191 sim s now has zero errors.
 - The full 60 minute soak per region is not run overnight: it takes about 3.5 hours of wall time each here. Left for the release candidate.
+- smoke --extra 'blast over the sea' failed once on a loaded machine and passed on rerun; watch for a repeat.
