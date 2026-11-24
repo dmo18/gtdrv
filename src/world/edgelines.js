@@ -18,6 +18,8 @@ export const WALL_H = 0.9; // m, sea wall and rail height
 export const WALL_R = 0.25; // m, half thickness (capsule radius)
 export const RAIL_OFF = 0.5; // m, rail line outside a road's curb
 export const GAP_PAD = 0.4; // m, a pier root gap is the pier width plus this each side
+import { pairGap, MEDIAN_GAP } from './junctions.js';
+
 const CELL = 32; // the collision world's cell
 const N = CELL / EDGE_STEP; // squares per cell side
 const NO_ITEMS = [];
@@ -34,14 +36,24 @@ export function createEdgeLayer(city) {
   const piers = city.piers || [];
   const NE = edges.length;
   const ax = new Float64Array(NE), az = new Float64Array(NE), ux = new Float64Array(NE), uz = new Float64Array(NE);
-  const len = new Float64Array(NE), rr = new Float64Array(NE);
+  const len = new Float64Array(NE), rr = new Float64Array(NE), rl = new Float64Array(NE);
   let maxR = 0;
   for (let k = 0; k < NE; k++) {
     const e = edges[k], a = nodes[e.a], b = nodes[e.b];
     const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1e-6;
     ax[k] = a.x; az[k] = a.z; ux[k] = dx / L; uz[k] = dz / L; len[k] = L;
-    rr[k] = e.width / 2 + RAIL_OFF;
+    rr[k] = rl[k] = e.width / 2 + RAIL_OFF;
+    // The two halves of a divided road under MEDIAN_GAP apart (two bridge
+    // decks side by side): the left side reaches past the middle of the
+    // gap, so the decks are one road with no rail pair down the middle
+    // (the meshes pave the gap, render/citymesh.js pairGap).
+    if (e.pair >= 0 && edges[e.pair] && e.ux !== undefined) {
+      const lc = (e.off || 0) - e.width / 2;
+      const g = Math.max(pairGap(city, e, 0, lc), pairGap(city, e, L, lc));
+      if (g < MEDIAN_GAP) rl[k] = e.width / 2 - (e.off || 0) + Math.max(RAIL_OFF, g / 2 + 0.3);
+    }
     if (rr[k] > maxR) maxR = rr[k];
+    if (rl[k] > maxR) maxR = rl[k];
   }
   const rectSdf = (r, x, z) => {
     const ix = Math.min(x - r.x0, r.x1 - x), iz = Math.min(z - r.z0, r.z1 - z);
@@ -58,7 +70,8 @@ export function createEdgeLayer(city) {
       let t = (x - ax[k]) * ux[k] + (z - az[k]) * uz[k];
       if (t < 0) t = 0; else if (t > len[k]) t = len[k];
       const dx = ax[k] + ux[k] * t - x, dz = az[k] + uz[k] * t - z;
-      const v = rr[k] - Math.sqrt(dx * dx + dz * dz);
+      // (Left of the edge: s = -(x - ax) uz + (z - az) ux < 0.)
+      const v = (rl[k] !== rr[k] && -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k] < 0 ? rl[k] : rr[k]) - Math.sqrt(dx * dx + dz * dz);
       if (v > best) best = v;
     }
     return best;

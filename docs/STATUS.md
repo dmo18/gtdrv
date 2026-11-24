@@ -826,3 +826,14 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Fixed from the scripted play-through (scripts/loop-test.mjs, 748x360): a heat gate never raised its star after a calm spell (pending point faded below the step); the first run got a star from a bump at 7 s (until the police beat, bumps and speed do not call the police) and ran into a queue at the first light (it goes 40 to 70 m ahead); a car into the player standing still paid a Ram and cost a crash; the wrong-way line now says "turn around". Stunt ramps are one draw each (were seven) and event ramps have no pillar: Downtown Normal street view was 222 calls with the loop, now 209 / 293k (Beach 123 / 241k).
 - ui-test: the wheel checks follow DRAG_FULL_PX (80 px since 0.11.1; they still asserted 55 and failed since then), the event line check is the prompt strip's real rect, the car-event state repaints the line force() overwrote.
 - Gates: lint, 1035 tests, menu-test 219, ui-test 771/771, touch-test 243/243, smoke --extra, smoke-regions (5), loop-test 32 ok, perf both maps in budget; step +0.04 to 0.16 ms against a HEAD copy.
+
+## 2026-11-24: 0.12.1 Streetscape, in the tree (not published, no version bump)
+
+- STREETSCAPE parts of docs/wip/0.12-partial.patch applied by file (the patch left as it is) and finished; the defect list, fixes and what remains are in docs/STREETSCAPE.md. Checked with drive-review shots of all five routes and the defect places, and in node by comparing what the ground says with what the meshes draw.
+- Narrow-gap net drawn: flat net as asphalt, and the net between two sidewalks is now raised sidewalk in physics and mesh (was a 15 cm slot). Into existing builders, no new draw calls.
+- S Miami Ave: no rail pair down the 3.5 m gap between the two river bridge decks (world/edgelines.js), the gap paved; at SW 6th St no sidewalk drawn on another carriageway's asphalt.
+- Junction corners judged by the ground (cut where they straddle road), fan junctions (32) drawn as arm carriageways plus a middle hull, no curb through them.
+- Beds as rows of faceted shrubs, forecourts on a loose per-lot grid, lawns run under the sidewalk (lot fringe), lot ground merged down z as well as along x. lotGrid.ground made lazily (lots build stage back to about 4 of its 5.4 limit).
+- Normal street view, day: Beach 122 / 233k (was 130 / 244k), Downtown 209 / 292k (208 / 293k), North 164 / 232k (166 / 246k), West 146 / 255k (152 / 280k), South 114 / 249k (119 / 260k); static city calls unchanged.
+- Gates: lint, 1039 tests (4 new in test/streetscape.test.js; node fingerprints repinned for the street-name blades near fan junctions), menu-test 219, ui-test 771/771, touch-test 243/243, smoke --extra, smoke-regions (5), perf five regions in budget.
+- Open: lot to lot raster steps, long hedges read heavy, an arm's real sidewalk can cross a fan junction, crossing lane paint where two carriageways overlap.

@@ -66,16 +66,23 @@ export function walkLeftOf(e) {
 // varies along a pair; a fixed band left a sliver of ground down the
 // middle or ran onto the partner), up to 4 m.
 export const MEDIAN_GAP = 6;
+// The distance from edge e's left curb (lateral lc) at d m along it to
+// the left curb line of its partner (the other half of a divided road);
+// Infinity without a partner.
+export function pairGap(city, e, d, lc) {
+  if (!(e.pair >= 0)) return Infinity;
+  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
+  const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
+  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
+  return Math.abs(lat - ((p.off || 0) - p.width / 2));
+}
 export function medianAt(city, e, d, lc) {
   const m = medianBand(e);
   if (!(m > 0) || !(e.pair >= 0)) return m;
   // (No median against a partner drawn as part of a junction.)
   if (city.roadGeo && city.roadGeo.inner[e.pair]) return 0;
   if (e.median > 8) return m;
-  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
-  const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
-  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
-  const dist = Math.abs(lat - ((p.off || 0) - p.width / 2));
+  const dist = pairGap(city, e, d, lc);
   // (+0.3 m: the two halves overlap a little, so no ground shows between
   // them where the pair is not parallel.)
   // A median only where the two curbs are 6 m apart or more; nearer,
@@ -339,16 +346,6 @@ function goreOf(PG, A, B) {
   };
 }
 
-// Fan triangles round (cx, cz) over a ring (x, z triples).
-function fanOf(ring, cx, cz) {
-  const out = [];
-  const n = ring.length / 2;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    out.push(cx, cz, ring[2 * i], ring[2 * i + 1], ring[2 * j], ring[2 * j + 1]);
-  }
-  return out;
-}
 function inTri(t, k, x, z) {
   const ax = t[k], az = t[k + 1], bx = t[k + 2], bz = t[k + 3], cx = t[k + 4], cz = t[k + 5];
   const d1 = (bx - ax) * (z - az) - (bz - az) * (x - ax);
@@ -547,6 +544,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   // Per end and side (q * 2 + 0 right, 1 left, edge frame): no sidewalk,
   // median or fill within this many m of that end's node (gores, noses).
   const sup = new Float64Array(4 * NE);
+  const mthru = new Uint8Array(2 * NE);
   const junctions = [];
   for (const [r, g] of groups) {
     const list = arms.get(r);
@@ -604,7 +602,17 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       sup[2 * G.qb + G.sideB] = Math.max(sup[2 * G.qb + G.sideB], G.lb);
     }
     // Median noses stop 2 m short of the junction.
-    for (const A of list) if (medianBand(A.e) > 0) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
+    // (Not where nothing leaves the junction on the median's side: a
+    // street that ends at one half of a divided road, a T. The median
+    // runs on past it, `mthru`, and the meshes carry it through.)
+    for (const A of list) {
+      if (!(medianBand(A.e) > 0)) continue;
+      const sg = A.end ? 1 : -1;
+      let crossed = false;
+      for (const B of list) if (B !== A && (B.ux * A.rx + B.uz * A.rz) * sg > 0.35) { crossed = true; break; }
+      if (crossed || list.length < 2) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
+      else mthru[A.q] = 1;
+    }
     for (const id of g) nodeJ[id] = J.id;
     for (const A of list) {
       trim[A.q] = A.trim;
@@ -642,7 +650,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       }
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup };
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup, mthru };
 }
 
 // Two one-way ways in the same direction drawn over each other (a turn
@@ -849,7 +857,10 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
         tris.push(ra[0], ra[1], lb[0], lb[1], bbx, bbz, ra[0], ra[1], bbx, bbz, bax, baz);
       }
     }
-    if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null });
+    // (qa, sideA: the edge end and side (0 right, 1 left) of the arm before
+    // the corner; qb, sideB: of the arm after it. The meshes leave the
+    // sidewalk off a corner whose two sides are bare, world/ground.js.)
+    if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null, qa: A.q, sideA: A.end ? 1 : 0, qb: B.q, sideB: B.end ? 0 : 1 });
   }
   let hull = false;
   let poly = ring;
@@ -870,6 +881,23 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
     hull = false;
     corners.length = 0;
   }
+  // A fan junction's asphalt (its ring crosses itself): each arm's
+  // carriageway carried straight on from its mouth to its node, and the
+  // convex hull of those ends in the middle. Straight edges along every
+  // arm, no spikes from a fan round the middle across the crossing.
+  let area = null;
+  if (hull && n >= 2) {
+    area = [];
+    const mid = [];
+    for (const A of list) {
+      const ol = lat(A, false), or = lat(A, true), la = L(A), ra = R(A);
+      const lx = A.nx + A.rx * ol, lz = A.nz + A.rz * ol, rx = A.nx + A.rx * or, rz = A.nz + A.rz * or;
+      area.push(la[0], la[1], ra[0], ra[1], rx, rz, la[0], la[1], rx, rz, lx, lz);
+      mid.push(lx, lz, rx, rz);
+    }
+    const H = hullOf(mid), nh = H.length / 2;
+    for (let i = 1; i + 1 < nh; i++) area.push(H[0], H[1], H[2 * i], H[2 * i + 1], H[2 * i + 2], H[2 * i + 3]);
+  }
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   const grow = (p) => {
     for (let k = 0; k < p.length; k += 2) {
@@ -878,12 +906,13 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
     }
   };
   grow(poly);
+  if (area) grow(area);
   for (const c of corners) if (c.tris) grow(c.tris);
   for (const G of gores) grow(G.poly);
   const lead = Math.min(...g);
   return {
     id, lead, nodes: Int32Array.from(g), x, z, signal, stop, hull, fan: hull,
-    ring: Float64Array.from(poly), tris: n < 2 ? new Float64Array(0) : Float64Array.from(hull ? fanOf(poly, x, z) : triangulate(poly)),
+    ring: Float64Array.from(poly), tris: n < 2 ? new Float64Array(0) : Float64Array.from(area || triangulate(poly)),
     corners, gores, arms: Int32Array.from(list.map((A) => A.q)), x0, z0, x1, z1, hullRing: forceHull,
   };
 }

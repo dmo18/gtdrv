@@ -63,12 +63,12 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // big pieces downtown are parking lots, a house's land over 900 m2 is a
 // lawn (world/lots.js lotTypeFor; docs/PLAN_V3.md 13).
 const PINNED = {
-[WHOLE_BOX]: { nodes: 'a5591bc3', edges: '733ec414', buildings: '48dee23c', lots: 'a7f7b5a4', lotGrid: '6b864194' },
-  'miami-downtown': { nodes: 'f166abee', edges: '42de42cb', buildings: '29b8852e', lots: '6d1ba28d', lotGrid: 'f0a57934' },
+[WHOLE_BOX]: { nodes: '420a1304', edges: '733ec414', buildings: '48dee23c', lots: 'a7f7b5a4', lotGrid: '6b864194' },
+  'miami-downtown': { nodes: 'f293d4b5', edges: '42de42cb', buildings: '29b8852e', lots: '6d1ba28d', lotGrid: 'f0a57934' },
   'miami-beach': { nodes: 'ae1f4dbf', edges: 'f8ee2f15', buildings: 'b7236251', lots: '85a2d451', lotGrid: 'e43ac181' },
-  'miami-north': { nodes: '14fc1aee', edges: '337da624', buildings: 'b0e601a9', lots: '4fdb5c68', lotGrid: 'dd88bfe0' },
-  'miami-west': { nodes: '2c941c50', edges: 'e974bccf', buildings: 'a44fb8ea', lots: '718ee8b4', lotGrid: '939234c7' },
-  'miami-south': { nodes: '5f4098c0', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'd27b67ef', lotGrid: '6110b03c' },
+  'miami-north': { nodes: '2debc075', edges: '337da624', buildings: 'b0e601a9', lots: '4fdb5c68', lotGrid: 'dd88bfe0' },
+  'miami-west': { nodes: '1c6e85c8', edges: 'e974bccf', buildings: 'a44fb8ea', lots: '718ee8b4', lotGrid: '939234c7' },
+  'miami-south': { nodes: '4c3195bc', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'd27b67ef', lotGrid: '6110b03c' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

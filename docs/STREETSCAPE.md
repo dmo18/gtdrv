@@ -1,10 +1,12 @@
-# Streetscape review (version 0.12.0)
+# Streetscape review (version 0.12.1)
 
 Owner's verdict on 0.10.0 and before: "wasteland", "not a single street
 familiar", "fucked up looking roads", "glitchy wastelands"
-(docs/owner/r3-*.jpg). Version 0.11.0 rebuilt junctions and lots and
-passed its tests; this file is the record of driving it with a critical
-eye and of what was changed for 0.12.0.
+(docs/owner/r3-*.jpg). Version 0.11.0 rebuilt junctions and lots. The
+STREETSCAPE work started for 0.12.0, was parked in
+docs/wip/0.12-partial.patch (its streetscape files: ground, junctions,
+lots, citymesh, lotmesh, realcity, drive-review) and is finished here for
+0.12.1. The patch file itself is left as it is.
 
 ## Method
 
@@ -24,56 +26,84 @@ Street east; South, Southwest 1st Avenue south-west then Southwest 28th
 Road. Owner's spots: Downtown `miami-6th`, `sw1st-miami`, `se5th-brickell`;
 Beach `ocean-10th`, `alton-5th`, `lincoln-washington`.
 
-Frame names below are `<region>-<tag>-<nn>[-top].png` and
-`<region>-<tag>-spot-<name>-<view>.png`; tag `r0` is 0.11.0 as published,
-`r4` the tree after this work. Five rounds were shot (r0 to r4), every
-frame read.
+For 0.12.1 every region route and spot was shot (tag `r5`), then the
+defect places again after each fix: Downtown `--at=bridge:-1352:1150:90:20`
+(S Miami Ave bridge), `m6:-1376:1306:300:40` (S Miami Ave at SW 6th St),
+`fan1:-1187:953:90:35`, `fan2:-2633:159:0:45`, `fan3:-1949:416:0:35`;
+North `fc:-1963:-3121:0:40` (a forecourt). Checks in node (no browser):
+what the ground says against what the meshes draw at a point, and a
+0.5 m coverage map of road the meshes leave bare or cover with raised
+sidewalk.
 
-## Defects, ranked by how much a player notices
+## Defects, ranked as the task gave them
 
-| # | Place (frame) | What is wrong | Cause in code | Fix | State |
+| # | Place | What was wrong | Cause in code | Fix | State |
 |---|---|---|---|---|---|
-| 1 | Every lawn in every region (south-r0-05-top, west-r0-06, beach-r0-00-top) | Lawns end in 5 m stair steps with a band of pale paving between the steps and the sidewalk; beside a diagonal street it reads as a saw blade | `world/miami.js` keeps lots 4 m back from every curb on the 5 m lot raster; the band between was plain land (`render/citymesh.js realLand`, PAVE) | `world/lots.js spreadGround`: `lotGrid.ground`, the lot grounds spread two cells into the land in no lot; `render/lotmesh.js lotFringe` draws it at lot height, so the lawn runs under the real sidewalk and curb and ends on their straight edge. `lotEdges` judges neighbors by drawn ground (no edging through a lawn) | Fixed (south-r4-05-top, west-r4-06) |
-| 2 | Lawns and yards everywhere (south-r0-05, west-r0-06, north-r0-13) | Beds and hedges are smooth green tubes lying on the grass, at right angles to nothing | `render/lotmesh.js softStrip` drew a bed as one extruded profile; `world/lots.js` laid every row along the raster axes whatever the street grid | Beds are rows of faceted shrub mounds of two sizes (`mound`, 15 triangles each, 5-sided, dark foot, light top, flowers on some); single shrubs use the same mound. Rows (hedge, fence, wall, bed) are turned to the street grid of the block (`gridSkew`, the length-weighted mean street direction per 60 m square) | Fixed (south-r4-05, north-r4-13). Clipped hedges are still straight extrusions: correct for a hedge, long ones still read heavy |
-| 3 | S Miami Ave north of SW 6th St, x -1352 z 1100 to 1250 (downtown `--at=n1:-1352:1181:90:22`) | A raised concrete strip with white curbs down the middle of the avenue, between the two halves | The halves are bridge edges 3.5 m apart: no median (under 6 m), no gap asphalt (`gapStation` skips bridges against non-bridges, and the gap rule only looked at curbs), so the net filled it in physics and nothing drew it; the sliver fill of the next edge drew raised concrete at the ends | `render/citymesh.js realRoads`: where the halves of a divided road are under 6 m apart each half draws its share of the gap as asphalt (`pairGap`); `world/ground.js`: no raised fill beside a curb with no sidewalk | Fixed |
-| 4 | All regions: 2 m gaps between two roadways | Flat road in physics (the narrow-gap net) but drawn as lot ground or bare land | `world/ground.js netAt` had no mesh | `ground.netQuads(x0, z0, x1, z1, out)`: the net cells (same 0.25 m lattice, same `netAt`) found from seeds on a 1 m lattice where two roads are in reach, flood filled and merged into rectangles; `render/citymesh.js netRoads` draws those between roadways as asphalt, in 60 m boxes per tile (`realcity.js NET_BOX`). Net ground between two sidewalks is left as the block's ground (flat there too) | Fixed between roadways. Test (d) untouched and at zero |
-| 5 | 5th Street at Euclid and at every T on a divided road (beach-r0-20-top, beach-r0-27) | The planted median breaks at a junction nothing crosses it at; the gap showed pale paving, then lawn | `world/junctions.js` stopped every median 2 m short of every junction | `roadGeo.mthru[q]`: an arm whose median side no other arm leaves on keeps its median; the mesh carries it to the node. Where a street does cross, each half paves its share of the gap from the node to the nose | Fixed (beach `--at=med:4512:606:180:30`) |
-| 6 | Biscayne Boulevard, 5th Street (downtown-r0-25-top, beach-r0-21) | A strip of paving slabs down the middle of a wide planted median | The middle of a median over 8 m is lot land (plaza or verge) | `spreadGround` makes the middle of a wide median lawn | Fixed (downtown-r4-25-top); a thin run of paving remains where a mapped footpath lot lies in the median (beach-r4-21) |
-| 7 | Fan junctions, 32 in five regions (downtown `--at=fan1:-1187:953:90:35`) | Sidewalk wedges and curbs crossing the asphalt of the junction | A ring that crosses itself is drawn as a fan; its corner triangles lie on the fan | Fan junctions draw only the corner triangles off their asphalt and no curb through them; lot features never stand on a junction's asphalt (`dressLot put`, a palm stood in the middle of Alton Road at Sunset Drive) | Improved. The 32 fans remain fans: wide irregular asphalt (list: `roadGeo.junctions.filter((j) => j.fan)`) |
-| 8 | Raised corner pads between two bare arms (downtown-r0-spot-miami-6th-top) | A concrete pad standing alone in the asphalt where a gore or a facing strip keeps both sidewalks off | Corner triangles were drawn whatever the arms beside them drew | A corner whose two sides are bare is asphalt (`bareEnd`) | Fixed for bare corners. The two pads at S Miami Ave and SW 6th St are the sidewalks of a slip lane (a real island); they stay |
-| 9 | Lincoln Road at Washington Avenue (beach-r0-spot-lincoln-washington-chase) | A lawn with a picket fence runs onto the mall's paving | The setback band beside a pedestrian street took the lawn behind it | Land in no lot within 7 m of a pedestrian street is paving | Fixed |
-| 10 | Parking lots (north-r0-00-top) | Bay lines barely show from the car | 0.16 m lines | 0.24 m, a little brighter | Fixed |
-| 11 | Yards on the Beach and Downtown (beach-r0-spot-ocean-10th-top, downtown-r0-spot-sw1st-miami-chase) | Black shrubs and black dumpsters | `SHRUB_GREENS[(v + Math.round(x)) % n]` with a negative x gave no color | The index uses the magnitude | Fixed |
-| 12 | Lot to lot boundaries (downtown `--at=x5`, west-r4-07) | A paved forecourt meets a lawn in 5 m steps | The lot raster itself | None yet: needs lot outlines as polygons | Open |
-| 13 | Wide empty sidewalks and plazas downtown (downtown-r4-07, north-r4-26) | Large plain paving round towers and at wide junctions | Forecourt lots plus the 4 m setback, now drawn as the lot's own ground | The setback now takes the neighbor's ground, so it is no longer a second tone; no more dressing was added (plain reads better than clutter) | Open, lower |
-| 14 | Lincoln Road junction ring (beach `--at=linc`) | The junction's asphalt has a diagonal wedge toward the mall | The pedestrian arm's mouth in the ring | None | Open, low |
-| 15 | Far level | Lot fringe is near tiles only; the far land keeps the lot color of each coarse cell | `realLand` far pass reads `lotGrid.ground`, so the far color matches | Done with the fringe | Fixed |
+| 1 | Every region: gaps under 2 m between two road spaces | Road in physics (the narrow-gap net, `world/ground.js netAt`) but drawn as lot ground or bare land; between two sidewalks the net was a flat slot 15 cm deep, drawn as a green line | `netAt` had no mesh, and gave flat road whatever lay each side | `netAt` now gives raised sidewalk (2) where both sides are sidewalk or median, flat road (1) where either side is road. `ground.netQuads(x0, z0, x1, z1, out, kind)`: the net cells of one kind (same 0.25 m lattice, same `netAt`), flood filled from seeds where two roads are in reach and merged into rectangles. `render/citymesh.js netRoads` draws kind 1 as asphalt just under the strips, kind 2 as sidewalk just under the sidewalk top, in 60 m boxes per tile (`realcity.js NET_BOX`), into the tile's existing asphalt and sidewalk builders: no new draw call | Fixed. Test (d) untouched and at zero |
+| 2a | S Miami Ave over the Miami River, x -1352, z 1100 to 1250 | A raised concrete strip with white walls down the middle of the avenue | The two bridge decks are 3.5 m apart over water: the sea-wall tracer (`world/edgelines.js`) put a 0.9 m rail along each deck's inner edge, drawn and solid | A divided road's left side reaches past the middle of a gap to its partner under `MEDIAN_GAP` (6 m), so there is no rail down the gap; the gap is paved as asphalt (`pairGap`, each half its share) and the inner deck side wall is not drawn | Fixed (bridge shot: one deck, lane paint, no rails) |
+| 2b | S Miami Ave at SW 6th St (owner spot `miami-6th`) | A thin raised strip of sidewalk down the middle of the roadway, which a car drove through | Two carriageways of S Miami Ave overlap by about 1 m; one's 3 m right sidewalk lay on the other's asphalt (road first in the ground); the island next to it was two sidewalks with a 1 m slot | A strip's sidewalk piece is drawn only where the ground does not say road at its middle; corner triangles are judged by the ground (see 3); the slot is raised net (1) | Fixed |
+| 3 | Fan junctions (rings that cross themselves): 32 in five regions (Beach 6, Downtown 8, North 2, West 6, South 10) | Spiky asphalt from a fan round the middle, sidewalk wedges and curbs across the asphalt | The ring drawn as a fan of triangles round the junction middle; corner triangles drawn whatever lay under them | `world/junctions.js`: a fan's asphalt (and its area in the ground) is each arm's carriageway carried straight from its mouth to its node plus the convex hull of those ends (straight edges, no spikes). `citymesh.js cornerTri`: every junction's corner triangles (not only fans') are tested at seven points against the ground and cut in four where mixed (to 1.5 m, three cuts at most), so a sliver across asphalt is not drawn; a curb return with road on both sides is not drawn; fans draw no curb through the crossing. About 4 % of corner triangles (all regions) had lain on road | Improved: clean arms, no spikes, no pads on asphalt. Where an arm's real sidewalk crosses between two other arms (fan1, S 1st Ave at SE 4th St) it is raised in physics and still drawn |
+| 4a | Lawns and yards everywhere | Planting beds drawn as smooth green tubes | `render/lotmesh.js softStrip` drew a bed as one extruded profile | Beds are rows of faceted shrub mounds (15 triangles each, two sizes, one every 2.6 m, flowers on some); single shrubs use the same mound (was a 48-triangle blob); rows (hedge, fence, wall, bed) turn to the street grid of the block (`world/lots.js gridSkew`) | Fixed for beds. Clipped hedges stay soft strips (test "hedges, beds and shrubs are low soft forms" keeps them; a box hedge was tried and fails it); long ones along parking lots still read heavy |
+| 4b | Forecourts (plaza lots), Downtown and North | The same 9 m lattice of tree, bed, bed, seat wall in every forecourt, on the raster axes | `dressLot` plaza: `gridPts(9, ...)` with a fixed modular pattern | A pitch of 8 to 11 m per lot, points nudged up to 1.1 m, one in five left open, the kind drawn per point from the lot's seed; seat walls turned to the street grid where both ends stay on the lot | Fixed (North `fc`) |
+| 4c | Lawns beside every street | Lawns ended in 5 m stair steps with a band of pale paving before the sidewalk | Lots stop 4 m back from every curb on the 5 m raster; the band was plain land | `world/lots.js spreadGround` (`lotGrid.ground`): lot grounds spread two cells into land in no lot, so the lawn runs under the sidewalk and ends on its straight edge (`lotmesh.js lotFringe`). Lot ground and fringe quads now merge down z as well as along x (`groundRuns`), in 15-row bands: fewer triangles than before the fringe | Fixed |
+| 4d | Lot to lot boundaries | A paved forecourt meets a lawn in 5 m steps | The lot raster itself | None: needs lot outlines as polygons | Open |
 
-Checked and found right, no change: double yellow on two-way streets,
-yellow left edge and white right edge on one-ways, white dashed lane
-lines, two-line crosswalks with a stop bar on signal and stop approaches
-(downtown `--at=b1`), curb height read from the chase camera, asphalt
-texture scale (8 m repeat, no visible tiling in a drive), sidewalk slab
-size (1.2 m).
+Also from the parked work, checked in the shots and kept: a planted median
+runs on through a T that nothing crosses (`roadGeo.mthru`); where a street
+crosses a divided road each half paves its share of the gap; the middle
+of a median over 8 m is lawn; land within 7 m of a pedestrian street is
+paving (no lawn onto Lincoln Road); a corner between two bare sides
+(gore, gap) is asphalt; bay lines 0.24 m; no black shrubs or dumpsters
+(negative index); lot features never stand on a junction's asphalt.
 
-## Rules kept
+## Budget (Normal street view, `scripts/perf.mjs map=<region>`, day)
 
-Real street geometry and names; 11 and 12 ft lanes; no real business
-names; original art. Every prop kind already has its solid in
-`world/propsolid.js` (no new kind was added: the mounds draw the existing
-`bed` and `shrub`).
+| Region | 0.12.0 | 0.12.1 |
+|---|---|---|
+| Beach | 130 calls / 244k | 122 / 233k |
+| Downtown | 208 / 293k | 209 / 292k |
+| North | 166 / 246k | 164 / 232k |
+| West | 152 / 280k | 146 / 255k |
+| South | 119 / 260k | 114 / 249k |
+
+Static city draw calls are unchanged (68 in the Downtown view); call
+counts move by a few between runs with traffic, events and police. The
+two extra shader programs in every region are basic-material markers of
+the event layer, not city materials.
+
+## Not done
+
+- Lot to lot steps (4d) and large plain paving round towers downtown.
+- Hedges as described in 4a.
+- Fan junctions are still wide asphalt where the data's arms cross; the
+  list is `roadGeo.junctions.filter((j) => j.fan)`.
+- Lane paint of two overlapping carriageways still crosses (S Miami Ave
+  at SW 6th St): the paint is per strip and does not know the other.
+- Lincoln Road junction ring keeps a diagonal wedge toward the mall.
 
 ## Data added
 
 - `lotGrid.ground` (Uint8Array, one per land cell): the drawn ground type
-  (lot type + 1) of the cell: its lot's, a neighbor's in the setback
-  band, lawn in a wide median, paving beside a pedestrian street.
-  `lotGrid.type` and `lotGrid.id` are unchanged.
+  (lot type + 1) of the cell, made the first time it is read (a lazy,
+  non-enumerable getter: about 70 ms on the whole box, kept out of the
+  city build, whose lots stage had gone from about 4.0 to 5.0 of its 5.4
+  calibration limit). `lotGrid.type` and `lotGrid.id` unchanged.
+- Street-name blades are placed off a junction's asphalt
+  (`world/miami.js bladesAndStops`); fan areas are smaller now, so some
+  fan nodes gain a blade. The node fingerprints in test/regions.test.js
+  were repinned for that (Beach has no change); edges, buildings, lots
+  and lot grid fingerprints are unchanged.
 - `roadGeo.mthru[q]` (Uint8Array per edge end): 1 where the median runs
   on through the junction at that end.
-- `roadGeo.junctions[j].corners[k]`: `qa, sideA, qb, sideB`, the edge end
-  and side on each side of the corner.
+- `roadGeo.junctions[j].corners[k]`: `qa, sideA, qb, sideB`.
+- A fan junction's `tris` are its arm carriageways and middle hull (was a
+  fan round its middle); `ring` is unchanged.
 - `groundOf(city).baseAt(x, z)` (the surface without the net) and
-  `netQuads(x0, z0, x1, z1, out)`. `groundAt`, `surfaceAt`, `gapAt`,
-  `fillOf`, `gapOf` are unchanged in meaning; the one change in their
-  answers: no raised fill beside a curb that has no sidewalk.
+  `netQuads(x0, z0, x1, z1, out, kind = 1)`. `surfaceAt` gives 2 on raised
+  net ground (was 1), so `groundAt` is the curb height there.
+- `junctions.js pairGap(city, e, d, lc)`: distance from a divided half's
+  left curb to its partner's.
+
+Tests: test/streetscape.test.js (net kinds in physics and mesh, bridge
+gaps on the road field, fan arms in the junction area, no raised sidewalk
+drawn on road at the two defect places).
