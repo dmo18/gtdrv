@@ -795,3 +795,11 @@ None critical or high.
 - Lots: surface parking, forecourts, parks and yards by rule; low shrubs and hedges; one ground per block.
 - Gates: lint, 966 tests, smoke --extra, touch-test, five region smoke, ui-test 747/747. Security review: 0 critical, high, medium.
 - Open: Phone check showed 20 frames over 33 ms on 0.10.0 (PERF not started); net-filled road gaps are flat in physics but not drawn as asphalt; shader programs 73 to 77; owner screenshots (with metadata) remain in three earlier commits.
+
+## 2026-11-24: version 0.11.1 Planted handling (owner: loose, cannot turn sharp, fishtails)
+
+- Arcade is a planted model: the nose follows the steering (0.04 s lag), the travel follows the nose, power and brakes cannot rotate the car (worst slip over six abuse cases 0.1 degrees, was 27 to 35). Grip 1.6x up to 35 mph easing to 1.25x at 75, lock 40 degrees, speed shaping exponent 1.2 at 70 mph, input to yaw 0.08 s (was 0.17). Handbrake swings the tail to 34 degrees, steerable, recovers by itself; slip, smoke, squeal and drift score follow the real slip. Touch wheel: 80 px for full input. Sim unchanged.
+- Real touch drive through four Beach blocks: 0.51 m worst from lane center, five corners at 18 to 27 mph.
+- Gate: lint, tests, smoke --extra, touch-test 240/240 (regions and ui-test not rerun: no UI or world change). Curb pull-over margin widened by 0.5 m for the new car path (yield test).
+- Risk: at 1.3 g with a 0.08 s response it may read twitchy; knobs: 80 px travel, Relaxed preset.
+- Open: PERF, LOOP and STREETSCAPE partial work stays in the tree (0.12.0).
