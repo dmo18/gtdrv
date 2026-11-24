@@ -9,7 +9,7 @@
 // toward +z.
 import { createRng, firstNext } from '../core/rng.js';
 import { SERVICE_SPOTS } from '../entities/servicevehicles.js';
-import { onJunction } from './junctions.js';
+import { onJunction, junctionsInBox } from './junctions.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -433,6 +433,12 @@ const ptRect2 = (px, pz, x0, z0, x1, z1) => {
   const qx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0, qz = pz < z0 ? z0 - pz : pz > z1 ? pz - z1 : 0;
   return qx * qx + qz * qz;
 };
+// A lower bound of segRectDist (as miami.js rectGap): the gap between
+// the segment's bounding box and the rect along x or z, 0 if they overlap.
+function rectGap(ax, az, bx, bz, x0, z0, x1, z1) {
+  const gx = Math.max((ax < bx ? ax : bx) - x1, x0 - (ax > bx ? ax : bx)), gz = Math.max((az < bz ? az : bz) - z1, z0 - (az > bz ? az : bz));
+  return gx > gz ? (gx > 0 ? gx : 0) : gz > 0 ? gz : 0;
+}
 function segRectDist(ax, az, bx, bz, x0, z0, x1, z1) {
   let t0 = 0, t1 = 1, hit = true;
   const dx = bx - ax, dz = bz - az;
@@ -455,8 +461,8 @@ function newPiece(tmp, k, building, W, H) {
   tmp.push({ cls: k, building, n: 0, i0: W, i1: -1, j0: H, j1: -1 });
   return tmp.length - 1;
 }
-function growPiece(p, c, W) {
-  const i = c % W, j = (c - i) / W;
+// Piece p gains the cell at column i, row j.
+function growAt(p, i, j) {
   p.n++;
   if (i < p.i0) p.i0 = i;
   if (i > p.i1) p.i1 = i;
@@ -476,12 +482,13 @@ function floodPiece(PS, s, k, cut) {
   lid[s] = id;
   while (qh < qt) {
     const c = queue[qh++];
-    growPiece(p, c, W);
-    const i = c % W;
+    const i = c % W, j = (c - i) / W;
+    growAt(p, i, j);
     for (let q = 0; q < 4; q++) {
       const n = q === 0 ? (i > 0 ? c - 1 : -1) : q === 1 ? (i < W - 1 ? c + 1 : -1) : q === 2 ? c - W : c + W;
       if (n < 0 || n >= N || lid[n] !== -1 || cls[n] !== k) continue;
-      if (cut) { const ni = n % W; if (colKey[ni] + rowKey[(n - ni) / W] !== gk) continue; }
+      // (the neighbor's grid square key: its column and row are known)
+      if (cut && colKey[q === 0 ? i - 1 : q === 1 ? i + 1 : i] + rowKey[q === 2 ? j - 1 : q === 3 ? j + 1 : j] !== gk) continue;
       lid[n] = id;
       queue[qt++] = n;
     }
@@ -494,20 +501,25 @@ function floodPiece(PS, s, k, cut) {
 // A building's land over LOT_MAX_AREA is cut by the same 80 m grid (one
 // lot per building and grid square), so no lot is a hectare of one use.
 function piecesOf(PS, list, nList, own, mainOf, byBuilding, cell) {
-  const { W, H, N, lid, cls, queue, tmp, colKey, rowKey } = PS;
+  const { W, H, lid, cls, queue, tmp, colKey, rowKey } = PS;
   const cells = new Int32Array(byBuilding.length);
   for (let q = 0; q < nList; q++) { const c = list[q]; if (cls[c] === 5) cells[mainOf[own[c]]]++; }
   const maxCells = LOT_MAX_AREA / (cell * cell);
   const bySquare = new Map();
+  // The list is in row order: the row start (rs) and row (j) of each cell
+  // follow it, with no division per cell.
+  let rs = 0, j = 0;
   for (let q = 0; q < nList; q++) {
     const c = list[q];
     const k = cls[c];
     if (!k || lid[c] !== -1) continue;
     if (k === 5) {
+      while (c >= rs + W) { rs += W; j++; }
+      const i = c - rs;
       const m = mainOf[own[c]];
       let id;
       if (cells[m] > maxCells) {
-        const i = c % W, key = m * 1e8 + colKey[i] + rowKey[(c - i) / W];
+        const key = m * 1e8 + colKey[i] + rowKey[j];
         id = bySquare.get(key);
         if (id === undefined) { id = newPiece(tmp, 5, m, W, H); bySquare.set(key, id); }
       } else {
@@ -515,28 +527,17 @@ function piecesOf(PS, list, nList, own, mainOf, byBuilding, cell) {
         if (id < 0) { id = newPiece(tmp, 5, m, W, H); byBuilding[m] = id; }
       }
       lid[c] = id;
-      growPiece(tmp[id], c, W);
+      growAt(tmp[id], i, j);
       continue;
     }
     const id = floodPiece(PS, c, k, k <= 2);
     if (k >= 3 && tmp[id].n * cell * cell > LOT_MAX_AREA) {
-      // Too big: undo and cut it by the world grid.
-      let qh = 0, qt = 0;
-      queue[qt++] = c;
-      lid[c] = -2;
-      while (qh < qt) {
-        const q2 = queue[qh++];
-        const i = q2 % W;
-        for (let t = 0; t < 4; t++) {
-          const n = t === 0 ? (i > 0 ? q2 - 1 : -1) : t === 1 ? (i < W - 1 ? q2 + 1 : -1) : t === 2 ? q2 - W : q2 + W;
-          if (n < 0 || n >= N || lid[n] !== id) continue;
-          lid[n] = -2;
-          queue[qt++] = n;
-        }
-      }
+      // Too big: undo and cut it by the world grid. The flood left the
+      // piece's cells in the queue, in its breadth-first order from c.
+      const qt = tmp[id].n;
       tmp[id].n = 0;
       tmp[id].dead = true;
-      // Collect the cells (the queue holds them), then fill each square.
+      // Collect the cells, then fill each square.
       const cells = queue.slice(0, qt);
       for (let t = 0; t < qt; t++) lid[cells[t]] = -1;
       for (let t = 0; t < qt; t++) if (lid[cells[t]] === -1) floodPiece(PS, cells[t], k, true);
@@ -573,6 +574,9 @@ function lotObjects(city, tmp, remap, lots, G, cell) {
     for (let k = 0; k < EN.length; k++) {
       const e = city.edges[EN[k]];
       const a = city.nodes[e.a], q = city.nodes[e.b];
+      // (Only an edge within 8 m, and nearer than the best so far, can be
+      // the lot's road: the others are skipped before the exact distance.)
+      if (rectGap(a.x, a.z, q.x, q.z, lx0, lz0, lx1, lz1) - e.width / 2 > (ed < 8 ? ed : 8) + 1e-6) continue;
       const d = segRectDist(a.x, a.z, q.x, q.z, lx0, lz0, lx1, lz1) - e.width / 2;
       if (d < ed) { ed = d; edge = e.id; }
     }
@@ -788,7 +792,8 @@ function spreadGround(city, typeGrid, land, W, H) {
 }
 
 // inp (from createMiamiCity): { free, owner, park, inBeach, water, queue,
-// list, nList }. park: 1 park or forest, 2 grass, per cell; inBeach(c):
+// list, nList }, and optional scratch buffers (scratch8, scratch32,
+// lidBuf). park: 1 park or forest, 2 grass, per cell; inBeach(c):
 // the cell is in a beach rect; owner: building index per cell (-1 none).
 // on the land grid. city needs landGrid, buildings, edges, nodes, seed,
 // districtOf, placeOf, edgesNear and inCore. Returns { lots, lotGrid,
@@ -827,7 +832,10 @@ export function buildLots(city, inp) {
   const cls = inp.scratch8 ? inp.scratch8.fill(0) : new Uint8Array(N);
   classify(list, nList, water, park, inBeach, beachSteps, stripSteps, cls);
   // 4c: the nearest building box (main box of its footprint) within reach.
-  const own = new Int32Array(N);
+  // (scratch32, lidBuf: optional Int32 buffers of N the caller gives up,
+  // for the nearest box per cell and for the lot ids; lidBuf may be the
+  // owner raster, which is not read after this step.)
+  const own = inp.scratch32 || new Int32Array(N);
   const bd = water; // reused: the water steps are no longer needed
   stepDistance(W, H, owner, cls, Math.floor(LOT_REACH / cell), bd, own, queue, list, nList, SRC_ID, 7);
   placeClasses(list, nList, bd, cls);
@@ -838,7 +846,7 @@ export function buildLots(city, inp) {
   // Pieces: one lot per building (cells sharing it, connected or not);
   // other classes are connected pieces, shore runs cut by the 80 m grid,
   // park, grass and open pieces cut by it only when over LOT_MAX_AREA.
-  const lid = new Int32Array(N).fill(-1);
+  const lid = (inp.lidBuf || new Int32Array(N)).fill(-1);
   const lots = [];
   const tmp = []; // per raw piece: { cls, building, n, i0, i1, j0, j1 }
   const byBuilding = new Int32Array(B.length).fill(-1); // building -> piece
@@ -907,6 +915,95 @@ export function featureCap(lot) {
 }
 
 const NEAR_B = []; // scratch: building ids round the lot being dressed
+// dressLot's constant tables (made once, not per lot): the outward normal
+// of side s (NX, NZ; a row steps in from its side by -SNX, -SNZ, the same
+// table), the height and width of each boundary kind, and a seat wall's
+// clear points along it.
+const SNX = [1, 0, -1, 0], SNZ = [0, 1, 0, -1];
+const NX = SNX, NZ = SNZ;
+const H_OF = { fence: 1.5, hedge: HEDGE_H, wall: 2.0 };
+const W_OF = { fence: 0.12, hedge: 0.7, wall: 0.3 };
+const SEAT_T = [-0.5, 0, 0.5];
+// The bay rows of a parking lot (dressLot, 'carpark'), as a top-level
+// loop (optimized on its own, not with the whole of dressLot): rows gets
+// [first slot, bays, row] triples, islands the slots kept for a tree.
+// Q: the lot grid (gx0, gz0, cell, W, gh, gid, id), its building boxes
+// (NB, nb; or inB, a test, when nb < 0) and the row frame.
+const BAY_OX = new Float64Array(7), BAY_OZ = new Float64Array(7);
+const BAY_F = new Int32Array(7), BAY_V = new Int32Array(3);
+const BAY_VM_X = [0, 0, 0, 1, 2, 1, 2], BAY_VM_Z = [0, 0, 0, 1, 1, 2, 2]; // point k's offset along the row: 0, +q, -q
+const BAY_Q = { gx0: 0.5, gz0: 0.5, cell: 1, W: 0, gh: 0, gid: null, id: 0, NB: null, nb: 0, inB: null, depth0: 0.5, sgn: 1, span0: 0.5, span1: 0.5, depthLen: 0.5, alongX: false, bayMax: 0 };
+function bayInB(Q, x, z, m) {
+  if (Q.nb < 0) return Q.inB(x, z, m);
+  const NB = Q.NB;
+  for (let k = 0, n = 4 * Q.nb; k < n; k += 4) {
+    if (x > NB[k] - m && x < NB[k + 2] + m && z > NB[k + 1] - m && z < NB[k + 3] + m) return true;
+  }
+  return false;
+}
+function bayRows(Q, rows, islands) {
+  const { depth0, sgn, span0, span1, depthLen, alongX, bayMax } = Q;
+  const withB = Q.nb >= 0 || !!Q.inB;
+  // The points each slot tests, in order: its center and both ends on the
+  // lot, then its four corners (a bay never pokes into the next lot); the
+  // first three clear of buildings, by 1.5, 1.3 and 1.3 m. (One call site
+  // each in the loops below, so the optimizer inlines them.)
+  const ex = alongX ? 0 : 2.2, ez = alongX ? 2.2 : 0;
+  const qx = alongX ? 1.15 : 2.3, qz = alongX ? 2.3 : 1.15;
+  const OX = BAY_OX, OZ = BAY_OZ;
+  OX[0] = 0; OZ[0] = 0; OX[1] = ex; OZ[1] = ez; OX[2] = -ex; OZ[2] = -ez;
+  OX[3] = qx; OZ[3] = qz; OX[4] = -qx; OZ[4] = qz; OX[5] = qx; OZ[5] = -qz; OX[6] = -qx; OZ[6] = -qz;
+  // The lot test of those points (bayInLot) split by axis: along the row
+  // a point is the slot's coordinate plus 0, +q or -q (VM picks which),
+  // across it the row's coordinate plus its offset, the same for every
+  // slot (F: its cell index, -1 off the grid, made once a row).
+  const { gx0, gz0, cell, W, gh, gid, id } = Q;
+  const q = alongX ? qx : qz, VM = alongX ? BAY_VM_X : BAY_VM_Z;
+  const g0 = alongX ? gx0 : gz0, vMax = alongX ? W : gh, f0 = alongX ? gz0 : gx0, fMax = alongX ? gh : W;
+  const F = BAY_F, V = BAY_V;
+  let bayN = 0;
+  for (let off = 4.5, row = 0; off < depthLen - 2.5 && bayN < bayMax; row++) {
+    const d = depth0 + sgn * off;
+    for (let k = 0; k < 7; k++) {
+      const f = Math.floor((d + (alongX ? OZ[k] : OX[k]) - f0) / cell);
+      F[k] = f >= 0 && f < fMax ? f : -1;
+    }
+    let runA = -1, runN = 0, slot = 0;
+    for (let a = span0 + 2.75; a <= span1 - 2.75 + 1e-6; a += 2.5) {
+      const x = alongX ? a : d, z = alongX ? d : a;
+      V[0] = Math.floor((a + 0 - g0) / cell); V[1] = Math.floor((a + q - g0) / cell); V[2] = Math.floor((a + -q - g0) / cell);
+      let ok = true;
+      for (let k = 0; k < 7 && ok; k++) {
+        const v = V[VM[k]], f = F[k];
+        ok = f >= 0 && v >= 0 && v < vMax && gid[alongX ? f * W + v : v * W + f] === id;
+      }
+      if (ok && withB) for (let k = 0; k < 3 && ok; k++) ok = !bayInB(Q, x + OX[k], z + OZ[k], k ? 1.3 : 1.5);
+      // (flush: the run so far becomes a row, up to bayMax bays in all)
+      if (!ok || (slot + 1 > ISLAND_EVERY && runN >= ISLAND_EVERY)) {
+        if (runN >= 1 && bayN < bayMax) {
+          const n = Math.min(runN, bayMax - bayN);
+          rows.push(runA, n, d);
+          bayN += n;
+        }
+        runN = 0;
+        // This slot is an island (the row goes on after it), or a gap.
+        if (ok) islands.push(x, z);
+        slot = 0;
+        continue;
+      }
+      slot++;
+      if (!runN) runA = a;
+      runN++;
+    }
+    if (runN >= 1 && bayN < bayMax) {
+      const n = Math.min(runN, bayMax - bayN);
+      rows.push(runA, n, d);
+      bayN += n;
+    }
+    off += row % 2 === 0 ? 11 : 5; // bay, aisle, bay | bay, aisle, bay
+  }
+}
+let NB_BOX = new Float64Array(256); // scratch: their boxes, 4 values each
 const NEAR_E = []; // scratch: edges round the lot being dressed
 const NEAR_S = []; // scratch: service homes round the lot being dressed
 const SERVICE_KEEP = 6.5; // m round a service home kept clear of lot features
@@ -956,7 +1053,10 @@ function gridSkew(city, x, z) {
   m.set(key, v);
   return v;
 }
-export function dressLot(city, lot, out = []) {
+// baysOnly (a parking lot): stop once the bay rows are placed (the
+// features so far are the full dressing's first ones, its bays all among
+// them), for the build's parking spots.
+export function dressLot(city, lot, out = [], baysOnly = false) {
   out.length = 0;
   const G = city.lotGrid;
   if (!G || !lot || lot.type === 'verge' || lot.type === 'airfield') return out;
@@ -968,14 +1068,15 @@ export function dressLot(city, lot, out = []) {
   const cap = featureCap(lot);
   let solid = 0;
   const garages = city.garages;
-  const cellOf = (x, z) => {
-    const i = Math.floor((x - G.x0) / cell), j = Math.floor((z - G.z0) / cell);
-    return i < 0 || j < 0 || i >= W || j >= G.h ? -1 : j * W + i;
-  };
+  // (The grid's fields read once: inLot runs some ten times a feature.)
+  const gx0 = G.x0, gz0 = G.z0, gh = G.h, gid = G.id;
   const inLot = (x, z) => {
-    const c = cellOf(x, z);
-    return c >= 0 && G.id[c] === id;
+    const i = Math.floor((x - gx0) / cell), j = Math.floor((z - gz0) / cell);
+    return i >= 0 && j >= 0 && i < W && j < gh && gid[j * W + i] === id;
   };
+  // No junction near the lot's box: put skips the junction test (a point
+  // that passes inLot is inside the box, padded 1 m).
+  const nearJunction = !!roadGeo && junctionsInBox(roadGeo, lot.x0 - 1, lot.z0 - 1, lot.x1 + 1, lot.z1 + 1);
   // The hand-placed service homes (entities/servicevehicles.js
   // SERVICE_SPOTS) near this lot: nothing stands within SERVICE_KEEP m.
   NEAR_S.length = 0;
@@ -995,13 +1096,21 @@ export function dressLot(city, lot, out = []) {
   // Clear of every building box by m (a cell can be partly covered): the
   // boxes round the lot, gathered once.
   const BX = city.buildings;
-  let inB = null;
+  let inB = null, nbAll = -1;
   if (city.buildingsNear) {
     city.buildingsNear(lot.x0 - 4, lot.z0 - 4, lot.x1 + 4, lot.z1 + 4, NEAR_B);
+    // The boxes as flat x0, z0, x1, z1 (no object reads in the hot test).
+    const nb = NEAR_B.length;
+    nbAll = nb;
+    if (NB_BOX.length < 4 * nb) NB_BOX = new Float64Array(8 * nb);
+    const NB = NB_BOX;
+    for (let k = 0; k < nb; k++) {
+      const q = BX[NEAR_B[k]];
+      NB[4 * k] = q.x0; NB[4 * k + 1] = q.z0; NB[4 * k + 2] = q.x1; NB[4 * k + 3] = q.z1;
+    }
     inB = (x, z, m) => {
-      for (let k = 0; k < NEAR_B.length; k++) {
-        const q = BX[NEAR_B[k]];
-        if (x > q.x0 - m && x < q.x1 + m && z > q.z0 - m && z < q.z1 + m) return true;
+      for (let k = 0; k < 4 * nb; k += 4) {
+        if (x > NB[k] - m && x < NB[k + 2] + m && z > NB[k + 1] - m && z < NB[k + 3] + m) return true;
       }
       return false;
     };
@@ -1034,7 +1143,7 @@ export function dressLot(city, lot, out = []) {
     if (!inLot(x, z) || inGarage(x, z, Math.max(l, w) / 2 + r) || !offBuildings(x, z, heading, l, w, r)) return false;
     // Never on a junction's asphalt (a wide junction can reach over the
     // lot raster: a tree would stand in the road).
-    if (roadGeo && onJunction(roadGeo, x, z)) return false;
+    if (nearJunction && onJunction(roadGeo, x, z)) return false;
     const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays
@@ -1093,7 +1202,6 @@ export function dressLot(city, lot, out = []) {
   // A boundary row along side s, turned to the street (skew): moved in
   // from the side and, where that is not enough, shortened until both its
   // ends are on the lot.
-  const SNX = [1, 0, -1, 0], SNZ = [0, 1, 0, -1];
   const row = (kind, x, z, hd, l, w, h, s) => {
     if (!skew) return put(kind, x, z, hd, l, w, h, 0, true, set.furn);
     const ca = Math.cos(hd + skew), sa = Math.sin(hd + skew);
@@ -1107,12 +1215,10 @@ export function dressLot(city, lot, out = []) {
     return false;
   };
   // A boundary segment along side s; `gap` cuts a gate opening in the middle.
-  const H_OF = { fence: 1.5, hedge: HEDGE_H, wall: 2.0 };
-  const W_OF = { fence: 0.12, hedge: 0.7, wall: 0.3 };
   const boundary = (s, kind, gap = 0, gateKind = '') => {
     const run = sideRun(s);
     if (!run) return 0;
-    const [a, b, f] = run;
+    const a = run[0], b = run[1], f = run[2];
     const len = b - a - 1;
     if (len < 3) return 0;
     const hd = SIDE_HEADING[s];
@@ -1208,7 +1314,7 @@ export function dressLot(city, lot, out = []) {
   // A low seat wall (forecourts): a stone bench wall 0.5 m high.
   const seatWall = (x, z, heading, l) => {
     const ca = Math.cos(heading), sa = Math.sin(heading);
-    for (const t of [-0.5, 0, 0.5]) if (!clearAt(x + ca * l * t, z + sa * l * t, 0.5, 0.6)) return false;
+    for (let k = 0; k < 3; k++) { const t = SEAT_T[k]; if (!clearAt(x + ca * l * t, z + sa * l * t, 0.5, 0.6)) return false; }
     return putLong('wall', x, z, heading, l, 0.5, 0.5, true, set.furn);
   };
   const b = lot.building >= 0 ? city.buildings[lot.building] : null;
@@ -1217,9 +1323,6 @@ export function dressLot(city, lot, out = []) {
   const sides = [(front + 1) % 4, back, (front + 3) % 4];
   const area = lot.area;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  // Outward normal of side s.
-  const NX = [1, 0, -1, 0], NZ = [0, 1, 0, -1];
-
   // A low rail fence (1 m) along the road side of a green, with a gap.
   const lowFence = (q) => {
     const n0 = out.length;
@@ -1337,47 +1440,18 @@ export function dressLot(city, lot, out = []) {
       // per-lot counts (mapped parking gets more).
       const mapped = isMappedParking(lot.building >= 0 && city.buildings ? city.buildings[lot.building] : null);
       const bayMax = Math.max(mapped ? CARPARK_BAYS_MAPPED : CARPARK_BAYS, Math.floor((area * 0.5) / 12.5));
-      let bayN = 0;
-      for (let off = 4.5, row = 0; off < depthLen - 2.5 && bayN < bayMax; row++) {
-        const d = depth0 + sgn * off;
-        let runA = -1, runN = 0, slot = 0;
-        const flush = () => {
-          if (runN >= 1 && bayN < bayMax) {
-            const n = Math.min(runN, bayMax - bayN);
-            rows.push(runA, n, d);
-            bayN += n;
-          }
-          runN = 0;
-        };
-        for (let a = span0 + 2.75; a <= span1 - 2.75 + 1e-6; a += 2.5) {
-          const x = alongX ? a : d, z = alongX ? d : a;
-          // The whole bay on the lot: its center and both ends.
-          const ex = alongX ? 0 : 2.2, ez = alongX ? 2.2 : 0;
-          // ... and its four corners (a bay never pokes into the next lot).
-          const qx = alongX ? 1.15 : 2.3, qz = alongX ? 2.3 : 1.15;
-          const ok = inLot(x, z) && inLot(x + ex, z + ez) && inLot(x - ex, z - ez) &&
-            inLot(x + qx, z + qz) && inLot(x - qx, z + qz) && inLot(x + qx, z - qz) && inLot(x - qx, z - qz) &&
-            (!inB || (!inB(x, z, 1.5) && !inB(x + ex, z + ez, 1.3) && !inB(x - ex, z - ez, 1.3)));
-          if (!ok) { flush(); slot = 0; continue; }
-          slot++;
-          if (slot > ISLAND_EVERY && runN >= ISLAND_EVERY) {
-            // This slot is an island; the row goes on after it.
-            flush();
-            islands.push(x, z);
-            slot = 0;
-            continue;
-          }
-          if (!runN) runA = a;
-          runN++;
-        }
-        flush();
-        off += row % 2 === 0 ? 11 : 5; // bay, aisle, bay | bay, aisle, bay
-      }
+      const Q = BAY_Q;
+      Q.gx0 = gx0; Q.gz0 = gz0; Q.cell = cell; Q.W = W; Q.gh = gh; Q.gid = gid; Q.id = id;
+      Q.NB = NB_BOX; Q.nb = nbAll; Q.inB = nbAll >= 0 ? null : inB;
+      Q.depth0 = depth0; Q.sgn = sgn; Q.span0 = span0; Q.span1 = span1; Q.depthLen = depthLen; Q.alongX = alongX; Q.bayMax = bayMax;
+      bayRows(Q, rows, islands);
       const rowHead = alongX ? 0 : Math.PI / 2;
       for (let k = 0; k < rows.length; k += 3) {
         const n = rows[k + 1], a = rows[k] + ((n - 1) * 2.5) / 2, d = rows[k + 2];
         put('bay', alongX ? a : d, alongX ? d : a, rowHead, n * 2.5, 5, 0, 0, false, rng.int(0, 3));
       }
+      // Nothing after this point adds, moves or drops a bay.
+      if (baysOnly) return out;
       // Islands with a tree (or a planter downtown when the tree will not fit).
       let nt = 0;
       for (let k = 0; k < islands.length; k += 2) {
@@ -1414,7 +1488,7 @@ export function dressLot(city, lot, out = []) {
       // pole by the building.
       const run = sideRun(front);
       if (run) {
-        const [a, bb, f] = run;
+        const a = run[0], bb = run[1], f = run[2];
         const n = 2;
         for (let k = 0; k < n; k++) { pointOnSide(front, a + ((k + 0.5) / n) * (bb - a), f, P); put('bollard', P[0], P[1], 0, 0, 0, 0.9, 0.15, true, set.furn); }
         // The allee: 3.5 m in from the road side, a tree every 10 m.
@@ -1534,7 +1608,7 @@ export function dressLot(city, lot, out = []) {
       const run = sideRun(bs);
       const np = Math.max(1, Math.min(6, Math.round(area / 200)));
       if (run) {
-        const [a, bb, f] = run;
+        const a = run[0], bb = run[1], f = run[2];
         for (let k = 0; k < np; k++) {
           pointOnSide(bs, a + ((k + 0.5) / np) * (bb - a), f - (bs < 2 ? 1.5 : -1.5), P);
           put('tree', P[0], P[1], 0, 0, 0, 9, 0.5, true, set.trees[k % set.trees.length]);
@@ -1590,7 +1664,7 @@ export function dressLot(city, lot, out = []) {
       const run = sideRun(ws, 2);
       const walled = set.bound !== 'hedge' || lot.district === 'downtown' || lot.district === 'midtown';
       if (run) {
-        const [a, bb, f] = run;
+        const a = run[0], bb = run[1], f = run[2];
         const len = bb - a - 0.5;
         pointOnSide(ws, (a + bb) / 2, f, P);
         if (walled) put('wall', P[0], P[1], SIDE_HEADING[ws], len, 0.6, 0.6, 0, true, set.furn);
@@ -1758,13 +1832,26 @@ export function lotFill(lot, hour) {
 // bay, heading the way a parked car faces (across the row). The renderer
 // splits a row the same way (2.5 m per bay, centered on the feature).
 export function eachBay(f, fn) {
-  const n = Math.max(1, Math.round(f.l / 2.5));
+  const n = bayCount(f);
   const ca = Math.cos(f.heading), sa = Math.sin(f.heading);
   const half = (n * 2.5) / 2;
   for (let s = 0; s < n; s++) {
     const o = -half + (s + 0.5) * 2.5;
     fn(f.x + ca * o, f.z + sa * o, f.heading + Math.PI / 2, s);
   }
+}
+// The number of bays in bay row f (as eachBay counts them).
+export const bayCount = (f) => Math.max(1, Math.round(f.l / 2.5));
+// Bay s of row f (the point and heading eachBay gives it) into out [x, z, heading].
+export function bayAt(f, s, out) {
+  const n = bayCount(f);
+  const ca = Math.cos(f.heading), sa = Math.sin(f.heading);
+  const half = (n * 2.5) / 2;
+  const o = -half + (s + 0.5) * 2.5;
+  out[0] = f.x + ca * o;
+  out[1] = f.z + sa * o;
+  out[2] = f.heading + Math.PI / 2;
+  return out;
 }
 
 // ---- Shared dressing cache ----

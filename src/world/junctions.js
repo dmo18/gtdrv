@@ -100,6 +100,24 @@ function find(uf, v) {
   }
   return v;
 }
+// One merge pass of buildRoadGeo's clusters (a top-level loop, optimized
+// on its own): two junctions that both want more than the edge between
+// them has are one; so is a junction and a bend its arm runs past.
+// hasArms[root]: that cluster is a junction. Returns the merges made.
+function mergeClusters(nodes, edges, uf, hasArms, want) {
+  let merged = 0;
+  for (let k = 0; k < edges.length; k++) {
+    const e = edges[k];
+    const ra = find(uf, e.a), rb = find(uf, e.b);
+    const ha = hasArms[ra] === 1, hb = hasArms[rb] === 1;
+    if (ra === rb || e.causeway || (!ha && !hb)) continue;
+    const ta = want[2 * e.id], tb = want[2 * e.id + 1];
+    const both = ha && hb;
+    const bend = !both && nodes[ha ? e.b : e.a].edges.length === 2;
+    if ((both && ta + tb > e.length - 1 && e.length < 30) || (bend && ta + tb > e.length - 1)) { union(uf, e.a, e.b); merged++; }
+  }
+  return merged;
+}
 function union(uf, a, b) {
   const ra = find(uf, a), rb = find(uf, b);
   if (ra !== rb) uf[ra < rb ? rb : ra] = ra < rb ? ra : rb;
@@ -143,9 +161,10 @@ function clipReach(A, B) {
   // (0.3 m in from B's curbs: two strips that only touch, the halves of a
   // paired one-way, do not count.)
   const lo = B.o - B.h + 0.3, hi = B.o + B.h - 0.3;
-  const pts = [0, lo, SB, lo, SB, hi, 0, hi];
+  // Corners (0, lo), (SB, lo), (SB, hi), (0, hi), no array made per call.
   for (let k = 0; k < 4; k++) {
-    const x = B.nx + B.ux * pts[2 * k] + B.rx * pts[2 * k + 1] - A.nx, z = B.nz + B.uz * pts[2 * k] + B.rz * pts[2 * k + 1] - A.nz;
+    const ps = k === 1 || k === 2 ? SB : 0, pl = k < 2 ? lo : hi;
+    const x = B.nx + B.ux * ps + B.rx * pl - A.nx, z = B.nz + B.uz * ps + B.rz * pl - A.nz;
     P[2 * k] = x * A.ux + z * A.uz;
     P[2 * k + 1] = x * A.rx + z * A.rz;
   }
@@ -242,43 +261,50 @@ export function ringArea(ring) {
 }
 
 // Ear clipping: triangles (x, z, x, z, x, z) of a simple ring, any winding.
+// (The live vertices in a typed scratch list, the cross products inline:
+// the same tests in the same order as with an array and splice.)
+let TRI_IDX = new Int32Array(64);
+const crossOf = (ring, a, b, c, sgn) => ((ring[2 * b] - ring[2 * a]) * (ring[2 * c + 1] - ring[2 * a + 1]) - (ring[2 * b + 1] - ring[2 * a + 1]) * (ring[2 * c] - ring[2 * a])) * sgn;
 export function triangulate(ring) {
   const n = ring.length / 2;
   const out = [];
   if (n < 3) return out;
-  const idx = [];
-  for (let i = 0; i < n; i++) idx.push(i);
+  if (TRI_IDX.length < n) TRI_IDX = new Int32Array(2 * n);
+  const idx = TRI_IDX;
+  let len = n;
+  for (let i = 0; i < n; i++) idx[i] = i;
   const sgn = ringArea(ring) >= 0 ? 1 : -1;
-  const X = (i) => ring[2 * i], Z = (i) => ring[2 * i + 1];
-  const crossAt = (a, b, c) => ((X(b) - X(a)) * (Z(c) - Z(a)) - (Z(b) - Z(a)) * (X(c) - X(a))) * sgn;
   let guard = 0;
-  while (idx.length > 3 && guard++ < 4 * n * n) {
+  while (len > 3 && guard++ < 4 * n * n) {
     let cut = false;
-    for (let k = 0; k < idx.length; k++) {
-      const a = idx[(k + idx.length - 1) % idx.length], b = idx[k], c = idx[(k + 1) % idx.length];
-      if (crossAt(a, b, c) <= 1e-9) continue;
+    for (let k = 0; k < len; k++) {
+      const a = idx[(k + len - 1) % len], b = idx[k], c = idx[(k + 1) % len];
+      if (crossOf(ring, a, b, c, sgn) <= 1e-9) continue;
       let inside = false;
-      for (const p of idx) {
+      for (let m = 0; m < len; m++) {
+        const p = idx[m];
         if (p === a || p === b || p === c) continue;
-        if (crossAt(a, b, p) >= -1e-9 && crossAt(b, c, p) >= -1e-9 && crossAt(c, a, p) >= -1e-9) { inside = true; break; }
+        if (crossOf(ring, a, b, p, sgn) >= -1e-9 && crossOf(ring, b, c, p, sgn) >= -1e-9 && crossOf(ring, c, a, p, sgn) >= -1e-9) { inside = true; break; }
       }
       if (inside) continue;
-      out.push(X(a), Z(a), X(b), Z(b), X(c), Z(c));
-      idx.splice(k, 1);
+      out.push(ring[2 * a], ring[2 * a + 1], ring[2 * b], ring[2 * b + 1], ring[2 * c], ring[2 * c + 1]);
+      idx.copyWithin(k, k + 1, len);
+      len--;
       cut = true;
       break;
     }
     if (!cut) {
       // Degenerate (collinear) remainder: drop the flattest vertex.
       let bk = 0, bv = Infinity;
-      for (let k = 0; k < idx.length; k++) {
-        const v = Math.abs(crossAt(idx[(k + idx.length - 1) % idx.length], idx[k], idx[(k + 1) % idx.length]));
+      for (let k = 0; k < len; k++) {
+        const v = Math.abs(crossOf(ring, idx[(k + len - 1) % len], idx[k], idx[(k + 1) % len], sgn));
         if (v < bv) { bv = v; bk = k; }
       }
-      idx.splice(bk, 1);
+      idx.copyWithin(bk, bk + 1, len);
+      len--;
     }
   }
-  if (idx.length === 3 && Math.abs(crossAt(idx[0], idx[1], idx[2])) > 1e-9) out.push(X(idx[0]), Z(idx[0]), X(idx[1]), Z(idx[1]), X(idx[2]), Z(idx[2]));
+  if (len === 3 && Math.abs(crossOf(ring, idx[0], idx[1], idx[2], sgn)) > 1e-9) out.push(ring[2 * idx[0]], ring[2 * idx[0] + 1], ring[2 * idx[1]], ring[2 * idx[1] + 1], ring[2 * idx[2]], ring[2 * idx[2] + 1]);
   return out;
 }
 
@@ -396,7 +422,8 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const deg = (id) => nodes[id].edges.length;
   const uf = new Int32Array(NN);
   for (let i = 0; i < NN; i++) uf[i] = i;
-  for (const e of edges) {
+  for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+    const e = edges[eIdx];
     if (e.causeway) continue;
     const da = deg(e.a), db = deg(e.b);
     if (e.length < CLUSTER_LEN && da >= 3 && db >= 3) union(uf, e.a, e.b);
@@ -404,14 +431,16 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   }
   // A street across both carriageways of a divided road: one junction.
   const dividedAt = (id, skip, name, other) => {
-    for (const k of nodes[id].edges) {
+    for (let kIdx = 0; kIdx < nodes[id].edges.length; kIdx++) {
+      const k = nodes[id].edges[kIdx];
       const d = edges[k];
       if (d === skip || !d.divided || d.name === skip.name) continue;
       if (name === null) { if (dividedAt(other, skip, d.name, -1)) return true; } else if (d.name === name) return true;
     }
     return false;
   };
-  for (const e of edges) {
+  for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+    const e = edges[eIdx];
     if (e.causeway || e.divided || e.length >= DIVIDED_LINK) continue;
     if (deg(e.a) < 3 || deg(e.b) < 3) continue;
     if (dividedAt(e.a, e, null, e.b)) union(uf, e.a, e.b);
@@ -430,6 +459,13 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const C = {};
   // (A cluster that no pass changed keeps its arms: same root, same size.)
   const want = new Float64Array(2 * NE);
+  const hasArms = new Uint8Array(NN); // 1: the root's cluster is a junction (arms.has)
+  // bendIsJunction depends on the graph alone: asked once per node, not per pass.
+  const bendJ = new Int8Array(NN).fill(-1);
+  const isBendJ = (id) => {
+    if (bendJ[id] < 0) bendJ[id] = bendIsJunction(nodes, edges, id) ? 1 : 0;
+    return bendJ[id] === 1;
+  };
   let prev = new Map();
   for (let pass = 0; pass < 5; pass++) {
     groups = new Map();
@@ -440,40 +476,33 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       g.push(i);
     }
     arms = new Map();
-    for (const [r, g] of groups) {
+    // (Map.forEach, not for-of: no entry array per group.)
+    groups.forEach((g, r) => {
       const old = prev.get(r);
-      if (old && old.size === g.length) { arms.set(r, old.list); continue; }
-      const isJ = g.length > 1 || deg(g[0]) >= 3 || (deg(g[0]) === 2 && bendIsJunction(nodes, edges, g[0]));
-      if (!isJ) continue;
+      if (old && old.size === g.length) { arms.set(r, old.list); return; }
+      const isJ = g.length > 1 || deg(g[0]) >= 3 || (deg(g[0]) === 2 && isBendJ(g[0]));
+      if (!isJ) return;
       const list = [];
-      for (const id of g) {
-        for (const k of nodes[id].edges) {
-          const e = edges[k];
+      for (let m = 0; m < g.length; m++) {
+        const id = g[m], ne = nodes[id].edges;
+        for (let j = 0; j < ne.length; j++) {
+          const e = edges[ne[j]];
           if (find(uf, e.a) === find(uf, e.b)) continue;
           list.push(makeArm(nodes, e, e.a === id ? 0 : 1));
         }
       }
       solveTrims(list, C);
       arms.set(r, list);
-    }
+    });
     prev = new Map();
     want.fill(0);
-    for (const [r, list] of arms) {
+    hasArms.fill(0);
+    arms.forEach((list, r) => {
       prev.set(r, { size: groups.get(r).length, list });
-      for (const A of list) want[A.q] = A.want;
-    }
-    let merged = 0;
-    for (const e of edges) {
-      const ra = find(uf, e.a), rb = find(uf, e.b);
-      const ha = arms.has(ra), hb = arms.has(rb);
-      if (ra === rb || e.causeway || (!ha && !hb)) continue;
-      const ta = want[2 * e.id], tb = want[2 * e.id + 1];
-      // Two junctions that both want more than the edge between them has
-      // are one; so is a junction and a bend its arm runs past.
-      const both = ha && hb;
-      const bend = !both && deg(ha ? e.b : e.a) === 2;
-      if ((both && ta + tb > e.length - 1 && e.length < 30) || (bend && ta + tb > e.length - 1)) { union(uf, e.a, e.b); merged++; }
-    }
+      hasArms[r] = 1;
+      for (let m = 0; m < list.length; m++) want[list[m].q] = list[m].want;
+    });
+    const merged = mergeClusters(nodes, edges, uf, hasArms, want);
     stats.merged += merged;
     if (!merged) break;
   }
@@ -481,8 +510,9 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   // Ends capped by short edges between two junctions (before the rings, so
   // every strip end stays on its ring).
   const armAt = new Map();
-  for (const list of arms.values()) for (const A of list) armAt.set(A.q, A);
-  for (const e of edges) {
+  arms.forEach((list) => { for (let m = 0; m < list.length; m++) armAt.set(list[m].q, list[m]); });
+  for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+    const e = edges[eIdx];
     const A = armAt.get(2 * e.id), B = armAt.get(2 * e.id + 1);
     if (!A || !B) continue;
     const room = e.length - 1;
@@ -495,14 +525,14 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   }
   // Pair shifts as linear tapers of the curbs (edge frame), within the
   // room the other end leaves.
-  for (const A of armAt.values()) {
-    if (!(A.tl > 0)) continue;
+  armAt.forEach((A) => {
+    if (!(A.tl > 0)) return;
     const sg = A.end ? -1 : 1, e = A.e, sh = A.shift * sg, o = (e.off || 0) + eoff[e.id];
     tcl[A.q] = o - e.width / 2 + sh;
     tcr[A.q] = o + e.width / 2 + sh;
     taper[A.q] = A.tl;
     tlin[A.q] = 1;
-  }
+  });
   // Bends: mitered joins and tapers.
   for (let i = 0; i < NN; i++) {
     if (arms.has(find(uf, i)) || deg(i) !== 2) continue;
@@ -546,10 +576,13 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const sup = new Float64Array(4 * NE);
   const mthru = new Uint8Array(2 * NE);
   const junctions = [];
-  for (const [r, g] of groups) {
+  groups.forEach((g, r) => {
     const list = arms.get(r);
-    if (!list) continue;
-    for (const id of g) for (const k of nodes[id].edges) if (find(uf, edges[k].a) === find(uf, edges[k].b)) inner[k] = 1;
+    if (!list) return;
+    for (let m = 0; m < g.length; m++) {
+      const ne = nodes[g[m]].edges;
+      for (let j = 0; j < ne.length; j++) { const k = ne[j]; if (find(uf, edges[k].a) === find(uf, edges[k].b)) inner[k] = 1; }
+    }
     let J = buildJunction(junctions.length, nodes, g, list, C, PG);
     // A ring that crosses itself: the arms a little longer, a few times.
     for (let t = 0; t < 6 && J.hull; t++) {
@@ -597,6 +630,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
         stats.fanKept = (stats.fanKept || 0) + 1;
       }
     }
+    J = finishJunction(J);
     for (const G of J.gores) {
       sup[2 * G.qa + G.sideA] = Math.max(sup[2 * G.qa + G.sideA], G.la);
       sup[2 * G.qb + G.sideB] = Math.max(sup[2 * G.qb + G.sideB], G.lb);
@@ -605,28 +639,32 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
     // (Not where nothing leaves the junction on the median's side: a
     // street that ends at one half of a divided road, a T. The median
     // runs on past it, `mthru`, and the meshes carry it through.)
-    for (const A of list) {
+    for (let armIdx = 0; armIdx < list.length; armIdx++) {
+      const A = list[armIdx];
       if (!(medianBand(A.e) > 0)) continue;
       const sg = A.end ? 1 : -1;
       let crossed = false;
-      for (const B of list) if (B !== A && (B.ux * A.rx + B.uz * A.rz) * sg > 0.35) { crossed = true; break; }
+      for (let m = 0; m < list.length; m++) { const B = list[m]; if (B !== A && (B.ux * A.rx + B.uz * A.rz) * sg > 0.35) { crossed = true; break; } }
       if (crossed || list.length < 2) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
       else mthru[A.q] = 1;
     }
-    for (const id of g) nodeJ[id] = J.id;
-    for (const A of list) {
+    for (let m = 0; m < g.length; m++) nodeJ[g[m]] = J.id;
+    for (let armIdx = 0; armIdx < list.length; armIdx++) {
+      const A = list[armIdx];
       trim[A.q] = A.trim;
       jEnd[A.q] = J.id;
     }
     junctions.push(J);
     if (g.length > 1) stats.multi++;
     if (J.hull) stats.hull++;
-  }
+  });
   stats.junctions = junctions.length;
   // Controlled approaches: a signal or stop sign at the junction, 3+ arms.
-  for (const J of junctions) {
+  for (let jIdx = 0; jIdx < junctions.length; jIdx++) {
+    const J = junctions[jIdx];
     if (!(J.signal || J.stop) || J.arms.length < 3) continue;
-    for (const q of J.arms) {
+    for (let qIdx = 0; qIdx < J.arms.length; qIdx++) {
+      const q = J.arms[qIdx];
       const e = edges[q >> 1];
       if (!e.causeway && !e.ped && !e.bridge) ctrl[q] = 1;
     }
@@ -640,7 +678,8 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   }
   // The junctions by 32 m cell of their boxes (junctionsAt).
   const jGrid = new Map();
-  for (const J of junctions) {
+  for (let jIdx = 0; jIdx < junctions.length; jIdx++) {
+    const J = junctions[jIdx];
     for (let i = Math.floor(J.x0 / JCELL); i <= Math.floor(J.x1 / JCELL); i++) {
       for (let j = Math.floor(J.z0 / JCELL); j <= Math.floor(J.z1 / JCELL); j++) {
         const k = i * 100003 + j;
@@ -662,7 +701,8 @@ function sideShifts(nodes, edges, edgesNear) {
   const out = new Float64Array(edges.length);
   if (!edgesNear) return out;
   const near = [];
-  for (const e of edges) {
+  for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+    const e = edges[eIdx];
     if (!e.oneway || e.causeway || e.pair >= 0 || e.bridge) continue;
     const a = nodes[e.a], b = nodes[e.b];
     const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
@@ -707,12 +747,12 @@ function bendIsJunction(nodes, edges, id) {
 // Arms in order round the junction, and their trims.
 function solveTrims(list, C) {
   let cx = 0, cz = 0;
-  for (const A of list) { cx += A.nx; cz += A.nz; }
+  for (let i = 0; i < list.length; i++) { cx += list[i].nx; cz += list[i].nz; }
   cx /= list.length || 1; cz /= list.length || 1;
   let rad = 0;
-  for (const A of list) rad = Math.max(rad, Math.hypot(A.nx - cx, A.nz - cz));
+  for (let i = 0; i < list.length; i++) rad = Math.max(rad, Math.hypot(list[i].nx - cx, list[i].nz - cz));
   const D = rad + 15;
-  for (const A of list) A.ang = Math.atan2(A.nz + A.uz * D + A.rz * A.o - cz, A.nx + A.ux * D + A.rx * A.o - cx);
+  for (let i = 0; i < list.length; i++) { const A = list[i]; A.ang = Math.atan2(A.nz + A.uz * D + A.rz * A.o - cz, A.nx + A.ux * D + A.rx * A.o - cx); }
   list.sort((a, b) => a.ang - b.ang || a.q - b.q);
   pairShifts(list);
   // Two arms moved side by side keep that order round the junction (the
@@ -721,7 +761,7 @@ function solveTrims(list, C) {
     const A = list[i], j = (i + 1) % list.length, B = list[j];
     if (A.partner === B.q && A.shift > 0 && list.length > 2) { list[i] = B; list[j] = A; }
   }
-  for (const A of list) A.trim = list.length > 1 ? 0.5 : 0;
+  for (let i = 0; i < list.length; i++) list[i].trim = list.length > 1 ? 0.5 : 0;
   for (let i = 0; i < list.length; i++) {
     for (let j = 0; j < list.length; j++) {
       if (i === j || list[i].partner === list[j].q) continue;
@@ -738,7 +778,8 @@ function solveTrims(list, C) {
       B.trim = Math.max(B.trim, C.sb + C.T + 0.2);
     }
   }
-  for (const A of list) {
+  for (let armIdx = 0; armIdx < list.length; armIdx++) {
+    const A = list[armIdx];
     A.want = A.trim;
     A.trim = Math.min(A.trim, TRIM_MAX, Math.max(0.5, A.len - 1));
   }
@@ -751,9 +792,11 @@ function solveTrims(list, C) {
 // over `tl` m, linearly) so the two meet curb to curb (one surface).
 const PAIR_COS = Math.cos((25 * Math.PI) / 180);
 function pairShifts(list) {
-  for (const A of list) {
+  for (let armIdx = 0; armIdx < list.length; armIdx++) {
+    const A = list[armIdx];
     if (A.partner >= 0 || A.e.median > 0) continue;
-    for (const B of list) {
+    for (let otherIdx = 0; otherIdx < list.length; otherIdx++) {
+      const B = list[otherIdx];
       if (B === A || B.partner >= 0 || B.e.median > 0 || B.e.name !== A.e.name) continue;
       const dot = A.ux * B.ux + A.uz * B.uz;
       if (dot < PAIR_COS) continue;
@@ -778,7 +821,7 @@ function pairShifts(list) {
 }
 function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   let x = 0, z = 0, signal = false, stop = false;
-  for (const k of g) { x += nodes[k].x; z += nodes[k].z; signal = signal || !!nodes[k].signal; stop = stop || !!nodes[k].stop; }
+  for (let m = 0; m < g.length; m++) { const k = g[m]; x += nodes[k].x; z += nodes[k].z; signal = signal || !!nodes[k].signal; stop = stop || !!nodes[k].stop; }
   x /= g.length; z /= g.length;
   const ring = [], corners = [], gores = [];
   const n = list.length;
@@ -860,7 +903,7 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
     // (qa, sideA: the edge end and side (0 right, 1 left) of the arm before
     // the corner; qb, sideB: of the arm after it. The meshes leave the
     // sidewalk off a corner whose two sides are bare, world/ground.js.)
-    if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null, qa: A.q, sideA: A.end ? 1 : 0, qb: B.q, sideB: B.end ? 0 : 1 });
+    if (wa > 0 || wb > 0) corners.push({ curb, tris, qa: A.q, sideA: A.end ? 1 : 0, qb: B.q, sideB: B.end ? 0 : 1 });
   }
   let hull = false;
   let poly = ring;
@@ -889,7 +932,8 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   if (hull && n >= 2) {
     area = [];
     const mid = [];
-    for (const A of list) {
+    for (let armIdx = 0; armIdx < list.length; armIdx++) {
+      const A = list[armIdx];
       const ol = lat(A, false), or = lat(A, true), la = L(A), ra = R(A);
       const lx = A.nx + A.rx * ol, lz = A.nz + A.rz * ol, rx = A.nx + A.rx * or, rz = A.nz + A.rz * or;
       area.push(la[0], la[1], ra[0], ra[1], rx, rz, la[0], la[1], rx, rz, lx, lz);
@@ -907,13 +951,27 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   };
   grow(poly);
   if (area) grow(area);
-  for (const c of corners) if (c.tris) grow(c.tris);
-  for (const G of gores) grow(G.poly);
+  for (let m = 0; m < corners.length; m++) if (corners[m].tris) grow(corners[m].tris);
+  for (let m = 0; m < gores.length; m++) grow(gores[m].poly);
   const lead = Math.min(...g);
+  // A draft: plain arrays, the ring not yet triangulated (a ring that
+  // crosses itself is built again, so only the kept one is finished).
   return {
-    id, lead, nodes: Int32Array.from(g), x, z, signal, stop, hull, fan: hull,
-    ring: Float64Array.from(poly), tris: n < 2 ? new Float64Array(0) : Float64Array.from(area || triangulate(poly)),
-    corners, gores, arms: Int32Array.from(list.map((A) => A.q)), x0, z0, x1, z1, hullRing: forceHull,
+    id, lead, nodes: g, x, z, signal, stop, hull, fan: hull,
+    ring: poly, tris: n < 2 ? null : area, corners, gores, arms: list, x0, z0, x1, z1, hullRing: forceHull,
+  };
+}
+// The kept draft as a junction: typed arrays, its asphalt triangulated.
+function finishJunction(D) {
+  const corners = D.corners;
+  for (let k = 0; k < corners.length; k++) {
+    const c = corners[k];
+    corners[k] = { curb: Float64Array.from(c.curb), tris: c.tris ? Float64Array.from(c.tris) : null, qa: c.qa, sideA: c.sideA, qb: c.qb, sideB: c.sideB };
+  }
+  return {
+    id: D.id, lead: D.lead, nodes: Int32Array.from(D.nodes), x: D.x, z: D.z, signal: D.signal, stop: D.stop, hull: D.hull, fan: D.fan,
+    ring: Float64Array.from(D.ring), tris: D.arms.length < 2 ? new Float64Array(0) : Float64Array.from(D.tris || triangulate(D.ring)),
+    corners, gores: D.gores, arms: Int32Array.from(D.arms.map((A) => A.q)), x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, hullRing: D.hullRing,
   };
 }
 
@@ -922,6 +980,18 @@ const NONE = [];
 // The junctions whose box may hold (x, z) (a list owned by the grid).
 export function junctionsAt(geo, x, z) {
   return geo.jGrid.get(Math.floor(x / JCELL) * 100003 + Math.floor(z / JCELL)) || NONE;
+}
+// Does any junction's grid cell list meet the box x0..x1, z0..z1? (When
+// none does, onJunction is false at every point of the box.)
+export function junctionsInBox(geo, x0, z0, x1, z1) {
+  const i0 = Math.floor(x0 / JCELL), i1 = Math.floor(x1 / JCELL), j0 = Math.floor(z0 / JCELL), j1 = Math.floor(z1 / JCELL);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      const l = geo.jGrid.get(i * 100003 + j);
+      if (l && l.length) return true;
+    }
+  }
+  return false;
 }
 // Is (x, z) on some junction's asphalt?
 export function onJunction(geo, x, z) {

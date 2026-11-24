@@ -128,8 +128,9 @@ function heapPath(city, from, to, cost, avoid, dist, prev, done) {
     if (u === to) { found = true; break; }
     done[u] = 1;
     const best = dist[u];
-    for (const eid of city.nodes[u].edges) {
-      const e = city.edges[eid];
+    const ue = city.nodes[u].edges;
+    for (let j = 0; j < ue.length; j++) {
+      const e = city.edges[ue[j]];
       const v = otherEnd(e, u);
       if (done[v] || (avoid && avoid.has(v) && v !== to)) continue;
       const d = best + (cost ? cost(e) : e.length);
@@ -155,7 +156,8 @@ const edgeKey = (a, b) => (a < b ? a * 100000 + b : b * 100000 + a);
 
 function nearestNode(nodes, x, z) {
   let best = null, bd = Infinity;
-  for (const n of nodes) {
+  for (let nIdx = 0; nIdx < nodes.length; nIdx++) {
+    const n = nodes[nIdx];
     const d = hyp(n.x - x, n.z - z);
     if (d < bd) { bd = d; best = n; }
   }
@@ -167,7 +169,8 @@ function nearestNode(nodes, x, z) {
 function ringNodes(nodes, cx, cz, sectors, theta0 = 0) {
   const best = new Array(sectors).fill(null);
   const bestD = new Array(sectors).fill(-1);
-  for (const n of nodes) {
+  for (let nIdx = 0; nIdx < nodes.length; nIdx++) {
+    const n = nodes[nIdx];
     const a = (Math.atan2(n.z - cz, n.x - cx) - theta0 + TAU * 2) % TAU;
     const s = Math.min(sectors - 1, Math.floor((a / TAU) * sectors));
     const d = hyp(n.x - cx, n.z - cz);
@@ -400,7 +403,8 @@ export function tallestNear(city, x, z, R = RING_CLEAR_RADIUS) {
     }
     return h;
   }
-  for (const b of city.buildings) {
+  for (let bIdx = 0; bIdx < city.buildings.length; bIdx++) {
+    const b = city.buildings[bIdx];
     if (b.h <= h) continue;
     const dx = Math.max(b.x0 - x, 0, x - b.x1), dz = Math.max(b.z0 - z, 0, z - b.z1);
     if (dx * dx + dz * dz <= R * R) h = b.h;
@@ -418,7 +422,9 @@ function ringY(city, x, z, r, wantY) {
 
 // The avenue edge under (x,z), if there is one.
 export function avenueAt(city, x, z) {
-  for (const e of city.edges) {
+  const edges = city.edges;
+  for (let k = 0; k < edges.length; k++) {
+    const e = edges[k];
     if (!e.avenue || e.causeway) continue;
     const a = city.nodes[e.a], b = city.nodes[e.b];
     if (e.ux !== undefined) {
@@ -468,15 +474,19 @@ function skyCheckpoints(city, list, start) {
 // Flat roofs a helicopter can touch down on.
 function roofNear(city, x, z, used) {
   let best = null, bd = Infinity;
-  for (const b of city.buildings) {
+  const B = city.buildings;
+  for (let k = 0; k < B.length; k++) {
+    const b = B[k];
     if (b.kind !== 'building' && b.kind !== 'warehouse') continue;
     if (b.x1 - b.x0 < 18 || b.z1 - b.z0 < 18 || b.h < 8 || b.h > 45) continue;
     if (used.has(b)) continue;
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    // (Only a nearer roof can win: the neighbor test runs for those alone.)
+    const d = hyp(cx - x, cz - z);
+    if (d >= bd) continue;
     // Nothing much taller right next to it.
     if (tallestNear(city, cx, cz, 30) > b.h + 6) continue;
-    const d = hyp(cx - x, cz - z);
-    if (d < bd) { bd = d; best = b; }
+    bd = d; best = b;
   }
   if (!best) throw new Error('courses: no roof found');
   used.add(best);
@@ -888,15 +898,19 @@ function centroid(nodes) {
 
 // The point on an avenue's center line nearest (x, z) where a canyon ring
 // of radius r fits: road under it, no building across its full width.
+const CANYON_S = [-1, -0.5, 0, 0.5, 1]; // across the ring, in radii
 function canyonPoint(city, street, x, z, r) {
   let best = null, bd = Infinity;
   const clear = (px, pz, e) => {
-    for (const s of [-1, -0.5, 0, 0.5, 1]) {
+    for (let k = 0; k < CANYON_S.length; k++) {
+      const s = CANYON_S[k];
       if (city.inBuilding(px - e.uz * s * r, pz + e.ux * s * r, 0.5)) return false;
     }
     return true;
   };
-  for (const e of city.edges) {
+  const edges = city.edges;
+  for (let k = 0; k < edges.length; k++) {
+    const e = edges[k];
     if (!e.avenue || e.causeway || e.bridge || (street && e.name !== street)) continue;
     const a = city.nodes[e.a], b = city.nodes[e.b];
     const t0 = Math.max(a.hx, a.hz) + 3, t1 = e.length - Math.max(b.hx, b.hz) - 3;

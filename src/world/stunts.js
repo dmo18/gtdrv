@@ -89,7 +89,8 @@ export function generateStuntSpots(city, seed = (city && city.seed) || 1) {
   if (Array.isArray(city.rampSpots)) return city.rampSpots.slice(); // hand-placed (Miami)
   const rng = createRng((seed ^ 0x57a7) >>> 0);
   const cands = [];
-  for (const e of city.edges) {
+  for (let eIdx = 0; eIdx < city.edges.length; eIdx++) {
+    const e = city.edges[eIdx];
     if (e.avenue || e.causeway || !(e.length > 60)) continue;
     const a = city.nodes[e.a], b = city.nodes[e.b];
     const x = (a.x + b.x) / 2, z = (a.z + b.z) / 2;
@@ -163,7 +164,8 @@ export function placeRamps(city, spec) {
   const need = RAMP_LAND.slope * 2 + RAMP_LAND.top / 2 + 6; // m of straight road each side of the center
   for (const r of spec) {
     let best = null, bd = Infinity;
-    for (const e of city.edges) {
+    for (let eIdx = 0; eIdx < city.edges.length; eIdx++) {
+      const e = city.edges[eIdx];
       if (e.name !== r.street || e.bridge || e.causeway || e.avenue) continue;
       const a = city.nodes[e.a], b = city.nodes[e.b];
       const t0 = Math.max(a.hx, a.hz) + need, t1 = e.length - Math.max(b.hx, b.hz) - need;

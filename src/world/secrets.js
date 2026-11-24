@@ -136,7 +136,8 @@ function findAlley(city, rng, taken) {
 
 function findRooftop(city, rng, taken) {
   const pool = [];
-  for (const b of city.buildings) {
+  for (let bIdx = 0; bIdx < city.buildings.length; bIdx++) {
+    const b = city.buildings[bIdx];
     if (b.kind !== 'building' || b.district === 'airfield') continue;
     if (b.h < 9 || b.h > 20 || b.x1 - b.x0 < 14 || b.z1 - b.z0 < 14) continue;
     const x = (b.x0 + b.x1) / 2, z = (b.z0 + b.z1) / 2;
