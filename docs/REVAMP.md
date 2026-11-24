@@ -717,6 +717,54 @@ Acceptance (W1): new test/lots.test.js and test/world-density.test.js.
 
 ### 6.3 Handling contract
 
+**PLANTED (owner round 5, 0.12.0): Arcade is rebuilt.** The owner, on 0.11.0 with the touch wheel:
+"steering (wheel) is way too loose and you can not turn sharp enough. the car does not handle
+turns well, slips, fishtails but the fishtail isn't even accurate." The numbers matched real cars,
+so realism was not the ask. Arcade (the default) is now a planted model in `stepVehicle`
+("Arcade: planted"), not the Sim tire model with assists on top. Sim keeps the tire model and all
+its rows below. Where this block and the older text below disagree, this block is the contract
+for Arcade; constants are in handlingbands.js (`ARCADE_GRIP`, `ARCADE_LOCK`,
+`ARCADE_PLAYER_STEER`, `PLANTED`, `SERVICE_GAIN`, `PRESET_BANDS`).
+
+1. Planted. The nose follows the steering (path curvature follows the command with a 0.04 s
+   lag, yaw rate = speed times it) and the travel follows the nose (the rear axle's sideways
+   velocity is taken out, at up to twice the lateral grip). There is no tire, assist or traction
+   control state: power and brakes act along the car only. Without the handbrake the slip angle
+   at the rear axle stays under 4 degrees (measured: under 0.2) in full throttle from rest on
+   full lock, lifting or braking mid-corner at 50 mph, a flick at 60 mph, curbs mid-turn and
+   rain. The slide is read at the rear axle: the body slip at the center of mass also holds the
+   plain geometry of a tight turn. A crash still pushes the car sideways for up to 0.4 s.
+2. Sharp. Lateral grip 1.6 times the class table up to 35 mph, easing to 1.25 times at 75 mph
+   (sedan 1.31 g in town). Every vehicle up to 3000 kg cuts 40 degrees at full input (sedan 35 ft
+   curb to curb; Sim keeps the table's 40 ft), and at or below 15 mph full input is the whole
+   lock whatever the grip table says. Trucks and buses keep their own lock. The four tall
+   service vehicles keep 5/12 of the grip gain (1.25 and 1.10, as before): with more their
+   inner wheels would lift. Body roll at the limit is 1.2 times the table's, not 1.6.
+3. Direct. Shaping exponent 1.2 at 70 mph (was 1.8). The player's steering (controls.steerShape)
+   moves at 12 locks per second each way (AI drivers keep 5.5 and 5, and a 0.06 s lateral
+   lag above walking pace: their planners were tuned on both). Input to 63 % of the settled yaw rate: 0.083 s at 10 to 70 mph. A
+   released car is straight within 0.25 s, with no yaw the other way.
+4. The handbrake slide. The tail swings out toward the steering's side at 2.2 rad/s up to 0.6
+   rad (34 degrees) on full input, from 2 m/s (none) to 5 m/s (all); the path keeps 0.85 of the
+   steering's turn; the slide adds up to 0.3 of the lateral grip of drag. On release the travel
+   lines up with the nose (time constant 0.12 s, the nose never swings back): under 3 degrees
+   within 0.3 s. `v.slip` follows the real slip angle (0 under 3 degrees, 1 at 29), so smoke,
+   squeal and the drift score (score.js, unchanged) show the slide that is there; locked rear
+   wheels with no slide read 0.3; the drawn front wheels steer into the slide.
+5. Touch wheel: full input at 80 px of travel at sensitivity 1 (was 55), response
+   0.9 x + 0.1 x^3 (was 0.85 / 0.15), the drawn wheel shows the steer sent.
+6. Presets, one table (core/handlingpreset.js): Standard is this target. Relaxed keeps 0.7 of the
+   grip gain (1.42), steers at 0.7 of the rate, rolls 1.3 times, shaping 1.25. Sharp steers 1.25
+   times quicker, cuts 44 degrees, shaping 1.1. `assistK` is gone; `lockAdd` and `gainK` join.
+7. Proof: test/thumb-driver.test.js (sedan, SUV, pickup, sports car, muscle car, box truck):
+   90 degree turns at 20 mph on 12 m and at 30 mph on 15 m lane-center corners (truck 25 mph),
+   lane changes at 45 and 65 mph, a 60 m curve at 45 mph, a U-turn in 10.5 m (SUV and pickup
+   11 m), a slalom at 35 mph (truck 30), the six abuse cases, the handbrake turn, the delay. The
+   thumb is unchanged (180 ms, 4 per second, steps of 0.08, noise); its preview is 0.2 s + 0.03 u
+   (was 0.35 + 0.036 u), as a driver previews as far as the car's own lag asks.
+   `THUMB_OLD=<older vehicle.js> node --test test/thumb-driver.test.js` prints the same table
+   for an older model.
+
 New file src/entities/handlingbands.js (W3): plain constants, imported by
 test/handling-bands.test.js and by nothing at runtime. Units: m/s, m, s, g = 9.81 m/s2.
 "mph" below is m/s times 2.23694. All measurements use `stepVehicle` at 1/60 s on dry ground with
@@ -817,16 +865,16 @@ What differs:
 
 | item | Arcade (default) | Sim |
 |---|---|---|
-| Steady lateral grip on full lock | 1.00 to 1.12 times `spec.grip` | 0.88 to 1.00 times `spec.grip` |
-| Tire past its peak | force sags at most 6 % | force sags 18 to 22 % |
+| Steady lateral grip on full lock | PLANTED: 1.6 times `spec.grip` up to 35 mph, 1.25 from 75 mph (was 1.25 and 1.10) | 1.00 times `spec.grip` |
+| Tire past its peak | PLANTED: no tire curve (was: sags at most 6 %) | force sags 18 to 22 % |
 | Full steering input at speed asks for | 1.00 of lateral grip: the tightest turn the car makes at that speed without sliding, the front at 0.95 of its peak (`ASK`, `USE`), quiet; more input always turns more (DRIVE, 0.10.1; 0.10.0 asked 1.15 and pushed wide) | 1.15 of lateral grip (too much lock scrubs speed and runs wide, with tire noise; HANDLE) |
-| Player input shaping by speed (the player's input only, `steerShape`; AI planners send a share of the lock unchanged) | steer x becomes sign(x) * abs(x)^e, e rising smoothly from 1 at 15 mph to 1.8 at 70 mph (times the preset's `shapeK` on the rise): small thumb moves are small lane corrections on the highway, full input is still full lock, no dead zone (DRIVE) | the same |
+| Player input shaping by speed (the player's input only, `steerShape`; AI planners send a share of the lock unchanged) | steer x becomes sign(x) * abs(x)^e, e rising smoothly from 1 at 15 mph to 1.2 at 70 mph (PLANTED; was 1.8) (times the preset's `shapeK` on the rise): small thumb moves are small lane corrections on the highway, full input is still full lock, no dead zone (DRIVE) | the same |
 | Yaw damping near the center of the wheel | the assist firms up under 0.15 of input (`calm`), so a released car is straight within 0.5 s, with no weave (DRIVE) | the light damper only |
-| Stability assist (yaw and slide correction) | on; body slip held under 8 degrees (rear drive 16) | off, apart from a light yaw damper; the car can spin |
-| Traction control | on; drive is cut in a slide, no less than 30 % kept | off; rear drive cars step out under power |
-| Handbrake | slide capped (slip 0.6 rad) and it recovers by itself | free; holds the slide until released |
-| Weight transfer on the balance (lift off, trail brake) | half effect | full effect |
-| Tire squeal starts at | 1.05 times peak slip (0.10.0, HANDLE; was 1.3) | 0.9 times peak slip |
+| Stability assist (yaw and slide correction) | PLANTED: none needed, rear slip under 4 degrees by construction (was: on; body slip under 8 degrees, rear drive 16) | off, apart from a light yaw damper; the car can spin |
+| Traction control | PLANTED: none, power cannot rotate the car; wheelspin is limited by the tires as in Sim (was: on) | off; rear drive cars step out under power |
+| Handbrake | PLANTED: a slide of up to 0.6 rad toward the steering's side, steerable, recovers within 0.6 s of release (was: capped at 0.6 rad) | free; holds the slide until released |
+| Weight transfer on the balance (lift off, trail brake) | PLANTED: none (was half) | full effect |
+| Tire squeal starts at | PLANTED: 3 degrees of rear slip (was 1.05 times peak slip) | 0.9 times peak slip |
 | Rain | grip loss as today | grip loss as today, plus the sag above |
 
 Nothing else may differ. The mode table in vehicle.js (`HANDLING`) keeps only the fields that

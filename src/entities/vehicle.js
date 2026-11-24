@@ -279,8 +279,9 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     wheelSpin: 0,
     slip: 0,
     // Arcade (planted model): the handbrake slide asked for (rad, + nose
-    // right of the travel), its rate, and the time a crash leaves the car loose.
-    slide: 0, slideV: 0, knock: 0,
+    // right of the travel), its rate, the time a crash leaves the car loose, and the path curvature
+    // the steering has built up (1/m).
+    slide: 0, slideV: 0, knock: 0, curv: 0,
     // Front tire slip as a multiple of its peak (1 = at the grip limit) and
     // how far past the limit the front is pushing (0..1, understeer).
     slipF: 0, push: 0,
@@ -368,6 +369,7 @@ const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
 const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse
 const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
 const REAR_K = 1.08; // rear tires a little grippier than the front: the car settles at the limit (both modes)
+const AI_RELAX = 0.06; // s, Arcade: AI cars' lateral lag (see the planted model)
 const SCRUB = 0.2; // Arcade: share of the front's cornering drag that slows the car in a turn
 const KNOCK_MIN = 3, KNOCK_S = 0.4, KNOCK_PER = 30; // Arcade: a crash over 3 m/s leaves the car loose for up to 0.4 s (closing speed / 30)
 const SLIP_QUIET = 0.05, SLIP_FULL = 0.5; // Arcade: rear slip angle (rad) where the squeal starts and where v.slip reaches 1
@@ -402,7 +404,7 @@ const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arca
 //             drivers keep the spec's own rates (their planners are tuned
 //             to them).
 //   knockTau / knockK  after a crash (v.knock seconds): the yaw lag and the
-//             share of plantK kept, so a hit can still turn the car a little
+//             share of plantK kept, so a hit can still push the car a little
 //   hbSlide   handbrake: the rear slip angle (rad) full steering asks for;
 //             the tail swings out toward it at hbRate (rad/s) from hbV[0]
 //             m/s (none) to hbV[1] m/s (all of it)
@@ -424,7 +426,7 @@ const ROLL_MAX = 0.16; // rad: steady body roll limit (the heaviest roller, Arca
 const HANDLING = {
   arcade: {
     planted: true, lat: [1.6, 1.25], latV: [35, 75], lockDeg: 40, lockV: [15, 25], yawTau: 0.04, plantK: 2,
-    lockRate: 12, returnRate: 12, knockTau: 0.25, knockK: 0.45,
+    lockRate: 12, returnRate: 12, knockTau: 0.08, knockK: 0.45,
     hbSlide: 0.6, hbRate: 2.2, hbV: [3, 8], hbCourse: 0.85, hbDrag: 0.3, hbRec: 0.12, hbRecMin: 0.5,
   },
   sim: {
@@ -805,6 +807,7 @@ export function stepVehicle(v, controls, dt, world) {
   const m = s.mass, mg = m * G, mu = d.muLong * wet, muLat = lateralGrip(s, vf0) * (planted ? 1 : H.cal[0]) * wet, fLat = wetUnderSteer(rain);
   const avf0 = Math.abs(vf0);
   if (v.slide === undefined) { v.slide = 0; v.slideV = 0; v.knock = 0; }
+  if (!(v.curv === v.curv)) v.curv = 0; // also undefined
   if (v.knock > 0) v.knock = Math.max(0, v.knock - dt);
   if (hitBefore > KNOCK_MIN) v.knock = Math.max(v.knock, Math.min(KNOCK_S, hitBefore / KNOCK_PER));
 
@@ -956,13 +959,12 @@ export function stepVehicle(v, controls, dt, world) {
       // sideways velocity is taken out). Power and brakes act along the
       // car only: nothing here can rotate it or let the tail step out. The
       // one slide is the handbrake's, asked for by the player (v.slide).
-      const r0 = r, w0 = vl - b * r; // the rear axle's sideways velocity
-      const aw = w0 < 0 ? -w0 : w0;
+      const r0 = r;
       const aLat = vf * r;
-      let fx = fxF + fxR - drag * vf - roll;
+      let fx = fxF * cd + fxR - drag * vf - roll; // the front axle pushes and brakes along its wheels
       if (handbrake) fx -= sgn * HB_K * muLat * fzR * Math.min(1, avf / 0.5); // locked rear wheels
       // Cornering scrub, and the drag of a slide (tires going sideways).
-      fx -= sgn * m * (SCRUB * (aLat < 0 ? -aLat : aLat) * sinGeo + H.hbDrag * muLat * G * aw / Math.hypot(aw, avf > V0 ? avf : V0));
+      fx -= sgn * m * (SCRUB * (aLat < 0 ? -aLat : aLat) * sinGeo + H.hbDrag * muLat * G * Math.abs(Math.sin(v.slide)));
       const ax = fx / m;
       sumAx += ax;
       sumAy += aLat;
@@ -986,9 +988,14 @@ export function stepVehicle(v, controls, dt, world) {
         if ((next < 0 ? -next : next) > as) slideV = (next - v.slide) / h;
         v.slide = next;
       }
-      r += (rRef - (r - v.slideV)) * kYaw + (slideV - v.slideV);
+      // The curvature follows the steering with the yaw lag; the yaw rate
+      // is the speed times it at once (wheels roll: pulling away on lock
+      // turns the car from the first meter). Yaw from outside (a crash)
+      // is what the car turns beyond that; it decays with the same lag.
+      const kick = (r - (vf * v.curv + v.slideV)) * (1 - kYaw);
+      v.curv += ((anf > 0.3 ? rRef / nf : kGeo) - v.curv) * kYaw;
+      r = clamp(nf * v.curv + slideV + kick, -4, 4);
       v.slideV = slideV;
-      r = clamp(r, -4, 4);
       v.yawRate = r;
       v.heading = angleDiff(v.heading + r * h, 0);
       ch = Math.cos(v.heading);
@@ -996,7 +1003,13 @@ export function stepVehicle(v, controls, dt, world) {
       // The old velocity seen from the turned nose: the rear axle's
       // sideways part of it is what the tires take out.
       const want = nf > 0 ? -Math.tan(v.slide) * nf : 0;
-      const w = approach(-v.vx * sh + v.vz * ch - b * r0, want, plantA * h);
+      // The player's car: taken out at once, within plantA. AI drivers
+      // (no controls.steerShape) keep a short tire lag above walking pace,
+      // AI_RELAX s from KIN_V up, none at a crawl: their planners (traffic
+      // pull-overs, police) were tuned on it and it keeps their paths.
+      const wp = -v.vx * sh + v.vz * ch - b * r0;
+      const relax = quick ? 0 : AI_RELAX * clamp((anf - 0.5) / (KIN_V - 0.5), 0, 1);
+      const w = relax > 0 ? approach(wp, want + (wp - want) * Math.exp(-h / relax), plantA * h) : approach(wp, want, plantA * h);
       const nl = w + b * r;
       v.vx = nf * ch - nl * sh;
       v.vz = nf * sh + nl * ch;
@@ -1200,8 +1213,8 @@ export function stepVehicle(v, controls, dt, world) {
     v.x = v.px; v.z = v.pz; v.heading = v.pheading;
     v.vx = 0; v.vz = 0; v.yawRate = 0; v.speed = 0;
   }
-  if (!Number.isFinite(v.pitch + v.roll + v.pitchV + v.rollV + v.rpm + v.accelX + v.steer + v.brakeP + v.slide + v.slideV)) {
-    v.pitch = 0; v.roll = 0; v.pitchV = 0; v.rollV = 0; v.rpm = IDLE; v.accelX = 0; v.steer = 0; v.brakeP = 0; v.slide = 0; v.slideV = 0;
+  if (!Number.isFinite(v.pitch + v.roll + v.pitchV + v.rollV + v.rpm + v.accelX + v.steer + v.brakeP + v.slide + v.slideV + v.curv)) {
+    v.pitch = 0; v.roll = 0; v.pitchV = 0; v.rollV = 0; v.rpm = IDLE; v.accelX = 0; v.steer = 0; v.brakeP = 0; v.slide = 0; v.slideV = 0; v.curv = 0;
   }
 }
 

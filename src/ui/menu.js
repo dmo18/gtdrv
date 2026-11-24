@@ -125,7 +125,7 @@ const CSS = `
 .rw-lp-sw { width: 48px; padding: 0 !important; }
 /* Customize: the menu steps aside so the car shows while its look changes. */
 .rw-menu.rw-menu-see { background: transparent; }
-.rw-menu.rw-menu-see .rw-menu-side { visibility: hidden; flex-basis: 0; width: 0; }
+.rw-menu.rw-menu-see .rw-menu-side { display: none; }
 .rw-menu.rw-menu-see .rw-menu-main { margin-left: auto; flex: 0 0 min(46%, 380px); }
 .rw-menu.rw-menu-see .rw-menu-points { display: none; }
 .rw-menu.rw-menu-see .rw-menu-head .rw-menu-btn { min-width: 64px; }

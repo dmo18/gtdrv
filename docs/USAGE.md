@@ -39,3 +39,7 @@ Round 3 used 2.5M (roads 0.55M over four passes, lots 0.60M, controls 0.45M, car
 ## 2026-11-23, owner: cap 10M, heavy Fable allowed
 
 V3 total 8.4M. Remaining 1.6M for 0.12.0: PERF (Fable, about 0.4M), STREETSCAPE (Fable, about 0.45M), LOOP (Fable, about 0.5M), security review and gates (about 0.15M). Stop and ask at 10M.
+
+## 2026-11-24: quota
+
+Four Fable helpers in parallel hit the account's 5-hour limit and the owner said I was burning session quota. Rule from now: at most ONE heavy helper at a time, Fable only for design or the single hardest task, work in small steps. Order: handling (running), then PERF, then LOOP (design doc and Flow meter first), then STREETSCAPE. Partial work of the stopped three is saved in the tree and can be resumed by name.
