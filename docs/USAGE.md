@@ -43,3 +43,7 @@ V3 total 8.4M. Remaining 1.6M for 0.12.0: PERF (Fable, about 0.4M), STREETSCAPE 
 ## 2026-11-24: quota
 
 Four Fable helpers in parallel hit the account's 5-hour limit and the owner said I was burning session quota. Rule from now: at most ONE heavy helper at a time, Fable only for design or the single hardest task, work in small steps. Order: handling (running), then PERF, then LOOP (design doc and Flow meter first), then STREETSCAPE. Partial work of the stopped three is saved in the tree and can be resumed by name.
+
+## 2026-11-24 night: owner cap 16M, finish overnight, pace for the 5-hour and weekly quotas
+
+Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never two heavy runs overlapping; Opus for build and fixes, Sonnet for standard builds from a complete brief, Fable only for the LOOP design document (one short call); no screenshot loops beyond what a task needs; if a helper stops on a rate limit, wait for the reset time in its message (send_later) and resume it by name, do not start new ones. Order: PERF (running) -> publish 0.12.0 -> LOOP design -> LOOP build in four small steps (Flow meter, events, records and daily, first five minutes and customization) publishing 0.12.1 to 0.12.4 -> STREETSCAPE -> 1.0.0 release candidate review.

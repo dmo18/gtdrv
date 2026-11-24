@@ -200,17 +200,41 @@ export function pairWith(a, b) {
 // ---------------------------------------------------------------------
 // Finds a moving craft that will pass within `extra + threshold` of the
 // ped in the next LOOKAHEAD_T seconds. Result in TH.
-function scanThreat(ped, vehicles, extra) {
-  TH.found = false;
-  if (!vehicles) return;
-  const px = ped.x, pz = ped.z;
-  let best = Infinity;
-  for (let i = 0; i < vehicles.length; i++) {
+// The craft round the peds as plain numbers, read once a step (VS_* slots of
+// VS.a): every ped tests every craft twice a step, and the craft are many
+// object shapes, so reading their fields a ped at a time was the slowest part
+// of the system and boxed a number per read (docs/PERF.md, 0.12.0).
+const VS_N = 7, VS_X = 0, VS_Z = 1, VS_VX = 2, VS_VZ = 3, VS_Y = 4, VS_R = 5, VS_F = 6; // F: 0 none, 1 craft, 2 wrecked
+export function createVehicleSnap() {
+  return { n: 0, list: null, a: new Float64Array(VS_N * 64) };
+}
+export function snapVehicles(vehicles, vs) {
+  const n = vehicles ? vehicles.length : 0;
+  if (vs.a.length < n * VS_N) vs.a = new Float64Array(Math.max(n, 64) * VS_N * 2);
+  const a = vs.a;
+  for (let i = 0, o = 0; i < n; i++, o += VS_N) {
     const c = vehicles[i];
-    if (!c || c.wrecked || c.y > 3) continue;
-    const rx = px - c.x, rz = pz - c.z;
+    if (!c) { a[o + VS_F] = 0; continue; }
+    a[o + VS_X] = c.x; a[o + VS_Z] = c.z; a[o + VS_VX] = c.vx; a[o + VS_VZ] = c.vz;
+    a[o + VS_Y] = c.y; a[o + VS_R] = c.radius || 2; a[o + VS_F] = c.wrecked ? 2 : 1;
+  }
+  vs.n = n;
+  vs.list = vehicles || null;
+  return vs;
+}
+const VS_LOCAL = createVehicleSnap(); // stepPed without a snapshot from its system (node tests)
+
+function scanThreat(ped, vs, extra) {
+  TH.found = false;
+  if (!vs.list) return;
+  const px = ped.x, pz = ped.z;
+  const a = vs.a;
+  let best = Infinity;
+  for (let i = 0, o = 0; i < vs.n; i++, o += VS_N) {
+    if (a[o + VS_F] !== 1 || a[o + VS_Y] > 3) continue;
+    const rx = px - a[o + VS_X], rz = pz - a[o + VS_Z];
     if (rx > 50 || rx < -50 || rz > 50 || rz < -50) continue;
-    const vx = c.vx, vz = c.vz;
+    const vx = a[o + VS_VX], vz = a[o + VS_VZ];
     const sp2 = vx * vx + vz * vz;
     if (!(sp2 > MOVING * MOVING)) continue;
     let t = (rx * vx + rz * vz) / sp2;
@@ -218,7 +242,7 @@ function scanThreat(ped, vehicles, extra) {
     else if (t > LOOKAHEAD_T) t = LOOKAHEAD_T;
     const dx = rx - vx * t, dz = rz - vz * t;
     const d = Math.sqrt(dx * dx + dz * dz);
-    const thr = THREAT_DIST + (c.radius || 2) * 0.4 + extra;
+    const thr = THREAT_DIST + a[o + VS_R] * 0.4 + extra;
     if (d >= thr) continue;
     if (t < best) {
       best = t;
@@ -283,6 +307,8 @@ export function stepPed(ped, dt, ctx) {
     return ped;
   }
   const { city, collision, vehicles, player } = ctx;
+  // The system snapshots the craft once a step (ctx.vs); alone, each call does.
+  const vs = ctx.vs && ctx.vs.list === vehicles ? ctx.vs : snapVehicles(vehicles, VS_LOCAL);
 
   // --- Decide what to do. ---
   if (ped.panicT > 0) {
@@ -294,10 +320,10 @@ export function stepPed(ped, dt, ctx) {
     }
   } else if (ped.state === 'fleeing') {
     ped.fleeT += dt;
-    scanThreat(ped, vehicles, HYSTERESIS);
+    scanThreat(ped, vs, HYSTERESIS);
     if (!TH.found && ped.fleeT > 0.4) resumeWalking(ped);
   } else {
-    scanThreat(ped, vehicles, 0);
+    scanThreat(ped, vs, 0);
     if (TH.found) startFlee(ped, ctx);
   }
 
@@ -339,7 +365,7 @@ export function stepPed(ped, dt, ctx) {
   } else if (st === 'fleeing') {
     accel = 40;
     // Keep jumping until clear of the path; then stand still.
-    scanThreat(ped, vehicles, 0);
+    scanThreat(ped, vs, 0);
     if (TH.found) {
       wvx = ped.fdx * ped.fleeSpeed;
       wvz = ped.fdz * ped.fleeSpeed;
@@ -432,24 +458,25 @@ export function stepPed(ped, dt, ctx) {
 
   // Craft bodies: never stand inside one. Slow ones push gently, fast
   // ones (a last resort, the dodge should have worked) at once.
-  if (vehicles) {
-    for (let i = 0; i < vehicles.length; i++) {
-      const c = vehicles[i];
-      if (!c || c.y > 3) continue;
-      const ex = nx - c.x, ez = nz - c.z;
+  if (vs.list) {
+    const a = vs.a;
+    for (let i = 0, o = 0; i < vs.n; i++, o += VS_N) {
+      if (a[o + VS_F] === 0 || a[o + VS_Y] > 3) continue;
+      const ex = nx - a[o + VS_X], ez = nz - a[o + VS_Z];
       if (ex > 12 || ex < -12 || ez > 12 || ez < -12) continue;
-      const rr = (c.radius || 2) * 0.6 + RADIUS;
+      const rr = a[o + VS_R] * 0.6 + RADIUS;
       const d2 = ex * ex + ez * ez;
       if (d2 >= rr * rr) continue;
       const d = Math.sqrt(d2);
-      const fast = c.vx * c.vx + c.vz * c.vz > MOVING * MOVING;
+      const cvx = a[o + VS_VX], cvz = a[o + VS_VZ];
+      const fast = cvx * cvx + cvz * cvz > MOVING * MOVING;
       const push = fast ? rr - d : Math.min(rr - d, 5 * dt);
       if (d > 1e-6) {
         // Remember a hard hit for combat (closing speed along the push).
         // The car's own speed toward the ped (never the ped's, PLAN_V3 2.3 item 5).
-        const closing = (c.vx || 0) * (ex / d) + (c.vz || 0) * (ez / d);
+        const closing = (cvx || 0) * (ex / d) + (cvz || 0) * (ez / d);
         if (closing > (ped.bumpV || 0)) {
-          ped.bumpBy = c;
+          ped.bumpBy = vs.list[i];
           ped.bumpV = closing;
         }
         nx += (ex / d) * push;
@@ -645,7 +672,7 @@ function lineUsable(city, b) {
 export function createPeds(game, { max = 30 } = {}) {
   const city = game.city;
   const slots = []; // { ped, mesh }
-  const ctx = { city, collision: game.collision, vehicles: game.vehicles, player: game.player, sirens: [] };
+  const ctx = { city, collision: game.collision, vehicles: game.vehicles, player: game.player, sirens: [], vs: createVehicleSnap() };
   const { areas: blocks, grid } = buildAreas(city);
   const onBlock = new Int16Array(blocks.length); // active peds per block or plaza
   const cand = new Int32Array(blocks.length);
@@ -994,6 +1021,7 @@ export function createPeds(game, { max = 30 } = {}) {
       ctx.vehicles = game.vehicles;
       ctx.player = p;
       collectSirens(game.vehicles, ctx.sirens);
+      snapVehicles(game.vehicles, ctx.vs);
       for (let i = 0; i < slots.length; i++) {
         const ped = slots[i].ped;
         if (!ped.active) continue;
