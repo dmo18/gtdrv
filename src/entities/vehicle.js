@@ -798,8 +798,8 @@ function steerGeo(spec, u, s) {
 // planners send a share of the lock and get it unchanged.
 export const SHAPE_V1 = 15 / 2.23694, SHAPE_V2 = 70 / 2.23694, SHAPE_EXP = 1.2;
 // Task GRIP (deliberate): in Arcade the exponent is the preset's arcShape
-// at 70 mph (Standard and Sharp 1: linear at every speed, the yaw rate is
-// proportional to the thumb; Relaxed 1.25, the gentler curve); Sim keeps
+// at 70 mph (Standard 1.4: the 2.6 g full turn with fine highway
+// corrections; Sharp 1, linear; Relaxed 1.6, the gentler curve); Sim keeps
 // SHAPE_EXP times shapeK.
 export function steerShapeExp(u) {
   const au = u < 0 ? -u : u;

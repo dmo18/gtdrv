@@ -66,9 +66,13 @@ export function placeWheel(cx, cy, r, w, h, rects, out, margin = 6) {
 // or when the move is mostly up or down (dragging down the right side of the
 // wheel turns right). A thumb below the center that slides right therefore
 // steers right, never left, and crossing the center never jumps. The sum is
-// clamped to full input, so turning back answers at once.
+// held within full input plus WHEEL_SLACK (task GRIP: travel past the stop
+// is not stored, so turning back answers at once, and after a full-lock
+// swerve the thumb's center is the wheel's center again within a tenth of
+// the travel); the steer is that sum clamped to full input.
 // ---------------------------------------------------------------------------
 export const DRAG_FULL_PX = 80;
+export const WHEEL_SLACK = 0.1; // share of full travel held past the stop
 export const ROT_FULL_DEG = 60;
 export const ROT_CORE_PX = 40;
 export const WHEEL_SHOW_DEG = 100; // the drawn wheel's angle at full input
@@ -102,11 +106,11 @@ function angDiff(a, b) {
 // One tracker per steering finger. Allocation free after creation.
 export function createDragSteer() {
   const t = {
-    x: 0, y: 0, cx: 0, cy: 0, last: 0, have: false, raw: 0, active: false,
+    x: 0, y: 0, cx: 0, cy: 0, last: 0, have: false, raw: 0, acc: 0, active: false,
     // Finger down at (x, y); the drawn wheel's center is (cx, cy). No steer yet.
     down(x, y, cx, cy) {
       t.x = x; t.y = y; t.cx = cx; t.cy = cy;
-      t.raw = 0; t.active = true;
+      t.raw = 0; t.acc = 0; t.active = true;
       t.have = t.angle(x, y);
       return 0;
     },
@@ -123,11 +127,13 @@ export function createDragSteer() {
       const prev = t.last, had = t.have;
       t.have = t.angle(x, y);
       const rot = had && t.have ? angDiff(t.last, prev) * 180 / Math.PI : 0;
-      t.raw = clamp1(t.raw + dragSteer(x - t.x, rot, y - t.y, sensitivity));
+      const lim = 1 + WHEEL_SLACK, a = t.acc + dragSteer(x - t.x, rot, y - t.y, sensitivity);
+      t.acc = a > lim ? lim : a < -lim ? -lim : a;
+      t.raw = clamp1(t.acc);
       t.x = x; t.y = y;
       return t.raw;
     },
-    up() { t.active = false; t.have = false; t.raw = 0; return 0; },
+    up() { t.active = false; t.have = false; t.raw = 0; t.acc = 0; return 0; },
   };
   return t;
 }

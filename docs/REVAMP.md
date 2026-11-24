@@ -789,9 +789,13 @@ handlingbands.js; `TURN_G`, `TALL_SSF`, `TALL_K`, `TURN_GRIP_REF`, `TURN_GRIP_MA
    2.2 g, 8 m; 50 mph 60 degrees, 2.5 g, 20 m; 70 mph 44 degrees, 2.6 g, 38 m (was 18, 1.06 g,
    93 m); 100 mph 31 degrees, 2.6 g, 77 m (was 12, 1.02 g, 196 m). Sports car 1.1 times; box
    truck 0.65 times (29 degrees, 1.7 g at its 68 mph top).
-3. Shaping: Arcade / Standard and Sharp are linear at every speed (`arcShape` 1); Relaxed keeps
-   1.25 at 70 mph. Sim keeps its 1 to 1.2 curve (`shapeK`). Presets: Relaxed 0.8 of the turn,
-   Sharp 1.1. The touch wheel is unchanged (full input at 80 px, no dead zone).
+3. Shaping (coordinator decision after item 6): Arcade / Standard 1.4 at 70 mph (`arcShape`,
+   rising from 1 at 15 mph, full input is still the whole turn); Sharp linear; Relaxed 1.6.
+   Sim keeps its 1 to 1.2 curve (`shapeK`). Presets: Relaxed 0.8 of the turn, Sharp 1.1. The
+   touch wheel: full input at 80 px, no dead zone; thumb travel past the stop is stored only up
+   to `WHEEL_SLACK` (0.1 of the travel, wheel.js), so after a full-lock swerve a move back
+   answers within 8 px and the thumb's start point is the center again (it used to keep all the
+   overtravel, or lose it to the clamp, and leave a bias); the drawn wheel shows the steer sent.
 4. Not changed: the AI drivers (no steerShape: traffic, police and crew keep `arcadeK`,
    `steerLock`, `fullLockCurvature`), the four service vehicles (their rollover tests), Sim,
    the handbrake slide, the straight line.
@@ -799,13 +803,13 @@ handlingbands.js; `TURN_G`, `TALL_SSF`, `TALL_K`, `TURN_GRIP_REF`, `TURN_GRIP_MA
    pickup, sports car and box truck at 30, 50, 70, 100 mph (and 60, 90, 120 for the g floor),
    rear slip under 4 degrees; the thumb driver's lane change at 90 mph settles within 3 s with
    at most one overshoot (seed 13, every car that reaches 90).
-6. The cost, measured: one 0.08 thumb step now asks 0.21 g at 65 mph (0.05 g on 0.11.1). Over 30
-   thumb seeds the 65 and 90 mph lane changes settle late (over 3 s, two or three small
-   overshoots of 0.3 to 0.45 m) on 3 to 5 seeds for the sedan and sports car (0.11.1: none).
-   Neither suggested remedy helps the thumb model: a speed-dependent steering rate limit changed
-   nothing and a longer yaw lag (a calm damper) made it worse (the driver is delay-limited). A
-   shaping exponent does help (1.5 at 70 mph: every seed within 3.1 s, one overshoot) with the
-   full-input turn kept; Relaxed is that option today.
+6. Why 1.4: linear (the first cut) made one 0.08 thumb step ask 0.21 g at 65 mph (0.05 g on
+   0.11.1); over 30 thumb seeds 3 to 5 lane changes per car at 65 and 90 mph then settled late
+   with two or three overshoots. A speed-dependent steering rate limit changed nothing and a
+   longer yaw lag (a calm damper) made it worse (the driver is delay-limited). 1.3 settled every
+   seed within 2.7 s but with two overshoots on some; 1.4 gives every seed one overshoot at
+   most, worst 3.22 s (pickup at 90): pinned by `LANE_CHANGE_SWEEP` (under 3.3 s, sedan, SUV,
+   pickup, sports and muscle car).
 
 New file src/entities/handlingbands.js (W3): plain constants, imported by
 test/handling-bands.test.js and by nothing at runtime. Units: m/s, m, s, g = 9.81 m/s2.
@@ -910,7 +914,7 @@ What differs:
 | Steady lateral grip on full lock | PLANTED: 1.6 times `spec.grip` up to 35 mph, 1.25 from 75 mph (was 1.25 and 1.10), the AI's turn; GRIP: the player's full input is `playerLatG`, 2.6 g from 55 to 110 mph for a car (block GRIP above) | 1.00 times `spec.grip` |
 | Tire past its peak | PLANTED: no tire curve (was: sags at most 6 %) | force sags 18 to 22 % |
 | Full steering input at speed asks for | 1.00 of lateral grip: the tightest turn the car makes at that speed without sliding, the front at 0.95 of its peak (`ASK`, `USE`), quiet; more input always turns more (DRIVE, 0.10.1; 0.10.0 asked 1.15 and pushed wide) | 1.15 of lateral grip (too much lock scrubs speed and runs wide, with tire noise; HANDLE) |
-| Player input shaping by speed (the player's input only, `steerShape`; AI planners send a share of the lock unchanged) | steer x becomes sign(x) * abs(x)^e, e rising smoothly from 1 at 15 mph to 1.2 at 70 mph (PLANTED; was 1.8) (times the preset's `shapeK` on the rise; GRIP: in Arcade, Standard and Sharp e = 1 at every speed, Relaxed 1.25 at 70 mph, the preset's `arcShape`): small thumb moves are small lane corrections on the highway, full input is still full lock, no dead zone (DRIVE) | the same |
+| Player input shaping by speed (the player's input only, `steerShape`; AI planners send a share of the lock unchanged) | steer x becomes sign(x) * abs(x)^e, e rising smoothly from 1 at 15 mph to 1.2 at 70 mph (PLANTED; was 1.8) (times the preset's `shapeK` on the rise; GRIP: in Arcade the preset's `arcShape` at 70 mph: Standard 1.4, Sharp 1 (linear), Relaxed 1.6): small thumb moves are small lane corrections on the highway, full input is still full lock, no dead zone (DRIVE) | the same |
 | Yaw damping near the center of the wheel | the assist firms up under 0.15 of input (`calm`), so a released car is straight within 0.5 s, with no weave (DRIVE) | the light damper only |
 | Stability assist (yaw and slide correction) | PLANTED: none needed, rear slip under 4 degrees by construction (was: on; body slip under 8 degrees, rear drive 16) | off, apart from a light yaw damper; the car can spin |
 | Traction control | PLANTED: none, power cannot rotate the car; wheelspin is limited by the tires as in Sim (was: on) | off; rear drive cars step out under power |

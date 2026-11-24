@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildGame, serve } from './build.mjs';
+import { WHEEL_SHOW_DEG } from '../src/ui/wheel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, '..', 'dist', 'touch-test');
@@ -265,6 +266,22 @@ try {
       check(`${tag} wheel at sensitivity ${sens}: full input at about ${px} px`, full.s >= 0.999 && halfway.s < 0.6 && halfway.s > 0.3, JSON.stringify([halfway.s, full.s]));
     }
     await pg.evaluate(() => window.__rw.touch.setSteering('wheel', 1));
+    // Past the stop (task GRIP): push to 150 percent of the travel (120 px), then back 40 px: the
+    // steer drops by about half (at most 10 percent of the travel is stored past full lock), and
+    // the drawn wheel shows the steer sent all the way.
+    {
+      const x0 = W0.x - 20, y0 = W0.y + 60, rows = [];
+      const drawn = () => pg.evaluate(() => { const t = document.querySelector('.rw-wheel-rot').style.transform; const m = /rotate\((-?[\d.]+)deg\)/.exec(t || ''); return m ? +m[1] : 0; });
+      await down(2, x0, y0);
+      for (let px = 10; px <= 120; px += 10) { await move(2, x0 + px, y0); rows.push({ s: (await read()).s, d: await drawn() }); }
+      const atFull = rows[rows.length - 1].s;
+      for (let px = 110; px >= 80; px -= 10) { await move(2, x0 + px, y0); rows.push({ s: (await read()).s, d: await drawn() }); }
+      const back = rows[rows.length - 1].s;
+      await up(2);
+      const agree = rows.every((r) => Math.abs(r.d - r.s * WHEEL_SHOW_DEG) < 0.11);
+      check(`${tag} wheel past the stop: 150 percent travel then 40 px back drops the steer by about 0.5, drawn wheel agrees`, atFull >= 0.999 && atFull - back > 0.35 && atFull - back < 0.6 && agree,
+        `full ${f2(atFull)} back ${f2(back)} | ${rows.map((r) => `${f2(r.s)}/${r.d}`).join(' ')}`);
+    }
 
     // SWAP while driving: tap cycles the drive-by gun, hold opens the wheel of drive-by weapons, lift picks.
     const sw = await rect('.rw-touch .rw-a-carswap');

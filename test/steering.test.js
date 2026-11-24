@@ -203,10 +203,11 @@ test('handling presets: values, default standard, enum validation, one table wit
   // of 0.8). Sharp: 44 degrees in Arcade, shaping halved (was 0.75).
   // GRIP re-pin (deliberate, owner round 6, docs/REVAMP.md 6.3): arcShape (the
   // Arcade player's shaping exponent from 70 mph: Standard and Sharp 1,
-  // linear; Relaxed 1.25) and turnK (share of the player's full-input turn,
+  // linear at first, then coordinator decision: Standard 1.4, the 30-seed lane
+  // change sweep; Relaxed 1.6; Sharp 1) and turnK (share of the player's full-input turn,
   // playerLatG: Relaxed 0.8, Sharp 1.1) join; shapeK now shapes Sim only.
-  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1, arcShape: 1, turnK: 1 }, 'standard is the target');
-  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25, arcShape: 1.25, turnK: 0.8 });
+  assert.deepEqual(PRESET_VALUES.standard, { lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1, arcShape: 1.4, turnK: 1 }, 'standard is the target');
+  assert.deepEqual(PRESET_VALUES.relaxed, { lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25, arcShape: 1.6, turnK: 0.8 });
   assert.deepEqual(PRESET_VALUES.sharp, { lockK: 1.25, returnK: 1.2, lockDeg: 40, lockAdd: 4, gripK: 1, gainK: 1, rollK: 0.85, shapeK: 0.5, arcShape: 1, turnK: 1.1 });
   assert.ok(PRESET_VALUES.relaxed.turnK < 1 && PRESET_VALUES.sharp.turnK > 1 && PRESET_VALUES.relaxed.arcShape > PRESET_VALUES.standard.arcShape);
   assert.ok(PRESET_VALUES.relaxed.gainK < 1 && PRESET_VALUES.sharp.lockAdd > 0);

@@ -115,7 +115,10 @@ export const ARCADE_PLAYER_STEER = { time: [0.07, 0.10] };
 // input within `delay` s (63 % of the settled rate, a full step) at every
 // speed; a released car is straight within `release` s; the handbrake
 // slide recovers within `recover` s of the release with no yaw the other way.
-export const PLANTED = { slipDeg: 4, delay: 0.12, release: 0.25, recover: 0.6, slideDeg: [25, 37], shapeExp: 1.25 };
+export const PLANTED = { slipDeg: 4, delay: 0.12, release: 0.25, recover: 0.6, slideDeg: [25, 37], shapeExp: 1.6 };
+// (Task GRIP, deliberate: shapeExp 1.6, was 1.25. Arcade / Standard shapes at
+// 1.4 from 70 mph, Relaxed 1.6: with the player's 2.6 g turn a linear thumb
+// settled late on some seeds; full input is still the whole turn.)
 // Arcade, the player's full input (task GRIP, owner round 6, deliberate:
 // "still too loose, especially at high speed; a fully rotated wheel barely
 // changed the trajectory"; 0.11.1 gave the sedan 1.06 g, 18 degrees in the
@@ -132,6 +135,10 @@ export const PLAYER_TURN = { g: [[60, 2.2], [90, 2.0], [120, 1.8]], head: [[70, 
 // The thumb driver's lane change at highway speed (task GRIP): one lane at
 // `mph`, settled within `settle` s, at most one overshoot.
 export const LANE_CHANGE_FAST = { mph: 90, settle: 3, overshoots: 1 };
+// The same lane change over `seeds` thumb seeds at 65 and 90 mph (sedan,
+// SUV, pickup, sports car, muscle car): every seed settled within `settle` s
+// with at most `overshoots` overshoot (measured worst 3.22 s, pickup at 90).
+export const LANE_CHANGE_SWEEP = { seeds: 30, mphs: [65, 90], settle: 3.3, overshoots: 1, cars: ['sedan', 'suv', 'pickup', 'sports', 'muscle'] };
 export const HEAVY = ['minivan', 'van', 'suv', 'crewcab', 'pickup', 'truck', 'semi', 'schoolbus', 'citybus'];
 export const MODE_BRAKE_DIFF = 0.05; // Arcade and Sim stopping distance within 5 %
 export const MODE_STRAIGHT_DIFF = 0.03; // 0 to 60 and top speed within 3 %

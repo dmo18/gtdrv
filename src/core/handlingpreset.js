@@ -19,8 +19,8 @@
 //                    steerShapeExp): multiplier on the exponent's rise
 //                    above 1 (more is finer at speed, less is more direct)
 //   arcShape         Arcade: the player's shaping exponent from 70 mph up
-//                    (task GRIP: Standard 1, linear at every speed;
-//                    Relaxed keeps a gentler curve)
+//                    (task GRIP: Standard 1.4, small thumb moves stay
+//                    small on the highway; Sharp 1, linear; Relaxed 1.6)
 //   turnK            Arcade: share of the player's full-input turn
 //                    (vehicle.js playerLatG: Standard about 2.6 g at 60 to
 //                    100 mph; Relaxed less, Sharp more)
@@ -29,8 +29,8 @@
 export const PRESETS = ['standard', 'relaxed', 'sharp'];
 export const PRESET_LABELS = { standard: 'Standard', relaxed: 'Relaxed', sharp: 'Sharp' };
 export const PRESET_VALUES = Object.freeze({
-  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1, arcShape: 1, turnK: 1 }),
-  relaxed: Object.freeze({ lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25, arcShape: 1.25, turnK: 0.8 }),
+  standard: Object.freeze({ lockK: 1, returnK: 1, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 1, rollK: 1, shapeK: 1, arcShape: 1.4, turnK: 1 }),
+  relaxed: Object.freeze({ lockK: 0.7, returnK: 0.8, lockDeg: 0, lockAdd: 0, gripK: 1, gainK: 0.7, rollK: 1.3, shapeK: 1.25, arcShape: 1.6, turnK: 0.8 }),
   sharp: Object.freeze({ lockK: 1.25, returnK: 1.2, lockDeg: 40, lockAdd: 4, gripK: 1, gainK: 1, rollK: 0.85, shapeK: 0.5, arcShape: 1, turnK: 1.1 }),
 });
 

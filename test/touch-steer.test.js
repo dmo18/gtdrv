@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dragSteer, createDragSteer, driveWeapons, nextInList, DRAG_FULL_PX, ROT_FULL_DEG, ROT_CORE_PX,
+  dragSteer, createDragSteer, driveWeapons, nextInList, DRAG_FULL_PX, ROT_FULL_DEG, ROT_CORE_PX, WHEEL_SLACK,
 } from '../src/ui/wheel.js';
 import { WEAPONS, WEAPON_IDS, createArms } from '../src/core/weapons.js';
 import { pickWeapon } from '../src/ui/combathud.js';
@@ -87,6 +87,30 @@ test('inside the core the rotation holds; full lock clamps and turning back answ
   assert.ok(t.raw < 1 && t.raw > 0.7, String(t.raw));
   assert.equal(t.up(), 0);
   assert.equal(t.move(300, 150), 0); // lifted: moves do nothing
+});
+
+// Task GRIP: pushing past full lock stores at most WHEEL_SLACK of extra
+// travel, so the first move back answers at once and a return to the
+// touch-down point is near the center again.
+test('past full lock: at most 10 percent of travel is stored; reversing reduces the steer at once', () => {
+  const t = createDragSteer();
+  t.down(100, 300, 100, 100); // far below the wheel center: horizontal travel counts
+  for (let x = 100; x <= 100 + 1.5 * DRAG_FULL_PX; x += 4) t.move(x, 300);
+  assert.equal(t.raw, 1);
+  assert.ok(t.acc <= 1 + WHEEL_SLACK + 1e-12, `stored ${t.acc}`);
+  const x1 = 100 + 1.5 * DRAG_FULL_PX;
+  t.move(x1 - DRAG_FULL_PX * WHEEL_SLACK - 1, 300);
+  assert.ok(t.raw < 1, 'a move back answers once past the 8 px slack');
+  t.move(x1 - DRAG_FULL_PX / 2, 300); // back 40 px
+  assert.ok(Math.abs(t.raw - (1 + WHEEL_SLACK - 0.5)) < 1e-9 && 1 - t.raw > 0.39, `steer ${t.raw} after 40 px back`);
+  t.move(x1 - DRAG_FULL_PX * (1 + WHEEL_SLACK), 300); // back by full travel plus the slack: centered
+  assert.ok(Math.abs(t.raw) < 1e-9, `centered ${t.raw}`);
+  // The same on the other side, and the stop holds however far the thumb goes.
+  for (let x = 100; x >= -400; x -= 10) t.move(x, 300);
+  assert.equal(t.raw, -1);
+  assert.ok(t.acc >= -1 - WHEEL_SLACK - 1e-12);
+  t.move(-400 + DRAG_FULL_PX * WHEEL_SLACK + 1, 300);
+  assert.ok(t.raw > -1, 'answers as soon as the slack is spent');
 });
 
 test('drive-by weapons for SWAP while driving are the ones marked driveBy', () => {
