@@ -370,6 +370,8 @@ try {
   await page.screenshot({ path: path.join(out, 'settings-controls-915x412.png') });
   check('settings: two handling choices, arcade marked', (await page.locator('.rw-menu-body [data-handling]').count()) === 2
     && (await page.locator('.rw-menu-body [data-handling="arcade"]').getAttribute('aria-checked')) === 'true');
+  check('settings: Standard, Relaxed, Sharp one tap below Settings (two from pause)', (await page.locator('.rw-menu-body [data-preset]').count()) === 3
+    && (await page.locator('.rw-menu-body [data-preset="standard"]').getAttribute('aria-checked')) === 'true');
   await page.locator('.rw-menu-body [data-handling="sim"]').tap();
   check('settings: handling applied at once and saved', (await ev(() => window.rw.getHandlingMode())) === 'sim' && (await progress()).settings.handling === 'sim' && (await stored()).settings.handling === 'sim');
   check('settings: sim marked', (await page.locator('.rw-menu-body [data-handling="sim"]').getAttribute('aria-checked')) === 'true'

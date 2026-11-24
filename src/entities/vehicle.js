@@ -290,6 +290,14 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     wrecked: false,
     onFire: false,
     radius: Math.hypot(spec.length / 2, spec.width / 2),
+    // Set later by the systems and the renderer (undefined until then, as
+    // if absent). Declared here so every car has one object shape: per
+    // frame code then reads car fields inline instead of through a
+    // generic lookup that boxes each number (docs/PERF.md, 0.12.6).
+    controls: undefined, ai: undefined, traffic: undefined, parked: undefined, police: undefined,
+    asleep: undefined, mesh: undefined, meshDirty: undefined, lodFar: undefined,
+    siren: undefined, role: undefined, officers: undefined, outCool: undefined, occ: undefined,
+    occDown: undefined, copsDead: undefined,
   };
 }
 

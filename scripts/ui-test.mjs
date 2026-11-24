@@ -629,7 +629,7 @@ async function liveLayout(check) {
       });
       const tag = `first person ${grid.V}x${grid.H}`;
       check(`${tag}: Hood view, FOV 80 across, near 0.12, exterior kept`, fpv.Hood.name === 'Hood' && fpv.Hood.first && Math.abs(fpv.Hood.hfov - 80) < 0.5 && fpv.Hood.near === 0.12 && !fpv.Hood.interior, JSON.stringify(fpv.Hood));
-      check(`${tag}: Cockpit view, FOV 78, near 0.12, interior of 1,200 to 1,800 triangles`, fpv.Cockpit.name === 'Cockpit' && fpv.Cockpit.first && Math.abs(fpv.Cockpit.fov - 78) < 0.01 && fpv.Cockpit.near === 0.12 && fpv.Cockpit.interior && fpv.Cockpit.tris >= 1200 && fpv.Cockpit.tris <= 1800, JSON.stringify(fpv.Cockpit));
+      check(`${tag}: Cockpit view, FOV 100 across, near 0.12, interior of 1,200 to 1,800 triangles`, fpv.Cockpit.name === 'Cockpit' && fpv.Cockpit.first && Math.abs(fpv.Cockpit.hfov - 100) < 0.5 && fpv.Cockpit.near === 0.12 && fpv.Cockpit.interior && fpv.Cockpit.tris >= 1200 && fpv.Cockpit.tris <= 1800, JSON.stringify(fpv.Cockpit));
       check(`${tag}: the look area covers the right half of the screen`, fpv.look.x <= grid.V / 2 + 0.5 && fpv.look.r >= grid.V - 0.5 && fpv.look.y <= 0.5 && fpv.look.b >= grid.H - 0.5, JSON.stringify(fpv.look));
       // A real touch drag on the empty right side turns the head; lifting the finger clears lookHeld.
       const x0 = Math.round(grid.V * 0.62), y0 = Math.round(grid.H * 0.3);
@@ -901,7 +901,7 @@ async function liveLayout(check) {
           return out;
         }, L);
         const tag = `handling lab ${w}x${h} L${L}`;
-        check(`${tag}: Controls has 6 rows, the lab opens, every control 48+, inside the screen, no overlap, no scrolling`, r.rows === 6 && r.title === 'Handling lab' && r.controls >= 12 && r.bad.length === 0, JSON.stringify(r));
+        check(`${tag}: Controls has 7 rows (Steering feel added), the lab opens, every control 48+, inside the screen, no overlap, no scrolling`, r.rows === 7 && r.title === 'Handling lab' && r.controls >= 12 && r.bad.length === 0, JSON.stringify(r));
       }
       // The test drive overlay: Finish at the top center, then the verdict card.
       const dv = await lp.evaluate(() => {

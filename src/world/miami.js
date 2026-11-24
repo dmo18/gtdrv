@@ -856,7 +856,7 @@ const GROW_F64 = (a, n) => {
 function readWays(data, S, crop, landCell, coastLand, baseLand) {
   const R = {
     crop, landCell, coastLand, baseLand, districts: S.districts, curb: S.curbParking || [],
-    popts: { district: '', curbParking: false }, classIds: new Map(), profiles: new Map(),
+    popts: { district: '', curbParking: false, turnLane: false }, classIds: new Map(), profiles: new Map(),
     ways: [], wayS: [], wayE: [], P: new Float64Array(1 << 16), np: 0, cuts: [],
     // decodePolyline's output for one road, reused (pts[0, m)).
     pts: new Float64Array(4096),
@@ -880,6 +880,7 @@ function districtKeyAt(districts, x, z) {
 // and of the options only whether the district is downtown and whether
 // the street parks on its curbs): one frozen profile per key. Lane tags
 // other than whole numbers 0 to 15 (or none) are not cached.
+const BEACH_X0_DM = 35000;
 const laneKey = (v) => (v === undefined || v === null || v === 0 ? 0 : Number.isInteger(v) && v > 0 && v < 16 ? v : -1);
 function cachedProfile(R, r, downtown, curb) {
   const lanes = laneKey(r.lanes), lf = laneKey(r.lf), lb = laneKey(r.lb);
@@ -888,6 +889,10 @@ function cachedProfile(R, r, downtown, curb) {
   const popts = R.popts;
   popts.district = downtown ? 'downtown' : '';
   popts.curbParking = curb;
+  // Miami Beach island (east of the Venetian Islands, x 3500 m, in decimeters): a
+  // two-way 2 + 1 road is equal lanes each way and a center turn lane.
+  const beach = r.p && r.p[0] >= BEACH_X0_DM;
+  popts.turnLane = beach;
   if (lanes < 0 || lf < 0 || lb < 0 || ci > 63) return roadProfile(r, popts);
   const name = r.name || '';
   let key = ci;
@@ -901,6 +906,7 @@ function cachedProfile(R, r, downtown, curb) {
   key = key * 2 + (name === 'Lincoln Road' ? 1 : 0);
   key = key * 2 + (downtown ? 1 : 0);
   key = key * 2 + (curb ? 1 : 0);
+  key = key * 2 + (beach ? 1 : 0);
   let prof = R.profiles.get(key);
   if (!prof) R.profiles.set(key, (prof = Object.freeze(roadProfile(r, popts))));
   return prof;

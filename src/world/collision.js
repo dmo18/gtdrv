@@ -60,7 +60,10 @@ export function createCollisionWorld() {
   }
 
   function addCircle(x, z, r, h = 5, tag = null) {
-    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
+    // bayU (a parked bay car's hash, set by the lot layer) is declared on
+    // every circle so all circles share one object shape (resolveIn reads
+    // them inline, without boxing numbers).
+    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', bayU: undefined };
     circles.push(c);
     insert(c, x - r, z - r, x + r, z + r);
     joined = null;
@@ -124,9 +127,13 @@ export function createCollisionWorld() {
             const it = list[i];
             if (it.stamp === stamp) continue;
             it.stamp = stamp;
-            if (it.off || it.h <= y) continue;
+            // off and h are read in each kind's branch: one read site sees
+            // only that kind's object shapes, so V8 keeps it inline instead
+            // of a generic lookup that boxes the height (docs/PERF.md).
             let nx, nz, depth;
-            if (it.kind === 0) {
+            const kind = it.kind;
+            if (kind === 0) {
+              if (it.off || it.h <= y) continue;
               const px = out.x < it.x0 ? it.x0 : out.x > it.x1 ? it.x1 : out.x;
               const pz = out.z < it.z0 ? it.z0 : out.z > it.z1 ? it.z1 : out.z;
               const dx = out.x - px, dz = out.z - pz;
@@ -150,7 +157,8 @@ export function createCollisionWorld() {
                 else nz = 1;
                 depth = m + r;
               }
-            } else if (it.kind === 2) {
+            } else if (kind === 2) {
+              if (it.off || it.h <= y) continue;
               const sx = it.x1 - it.x0, sz = it.z1 - it.z0;
               const L2 = sx * sx + sz * sz;
               let t = L2 > 1e-12 ? ((out.x - it.x0) * sx + (out.z - it.z0) * sz) / L2 : 0;
@@ -170,6 +178,7 @@ export function createCollisionWorld() {
               }
               depth = rr - d;
             } else {
+              if (it.off || it.h <= y) continue;
               const dx = out.x - it.x, dz = out.z - it.z;
               const rr = r + it.r;
               const d2 = dx * dx + dz * dz;
@@ -678,7 +687,7 @@ export const LOT_SHAPE_REACH = 6;
 // lazy layer lists them in its own cells.
 const SHAPE_SINK = {
   addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
-  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
+  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', bayU: undefined }),
 };
 
 // The lots' solids as a lazy layer of `collision` (replacing any layer it

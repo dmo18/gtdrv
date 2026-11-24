@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  taxiCap, TAXI_SPEED,
   AIRCRAFT_SPECS, createAircraft, stepAircraft, collideAircraft,
 } from '../src/entities/aircraft.js';
 import { createCollisionWorld } from '../src/world/collision.js';
@@ -566,4 +567,35 @@ test('police heli lifts off its pad and hovers', () => {
   const y0 = h.y, x0 = h.x;
   run(h, ctl(), 300, w);
   assert.ok(Math.abs(h.y - y0) < 1 && Math.abs(h.x - x0) < 1);
+});
+
+// docs/PLAN_V4.md task 8: the depot fighters park 60 m off the runway
+// centerline facing it. The 14 m/s2 push ran a fighter straight across the
+// runway into the sea wall at any thrust (the nose wheel cannot turn at
+// 30 m/s): the known "shore-stuck fighter". With the stick held over, the
+// push now holds a taxi speed, so every plane turns onto the runway.
+test('taxi out: full stick at part or full thrust turns a parked plane onto the runway within its width', () => {
+  for (const id of ['fighter', 'jet', 'prop', 'stunt']) {
+    for (const throttle of [0.35, 0.6, 1]) {
+      const a = createAircraft(id, 0, 60, -Math.PI / 2);
+      a.driver = 'player';
+      const w = emptyWorld();
+      let minZ = Infinity, maxV = 0;
+      for (let i = 0; i < 60 * 20; i++) {
+        const h = a.heading; // full right until it faces east, then straight
+        const steer = Math.abs(h) > 0.12 ? 1 : 0;
+        stepAircraft(a, ctl({ steer, throttle: steer ? throttle : 0 }), DT, w);
+        if (a.z < minZ) minZ = a.z;
+        if (steer) maxV = Math.max(maxV, a.speed);
+        if (Math.abs(h) <= 0.12) break;
+      }
+      assert.ok(a.onGround && !a.wrecked, `${id} at ${throttle}: still taxiing`);
+      assert.ok(Math.abs(a.heading) <= 0.12, `${id} at ${throttle}: faces down the runway (${a.heading.toFixed(2)})`);
+      assert.ok(minZ > -15, `${id} at ${throttle}: turned within the runway, at most z ${minZ.toFixed(1)}`);
+      assert.ok(maxV < 14, `${id} at ${throttle}: taxi speed in the turn ${maxV.toFixed(1)} m/s`);
+    }
+  }
+  // Straight ahead the take-off run is untouched: no cap below 1.5 x rotate.
+  for (const s of Object.values(AIRCRAFT_SPECS)) if (s.kind === 'plane') assert.ok(taxiCap(0.4, s.rotate) >= s.rotate * 1.5 - 1e-9, s.id);
+  assert.equal(taxiCap(1, 50), TAXI_SPEED);
 });

@@ -13,7 +13,7 @@ import { createVehicleMesh, updateVehicleMesh } from '../src/render/vehiclemesh.
 import { CLS } from '../src/render/vehiclemats.js';
 import {
   carGeometry, measureCabin, eyePoint, hoodPoint, inCabin, buildInterior, attachInterior, frontShell, interiorLayout,
-  pointTri, bodyClearance, EYE_DEFAULTS, WHEEL_MAX_DEG, COCKPIT_FOV, LOOKS, lookOf, paintAtlas, DIAL,
+  pointTri, bodyClearance, EYE_DEFAULTS, WHEEL_MAX_DEG, COCKPIT_FOV_H, cockpitFov, LOOKS, lookOf, paintAtlas, DIAL,
 } from '../src/render/carinterior.js';
 
 const cars = Object.values(VEHICLE_SPECS).filter((s) => !s.kind || s.kind === 'car');
@@ -184,14 +184,15 @@ test('eye clearance helper sees the body shell', () => {
 
 // ---- cockpit framing (AIR): rasterize the kit from the eye ----------------------
 // Coverage of the interior kit seen from the eye with the cockpit camera
-// (vertical FOV 78, level), at a quarter of the phone resolution. What the
+// (horizontal FOV 100, level), at a quarter of the phone resolution. What the
 // kit does not cover is seen through the glass (sky, road, the hood).
+const norm3 = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 function frameOf(spec, W, H, S = 4) {
   const { cab } = cabinOf(spec);
   const eye = eyePoint(spec, cab);
   const it = buildInterior(spec, cab, eye);
   it.update({ steer: 0, speed: 0, rpm: 0 });
-  const cam = new THREE.PerspectiveCamera(COCKPIT_FOV, W / H, 0.12, 100);
+  const cam = new THREE.PerspectiveCamera(cockpitFov(W / H), W / H, 0.12, 100);
   cam.position.set(eye.x, eye.y, eye.z);
   cam.lookAt(eye.x + 1, eye.y, eye.z);
   cam.updateMatrixWorld(true);
@@ -275,11 +276,21 @@ function frameOf(spec, W, H, S = 4) {
     for (const [x, y] of ps) { ax = Math.min(ax, x); bx = Math.max(bx, x); ay = Math.min(ay, y); by = Math.max(by, y); }
     return ps.length / Math.max(1, Math.hypot(bx - ax, by - ay)) / w;
   });
-  return { glass: glass / buf.length, header, pillars, wheelOut, wheelIn, share, it };
+  // Screen points (full resolution pixels): the rim's top, the cluster
+  // face corners, the digital readout's top and bottom.
+  const scr = (x, y, z) => { v.set(x, y, z).applyMatrix4(cam.matrixWorldInverse).applyMatrix4(cam.projectionMatrix); return [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]; };
+  const L = it.layout;
+  const rimTop = scr(L.wheelX + Math.sin(L.tilt) * (L.wheelR + L.rimR), L.wheelY + Math.cos(L.tilt) * (L.wheelR + L.rimR), eye.z);
+  const cl = it.face.geometry.attributes.position.array;
+  const cluster = [0, 1, 2, 3].map((k) => scr(cl[k * 3], cl[k * 3 + 1], cl[k * 3 + 2]));
+  const r = it.readout[1], up = it.readoutH / 2;
+  const n = norm3([eye.x - r[0], eye.y - r[1], 0]);
+  const rt = scr(r[0] + n[1] * up, r[1] - n[0] * up, r[2]), rb = scr(r[0] - n[1] * up, r[1] + n[0] * up, r[2]);
+  return { glass: glass / buf.length, header, pillars, wheelOut, wheelIn, share, it, rimTop, cluster, digitPx: rb[1] - rt[1], horizon: scr(eye.x + 50, eye.y, eye.z)[1] / H };
 }
 
 test('cockpit framing: the windshield is the hero at 915x412 and 748x360', () => {
-  for (const id of ['sedan', 'suv', 'pickup', 'sports', 'schoolbus']) {
+  for (const id of ['sedan', 'suv', 'pickup', 'sports', 'van', 'truck', 'schoolbus']) {
     for (const [W, H] of [[915, 412], [748, 360]]) {
       const f = frameOf(VEHICLE_SPECS[id], W, H);
       const tag = `${id} ${W}x${H}`;
@@ -287,8 +298,16 @@ test('cockpit framing: the windshield is the hero at 915x412 and 748x360', () =>
       assert.ok(f.header < 0.08, `${tag}: roof header ${(f.header * 100).toFixed(1)} percent of the height`);
       for (const p of f.pillars) assert.ok(p < 0.05, `${tag}: A-pillar ${(p * 100).toFixed(1)} percent of the width`);
       assert.ok(f.pillars[0] > 0.005, `${tag}: the driver's A-pillar is in view`);
-      assert.ok((f.share.mirror || 0) > 0.002 && (f.share.mirror || 0) < 0.02, `${tag}: a small mirror`);
-      assert.equal(f.wheelOut, 0, `${tag}: the whole wheel is in the frame`);
+      assert.ok((f.share.mirror || 0) > 0.002 && (f.share.mirror || 0) < 0.02, `${tag}: a small mirror (${((f.share.mirror || 0) * 100).toFixed(2)} percent)`);
+      // A level look with a 100 degree horizontal FOV (the old 78 degree
+      // vertical one was a fish-eye): the rim's top and every corner of the
+      // gauge cluster in the frame, the mph readout at least 12 px tall,
+      // the horizon at mid height, the road clear down to the rim.
+      assert.ok(f.wheelIn > 0, `${tag}: the wheel is in the frame`);
+      assert.ok(f.rimTop[1] > H * 0.56 && f.rimTop[1] < H * 0.9, `${tag}: rim top at ${(f.rimTop[1] / H * 100).toFixed(0)} percent of the height`);
+      for (const c of f.cluster) assert.ok(c[0] > 0 && c[0] < W && c[1] > 0 && c[1] < H - 2, `${tag}: cluster corner ${c.map((q) => q.toFixed(0))} in the frame`);
+      assert.ok(f.digitPx >= 12, `${tag}: mph digits ${f.digitPx.toFixed(1)} px tall`);
+      assert.ok(Math.abs(f.horizon - 0.5) < 0.01, `${tag}: horizon at ${(f.horizon * 100).toFixed(0)} percent`);
       assert.ok((f.share.wheel || 0) > 0.008, `${tag}: the wheel shows`);
       assert.ok((f.share.face || 0) > 0.008, `${tag}: the gauges show`);
       assert.ok((f.share.dash || 0) > 0.05, `${tag}: the dash shows`);
@@ -327,4 +346,22 @@ test('gauge atlas: two round dials with ticks and numbers (mph and rpm), a stitc
   assert.ok(calls.text.includes('MPH') && calls.text.includes('RPM'));
   assert.ok(calls.strokes >= DIAL.mph / 10 + DIAL.rpm * 2 + 2, `${calls.strokes} tick strokes`);
   assert.ok(calls.arcs >= 4 && calls.rects > 100, 'dial faces, rings, grain, stitches');
+});
+
+test('cockpit FOV: 100 degrees across, the vertical one follows the screen; a digital mph readout', () => {
+  assert.equal(COCKPIT_FOV_H, 100);
+  assert.ok(Math.abs(cockpitFov(748 / 360) - 59.7) < 0.1, `748x360: ${cockpitFov(748 / 360).toFixed(2)}`);
+  assert.ok(Math.abs(cockpitFov(915 / 412) - 56.4) < 0.1, `915x412: ${cockpitFov(915 / 412).toFixed(2)}`);
+  const { cab } = cabinOf(VEHICLE_SPECS.sedan);
+  const it = buildInterior(VEHICLE_SPECS.sedan, cab, eyePoint(VEHICLE_SPECS.sedan, cab));
+  const uv = it.face.geometry.attributes.uv;
+  const before = Array.from(uv.array.slice(-24));
+  it.update({ speed: 60 / 2.23694, steer: 0 });
+  assert.equal(it.state.shown, 60);
+  const after = Array.from(uv.array.slice(-24));
+  assert.notDeepEqual(after, before, 'the digits change with the speed');
+  assert.deepEqual(after.slice(0, 8), before.slice(0, 8), 'the hundreds stay blank under 100 mph');
+  const v0 = uv.version;
+  it.update({ speed: 60.1 / 2.23694, steer: 0 });
+  assert.equal(uv.version, v0, 'no upload while the shown speed holds');
 });

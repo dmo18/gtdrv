@@ -851,6 +851,10 @@ read as one double yellow, or on a one-way drawn over another one-way of
 the same direction (each moves away from the other by half the overlap); every strip, lane and curb is measured from
 `node line + off`), `pair` (the partner edge id of a divided road).
 
+Miami two-way roads tagged `lanes` odd with `lanes:forward` and `lanes:backward`
+differing by one (2 + 1, 3 + 2) are drawn as equal lanes each way plus the
+center turn lane (`center`), same width (0.12.6, `roadProfile(way, { turnLane })`).
+
 Also on every edge, derived (old callers): `avenue` = two or more lanes each
 way (`min(lanesF, lanesB) >= 2`, or a one-way of 3 or more); optional
 `sidewalk` (1.8 residential, 3.0 downtown and on Lincoln Road; the 0.15 m curb

@@ -92,7 +92,7 @@ export const TANK_SHOTS = {
     addMode(out, len(0.1), 920, 0.03, 0.12);
     harmonize(out, 110, 1, { hi: 900 });
     warm(out, 2.2, 0.3);
-    return fadeEdges(normalize(removeDC(out), 0.97), 8, 3000);
+    return fadeEdges(normalize(removeDC(out), 0.9), 8, 3000);
   },
   tankCoax(rng) {
     const n = len(0.16);

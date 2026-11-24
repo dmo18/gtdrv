@@ -267,12 +267,12 @@ export const COMBAT_SHOTS = {
     band(out, rng, 0, 0.01, 0.8, 'hp', 1000); // ignition
     thump(out, 110, 50, 0.04, 0.7, 0.12);
     const w = envelope(white(n, rng), 0.03, 0.7);
-    const roar = svf(w, z(n), (u) => 500 + 2500 * Math.pow(u, 0.5), 0.9, 'bp');
+    const roar = svf(w, z(n), (u) => 500 + 1500 * Math.pow(u, 0.5), 0.9, 'bp');
     const hiss = z(n);
     filter(w, hiss, biquad('hp', 3500, 0.7), { loop: false });
-    for (let i = 0; i < n; i++) out[i] += roar[i] * 1.6 + hiss[i] * 0.5;
+    for (let i = 0; i < n; i++) out[i] += roar[i] * 1.6 + hiss[i] * 0.15;
     harmonize(out, 120, 0.5);
-    return fadeEdges(normalize(removeDC(out), 0.9), 8, 2500);
+    return fadeEdges(normalize(removeDC(out), 0.8), 8, 2500);
   },
 };
 

@@ -12,7 +12,7 @@
 // lean into braking and bumps. The cockpit puts the interior kit of
 // carinterior.js into the car and hides the exterior.
 import { angleDiff, clamp } from '../core/rng.js';
-import { attachInterior, carGeometry, measureCabin, eyePoint, hoodPoint, frontShell } from './carinterior.js';
+import { attachInterior, carGeometry, measureCabin, eyePoint, hoodPoint, frontShell, COCKPIT_FOV_H } from './carinterior.js';
 
 // follow: position spring rate. turn: heading spring factor.
 // pitchShare / rollShare: how much of the craft's climb angle and bank the
@@ -35,14 +35,17 @@ const MODES = {
 // the car (FIRST), `near` is the near plane. Hood's FOV 80 is horizontal
 // (`fovH`, the vertical one follows the screen: 41 degrees at 915x412),
 // the only reading under which the hood fills 10 to 20 percent of the
-// frame from the driver's eye height; the cockpit's 78 is the camera's
-// own vertical FOV like every other view (122 horizontal at 915x412).
+// frame from the driver's eye height; the cockpit's is horizontal too
+// (COCKPIT_FOV_H, 100: 56 degrees vertical at 915x412). It was 78
+// vertical, 122 across: a fish-eye with unreadable gauges.
+// Bow and the aircraft cockpits were 74 to 80 degrees vertical (113 to 120
+// across a 748x360 phone): fish-eyes. Now 60 to 62 (about 100 across).
 const VIEWS = {
   car: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 12.5, height: 4.8, lookHeight: 1.0, lookAhead: 7, baseFov: 66 },
     { name: 'Hood', fp: 'hood', dist: -1, fovH: 80, near: 0.12 },
-    { name: 'Cockpit', fp: 'cockpit', dist: -1, baseFov: 78, near: 0.12 },
+    { name: 'Cockpit', fp: 'cockpit', dist: -1, fovH: COCKPIT_FOV_H, near: 0.12 },
   ],
   foot: [
     { name: 'Chase' },
@@ -51,17 +54,17 @@ const VIEWS = {
   boat: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 18, height: 6.5, lookHeight: 1.2, lookAhead: 8, baseFov: 66 },
-    { name: 'Bow', dist: -2.4, height: -0.1, lookHeight: -0.2, lookAhead: 40, baseFov: 74, follow: 30, turn: 1.6 },
+    { name: 'Bow', dist: -2.4, height: -0.1, lookHeight: -0.2, lookAhead: 40, baseFov: 60, follow: 30, turn: 1.6 },
   ],
   plane: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 28, height: 7, lookHeight: 1.8, lookAhead: 20, baseFov: 66 },
-    { name: 'Cockpit', dist: -1.4, height: 0.5, lookHeight: 0.4, lookAhead: 60, baseFov: 78, follow: 40, turn: 1.2, pitchShare: 0.9, rollShare: 0.8 },
+    { name: 'Cockpit', dist: -1.4, height: 0.5, lookHeight: 0.4, lookAhead: 60, baseFov: 62, follow: 40, turn: 1.2, pitchShare: 0.9, rollShare: 0.8 },
   ],
   heli: [
     { name: 'Chase' },
     { name: 'Far chase', dist: 26, height: 10, lookHeight: 2, lookAhead: 6, baseFov: 66 },
-    { name: 'Cockpit', dist: -1.8, height: 0.7, lookHeight: 0.3, lookAhead: 50, baseFov: 80, follow: 30, turn: 0.9, rollShare: 0.5 },
+    { name: 'Cockpit', dist: -1.8, height: 0.7, lookHeight: 0.3, lookAhead: 50, baseFov: 62, follow: 30, turn: 0.9, rollShare: 0.5 },
   ],
   tank: [
     { name: 'Chase' },

@@ -46,7 +46,8 @@ test('car views: Chase, Far chase, Hood, Cockpit; Bumper is gone; FOV and near p
   assert.equal(cam.near, 0.12);
   assert.equal(chase.cycleView(), 'Cockpit');
   pos = settle(cam, chase, 30);
-  assert.ok(Math.abs(cam.fov - 78) < 1e-6, `cockpit FOV 78 (${cam.fov})`);
+  const hfovC = (2 * Math.atan(Math.tan((cam.fov * Math.PI) / 360) * cam.aspect) * 180) / Math.PI;
+  assert.ok(Math.abs(hfovC - 100) < 0.1, `cockpit FOV 100 horizontal (${hfovC.toFixed(1)}; the 78 degree vertical one was a fish-eye)`);
   assert.equal(cam.near, 0.12);
   assert.ok(pos.z < target.z - 0.25, 'driver on the left (heading 0: left is -z)');
   assert.ok(pos.y > 0.9 && pos.y < 1.6, `eye height ${pos.y.toFixed(2)}`);
@@ -65,6 +66,20 @@ test('car views: Chase, Far chase, Hood, Cockpit; Bumper is gone; FOV and near p
   chase.setMode('tank');
   assert.equal(chase.isFirstPerson(), false);
   assert.ok(LOOK.yawMax > 1.9 && LOOK.pitchMax > 0.43);
+});
+
+test('front views (car cockpit, boat bow, aircraft cockpits) are no fish-eye: 90 to 105 degrees across a 748x360 phone at rest', () => {
+  const cam = new THREE.PerspectiveCamera(62, 748 / 360, 0.5, 1800);
+  const chase = createChaseCamera(cam);
+  const still = { x: 0, z: 0, y: 30, heading: 0, pitch: 0, roll: 0, speed: 0, height: 1.2 };
+  for (const [k, view] of [['car', 'Cockpit'], ['boat', 'Bow'], ['plane', 'Cockpit'], ['heli', 'Cockpit']]) {
+    chase.setMode(k);
+    assert.ok(chase.setView(view), `${k} ${view}`);
+    chase.snap(still);
+    for (let i = 0; i < 120; i++) chase.update(still, 1 / 60, null, null);
+    const h = (2 * Math.atan(Math.tan((cam.fov * Math.PI) / 360) * cam.aspect) * 180) / Math.PI;
+    assert.ok(h >= 90 && h <= 105, `${k} ${view}: ${h.toFixed(1)} degrees across`);
+  }
 });
 
 test('first person: rigid on the car, no sideways shift in turns, level horizon, drag look springs back, head lean <= 3 cm', async () => {

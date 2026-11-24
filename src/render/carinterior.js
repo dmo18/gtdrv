@@ -36,9 +36,14 @@ export const EYE_DEFAULTS = {
 };
 export const MIN_CLEAR = 0.15; // eye to any body shell surface (m; the cabin parts hide in the cockpit)
 export const WHEEL_MAX_DEG = 90; // steering wheel turn at full input
-// The cockpit camera (chasecam.js VIEWS.car 'Cockpit'): vertical FOV in
-// degrees, looking level from the eye. The kit is framed for it.
-export const COCKPIT_FOV = 78;
+// The cockpit camera (chasecam.js VIEWS.car 'Cockpit'): horizontal FOV in
+// degrees, looking level from the eye; the vertical one follows the screen
+// (59.7 degrees at 748x360, 56.4 at 915x412). It was a 78 degree vertical
+// FOV (118 across a phone): a fish-eye with the A-pillars as diagonal bars
+// and gauges too small to read. The rim's top and the gauges stay in
+// frame; the bottom of the wheel may leave it, as in a real seat.
+export const COCKPIT_FOV_H = 100;
+export const cockpitFov = (aspect) => (2 * Math.atan(Math.tan((COCKPIT_FOV_H * DEG) / 2) / Math.max(0.5, aspect || 1))) / DEG;
 
 // How each class looks from the driver's seat (docs/PLAN_V3.md section
 // 13, AIR): angles in degrees from the level line of sight. dash: the
@@ -354,12 +359,26 @@ export const ATLAS = {
   cluster: [0, 0, 640, 256], screen: [640, 0, 1024, 256],
   stitch: [0, 256, 512, 288], vent: [0, 288, 256, 416], grain: [512, 256, 1024, 512],
   white: [272, 304, 496, 496], needle: [8, 424, 56, 472],
+  // Digits 0 to 9 for the digital speed readout (two rows of five cells);
+  // `blank` is a spot of the cluster's black background.
+  digits: [60, 416, 270, 512], blank: [4, 4, 12, 12],
 };
+// The digital mph readout between the dials (cluster pixels: center x,
+// top, one digit's width and height). Big enough to read at phone size.
+export const READOUT = { x: 320, y: 62, w: 44, h: 66 };
 // The two dials on the cluster (pixels): rpm on the left, mph on the right.
 export const DIAL = { start: (225 * Math.PI) / 180, sweep: (270 * Math.PI) / 180, mph: 140, rpm: 8, red: 6.5, r: 112, rpmC: [130, 128], mphC: [510, 128] };
 const uvRect = (r) => [r[0] / ATLAS.w, 1 - r[3] / ATLAS.h, r[2] / ATLAS.w, 1 - r[1] / ATLAS.h];
 const UV = {};
-for (const k of ['cluster', 'screen', 'stitch', 'vent', 'grain', 'white', 'needle']) UV[k] = uvRect(ATLAS[k]);
+for (const k of ['cluster', 'screen', 'stitch', 'vent', 'grain', 'white', 'needle', 'blank']) UV[k] = uvRect(ATLAS[k]);
+// One UV rect per digit (index 10: blank).
+const DIGIT_UV = [];
+for (let d = 0; d < 10; d++) {
+  const D = ATLAS.digits, cw = (D[2] - D[0]) / 5, ch = (D[3] - D[1]) / 2;
+  const x0 = D[0] + (d % 5) * cw, y0 = D[1] + Math.floor(d / 5) * ch;
+  DIGIT_UV.push(uvRect([x0 + 1, y0 + 1, x0 + cw - 1, y0 + ch - 1]));
+}
+DIGIT_UV.push(UV.blank);
 const UVW = [(UV.white[0] + UV.white[2]) / 2, (UV.white[1] + UV.white[3]) / 2];
 
 const _col = new THREE.Color();
@@ -509,21 +528,24 @@ export function interiorLayout(cab, eye, spec = cab.spec) {
   const big = lk === LOOKS.big;
   let wd = (2 * Re * Math.cos(t) - (A + B) * Re * Math.sin(t)) / (A - B);
   let wy = A * (wd + Re * Math.sin(t)) - Re * Math.cos(t);
-  // A short cab: the wheel comes nearer (and a little smaller), its
-  // bottom edge kept at wheelBot.
+  // A short cab: the wheel comes nearer (and a little smaller), its top
+  // edge kept at wheelTop (keeping the bottom edge raised the rim of a
+  // truck's near wheel into the road ahead).
   const room = gX - eye.x - (big ? 0.26 : 0.2);
   if (wd > room) {
     if (big) R *= Math.max(0.75, room / wd);
     Re = R + lk.rimR;
     wd = room;
-    wy = B * (wd - Re * Math.sin(t)) + Re * Math.cos(t);
+    wy = A * (wd + Re * Math.sin(t)) - Re * Math.cos(t);
   }
   const wheelX = eye.x + wd, wheelY = eye.y + wy;
-  // Gauge cluster: behind the rim's top, seen through the wheel.
-  const clusterW = big ? 0.52 : 0.43, clusterH = clusterW * 0.4;
+  // Gauge cluster: behind the rim's top, seen through the wheel. A big
+  // flat wheel's upper opening is shallow: a smaller cluster tucked just
+  // under its rim, clear of the hub (a wide one sat behind hub and spokes).
   const cd = Math.min(wd + (big ? 0.2 : 0.15), gX - eye.x - 0.06);
+  const clusterW = big ? Math.max(0.32, cd * 0.4) : 0.43, clusterH = clusterW * 0.4;
   const clusterX = eye.x + cd;
-  const clusterY = eye.y + cd * tan(lk.wheelTop - 2.2) - clusterH / 2;
+  const clusterY = eye.y + cd * tan(lk.wheelTop - (big ? 0.7 : 2.2)) - clusterH / 2;
   // Dash lip: under the cluster in front of the driver, curving closer
   // toward the passenger side; its edge reads as one level line.
   const lipAng = Math.min(lk.dash - 5, Math.atan2(clusterY - clusterH / 2 - 0.03 - eye.y, cd) / DEG);
@@ -686,8 +708,11 @@ function buildShell(cab, eye, lay) {
   }
   // Rear-view mirror: a small one on a stem from the header, angled to the driver.
   k.begin('mirror');
-  const mx = Math.max(hx + 0.1, ex + 0.5), my = hy - 0.075 + (mx - hx - 0.1) * 0.25;
+  const mx = Math.max(hx + 0.1, ex + 0.5);
   const ms = Math.max(1, (mx - ex) / 0.6); // a far header (buses) gets a bigger mirror
+  // Hung low enough to show in the 100 degree cockpit frame (its top at
+  // most 24 degrees up; a bus header is out of the frame).
+  const my = Math.min(hy - 0.075 + (mx - hx - 0.1) * 0.25, ey + (mx - ex) * Math.tan(24 * DEG) - 0.021 * ms);
   k.bar([hx + 0.02, hy + 0.005, 0], [mx + 0.01, my + 0.02, 0], [0, 0, 1], 0.02, 0.018, COL.mirrorFrame);
   const yaw = Math.atan2(-ez, mx - ex) * 0.5;
   const u = [Math.sin(yaw), 0, Math.cos(yaw)], w = [Math.cos(yaw), 0, -Math.sin(yaw)];
@@ -724,7 +749,10 @@ function buildWheel(lay) {
   k.begin('rim');
   k.torus(R, r, 40, 8, COL.rim, { half: 0.09, hex: COL.mark }, UV.grain);
   k.begin('spokes');
-  const angs = four ? [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4] : [-0.12, Math.PI + 0.12, -Math.PI / 2];
+  // Four spokes on big wheels in a low pair and a near level pair: the
+  // upper half stays open so the gauges show through it (spokes at 45
+  // degrees crossed both dials).
+  const angs = four ? [-0.2, Math.PI + 0.2, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5] : [-0.12, Math.PI + 0.12, -Math.PI / 2];
   for (const a of angs) {
     const c = Math.cos(a), s = Math.sin(a);
     const wide = !four && a === -Math.PI / 2;
@@ -820,11 +848,19 @@ export function paintAtlas(g) {
   dial(DIAL.mphC[0], DIAL.mphC[1], DIAL.mph, 20, 10, 'MPH', null, null);
   // Between the dials: gear, a fuel bar and a temperature bar.
   const mx = (DIAL.rpmC[0] + DIAL.mphC[0]) / 2;
-  g.fillStyle = '#7ad3ff'; g.font = 'bold 40px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText('D', mx, 92);
-  g.fillStyle = '#2b3036'; g.fillRect(mx - 44, 150, 88, 10); g.fillRect(mx - 44, 182, 88, 10);
-  g.fillStyle = '#e8e8e2'; g.fillRect(mx - 44, 150, 62, 10);
-  g.fillStyle = '#8fd18a'; g.fillRect(mx - 44, 182, 40, 10);
+  // (the digital readout's three digits are quads of their own over y 62 to 128)
+  g.fillStyle = '#7ad3ff'; g.font = 'bold 30px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('D', mx, 34);
+  g.fillStyle = '#c7ccd3'; g.font = 'bold 20px sans-serif';
+  g.fillText('MPH', mx, 148);
+  g.fillStyle = '#2b3036'; g.fillRect(mx - 44, 186, 88, 9); g.fillRect(mx - 44, 210, 88, 9);
+  g.fillStyle = '#e8e8e2'; g.fillRect(mx - 44, 186, 62, 9);
+  g.fillStyle = '#8fd18a'; g.fillRect(mx - 44, 210, 40, 9);
+  // Digit cells for the readout: light digits on the cluster black.
+  const D = ATLAS.digits, cw = (D[2] - D[0]) / 5, ch = (D[3] - D[1]) / 2;
+  fill('#08090b', D);
+  g.fillStyle = '#f4f6f8'; g.font = 'bold 46px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let d = 0; d < 10; d++) g.fillText(String(d), D[0] + (d % 5) * cw + cw / 2, D[1] + Math.floor(d / 5) * ch + ch / 2 + 2);
   // Center screen: a dark glass panel with an invented map and tiles.
   const sc = ATLAS.screen;
   fill('#0b1118', sc);
@@ -865,13 +901,16 @@ function atlasTexture() {
 }
 
 let mats = null;
+export const SHADE = 0.45; // direct light share inside the cabin
 function materials() {
   if (mats) return mats;
   const tex = atlasTexture();
   mats = {
     // One lit material for the cabin and the wheel (vertex colors times
     // the atlas), a little self light: the cabin is in the roof's shade.
-    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x2a2a2a, map: tex || null }),
+    // The color scale stands in for the roof's shade (the kit takes no
+    // shadows): at full sun the charcoal dash read as a pale gray slab.
+    shell: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, emissive: 0x2a2a2a, map: tex || null, color: new THREE.Color().setRGB(SHADE, SHADE, SHADE, THREE.LinearSRGBColorSpace) }),
     // Unlit for the dials, needles and screen (they glow).
     face: new THREE.MeshBasicMaterial(tex ? { map: tex, toneMapped: false } : { color: 0x15171a }),
     // Draws nothing, casts the car's shadow.
@@ -905,6 +944,14 @@ function buildFace(cab, eye, lay) {
   // Needles: 4 vertices each, filled in by setNeedle.
   const n0 = P.length / 3;
   for (let k = 0; k < 2; k++) quad(at(0, 0), at(0, 0), at(0, 0), at(0, 0), UV.needle);
+  // Digital readout: three digit quads a hair in front of the face.
+  const ppm = W / ATLAS.cluster[2]; // meters per atlas pixel
+  const d0 = P.length / 3;
+  for (let k = 0; k < 3; k++) {
+    const x0 = (READOUT.x + (k - 1.5) * READOUT.w - ATLAS.cluster[2] / 2) * ppm, x1 = x0 + READOUT.w * ppm;
+    const y1 = (ATLAS.cluster[3] / 2 - READOUT.y) * ppm, y0 = y1 - READOUT.h * ppm;
+    quad(at(x0, y0, 0.003), at(x1, y0, 0.003), at(x1, y1, 0.003), at(x0, y1, 0.003), UV.blank);
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
@@ -928,7 +975,22 @@ function buildFace(cab, eye, lay) {
     }
     pos.needsUpdate = true;
   };
-  return { geometry: g, setNeedle, tris: I.length / 3, dialCenters: centers.map(([x, y]) => at(x, y)) };
+  // Digital readout: the three digits of a speed (blank leading zeros).
+  const uv = g.attributes.uv;
+  const setDigit = (k, d) => {
+    const r = DIGIT_UV[d], i = (d0 + k * 4) * 2, a = uv.array;
+    a[i] = r[0]; a[i + 1] = r[1]; a[i + 2] = r[2]; a[i + 3] = r[1];
+    a[i + 4] = r[2]; a[i + 5] = r[3]; a[i + 6] = r[0]; a[i + 7] = r[3];
+  };
+  const setSpeed = (n) => {
+    const v = Math.max(0, Math.min(999, n | 0));
+    setDigit(0, v >= 100 ? Math.floor(v / 100) : 10);
+    setDigit(1, v >= 10 ? Math.floor(v / 10) % 10 : 10);
+    setDigit(2, v % 10);
+    uv.needsUpdate = true;
+  };
+  const readout = [0, 1, 2].map((k) => at((READOUT.x + (k - 1) * READOUT.w - ATLAS.cluster[2] / 2) * ppm, (ATLAS.cluster[3] / 2 - READOUT.y - READOUT.h / 2) * ppm));
+  return { geometry: g, setNeedle, setSpeed, readoutH: READOUT.h * ppm, readout, tris: I.length / 3, dialCenters: centers.map(([x, y]) => at(x, y)) };
 }
 
 // Build the interior for one car (spec, cabin, eye). Returns the group to
@@ -960,10 +1022,11 @@ export function buildInterior(spec, cab, eye) {
   // The interior is opaque and near; keep it out of shadows (no flicker inside).
   group.traverse((o) => { o.castShadow = false; o.receiveShadow = false; o.frustumCulled = false; });
   const tris = shellKit.tris + wheelKit.tris + faceKit.tris;
-  const state = { wheelDeg: 0, mph: 0, rpm: 0, speedAngle: 0, rpmAngle: 0 };
+  const state = { wheelDeg: 0, mph: 0, rpm: 0, speedAngle: 0, rpmAngle: 0, shown: -1 };
   const it = {
     group, shell, wheel, spinner, mount, face, layout: lay, tris, state,
     parts: shellKit.parts, wheelParts: wheelKit.parts, dialCenters: faceKit.dialCenters,
+    readout: faceKit.readout, readoutH: faceKit.readoutH,
     textured: !!m.shell.map,
     update(v) {
       const steer = Math.max(-1, Math.min(1, (v && v.steer) || 0));
@@ -977,6 +1040,11 @@ export function buildInterior(spec, cab, eye) {
       state.rpmAngle = DIAL.start - Math.min(1, (state.rpm * 7) / DIAL.rpm) * DIAL.sweep;
       faceKit.setNeedle(0, state.rpmAngle);
       faceKit.setNeedle(1, state.speedAngle);
+      const shown = Math.round(mph);
+      if (shown !== state.shown) {
+        state.shown = shown;
+        faceKit.setSpeed(shown);
+      }
     },
   };
   it.update(null);

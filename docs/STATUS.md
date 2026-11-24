@@ -7,6 +7,58 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.12.6 Beach checklist (2026-11-24)
+- Task 9, Miami Beach familiarity. `node scripts/beach-checklist.mjs` builds the Beach region from the repo's OSM file (no
+  network) and checks 43 streets and 12 places: name present, the streets it meets, typical lanes, one-way share, width in
+  feet, share of length with a raised median, sidewalk, curb parking, equal lanes each way on two-way roads, and the order of
+  numbered cross streets (5th to 41st) or named avenues along Lincoln Road, 17th Street, Alton Road, Washington Avenue and
+  Ocean Drive. test/beach-checklist.test.js pins all of it (every item passes) plus the Ocean Drive, Lincoln Road, Collins,
+  Washington and numbered-street facts.
+- Found and fixed: Collins Avenue, Alton Road, 17th, 23rd, 41st Streets and Dade Boulevard swapped 2 + 1 and 1 + 2 (3 + 2 and
+  2 + 3) lanes every block, because OSM gives the shared middle lane to one direction or the other by way (16 % of Collins,
+  38 % of 17th Street, 43 % of Dade Boulevard had unequal lanes). `roadProfile(way, { turnLane: true })` (set in miami.js
+  `cachedProfile` for ways on the Miami Beach island, x from 3500 m; not the Venetian Islands, Downtown or the other regions,
+  to keep their pins) draws such a road as equal lanes each way plus the painted center turn lane; width is unchanged, and
+  neighboring equal edges merge (Beach 3 edges fewer). The default profile keeps the tag as before.
+- Also: event gates need an edge at least 5 m wide (`eventspots.js usable`): with the edges merged a Downtown rush-drop gate
+  landed on a 4.2 m one-lane ramp (test "gates stand on a street" failed at width 2).
+- Re-pinned (deliberate): test/regions.test.js, the Beach (nodes unchanged; edges, and with them buildings, lots and lot grid
+  as pinned now) and the whole box; Downtown, North, West, South unchanged. docs/MAP.md edge contract gained one note; no
+  field was added.
+- Open, for the lead: test/gps-audit.test.js "miami-beach" fails by 0.01 (worst route 1.2106 against the 1.2 limit). The
+  seeded pair draw follows the edge list, so the merged edges draw a different pair 163 (41st Street to Dade Boulevard by
+  Alton Road, 3005 m against a 2483 m shortest way; the router prefers the trunk). Before, the worst of 200 was 1.196. Not
+  changed (src/core/route.js and the test are not mine). test/service.test.js passes (a hand curb bay of the whole box
+  moved when the edge set changed under the first attempt; the island-only rule keeps it).
+- Checked and kept as mapped (not clearly wrong): Ocean Drive is one-way south from 5th to 15th Street in the data (the
+  brief expected two-way; two-way with parking from 1st to 5th and 100 % curb parking kept); Collins Avenue is two-way with
+  odd 2 and 3 lane blocks (a turn lane that comes and goes); Washington Avenue and Alton Road are mostly one-way pairs with
+  1.5 to 10 m medians (the data's gaps); 5th Street west of Alton is a divided pair; Euclid and Drexel Avenues end at 16th
+  Street (the OSM footway to Lincoln Road is dropped by the importer); Lincoln Road is pedestrian paving only between
+  Washington and Alton (plain street elsewhere). Residential streets draw 39 ft curb to curb (two 11 ft lanes and two 8 ft
+  parking lanes), the top of the plausible 26 to 44 ft; not narrowed, it would change every region's lots.
+- Not changed: curb parking on Collins and Washington (the data has no parking tags; real streets park there) and the
+  lane width on residential streets.
+
+## 0.12.6 steering and sound (2026-11-24)
+- Task 3, steering lock-in. Measured full lock held (Arcade, thumb driver `fullWheel`) at 15, 30, 50, 70 mph for the 22
+  driveable specs at all three presets. Standard sedan: 12 / 26 / 64 / 123 ft at 1.2 / 2.2 / 2.5 / 2.6 g, no rear slip
+  (sports 11 / 24 / 59 / 114 ft; pickup and SUV 32 to 33 ft at 30 mph, 152 ft at 70; van, truck, buses 36 to 40 ft at
+  30 mph, 178 to 191 ft at 70). Sharp cuts the radius about 10 %, Relaxed widens it about 25 %. Every spec was already
+  inside a US-car envelope, so TURN_G, tallK and the shape tables are unchanged ("no model change unless a class
+  fails"). test/steering-envelope.test.js pins radius, lateral g and rear slip (spin-out) per spec and preset, the
+  sedan under 120 ft at 30 mph and still 1.8 g at 70, and Sharp < Standard < Relaxed in radius.
+- Presets: Settings, Controls now has a Steering feel row (Standard, Relaxed, Sharp), two taps from pause; the
+  Handling lab keeps the same pick. menu-test gained one check; no rect loosened.
+- Task 14, sound by numbers (offline, node; nobody has listened). No buffer clipped. Over the limits: turbo whistle
+  (2 to 5 kHz band -12.6 dBFS RMS, 96 % of power there), blink beep (-15.1), jet turbine whine (-16.8), wet-road hiss
+  (-17.0, centroid 4.2 kHz), bullet whiz (-18.0), can pin (-19.5), rocket launch (centroid 5.4 kHz, peak -0.9), tank
+  boom (peak -0.3). Lowered or darkened: turbo to 0.3, beep 0.25, turbine 0.45, wet 0.45 with a 4.2 kHz low-pass, whiz 0.4,
+  pin 0.4, rocket hiss and roar top (centroid 3.3 kHz, level 0.8), tank boom 0.9. After: worst 2 to 5 kHz band -19.9 dBFS.
+  test/audio-harsh.test.js pins, for all 219 buffers, peak at most -0.9 dBFS, no sample over 0.95, the 2 to 5 kHz band
+  at most -19.5 dBFS RMS, and centroid ceilings per class (engines 1.0 kHz, sirens and horns 1.5, tires 4.2,
+  weapons 3.8, impacts 6.0, UI 3.5).
+
 ## City build time, second pass (2026-11-22)
 - Lot collision is lazy (src/world/collision.js `attachLotCollision`, `createLotLayer`): no lot shape is made at
   build. A collision cell (32 m) gets its lot shapes the first time any query (resolveCircle, raycast, lineClear,
@@ -385,8 +437,8 @@ Contract: docs/REVAMP.md 6.7. Details: docs/COMBAT.md.
   docs/AUDIO.md. Screenshot: docs/preview/radio-talk-caption.png.
 
 ## Known issues
-- A fighter that leaves the depot at part thrust can get stuck on the
-  shore (full thrust is fine).
+- Closed in 0.12.6: a fighter that left the depot at part thrust could
+  not turn onto the runway and ran into the shore (see 0.12.6 below).
 - Draw calls reach about 417 in a street view and 544 in a heavy fight,
   against a budget of about 420.
 - No test on the real phone (Galaxy S24 Ultra) since the overhaul.
@@ -887,3 +939,17 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Tried and left out (no gain measured): fusing the two signed-field row passes, integer column steps, pooling the spent byte rasters, a per-row building filter for bays, warming the step-distance kernels.
 - Gates: lint, 1067 tests, smoke --extra.
 - 0.12.4 published with the 0.12.5 build time work (city builds about 17 percent faster); CI failed the 3 s whole box tests three times before it.
+
+## 2026-11-24: 0.12.6 cockpit and flight (in the tree, no version bump)
+- Why: the owner called the dashboard view bad and first person horrible; planes "do not fly right" (docs/PLAN_V4.md tasks 7 and 8).
+- Review: headless shots at 748x360 of Hood and Cockpit in the sedan, pickup, sports car, van and truck, day and night, parked and at 55 mph, plus the boat's Bow and the plane and helicopter cockpits. Hood view was fine. Defects found in the cockpit:
+  - Fish-eye: a 78 degree vertical FOV is 118 degrees across a phone; the A-pillars cut the frame as thick diagonals, the mirror stretched into a bar, the road warped. Bow (74) and the plane (78) and helicopter (80) cockpits had the same.
+  - Gauges unreadable: the dial numbers were 6 to 7 px tall; the truck's four 45 degree spokes and hub covered both dials.
+  - Washed-out dash: the charcoal dash took full sun (the kit takes no shadow) and read as a pale gray slab.
+  - Truck wheel: a near wheel (short cab) kept its bottom edge in place and pushed its rim up into the road ahead.
+- Fixes: cockpit FOV 100 degrees across (COCKPIT_FOV_H; 59.7 vertical at 748x360), the rim's top and the whole cluster in frame, the bottom of the wheel may leave it. A digital mph readout between the dials (three digit quads from the atlas, UVs rewritten only when the shown speed changes, no allocation), 12 px or more at phone size. Cabin direct light share 0.45 (SHADE). Big wheels: spokes as a low and a near level pair, a smaller cluster under the rim (scaled with distance on buses), a near wheel keeps its top edge. The bus mirror hangs into the narrower frame. Bow 60, plane and helicopter cockpits 62 degrees vertical (about 100 across).
+- Flight review: scripts/flight-review.mjs flies scripted thumb sorties in the real worlds of all five regions: every plane off the runway (climb to 150 m, 30 degree circle, return, landing on its own strip downtown), every parked plane taxiing out at 0.35 and 0.6 thrust, each seaplane from its water spot, each helicopter up, out, back and down on its pad. Take-off runs (prop 295 m, stunt 165, jet 507, fighter 69 on BOOST-free full thrust) and rotation speeds are sensible; no stall or spin on gentle input; landings 0.7 to 0.9 m/s sink with wings level. The bug: both depot fighters and the apron fighter crashed in every part thrust exit (the 14 m/s2 push reached 30 m/s before the nose wheel could turn them, across the runway into the sea wall or the runway end). Fix: taxi assist in planeGround: with the stick over past 0.45 the push holds a taxi speed (9 m/s at 0.85 and beyond); straight ahead the run is unchanged. After: 0 failures but one pilot-pattern limit (the downtown seaplane's straight-in glide ends in a shore wall: the script's path, not the model). Touch stick: steer and pitch as before (dead band widens with sideways push, autolevel only with the stick centered), nothing found fighting the thumb.
+- Tests: carinterior (framing at 100 degrees for seven bodies incl. van and truck: rim top 56 to 90 percent down, cluster corners in frame, mph digits 12 px or more, horizon at mid height; readout digits and no upload while the speed holds), chasecam (cockpit 100 across; Bow and aircraft cockpits 90 to 105 across), aircraft (taxi out at 0.35, 0.6 and full thrust for fighter, jet, prop and stunt stays within the runway, under 14 m/s). The old "whole wheel in frame" check was what forced the fish-eye; it is replaced by the stricter readability checks above. ui-test cockpit check now 100 degrees across.
+- Draw budget unchanged: smoke street view 210 calls, 294k triangles.
+- Gates: lint, 1070 tests, smoke --extra, touch-test 309/309 (one rerun: a slider touchcancel check flaked once), ui-test 765/771: the 6 failures are the handling lab "Controls has 6 rows" check against the concurrent menu.js change (a seventh row) from task 3, not this work.
+- Router: trunk class cost 0.75 to 0.8 so a correct Alton Rd route stays within 1.2 of the shortest after the Beach lane merge (no test limit changed).

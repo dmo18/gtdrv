@@ -38,7 +38,7 @@ const FEET_PER_METER = 3.28084;
 // Cost factor per road class (lower = preferred). Pedestrian streets are
 // drivable in the sandbox but a route uses them only when nothing else goes.
 const CLASS_COST = {
-  motorway: 0.7, motorway_link: 0.8, trunk: 0.75, trunk_link: 0.85,
+  motorway: 0.7, motorway_link: 0.8, trunk: 0.8, trunk_link: 0.85,
   primary: 0.82, primary_link: 0.9, secondary: 0.88, secondary_link: 0.92,
   tertiary: 0.94, causeway: 0.85, residential: 1, unclassified: 1, street: 1, avenue: 0.9,
   living_street: 1.6, service: 1.4, pedestrian: 4,

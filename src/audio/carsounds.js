@@ -18,7 +18,7 @@ export const CAR_LOOPS = {
         const t = i / R.sr;
         out[i] += (Math.sin(TAU * 3100 * t) * 0.5 + Math.sin(TAU * 4650 * t + 0.6) * 0.18 + Math.sin(TAU * 6200 * t + 1.1) * 0.08) * (0.85 + 0.15 * m[i]);
       }
-      return normalize(removeDC(out), 0.7);
+      return normalize(removeDC(out), 0.3);
     });
   },
   birds(rng) {

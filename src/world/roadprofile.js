@@ -39,7 +39,9 @@ export const PED_STREETS = new Set(['Lincoln Road', 'Espanola Way', 'Española W
 // "Contents": class, oneway, lanes, lf, lb, name, bridge, mall).
 // opts: { district } (the district key at the way, for the sidewalk),
 // curbParking (a hand table says the street parks on its curbs where the
-// data has no parking tags: MIAMI_SPOTS.curbParking).
+// data has no parking tags: MIAMI_SPOTS.curbParking), turnLane (Miami: a
+// two-way road tagged lanes:forward / lanes:backward as 2 + 1 or 3 + 2 is
+// an equal number each way and a center turn lane).
 // Returns a new object with the edge contract's fields:
 // { lanesF, lanesB, laneW, parkL, parkR, median, center, width, oneway,
 //   sidewalk, ped, tagged }. `lanesF` is along the way's own direction
@@ -74,6 +76,15 @@ export function roadProfile(way, opts = {}) {
     if (lanes >= 2 && f + b > lanes) {
       b = Math.max(1, lanes - f);
       if (f + b > lanes) f = Math.max(1, lanes - b);
+    }
+    // The odd lane of a two-way road mapped as 2 + 1 (or 3 + 2) is the shared
+    // middle lane, which OSM assigns to either direction by way (Collins
+    // Avenue and Alton Road swapped 2/1 and 1/2 every block): with `turnLane`
+    // it is drawn as the painted center turn lane, so a street keeps one
+    // count along its length. The width is the same.
+    if (opts.turnLane && lanes >= 3 && (lanes & 1) && f + b === lanes && Math.abs(f - b) === 1) {
+      f = b = Math.min(f, b);
+      center = laneW;
     }
     lanesF = f;
     lanesB = b;

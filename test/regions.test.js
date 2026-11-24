@@ -62,10 +62,17 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // graph above): a building's land over 6400 m2 is cut on the 80 m grid,
 // big pieces downtown are parking lots, a house's land over 900 m2 is a
 // lawn (world/lots.js lotTypeFor; docs/PLAN_V3.md 13).
+// 0.12.6 Beach checklist re-pin (deliberate; docs/STATUS.md): a two-way
+// road on the Miami Beach island (x from 3500 m) tagged lanes:forward /
+// lanes:backward as 2 + 1 or 3 + 2 is now equal lanes each way plus a
+// center turn lane (roadprofile.js `turnLane`, same width), and equal
+// neighbors merge into one edge. Only the Beach (all five: junction blades,
+// buildings and lots follow the road strips) and the whole box change;
+// Downtown, North, West and South keep their pins.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '420a1304', edges: '733ec414', buildings: '48dee23c', lots: 'a7f7b5a4', lotGrid: '6b864194' },
+[WHOLE_BOX]: { nodes: '797851b0', edges: '2e4e0268', buildings: '0151a92c', lots: '78e4569b', lotGrid: '051fda0d' },
   'miami-downtown': { nodes: 'f293d4b5', edges: '42de42cb', buildings: '29b8852e', lots: '6d1ba28d', lotGrid: 'f0a57934' },
-  'miami-beach': { nodes: 'ae1f4dbf', edges: 'f8ee2f15', buildings: 'b7236251', lots: '85a2d451', lotGrid: 'e43ac181' },
+  'miami-beach': { nodes: '17dca3b5', edges: '065cd791', buildings: '7d8e9776', lots: 'f4183abf', lotGrid: 'bdea5737' },
   'miami-north': { nodes: '2debc075', edges: '337da624', buildings: 'b0e601a9', lots: '4fdb5c68', lotGrid: 'dd88bfe0' },
   'miami-west': { nodes: '1c6e85c8', edges: 'e974bccf', buildings: 'a44fb8ea', lots: '718ee8b4', lotGrid: '939234c7' },
   'miami-south': { nodes: '4c3195bc', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'd27b67ef', lotGrid: '6110b03c' },

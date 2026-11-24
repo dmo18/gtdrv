@@ -99,7 +99,7 @@ const LOOPS = {
     const n = len(2);
     const m = smoothRandom(n, 70, rng);
     return spec(n, [{ x: white(n, rng), bands: [['hp', 1500, 0.7, 1]] }],
-      (out) => normalize(removeDC(am(out, m, 0.75, 0.25)), 0.75), [['lp', 6500, 0.7]]);
+      (out) => normalize(removeDC(am(out, m, 0.75, 0.25)), 0.45), [['lp', 4200, 0.7]]);
   },
   wind(rng) {
     const n = len(2.5);
@@ -152,7 +152,7 @@ const LOOPS = {
         const a = tones[k][1] * 0.5;
         for (let i = 0; i < n; i++) out[i] += Math.sin(w * i + phases[k]) * a;
       }
-      return normalize(removeDC(out), 0.8);
+      return normalize(removeDC(out), 0.45);
     });
   },
   rotor(rng) {
@@ -745,7 +745,7 @@ const SHOTS = {
     }
     const out = z(n);
     svf(w, out, (x) => 3800 - 2200 * x, 3, 'bp');
-    return fadeEdges(normalize(out, 0.7), 64, 400);
+    return fadeEdges(normalize(out, 0.4), 64, 400);
   },
   reloadA(rng) {
     const out = z(len(0.16));
@@ -779,7 +779,7 @@ const SHOTS = {
     noiseBand(out, rng, 0, 0.012, 0.5, 'bp', 3800, 2);
     addMode(out, len(0.02), 3150, 0.05, 0.5);
     addMode(out, len(0.02), 5200, 0.025, 0.25);
-    return fadeEdges(normalize(out, 0.6));
+    return fadeEdges(normalize(out, 0.4));
   },
   // tink: a can bouncing on the street
   tink(rng) {
@@ -813,7 +813,7 @@ const SHOTS = {
       const t = i / R.sr;
       out[i] = (Math.sin(TAU * 2350 * t) + 0.3 * Math.sin(TAU * 4700 * t)) * Math.min(1, t / 0.002) * Math.exp(-t / 0.04);
     }
-    return fadeEdges(normalize(out, 0.5), 8, 120);
+    return fadeEdges(normalize(out, 0.25), 8, 120);
   },
   // lock tones: a short seek tick and a steady "locked" double tone
   lockSeek() {

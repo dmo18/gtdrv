@@ -101,7 +101,7 @@ export function placeEvents(city, seed = EVENT_SEED) {
   for (const t of city.travelPads || []) keep.push({ x: t.x, z: t.z, r: 90 });
   const oldRamps = Array.isArray(city.rampSpots) ? city.rampSpots.filter((r) => !r.event) : [];
   for (const r of oldRamps) keep.push({ x: r.x, z: r.z, r: 70 });
-  const usable = (e) => !!e.name && !e.bridge && !e.ped && !NO_CLASS[e.cls] && e.length >= 40;
+  const usable = (e) => !!e.name && !e.bridge && !e.ped && !NO_CLASS[e.cls] && e.length >= 40 && e.width >= 5; // a gate needs a street wider than one narrow ramp lane
   const S = { edge: new Int32Array(48), from: new Int32Array(48), cum: new Float64Array(48), n: 0, len: 0 };
   const P = { x: 0, z: 0, dx: 0, dz: 0, w: 0, edge: null, clear: 0, s: 0 };
   const Q = { x: 0, z: 0, dx: 0, dz: 0, w: 0, edge: null, clear: 0 };

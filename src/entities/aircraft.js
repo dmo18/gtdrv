@@ -451,7 +451,15 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
       // The take-off run: a firm push that fades toward rotation speed, so
       // the prop plane uses about 250 to 400 m of runway.
       const u = clamp(vf / vto, 0, 1.5);
-      vf += (s.groundAccel || s.thrust) * throttle * thrustK(a, s) * (1 - 0.35 * u * u) * dt;
+      const push = (s.groundAccel || s.thrust) * throttle * thrustK(a, s) * (1 - 0.35 * u * u) * dt;
+      // Taxi assist: while the stick turns hard the push holds a taxi
+      // speed, so a plane can turn out of its parking spot onto the
+      // runway. (The fighter's 14 m/s2 push ran it straight across the
+      // runway into the sea wall at any thrust: the nose wheel cannot turn
+      // at 30 m/s.) Straight ahead the take-off run is unchanged.
+      const cap = taxiCap(a.steer, vto);
+      if (vf < cap) vf = Math.min(cap, vf + push);
+      else if (manned) vf = approach(vf, cap, TAXI_SLOW * dt);
     } else {
       vf = approach(vf, 0, s.groundBrake * throttle * dt);
     }
@@ -528,6 +536,16 @@ function planeGround(a, s, manned, pitchIn, throttle, brake, dt, world) {
     a.y += 0.05;
     a.pitch = Math.max(a.pitch, 0.05);
   }
+}
+
+// Taxi speed (m/s) the push holds with the stick turning by `steer`: no
+// cap up to TAXI_STEER[0], the taxi speed from TAXI_STEER[1] on.
+export const TAXI_SPEED = 9;
+export const TAXI_STEER = [0.45, 0.85];
+const TAXI_SLOW = 5; // m/s2 of easing down to the taxi speed while turning hard
+export function taxiCap(steer, vto) {
+  const k = clamp((Math.abs(steer) - TAXI_STEER[0]) / (TAXI_STEER[1] - TAXI_STEER[0]), 0, 1);
+  return TAXI_SPEED + (vto * 1.5 - TAXI_SPEED) * (1 - k);
 }
 
 // Stick shaping for one thumb: a dead band around center, wider while the
