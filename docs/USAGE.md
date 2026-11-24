@@ -50,3 +50,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 
 2026-11-24 night: LOOP build helper 257k, security review 77k. Total about 10.3M of 16M. 0.12.0 published (gate passed, review: no critical/high; two lows closed in custom.js).
 2026-11-24 night: STREETSCAPE helper 356k. Total about 10.7M of 16M. 0.12.1 published (gate passed; geometry only, no new input paths, security review skipped by design).
+2026-11-24 night: 0.12.2 published after two CI timing flakes (whole box 3135 and 3384 ms vs 3000, runner noise; no test changed). Total about 10.8M of 16M. Remaining: RC items needing owner; full 60 min soaks not run.
