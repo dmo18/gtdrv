@@ -805,3 +805,11 @@ None critical or high.
 - Open: PERF, LOOP and STREETSCAPE partial work stays in the tree (0.12.0).
 
 Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PERF, LOOP and STREETSCAPE edits and failed the lots build-time check on the build server. Those edits were pulled out into docs/wip/0.12-partial.patch (apply with `git apply`) and 0.11.1 is the handling change only, from 0.11.0. Lesson: never publish with partial helper work in the tree; park it as a patch first.
+
+## 2026-11-24: version 0.11.2 Strong steering at speed (owner: fully rotated wheel barely changed trajectory)
+
+- Cause measured: wheel, curve and shaping passed full input through; the loss was the grip-limited turn (1.06 g at 70 mph, 18 degrees in the first second, 93 m radius). Arcade player steering is now a yaw-rate command, linear in the input (0.04 s lag), target lateral g 2.0 at 20 mph, 2.3 at 35, 2.6 from 55 to 110, 2.3 at 130, scaled for tall bodies (SUV, pickup 0.81; van, box truck 0.65). Sedan at 70 mph full wheel: 44 degrees in the first second, 38 m radius, rear slip under 0.1 degree. Sim, AI, service vehicles, handbrake slide, straight line unchanged.
+- Center response: Standard arcShape 1.4 (seed sweep of 30 thumb models: lane changes at 65 and 90 mph under 3.3 s, at most one overshoot; pinned as LANE_CHANGE_SWEEP). Relaxed 1.6, Sharp linear.
+- Wheel: travel past full lock is capped at 10 percent slack, so reversing responds at once.
+- Gate: lint, 974 tests, smoke --extra, touch-test 243/243.
+- If twitchy near center: raise arcShape; if still loose: it is not the model, tell me what you see.
