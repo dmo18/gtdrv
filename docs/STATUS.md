@@ -813,3 +813,9 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Wheel: travel past full lock is capped at 10 percent slack, so reversing responds at once.
 - Gate: lint, 974 tests, smoke --extra, touch-test 243/243.
 - If twitchy near center: raise arcShape; if still loose: it is not the model, tell me what you see.
+
+## 2026-11-24: version 0.11.3 Crowd spike (owner Phone check: peds 10.7 ms, 4 slow frames)
+
+- peds read a typed per-step snapshot of vehicles (no per-read allocation), spawn tries capped at 4 per step, mesh warmers build one mesh per step while the title is up. Under 4x throttle: peds worst call 16.6 to 7.8 ms, frames over budget 1 to 0, heat scenario steps over 4 ms per minute 77 to 60, start at 4x 11.0 to 9.5 s.
+- scripts/perf-phonecheck.mjs (--alloc) drives the Phone check headless at 4x throttle.
+- Not done: memory 185 MB at 4x forced GC (111 MB typed arrays: tile mesh pool cap 48 MB in meshbuilder.js, lot and block grids ~30 MB); combat 9.6 ms in the check's own fight; stepVehicle, resolveCircle, ground and traffic scan allocate (GC pauses 15 ms); 83 ms frame probably the Phone check's own resize.
