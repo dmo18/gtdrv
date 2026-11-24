@@ -14,10 +14,10 @@
 // new shader programs, geometries or textures, the top functions of a CPU profile with
 // --profile), the lowest adaptive resolution those frames lead to (render/adaptres.js fed
 // the frame times), the start time and the memory after a forced collection.
-// usage: node scripts/phonecheck-run.mjs [--check] [--profile] [--passes 3] [--rate 4]
+// usage: node scripts/perf-phonecheck.mjs [--check] [--profile] [--passes 3] [--rate 4]
 //          [--map miami-downtown] [--no-heat] [--seconds 60] [--settle 10] [--quality 1.25]
-//          [--root dir] [--out shots/phonecheck-run.json] [--quiet] [--all] [--gpu]
-//   --check    exit 1 when a pinned limit below is missed (the gate: npm run gate -- --phone)
+//          [--root dir] [--out shots/perf-phonecheck.json] [--quiet] [--all] [--gpu]
+//   --check    exit 1 when a pinned limit below is missed (not wired into the gate yet)
 //   --profile  an unminified build under the CPU profiler: names the functions of each slow frame
 //   --alloc    a sampled heap profile of the drive: the top allocating functions
 //   --root     another source tree to build and measure (an older version in a scratch copy)
@@ -325,15 +325,14 @@ export function allocTop(profile, top = 20) {
   const walk = (node) => {
     const cf = node.callFrame;
     const key = (cf.functionName || '(anonymous)') + ' ' + String(cf.url).split('/').pop() + ':' + (cf.lineNumber + 1);
-    let size = 0;
-    for (const s of node.selfSize !== undefined ? [node.selfSize] : []) size += s;
+    const size = node.selfSize || 0;
     total += size;
     self.set(key, (self.get(key) || 0) + size);
     for (const c of node.children || []) walk(c);
   };
   walk(profile.head);
   const list = [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, v]) => `${k} ${Math.round(v / 1024)} KB`);
-  return { totalMb: +(total / 1048576).toFixed(1), top: list };
+  return { totalMb: +(total / 1048576).toFixed(1), totalKb: Math.round(total / 1024), top: list };
 }
 
 // Pure: the fastest pass of each frame. passes: [{ rows }]; frames whose state differs from the
@@ -381,7 +380,7 @@ async function main() {
   const quality = Number(opt('--quality', 1.25));
   const map = opt('--map', 'miami-downtown');
   const srcRoot = resolve(opt('--root', here));
-  const outFile = resolve(opt('--out', join(here, 'shots/phonecheck-run.json')));
+  const outFile = resolve(opt('--out', join(here, 'shots/perf-phonecheck.json')));
   const profileOn = has('--profile');
   const nPass = Math.max(1, Number(opt('--passes', profileOn ? 2 : 3)));
   const heat = !has('--no-heat');
@@ -510,7 +509,7 @@ async function main() {
       const slow = [];
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        if (excess[i] <= overMs / 4) continue;
+        if (excess[i] <= overMs / 4 && r[5] <= 4) continue; // slow frames and system calls over 4 ms
         const prev = passes[f.from[i]][key].rows[i - 1] || r;
         const row = {
           frame: i, s: +(i / 60).toFixed(1), ms: +r[0].toFixed(1), excess: +excess[i].toFixed(1), stepMs: +r[1].toFixed(1), drawMs: +r[2].toFixed(1),

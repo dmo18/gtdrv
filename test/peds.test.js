@@ -6,7 +6,7 @@ import { createRng } from '../src/core/rng.js';
 import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
 import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
-import { createPed, placePed, stepPed, createPeds, crowdAt } from '../src/systems/peds.js';
+import { createPed, placePed, stepPed, createPeds, crowdAt, createVehicleSnap, snapVehicles, SPAWN_TRIES_PER_STEP } from '../src/systems/peds.js';
 import { createTraffic, createDriver, placeDriver } from '../src/systems/traffic.js';
 import { makeFightGame, step as fightStep, cityAndCollision } from './fightgame.js';
 
@@ -126,6 +126,50 @@ test('no NaN over 5000 steps with random vehicles moving about', () => {
       assert.ok(Number.isFinite(p.x + p.z + p.heading + p.stride + p.speed), `NaN at ${i}`);
     }
   }
+});
+
+test('a craft snapshot taken once a step walks the peds exactly as reading the craft each call', () => {
+  // The system snapshots the craft once a step (docs/PERF.md, 0.12.0); stepPed alone reads them.
+  const run = (snap) => {
+    const rng = createRng(7);
+    const peds = [];
+    for (let i = 0; i < 10; i++) {
+      const p = createPed(rng);
+      placePed(p, plain[i % plain.length], rng, 'loop');
+      peds.push(p);
+    }
+    const cars = [];
+    for (let i = 0; i < 5; i++) {
+      const b = plain[i % plain.length];
+      const c = createVehicle('sedan', b.x0 + 2, b.z0 + 2, rng.range(0, 6), rng);
+      c.speed = rng.range(0, 20);
+      cars.push(c);
+    }
+    cars.push(null);
+    cars[2].wrecked = true;
+    const ctx = makeCtx(cars);
+    if (snap) ctx.vs = createVehicleSnap();
+    let bumps = 0;
+    for (let i = 0; i < 1500; i++) {
+      for (const c of cars) {
+        if (!c) continue;
+        if (i % 90 === 0) c.heading += rng.range(-1, 1);
+        c.vx = Math.cos(c.heading) * c.speed;
+        c.vz = Math.sin(c.heading) * c.speed;
+        c.x += c.vx * DT;
+        c.z += c.vz * DT;
+      }
+      if (snap) snapVehicles(cars, ctx.vs);
+      for (const p of peds) {
+        stepPed(p, DT, ctx);
+        if (p.bumpBy) bumps++;
+      }
+    }
+    return { at: peds.map((p) => [p.x, p.z, p.state, p.heading]), bumps };
+  };
+  const a = run(false), b = run(true);
+  assert.deepEqual(b, a);
+  assert.ok(SPAWN_TRIES_PER_STEP >= 2, 'a step still makes both spawns the shared gate allows');
 });
 
 // --- Drivers who bail out (task 27) ---

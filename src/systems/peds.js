@@ -16,6 +16,10 @@ import { createGridIndex, beginSpawnStep, takeSpawn, spawnsLeft, SPAWNER } from 
 // Sidewalk lines checked against the buildings and the road in one step at
 // most (each is checked once; the rest wait for a later step).
 export const LINE_CHECKS_PER_STEP = 6;
+// Spawn tries (a pick and up to ten placements, each with a sight line) in
+// one step at most: a refill after a teleport or a quiet street could make a
+// dozen failed tries in one step (the 16 ms peds spike of 0.11.2, docs/PERF.md).
+export const SPAWN_TRIES_PER_STEP = 4;
 
 const INSET = 2; // walking line, meters inside the block edge
 const RADIUS = 0.35;
@@ -888,7 +892,9 @@ export function createPeds(game, { max = 30 } = {}) {
     if (fillLeft <= 0) return;
     const px = game.player.x, pz = game.player.z;
     const limit = cap();
+    let tries = 0;
     while (fillLeft > 0 && active < limit && spawnsLeft(game) > 0) {
+      if (++tries > SPAWN_TRIES_PER_STEP) break; // the rest on the next step
       lineSkipped = false;
       if (spawnOne(px, pz, first)) {
         fillLeft--;

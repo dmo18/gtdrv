@@ -123,3 +123,76 @@ What changed (all in `src/render`, plus the lamp streaks in `src/systems/daynigh
   neutral roughness and metalness maps (one program with glass and office); ground, sand and
   wood take a flat normal map (one program with the sidewalk); the windsock is in the detail
   material; two-sided see-through markers, spray, rotor discs and jet flames draw in one pass.
+
+## Phone check drive at 4x (0.12.0 work, after 0.11.2)
+
+Owner's phone (S24 Ultra, 0.11.2, Downtown, five stars): median 16.6 ms, worst 83.3 ms,
+4 frames over 33 ms, res 2.00, start 2.8 s, 202 MB, slowest system call `peds 10.7 ms`.
+
+Stand-in: `node scripts/perf-phonecheck.mjs` (taken from the parked
+`docs/wip/0.12-partial.patch`, plus `--alloc`, a sampled heap profile of the drive). It builds
+the game, plays 10 s of first play and then the Phone check's own 60 s drive with five stars
+held, at 4x CPU throttle, one fixed step and one draw a frame, main-thread time only (draw calls
+left out), each frame the fastest of 2 passes. "Over" is a frame more than 28 ms above the
+running level, which matched the phone's frames over 33 ms on 0.7.0 and 0.10.0. On 0.11.2 the
+slowest peds call here (16.6 ms) was about 1.55 times the phone's (10.7 ms).
+
+    node scripts/perf-phonecheck.mjs --passes 2 --settle 10            the table below
+    node scripts/perf-phonecheck.mjs --passes 1 --profile --all        functions behind each slow frame or call over 4 ms
+    node scripts/perf-phonecheck.mjs --passes 1 --alloc                where the drive allocates
+    node scripts/perf-phonecheck.mjs --root <copy of an older tree>    the same for another version
+
+Causes, ranked by milliseconds (0.11.2, 4x):
+
+1. peds: worst call 16.6 ms, mean 1.51 ms a step (the costliest system on average). Every ped
+   tested every craft twice a step (threat scan and body push), about 4,500 reads of `x`, `z`,
+   `vx`, `vz`, `y`, `radius` from craft of many object shapes, and each such read boxed a number:
+   `stepPed` plus `scanThreat` were 158 MB of the drive's 1.2 GB of allocation. A refill
+   (teleport, quiet street) could also make a dozen failed spawn tries (pick plus ten sight lines)
+   in one step.
+2. Garbage collection: 312 KB allocated a frame, two major collections of 17 and 24 ms in the
+   drive, landing on whichever system ran at the time. After peds, the largest sources are
+   outside the systems: `stepVehicle` 128 MB, three.js uniform upload 97 MB, `resolveCircle`
+   54 MB, ground `geoSurface`/`net1` 67 MB, traffic `scan` 32 MB (the same many-shape craft reads).
+3. Mesh builds in the first seconds of play: one car body of each of the 18 specs (traffic
+   warmer, 50 to 80 ms each, near body 80 percent of it), parked lots (70 to 90 ms) and the fleet
+   (40 ms): the 250 to 300 ms frames of first play. The drive itself compiled no shader program.
+
+What changed:
+
+- `src/systems/peds.js`: the system snapshots the craft once a step into a Float64Array
+  (`snapVehicles`), and `stepPed` reads that (alone, as in node tests, it snapshots per call; a
+  test pins that both walk the same). At most `SPAWN_TRIES_PER_STEP` (4) spawn tries a step; the
+  rest go on the next step.
+- `src/core/spatial.js`: the mesh warmers (traffic, police) build one mesh every step while the
+  title screen is up, so on the phone the list is done before Start is tapped (test added).
+- `scripts/perf-phonecheck.mjs` and `test/perf-phonecheck.test.js`.
+
+| measure (4x, 2 passes) | 0.11.2 | after |
+|---|---|---|
+| drive: frames over (28 ms excess) | 1 | 0 |
+| drive: worst excess, in phone ms | 28.3 (34) | 20.2 (29) |
+| drive: median, p99, worst main-thread frame, ms | 20.2, 38.0, 53.9 | 20.3, 33.4, 54.5 |
+| drive: slowest system call | peds 16.6 | combat 9.6 (peds 7.8) |
+| drive: peds mean a step, ms | 1.51 | 1.32 |
+| drive: allocated a frame; worst collection | 312 KB; 24.3 ms | 279 KB; 15.5 ms |
+| first play: slowest system call | parked 89.3 | traffic 73.7 |
+| start at 4x, s; memory after collection, MB | 11.0; 185 | 9.5; 185 |
+| perf-scenarios --quick: heat over4/min, worst step | 77.1, 19.7 | 60, 12.3 |
+| perf-scenarios --quick: memory 1x, MB | 169.3 | 170.0 |
+
+Start and the scenarios' small steps vary by 10 percent or more from run to run here.
+
+Not reached yet, and where to look next:
+
+- Memory (target under 185 MB on the phone): the heap is 111 MB of typed arrays. Holders after a
+  forced collection: the tile mesh scratch pool in `src/render/meshbuilder.js` 25.6 MB (its cap
+  `POOL_MAX` is 48 MB), lot and block grids in the city (`lotIn`, `blockLab`, `lotGrid`) about
+  30 MB, three.js binding states 6.5 MB, compiled code 13 MB. Car geometry is small (the spec
+  cache holds about 1 MB). A lower pool cap is the cheapest saving but means more collections
+  while tiles stream: measure with this script before changing it.
+- Slowest calls still over 4 phone ms (about 6 ms here): combat (the check's own fight
+  fixture), parked (lot hour change), peds, police spawns (car, tank, helicopter).
+- Allocation in `stepVehicle`, collision and ground (core files): the same many-shape reads.
+- The phone's 83 ms worst frame is not reproduced here; the check's own full screen request
+  resizes every render target at its start (the parked patch skips those frames in phonecheck.js).
