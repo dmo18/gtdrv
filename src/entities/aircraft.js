@@ -192,6 +192,10 @@ function surfaceAt(world, x, z) {
 function keepShoreSide(a, city, side, margin) {
   const d = city.shoreDist(a.x, a.z) * side;
   if (!(d < margin)) return;
+  // On a bridge or causeway deck (ground over the water): the rails hold
+  // it, as they hold a car. (The push shoved a plane taxiing on a deck
+  // into the rail and wrecked it; scripts/collision-sweep.mjs.)
+  if (side > 0 && d < 0 && typeof city.isGround === 'function' && city.isGround(a.x, a.z)) return;
   const e = 1;
   let gx = (city.shoreDist(a.x + e, a.z) - city.shoreDist(a.x - e, a.z)) * side;
   let gz = (city.shoreDist(a.x, a.z + e) - city.shoreDist(a.x, a.z - e)) * side;

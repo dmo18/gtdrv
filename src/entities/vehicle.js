@@ -1330,10 +1330,11 @@ function collideStatic(v, col) {
     if (c > maxClose) maxClose = c;
   }
   // The box corners stick out of the three circles by up to 0.2 of the
-  // width: by a sea wall or a rail they are probed too, so no corner
-  // reaches over the water (docs/PLAN_V3.md section 6 item 6).
+  // width: by a sea wall or a rail they are probed too (against the walls
+  // and rails alone), so no corner reaches over the water (docs/PLAN_V3.md
+  // section 6 item 6).
   const edges = col.layerNamed ? col.layerNamed('edges') : null;
-  if (edges && edges.cell(Math.floor(v.x / 32), Math.floor(v.z / 32)).length) {
+  if (edges && edgeWallsNear(edges, v.x, v.z, s.length / 2 + 0.5)) {
     const hl = s.length / 2 - CORNER_R, hw = s.width / 2 - CORNER_R;
     for (let k = 0; k < 4; k++) {
       const lo = k < 2 ? hl : -hl, la = k === 0 || k === 3 ? hw : -hw;
@@ -1342,7 +1343,10 @@ function collideStatic(v, col) {
       // land the point on the other line.
       for (let pass = 0; pass < 2; pass++) {
         const cx = v.x + ox, cz = v.z + oz;
-        const res = col.resolveCircle(cx, cz, CORNER_R, y);
+        // The edge layer only: a corner tip inside a thin lot wall or a post
+        // left it by the far face and pulled the car through (0.33 m into a
+        // 0.5 m wall; scripts/collision-sweep.mjs).
+        const res = col.resolveLayer ? col.resolveLayer('edges', cx, cz, CORNER_R, y) : col.resolveCircle(cx, cz, CORNER_R, y);
         if (!res.hit) break;
         const c = contact(v, res.x - cx, res.z - cz, ox, oz, inertiaK);
         if (c > maxClose) maxClose = c;
@@ -1352,6 +1356,16 @@ function collideStatic(v, col) {
   return maxClose;
 }
 const CORNER_R = 0.08;
+// True when a sea wall or rail is listed in any edge cell the box within
+// reach of (x, z) touches. (Was the center's cell only: a long truck with
+// its center one cell back put its front corners 0.6 m past a bridge
+// rail; scripts/collision-sweep.mjs, test/collision-sweep.test.js.)
+function edgeWallsNear(edges, x, z, reach) {
+  const cx0 = Math.floor((x - reach) / 32), cx1 = Math.floor((x + reach) / 32);
+  const cz0 = Math.floor((z - reach) / 32), cz1 = Math.floor((z + reach) / 32);
+  for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) if (edges.cell(cx, cz).length) return true;
+  return false;
+}
 
 // One contact: move the car by the push (dx, dz) found for its body point
 // at offset (ox, oz) and bounce that point's velocity. Returns the closing

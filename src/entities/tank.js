@@ -100,6 +100,42 @@ function wallCircle(t, col, off, r) {
   return -vn;
 }
 
+// The sea walls and rails (world/edgelines.js, 0.9 m) stop the tank too,
+// though it rolls over other things 1 m tall: its two body circles and
+// its four box corners against the 'edges' layer alone. (Was ignored: a
+// tank drove 1 m and more past a sea wall and over a bridge rail;
+// scripts/collision-sweep.mjs, test/collision-sweep.test.js.)
+const EDGE_CORNER_R = 0.08;
+function edgePoint(t, col, ox, oz, r) {
+  const cx = t.x + ox, cz = t.z + oz;
+  const res = col.resolveLayer('edges', cx, cz, r, 0);
+  if (!res.hit) return 0;
+  const dx = res.x - cx, dz = res.z - cz;
+  const d = Math.sqrt(dx * dx + dz * dz);
+  if (!(d > 1e-9)) return 0;
+  t.x += dx;
+  t.z += dz;
+  const nx = dx / d, nz = dz / d;
+  const vn = t.vx * nx + t.vz * nz;
+  if (vn >= 0) return 0;
+  t.vx -= vn * nx * 1.05;
+  t.vz -= vn * nz * 1.05;
+  return -vn;
+}
+function edgeWalls(t, col) {
+  const s = t.spec;
+  const ch = Math.cos(t.heading), sh = Math.sin(t.heading);
+  const off = s.length / 4, r = s.width / 2;
+  let close = Math.max(edgePoint(t, col, ch * off, sh * off, r), edgePoint(t, col, -ch * off, -sh * off, r));
+  const hl = s.length / 2 - EDGE_CORNER_R, hw = s.width / 2 - EDGE_CORNER_R;
+  for (let k = 0; k < 4; k++) {
+    const lo = k < 2 ? hl : -hl, la = k === 0 || k === 3 ? hw : -hw;
+    const c = edgePoint(t, col, ch * lo - sh * la, sh * lo + ch * la, EDGE_CORNER_R);
+    if (c > close) close = c;
+  }
+  return close;
+}
+
 // The shoreline is a wall: keep the land side (the causeway is land).
 function keepOnLand(t, city) {
   const d = city.shoreDist(t.x, t.z);
@@ -112,7 +148,10 @@ function keepOnLand(t, city) {
   if (!(gl > 1e-9)) return;
   gx /= gl;
   gz /= gl;
-  const push = Math.min(edge - d, 4);
+  // At most 1 m a step, before the walls are resolved (it was up to 4 m
+  // after them: a tank near the water jumped through a lamp post;
+  // scripts/collision-sweep.mjs).
+  const push = Math.min(edge - d, 1);
   t.x += gx * push;
   t.z += gz * push;
   const vin = t.vx * gx + t.vz * gz;
@@ -190,17 +229,18 @@ export function stepTank(t, controls, dt, world) {
   t.y = 0;
   t.vy = 0;
 
-  // ---- Walls (two circles at +-length/4) and the shore.
+  // ---- The shore, then the walls (two circles at +-length/4).
+  const city = world && world.city;
+  if (city && city.shoreDist) keepOnLand(t, city);
   let close = 0;
   const col = world && world.collision;
   if (col) {
     const r = s.width / 2, off = s.length / 4;
     for (let pass = 0; pass < 2; pass++) {
       close = Math.max(close, wallCircle(t, col, off, r), wallCircle(t, col, -off, r));
+      if (col.resolveLayer) close = Math.max(close, edgeWalls(t, col));
     }
   }
-  const city = world && world.city;
-  if (city && city.shoreDist) keepOnLand(t, city);
   if (close > 0) {
     t.impact = close;
     // Armored: only a hard crash hurts (ram armor 0.15).

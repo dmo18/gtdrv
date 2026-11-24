@@ -92,6 +92,17 @@ export function createCollisionWorld() {
   // lower than that are ignored, so aircraft can fly over rooftops.
   // A cell's static shapes first, then its lot shapes.
   function resolveCircle(x, z, r, y = 0) {
+    return resolveIn(x, z, r, y, -1);
+  }
+  // The same against one lazy layer only (by name; no such layer: no hit).
+  // The tank rolls over what is 1 m tall but not over the sea walls and
+  // rails (0.9 m): it resolves those on their own (entities/tank.js).
+  function resolveLayer(name, x, z, r, y = 0) {
+    for (let i = 1; i < layers.length; i++) if (layers[i] && layers[i].name === name) return resolveIn(x, z, r, y, i + 1);
+    return resolveIn(x, z, r, y, -2);
+  }
+  // only: -1 every pass, -2 none, else the one pass (0 static, k layer k - 1).
+  function resolveIn(x, z, r, y, only) {
     out.x = x;
     out.z = z;
     out.nx = 0;
@@ -106,6 +117,7 @@ export function createCollisionWorld() {
     for (let cx = cx0; cx <= cx1; cx++) {
       for (let cz = cz0; cz <= cz1; cz++) {
         for (let pass = 0; pass <= NL; pass++) {
+          if (only !== -1 && pass !== only) continue;
           const list = pass ? layerList(layers[pass - 1], cx, cz) : cells.get(key(cx, cz));
           if (!list) continue;
           for (let i = 0; i < list.length; i++) {
@@ -415,7 +427,7 @@ export function createCollisionWorld() {
   }
 
   return {
-    addBox, addCircle, addSegment, setEnabled, resolveCircle, raycast, lineClear, heightAt, setLotLayer, setLotHour, addLayer, layerNamed,
+    addBox, addCircle, addSegment, setEnabled, resolveCircle, resolveLayer, raycast, lineClear, heightAt, setLotLayer, setLotHour, addLayer, layerNamed,
     breakShape, stepBroken, isBroken, breaks,
     get breakSeq() { return breakSeq; },
     get brokenCount() { return broken.length; },

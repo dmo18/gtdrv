@@ -132,6 +132,7 @@ function circleOffset(s, i) {
 
 const MAX_SUBSTEP_MOVE = 0.3;
 const SHORE_MARGIN = -1.5; // boats keep shoreDist below this
+const CORNER_MARGIN = -0.1; // and the hull's corners below this
 
 export function stepBoat(b, controls, dt, world) {
   const s = b.spec;
@@ -362,19 +363,30 @@ function collideStatic(b, col) {
   return maxClose;
 }
 
-// Keep bow, middle and stern out of the shallows: where shoreDist is
+// Keep bow, middle and stern out of the shallows and the hull corners off
+// the land: where shoreDist is
 // above the margin, push back out along the outward gradient and kill
 // velocity into the shore. Returns the closing speed (0 if none).
 function keepOffShore(b, city) {
   const s = b.spec;
   const ch = Math.cos(b.heading), sh = Math.sin(b.heading);
   const reach = s.length * 0.45;
+  const hl = s.length / 2, hw = s.width / 2;
   let close = 0;
-  for (let i = 0; i < 3; i++) {
-    const off = i === 0 ? reach : i === 1 ? 0 : -reach;
-    const qx = b.x + ch * off, qz = b.z + sh * off;
+  for (let i = 0; i < 7; i++) {
+    // Bow, middle and stern on the center line, then the hull's four
+    // corners, which keep off the land itself (a wide hull's corner went
+    // 0.5 m onto the shore at an angle; scripts/collision-sweep.mjs).
+    let qx, qz, margin;
+    if (i < 3) {
+      const off = i === 0 ? reach : i === 1 ? 0 : -reach;
+      qx = b.x + ch * off; qz = b.z + sh * off; margin = SHORE_MARGIN;
+    } else {
+      const lo = i < 5 ? hl : -hl, la = i === 3 || i === 6 ? hw : -hw;
+      qx = b.x + ch * lo - sh * la; qz = b.z + sh * lo + ch * la; margin = CORNER_MARGIN;
+    }
     const d = city.shoreDist(qx, qz);
-    if (!(d > SHORE_MARGIN)) continue;
+    if (!(d > margin)) continue;
     const e = 1;
     let gx = city.shoreDist(qx + e, qz) - city.shoreDist(qx - e, qz);
     let gz = city.shoreDist(qx, qz + e) - city.shoreDist(qx, qz - e);
@@ -382,7 +394,7 @@ function keepOffShore(b, city) {
     if (!(gl > 1e-9)) continue;
     gx /= gl;
     gz /= gl; // points inland
-    const push = Math.min(d - SHORE_MARGIN + 0.05, 20);
+    const push = Math.min(d - margin + 0.05, 20);
     b.x -= gx * push;
     b.z -= gz * push;
     const vin = b.vx * gx + b.vz * gz;

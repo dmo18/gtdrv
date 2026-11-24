@@ -29,6 +29,7 @@ const ROAD_MODES = { car: true, tank: true, foot: true };
 const GOAL_MOVE_M = 25; // a goal that moves farther than this gets a new route
 const PREP_M = 152; // 500 ft: the first chime before a turn
 const NOW_M = 18; // the chime at the turn
+const AIM_AHEAD_M = 45; // the arrow aims this far ahead on the route
 const STREET_EVERY = 0.25; // seconds between street lookups
 export const UTURN_WAIT_S = 3; // the route has wanted a U-turn this long before the pill asks for one
 export const REPLAN_S = 1; // while it wants one, search again this often (a way ahead wins)
@@ -104,6 +105,7 @@ export function createObjective(game) {
   const router = canRoute ? createRouter(city) : null;
   const tracker = router ? createTracker(router) : null;
   const routed = { x: 0, z: 0, src: '', on: false, legal: true };
+  const aim = { x: 0, z: 0 };
   const lines = { kind: '', text: '', soon: false };
   let uturnT = 0, replanT = 0; // seconds the route has wanted a U-turn; time to the next search
   const street = { edge: -1, name: '', cross: '', d: 0, side: 1 };
@@ -257,7 +259,10 @@ export function createObjective(game) {
       const hud = game.hud;
       const routing = sys.routing && goal.on;
       if (goal.on && p) {
-        this.angle = objectiveAngle(p.x, p.z, game.camHeading || 0, goal.x, goal.z);
+        // On a route the arrow points along it (a point ahead on the line, so
+        // it agrees with the turn pill); with no route, at the goal itself.
+        if (routing && tracker.lookAhead(AIM_AHEAD_M, aim)) this.angle = objectiveAngle(p.x, p.z, game.camHeading || 0, aim.x, aim.z);
+        else this.angle = objectiveAngle(p.x, p.z, game.camHeading || 0, goal.x, goal.z);
         this.distance = routing ? tracker.remaining : Math.hypot(goal.x - p.x, goal.z - p.z);
       }
       // The street line and the burning alert first (no goal needed).

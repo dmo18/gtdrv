@@ -26,7 +26,7 @@ since the Phone check that led to 0.11.3, and that check reported timing, not fe
 | No wastelands | lots by rule, wasteland-probe, streetscape tests | lot to lot 5 m steps, heavy hedges, plain paving round downtown towers | yes |
 | Smooth at 60 | headless 4x: 0 frames over budget, heap 153 to 162 MB | GC pauses 15 ms (stepVehicle, resolveCircle, ground, traffic allocate); shader programs 75 (target 60) | last real line: 4 slow frames, peds 10.7 ms |
 | Fun, not points | loop-test 32 ok; no money, ads, purchases | that events are fun: slow staged cars and approach direction untuned | yes |
-| Offline, Play Store ready | pwa test, offline-test script, no runtime network, pinned deps | store pictures and text may predate Miami and the loop; 60 minute soaks not run; Android bundle deferred; Actions not pinned to SHAs | WebView behaviour |
+| Offline, Play Store ready | pwa test, offline-test script, no runtime network, pinned deps | store pictures and text may predate Miami and the loop; 60 minute soaks not run; Android bundle deferred; Actions not pinned to SHAs | WebView behavior |
 
 ## 2. Ranked work an agent can do alone
 

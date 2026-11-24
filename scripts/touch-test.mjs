@@ -5,6 +5,7 @@
 // For each steering style (wheel, buttons, tilt fallback, slider) it holds GAS
 // with one finger and steers with another, then BRAKE plus steer, FIRE plus
 // steer, a look drag beside the steering, a third finger in the steering zone,
+// (the weapon controls of boat, tank, helicopter and plane with a steering finger down),
 // a touchcancel and a finger that slides off the screen edge. The steering the
 // game receives (window.__rw.input.steer after poll) is recorded against the
 // finger path; the test fails on any lost, stolen, reversed, jumping or stuck
@@ -46,6 +47,8 @@ try {
     await pg.goto(`${base}?autostart&map=miami-downtown`);
     await pg.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 120000 });
     await pg.waitForTimeout(1200);
+    // The fleet (boats, tank, aircraft) is made over the first seconds of play: wait for it.
+    await pg.waitForFunction(() => !window.__rw.fleet || window.__rw.fleet.ready, null, { timeout: 240000 });
     // Freeze the simulation: the test reads the touch source through input.poll() itself.
     await pg.evaluate(() => {
       const g = window.__rw;
@@ -320,6 +323,85 @@ try {
       await up(2);
       await up(1);
       check(`${tag} after SWAP: steer and gas released`, (await read()).s === 0 && (await read()).t === 0);
+    }
+    // Weapon controls while a thumb steers, in every craft (owner: "should be able to switch weapons
+    // when driving"). Car and boat: SWAP (tap cycles, hold opens the wheel). Tank, helicopter, plane:
+    // every weapon has its own button (CANNON/COAX, GUN/MSL/BOMB), so "switching" is firing another
+    // one. Each control must be on screen, at least 48 px, outside the steering zone, and must work
+    // with a finger already down in the steering zone (and GAS held where there is one).
+    await pg.evaluate(() => { window.__rw.touch.setSteering('wheel', 1); window.__rw.touch.update(1 / 60); });
+    const heldNames = (names) => pg.evaluate((ns) => {
+      const g = window.__rw, i = g.input;
+      for (let k = 0; k < 2; k++) g.touch.update(1 / 60);
+      i.poll();
+      const o = { steer: i.steer, pitch: i.pitch, moveX: i.moveX };
+      for (const n of ns) o[n] = i.held(n);
+      return o;
+    }, names);
+    const enterKind = (kind, specId) => pg.evaluate(([k, sid]) => {
+      const g = window.__rw;
+      const n = (x) => (x.spec && x.spec.mounts ? x.spec.mounts.length : 0);
+      let v = null;
+      for (const x of g.vehicles) if (x.kind === k && (!sid || (x.spec && x.spec.id === sid)) && (!v || n(x) > n(v))) v = x; // the best armed one
+      if (!v) return null;
+      g.enterVehicle(v);
+      g.touch.update(1 / 60);
+      g.touch.update(1 / 60);
+      const m = (v.spec && v.spec.mounts) || [];
+      const bomb = m.filter((q) => q === 'bomb' || q === 'drop').length, other = m.length - bomb;
+      return { mounts: m, gun: other >= 1, msl: other >= 2, bomb: bomb >= 1 };
+    }, [kind, specId || null]);
+    const zoneNow = await rect('.rw-stickzone');
+    const CRAFT = [
+      ['boat', null, [['carswap', null]]],
+      ['tank', null, [['cannon', 'fire'], ['coax', 'fire2']]],
+      ['heli', null, [['gun', 'fire'], ['msl', 'fire2'], ['bomb', 'drop']]],
+      ['plane', null, [['gun', 'fire'], ['msl', 'fire2'], ['bomb', 'drop']]],
+    ];
+    for (const [kind, sid, ctl] of CRAFT) {
+      const entered = await enterKind(kind, sid);
+      if (!entered) { check(`${tag} ${kind}: a craft exists to test the weapon controls`, false, 'none in this region'); continue; }
+      const z = await rect('.rw-stickzone');
+      const steerPt = { x: (z ? z.l + z.r : zoneNow.l + zoneNow.r) / 2 - 10, y: (z ? z.t + z.b : zoneNow.t + zoneNow.b) / 2 + 20 };
+      for (const [id, inputName] of ctl) {
+        if ((id === 'gun' || id === 'msl' || id === 'bomb') && !entered[id]) continue; // this craft does not carry it
+        const r = await rect(`.rw-touch .rw-a-${id}`);
+        const inView = !!r && r.l >= 0 && r.r <= W && r.t >= 0 && r.b <= H;
+        check(`${tag} ${kind}: ${id.toUpperCase()} is on screen, at least 48 px, clear of the steering zone`,
+          inView && r.w >= 48 && r.h >= 48 && r.l >= (z ? z.r : W * 0.4) - 1, JSON.stringify({ r, zone: z }));
+        if (!inView) continue;
+        // a steering finger is already down; steer reads nonzero on the stick/wheel (or pitch for aircraft)
+        await down(1, steerPt.x, steerPt.y);
+        await move(1, steerPt.x + 40, steerPt.y - 30);
+        const pre = await heldNames(inputName ? [inputName] : []);
+        const steering = Math.abs(pre.steer) > 0.05 || Math.abs(pre.pitch) > 0.05 || Math.abs(pre.moveX) > 0.05;
+        check(`${tag} ${kind}: the steering finger steers before ${id.toUpperCase()} is touched`, steering, JSON.stringify(pre));
+        if (id === 'carswap') {
+          const gun = () => pg.evaluate(() => { const a = window.__rw.player.walker.arms; return a.lastGun; });
+          const g0 = await gun();
+          await down(5, r.x, r.y);
+          await pg.waitForTimeout(60);
+          await up(5);
+          const g1 = await gun();
+          const mid = await heldNames([]);
+          check(`${tag} ${kind}: SWAP tap switches the drive-by gun while the thumb steers`, g1 !== g0 && ['pistol', 'smg'].includes(g1) && Math.abs(mid.steer) > 0.05, `${g0} -> ${g1} ${JSON.stringify(mid)}`);
+          await down(5, r.x, r.y);
+          await pg.waitForTimeout(400);
+          const ww = await pg.evaluate(() => { const e = document.querySelector('.rw-ww'); return { open: e.classList.contains('rw-ww-open') }; });
+          await up(5);
+          check(`${tag} ${kind}: SWAP hold opens the weapon wheel and lifting closes it`, ww.open && !(await pg.evaluate(() => document.querySelector('.rw-ww').classList.contains('rw-ww-open'))), JSON.stringify(ww));
+        } else {
+          await down(5, r.x, r.y);
+          const on = await heldNames([inputName]);
+          const nearer = await heldNames([inputName]);
+          await up(5);
+          const off = await heldNames([inputName]);
+          check(`${tag} ${kind}: ${id.toUpperCase()} fires (${inputName}) with the steering finger down; releases on lift; steering kept`,
+            on[inputName] === true && nearer[inputName] === true && off[inputName] === false && Math.abs(on.steer) + Math.abs(on.pitch) + Math.abs(on.moveX) > 0.05 && Math.abs(nearer.steer) + Math.abs(nearer.pitch) + Math.abs(nearer.moveX) > 0.05,
+            JSON.stringify({ pre, on, off }));
+        }
+        await up(1);
+      }
     }
     check(`${tag}: no page errors`, errs.length === 0, errs.slice(0, 3).join(' | '));
     await ctx.close();

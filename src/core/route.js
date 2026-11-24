@@ -21,8 +21,10 @@
 import { lanePoint, canDrive } from '../world/citygen.js';
 import { formatDistance, formatMiles } from './units.js';
 
-export const OFF_ROUTE_M = 40; // off the line by more than this ...
-export const OFF_ROUTE_S = 1.0; // ... for this long: re-route
+export const OFF_ROUTE_M = 18; // off the line by more than this ...
+export const OFF_ROUTE_S = 0.5; // ... for this long: re-route
+export const OFF_NEAR_M = 10; // or off by more than this while heading away from the line ...
+export const OFF_NEAR_S = 0.4; // ... for this long (a missed turn is told within about 2 s)
 export const REROUTE_GAP_S = 0.5; // at most one search per this long
 export const ARRIVE_M = 22; // this close to the end: arrived
 export const UTURN_COST = 120; // meters added for starting with a U-turn
@@ -515,7 +517,7 @@ export function createRouter(city, opts = {}) {
         if (sd < 20) { tc--; continue; } // a jog: nothing to tell
         prev.angle = sum;
         prev.kind = turnKind(sum);
-        prev.full = name; prev.name = shortStreet(name);
+        if (name) { prev.full = name; prev.name = shortStreet(name); } // an unnamed ramp keeps the street before it
         continue;
       }
       put(kind, ang, jAt, name, node);
@@ -538,7 +540,7 @@ export function createTracker(router, opts = {}) {
     active: false, // a destination is set
     arrived: false,
     goalX: 0, goalZ: 0, legal: true,
-    seg: 0, along: 0, off: 0, offT: 0, wrongT: 0, sinceSearch: 99,
+    seg: 0, along: 0, off: 0, offT: 0, nearT: 0, wrongT: 0, sinceSearch: 99,
     turn: 0, // index of the next turn in route.turns
     toTurn: 0, remaining: 0, eta: 0,
     reroutes: 0, searches: 0, lastMs: 0, rev: 0,
@@ -561,11 +563,12 @@ export function createTracker(router, opts = {}) {
     st.lastMs = route.searchMs;
     st.sinceSearch = 0;
     st.pending = false;
-    st.seg = 0; st.along = 0; st.turn = 0; st.offT = 0; st.wrongT = 0;
+    st.seg = 0; st.along = 0; st.turn = 0; st.offT = 0; st.nearT = 0; st.wrongT = 0;
     st.rev++;
   }
 
-  // Project (x, z) on segments [i0, i1): writes best into st (returns dist).
+  // Project (x, z) on segments [i0, i1): writes best into bSeg / bAlong
+  // (returns the distance).
   let bSeg = 0, bAlong = 0;
   function project(x, z, i0, i1) {
     const X = route.x, Z = route.z, C = route.cum;
@@ -610,8 +613,11 @@ export function createTracker(router, opts = {}) {
     const dot = (Math.cos(heading) * sx + Math.sin(heading) * sz) / sl;
     if (dot < -0.5 && spd > 3) st.wrongT += dt; else st.wrongT = 0;
     if (off > OFF_ROUTE_M) st.offT += dt; else st.offT = 0;
+    // A missed turn: moving, off the line and not along it (a car cutting a
+    // corner is within a few meters of the line, so this does not fire there).
+    if (off > OFF_NEAR_M && spd > 2 && dot < 0.5) st.nearT += dt; else st.nearT = 0;
     let changed = false;
-    if ((st.offT >= OFF_ROUTE_S || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
+    if ((st.offT >= OFF_ROUTE_S || st.nearT >= OFF_NEAR_S || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
       doSearch(x, z, heading);
       st.reroutes++;
       changed = true;
@@ -638,6 +644,20 @@ export function createTracker(router, opts = {}) {
 
   // The next turn object (or null).
   st.next = () => (route.ok && route.turnCount ? route.turns[st.turn] : null);
+  // The point `m` meters ahead of the car along the line (the end when
+  // fewer are left), into out.x / out.z. The HUD arrow points at it, so it
+  // agrees with the turn the pill announces (no allocation).
+  st.lookAhead = (m, out) => {
+    const n = route.n;
+    if (!route.ok || n < 2) return false;
+    const want = st.along + m, C = route.cum;
+    let i = Math.max(0, Math.min(st.seg, n - 2));
+    while (i + 2 < n && C[i + 1] < want) i++;
+    const l = C[i + 1] - C[i] || 1, f = Math.max(0, Math.min(1, (want - C[i]) / l));
+    out.x = route.x[i] + (route.x[i + 1] - route.x[i]) * f;
+    out.z = route.z[i] + (route.z[i + 1] - route.z[i]) * f;
+    return true;
+  };
   st.setGoal = setGoal;
   st.clear = clear;
   st.update = update;
