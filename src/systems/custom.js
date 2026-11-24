@@ -4,6 +4,7 @@
 // (only touched when a mesh exists, so the logic runs in node tests).
 import { defaultLook, sanitizeLook, isDefaultLook, unlocked, LOOK_KEYS, LOOK_SIZE, MAX_LOOKS } from '../core/custom.js';
 import { loopOf, medalCounts } from '../core/records.js';
+import { kindOfSpec } from '../core/garage.js';
 import { applyLook, keepLook } from '../render/vehiclemats.js';
 
 export function createCustom(game) {
@@ -24,7 +25,7 @@ export function createCustom(game) {
   }
   // Set one part of the look of a class. Returns false for a locked or bad option.
   function set(specId, key, i) {
-    if (!LOOK_KEYS.includes(key) || !Number.isInteger(i) || i < (key === 'paint' ? -1 : 0) || i >= LOOK_SIZE[key] || !open(key, i)) return false;
+    if (kindOfSpec(specId) !== 'car' || !LOOK_KEYS.includes(key) || !Number.isInteger(i) || i < (key === 'paint' ? -1 : 0) || i >= LOOK_SIZE[key] || !open(key, i)) return false;
     const all = looks();
     const look = lookFor(specId);
     look[key] = i;
@@ -46,7 +47,7 @@ export function createCustom(game) {
     set,
     open,
     apply,
-    reset(specId) { delete looks()[specId]; const v = game.player.vehicle; if (v && v.spec.id === specId) apply(v); if (game.events) game.events.emit('progress'); },
+    reset(specId) { if (kindOfSpec(specId) !== 'car') return; delete looks()[specId]; const v = game.player.vehicle; if (v && v.spec.id === specId) apply(v); if (game.events) game.events.emit('progress'); },
     // Damage swaps the wheel and glass materials back: put the look's on again (one check a frame, the player's car only).
     render() {
       const v = game.player && game.player.vehicle;
