@@ -32,11 +32,7 @@ await build({
       import { createEconomy } from './src/systems/economy.js';
       import { createScore } from './src/systems/score.js';
       import { createMenu } from './src/ui/menu.js';
-      import { getHandlingMode, VEHICLE_SPECS } from './src/entities/vehicle.js';
-      // The loop's screens (docs/LOOP.md): Records, Daily Three, Customize.
-      import { createDaily } from './src/systems/daily.js';
-      import { createCustom } from './src/systems/custom.js';
-      import { trapTargets, missTargets, jumpTargets, dashTargets, heatTargets, wreckTargets } from './src/core/streetevents.js';
+      import { getHandlingMode } from './src/entities/vehicle.js';
       const root = document.createElement('div');
       root.style.cssText = 'position:fixed;inset:0;background:linear-gradient(#9fc8e8,#6d8f5a)';
       document.body.appendChild(root);
@@ -62,16 +58,6 @@ await build({
       };
       const economy = createEconomy(game, window.localStorage);
       game.score = createScore(game);
-      // Twelve street events (two of each template), the daily picks of a fixed date, the looks, the intro.
-      const T = { trap: trapTargets(400), miss: missTargets(45, 1), jump: jumpTargets(95, 0.245, 1.5), dash: dashTargets(600), heat: heatTargets(2), wreck: wreckTargets(40, 1) };
-      const list = [];
-      for (const tpl of Object.keys(T)) for (let i = 1; i <= 2; i++) list.push({ id: 'ev_beach_' + tpl + '_' + i, tpl, name: (i === 1 ? 'Ocean Dr ' : 'Collins Ave ') + tpl, street: i === 1 ? 'Ocean Dr' : 'Collins Ave', targets: T[tpl], x: i * 100, z: 0 });
-      log.tracked = null; log.staged = [];
-      game.streetEvents = { list, slug: 'beach', track: (ev) => { log.tracked = ev ? ev.id : null; }, stage: (ev, spec) => { log.staged.push([ev.id, spec || '']); return true; } };
-      game.daily = createDaily(game, { now: () => new Date(2026, 10, 23, 9, 0) });
-      game.custom = createCustom(game);
-      game.tutorial = { introOn: true, skip() { this.introOn = false; log.intro = 'skipped'; }, replay() { this.introOn = true; log.intro = 'replayed'; } };
-      log.car = { kind: 'car', spec: VEHICLE_SPECS.muscle, color: VEHICLE_SPECS.muscle.colors[0], mesh: null };
       const menu = createMenu(root, game, economy);
       window.rw = { game, economy, menu, log, getHandlingMode, score: game.score };
     `,
@@ -551,121 +537,6 @@ try {
   for (const n of ['Stats', 'Settings']) await tab(n);
   check('tamper: nothing executed', await ev(() => !document.querySelector('.rw-menu img')));
   await page.waitForTimeout(200);
-
-  // ---- the loop's screens (docs/LOOP.md sections c, d, f): Records, Daily Three, Customize, the intro tile ----
-  await load();
-  await ev(() => localStorage.clear());
-  await load();
-  await ev(() => {
-    const L = window.rw.game.progress.loop;
-    L.events.ev_beach_trap_1 = { m: 'gold', b: 92.4, n: 3 };
-    L.events.ev_beach_miss_1 = { m: 'bronze', b: 3, n: 2 };
-    L.events.ev_beach_dash_2 = { m: '', b: 80, n: 1 };
-    L.events.ev_north_jump_1 = { m: 'silver', b: 88, n: 1 };
-    L.flow.beach = 12450; L.flow.north = 800;
-    L.dist.beach = 16093.44; L.dist.north = 1609.344;
-    L.totals.banked = 45000; L.best.mph = 97.3; L.best.jumpFt = 118; L.best.tier = 4;
-    L.driven.push('sedan', 'muscle');
-    window.rw.game.events.emit('progress');
-    window.rw.game.paused = true; window.rw.game.events.emit('pause', true);
-  });
-  const tiles = await ev(() => [...document.querySelectorAll('.rw-menu-tile')].map((b) => b.dataset.role + ':' + b.innerText.replace(/\n/g, ' ')));
-  check('hub: Records, Daily Three, Customize and Skip intro tiles', ['records:Records 2 / 12 medals', 'daily:Daily Three 0 / 3 today', 'customize:Customize Paint and wheels, free', 'intro:Skip intro No more guide lines'].every((t) => tiles.includes(t)), JSON.stringify(tiles));
-  // Records: the pause button, then the tile: two taps from play.
-  await page.locator('[data-role="records"]').tap();
-  const recText = await page.locator('.rw-menu-body').innerText();
-  check('records: opens from the hub with its title', (await page.locator('.rw-menu-title').innerText()) === 'Records' && (await page.locator('.rw-menu-tab[aria-selected="true"]').innerText()) === 'Resume');
-  check('records: twelve tiles, best flow run here and overall, miles', (await page.locator('[data-role="records-stats"] .rw-menu-stat').count()) === 12 && recText.includes('12,450') && recText.includes('10.0 mi') && recText.includes('97 mph') && recText.includes('118 ft') && recText.includes('x4') && /2 \/ 26/.test(recText), recText.slice(0, 400));
-  const regions = await ev(() => [...document.querySelectorAll('[data-role="records-regions"] tr')].map((r) => r.innerText.replace(/\s+/g, ' ').trim()));
-  check('records: every region and overall (gold, silver, bronze, best flow, miles)', regions.length === 7 && regions[1] === 'Miami Beach 1 0 1 12,450 10.0' && regions.includes('North Side 0 1 0 800 1.0') && regions[6] === 'Overall 1 1 1 12,450 11.0', JSON.stringify(regions));
-  const close3 = await ev(() => [...document.querySelectorAll('.rw-menu-group')].find((g) => g.textContent === 'Closest medals') && [...document.querySelectorAll('.rw-lp-row')].slice(0, 3).map((r) => r.dataset.event + '|' + r.querySelector(':scope > i').textContent));
-  check('records: the three closest medals with their next target', close3 && close3[0].startsWith('ev_beach_dash_2|1:20') && /bronze 1:0\d/.test(close3[0]) && close3.length === 3, JSON.stringify(close3));
-  check('records: medals by event for all six templates', (await page.locator('.rw-lp-row').count()) === 15 && ['Speed trap  1 / 2', 'Near-miss run  1 / 2', 'Jump  0 / 2', 'Rush drop  0 / 2', 'Heat escape  0 / 2', 'Wrecking spree  0 / 2'].every((t) => recText.replace(/\u00a0/g, ' ').toUpperCase().includes(t.toUpperCase().replace(/\s+/g, ' ')) || recText.toUpperCase().includes(t.toUpperCase())), recText.slice(-600));
-  check('records: no flags, no money', !/hint_|seen_|\$|buy/i.test(recText));
-  await page.locator('.rw-lp-row [data-role="route"]').first().tap();
-  check('records: Route puts the GPS on the gate and resumes', (await ev(() => window.rw.log.tracked)) === 'ev_beach_dash_2' && !(await isOpen()));
-  // Daily Three
-  await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
-  await page.locator('[data-role="daily"]').tap();
-  const cards = await ev(() => [...document.querySelectorAll('.rw-lp-card')].map((c) => c.dataset.slot + ':' + c.dataset.done + ':' + c.querySelector('b').textContent));
-  check('daily: three cards, one easy, one skill, one mayhem, each with a twist', cards.length === 3 && /^0:false:Easy: (Speed trap|Jump) /.test(cards[0]) && /^1:false:Skill: (Near-miss run|Rush drop) /.test(cards[1]) && /^2:false:Mayhem: (Heat escape|Wrecking spree) /.test(cards[2])
-    && cards.every((c) => /( in a | in the | at | under )/.test(c)), JSON.stringify(cards));
-  check('daily: days played, and a missed day costs nothing', /Days played: 0\./.test(await page.locator('[data-role="daily-streak"]').innerText()) && /missed day costs nothing/.test(await page.locator('[data-role="daily-msg"]').innerText()));
-  await page.locator('.rw-lp-card [data-role="daily-go"]').first().tap();
-  const staged = await ev(() => window.rw.log.staged);
-  check('daily: Go stages the event and resumes', staged.length === 1 && /^ev_beach_(trap|jump)_/.test(staged[0][0]) && !(await isOpen()), JSON.stringify(staged));
-  await ev(() => {
-    const g = window.rw.game, p = g.daily.picks[0];
-    g.events.emit('streetEventEnd', { id: p.ev.id, medal: 'bronze', daily: 0 });
-    g.paused = true; g.events.emit('pause', true);
-  });
-  check('daily: the hub tile counts it', (await ev(() => document.querySelector('[data-role="daily"]').innerText.replace(/\n/g, ' '))) === 'Daily Three 1 / 3 today');
-  await page.locator('[data-role="daily"]').tap();
-  check('daily: a finished daily is ticked, the streak is one day, and it is saved', (await ev(() => document.querySelector('.rw-lp-card').dataset.done)) === 'true' && /Days played: 1\./.test(await page.locator('[data-role="daily-streak"]').innerText())
-    && (await stored()).loop.daily.streak === 1 && (await stored()).loop.daily.day === 20261123, JSON.stringify((await stored()).loop.daily));
-  await page.locator('.rw-menu-back').tap();
-  // Customize: on foot it says so; in a car every base option is open and free.
-  await page.locator('[data-role="customize"]').tap();
-  check('customize: on foot it asks for a car', (await page.locator('[data-role="customize-none"]').count()) === 1);
-  await page.locator('[data-role="customize-done"]').tap();
-  await ev(() => { window.rw.game.player.vehicle = window.rw.log.car; });
-  await page.locator('[data-role="customize"]').tap();
-  const cz = await ev(() => ({
-    title: document.querySelector('.rw-menu-title').textContent, see: document.querySelector('.rw-menu').classList.contains('rw-menu-see'),
-    n: ['paint', 'finish', 'wheels', 'tint', 'decal'].map((k) => document.querySelectorAll('[data-look="' + k + '"] button').length),
-    locked: [...document.querySelectorAll('.rw-lp-opts button:disabled')].map((b) => b.textContent),
-    main: document.querySelector('.rw-menu-main').getBoundingClientRect().left / innerWidth,
-  }));
-  check('customize: the car class in the title, 17 paints, 7 finishes, 6 wheels, 4 tints, 5 decals', cz.title === 'Customize: Redtail' && JSON.stringify(cz.n) === '[17,7,6,4,5]', JSON.stringify(cz));
-  check('customize: the base set is open; medals open three finishes and one wheel', JSON.stringify(cz.locked) === JSON.stringify(['Pearl (5 medals)', 'Chrome (15 medals)', 'Candy (10 gold medals)', 'Gold (10 medals)']), JSON.stringify(cz.locked));
-  check('customize: the menu steps aside so the car shows', cz.see && cz.main > 0.5, JSON.stringify(cz));
-  await page.locator('[data-look="paint"] [data-opt="3"]').tap();
-  await page.locator('[data-look="finish"] [data-opt="2"]').tap();
-  await page.locator('[data-look="wheels"] [data-opt="1"]').tap();
-  await page.locator('[data-look="tint"] [data-opt="3"]').tap();
-  await page.locator('[data-look="decal"] [data-opt="2"]').tap();
-  check('customize: a tap sets the look for the class, marked and saved', JSON.stringify((await stored()).loop.looks) === '{"muscle":{"paint":3,"finish":2,"wheels":1,"tint":3,"decal":2}}'
-    && (await page.locator('[data-look="paint"] [data-opt="3"]').getAttribute('aria-checked')) === 'true' && (await page.locator('[data-look="finish"] [data-opt="2"]').getAttribute('aria-checked')) === 'true', JSON.stringify((await stored()).loop.looks));
-  check('customize: nothing is for sale', !/\$|buy|price|coins?|credits?/i.test(await page.locator('.rw-menu').innerText()));
-  await page.locator('[data-role="look-reset"]').tap();
-  check('customize: Back to stock clears the saved look', JSON.stringify((await stored()).loop.looks) === '{}');
-  await page.locator('[data-role="customize-done"]').tap();
-  check('customize: Done returns to the hub, the menu is whole again', (await page.locator('.rw-menu-title').innerText()) === 'Resume' && !(await ev(() => document.querySelector('.rw-menu').classList.contains('rw-menu-see'))));
-  await page.locator('[data-role="intro"]').tap();
-  check('intro: Skip intro skips it; the tile then offers Replay intro', (await ev(() => window.rw.log.intro)) === 'skipped' && (await ev(() => document.querySelector('[data-role="intro"]').innerText.replace(/\n/g, ' '))) === 'Replay intro The first five minutes' && (await isOpen()));
-  await page.locator('[data-role="intro"]').tap();
-  check('intro: Replay intro starts it again and resumes', (await ev(() => window.rw.log.intro)) === 'replayed' && !(await isOpen()));
-  // Layout of the three screens at the three sizes: targets 48 or more, nothing off screen; only Records and Customize scroll.
-  for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }, { width: 748, height: 360 }]) {
-    await page.setViewportSize(size);
-    await ev(() => { window.rw.game.paused = true; window.rw.game.events.emit('pause', true); });
-    const lay = () => ev(() => {
-      const b = document.querySelector('.rw-menu-body');
-      const bad = [];
-      const br = b.getBoundingClientRect();
-      for (const e of document.querySelectorAll('.rw-menu button')) {
-        const q = e.getBoundingClientRect();
-        if (!q.width) continue;
-        if (q.right > innerWidth + 1 || q.left < -1) bad.push('off:' + e.textContent);
-        if (q.height < 47.5 || q.width < 47.5) bad.push('small:' + (e.textContent || e.getAttribute('aria-label')) + ':' + Math.round(q.width) + 'x' + Math.round(q.height));
-      }
-      for (const e of document.querySelectorAll('.rw-lp-row > span, .rw-lp-card b')) if (e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).textOverflow !== 'ellipsis') bad.push('clip:' + e.textContent);
-      return { bad, over: document.documentElement.scrollWidth > innerWidth, sx: b.scrollWidth > b.clientWidth + 1, sy: b.scrollHeight - b.clientHeight, bot: br.bottom <= innerHeight + 0.5 };
-    });
-    const hubm = await lay();
-    check(`layout hub with the loop tiles ${size.width}: targets 48+, no scroll`, !hubm.bad.length && !hubm.over && !hubm.sx && hubm.sy <= 1 && hubm.bot, JSON.stringify(hubm));
-    await page.screenshot({ path: path.join(out, `loop-hub-${size.width}x${size.height}.png`) });
-    for (const [role, scrolls] of [['records', true], ['daily', false], ['customize', true]]) {
-      await page.locator(`[data-role="${role}"]`).tap();
-      const m = await lay();
-      check(`layout ${role} ${size.width}: targets 48+, in view, ${scrolls ? 'may scroll' : 'no scroll'}`, !m.bad.length && !m.over && !m.sx && (scrolls || m.sy <= 1) && m.bot, JSON.stringify(m));
-      await page.screenshot({ path: path.join(out, `loop-${role}-${size.width}x${size.height}.png`) });
-      await page.locator(role === 'customize' ? '[data-role="customize-done"]' : '.rw-menu-back').tap();
-    }
-    await ev(() => { window.rw.menu.close(); });
-  }
-  await page.setViewportSize({ width: 915, height: 412 });
-  await ev(() => { window.rw.game.player.vehicle = null; });
 
   // Smaller phone: every screen at both sizes, every group; rows 48 px or more; nothing scrolls except Help.
   for (const size of [{ width: 915, height: 412 }, { width: 780, height: 360 }, { width: 748, height: 360 }]) {

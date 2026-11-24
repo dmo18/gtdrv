@@ -10,7 +10,7 @@
 // The answer is a pure function of the city and the point.
 
 import { divideOf, GUTTER } from './roadprofile.js';
-import { inJunctionArea, pointInRing, ringDist, supAt, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
+import { inJunctionArea, pointInRing, supAt, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
 
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
@@ -173,19 +173,17 @@ export function createGround(city) {
         // A gap to a facing strip under GAP_MAX: asphalt (gapAt).
         const g = gapAt(k, 0, d);
         if (g > 0) { if (s <= cr + g) return 1; continue; }
-        const wr = walkOf(e), back = cr + wr;
+        const back = cr + walkOf(e);
         if (supAt(geo, e, 0, d)) continue;
-        // (A side with no sidewalk gets no raised fill either: a narrow
-        // gap beside a bare curb is the net's, flat asphalt.)
-        if (s <= back || (fills && wr > 0 && (s <= back + fillAt(k, 0, d) || (fills !== 1 && closes(k, x, z, s - back, 1, fills === true ? 2 : 1))))) side = true;
+        if (s <= back || (fills && (s <= back + fillAt(k, 0, d) || (fills !== 1 && closes(k, x, z, s - back, 1, fills === true ? 2 : 1))))) side = true;
         continue;
       }
       const gl = gapAt(k, 1, d);
       if (gl > 0) { if (s >= cl - gl) return 1; continue; }
       if (supAt(geo, e, 1, d)) continue;
       const m = medianBand(e) > 0;
-      const wl = m ? medianAt(city, e, d, cl) : walkLeftOf(e), back = cl - wl;
-      if (s >= back) { if (m) median = true; else side = true; } else if (fills && wl > 0 && (s >= back - fillAt(k, 1, d) || (fills !== 1 && closes(k, x, z, back - s, -1, fills === true ? 2 : 1)))) side = true;
+      const back = cl - (m ? medianAt(city, e, d, cl) : walkLeftOf(e));
+      if (s >= back) { if (m) median = true; else side = true; } else if (fills && (s >= back - fillAt(k, 1, d) || (fills !== 1 && closes(k, x, z, back - s, -1, fills === true ? 2 : 1)))) side = true;
     }
     return median ? 3 : side ? 2 : 0;
   }
@@ -299,8 +297,6 @@ export function createGround(city) {
       for (let side = 0; side < 2; side++) {
         if (supAt(geo, e, side, d) || gapAt(k, side, d) > 0) continue;
         const b = side ? backL : backR, dir = side ? -1 : 1;
-        // (No fill beside a bare curb: see geoSurface.)
-        if (side ? !(cl - backL > 0) : !(backR - cr > 0)) continue;
         const bx = ax[k] + ux[k] * d - uz[k] * b, bz = az[k] + uz[k] * d + ux[k] * b;
         // (None where the back of sidewalk is already on road space.)
         if (baseSurface(bx + -uz[k] * dir * 0.05, bz + ux[k] * dir * 0.05) !== 0) continue;
@@ -472,136 +468,6 @@ export function createGround(city) {
     return out;
   }
 
-  // The net as rectangles, for the meshes (render/citymesh.js netRoads):
-  // the lattice cells of the box x0..x1, z0..z1 (cell centers; x1, z1
-  // exclusive) that the per-edge rules leave off the road but netAt
-  // fills, merged along x and then down z into [xa, za, xb, zb] quads
-  // pushed on `out` (not cleared). The same lattice and the same netAt as
-  // the physics, so what is drawn as asphalt is what drives as road.
-  // Found from seeds on a 1 m lattice (every fourth point each way, the
-  // same points whatever the box) and grown over their neighbors, so a
-  // patch is drawn whole; one that holds no seed point (under 1 m2 or so)
-  // is not drawn. A seed is only tried where two roads (or a road and a
-  // junction) come within reach: a net cell has road space on two sides.
-  const NQ_SEED = 4, NQ_SLACK = 0.3;
-  const nqSeen = new Set(), nqCells = [], nqStack = [], nqOpen = [];
-  // Could (x, z) be net ground? Road space of two roads (strips with their
-  // sidewalk, median and fill, or a junction's box) within NET_MAX, one
-  // of them within half of it.
-  function twoRoads(x, z, slack) {
-    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-    const i = cx - gx0, j = cz - gz0;
-    if (i < 0 || j < 0 || i >= W || j >= H) return false;
-    const c = j * W + i;
-    const es = cellE[c] || build(c, cx, cz);
-    const far = NET_MAX + NQ_SLACK + slack, close = NET_MAX / 2 + NQ_SLACK + slack;
-    let n = 0, best = Infinity;
-    const js = cellJ[c];
-    for (let q = 0; q < js.length; q++) {
-      const J = geo.junctions[js[q]];
-      if (x < J.x0 - far || x > J.x1 + far || z < J.z0 - far || z > J.z1 + far) continue;
-      const dd = inJunctionArea(J, x, z) ? 0 : ringDist(J.ring, x, z);
-      if (dd > far) continue;
-      n++;
-      if (dd < best) best = dd;
-    }
-    for (let q = 0; q < es.length; q++) {
-      const k = es[q];
-      if (geo.inner[k]) continue;
-      const d = (x - ax[k]) * ux[k] + (z - az[k]) * uz[k];
-      if (d < -far || d > len[k] + far) continue;
-      const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
-      if (s > reach[k] + far || s < -reach[k] - far) continue;
-      const e = edges[k];
-      const C = curbsAt(geo, e, d < 0 ? 0 : d > len[k] ? len[k] : d);
-      // (Past the side's sidewalk or median band.)
-      const over = s > C.r ? s - C.r - walkOf(e) : C.l - s - Math.max(walkLeftOf(e), medianBand(e));
-      const along = d < 0 ? -d : d > len[k] ? d - len[k] : 0;
-      const dd = over > along ? over : along;
-      if (dd > far) continue;
-      n++;
-      if (dd < best) best = dd;
-    }
-    return n >= 2 && best <= close;
-  }
-  const nqIs = (qx, qz) => {
-    const x = qx * NET_STEP, z = qz * NET_STEP;
-    return baseSurface(x, z) === 0 && baseAt(x, z) === 0 && netAt(x, z) !== 0;
-  };
-  function netQuads(x0, z0, x1, z1, out) {
-    if (!geo) return out;
-    const S = NET_STEP;
-    const qx0 = Math.ceil(x0 / S - 1e-9), qx1 = Math.ceil(x1 / S - 1e-9), qz0 = Math.ceil(z0 / S - 1e-9), qz1 = Math.ceil(z1 / S - 1e-9);
-    if (qx1 <= qx0 || qz1 <= qz0) return out;
-    const nx = qx1 - qx0;
-    nqSeen.clear();
-    nqCells.length = 0;
-    // Seeds on a 1 m lattice (the same points whatever the box), tried
-    // only in the 4 m squares two roads can reach.
-    const SQ = 4 * NQ_SEED;
-    for (let sz = Math.floor(qz0 / SQ) * SQ; sz < qz1; sz += SQ) {
-      for (let sx = Math.floor(qx0 / SQ) * SQ; sx < qx1; sx += SQ) {
-        if (!twoRoads((sx + SQ / 2) * S, (sz + SQ / 2) * S, SQ * S * 0.71)) continue;
-        for (let qz = Math.max(sz, Math.ceil(qz0 / NQ_SEED) * NQ_SEED); qz < sz + SQ && qz < qz1; qz += NQ_SEED) {
-          for (let qx = Math.max(sx, Math.ceil(qx0 / NQ_SEED) * NQ_SEED); qx < sx + SQ && qx < qx1; qx += NQ_SEED) {
-            const key = (qz - qz0) * nx + (qx - qx0);
-            if (nqSeen.has(key)) continue;
-            nqSeen.add(key);
-            if (!twoRoads(qx * S, qz * S, 0) || !nqIs(qx, qz)) continue;
-            nqStack.length = 0;
-            nqStack.push(qx, qz);
-            while (nqStack.length) {
-              const pz = nqStack.pop(), px = nqStack.pop();
-              nqCells.push((pz - qz0) * nx + (px - qx0));
-              for (let n = 0; n < 4; n++) {
-                const ex = px + (n === 0 ? 1 : n === 1 ? -1 : 0), ez = pz + (n === 2 ? 1 : n === 3 ? -1 : 0);
-                if (ex < qx0 || ex >= qx1 || ez < qz0 || ez >= qz1) continue;
-                const k2 = (ez - qz0) * nx + (ex - qx0);
-                if (nqSeen.has(k2)) continue;
-                nqSeen.add(k2); // (tried: a miss is not tried again)
-                if (nqIs(ex, ez)) nqStack.push(ex, ez);
-              }
-            }
-          }
-        }
-      }
-    }
-    if (!nqCells.length) return out;
-    // Runs along x, then runs of one extent merged down z.
-    nqCells.sort((a, b) => a - b);
-    nqOpen.length = 0; // open quads: first column, end column, first row
-    const emit = (a, end) => out.push((qx0 + nqOpen[a] - 0.5) * S, (qz0 + nqOpen[a + 2] - 0.5) * S, (qx0 + nqOpen[a + 1] - 0.5) * S, (qz0 + end - 0.5) * S);
-    let prev = -2;
-    for (let i = 0; i < nqCells.length;) {
-      const r = Math.floor(nqCells[i] / nx);
-      const from = nqOpen.length;
-      while (i < nqCells.length && Math.floor(nqCells[i] / nx) === r) {
-        const c0 = nqCells[i] - r * nx;
-        let c1 = c0 + 1;
-        i++;
-        while (i < nqCells.length && nqCells[i] === r * nx + c1) { c1++; i++; }
-        nqOpen.push(c0, c1, r);
-      }
-      // An open quad goes on with a run of the same extent in the next
-      // row; else it ends under its last row.
-      for (let a = 0; a < from; a += 3) {
-        let hit = false;
-        if (r === prev + 1) {
-          for (let q = from; q < nqOpen.length; q += 3) {
-            if (nqOpen[q] === nqOpen[a] && nqOpen[q + 1] === nqOpen[a + 1]) { nqOpen[q + 2] = nqOpen[a + 2]; hit = true; break; }
-          }
-        }
-        if (!hit) emit(a, prev + 1);
-      }
-      nqOpen.copyWithin(0, from);
-      nqOpen.length -= from;
-      prev = r;
-    }
-    for (let a = 0; a < nqOpen.length; a += 3) emit(a, prev + 1);
-    nqOpen.length = 0;
-    return out;
-  }
-
   // Kind of ground at (x, z): 0 off any road, 1 road, 2 sidewalk, 3 median.
   function surfaceAt(x, z) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
@@ -644,17 +510,6 @@ export function createGround(city) {
     return road ? 1 : median ? 3 : side ? 2 : 0;
   }
 
-  // The surface without the narrow-gap net (what the per-edge rules alone
-  // give): surfaceAt differs from it exactly on net ground.
-  function baseAt(x, z) {
-    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-    const i = cx - gx0, j = cz - gz0;
-    if (i < 0 || j < 0 || i >= W || j >= H) return 0;
-    const c = j * W + i;
-    if (!cellE[c]) build(c, cx, cz);
-    return geo ? geoSurface(x, z, c) : surfaceAt(x, z);
-  }
-
   function groundAt(x, z) {
     const s = surfaceAt(x, z);
     if (s === 2 || s === 3) return CURB_H;
@@ -668,7 +523,7 @@ export function createGround(city) {
     }
     return 0;
   }
-  return { groundAt, surfaceAt, baseAt, netQuads, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
+  return { groundAt, surfaceAt, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
 }
 
 // The ground of a city, made once and kept (city.groundAt when the city

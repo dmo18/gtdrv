@@ -803,3 +803,5 @@ None critical or high.
 - Gate: lint, tests, smoke --extra, touch-test 240/240 (regions and ui-test not rerun: no UI or world change). Curb pull-over margin widened by 0.5 m for the new car path (yield test).
 - Risk: at 1.3 g with a 0.08 s response it may read twitchy; knobs: 80 px travel, Relaxed preset.
 - Open: PERF, LOOP and STREETSCAPE partial work stays in the tree (0.12.0).
+
+Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PERF, LOOP and STREETSCAPE edits and failed the lots build-time check on the build server. Those edits were pulled out into docs/wip/0.12-partial.patch (apply with `git apply`) and 0.11.1 is the handling change only, from 0.11.0. Lesson: never publish with partial helper work in the tree; park it as a patch first.

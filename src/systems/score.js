@@ -8,12 +8,6 @@ import { formatDistance } from '../core/units.js';
 // pending points. Awards (race medals, mission results, escaping the
 // police) pass `bank = true`: no combo, straight into the total.
 //
-// With Flow (docs/LOOP.md; systems/flow.js sets game.flow) the points
-// earned by play go to the flow run instead of `pending`: the multiplier
-// tiers, the bank and the crash rules are Flow's, and this module stays the
-// ledger (`total`, the session best) and the stunt detection. Without
-// game.flow (tests, tools) everything is as described above.
-//
 // Pure logic: runs in node tests. The HUD toast is optional.
 import { defaultProgress } from '../core/save.js';
 
@@ -35,8 +29,6 @@ export const POINTS = {
   jumpPerMeter: 10,
   driftPerSecond: 50,
   nearMiss: 150,
-  headOn: 225, // a near miss with a car coming the other way (Flow only)
-  shave: 50, // a parked car passed within SHAVE_GAP at speed (Flow only)
   lowFlyPerSecond: 40,
   roofLanding: 300,
   escapePerLevel: 500,
@@ -62,8 +54,6 @@ const DRIFT_GRACE = 0.3; // s a drift may pause before it counts as over
 const NEAR_GAP = 1.2; // m between the car sides
 const NEAR_SPEED = 20;
 const NEAR_COOLDOWN = 3; // s per passed car
-export const SHAVE_GAP = 0.6; // m between the flanks: a parked car shaved at speed (Flow only)
-export const SHAVE_EVERY = 0.5; // s between two close shaves
 const LOW_Y = 15;
 const LOW_SPEED = 40;
 const ROOF_Y = 5;
@@ -82,7 +72,6 @@ export function createScore(game) {
   let nmChain = 0; // near misses inside the current combo
   let lastTake = -1e9;
   let lastEscape = -1e9;
-  let shaveT = 0;
 
   // Per-craft stunt trackers.
   let veh = null;
@@ -130,32 +119,7 @@ export function createScore(game) {
     return amount;
   }
 
-  // Flow source for a reason given without one (other systems call add()).
-  const kindOf = (reason) => (reason === 'Lost the police' ? 'escape' : reason === 'Wrecked' || reason === 'Takedown' ? 'takedown'
-    : reason === 'Chain blast' ? 'chain' : 'other');
-
-  // A banked flow run goes into the total (systems/flow.js calls this).
-  // `later`: the save is left to the caller (a bank at speed must not save in the middle of a step).
-  function bankFlow(amount, later = false) {
-    if (!(amount > 0)) return 0;
-    const a = Math.min(MAX_PENDING, Math.round(amount));
-    const s = prog();
-    total = Math.min(MAX_TOTAL, total + a);
-    session += a;
-    if (s) {
-      s.total = total;
-      if (session > s.sessionBest) s.sessionBest = Math.min(MAX_TOTAL, session);
-      const f = game.flow;
-      if (f && nmChain > s.best.nearMiss) s.best.nearMiss = nmChain;
-    }
-    nmChain = 0;
-    events.emit('scoreBanked', a);
-    if (!later) events.emit('progress');
-    return a;
-  }
-
   function lose() {
-    if (game.flow) return; // Flow has its own crash and wipe rules
     if (pending > 0) toast('Combo lost');
     pending = 0;
     combo = 1;
@@ -165,18 +129,10 @@ export function createScore(game) {
 
   // The only way to score. Returns the points added (after the combo).
   // `bank` true: an award, goes straight into the total without a combo.
-  // `kind` and `seconds`: the Flow source and the length of a drift or
-  // flight (used only with Flow).
-  function add(points, reason, x, z, bankNow = false, kind = '', seconds = 0) {
+  function add(points, reason, x, z, bankNow = false) {
     if (!(typeof points === 'number' && points > 0) || !Number.isFinite(points)) return 0;
     const base = Math.min(MAX_EVENT, Math.round(points));
     let amount;
-    if (!bankNow && game.flow) {
-      const k = kind || kindOf(reason);
-      amount = game.flow.feed(k, base, kind || k === 'other' ? reason : '', seconds);
-      events.emit('scored', amount, reason, x, z);
-      return amount;
-    }
     if (bankNow) {
       amount = base;
       total = Math.min(MAX_TOTAL, total + amount);
@@ -306,7 +262,7 @@ export function createScore(game) {
     if (driftT >= DRIFT_MIN) {
       const pts = Math.round(driftAcc);
       recordBest('drift', pts);
-      add(pts, game.flow ? 'Drift ' + driftT.toFixed(1) + ' s' : 'Drift', veh.x, veh.z, false, 'drift', driftT);
+      add(pts, 'Drift', veh.x, veh.z);
     }
     driftT = driftAcc = driftGap = 0;
   }
@@ -330,11 +286,11 @@ export function createScore(game) {
         air = false;
         if (airT >= AIR_MIN) {
           recordBest('airtime', airT);
-          add(airT * POINTS.airtimePerSecond, game.flow ? 'Air ' + airT.toFixed(1) + ' s' : 'Airtime', v.x, v.z, false, 'air', airT);
+          add(airT * POINTS.airtimePerSecond, 'Airtime', v.x, v.z);
           const dist = Math.hypot(v.x - takeX, v.z - takeZ);
           if (dist >= JUMP_MIN) {
             recordBest('jump', dist);
-            add(dist * POINTS.jumpPerMeter, 'Jump ' + formatDistance(dist), v.x, v.z, false, 'jump');
+            add(dist * POINTS.jumpPerMeter, 'Jump ' + formatDistance(dist), v.x, v.z);
           }
         }
       }
@@ -356,7 +312,7 @@ export function createScore(game) {
         lowT += dt;
         if (lowT >= 1) {
           lowT -= 1;
-          add(POINTS.lowFlyPerSecond, 'Low flying', v.x, v.z, false, game.flow ? 'other' : '');
+          add(POINTS.lowFlyPerSecond, 'Low flying', v.x, v.z);
         }
       } else {
         lowT = 0;
@@ -376,34 +332,16 @@ export function createScore(game) {
     const wv = (v.spec && v.spec.width ? v.spec.width : 1.8) / 2;
     for (let i = 0; i < vs.length; i++) {
       const o = vs[i];
-      if (o === v || o.kind !== 'car' || o.wrecked || o.removed) continue;
-      // A parked car counts only with Flow, and only shaved much closer.
-      const parked = !o.driver;
-      if (parked && (!game.flow || shaveT > now)) continue;
+      if (o === v || o.kind !== 'car' || !o.driver || o.wrecked || o.removed) continue;
       const dx = o.x - v.x, dz = o.z - v.z;
       if (dx > 6 || dx < -6 || dz > 6 || dz < -6) continue;
       if (o.nearMissT > now) continue;
       const wo = (o.spec && o.spec.width ? o.spec.width : 1.8) / 2;
-      let gap = Math.hypot(dx, dz) - wv - wo;
-      if (parked) {
-        // Side by side only: the gap between the two flanks as the car goes by.
-        const fx = Math.cos(v.heading || 0), fz = Math.sin(v.heading || 0);
-        if (Math.abs(dx * fx + dz * fz) > 1.5) continue;
-        gap = Math.abs(-dx * fz + dz * fx) - wv - wo;
-        if (gap > 0 && gap < SHAVE_GAP && !(v.impact > 0)) {
-          o.nearMissT = now + NEAR_COOLDOWN;
-          shaveT = now + SHAVE_EVERY;
-          add(POINTS.shave, 'Close shave', v.x, v.z, false, 'shave');
-        }
-        continue;
-      }
+      const gap = Math.hypot(dx, dz) - wv - wo;
       if (gap > 0 && gap < NEAR_GAP && !(v.impact > 0)) {
         o.nearMissT = now + NEAR_COOLDOWN;
         nmChain++;
-        // With Flow a car coming the other way is the bigger thrill.
-        const onc = !!game.flow && Math.cos((o.heading || 0) - (v.heading || 0)) < -0.5;
-        if (onc) add(POINTS.headOn, nmChain > 1 ? 'Head-on miss x' + nmChain : 'Head-on miss', v.x, v.z, false, 'oncoming');
-        else add(POINTS.nearMiss, game.flow && nmChain > 1 ? 'Near miss x' + nmChain : 'Near miss', v.x, v.z, false, game.flow ? 'nearMiss' : '');
+        add(POINTS.nearMiss, 'Near miss', v.x, v.z);
       }
     }
   }
@@ -417,7 +355,6 @@ export function createScore(game) {
     get session() { return session; },
     add,
     bank,
-    bankFlow,
     lose,
     recordCourse,
     dispose() { for (const off of offs) off(); },
@@ -438,13 +375,10 @@ export function createScore(game) {
       }
       if (comboT > 0 && (comboT -= dt) <= 0) bank();
       const hs = game.hudState;
-      const f = game.flow;
       if (hs) {
         hs.score = total;
-        hs.pending = f ? f.run : pending;
-        hs.combo = f ? f.tier : combo;
-        // The Flow meter (after everything that can bank this step, so the HUD never shows half a state).
-        if (f) { hs.flow = f.meter; hs.flowTier = f.tier; }
+        hs.pending = pending;
+        hs.combo = combo;
       }
     },
   };

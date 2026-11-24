@@ -13,11 +13,6 @@ import { SECRET_DEFS, GARAGE_NAME } from '../world/secrets.js';
 import { fillMapPicker, switchMap } from './mappicker.js';
 import { mapName, pickerCurrent } from '../core/travel.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
-// The loop's screens (docs/LOOP.md sections c, d, f): Records, Daily, Customize.
-import { loopOf, medalCounts, boardRows, closestMedals, bestFlow, totalDistance, REGION_SLUGS, REGION_NAMES } from '../core/records.js';
-import { valueText, TEMPLATE_INFO, nextMedal, cap } from '../core/streetevents.js';
-import { PAINTS, FINISHES, WHEELS, TINTS, DECALS, lockText } from '../core/custom.js';
-import { VEHICLE_SPECS } from '../entities/vehicle.js';
 
 const STYLE_ID = 'rw-menu-style';
 const CREDIT = 'Map data (c) OpenStreetMap contributors, ODbL';
@@ -96,39 +91,10 @@ const CSS = `
 .rw-menu li { margin-bottom: 4px; }
 .rw-menu-hub { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
 .rw-menu-hub .rw-menu-primary { height: 64px; font-size: 22px; }
-.rw-menu-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rw-menu-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .rw-menu-tile { min-height: 72px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; text-align: left; }
 .rw-menu-tile b { font-size: 17px; }
 .rw-menu-tile span { font-size: 13px; font-weight: 500; color: var(--rw-dim); }
-.rw-menu-tile { padding: 0 10px; }
-.rw-lp-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 2px 0; box-shadow: inset 0 -1px rgba(246,239,230,0.1); }
-.rw-lp-row > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rw-lp-row > i { flex: 0 0 auto; font-style: normal; font-variant-numeric: tabular-nums; color: var(--rw-dim); }
-.rw-lp-row .rw-menu-btn { flex: 0 0 auto; min-width: 76px; }
-.rw-lp-medal { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; background: rgba(246,239,230,0.18); }
-.rw-lp-gold { background: #ffd34d; } .rw-lp-silver { background: #d4dbe2; } .rw-lp-bronze { background: #c98a52; }
-.rw-lp-table { width: 100%; border-collapse: collapse; margin: 0 0 8px; font-variant-numeric: tabular-nums; }
-.rw-lp-table th, .rw-lp-table td { text-align: right; padding: 4px 6px; font-weight: 500; }
-.rw-lp-table th { font-size: 12px; color: var(--rw-dim); }
-.rw-lp-table th:first-child, .rw-lp-table td:first-child { text-align: left; }
-.rw-lp-table tr[data-here="true"] td { color: #ffd08a; font-weight: 700; }
-.rw-lp-card { display: flex; align-items: center; gap: 10px; min-height: 64px; margin: 0 0 8px; padding: 6px 10px; border-radius: 12px; background: rgba(246,239,230,0.08); }
-.rw-lp-card[data-done="true"] { box-shadow: inset 0 0 0 2px #8bd66f; }
-.rw-lp-card > div { flex: 1 1 auto; min-width: 0; }
-.rw-lp-card b { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rw-lp-card span { font-size: 13px; color: var(--rw-dim); }
-.rw-lp-card .rw-menu-btn { flex: 0 0 auto; min-width: 84px; }
-.rw-lp-opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
-.rw-lp-opts button { min-width: 48px; min-height: 48px; border-radius: 10px; border: 2px solid transparent; background: rgba(246,239,230,0.1); font-weight: 600; font-size: 13px; padding: 0 10px; }
-.rw-lp-opts button[aria-checked="true"] { border-color: #ffd9a8; box-shadow: 0 0 0 2px var(--rw-accent); }
-.rw-lp-opts button:disabled { opacity: 0.5; }
-.rw-lp-sw { width: 48px; padding: 0 !important; }
-/* Customize: the menu steps aside so the car shows while its look changes. */
-.rw-menu.rw-menu-see { background: transparent; }
-.rw-menu.rw-menu-see .rw-menu-side { display: none; }
-.rw-menu.rw-menu-see .rw-menu-main { margin-left: auto; flex: 0 0 min(46%, 380px); }
-.rw-menu.rw-menu-see .rw-menu-points { display: none; }
-.rw-menu.rw-menu-see .rw-menu-head .rw-menu-btn { min-width: 64px; }
 .rw-menu-steer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 6px 0 8px; }
 .rw-menu-btn.rw-menu-choice {
   min-height: 70px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
@@ -243,8 +209,6 @@ export function createMenu(root, game, economy) {
   /* global __VERSION__ */
   const version = typeof __VERSION__ !== 'undefined' ? 'v' + __VERSION__ : '';
 
-  const doneBtn = button('Done', 'rw-menu-primary', () => goBack(), 'Done');
-  doneBtn.dataset.role = 'customize-done';
   const tabButtons = {};
   for (const [id, label] of TABS) {
     const b = h('button', 'rw-menu-tab', label);
@@ -384,20 +348,7 @@ export function createMenu(root, game, economy) {
       // The map system opens on the map button (systems/mapui.js).
       if (game.input && game.input.press) { game.input.press('map'); game.input.release('map'); }
     });
-    if (game.city && game.city.region && game.session && game.session.travelTo) tile('travel', 'Travel', 'To another part', () => go('travel'));
-    // The loop (docs/LOOP.md): events and records, the Daily Three, the looks, the intro.
-    const se = game.streetEvents;
-    if (se && se.list.length) {
-      const mc = medalCounts(loopOf(game.progress), se.slug);
-      tile('records', 'Records', mc.any + ' / ' + se.list.length + ' medals', () => go('records'));
-    }
-    if (game.daily && game.daily.picks.length) tile('daily', 'Daily Three', game.daily.doneCount + ' / 3 today', () => go('daily'));
-    if (game.custom) tile('customize', 'Customize', 'Paint and wheels, free', () => go('customize'));
-    const tut = game.tutorial;
-    if (tut && se && se.list.length) {
-      if (tut.introOn) tile('intro', 'Skip intro', 'No more guide lines', () => { tut.skip(); render(); });
-      else tile('intro', 'Replay intro', 'The first five minutes', () => { tut.replay(); close(); });
-    }
+    if (game.city && game.city.region && game.session && game.session.travelTo) tile('travel', 'Travel', 'To another part of Miami', () => go('travel'));
     box.appendChild(tiles);
     body.appendChild(box);
   }
@@ -680,171 +631,6 @@ export function createMenu(root, game, economy) {
     });
   }
 
-  // ---------- Records (docs/LOOP.md section c) ----------
-  const medalDot = (m) => {
-    const d = h('i', 'rw-lp-medal' + (m ? ' rw-lp-' + m : ''));
-    d.setAttribute('aria-hidden', 'true');
-    return d;
-  };
-  function routeTo(ev) {
-    if (game.streetEvents) game.streetEvents.track(ev);
-    close();
-  }
-  function renderRecords() {
-    const L = loopOf(game.progress);
-    const se = game.streetEvents;
-    const here = se ? se.slug : '';
-    const stats = h('div', 'rw-menu-stats');
-    stats.dataset.role = 'records-stats';
-    const add = (v, label) => {
-      const s = h('div', 'rw-menu-stat');
-      s.append(h('b', '', v), h('span', 'rw-menu-dim', label));
-      stats.appendChild(s);
-    };
-    const mc = medalCounts(L), mh = medalCounts(L, here);
-    add(num(L.flow[here] || 0), 'Best flow run here');
-    add(num(bestFlow(L)), 'Best flow run');
-    add(mh.gold + ' / ' + mh.silver + ' / ' + mh.bronze, 'Gold, silver, bronze here');
-    add(mc.any + '', 'Event medals');
-    add(num(L.totals.banked), 'Flow banked');
-    add(L.best.tier > 1 ? 'x' + Math.round(L.best.tier) : '-', 'Top multiplier');
-    add(L.best.mph > 0 ? Math.round(L.best.mph) + ' mph' : '-', 'Top speed');
-    add(L.best.jumpFt > 0 ? Math.round(L.best.jumpFt) + ' ft' : '-', 'Longest event jump');
-    add(num(L.totals.nearMiss + L.totals.passes), 'Close passes');
-    add(num(L.totals.smashes), 'Things smashed');
-    add(L.driven.length + ' / ' + Object.keys(VEHICLE_SPECS).length, 'Vehicles driven');
-    add(formatMiles(L.dist[here] || 0), 'Distance here');
-    body.appendChild(stats);
-
-    // Three closest medals, each with a button that sets the GPS on its gate.
-    if (se && se.list.length) {
-      body.appendChild(h('div', 'rw-menu-group', 'Closest medals'));
-      for (const ev of closestMedals(L, se.list, 3)) {
-        const r = L.events[ev.id] || null;
-        const want = nextMedal(r ? r.m : '');
-        const row = h('div', 'rw-lp-row');
-        row.dataset.event = ev.id;
-        const name = h('span', '', '');
-        name.append(medalDot(r ? r.m : ''), document.createTextNode(cap(ev.name)));
-        const tgt = h('i', '', (r && Number.isFinite(r.b) ? valueText(ev.tpl, r.b) + ' \u2192 ' : '') + want + ' ' + valueText(ev.tpl, ev.targets[want]));
-        const b = button('Route', '', () => routeTo(ev), 'Route to ' + ev.name);
-        b.dataset.role = 'route';
-        row.append(name, tgt, b);
-        body.appendChild(row);
-      }
-    }
-    // Every region (only this one's gates are loaded; the others show what is saved).
-    body.appendChild(h('div', 'rw-menu-group', 'By region'));
-    const table = h('table', 'rw-lp-table');
-    table.dataset.role = 'records-regions';
-    const head = h('tr');
-    for (const t of ['Region', 'Gold', 'Silver', 'Bronze', 'Best flow', 'Miles']) head.appendChild(h('th', '', t));
-    table.appendChild(head);
-    for (const slug of REGION_SLUGS) {
-      const c = medalCounts(L, slug);
-      if (slug !== here && !c.tried && !(L.flow[slug] > 0) && !(L.dist[slug] > 0) && (slug === 'miami' || slug === 'island')) continue;
-      const tr = h('tr');
-      tr.dataset.here = String(slug === here);
-      for (const t of [REGION_NAMES[slug], c.gold, c.silver, c.bronze, num(L.flow[slug] || 0), formatMiles(L.dist[slug] || 0).replace(' mi', '')]) tr.appendChild(h('td', '', String(t)));
-      table.appendChild(tr);
-    }
-    const all = h('tr');
-    for (const t of ['Overall', mc.gold, mc.silver, mc.bronze, num(bestFlow(L)), formatMiles(totalDistance(L)).replace(' mi', '')]) all.appendChild(h('td', '', String(t)));
-    table.appendChild(all);
-    body.appendChild(table);
-    // Medals by event, template by template.
-    if (se) {
-      for (const row of boardRows(L, se.list)) {
-        body.appendChild(h('div', 'rw-menu-group', row.title + '  ' + (row.gold + row.silver + row.bronze) + ' / ' + row.total));
-        for (const it of row.items) {
-          const line = h('div', 'rw-lp-row');
-          line.dataset.event = it.ev.id;
-          const name = h('span', '', '');
-          name.append(medalDot(it.medal), document.createTextNode(cap(it.ev.tpl === 'dash' ? it.ev.name : it.ev.street)));
-          const best = h('i', '', Number.isFinite(it.best) ? valueText(row.tpl, it.best) : 'gold ' + valueText(row.tpl, it.ev.targets.gold));
-          const b = button('Route', '', () => routeTo(it.ev), 'Route to ' + it.ev.name);
-          line.append(name, best, b);
-          body.appendChild(line);
-        }
-      }
-    }
-  }
-
-  // ---------- Daily Three (docs/LOOP.md section d) ----------
-  function renderDaily() {
-    const d = game.daily;
-    if (!d || !d.picks.length) { body.appendChild(h('p', 'rw-menu-dim', 'No daily events on this map.')); return; }
-    const st = d.state;
-    const top = h('p', '', 'Three events a day, each with a twist. Days played: ' + st.streak + '.');
-    top.dataset.role = 'daily-streak';
-    body.appendChild(top);
-    const msg = h('p', 'rw-menu-dim', 'A missed day costs nothing.');
-    msg.dataset.role = 'daily-msg';
-    const L = loopOf(game.progress);
-    for (const p of d.picks) {
-      const card = h('div', 'rw-lp-card');
-      card.dataset.slot = String(p.slot);
-      card.dataset.done = String(!!st.done[p.slot]);
-      const text = h('div');
-      const r = L.events[p.ev.id] || null;
-      text.append(h('b', '', p.group + ': ' + TEMPLATE_INFO[p.ev.tpl].title + ' ' + p.twist.text),
-        h('span', '', cap(p.ev.name) + '. Bronze ' + valueText(p.ev.tpl, p.ev.targets.bronze) + ', gold ' + valueText(p.ev.tpl, p.ev.targets.gold) + (r && r.m ? '. Yours: ' + r.m : '') + '.'));
-      const b = button(st.done[p.slot] ? 'Again' : 'Go', st.done[p.slot] ? '' : 'rw-menu-primary', () => {
-        const why = d.go(p.slot);
-        if (why) msg.textContent = why; else close();
-      }, 'Go: ' + p.ev.name + ' ' + p.twist.text);
-      b.dataset.role = 'daily-go';
-      card.append(text, b);
-      body.appendChild(card);
-    }
-    body.appendChild(msg);
-  }
-
-  // ---------- Customize (docs/LOOP.md section f) ----------
-  function renderCustomize() {
-    const C = game.custom;
-    const v = game.player && game.player.vehicle;
-    if (!C || !v || v.kind !== 'car') {
-      const p = h('p', 'rw-menu-dim', 'Get in a car to change its look. Every look is free and is kept for that kind of car.');
-      p.dataset.role = 'customize-none';
-      body.appendChild(p);
-      return;
-    }
-    const id = v.spec.id;
-    const look = C.lookFor(id);
-    const group = (label, key, options, swatch) => {
-      body.appendChild(h('div', 'rw-menu-group', label));
-      const row = h('div', 'rw-lp-opts');
-      row.setAttribute('role', 'radiogroup');
-      row.setAttribute('aria-label', label);
-      row.dataset.look = key;
-      options.forEach((o, k) => {
-        const i = key === 'paint' ? k - 1 : k;
-        const name = key === 'paint' && k === 0 ? 'Stock' : o[0];
-        const open = C.open(key, i);
-        const b = h('button', swatch && k > 0 ? 'rw-lp-sw' : '', swatch && k > 0 ? '' : (open ? name : name + ' (' + lockText(key, i) + ')'));
-        b.type = 'button';
-        b.setAttribute('role', 'radio');
-        b.setAttribute('aria-checked', String(look[key] === i));
-        b.setAttribute('aria-label', name + (open ? '' : ', locked: ' + lockText(key, i)));
-        b.dataset.opt = String(i);
-        if (swatch && k > 0) b.style.background = '#' + o[1].toString(16).padStart(6, '0');
-        if (!open) b.disabled = true;
-        b.addEventListener('click', () => { C.set(id, key, i); render(); });
-        row.appendChild(b);
-      });
-      body.appendChild(row);
-    };
-    group('Paint', 'paint', [['Stock', 0]].concat(PAINTS), true);
-    group('Finish', 'finish', FINISHES, false);
-    group('Wheels', 'wheels', WHEELS, false);
-    group('Window tint', 'tint', TINTS, false);
-    group('Decal', 'decal', DECALS, false);
-    const reset = button('Back to stock', '', () => { C.reset(id); render(); }, 'Back to the stock look');
-    reset.dataset.role = 'look-reset';
-    body.appendChild(reset);
-  }
-
   // ---------- Help ----------
   function renderHelp() {
     const inv = settings().invertPitch;
@@ -863,9 +649,7 @@ export function createMenu(root, game, economy) {
       ['Getting in and out', ['Walk up to any craft and tap ENTER. Tap ENTER again to get out once you are slow enough.']],
       ['Map and races', ['Open the map to place a waypoint and see race starts.',
         'Finish races and challenges for medals and points. Everything is open from the start.']],
-      ['Flow and events', ['Near misses, clean passes, drifts, air time, smashes, wrecks and escapes fill the Flow bar under the score; a full bar raises the multiplier, up to x5. Stop anywhere with no stars to bank the run. A hard crash costs two steps and a fifth of the run.',
-        'Drive through a glowing gate to start its event: bronze, silver and gold. RETRY puts you back at the gate. Pause shows Records, the Daily Three and Customize.']],
-      ['Scores', ['Race and stunt medals and street event medals pay points straight into the score. Everything is open from the start.',
+      ['Scores', ['Stunts, wrecks and takedowns of the rival crew earn points. Keep scoring within 4 seconds to build a combo. A hard crash or going down loses the points you have not banked yet.',
         (game.city && game.city.texts && game.city.texts.fleet) || 'The jet, stunt plane, heavy helicopter and yacht wait at Gullwing Airfield and Saltyard Marina.']],
     ];
     const aboutRow = goRow('About Rustwater', 'Open', 'about', 'about');
@@ -898,9 +682,6 @@ export function createMenu(root, game, economy) {
     newgame: { title: 'New game', render: renderNewGame },
     mapchoice: { title: 'Map', render: renderMapChoice },
     travel: { title: 'Travel', render: renderTravel },
-    records: { title: 'Records', render: renderRecords },
-    daily: { title: 'Daily Three', render: renderDaily },
-    customize: { title: 'Customize', render: renderCustomize },
   };
   const screenOf = (id) => BUILTIN[id] || screens.get(id) || null;
   const isTop = (id) => TABS.some(([t]) => t === id);
@@ -917,11 +698,7 @@ export function createMenu(root, game, economy) {
     const inSettings = active === 'settings';
     groupBar.style.display = inSettings ? '' : 'none';
     title.style.display = inSettings ? 'none' : '';
-    title.textContent = active === 'customize' && game.player && game.player.vehicle && game.player.vehicle.spec ? 'Customize: ' + game.player.vehicle.spec.label : sc.title;
-    // Customize steps aside (the car shows while its look changes) and keeps a Done button in its head.
-    const see = active === 'customize';
-    el.classList.toggle('rw-menu-see', see);
-    if (see !== !!doneBtn.parentNode) { if (see) head.appendChild(doneBtn); else doneBtn.remove(); }
+    title.textContent = sc.title;
     for (const [id] of GROUPS) {
       groupButtons[id].setAttribute('aria-selected', String(id === group));
       groupButtons[id].tabIndex = id === group ? 0 : -1;
@@ -932,11 +709,6 @@ export function createMenu(root, game, economy) {
     pointsEl.textContent = num(game.score ? game.score.total : game.progress.score.total) + ' pts';
     if (screenOf(active) === BUILTIN[active]) sc.render();
     else sc.render(body, api);
-    // In a garage, in a car: the way to its look.
-    if (active === 'garage' && game.custom && game.player && game.player.vehicle && game.player.vehicle.kind === 'car') {
-      const row = goRow('Look of this car', 'Customize', 'garage-customize', 'customize');
-      body.appendChild(row);
-    }
     body.scrollTop = top;
   }
 
@@ -984,7 +756,7 @@ export function createMenu(root, game, economy) {
     opened = false;
     armed = null;
     parents.clear();
-    el.classList.remove('rw-menu-open', 'rw-menu-see');
+    el.classList.remove('rw-menu-open');
     if (game.touch && game.touch.setVisible) game.touch.setVisible(true);
   }
   // open() with no id (or a pause) shows the hub; open(id) any screen by id.

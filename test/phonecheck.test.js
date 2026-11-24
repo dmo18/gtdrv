@@ -5,7 +5,7 @@ import { createVehicle, stepVehicle } from '../src/entities/vehicle.js';
 import { createInput } from '../src/core/input.js';
 import { createRng } from '../src/core/rng.js';
 import {
-  frameStats, formatResult, RESULT_RE, createSystemTimer, buildRoute, createDriver, createCheckRun, SOUNDS, findLabStreet, createLabDrive, RESIZE_SKIP, SKIP_MAX,
+  frameStats, formatResult, RESULT_RE, createSystemTimer, buildRoute, createDriver, createCheckRun, SOUNDS, findLabStreet, createLabDrive,
 } from '../src/ui/phonecheck.js';
 import { makeFightGame, cityAndCollision } from './fightgame.js';
 
@@ -241,27 +241,4 @@ test('the system timer names the slowest single call and puts the methods back',
   assert.equal(a.fixedUpdate, origA);
   assert.equal(c.fixedUpdate, origC);
   assert.deepEqual(createSystemTimer(null).worst(), { name: '', ms: 0 });
-});
-
-test('frames spoiled by the check\'s own resize are left out: skipFrames drops the next n, never more than the cap', () => {
-  const game = checkGame();
-  const { city } = cityAndCollision();
-  game.player.x = game.player.walker.x = city.nodes[3].x;
-  game.player.z = game.player.walker.z = city.nodes[3].z;
-  const run = createCheckRun(game, { driveSeconds: 6, soundSeconds: 0.5, source: game.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false }) });
-  assert.equal(run.start(), true);
-  run.feedFrame(16.7);
-  run.skipFrames(RESIZE_SKIP);
-  run.feedFrame(83.3); // the resize frame
-  run.skipFrames(3); // a shorter request never shortens the one in force
-  for (let i = 1; i < RESIZE_SKIP; i++) run.feedFrame(50);
-  run.feedFrame(16.6);
-  assert.deepEqual(run.frames, [16.7, 16.6]);
-  assert.equal(run.skipped, RESIZE_SKIP);
-  run.skipFrames(10000);
-  for (let i = 0; i < SKIP_MAX; i++) run.feedFrame(40);
-  run.feedFrame(17);
-  assert.deepEqual(run.frames, [16.7, 16.6, 17]);
-  assert.equal(run.result().over33, 0);
-  run.finish();
 });

@@ -210,8 +210,7 @@ export function belowLiveCap(game, reserve = 0) {
 // listed [kind, spec, color] (and throws it away) every `every` steps from
 // step `phase` on, so the first real spawn of that spec later costs little.
 // Only where the game draws (game.scene and game.kinds); steps are counted,
-// never timed. While the title screen is up (game.titleCam.active) it builds
-// one a step.
+// never timed.
 // ---------------------------------------------------------------------------
 export function createWarmer(list, every = 6, phase = 2) {
   let n = 0, next = 0;
@@ -222,10 +221,7 @@ export function createWarmer(list, every = 6, phase = 2) {
     step(game) {
       if (next >= list.length) return false;
       n++;
-      // Behind the title (the simulation runs, nobody plays yet): one every step, so the
-      // list is done before Start is tapped instead of over the first seconds of play.
-      const behindTitle = !!(game && game.titleCam && game.titleCam.active);
-      if (n < phase || (!behindTitle && (n - phase) % every !== 0)) return false;
+      if (n < phase || (n - phase) % every !== 0) return false;
       const kinds = game && game.scene && game.kinds;
       if (!kinds) {
         next = list.length;

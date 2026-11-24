@@ -66,23 +66,16 @@ export function walkLeftOf(e) {
 // varies along a pair; a fixed band left a sliver of ground down the
 // middle or ran onto the partner), up to 4 m.
 export const MEDIAN_GAP = 6;
-// The distance from edge e's left curb (lateral lc) at d m along it to
-// the left curb line of its partner (the other half of a divided road);
-// Infinity without a partner.
-export function pairGap(city, e, d, lc) {
-  if (!(e.pair >= 0)) return Infinity;
-  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
-  const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
-  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
-  return Math.abs(lat - ((p.off || 0) - p.width / 2));
-}
 export function medianAt(city, e, d, lc) {
   const m = medianBand(e);
   if (!(m > 0) || !(e.pair >= 0)) return m;
   // (No median against a partner drawn as part of a junction.)
   if (city.roadGeo && city.roadGeo.inner[e.pair]) return 0;
   if (e.median > 8) return m;
-  const dist = pairGap(city, e, d, lc);
+  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
+  const x = a.x + e.ux * d - e.uz * lc, z = a.z + e.uz * d + e.ux * lc;
+  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
+  const dist = Math.abs(lat - ((p.off || 0) - p.width / 2));
   // (+0.3 m: the two halves overlap a little, so no ground shows between
   // them where the pair is not parallel.)
   // A median only where the two curbs are 6 m apart or more; nearer,
@@ -554,7 +547,6 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   // Per end and side (q * 2 + 0 right, 1 left, edge frame): no sidewalk,
   // median or fill within this many m of that end's node (gores, noses).
   const sup = new Float64Array(4 * NE);
-  const mthru = new Uint8Array(2 * NE);
   const junctions = [];
   for (const [r, g] of groups) {
     const list = arms.get(r);
@@ -612,17 +604,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       sup[2 * G.qb + G.sideB] = Math.max(sup[2 * G.qb + G.sideB], G.lb);
     }
     // Median noses stop 2 m short of the junction.
-    // (Not where nothing leaves the junction on the median's side: a
-    // street that ends at one half of a divided road, a T. The median
-    // runs on past it, `mthru`, and the meshes carry it through.)
-    for (const A of list) {
-      if (!(medianBand(A.e) > 0)) continue;
-      const sg = A.end ? 1 : -1;
-      let crossed = false;
-      for (const B of list) if (B !== A && (B.ux * A.rx + B.uz * A.rz) * sg > 0.35) { crossed = true; break; }
-      if (crossed || list.length < 2) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
-      else mthru[A.q] = 1;
-    }
+    for (const A of list) if (medianBand(A.e) > 0) sup[2 * A.q + 1] = Math.max(sup[2 * A.q + 1], A.trim + 2);
     for (const id of g) nodeJ[id] = J.id;
     for (const A of list) {
       trim[A.q] = A.trim;
@@ -660,7 +642,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
       }
     }
   }
-  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup, mthru };
+  return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup };
 }
 
 // Two one-way ways in the same direction drawn over each other (a turn
@@ -867,10 +849,7 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
         tris.push(ra[0], ra[1], lb[0], lb[1], bbx, bbz, ra[0], ra[1], bbx, bbz, bax, baz);
       }
     }
-    // (qa, sideA: the edge end and side (0 right, 1 left) of the arm before
-    // the corner; qb, sideB: of the arm after it. The meshes leave the
-    // sidewalk off a corner whose two sides are bare, world/ground.js.)
-    if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null, qa: A.q, sideA: A.end ? 1 : 0, qb: B.q, sideB: B.end ? 0 : 1 });
+    if (wa > 0 || wb > 0) corners.push({ curb: Float64Array.from(curb), tris: tris ? Float64Array.from(tris) : null });
   }
   let hull = false;
   let poly = ring;
