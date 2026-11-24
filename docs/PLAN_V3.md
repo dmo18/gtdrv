@@ -719,3 +719,20 @@ Cap: this round is estimated at 1.8M; V3 cap raised from 7.0M to 8.0M (docs/USAG
 | STREETSCAPE | Roads and blocks to the owner's eye: net-filled gaps drawn, the strip at S Miami Ave, lot planting, far level, a drive review in every region | Fable | src/world/junctions.js, ground.js, lots.js, roadprofile.js, miami.js, src/render/citymesh.js, realcity.js, lotmesh.js, props.js, treebatch.js, buildings.js, textures.js |
 | LOOP | The fun loop: flow meter, street events with medals, records board, daily three, guided first five minutes, free paint and wheels | Fable | docs/LOOP.md, src/systems/score.js, activities.js, tutorial.js, events (new), src/ui/hud.js (meter only), menu.js (board), src/core/save.js (new fields), garage.js |
 | SEC, RV | Security review and the gate | Opus | none |
+
+## 15. Quota-aware order (2026-11-24, owner: you are killing session quotas)
+
+Rules: one heavy helper at a time; Fable only for design documents and the single hardest
+problem; Opus for hard scoped work; Sonnet for standard builds from a complete brief;
+briefs point at files instead of repeating them; one batched gate per publish (no gate on
+every helper); screenshots only where the owner's eye is the test; stopped helpers resume
+by name so no context is rebuilt.
+
+| step | task | model | publishes |
+|---|---|---|---|
+| 1 | FEEL: arcade handling rebuild (running) | Fable, then Opus review of the numbers | 0.11.1 after one gate |
+| 2 | PERF: 4 frames over 33 ms to 0, peds 10.7 ms, memory 202 to 180 MB (resume a97ae26) | Opus | with 0.12.0 |
+| 3 | LOOP design doc (docs/LOOP.md, 250 lines) | Fable, one short call | none |
+| 4 | LOOP build: Flow meter and juice, then events, records, first five minutes, daily three, paint and wheels, in that order, each a small Sonnet task | Sonnet, Opus review per two steps | 0.12.0 |
+| 5 | STREETSCAPE: the defect list and fixes from the partial work (resume aa8fc9c) | Opus | 0.12.1 |
+| 6 | Security review and the gate | Opus read-only, one pass | each publish |

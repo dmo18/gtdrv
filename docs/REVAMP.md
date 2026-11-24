@@ -741,8 +741,7 @@ for Arcade; constants are in handlingbands.js (`ARCADE_GRIP`, `ARCADE_LOCK`,
    service vehicles keep 5/12 of the grip gain (1.25 and 1.10, as before): with more their
    inner wheels would lift. Body roll at the limit is 1.2 times the table's, not 1.6.
 3. Direct. Shaping exponent 1.2 at 70 mph (was 1.8). The player's steering (controls.steerShape)
-   moves at 12 locks per second each way (AI drivers keep 5.5 and 5, and a 0.06 s lateral
-   lag above walking pace: their planners were tuned on both). Input to 63 % of the settled yaw rate: 0.083 s at 10 to 70 mph. A
+   moves at 12 locks per second each way (AI drivers keep the spec's 5.5 and 5: their planners were tuned on them). Input to 63 % of the settled yaw rate: 0.083 s at 10 to 70 mph. A
    released car is straight within 0.25 s, with no yaw the other way.
 4. The handbrake slide. The tail swings out toward the steering's side at 2.2 rad/s up to 0.6
    rad (34 degrees) on full input, from 2 m/s (none) to 5 m/s (all); the path keeps 0.85 of the

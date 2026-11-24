@@ -369,7 +369,6 @@ const BRAKE_FADE_V = 0.9; // m/s: below this the brake eases off (no stop jerk)
 const REV_HOLD = 0.5; // s at rest with the brake held after a stop before reverse
 const DRAG_K = 0.16; // aero drag N per (m/s)^2 per m^2 of width times height
 const REAR_K = 1.08; // rear tires a little grippier than the front: the car settles at the limit (both modes)
-const AI_RELAX = 0.06; // s, Arcade: AI cars' lateral lag (see the planted model)
 const SCRUB = 0.2; // Arcade: share of the front's cornering drag that slows the car in a turn
 const KNOCK_MIN = 3, KNOCK_S = 0.4, KNOCK_PER = 30; // Arcade: a crash over 3 m/s leaves the car loose for up to 0.4 s (closing speed / 30)
 const SLIP_QUIET = 0.05, SLIP_FULL = 0.5; // Arcade: rear slip angle (rad) where the squeal starts and where v.slip reaches 1
@@ -1003,13 +1002,7 @@ export function stepVehicle(v, controls, dt, world) {
       // The old velocity seen from the turned nose: the rear axle's
       // sideways part of it is what the tires take out.
       const want = nf > 0 ? -Math.tan(v.slide) * nf : 0;
-      // The player's car: taken out at once, within plantA. AI drivers
-      // (no controls.steerShape) keep a short tire lag above walking pace,
-      // AI_RELAX s from KIN_V up, none at a crawl: their planners (traffic
-      // pull-overs, police) were tuned on it and it keeps their paths.
-      const wp = -v.vx * sh + v.vz * ch - b * r0;
-      const relax = quick ? 0 : AI_RELAX * clamp((anf - 0.5) / (KIN_V - 0.5), 0, 1);
-      const w = relax > 0 ? approach(wp, want + (wp - want) * Math.exp(-h / relax), plantA * h) : approach(wp, want, plantA * h);
+      const w = approach(-v.vx * sh + v.vz * ch - b * r0, want, plantA * h);
       const nl = w + b * r;
       v.vx = nf * ch - nl * sh;
       v.vz = nf * sh + nl * ch;
