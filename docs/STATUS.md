@@ -837,3 +837,7 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Normal street view, day: Beach 122 / 233k (was 130 / 244k), Downtown 209 / 292k (208 / 293k), North 164 / 232k (166 / 246k), West 146 / 255k (152 / 280k), South 114 / 249k (119 / 260k); static city calls unchanged.
 - Gates: lint, 1039 tests (4 new in test/streetscape.test.js; node fingerprints repinned for the street-name blades near fan junctions), menu-test 219, ui-test 771/771, touch-test 243/243, smoke --extra, smoke-regions (5), perf five regions in budget.
 - Open: lot to lot raster steps, long hedges read heavy, an arm's real sidewalk can cross a fan junction, crossing lane paint where two carriageways overlap.
+
+## 2026-11-24: 0.12.2 look crash fix
+- Soak found `keepLook` throwing (reading wheelLevels of a mesh without them) in the render loop after 0.12.0; guarded. Soak of 191 sim s now has zero errors.
+- The full 60 minute soak per region is not run overnight: it takes about 3.5 hours of wall time each here. Left for the release candidate.

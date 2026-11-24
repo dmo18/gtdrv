@@ -769,8 +769,9 @@ export function applyLook(mesh, look, base) {
 export function keepLook(mesh) {
   const ud = mesh.userData, lk = ud.look;
   if (!lk || ud.wrecked) return;
-  const wm = wheelLookMaterial(lk.wheels);
   const wl = ud.wheelLevels;
+  if (!wl || !wl.length) return;
+  const wm = wheelLookMaterial(lk.wheels);
   if (wl[0].material !== wm) for (let i = 0; i < wl.length; i++) wl[i].material = wm;
   const gl = ud.glassLevels;
   if (gl && gl.length) {
