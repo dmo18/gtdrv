@@ -26,7 +26,7 @@ One run of unbanked points, one multiplier (x1 to x5), one meter toward the next
 | Takedown (vehicle wrecked 250, rival crew 100 to 400, +50 within 3 s) | 100 to 450 | 0.4 | combat, score.js |
 | Chain blast (a blast set off by a blast) | double | 0.6 | combat, score.js |
 | Smash (a prop broken by the car), chain within 3 s | 25, +5 per link up to +50 | 0.07 | systems/flow.js |
-| Ram (a driven car hit at 11 mph or more, once per 4 s per car) | 80 | 0.1 | systems/flow.js |
+| Ram (a driven car hit at 11 mph or more by the player, the faster of the two, once per 4 s per car) | 80 | 0.1 | systems/flow.js |
 | Escape (lost the police) | 500 per star | 1.0 (a whole tier) | police, score.js |
 
 Rules (all in `src/core/flow.js`, fixed 1/60 s steps):
@@ -40,7 +40,8 @@ Rules (all in `src/core/flow.js`, fixed 1/60 s steps):
   plus 10 percent of the run per tier above x1 (x5: +40 percent), and resets to x1. Finishing
   a street event banks the same way. A flow gone cold (x1, empty, 4 s) banks without the bonus.
   No bank while wanted, during an event, or in the air.
-- Hard crash (an impact over 18 mph that takes away more than 45 percent of the speed): two
+- Hard crash (an impact over 18 mph that takes away more than 45 percent of the speed, the car
+  moving at over 9 mph before it; a car into one standing still is no crash): two
   tiers and 20 percent of the unbanked run, once per second at most. Wrecked, pulled over or
   downed: the whole unbanked run. The banked score is never touched.
 - Caps: 20,000 per source before the multiplier, 1,000,000 per run.
@@ -72,8 +73,8 @@ seed 41077 on named streets: 150 m inside the region, on land, 170 m from any ot
 from a gate of the same template, clear of garages, travel pads and the old ramps. A gate is two
 posts and a beam across the street with a see-through curtain in the template's color (three
 instanced draws for all of them). Driving through it the right way at 7 mph or more starts the
-event at once: no menu, no countdown, no card. The wrong way says "Wrong way: enter the gate
-from the other side". A gate the GPS leads to is approached from 18 m behind it, in the lane.
+event at once: no menu, no countdown, no card. The wrong way says "Wrong way: turn around, then
+drive through." (the play test showed the player is then on the near side, facing away). A gate the GPS leads to is approached from 18 m behind it, in the lane.
 
 | template (color) | rule | value | bronze / silver / gold | limit |
 |---|---|---|---|---|
@@ -97,7 +98,9 @@ RETRY (the offer cell above MORE, 9 s) puts the car back 14 to 40 m before the g
 still, traffic on the spot removed, stars cleared: about 3 s from tap to gate. Leaving the car
 or wrecking it ends the event. The first gate (a near-miss run with bronze 2) stands 115 m ahead
 of the region's start place; the first one-star heat escape and the first jump are within
-800 m of it. Jump ramps are added to the stunt system's ramps (they keep their stunt medals).
+800 m of it. Jump ramps are added to the stunt system's ramps (they keep their stunt medals; no start pillar
+of their own, the gate marks them; every ramp is one vertex-colored draw, so the extra ramps in
+view cost no calls: Downtown 209 / 293k, Beach 123 / 241k).
 
 ## c. Records
 
@@ -131,8 +134,10 @@ nothing. No reward is ever withheld for missing days.
 A new game: parked on Ocean Drive (each region's start street). Ocean Drive is one lane between
 two rows of parked cars with a traffic light every block, so the first run would be a queue and
 a ram: until the first medal, moving traffic 70 to 170 m ahead in the player's lane is taken
-away (and the queue at the gate once, as the run starts). The parked cars stay: they are what
-the player passes close. One line at a time in the top stack, 9 words at most, the GPS on the
+away (and the queue at the gate once, as the run starts), and a queue standing 40 to 70 m ahead
+at a light goes before the player reaches it. The parked cars stay: they are what the player
+passes close. Until the police beat a bump or a fast stretch does not call the police (the
+first play-through got a star from a bump at 7 s, before anything had explained the police). One line at a time in the top stack, 9 words at most, the GPS on the
 beat's gate. Beats wait for what the player does; a beat's line comes again after 35 s without
 progress.
 

@@ -7,13 +7,16 @@
 // Undamaged cars of one color share one material; a car gets its own
 // clone only once it is damaged (released again when it is removed).
 import * as THREE from 'three';
+import { FINISHES, WHEELS, TINTS, DECALS, PAINTS, paintCode, codeRgb, codeFinish, codeDecal } from '../core/custom.js';
 
 // Surface classes stored in the `aCls` vertex attribute.
 export const CLS = { PAINT: 0, LIVERY: 1, TRIM: 2, CHROME: 3, GLASS: 4, RUBBER: 5, ALLOY: 6, PLATE: 7, GLOW: 8, SHADOW: 9, CABIN: 10 };
 
 // Lamp level shared by every patched material (0 day .. 1 night): far
 // LOD models light their baked lamp quads (class GLOW) with it.
-const shared = { uLamp: { value: 0 } };
+// uRim (the alloy tint of a wheel look) and uDecal (stripe color and kind
+// of a paint look) are white and none for every material without a look.
+const shared = { uLamp: { value: 0 }, uRim: { value: new THREE.Color(1, 1, 1) }, uDecal: { value: new THREE.Vector4(0, 0, 0, 0) } };
 export function setLampUniform(v) {
   shared.uLamp.value = v;
 }
@@ -56,6 +59,8 @@ varying float vCls;
 varying vec3 vObj;
 varying vec3 vObjN;
 uniform float uLamp;
+uniform vec3 uRim;
+uniform vec4 uDecal;
 #ifdef RW_STREET
 varying vec3 vRwW;
 #endif
@@ -120,6 +125,12 @@ vec3 rwCol = vColor.rgb;
 if (rwC < 0.5) {
   rwCol = diffuse * vColor.rgb;
   rwCC = 1.0;
+  // A look's stripes on the top faces: kind 1 twin, kind 2 one down the center.
+  if (uDecal.w > 0.5 && vObjN.y > 0.35) {
+    float rwZ = abs(vObj.z);
+    float rwS = uDecal.w < 1.5 ? step(0.14, rwZ) * step(rwZ, 0.4) : step(rwZ, 0.27);
+    rwCol = mix(rwCol, uDecal.rgb, rwS);
+  }
 } else if (rwC < 1.5) {
   rwCC = 1.0;
 } else if (rwC < 2.5) {
@@ -132,6 +143,7 @@ if (rwC < 0.5) {
   roughnessFactor = 0.92; metalnessFactor = 0.0;
 } else if (rwC < 6.5) {
   roughnessFactor = 0.3; metalnessFactor = 0.85;
+  rwCol *= uRim;
 } else if (rwC < 7.5) {
   roughnessFactor = 0.5; metalnessFactor = 0.0;
 } else if (rwC < 8.5) {
@@ -241,6 +253,8 @@ function patch(mat, damage, street = false) {
   const u = mat.userData.rw;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uLamp = shared.uLamp;
+    shader.uniforms.uRim = u.uRim || shared.uRim;
+    shader.uniforms.uDecal = u.uDecal || shared.uDecal;
     if (damage) {
       shader.uniforms.uDmg = u.uDmg;
       shader.uniforms.uHit0 = u.uHit0;
@@ -310,13 +324,23 @@ function paintParams(hex) {
 
 // Car paint: clearcoated physical material (the clearcoat gives the
 // sharp sky reflection on top of a softer metallic base).
-function makePaint(hex, damage, physical) {
-  const p = paintParams(hex);
+// `code`: a plain 24 bit color, or a look's paint code (core/custom.js
+// paintCode: the color with a finish and a decal in the bits above). The
+// finishes only change material numbers (the clearcoat is never 0), so
+// they share the one paint program.
+function makePaint(code, damage, physical) {
+  const hex = codeRgb(code), fin = FINISHES[codeFinish(code)] || FINISHES[0], dec = DECALS[codeDecal(code)] || DECALS[0];
+  const stock = codeFinish(code) === 0;
+  const p = stock ? paintParams(hex) : { metalness: fin[1], roughness: fin[2] };
   const opts = { color: hex, vertexColors: true, metalness: p.metalness, roughness: p.roughness };
   const mat = physical
-    ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: 1, clearcoatRoughness: 0.06 })
+    ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: stock ? 1 : fin[3], clearcoatRoughness: stock ? 0.06 : fin[4] })
     : new THREE.MeshStandardMaterial(opts);
   mat.userData.rw = damage ? damageUniforms() : {};
+  if (dec[2] > 0) {
+    tmp.setHex(dec[1], THREE.SRGBColorSpace);
+    mat.userData.rw.uDecal = { value: new THREE.Vector4(tmp.r, tmp.g, tmp.b, dec[2]) };
+  }
   patch(mat, damage, true);
   return track(mat);
 }
@@ -357,7 +381,8 @@ export function releaseMaterial(m) {
 
 const farCache = new Map();
 // Far LOD: plain standard material, same class patch (no clearcoat).
-export function farMaterial(hex, sooty = false) {
+export function farMaterial(code, sooty = false) {
+  const hex = codeRgb(code);
   const key = hex + (sooty ? 's' : '');
   let m = farCache.get(key);
   if (!m) {
@@ -644,6 +669,7 @@ const GLASS_FRAG = /* glsl */`
 float rwC = floor(vCls + 0.5);
 roughnessFactor = 0.05;
 metalnessFactor = 0.0;
+diffuseColor.rgb *= 1.0 - 0.85 * uRwGlass.z;
 float rwK = 0.0;
 if (uRwGlass.x > 0.5) {
   float m = smoothstep(0.32, 0.5, rwNoise(vObj * 2.3));
@@ -656,7 +682,7 @@ if (uRwGlass.x > 0.5) {
 `;
 const GLASS_OUT = /* glsl */`
 float rwNV = saturate(dot(normal, normalize(vViewPosition)));
-float rwAl = mix(0.7, 0.97, pow(1.0 - rwNV, 3.0));
+float rwAl = mix(mix(0.7, 0.98, uRwGlass.z), 0.97, pow(1.0 - rwNV, 3.0));
 if (uRwGlass.x > 0.5) rwAl = max(rwAl, 0.55 + 0.4 * rwK);
 gl_FragColor = vec4(totalDiffuse * rwAl + totalSpecular, rwAl);
 if (rwC > 8.5) gl_FragColor = vec4(0.0, 0.0, 0.0, vRwA);
@@ -670,22 +696,23 @@ gl_FragColor.rgb -= fogFactor * fogColor * (1.0 - gl_FragColor.a);
 `;
 const glassCache = {};
 // state: 'clean', 'crack' (crazed, cloudy) or 'gone' (blown out: only the
-// contact shadow draws).
-export function carGlassMaterial(state = 'clean') {
-  let m = glassCache[state];
+// contact shadow draws). tint: 0 (as built) to 1 (a look's window tint).
+export function carGlassMaterial(state = 'clean', tint = 0) {
+  const gkey = tint > 0 && state !== 'gone' ? state + tint : state;
+  let m = glassCache[gkey];
   if (m) return m;
   m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.05, metalness: 0, transparent: true, depthWrite: false, premultipliedAlpha: true });
   // One shader program for all three states (no compile on first damage):
   // the state is a uniform (x crazed, y blown out).
   const def = '#define RW_STREET\n';
-  const uRwGlass = { value: new THREE.Vector2(state === 'crack' ? 1 : 0, state === 'gone' ? 1 : 0) };
+  const uRwGlass = { value: new THREE.Vector3(state === 'crack' ? 1 : 0, state === 'gone' ? 1 : 0, gkey === state ? 0 : tint) };
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uLamp = shared.uLamp;
     shader.uniforms.uRwGlass = uRwGlass;
     shader.vertexShader = def + VERT_HEAD + 'varying float vRwA;\n' + shader.vertexShader
       .replace('#include <begin_vertex>', VERT_BODY)
       .replace('#include <project_vertex>', GLASS_VERT);
-    shader.fragmentShader = def + FRAG_HEAD + 'varying float vRwA;\nuniform vec2 uRwGlass;\n' + shader.fragmentShader
+    shader.fragmentShader = def + FRAG_HEAD + 'varying float vRwA;\nuniform vec3 uRwGlass;\n' + shader.fragmentShader
       .replace('#include <metalnessmap_fragment>', GLASS_FRAG)
       .replace('#include <lights_fragment_maps>', FRAG_REFL)
       .replace('#include <opaque_fragment>', GLASS_OUT)
@@ -694,8 +721,62 @@ export function carGlassMaterial(state = 'clean') {
   };
   m.customProgramCacheKey = () => 'rwglass';
   m.userData.envScale = 1.3;
-  glassCache[state] = track(m);
+  glassCache[gkey] = track(m);
   return m;
+}
+
+// ---- looks (docs/LOOP.md section f; rules in core/custom.js) ----------------
+const wheelLooks = [];
+// The wheel material of a look: the shared wheel material with its alloy tinted.
+export function wheelLookMaterial(style) {
+  const w = WHEELS[style];
+  if (!w || style === 0) return wheelMaterial();
+  let m = wheelLooks[style];
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0 });
+    m.userData.rw = { uRim: { value: new THREE.Color().setHex(w[1], THREE.SRGBColorSpace) } };
+    patch(m, false);
+    wheelLooks[style] = track(m);
+  }
+  return m;
+}
+// Put a look on a car mesh (render/vehiclemesh.js createVehicleMesh):
+// look { paint, finish, wheels, tint, decal } as indexes into the tables,
+// `base` the color the car came in (paint -1 keeps it). The mesh keeps the
+// paint code as its color, so damage and the far model follow the look.
+export function applyLook(mesh, look, base) {
+  const ud = mesh && mesh.userData;
+  if (!ud || !ud.body || !ud.wheelLevels) return false;
+  const rgb = look.paint >= 0 && PAINTS[look.paint] ? PAINTS[look.paint][1] : codeRgb(base);
+  const code = paintCode(rgb, look.finish, look.decal);
+  if (code !== ud.color) {
+    ud.color = code;
+    if (ud.ownPaint) {
+      const old = ud.ownPaint;
+      ud.ownPaint = ownPaintMaterial(code, ud.box);
+      const a = old.userData.rw, b = ud.ownPaint.userData.rw;
+      b.uDmg.value.copy(a.uDmg.value); b.uHit0.value.copy(a.uHit0.value); b.uHit1.value.copy(a.uHit1.value); b.uCrush.value.copy(a.uCrush.value);
+      ud.body.material = ud.bodyMid.material = ud.ownPaint;
+      releaseMaterial(old);
+    } else ud.body.material = ud.bodyMid.material = paintMaterial(code);
+    if (ud.far) ud.far.material = farMaterial(code, !!ud.wrecked);
+  }
+  ud.look = { wheels: look.wheels | 0, tint: (TINTS[look.tint] || TINTS[0])[1] };
+  keepLook(mesh);
+  return true;
+}
+// The wheel and glass materials of a look, put back after damage swapped them.
+export function keepLook(mesh) {
+  const ud = mesh.userData, lk = ud.look;
+  if (!lk || ud.wrecked) return;
+  const wm = wheelLookMaterial(lk.wheels);
+  const wl = ud.wheelLevels;
+  if (wl[0].material !== wm) for (let i = 0; i < wl.length; i++) wl[i].material = wm;
+  const gl = ud.glassLevels;
+  if (gl && gl.length) {
+    const gm = carGlassMaterial(ud.glassState || 'clean', lk.tint);
+    if (gl[0].material !== gm) for (let i = 0; i < gl.length; i++) gl[i].material = gm;
+  }
 }
 
 export { LAMP };

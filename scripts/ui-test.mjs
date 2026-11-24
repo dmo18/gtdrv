@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { DRAG_FULL_PX, WHEEL_SLACK } from '../src/ui/wheel.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '..');
@@ -232,7 +233,9 @@ async function liveLayout(check) {
     // [name, craft, armed]. 'car-garage' and 'foot-talk' have a GARAGE or TALK offer showing (docs/REVAMP.md 6.12 HG-2).
     // 'car-hood' and 'car-cockpit': the first-person views (PLAN_V3 2.8) under the same HUD contract.
     // 'car-swap': a plain car (no SIREN, no EXTRA forced) where SWAP takes the LOCK rect.
-    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-swap', 'car', null], ['car-garage', 'car', null], ['car-hood', 'car', null], ['car-cockpit', 'car', null], ['boat', 'boat', null],
+    // 'car-event' (docs/LOOP.md): a street event just ended, so RETRY is on offer in the BOOST cell, while the Flow meter (the
+    // pill under the score, x5 with a full bar) and the event line (the prompt strip) show through the real HUD calls.
+    const MODES = [['foot', 'foot', null], ['foot-talk', 'foot', null], ['car', 'car', null], ['car-swap', 'car', null], ['car-garage', 'car', null], ['car-event', 'car', null], ['car-hood', 'car', null], ['car-cockpit', 'car', null], ['boat', 'boat', null],
       ['plane-armed', 'plane', true], ['plane', 'plane', false], ['heli-armed', 'heli', true], ['tank', 'tank', null]];
     const setMode = (kind, armed, name) => pg.evaluate(([k, a, nm]) => {
       const g = window.__rw;
@@ -248,6 +251,17 @@ async function liveLayout(check) {
         if (!v) return false;
         g.enterVehicle(v);
         if (k === 'car') g.chase.setView(nm === 'car-hood' ? 'Hood' : nm === 'car-cockpit' ? 'Cockpit' : 'Chase');
+      }
+      // RETRY of a street event: the real offer, through a begun and given-up event.
+      const se = g.streetEvents;
+      if (se) {
+        se.cancel('Test');
+        se.dismissRetry();
+        g.hud.setEvent(null);
+        if (nm === 'car-event') {
+          if (!se.begin(se.list[0])) return false;
+          se.cancel('Test');
+        }
       }
       g.touch.update(1 / 60);
       return true;
@@ -352,7 +366,12 @@ async function liveLayout(check) {
       }
       const cv = document.getElementById('game').getBoundingClientRect();
       const cs = (e) => { const s = getComputedStyle(e); return { bg: s.backgroundColor, pad: s.padding, img: s.backgroundImage }; };
-      return { out, texts, mode: g.player.mode, extraOn: document.querySelector('.rw-touch').classList.contains('rw-extra-on'), mortal: !document.querySelector('.rw-hpmeter').classList.contains('rw-none'), canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
+      // the Flow meter and the event line (docs/LOOP.md): text, bar, tier, where the bar is drawn, the edge flash
+      const combo = document.querySelector('.rw-combo'), prompt = document.querySelector('.rw-prompt'), trEl = document.querySelector('.rw-tr');
+      const flow = { combo: combo.textContent.replace(/\s+/g, ' '), comboShown: vis(combo), bar: trEl.style.getPropertyValue('--flow'), tier5: trEl.classList.contains('rw-t5'),
+        scoreBar: getComputedStyle(document.querySelector('.rw-score')).backgroundSize, comboBar: getComputedStyle(combo).backgroundSize,
+        event: prompt.classList.contains('rw-event'), text: prompt.textContent, flash: Number(getComputedStyle(document.querySelector('.rw-flowflash')).opacity) };
+      return { out, texts, flow, mode: g.player.mode, extraOn: document.querySelector('.rw-touch').classList.contains('rw-extra-on'), mortal: !document.querySelector('.rw-hpmeter').classList.contains('rw-none'), canvas: { x: cv.left, y: cv.top, w: cv.width, h: cv.height },
         page: { html: cs(document.documentElement), body: cs(document.body), ui: cs(document.getElementById('ui')) },
         boot: getComputedStyle(document.getElementById('boot')).display, vw: innerWidth, vh: innerHeight };
     }).then((m) => ({ ...m, grid, L, hand, hud, name }));
@@ -491,7 +510,13 @@ async function liveLayout(check) {
       // HG-2: at most one control in the BOOST cell (BOOST, or GARAGE and TALK); BOOST hides while an offer shows
       const cell = el.filter((q) => q.key === 'boost');
       if (cell.length > 1) bad('more than one control in the BOOST cell');
-      if (m.name.endsWith('garage') || m.name.endsWith('talk')) {
+      if (m.name === 'car-event') {
+        if (cell.length !== 1 || !/Retry/.test(cell[0].label || '')) bad(`RETRY does not take the BOOST cell (${cell.map((q) => q.label)})`);
+        if (!m.flow || !m.flow.event || m.flow.text !== 'Smashed 11/12 \u00b7 0:07') bad(`the event line is not in the prompt strip (${JSON.stringify(m.flow)})`);
+        if (m.flow && grid.H > 300 && (m.flow.combo !== '+123,450 x5' || m.flow.bar !== '100%' || !m.flow.tier5)) bad(`the Flow meter does not read +123,450 x5 with a full bar (${JSON.stringify(m.flow)})`);
+        if (m.flow && grid.H <= 300 && (m.flow.comboShown || !/^100% 3px/.test(m.flow.scoreBar))) bad(`short screen: the Flow bar is not on the score pill (${JSON.stringify(m.flow)})`);
+        if (m.flow && m.flow.flash > 0.01) bad('the edge flash is still showing after it ended');
+      } else if (m.name.endsWith('garage') || m.name.endsWith('talk')) {
         if (!cell.length || /Boost/.test(cell[0].label || '') || !/garage/i.test(cell[0].label || '')) bad(`the offer does not take the BOOST cell (${cell.map((q) => q.label)})`);
       } else if (['car', 'car-swap', 'boat', 'plane', 'plane-armed', 'heli-armed'].includes(m.name) && !(cell.length === 1 && /Boost/.test(cell[0].label || ''))) bad('BOOST is missing');
       if (['foot', 'tank'].includes(m.name) && cell.length) bad(`${m.name} has a control in the BOOST cell`);
@@ -548,6 +573,15 @@ async function liveLayout(check) {
                   await pg.touchscreen.tap(mp.x, mp.y);
                 }
                 await force(true, name === 'car-swap');
+                if (name === 'car-event') {
+                  await pg.evaluate(() => {
+                    const g = window.__rw;
+                    g.hud.setEvent(null); // force() wrote the strip's text straight into the DOM: paint the line again
+                    g.hud.setEvent('Smashed 11/12 \u00b7 0:07');
+                    g.hud.update({ ...g.hudState, mode: 'car', speedKmh: 60, mortal: true, health: 80, maxHealth: 100, boost: 0.8, score: 1234567, pending: 123450, combo: 5, flow: 1, flowTier: 5 });
+                    g.hud.flowPop('tier', 5);
+                  });
+                }
                 await pg.waitForTimeout(states === 0 ? 500 : 60);
                 await settle();
                 const m = await measure(grid, L, hand, hud, name);
@@ -999,7 +1033,9 @@ try {
 
   // ---- car: steering wheel (default style). 0.10.1: a RELATIVE drag (src/ui/wheel.js): the
   // input comes from the thumb's travel since touch-down (horizontal, or rotation about the wheel
-  // center, the larger), 55 px is full input at sensitivity 1, never from where the thumb is. ----
+  // center, the larger), DRAG_FULL_PX (80 px since 0.11.1, was 55) is full input at sensitivity 1,
+  // never from where the thumb is; travel past the stop is held to WHEEL_SLACK. ----
+  const WF = DRAG_FULL_PX, WH = WF / 2, X0 = 10; // full and half travel; the drag starts 10 px right of the center
   check('default steering style is wheel', (await page.evaluate(() => rw.touch.getSteering().style)) === 'wheel');
   const wb = await wheelBox();
   check('wheel ~150px bottom-left', wb.vis && Math.abs(wb.w - 150) < 2 && wb.x < 200 && wb.y > 412 - 140, JSON.stringify(wb));
@@ -1007,17 +1043,19 @@ try {
   await down(1, p0.x, p0.y);
   check('touching the wheel at 3 o\'clock does not steer (no absolute angle)', (await read('rw.input.steer')) === 0);
   await up(1);
-  await down(1, wb.x - 10, wb.y + 10);
-  await drag(1, wb.x - 10, wb.y + 10, wb.x + 17.5, wb.y + 10, 4);
+  await down(1, wb.x + X0, wb.y + 10);
+  await drag(1, wb.x + X0, wb.y + 10, wb.x + X0 + WH, wb.y + 10, 4);
   let st60 = await read('rw.input.steer');
-  check('wheel: 27.5 px right -> half input through the curve', near(st60, await shape(0.5)), `${st60}`);
+  check(`wheel: ${WH} px right -> half input through the curve`, near(st60, await shape(0.5)), `${st60}`);
   check('wheel graphic rotates right', /rotate\(\d/.test(await wheelRot()), await wheelRot());
-  await drag(1, wb.x + 17.5, wb.y + 10, wb.x + 80, wb.y + 10, 6);
-  check('wheel: 55 px or more right -> full right', (await read('rw.input.steer')) === 1);
-  await drag(1, wb.x + 80, wb.y + 10, wb.x + 52.5, wb.y + 10, 3);
+  await drag(1, wb.x + X0 + WH, wb.y + 10, wb.x + X0 + WF + 10, wb.y + 10, 6);
+  check(`wheel: ${WF} px or more right -> full right`, (await read('rw.input.steer')) === 1);
+  // past the stop only WHEEL_SLACK of travel is held: back by (1 + slack) x full - half is half input
+  const backTo = wb.x + X0 + WF + 10 - ((1 + WHEEL_SLACK) * WF - WH);
+  await drag(1, wb.x + X0 + WF + 10, wb.y + 10, backTo, wb.y + 10, 3);
   const back = await read('rw.input.steer');
-  check('wheel: turning back from full lock answers at once (27.5 px back -> half)', near(back, await shape(0.5)), `${back}`);
-  await drag(1, wb.x + 52.5, wb.y + 10, wb.x - 60, wb.y + 10, 10);
+  check(`wheel: turning back from full lock answers at once (${(1 + WHEEL_SLACK) * WF - WH} px back -> half)`, near(back, await shape(0.5)), `${back}`);
+  await drag(1, backTo, wb.y + 10, backTo - WH - WF - 2, wb.y + 10, 10);
   check('wheel: dragged on left -> full left', (await read('rw.input.steer')) === -1);
   await shot('car-wheel-active-915x412.png');
   await up(1);
@@ -1025,7 +1063,7 @@ try {
   check('wheel springs back to center', (await wheelRot()) === '' && await page.evaluate(() => document.querySelector('.rw-wheel').classList.contains('rw-spring')));
   // Below the center a slide right still steers right (a turning wheel would go left).
   await down(1, wb.x - 30, wb.y + 50);
-  await drag(1, wb.x - 30, wb.y + 50, wb.x + 10, wb.y + 50, 6);
+  await drag(1, wb.x - 30, wb.y + 50, wb.x - 30 + 0.75 * WF, wb.y + 50, 6);
   check('wheel: below the center a slide right steers right', (await read('rw.input.steer')) > 0.5);
   await up(1);
   // Crossing the center: no jump to the other lock.
@@ -1197,8 +1235,8 @@ try {
   check('lefty: more button and fan on the left, the fan opens beside and above it', lh.x < 420 && lmore.x < 300 && Math.abs(lh.x - lmore.x) < 70 && lh.y <= lmore.y + 1, JSON.stringify([lh.x, lmore.x]));
   await tapMore();
   await down(1, lw.x - 10, lw.y + 10);
-  await drag(1, lw.x - 10, lw.y + 10, lw.x + 17.5, lw.y + 10, 4);
-  check('lefty: wheel steers (27.5 px -> half)', near(await read('rw.input.steer'), await shape(0.5)));
+  await drag(1, lw.x - 10, lw.y + 10, lw.x - 10 + DRAG_FULL_PX / 2, lw.y + 10, 4);
+  check(`lefty: wheel steers (${DRAG_FULL_PX / 2} px -> half)`, near(await read('rw.input.steer'), await shape(0.5)));
   await up(1);
   await read('(rw.input.lookX = 0, rw.input.lookY = 0)');
   await down(4, 420, 120);
@@ -1281,6 +1319,68 @@ try {
   await page.waitForTimeout(200);
   await shot('car-780x360.png');
   await page.setViewportSize({ width: 915, height: 412 });
+
+  // ---- the Flow meter and the event line (docs/LOOP.md sections a and g) ----
+  const hudCar = (o) => page.evaluate((x) => rw.hud.update({ mode: 'car', speedKmh: 60, health: 80, armor: 0, score: 12345, pending: 0, combo: 1, wanted: 0,
+    district: 'Cinder Flats', time: 13.5, vehicleHealth: 0.7, weapon: null, ammo: null, ...x }), o);
+  const flowNow = () => page.evaluate(() => {
+    const c = document.querySelector('.rw-combo'), tr = document.querySelector('.rw-tr'), sc = document.querySelector('.rw-score');
+    const r = c.getBoundingClientRect(), s = sc.getBoundingClientRect();
+    return { shown: getComputedStyle(c).display !== 'none', text: c.textContent.replace(/\s+/g, ' '), bar: tr.style.getPropertyValue('--flow'), cls: tr.className,
+      size: getComputedStyle(c).backgroundSize, scoreSize: getComputedStyle(sc).backgroundSize, x: r.left, y: r.top, w: r.width, h: r.height, sb: s.bottom, sx: s.left, sw: s.width,
+      role: c.getAttribute('role'), label: c.getAttribute('aria-label') };
+  });
+  await hudCar({ pending: 2450, combo: 3, flow: 0.6, flowTier: 3 });
+  let fl = await flowNow();
+  check('Flow meter: one slim element, the pill under the score, "+2,450 x3"', fl.shown && fl.text === '+2,450 x3' && fl.h <= 18.5 && Math.abs(fl.y - fl.sb) < 1 && Math.abs(fl.x - fl.sx) < 1 && Math.abs(fl.w - fl.sw) < 1, JSON.stringify(fl));
+  check('Flow meter: the bar toward the next tier is 60 percent of the pill, 4 px high, in the tier color', fl.bar === '60%' && /^60% 4px/.test(fl.size) && / rw-t3/.test(fl.cls) && fl.role === 'meter' && fl.label === 'Flow', JSON.stringify(fl));
+  await hudCar({ pending: 0, combo: 2, flow: 0.25, flowTier: 2 });
+  fl = await flowNow();
+  check('Flow meter: stays up at x2 with nothing unbanked; the tier class follows', fl.shown && fl.text === '+0 x2' && / rw-t2/.test(fl.cls) && !/ rw-t3/.test(fl.cls) && fl.bar === '26%', JSON.stringify(fl));
+  await hudCar({ pending: 0, combo: 1, flow: 0, flowTier: 1 });
+  fl = await flowNow();
+  check('Flow meter: gone when the flow is cold and banked', !fl.shown && fl.bar === '0%' && !/ rw-t\d/.test(fl.cls), JSON.stringify(fl));
+  await hudCar({ pending: 300, combo: 1, flow: 0.5, flowTier: 1 });
+  await page.evaluate(() => rw.hud.flowPop('feed', 1));
+  check('Flow meter: a source pops it (0.22 s, no flash)', await page.evaluate(() => {
+    const a = document.querySelector('.rw-combo').getAnimations();
+    return a.length === 1 && a[0].effect.getComputedTiming().duration === 220 && document.querySelector('.rw-flowflash').getAnimations().length === 0;
+  }));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => rw.hud.flowPop('tier', 3));
+  const fp = await page.evaluate(() => ({ pop2: document.querySelector('.rw-combo').getAnimations().map((a) => a.effect.getComputedTiming().duration).join(), anims: document.querySelector('.rw-flowflash').getAnimations().length,
+    pe: getComputedStyle(document.querySelector('.rw-flowflash')).pointerEvents }));
+  check('Flow meter: a tier up pops it harder (0.4 s) and flashes the screen edge (never a touch target)', fp.pop2 === '400' && fp.anims === 1 && fp.pe === 'none', JSON.stringify(fp));
+  await page.waitForTimeout(600);
+  check('Flow meter: the edge flash is gone in half a second', await page.evaluate(() => Number(getComputedStyle(document.querySelector('.rw-flowflash')).opacity) === 0 && document.querySelector('.rw-flowflash').getAnimations().length === 0));
+  // the event line uses the prompt strip: an alert wins, the normal prompt comes back
+  const promptNow = () => page.evaluate(() => { const e = document.querySelector('.rw-prompt'); const r = e.getBoundingClientRect(); return { text: e.textContent, cls: e.className, shown: getComputedStyle(e).display !== 'none', w: r.width, h: r.height, sw: e.scrollWidth, cw: e.clientWidth, y: r.top, b: r.bottom }; });
+  await page.evaluate(() => { rw.hud.setPrompt('Tap ENTER to get in'); rw.hud.setEvent('Lose them 0:21 \u00b7 gold 0:30'); });
+  let pr0 = await promptNow();
+  check('event line: one line in the prompt strip, 300 by 28, nothing clipped', pr0.shown && pr0.text === 'Lose them 0:21 \u00b7 gold 0:30' && /rw-event/.test(pr0.cls) && Math.abs(pr0.w - 300) < 1 && Math.abs(pr0.h - 28) < 1 && pr0.sw <= pr0.cw, JSON.stringify(pr0));
+  await page.evaluate(() => rw.hud.setAlert('Get out!'));
+  pr0 = await promptNow();
+  check('event line: a red alert takes the strip over', pr0.text === 'Get out!' && /rw-alert/.test(pr0.cls) && !/rw-event/.test(pr0.cls), JSON.stringify(pr0));
+  await page.evaluate(() => { rw.hud.setAlert(null); rw.hud.setEvent(null); });
+  pr0 = await promptNow();
+  check('event line: the normal prompt comes back when the event ends', pr0.text === 'Tap ENTER to get in' && !/rw-event|rw-alert/.test(pr0.cls), JSON.stringify(pr0));
+  // every status line of the six templates fits the narrowest strip (190 px at 690x280 and 748x285)
+  for (const [w, h] of [[748, 285], [690, 280]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(150);
+    await hudCar({ pending: 2450, combo: 3, flow: 0.6, flowTier: 3 });
+    fl = await flowNow();
+    check(`Flow meter ${w}x${h}: the pill is dropped, the bar runs along the bottom of the score pill`, !fl.shown && /^60% 3px/.test(fl.scoreSize), JSON.stringify(fl));
+    for (const line of ['Trap 980 ft \u00b7 gold 91 mph', 'Passes 12/12 \u00b7 0:45', 'Ramp 310 ft \u00b7 gold 106 ft', '1:12 \u00b7 gold 0:41', 'Lose them 1:29 \u00b7 gold 0:37', 'Smashed 11/12 \u00b7 0:40']) {
+      await page.evaluate((t) => rw.hud.setEvent(t), line);
+      const q = await promptNow();
+      check(`event line ${w}x${h}: "${line}" fits 190 px, in the prompt strip's own rect (190 by 20, 8 px above the bottom)`, q.sw <= q.cw && Math.abs(q.w - 190) < 1 && Math.abs(q.h - 20) < 1 && Math.abs(q.b - (h - 8)) < 1, JSON.stringify(q));
+    }
+    await page.evaluate(() => rw.hud.setEvent(null));
+  }
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.waitForTimeout(150);
+  await hudCar({ pending: 450, combo: 2.5 });
 
   // ---- foot mode ----
   await page.evaluate(() => rw.touch.setMode('foot'));

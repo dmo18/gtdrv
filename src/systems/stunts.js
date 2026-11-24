@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { generateStuntSpots, rampHeight } from '../world/stunts.js';
 import { createAirState, beginAir, stepAir, judgeLanding, medalRank } from '../core/stunt.js';
 import { createMarkers } from '../render/markers.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createGridIndex } from '../core/spatial.js';
 
 export const LAUNCH_VY = 1.6; // m/s climb rate at the crest that throws a craft into the air (about 23 km/h)
@@ -72,6 +73,8 @@ export function createStunts(game, opts = {}) {
     markers = createMarkers(game.scene, { seaY, maxStarts: spots.length, slots: 0 });
     const C = { type: 'stunt', start: { x: 0, z: 0, y: 0 } };
     spots.forEach((s, i) => {
+      // A street event's jump ramp has its violet gate 95 m before it: no pillar of its own.
+      if (s.event) return;
       // Beside the ramp, so the pillar never hides the jump.
       const side = s.width / 2 + 2.5;
       C.start.x = s.x - s.az * side;
@@ -299,19 +302,30 @@ export function tiltMesh(m, heading, pitch, roll) {
   m.position.z -= (lx * sh + lz * ch) * CENTER_Y;
 }
 
-// Tabletop ramp meshes: one shared geometry per shape, rust-orange deck
-// with pale chevrons, a dark frame. Water ramps sit on floats.
+// Tabletop ramp meshes: rust-orange deck with pale chevrons and dark side
+// rails, baked into one vertex-colored geometry per shape, so a ramp is one
+// draw call (it was seven: the street events' jump ramps put more of them in
+// view, docs/LOOP.md). Water ramps sit on floats.
 function buildRamps(scene, spots, seaY) {
   const root = new THREE.Group();
   root.name = 'stunt-ramps';
-  const deck = new THREE.MeshStandardMaterial({ color: 0xb8612f, roughness: 0.75, metalness: 0.15 });
-  const frame = new THREE.MeshStandardMaterial({ color: 0x3a3330, roughness: 0.8, metalness: 0.3 });
-  const stripe = new THREE.MeshStandardMaterial({ color: 0xf2e6c8, roughness: 0.7 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.15 });
+  const DECK = new THREE.Color(0xb8612f), FRAME = new THREE.Color(0x3a3330), STRIPE = new THREE.Color(0xf2e6c8);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), t = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+  const part = (geo, color, x = 0, y = 0, z = 0, rz = 0) => {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    if (geo.index) geo.dispose();
+    g.applyMatrix4(m.compose(t.set(x, y, z), q.setFromEuler(e.set(0, 0, rz)), one));
+    const n = g.attributes.position.count, c = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { c[i * 3] = color.r; c[i * 3 + 1] = color.g; c[i * 3 + 2] = color.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    return g;
+  };
   const geos = new Map();
   for (const s of spots) {
     const key = [s.slope, s.top, s.height, s.width, s.water].join(':');
-    let g = geos.get(key);
-    if (!g) {
+    let geo = geos.get(key);
+    if (!geo) {
       const t2 = s.top / 2, half = s.half, base = s.water ? -0.7 : 0;
       const sh = new THREE.Shape();
       sh.moveTo(-half, base);
@@ -323,31 +337,25 @@ function buildRamps(scene, spots, seaY) {
       sh.closePath();
       const body = new THREE.ExtrudeGeometry(sh, { depth: s.width, bevelEnabled: false });
       body.translate(0, 0, -s.width / 2);
-      const chev = new THREE.BoxGeometry(0.7, 0.04, s.width * 0.8);
-      g = { body, chev };
-      geos.set(key, g);
-    }
-    const grp = new THREE.Group();
-    grp.position.set(s.x, s.water ? seaY : 0, s.z);
-    grp.rotation.y = -s.heading;
-    const body = new THREE.Mesh(g.body, deck);
-    body.receiveShadow = true;
-    grp.add(body);
-    // Chevrons on both slopes and dark side rails.
-    for (const side of [-1, 1]) {
-      for (let k = 0; k < 2; k++) {
-        const u = side * (s.top / 2 + s.slope * (0.3 + k * 0.35));
-        const y = s.height * (1 - (Math.abs(u) - s.top / 2) / s.slope) + 0.03;
-        const c = new THREE.Mesh(g.chev, stripe);
-        c.position.set(u, y, 0);
-        c.rotation.z = side * s.angle;
-        grp.add(c);
+      const parts = [part(body, DECK)];
+      // Chevrons on both slopes and dark side rails.
+      for (const side of [-1, 1]) {
+        for (let k = 0; k < 2; k++) {
+          const u = side * (s.top / 2 + s.slope * (0.3 + k * 0.35));
+          const y = s.height * (1 - (Math.abs(u) - s.top / 2) / s.slope) + 0.03;
+          parts.push(part(new THREE.BoxGeometry(0.7, 0.04, s.width * 0.8), STRIPE, u, y, 0, side * s.angle));
+        }
+        parts.push(part(new THREE.BoxGeometry(s.half * 2, 0.25, 0.2), FRAME, 0, s.water ? -0.6 : 0.12, side * (s.width / 2 + 0.05)));
       }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(s.half * 2, 0.25, 0.2), frame);
-      rail.position.set(0, (s.water ? -0.6 : 0.12), side * (s.width / 2 + 0.05));
-      grp.add(rail);
+      geo = mergeGeometries(parts);
+      for (const g of parts) g.dispose();
+      geos.set(key, geo);
     }
-    root.add(grp);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(s.x, s.water ? seaY : 0, s.z);
+    mesh.rotation.y = -s.heading;
+    mesh.receiveShadow = true;
+    root.add(mesh);
   }
   scene.add(root);
   return root;
