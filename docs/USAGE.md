@@ -47,3 +47,5 @@ Four Fable helpers in parallel hit the account's 5-hour limit and the owner said
 ## 2026-11-24 night: owner cap 16M, finish overnight, pace for the 5-hour and weekly quotas
 
 Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never two heavy runs overlapping; Opus for build and fixes, Sonnet for standard builds from a complete brief, Fable only for the LOOP design document (one short call); no screenshot loops beyond what a task needs; if a helper stops on a rate limit, wait for the reset time in its message (send_later) and resume it by name, do not start new ones. Order: PERF (running) -> publish 0.12.0 -> LOOP design -> LOOP build in four small steps (Flow meter, events, records and daily, first five minutes and customization) publishing 0.12.1 to 0.12.4 -> STREETSCAPE -> 1.0.0 release candidate review.
+
+2026-11-24 night: LOOP build helper 257k, security review 77k. Total about 10.3M of 16M. 0.12.0 published (gate passed, review: no critical/high; two lows closed in custom.js).
