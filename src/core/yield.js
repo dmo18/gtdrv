@@ -115,7 +115,7 @@ export function stepYield(y, car, sirens, dt, id) {
 // room between its side and the road edge, with a margin, capped so a car
 // in the inner lane of an avenue only shifts within its own lane.
 export function curbShift(roadWidth, laneOff, halfW, innerLane) {
-  const room = roadWidth / 2 - laneOff - halfW - 0.5;
+  const room = roadWidth / 2 - laneOff - halfW - 1.0;
   const cap = innerLane ? 1.2 : 1.8;
   return room < 0 ? 0 : room > cap ? cap : room;
 }
