@@ -1,6 +1,6 @@
 {
   "name": "rustwater",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": true,
   "type": "module",
   "description": "Rustwater: an original open-world driving, boating and flying playground for mobile browsers",

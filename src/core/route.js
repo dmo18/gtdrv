@@ -25,6 +25,7 @@ export const OFF_ROUTE_M = 18; // off the line by more than this ...
 export const OFF_ROUTE_S = 0.5; // ... for this long: re-route
 export const OFF_NEAR_M = 10; // or off by more than this while heading away from the line ...
 export const OFF_NEAR_S = 0.4; // ... for this long (a missed turn is told within about 2 s)
+export const NEAR_REROUTE_GAP_S = 3; // the near-miss trigger searches at most this often (cross-country on foot or in a tank)
 export const REROUTE_GAP_S = 0.5; // at most one search per this long
 export const ARRIVE_M = 22; // this close to the end: arrived
 export const UTURN_COST = 120; // meters added for starting with a U-turn
@@ -617,7 +618,7 @@ export function createTracker(router, opts = {}) {
     // corner is within a few meters of the line, so this does not fire there).
     if (off > OFF_NEAR_M && spd > 2 && dot < 0.5) st.nearT += dt; else st.nearT = 0;
     let changed = false;
-    if ((st.offT >= OFF_ROUTE_S || st.nearT >= OFF_NEAR_S || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
+    if ((st.offT >= OFF_ROUTE_S || (st.nearT >= OFF_NEAR_S && st.sinceSearch >= NEAR_REROUTE_GAP_S) || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
       doSearch(x, z, heading);
       st.reroutes++;
       changed = true;
