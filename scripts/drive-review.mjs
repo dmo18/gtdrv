@@ -10,6 +10,8 @@
 //          [--at=name:x:z:headingDeg:height,...] (extra places, with --only=<one region>;
 //          chase and top view, the top from `height` m, default 40)
 //          [--survey] [--size=748x360] [--day] (survey: no night shots)
+//          [--hour=6.4] (the day shots at this hour, default 13)
+//          [--weather=rain|fog|overcast|clear] (held for every shot)
 // --survey (0.13.2): ten places a region picked from the city data (downtown
 // core, beach strip, bridge, residential yards, industrial, park, airfield
 // or its causeway, the biggest parking lot, the biggest grass lot, a street
@@ -39,6 +41,10 @@ const only = onlyArg ? onlyArg.slice(7).split(',') : null;
 const sizeArg = process.argv.find((a) => a.startsWith('--size='));
 const [VW, VH] = sizeArg ? sizeArg.slice(7).split('x').map(Number) : [915, 412];
 const SURVEY = flag('survey');
+const hourArg = process.argv.find((a) => a.startsWith('--hour='));
+const HOUR = hourArg ? +hourArg.slice(7) : 13;
+const weatherArg = process.argv.find((a) => a.startsWith('--weather='));
+const WEATHER = weatherArg ? weatherArg.slice(10) : null;
 const REGIONS = ['miami-beach', 'miami-downtown', 'miami-north', 'miami-west', 'miami-south'];
 const ROUTE_LEN = 1500, FRAME_STEP = 50, TOP_EVERY = 5;
 // The owner's spots: [name, street a (long, short), street b (long, short)].
@@ -163,13 +169,14 @@ for (const id of REGIONS) {
   }, [AT.length ? [] : SPOTS[id] || [], ROUTE_LEN, FRAME_STEP]);
 
   const shoot = async (p, view, file) => {
-    const info = await page.evaluate(async ([p, view, night, noTraffic]) => {
+    const info = await page.evaluate(async ([p, view, night, noTraffic, hour, weather]) => {
       night = p.night !== undefined ? p.night : night;
       const g = window.__rw;
+      if (weather) g.daynight.setWeather(weather, true);
       const v = g.player.vehicle;
       v.x = v.px = p.x; v.z = v.pz = p.z; v.heading = v.pheading = p.heading; v.vx = v.vz = 0; v.speed = 0;
       g.player.x = p.x; g.player.z = p.z;
-      g.daynight.setHour(night ? 22.5 : 13);
+      g.daynight.setHour(night ? 22.5 : hour);
       if (noTraffic) for (const q of g.vehicles) if (q !== v && q.kind === 'car' && q.driver) q.removed = true;
       g.snapCam();
       for (let i = 0; i < 30; i++) g.step(1 / 60);
@@ -202,7 +209,7 @@ for (const id of REGIONS) {
       }
       const gr = g.graphics || {};
       return { calls: gr.calls, tris: gr.triangles };
-    }, [p, view, flag('night'), flag('no-traffic')]);
+    }, [p, view, flag('night'), flag('no-traffic'), HOUR, WEATHER]);
     // A loaded machine can time a screenshot out: try again.
     for (let k = 0; ; k++) {
       try { await page.screenshot({ path: file, timeout: 120000 }); break; } catch (err) { if (k >= 2) throw err; }

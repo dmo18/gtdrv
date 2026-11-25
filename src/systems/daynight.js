@@ -174,7 +174,10 @@ void main() {
   col += uCity * (exp(-max(y, 0.0) * 9.0) + 0.25 * exp(-max(y, 0.0) * 2.5)) * smoothstep(-0.06, 0.01, y);
   // Horizon haze: the sky meets the fog color in a soft band, so the far
   // towers (which the scene fog turns the same color) sink into it.
+  // Right at the horizon (and below it) the sky is the fog color itself,
+  // so from the air the fogged far sea and land have no hard band (0.13.5).
   col = mix(col, uFog, exp(-max(y, 0.0) * 11.0) * 0.55 * smoothstep(-0.04, 0.0, y));
+  col = mix(col, uFog, exp(-max(y, 0.0) * 30.0));
   // Cloud layers: a low, thick deck and a thin high veil, each a noise
   // field on a sky plane (perspective squeezes it toward the horizon).
   // Thick parts are grayer underneath; thin edges catch the sun color.
@@ -341,7 +344,9 @@ void main() {
   vec3 rel = mod(p - cameraPosition + uBox * 0.5, uBox) - uBox * 0.5;
   vec3 w = cameraPosition + rel - normalize(uVel) * uLen * aEnd;
   float r = length(rel.xz) / (uBox.x * 0.5);
-  vA = (1.0 - aEnd * 0.8) * (1.0 - smoothstep(0.55, 1.0, r)) * (1.0 - smoothstep(0.3, 0.5, abs(rel.y) / uBox.y));
+  // Drops right at the lens would cross the whole screen as one hard line.
+  float near = smoothstep(2.5, 6.0, length(rel));
+  vA = (1.0 - aEnd * 0.8) * near * (1.0 - smoothstep(0.55, 1.0, r)) * (1.0 - smoothstep(0.3, 0.5, abs(rel.y) / uBox.y));
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
 }`;
 const RAIN_FS = `
@@ -742,9 +747,11 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const rainMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
-        uBox: { value: new THREE.Vector3(70, 40, 70) },
+        // A small box: the same drops sit closer to the eye, so they read
+        // as rain at phone size instead of a few faint hairs (0.13.5).
+        uBox: { value: new THREE.Vector3(42, 26, 42) },
         uVel: { value: new THREE.Vector3(2, -24, 1) },
-        uLen: { value: 0.9 },
+        uLen: { value: 1.1 },
         uColor: { value: new THREE.Color(0xc8d4e4) },
         uOpacity: { value: 0 },
       },
@@ -914,7 +921,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     K.shadow = Math.abs(2 * sunUp - 1) * (sunUp > 0.5 ? 1 : 0.55) * (1 - 0.8 * ov) * (1 - 0.7 * fg);
     K.version++;
 
-    const starA = night * clearSky;
+    // Stars only once the sky is dark: none in a pink dusk sky (0.13.5).
+    const starA = smoothstep(0.45, 0.95, night) * clearSky;
     V.stars.material.opacity = starA;
     want(0, starA > 0.02);
 
@@ -1164,7 +1172,8 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const U = V.rainU;
     U.uTime.value = rainTime;
     U.uVel.value.set(Math.cos(W.windDir) * W.wind * 0.6, -24, Math.sin(W.windDir) * W.wind * 0.6);
-    U.uOpacity.value = 0.32 * rn * (1 - 0.35 * V.night);
+    // Light streaks; softer at night, where they show as scratches on the sky.
+    U.uOpacity.value = 0.55 * rn * (1 - 0.4 * V.night);
     const q = game.progress && game.progress.settings ? game.progress.settings.quality : 1;
     R.geometry.setDrawRange(0, (q != null && q < 1 ? V.NR / 2 : V.NR) * 2);
   }

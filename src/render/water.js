@@ -73,7 +73,10 @@ const SEA_TONE = `
 const SHORE_TONE = `
           {
             vec2 rwSu = (vRwP - uShoreOrg) / ${glslFloat(SHORE_SPAN)};
-            float rwIn = step(0.02, rwSu.x) * step(rwSu.x, 0.98) * step(0.02, rwSu.y) * step(rwSu.y, 0.98) * uShoreOn;
+            // Fades out over the last tenth of the window: a hard cut drew a
+            // straight seam across the shallows and the foam far out.
+            vec2 rwE = min(rwSu, 1.0 - rwSu);
+            float rwIn = smoothstep(0.01, 0.1, min(rwE.x, rwE.y)) * uShoreOn;
             float rwSd = texture2D(uShore, rwSu).r * ${glslFloat(SHORE_RANGE)} - ${glslFloat(SHORE_NEG)};
             float rwShallow = (1.0 - smoothstep(1.0, 26.0, rwSd)) * rwIn;
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.3, 0.32), rwShallow * 0.3);
@@ -152,7 +155,9 @@ varying vec2 vRwP;
           #include <normal_fragment_maps>
           if (uRwNear > 0.5) {
             float rwD = length(vViewPosition);
-            float rwK = 1.0 - smoothstep(30.0, 140.0, rwD);
+            // Gone by 75 m: further out the 1 to 4 m ripples are under a
+            // pixel at phone size and alias into rings (0.13.5).
+            float rwK = 1.0 - smoothstep(18.0, 75.0, rwD);
             vec2 q = vRwP;
             float t = uTime;
             vec2 g = vec2(0.0);

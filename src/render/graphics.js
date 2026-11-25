@@ -405,7 +405,9 @@ export function createGraphics(game) {
   const seaBase = seaMats.map((m) => m.color.clone());
   const SEA_DAY = new THREE.Color().setRGB(0.32, 0.6, 0.78);
   function seaTone(sky) {
-    const day = sky ? Math.max(0, 1 - sky.night) * Math.min(1, Math.max(0, (sky.sunDir ? sky.sunDir.y : 1) * 2.2)) : 1;
+    // Part of the day tone stays through dusk: with the full sunset sky
+    // mirrored the bay read as flat pink-brown mud, not water (0.13.5).
+    const day = sky ? Math.max(0, 1 - sky.night) * Math.max(0.6, Math.min(1, Math.max(0, (sky.sunDir ? sky.sunDir.y : 1) * 2.2))) : 1;
     for (let i = 0; i < seaMats.length; i++) {
       const m = seaMats[i], b = seaBase[i];
       m.color.setRGB(b.r * (1 + (SEA_DAY.r - 1) * day), b.g * (1 + (SEA_DAY.g - 1) * day), b.b * (1 + (SEA_DAY.b - 1) * day));
@@ -781,6 +783,7 @@ export function createGraphics(game) {
   }
   schedule();
 
+  const HEAD_K = 0.5, TAIL_K = 0.75;
   let frame = 0, skyVersion = -1;
   const streamStats = ud.stream ? ud.stream.stats : null;
   const sys = {
@@ -818,8 +821,10 @@ export function createGraphics(game) {
         skyVersion = sky.version;
         updateEnv(sky, false);
         // Brighter eyes at night, as a camera would open up.
-        renderer.toneMappingExposure = 1.1 + 0.05 * sky.night;
-        scene.environmentIntensity = 0.42 + 0.48 * sky.night;
+        // A rain day reads as dull and dark, not as a sunny one under a gray
+        // sky (0.13.5); wet streets mirror more of the sky.
+        renderer.toneMappingExposure = 1.1 + 0.05 * sky.night - (0.1 * sky.overcast + 0.06 * sky.rain) * (1 - sky.night);
+        scene.environmentIntensity = 0.42 + 0.48 * sky.night + 0.18 * sky.rain * (1 - sky.night);
         seaTone(sky);
       }
       updateShadow(sky);
@@ -828,10 +833,14 @@ export function createGraphics(game) {
         const cl = game.daynight && game.daynight.carLamps;
         const n = cl ? Math.min(cl.n, CARS) : 0;
         const k = sky ? sky.lit : 0;
+        // The headlight throw at half: at full strength it burned the road
+        // white for 30 m and its soft sides clipped into hard edges; the red
+        // tail glow at 0.75 (it flooded a wet road) (0.13.5).
+        const hk = k * HEAD_K, tk = k * TAIL_K;
         for (let i = 0; i < n; i++) {
           const d = cl.data, o = i * 8;
           lampU.uCarA.value[i].set(d[o], d[o + 1], d[o + 2], d[o + 3]);
-          lampU.uCarB.value[i].set(d[o + 4] * k, d[o + 5] * k, d[o + 6], 0);
+          lampU.uCarB.value[i].set(d[o + 4] * hk, d[o + 5] * tk, d[o + 6], 0);
         }
         lampU.uCarN.value = n;
         setSpotLight(lampU, game.vehicles, sky ? 1 - sky.night : 0, BEAM_TAN);

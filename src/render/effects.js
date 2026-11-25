@@ -185,7 +185,9 @@ void main() {
   }
   gl_Position = projectionMatrix * mv;
   vUv = vec2(c.x + 0.5, 0.5 - c.y) * 0.5 + vec2(mod(cell, 2.0), floor(cell / 2.0)) * 0.5;
-  vCol = vec4(iCol, iData.y);
+  // Fades out right at the lens: smoke and spray blown onto the camera
+  // grew to fill the screen and then cut off at the near plane (0.13.5).
+  vCol = vec4(iCol, iData.y * smoothstep(0.35, 2.2, -mv.z));
 }
 `;
 // One program for both pools (uAdd per material). Smoke and dust: a
