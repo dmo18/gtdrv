@@ -227,9 +227,52 @@ included). Behavior is the same: the drives end in the same state before and aft
 | perf-phonecheck --alloc, 4x, steps and draws, Beach | 20.4 MB/s | 19.6 MB/s |
 | perf-phonecheck --alloc, 4x, steps and draws, Downtown | 21.2 MB/s | 19.8 MB/s |
 
-Still open: in the Beach Phone check drive `heightAt` (collision, called by the chase camera
-and crews) now shows about 1.7 MB/s that it did not show before (cause not found; node shows
-none); three.js uniform uploads (`setValueM4`, `setValueV3f`), `geoSurface`/`netRound`
+Still open: in the Beach Phone check drive `heightAt` (collision) now shows about 1.7 MB/s
+that it did not show before (found in 0.13.2, below: the police helicopter pilot and the many
+collision shape kinds); three.js uniform uploads (`setValueM4`, `setValueV3f`), `geoSurface`/`netRound`
 (ground) and the remaining stepVehicle boxing (numbers passed to calls V8 does not inline).
 The task's 5 ms collection target is not met; worst collections in single throttled passes
 vary from 18 to over 60 ms here while other work runs.
+
+## Combat allocations (0.13.2)
+
+Measured by allocation, not time: `node scripts/perf-phonecheck.mjs --alloc --alloc-raw file
+--passes 1` (4x, the 60 s drive, five stars held, sampled heap with collected objects;
+`--alloc-raw` writes the raw profile so callers and inclusive totals can be read). "Combat" is
+everything under combat's fixedUpdate, listeners included. One pass each; other work changed
+the tree between the runs, so totals move a few percent on their own.
+
+| drive (60 s) | before | after |
+|---|---|---|
+| Downtown: whole drive | 17.3 MB/s | 17.2 MB/s |
+| Downtown: combat | 123 KB/s | 117 KB/s |
+| Downtown: stepActor; aim consider | 100; 112 KB/s | 94; 96 KB/s |
+| Beach: whole drive | 19.1 MB/s | 19.4 MB/s |
+| Beach: combat | 23 KB/s | 26 KB/s |
+| Beach: heightAt (not changed, see below) | 1.71 MB/s | 1.69 MB/s |
+| node fight harness, Downtown: combat | 7 KB/s | 7 KB/s |
+
+- Combat allocates little and combat.js has no literals, closures or spreads in its step loops.
+  In Chrome the rest is number boxing in `stepActor` and the drive-by aim assist
+  (`core/aim.js consider`, from combathud's driveAim). Actors now keep one shape each
+  (`resetActor` declares `stumbleT`, `createFootActor` `seatNo`, `createWalker` the rest of
+  resetActor's fields): six actor shapes in the drive became three, but the bytes did not move
+  beyond noise.
+- Combat's spikes in the Phone check are its listeners: the first shot's `damage` (crime and
+  witness listeners) and the blast (`combatfx` onExplosion, scatterProps). Its own mean is 0.15
+  to 0.24 ms a step.
+- heightAt in the Beach drive: 75 of 103 MB from the police helicopter pilot (`helipilot.js`
+  pathRoof and roofAt, about 150 calls a step), under 11 MB from the chase camera
+  (`clearDist`), the rest aircraft ground checks. Not three.js. The collision shapes come in
+  eight or more object shapes (building, prop and tree literals, lot shapes, edge segments, and
+  the hidden `grp` that `setBreakGroup` adds with defineProperty), so the shape reads in heightAt
+  and rayList see too many shapes and box each number. A scratch copy with one constructor for
+  every collision shape (every field, `grp` defined at creation) measured: heightAt 103.6 to
+  0.4 MB, pathRoof 23.8 to 3.1 MB, rayList 49.6 MB to out of the top 15, the Beach drive 19.4 to
+  16.1 MB/s. Not applied in 0.13.2 (src/world belongs to another pass this round, and the extra
+  enumerable fields need the JSON shape tests checked).
+- In Chrome, stepActor, consider, heightAt and pathRoof end the drive as Maglev code after
+  repeated "dependent prototype chain changed" deopts (518 of 2817 deopts in a 40 s Downtown
+  drive, read with V8's `--log-deopt`). No code calls Object.create or setPrototypeOf during play
+  and the Object, Array and Function prototypes keep their keys; the cause is open. Node, whose
+  hot code stays optimized, shows none of this boxing.

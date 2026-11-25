@@ -25,6 +25,9 @@ export function createWalker(x, z, heading = 0) {
     life: 'ok', lifeT: 0, fade: 0, hitT: 0, kx: 0, kz: 0,
     lastHitBy: null, sinceHit: 99, bonks: 0, bumpBy: null, bumpV: 0,
     arms: null,
+    // The rest of combat.js resetActor's fields, declared up front so a
+    // respawn, a blast or a stumble never gives the walker a new shape.
+    ky: 0, spin: 0, spinV: 0, rag: null, ragDone: false, ragYaw: 0, ragPitch: 0, ragRoll: 0, stumbleT: 0,
   };
 }
 

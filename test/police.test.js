@@ -517,3 +517,22 @@ test('police tank driver: pivots toward the target, stops at the standoff, backs
   assert.ok(backed > 20, 'backed away from the wall');
   assert.ok(t2.x < 31, 'never through it');
 });
+
+test('a heat ceiling holds the stars: no step up at the ceiling, rams and speeding only keep the points below one', async () => {
+  const { createHeat, updateHeat } = await import('../src/systems/police.js');
+  const { heatCeiling } = await import('../src/core/streetevents.js');
+  assert.equal(heatCeiling(1), 2);
+  assert.equal(heatCeiling(3), 4);
+  const h = createHeat();
+  h.level = 1; h.ceiling = heatCeiling(1);
+  const f = { crashedTraffic: false, startledPed: false, speeding: 12, seenByPolice: true, inCar: true, enabled: true };
+  let ups = 0;
+  for (let i = 0; i < 60 * 60; i++) { f.crashedTraffic = i % 120 === 0; if (updateHeat(h, 1 / 60, f) === 'up') ups++; }
+  assert.equal(ups, 1, 'one step up, to the ceiling');
+  assert.equal(h.level, 2);
+  // without a ceiling the same drive reaches the top
+  const g = createHeat();
+  g.level = 1;
+  for (let i = 0; i < 60 * 60; i++) { f.crashedTraffic = i % 120 === 0; updateHeat(g, 1 / 60, f); }
+  assert.ok(g.level >= 3, 'stars climb past the ceiling when none is set (' + g.level + ')');
+});

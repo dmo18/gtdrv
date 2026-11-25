@@ -240,3 +240,48 @@ test('a street event gate is routed to from behind: from ahead of it, behind it 
   assert.ok(checked >= evs.length * 2, 'routes checked ' + checked);
   assert.ok(behind >= checked * 0.95, 'arrive the gate way (a few on island loops cannot) ' + behind + ' of ' + checked);
 });
+
+// Count the times a route's line passes through a gate other than `skip` (its beam, either way).
+function gatesCrossed(r, evs, skip) {
+  let n = 0;
+  for (const ev of evs) {
+    if (ev === skip) continue;
+    for (let k = 1; k < r.n; k++) {
+      const a0 = (r.x[k - 1] - ev.x) * ev.dx + (r.z[k - 1] - ev.z) * ev.dz, a1 = (r.x[k] - ev.x) * ev.dx + (r.z[k] - ev.z) * ev.dz;
+      if (a0 * a1 > 0 || a0 === a1) continue;
+      const t = a0 / (a0 - a1);
+      const cx = r.x[k - 1] + (r.x[k] - r.x[k - 1]) * t - ev.x, cz = r.z[k - 1] + (r.z[k] - r.z[k - 1]) * t - ev.z;
+      if (Math.abs(-cx * ev.dz + cz * ev.dx) <= ev.w + 1.2) { n++; break; }
+    }
+  }
+  return n;
+}
+
+test('the GPS keeps out of the other event gates: fewer gates crossed, never a ban, at most a modest detour', async () => {
+  const { placeEvents } = await import('../src/world/eventspots.js');
+  const evs = placeEvents(beach);
+  const r = createRoute();
+  const rr = createRouter(beach);
+  let plain = 0, avoid = 0, pairs = 0, longer = 0, lenPlain = 0, lenAvoid = 0;
+  for (let i = 0; i < evs.length; i++) {
+    const a = evs[i], b = evs[(i * 7 + 3) % evs.length];
+    if (a === b) continue;
+    const sx = a.x - a.dx * 18, sz = a.z - a.dz * 18;
+    const gx = b.x - b.dx * 18, gz = b.z - b.dz * 18;
+    rr.setAvoid(null);
+    if (!rr.search(sx, sz, a.heading, gx, gz, r, true, b.heading) || r.partial) continue;
+    const c0 = gatesCrossed(r, evs, b), l0 = r.length;
+    rr.setAvoid(evs, gx, gz);
+    if (!rr.search(sx, sz, a.heading, gx, gz, r, true, b.heading) || r.partial) continue;
+    const c1 = gatesCrossed(r, evs, b), l1 = r.length;
+    assert.ok(c1 <= c0 + 0 || l1 < l0 + 1, 'a penalty does not add crossings: ' + a.id + ' to ' + b.id);
+    plain += c0; avoid += c1; pairs++; lenPlain += l0; lenAvoid += l1;
+    if (l1 > l0 * 1.5 + 100) longer++;
+  }
+  assert.ok(pairs >= evs.length * 0.8, 'pairs checked ' + pairs);
+  assert.ok(plain >= 3, 'the plain routes cross some gates to begin with (' + plain + ')');
+  assert.ok(avoid <= plain * 0.5, 'gates crossed ' + plain + ' -> ' + avoid);
+  assert.ok(lenAvoid <= lenPlain * 1.15, 'the detours stay modest ' + Math.round(lenPlain) + ' -> ' + Math.round(lenAvoid) + ' m');
+  assert.ok(longer <= pairs * 0.1, 'few routes take a big detour (' + longer + ' of ' + pairs + ')');
+  rr.setAvoid(null);
+});

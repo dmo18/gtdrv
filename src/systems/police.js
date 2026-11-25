@@ -96,6 +96,7 @@ const BUST_DIST_FOOT = 5;
 export function createHeat() {
   return {
     level: 0,
+    ceiling: MAX_HEAT, // the level a street event's heat escape lets it climb to (events.js); MAX_HEAT: no limit
     points: 0, // pending infractions; 1 point = one level step
     calm: 0, // seconds since the last infraction
     grace: 0,
@@ -150,6 +151,7 @@ export function updateHeat(heat, dt, facts) {
     heat.calm = 0;
   } else if ((heat.calm += dt) > CALM_TIME) heat.points = Math.max(0, heat.points - POINT_DECAY * dt);
 
+  if (heat.level >= heat.ceiling && heat.points > 0.9) heat.points = 0.9; // at the ceiling: no step up
   if (heat.points >= 1 && heat.grace <= 0 && heat.level < MAX_HEAT) {
     heat.level++;
     heat.points -= 1;

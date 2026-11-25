@@ -1,4 +1,4 @@
-# Streetscape review (version 0.12.1)
+# Streetscape review (version 0.12.1, 0.13.2)
 
 Owner's verdict on 0.10.0 and before: "wasteland", "not a single street
 familiar", "fucked up looking roads", "glitchy wastelands"
@@ -81,6 +81,26 @@ the event layer, not city materials.
 - 0.13.1 fixed: lot to lot 1-cell steps (4d), crossing lane paint of two
   overlapping carriageways (`paintRivals`), the Lincoln Road wedge (the
   ring past the streets' mouths drawn as mall paving). See docs/STATUS.md.
+
+## 0.13.2 wastelands
+
+`node scripts/drive-review.mjs <outDir> <tag> --survey --size=748x360
+[--day]`: ten places a region picked from the city data (core, beach,
+bridge, residential, industrial, park, airfield, parking lot, grass lot,
+start street), each from the player's eye (1.6 m) and the chase camera,
+day and night. Defects fixed, most seen first (details in docs/STATUS.md):
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | Chipped, ragged edges on every line, stop bar and crosswalk | Worn paint holes 8 % to 1.6 % of the texture (`textures.js makePaint`) |
+| 2 | Parking lots as grids of bricks | Island with a tree every 11 bays (was 14); day fills 0.45 / 0.42 / 0.42 Downtown, midtown, beach |
+| 3 | Dead ends stop as a square cut in the lawn (399 in five regions) | `world/deadends.js deadEnds(city)`: a striped barricade just past each end, drawn (`props.js drawBarrier`) and solid (`collision.js`) |
+| 4 | Containers as flat toy-colored boxes | Weathered paint, a darker top rail per tier |
+
+Left: big sparse lawns (feature cap), bare works yards and parking lot
+margins, hedge tubes along parking lots, `lotCut` sand triangles on a
+beachfront plaza, a gray seam on some planted medians, an asphalt sliver
+past a few dead ends.
 
 ## Data added
 

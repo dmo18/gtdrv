@@ -9,6 +9,12 @@
 //          [--spots] (owner spots only) [--no-build] [--night] [--no-traffic]
 //          [--at=name:x:z:headingDeg:height,...] (extra places, with --only=<one region>;
 //          chase and top view, the top from `height` m, default 40)
+//          [--survey] [--size=748x360] [--day] (survey: no night shots)
+// --survey (0.13.2): ten places a region picked from the city data (downtown
+// core, beach strip, bridge, residential yards, industrial, park, airfield
+// or its causeway, the biggest parking lot, the biggest grass lot, a street
+// near the start), each shot from the player's eye at street level (1.6 m,
+// 3 m ahead of the car) and the chase camera, by day and night.
 // The game is built into DRIVE_BUILD (default: a folder under the OS temp
 // dir), never into dist/.
 import { createRequire } from 'node:module';
@@ -30,6 +36,9 @@ const out = args[0] || join(tmpdir(), 'rustwater-drive-review');
 const tag = args[1] || 'r';
 const onlyArg = process.argv.find((a) => a.startsWith('--only='));
 const only = onlyArg ? onlyArg.slice(7).split(',') : null;
+const sizeArg = process.argv.find((a) => a.startsWith('--size='));
+const [VW, VH] = sizeArg ? sizeArg.slice(7).split('x').map(Number) : [915, 412];
+const SURVEY = flag('survey');
 const REGIONS = ['miami-beach', 'miami-downtown', 'miami-north', 'miami-west', 'miami-south'];
 const ROUTE_LEN = 1500, FRAME_STEP = 50, TOP_EVERY = 5;
 // The owner's spots: [name, street a (long, short), street b (long, short)].
@@ -59,7 +68,7 @@ const errors = [];
 for (const id of REGIONS) {
   if (only && !only.includes(id)) continue;
   const short = id.slice(6);
-  const page = await browser.newPage({ viewport: { width: 915, height: 412 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: VW, height: VH }, deviceScaleFactor: 1 });
   page.setDefaultTimeout(300000);
   page.on('pageerror', (e) => errors.push(`${id}: ${String(e)}`));
   await page.goto(`http://127.0.0.1:${server.address().port}/?autostart&map=${id}`);
@@ -155,6 +164,7 @@ for (const id of REGIONS) {
 
   const shoot = async (p, view, file) => {
     const info = await page.evaluate(async ([p, view, night, noTraffic]) => {
+      night = p.night !== undefined ? p.night : night;
       const g = window.__rw;
       const v = g.player.vehicle;
       v.x = v.px = p.x; v.z = v.pz = p.z; v.heading = v.pheading = p.heading; v.vx = v.vz = 0; v.speed = 0;
@@ -165,7 +175,20 @@ for (const id of REGIONS) {
       for (let i = 0; i < 30; i++) g.step(1 / 60);
       const st = g.cityMesh.userData.stream;
       for (let k = 0; k < 3; k++) { g.draw(1, 1 / 60); if (st) st.flush(g.camera); }
+      // (The lot cars follow the camera, which moves in draw: step again
+      // so they are placed for this view, not the last one.)
+      for (let i = 0; i < 20; i++) g.step(1 / 60);
       g.draw(1, 1 / 60);
+      g.draw(1, 1 / 60);
+      if (view === 'eye') {
+        const ux = Math.cos(p.heading), uz = Math.sin(p.heading);
+        g.camera.position.set(p.x + ux * 3, 1.6, p.z + uz * 3);
+        g.camera.lookAt(p.x + ux * 40, 0.4, p.z + uz * 40);
+        g.camera.updateMatrixWorld();
+        if (st) st.flush(g.camera);
+        for (const s of g.systems) if (s.name === 'graphics' || s.name === 'daynight') s.render(1, 0);
+        if (g.renderFrame) g.renderFrame(0); else g.renderer.render(g.scene, g.camera);
+      }
       if (view === 'top') {
         const ux = Math.cos(p.heading), uz = Math.sin(p.heading);
         const cx = p.jx !== undefined ? p.jx : p.x + ux * 14, cz = p.jz !== undefined ? p.jz : p.z + uz * 14;
@@ -187,9 +210,70 @@ for (const id of REGIONS) {
     return info;
   };
 
+  if (SURVEY) {
+    plan.places = await page.evaluate(() => {
+      const c = window.__rw.city, E = c.edges, N = c.nodes, sp = c.spawn;
+      const near = (x, z) => Math.hypot(x - sp.x, z - sp.z);
+      // A road point beside (x, z): the nearest edge of a car road, facing
+      // half along the road, half toward the place.
+      const onRoad = (name, x, z, toward = true) => {
+        let best = null, bd = 1e9;
+        for (const e of E) {
+          if (e.ped || e.bridge && toward) continue;
+          const a = N[e.a];
+          const t = Math.max(0, Math.min(e.length, (x - a.x) * e.ux + (z - a.z) * e.uz));
+          const px = a.x + e.ux * t, pz = a.z + e.uz * t, d = Math.hypot(px - x, pz - z);
+          if (d < bd) { bd = d; best = { e, px, pz }; }
+        }
+        if (!best) return { name, missing: true };
+        const { e, px, pz } = best;
+        const h0 = Math.atan2(e.uz, e.ux);
+        let h = h0;
+        if (toward && bd > 2) {
+          const ht = Math.atan2(z - pz, x - px);
+          const dx = Math.cos(h0) + Math.cos(ht), dz = Math.sin(h0) + Math.sin(ht);
+          h = Math.atan2(dz, dx);
+        }
+        return { name, x: px - Math.cos(h) * 6, z: pz - Math.sin(h) * 6, heading: h, jx: px, jz: pz };
+      };
+      const lots = c.lots;
+      // The biggest lot of a kind within 1500 m of the start (else anywhere).
+      const lotOf = (name, keep) => {
+        let best = null, bs = -1;
+        for (const l of lots) {
+          if (!keep(l)) continue;
+          const cx = (l.x0 + l.x1) / 2, cz = (l.z0 + l.z1) / 2;
+          const s = l.area / (1 + Math.max(0, near(cx, cz) - 1500) / 200);
+          if (s > bs) { bs = s; best = l; }
+        }
+        return best ? onRoad(name, (best.x0 + best.x1) / 2, (best.z0 + best.z1) / 2) : { name, missing: true };
+      };
+      const P = [];
+      // Downtown core: the middle of the twenty tallest buildings near the start.
+      const bs = c.buildings.filter((b) => near((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2) < 2500).sort((a, b) => (b.h || 0) - (a.h || 0)).slice(0, 20);
+      if (bs.length) P.push(onRoad('core', bs.reduce((s, b) => s + (b.x0 + b.x1) / 2, 0) / bs.length, bs.reduce((s, b) => s + (b.z0 + b.z1) / 2, 0) / bs.length));
+      P.push(lotOf('beach', (l) => l.type === 'beach'));
+      // Bridge: the middle of the longest bridge edge.
+      let br = null;
+      for (const e of E) if (e.bridge && !e.ped && (!br || e.length > br.length)) br = e;
+      if (br) { const a = N[br.a]; P.push({ name: 'bridge', x: a.x + br.ux * (br.length / 2 - 6), z: a.z + br.uz * (br.length / 2 - 6), heading: Math.atan2(br.uz, br.ux), jx: a.x + br.ux * br.length / 2, jz: a.z + br.uz * br.length / 2 }); }
+      P.push(lotOf('residential', (l) => l.type === 'yard' && l.district === 'residential' && l.area > 400));
+      P.push(lotOf('industrial', (l) => l.type === 'works' || l.district === 'industrial' || l.district === 'docks'));
+      P.push(lotOf('park', (l) => l.type === 'park'));
+      const af = lots.find((l) => l.type === 'airfield');
+      P.push(af ? lotOf('airfield', (l) => l.type === 'airfield') : c.aircraftSpots && c.aircraftSpots[0] ? onRoad('airfield', c.aircraftSpots[0].x, c.aircraftSpots[0].z) : { name: 'airfield', missing: true });
+      P.push(lotOf('carpark', (l) => l.type === 'carpark'));
+      P.push(lotOf('grass', (l) => l.type === 'grass' || l.type === 'site'));
+      P.push(onRoad('start', sp.x + Math.cos(sp.heading) * 120, sp.z + Math.sin(sp.heading) * 120, false));
+      return P;
+    });
+    const day = plan.places, both = [];
+    for (const p of day) { both.push(p); if (!p.missing && !flag('day')) both.push({ ...p, name: p.name + '-night', night: true }); }
+    plan.places = both;
+  }
   const rep = report[id] = { streets: plan.streets, frames: [], spots: [] };
   const files = [];
-  if (!flag('spots') && !AT.length) {
+  if (!flag('spots') && !AT.length && !SURVEY) {
     for (let k = 0; k < plan.pts.length; k++) {
       const p = plan.pts[k], n = String(k).padStart(2, '0');
       const f = `${out}/${short}-${tag}-${n}.png`;
@@ -206,7 +290,7 @@ for (const id of REGIONS) {
   for (const a of AT) plan.places.push({ ...a, x: a.jx - Math.cos(a.heading) * 25, z: a.jz - Math.sin(a.heading) * 25 });
   for (const p of plan.places) {
     if (p.missing) { rep.spots.push({ name: p.name, missing: true }); continue; }
-    for (const view of ['chase', 'top']) {
+    for (const view of SURVEY ? ['eye', 'chase'] : ['chase', 'top']) {
       const f = `${out}/${short}-${tag}-spot-${p.name}-${view}.png`;
       await shoot(p, view, f);
       files.push([f, `${short} ${p.name} ${view} (${Math.round(p.jx)}, ${Math.round(p.jz)})`]);
@@ -221,7 +305,7 @@ for (const id of REGIONS) {
       const part = files.slice(k, k + 4);
       const a = [];
       for (const [f, label] of part) a.push('-label', label, f);
-      execFileSync('montage', [...a, '-tile', '2x2', '-geometry', '915x412+2+2', '-pointsize', '15', `${out}/sheets/${short}-${tag}-${String(s).padStart(2, '0')}.png`]);
+      execFileSync('montage', [...a, '-tile', '2x2', '-geometry', `${VW}x${VH}+2+2`, '-pointsize', '15', `${out}/sheets/${short}-${tag}-${String(s).padStart(2, '0')}.png`]);
     }
   } catch (err) {
     console.log('no contact sheets:', String(err).slice(0, 80));

@@ -903,7 +903,8 @@ export const HEDGE_H = 0.95;
 export const SHRUB_H = 1.15;
 const MIN_CONTENT = { yard: 6, carpark: 9, plaza: 6, grass: 2, works: 8, beach: 5, park: 5, wateredge: 4, site: 8, verge: 0, airfield: 0 };
 const SIDE_HEADING = [Math.PI / 2, 0, Math.PI / 2, 0]; // a run along side s
-const ISLAND_EVERY = 14; // bays between two planted islands in a row
+// 0.13.2: 11, was 14 (35 m of unbroken cars read as a grid of bricks).
+const ISLAND_EVERY = 11; // bays between two planted islands in a row
 
 // The cap on features for one lot: LOT_CAP_PER_HA a hectare and
 // MAX_FEATURES a lot, but never below what the type's minimum content
@@ -1811,7 +1812,9 @@ export function lotShares(lots, keep = () => true) {
 // below 0.2 and never above 0.55 (a lot is never full; the collision world
 // of world/collision.js only knows cars up to 0.55).
 export const FILL_BY_DISTRICT = {
-  downtown: [0.55, 0.2], midtown: [0.5, 0.2], residential: [0.3, 0.55], beach: [0.5, 0.2],
+  // (0.13.2: day fills 0.55, 0.5, 0.5 to 0.45, 0.42, 0.42 downtown, midtown
+  // and at the beach: a lot of solid rows read as a wall of bricks.)
+  downtown: [0.45, 0.2], midtown: [0.42, 0.2], residential: [0.3, 0.55], beach: [0.42, 0.2],
   docks: [0.3, 0.2], industrial: [0.3, 0.2], park: [0.35, 0.2],
 };
 export const FILL_MIN = 0.2, FILL_MAX = 0.55;

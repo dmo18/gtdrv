@@ -414,3 +414,56 @@ test('ten minutes of Beach traffic: every car on a legal lane, right of the cent
   assert.ok(leftOfCenter <= checks * 0.005, `${leftOfCenter} of ${checks} left of the center line`);
   assert.ok(junctions >= 3, 'cars get through junctions');
 });
+
+test('staged cars (the first run): spaced apart, with a bay cleared on one side to pass in', async () => {
+  const { regionCity } = await import('./regionfixture.js');
+  const { placeEvents } = await import('../src/world/eventspots.js');
+  const bc = regionCity('miami-beach');
+  const ev = placeEvents(bc)[0];
+  const mk = () => {
+    const vehicles = [];
+    const g = {
+      city: bc, vehicles, rng: createRng(5), time: 0, quality: 1,
+      player: { x: ev.x - ev.dx * 40, z: ev.z - ev.dz * 40, y: 0, heading: ev.heading, vehicle: null },
+      addVehicle(v) { vehicles.push(v); },
+      removeVehicle(v) { vehicles.splice(vehicles.indexOf(v), 1); v.removed = true; },
+    };
+    return { g, traffic: createTraffic(g, { max: 14 }), vehicles };
+  };
+  const dists = [50, 90, 135];
+  // free street: all three are placed, apart, and moving along the gate's way
+  const a = mk();
+  const n = a.traffic.stageAhead(ev.x, ev.z, ev.dx, ev.dz, dists, 6);
+  assert.ok(n >= 2, 'placed ' + n);
+  const st = a.vehicles.filter((v) => v.staged);
+  for (let i = 0; i < st.length; i++) {
+    assert.ok(Math.abs(st[i].speed) <= 6.01 && Math.abs(st[i].speed) > 2, 'slow');
+    for (let j = i + 1; j < st.length; j++) assert.ok(Math.hypot(st[i].x - st[j].x, st[i].z - st[j].z) >= 30, 'staged cars at least 30 m apart');
+  }
+  // a row of parked cars on both sides of every staged car's way: a bay is cleared on one side to pass in, the other row stays
+  const b = mk();
+  const rows = [];
+  for (const v of st) {
+    const hx = Math.cos(v.heading), hz = Math.sin(v.heading);
+    for (const side of [-1, 1]) for (let al = -6; al <= 70; al += 6) rows.push({ x: v.x + hx * al - hz * side * 2.7, z: v.z + hz * al + hx * side * 2.7, parked: true, row: side });
+  }
+  for (const r of rows) b.vehicles.push(r);
+  const nb = b.traffic.stageAhead(ev.x, ev.z, ev.dx, ev.dz, dists, 6);
+  assert.equal(nb, n, 'the same cars are placed with parked rows beside them');
+  const sb = b.vehicles.filter((v) => v.staged);
+  for (const v of sb) {
+    const hx = Math.cos(v.heading), hz = Math.sin(v.heading);
+    const left = [], right = [];
+    for (const o of b.vehicles) {
+      if (!o.parked) continue;
+      const rx = o.x - v.x, rz = o.z - v.z, al = rx * hx + rz * hz;
+      if (al < -6 || al > 70) continue;
+      const lat = -rx * hz + rz * hx;
+      if (lat > 1.2 && lat < 4.2) right.push(o);
+      if (lat < -1.2 && lat > -4.2) left.push(o);
+    }
+    assert.ok(left.length === 0 || right.length === 0, 'one side of a staged car is open to pass (' + left.length + ' left, ' + right.length + ' right)');
+  }
+  const removed = rows.filter((r) => !b.vehicles.includes(r)).length;
+  assert.ok(removed >= 8 && removed < rows.length * 0.75, 'a bay is cleared, not both rows (' + removed + ' of ' + rows.length + ')');
+});

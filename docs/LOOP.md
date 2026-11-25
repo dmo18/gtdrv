@@ -85,7 +85,7 @@ heat escape and the first jump face away from the start place, so the natural wa
 | Near-miss run (blue) | main roads; near misses, head-on misses, clean passes and close shaves count 1 each | passes | gold `round(45 x 0.16 x busy)`, silver 65, bronze 40 percent of gold (7 / 5 / 3 on an avenue) | 45 s, ends at gold |
 | Jump (violet) | a ramp 95 m past the gate on a quiet street, 70 m of landing | feet flown | the ballistic distance off the 1.5 m ramp at 58 / 74 / 90 percent of the reference speed (33 m/s cap) | 25 s |
 | Rush drop (green) | a point 380 to 760 m of blocks away, GPS turn by turn | seconds | gold `6 + m / 17`, silver x 1.25, bronze x 1.6 | bronze x 1.2, 90 s at most |
-| Heat escape (red) | the gate sets 1, 2 or 3 stars | seconds to lose them | out-of-sight time (12, 18, 25 s) + 12 / 26 / 45 s | 90 s |
+| Heat escape (red) | the gate sets 1, 2 or 3 stars (they may climb one above it, 0.13.2) | seconds to lose them | out-of-sight time (12, 18, 25 s) + 12 / 26 / 45 s | 90 s |
 | Wrecking spree (orange) | streets with sidewalks; a prop 1, a ram 2, a wreck 3 | things smashed | gold `round(40 x 0.3 x dense)` (12), silver 65, bronze 40 percent | 40 s, ends at gold |
 
 Sample (Miami Beach): Ocean Dr near-miss run 2 / 3 / 5; a 420 m trap 61 / 77 / 91 mph; a jump with
@@ -142,7 +142,7 @@ away (and the queue at the gate once, as the run starts), and a queue standing 4
 at a light goes before the player reaches it. The parked cars stay: they are what the player
 passes close. So the run also pays passes on moving cars, three slow cars (6 m/s, 13 mph) are
 staged in the lane 50, 90 and 135 m past the gate when the player comes within 45 m of it from
-behind (so at least traffic's own 90 m spawn distance ahead) (each approach, a RETRY too); the lane clearing keeps them while they move (0.13.0). Until the police beat a bump or a fast stretch does not call the police (the
+behind (so at least traffic's own 90 m spawn distance ahead) (each approach, a RETRY too); the lane clearing keeps them while they move (0.13.0). They are at least 30 m apart, and on one side of each the row of parked cars is taken away over 6 m behind to 70 m ahead of it (a bay to pass in; one lane between two rows has no room, 0.13.2). Until the police beat a bump or a fast stretch does not call the police (the
 first play-through got a star from a bump at 7 s, before anything had explained the police). One line at a time in the top stack, 9 words at most, the GPS on the
 beat's gate. Beats wait for what the player does; a beat's line comes again after 35 s without
 progress.

@@ -20,6 +20,7 @@ import { dressLot, eachBay, lotDressCache, lotFill, FILL_MAX } from './lots.js';
 import { PROP_SOLIDS, createPropLayer, setBreakGroup } from './propsolid.js';
 import { createEdgeLayer } from './edgelines.js';
 import { attachGround } from './ground.js';
+import { deadEnds } from './deadends.js';
 
 export const BREAK_BACK_T = 120, BREAK_BACK_FAR = 150, BREAK_RING = 16;
 
@@ -547,6 +548,15 @@ export function fillRoadEndCollision(city, collision) {
     for (let k = 0; k <= n; k++) {
       const t = -b.w / 2 + (b.w * k) / n;
       collision.addCircle(b.x + px * t, b.z + pz * t, BARRIER_POST_R, BARRIER_H, 'barrier');
+    }
+  }
+  // The barricades of the dead ends inside the region (world/deadends.js).
+  for (const de of deadEnds(city)) {
+    const px = -Math.sin(de.heading), pz = Math.cos(de.heading);
+    const n = Math.max(2, Math.ceil(de.w));
+    for (let k = 0; k <= n; k++) {
+      const t = -de.w / 2 + (de.w * k) / n;
+      collision.addCircle(de.x + px * t, de.z + pz * t, BARRIER_POST_R, BARRIER_H, 'barrier');
     }
   }
   return collision;

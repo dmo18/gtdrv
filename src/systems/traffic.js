@@ -1036,6 +1036,32 @@ export function createTraffic(game, { max = 14 } = {}) {
   const STAGE_LP = { x: 0, z: 0, heading: 0 };
   const STAGE_GAP = 14, STAGE_PARKED = 2.6; // m: clearance to a driven car, to a parked one
   const STAGE_TRIES = 4, STAGE_SLIDE = 12; // m
+  // A staged car needs a way past it, and one lane between two rows of
+  // parked cars has none. The car moves on at 6 m/s while the player closes
+  // up (up to 70 m by the time it is passed), so the side of the lane with
+  // fewer parked cars (strip 1.2 to 4.2 m out, from 6 m behind the car to
+  // 70 m ahead of it) is cleared of them: a bay to pass in. The other row stays.
+  // STAGE_APART: m between two staged cars, so the pass of one ends before the next begins.
+  const STAGE_SIDE_A = 1.2, STAGE_SIDE_B = 4.2, STAGE_BAY = [-6, 70], STAGE_APART = 30;
+  function stageBay(lp) {
+    const hx = Math.cos(lp.heading), hz = Math.sin(lp.heading);
+    let n1 = 0, nm = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      let best = 0;
+      if (pass === 1) best = n1 <= nm ? 1 : -1;
+      for (let m = game.vehicles.length - 1; m >= 0; m--) {
+        const o = game.vehicles[m];
+        if (!o.parked) continue;
+        const rx = o.x - lp.x, rz = o.z - lp.z;
+        const al = rx * hx + rz * hz;
+        if (al < STAGE_BAY[0] || al > STAGE_BAY[1]) continue;
+        const lat = -rx * hz + rz * hx; // right of the lane's way is +
+        const side = lat > STAGE_SIDE_A && lat < STAGE_SIDE_B ? 1 : lat < -STAGE_SIDE_A && lat > -STAGE_SIDE_B ? -1 : 0;
+        if (!side) continue;
+        if (pass === 0) { if (side > 0) n1++; else nm++; } else if (side === best) game.removeVehicle(o);
+      }
+    }
+  }
   function stageAhead(x, z, dx, dz, dists, speed = 6) {
     const rng = game.rng;
     let placed = 0, full = false;
@@ -1067,7 +1093,7 @@ export function createTraffic(game, { max = 14 } = {}) {
         for (let m = 0; m < game.vehicles.length; m++) {
           const o = game.vehicles[m];
           // parked cars line the curb beside the lane: only one on the spot itself blocks it
-          const r = o.parked || !(o.ai || o.driver) ? STAGE_PARKED : STAGE_GAP;
+          const r = o.staged ? STAGE_APART : o.parked || !(o.ai || o.driver) ? STAGE_PARKED : STAGE_GAP;
           if ((o.x - STAGE_LP.x) * (o.x - STAGE_LP.x) + (o.z - STAGE_LP.z) * (o.z - STAGE_LP.z) < r * r) { clear = false; break; }
         }
         if (!clear) continue;
@@ -1103,6 +1129,7 @@ export function createTraffic(game, { max = 14 } = {}) {
         v.asleep = false;
         game.addVehicle(v);
         cars.push(v);
+        stageBay(STAGE_LP);
         placed++;
         break;
       }

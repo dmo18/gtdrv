@@ -20,6 +20,7 @@
 //   --check    exit 1 when a pinned limit below is missed (not wired into the gate yet)
 //   --profile  an unminified build under the CPU profiler: names the functions of each slow frame
 //   --alloc    a sampled heap profile of the drive: the top allocating functions
+//   --alloc-raw file  with --alloc: also write the raw sampled profile (open it in DevTools)
 //   --root     another source tree to build and measure (an older version in a scratch copy)
 //   --no-heat  do not hold the wanted level at five stars (the plain drive)
 import { createRequire } from 'node:module';
@@ -452,7 +453,11 @@ async function main() {
       // --alloc: where the drive allocates (sampled heap profile, objects the collector took too).
       if (allocOn && n === 0) await cdp.send('HeapProfiler.startSampling', { samplingInterval: 8192, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
       out.drive = await play('drive', Math.round(seconds * 60), true);
-      if (allocOn && n === 0) out.alloc = allocTop((await cdp.send('HeapProfiler.stopSampling')).profile, 25);
+      if (allocOn && n === 0) {
+        const { profile } = await cdp.send('HeapProfiler.stopSampling');
+        out.alloc = allocTop(profile, 25);
+        if (has('--alloc-raw')) await writeFile(resolve(opt('--alloc-raw', 'alloc.heapprofile')), JSON.stringify(profile));
+      }
       if (profileOn) {
         const { profile } = await cdp.send('Profiler.stop');
         out.index = profileIndex(profile);

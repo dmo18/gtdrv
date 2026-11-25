@@ -269,6 +269,7 @@ export function createFootActor(team, rng, weapon = 'pistol') {
     stuckT: 0, fleeT: 0, fleeRolled: false, idleT: 0, flee: false,
     nerve: 1, detourT: 0, dtx: 0, dtz: 0, detourSide: 1, peekT: 0, covered: false, coverGood: false,
     mesh: null, tag: null, shots: 0, hits: 0,
+    seatNo: 0, // police.js: the seat an officer got out of (declared here: one shape for crew and officers)
   };
   initActor(a, team);
   a.arms = createArms(weapon);

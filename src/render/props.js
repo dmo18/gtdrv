@@ -8,6 +8,7 @@ import { MeshBuilder } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
 import { PALM_PLACES, miamiPalmSpots as palmSpots } from '../world/propsolid.js';
 import { WALL_H } from '../world/edgelines.js';
+import { deadEnds } from '../world/deadends.js';
 
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
 const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
@@ -644,21 +645,26 @@ export function lotStamps(C) {
 const END_STRIPE = [0xd8762c, 0xf2efe6];
 function drawRoadEnd(P, re) {
   const b = re.barrier, h = b.heading;
-  const px = -Math.sin(h), pz = Math.cos(h);
   // The turning pad: a worn patch with a pale rim.
   const pd = re.pad;
   P.cyl(pd.x, pd.z, 0, 0.026, pd.r, pd.r, 20, 0xc9c5b8, true);
   P.cyl(pd.x, pd.z, 0, 0.034, pd.r - 0.35, pd.r - 0.35, 20, 0x45484d, true);
-  // A low concrete base across the road, striped rails above it, a post
-  // at each end.
-  P.obox(b.x, b.z, 0.34, b.w / 2, 0, 0.5, h, 0xb8b4ac, 0xc8c4bc, 0.6, 0.95);
-  const n = Math.max(2, Math.round(b.w / 1.5)), seg = b.w / n;
+  drawBarrier(P, b.x, b.z, h, b.w);
+}
+
+// A low concrete base across the road, striped rails above it, a post at
+// each end: the barrier of a road end, and of a dead end inside a region
+// (world/deadends.js, 0.13.2).
+function drawBarrier(P, bx, bz, h, w) {
+  const px = -Math.sin(h), pz = Math.cos(h);
+  P.obox(bx, bz, 0.34, w / 2, 0, 0.5, h, 0xb8b4ac, 0xc8c4bc, 0.6, 0.95);
+  const n = Math.max(2, Math.round(w / 1.5)), seg = w / n;
   for (let k = 0; k < n; k++) {
-    const t = -b.w / 2 + seg * (k + 0.5);
-    P.obox(b.x + px * t, b.z + pz * t, 0.14, seg / 2, 0.5, 0.98, h, END_STRIPE[k & 1], END_STRIPE[k & 1]);
+    const t = -w / 2 + seg * (k + 0.5);
+    P.obox(bx + px * t, bz + pz * t, 0.14, seg / 2, 0.5, 0.98, h, END_STRIPE[k & 1], END_STRIPE[k & 1]);
   }
-  for (const t of [-b.w / 2, b.w / 2]) {
-    const x = b.x + px * t, z = b.z + pz * t;
+  for (const t of [-w / 2, w / 2]) {
+    const x = bx + px * t, z = bz + pz * t;
     P.cyl(x, z, 0, 1.7, 0.1, 0.1, 5, 0xe8e4dc, true);
     P.cyl(x, z, 1.25, 1.7, 0.12, 0.12, 5, 0xd8762c, true);
   }
@@ -969,6 +975,9 @@ export function addProps(C, own = null, side = true, lists = null) {
   // ---- region edges: generated road ends and travel pads (PLAN_V2 3.4) ----
   for (const re of city.roadEnds || []) {
     if (mine(re.barrier.x, re.barrier.z) || mine(re.pad.x, re.pad.z)) drawRoadEnd(C.plain.at(re.barrier.x, re.barrier.z), re);
+  }
+  for (const de of deadEnds(city)) {
+    if (mine(de.x, de.z)) drawBarrier(C.plain.at(de.x, de.z), de.x, de.z, de.heading, de.w);
   }
   for (const pad of city.travelPads || []) {
     if (mine(pad.x, pad.z)) drawTravelPad(C.plain.at(pad.x, pad.z), pad);

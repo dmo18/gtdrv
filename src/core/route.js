@@ -29,6 +29,8 @@ export const NEAR_REROUTE_GAP_S = 3; // the near-miss trigger searches at most t
 export const REROUTE_GAP_S = 0.5; // at most one search per this long
 export const ARRIVE_M = 22; // this close to the end: arrived
 export const UTURN_COST = 120; // meters added for starting with a U-turn
+export const AVOID_COST = 350; // meters added for driving a street through another event's gate (a penalty, not a ban)
+const AVOID_PAD = 1.5; // m beyond a gate's posts that still counts as its footprint
 const TURN_COST_R = 8, TURN_COST_L = 16; // meters added per right / left turn
 const MERGE_M = 32; // two turns closer than this read as one (divided roads)
 const MAX_PTS = 8192;
@@ -233,6 +235,34 @@ export function createRouter(city, opts = {}) {
     if (HL > 0) { HN[i] = lv; HF[i] = lf; }
     return top;
   };
+  // Extra cost per edge for passing through a street event gate other than
+  // the goal (setAvoid): driving through one starts that event by accident.
+  const extra = new Float32Array(edges.length);
+  let avoided = 0;
+  // gates: [{ x, z, dx, dz, w }]; skipX/skipZ: a gate within 30 m of it is
+  // the goal, not to be avoided. Called when the goal changes, not per frame.
+  function setAvoid(gates, skipX = NaN, skipZ = NaN) {
+    if (avoided) extra.fill(0);
+    avoided = 0;
+    if (!gates) return 0;
+    for (let q = 0; q < gates.length; q++) {
+      const g = gates[q];
+      if (Math.hypot(g.x - skipX, g.z - skipZ) < 30) continue;
+      const half = g.w + AVOID_PAD, px = -g.dz, pz = g.dx; // the beam: g +- half * (px, pz)
+      const x0 = g.x - px * half, z0 = g.z - pz * half, bx = px * half * 2, bz = pz * half * 2;
+      for (let k = 0; k < edges.length; k++) {
+        const e = edges[k];
+        const a = nodes[e.a], b = nodes[e.b];
+        const ex = b.x - a.x, ez = b.z - a.z;
+        const den = bx * ez - bz * ex;
+        if (Math.abs(den) < 1e-9) continue;
+        const wx = a.x - x0, wz = a.z - z0;
+        const tb = (wx * ez - wz * ex) / den, te = (wx * bz - wz * bx) / den;
+        if (tb >= 0 && tb <= 1 && te >= 0 && te <= 1) { extra[k] = AVOID_COST; avoided++; }
+      }
+    }
+    return avoided;
+  }
   const pathN = new Int32Array(N + 2), pathE = new Int32Array(N + 2);
   const jcum = new Float64Array(N + 2); // cumulative distance of path junction i
   const snapA = { edge: -1, d: 0, d2: 0 }, snapB = { edge: -1, d: 0, d2: 0 };
@@ -311,14 +341,14 @@ export function createRouter(city, opts = {}) {
         const id = n.edges[k];
         if (id === inE && !turnRound) continue; // no U-turn at a junction
         if (id === inE) {
-          if (ok(edges[id], u)) relax(edges[id].a === u ? edges[id].b : edges[id].a, gu + edges[id].length * cost[id] + UTURN_COST, u, id, tx, tz);
+          if (ok(edges[id], u)) relax(edges[id].a === u ? edges[id].b : edges[id].a, gu + edges[id].length * cost[id] + extra[id] + UTURN_COST, u, id, tx, tz);
           continue;
         }
         const e = edges[id];
         if (!ok(e, u)) continue;
         if (againstGoal(e, u)) continue;
         const v = e.a === u ? e.b : e.a;
-        relax(v, gu + e.length * cost[id] + turnCost(edges[inE], inFrom, e, u), u, id, tx, tz);
+        relax(v, gu + e.length * cost[id] + extra[id] + turnCost(edges[inE], inFrom, e, u), u, id, tx, tz);
       }
     }
     expandedLast = expanded;
@@ -564,7 +594,7 @@ export function createRouter(city, opts = {}) {
     route.turnCount = tc;
   }
 
-  return { search, cost, speed, nodes, edges, nearestEdge: (x, z, out = { edge: -1, d: 0, d2: 0 }, heading) => nearestEdge(city, x, z, out, heading) };
+  return { search, setAvoid, cost, speed, nodes, edges, nearestEdge: (x, z, out = { edge: -1, d: 0, d2: 0 }, heading) => nearestEdge(city, x, z, out, heading) };
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ const server = await serve(0, dist);
 const port = server.address().port;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 748, height: 360 }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+page.setDefaultTimeout(120000); // the soak and the software renderer can make a tap slow
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -49,11 +50,25 @@ const installDriver = () => {
   const src = g.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false });
   const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, stucks: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
   const toast0 = g.hud.toast;
-  g.hud.toast = (t, s, k) => { st.toasts.push([Math.round(g.time * 10) / 10, k || '', String(t)]); toast0(t, s, k); };
+  st.trace = []; st.tt = 0;
+  st.rams = []; // what the car hit when a Ram paid (staged or ordinary traffic, how far off its lane, its speed)
+  g.hud.toast = (t, s, k) => {
+    st.toasts.push([Math.round(g.time * 10) / 10, k || '', String(t)]);
+    if (/^Ram/.test(String(t)) && st.rams.length < 60) {
+      const v = g.player.vehicle;
+      let b = null, bd = 1e9;
+      for (const c of g.vehicles) { if (c === v || c.kind !== 'car') continue; const d = Math.hypot(c.x - v.x, c.z - v.z); if (d < bd) { bd = d; b = c; } }
+      st.rams.push(b ? `${Math.round(g.time * 10) / 10} s ${b.staged ? 'STAGED' : b.driver ? 'traffic' : b.parked ? 'parked' : 'car'} d ${bd.toFixed(1)} speed ${Math.round(b.speed || 0)}` : 'none');
+    }
+    toast0(t, s, k);
+  };
   // The event line as the prompt strip gets it (the driver steps without drawing: it asks for the line now and then).
   st.eventLines = [];
   const setEvent0 = g.hud.setEvent;
   g.hud.setEvent = (t) => { if (t && st.eventLines.length < 400 && st.eventLines[st.eventLines.length - 1] !== t) st.eventLines.push(String(t)); setEvent0(t); };
+  // Every gate an event started at, in order (a drive that passes through the wrong gate shows here).
+  st.started = [];
+  g.events.on('streetEventStart', (ev) => { if (ev && ev.id) st.started.push(ev.id); });
   function ahead(dist) {
     const tr = g.objective.tracker, r = tr.route;
     if (!tr.active || !r.ok || r.n < 2) return null;
@@ -98,9 +113,33 @@ const installDriver = () => {
         if (c === v || c.kind !== 'car' || c.wrecked) continue;
         const dx = c.x - v.x, dz = c.z - v.z;
         const al = dx * fx + dz * fz, lat = -dx * fz + dz * fx;
-        if (al < 2 || al > 10 + sp * 1.3 || Math.abs(lat) > 2.3) continue;
-        if (o.pass || !c.driver) side = lat >= 0 ? -3.3 : 3.3;
-        else cruise = Math.min(cruise, Math.max(3, Math.abs(c.speed || 0) + (al - 9) * 0.5));
+        const passing = o.pass || !c.driver;
+        // A pass of a driven car is begun early (the car swings out over about 50 m) and held until its tail is clear.
+        const early = passing && !!c.driver;
+        if (al < (early ? -5 : 2) || al > (early ? 14 + sp * 2.4 : 10 + sp * 1.3) || Math.abs(lat) > 2.3) continue;
+        if (!early) {
+          if (passing) side = lat >= 0 ? -3.3 : 3.3;
+          else cruise = Math.min(cruise, Math.max(3, Math.abs(c.speed || 0) + (al - 9) * 0.5));
+          continue;
+        }
+        // Pass on the side with room (no parked car beside the slow one there), 0.9 m off its flank: a near miss, not a ram.
+        // The side is chosen once per car (no flip-flopping while alongside).
+        if (!c.passSide) {
+          let right = 0, left = 0;
+          for (const q of g.vehicles) {
+            if (q === c || q === v) continue;
+            const qx = q.x - c.x, qz = q.z - c.z;
+            if (Math.abs(qx * fx + qz * fz) > 8) continue;
+            const ql = -qx * fz + qz * fx;
+            if (ql > 1.2 && ql < 4.2) right++;
+            else if (ql < -1.2 && ql > -4.2) left++;
+          }
+          c.passSide = right < left ? 1 : left < right ? -1 : (lat >= 0 ? -1 : 1);
+        }
+        // the target is a lateral offset from the line (or the GPS line), so the player's own offset from it counts
+        const own = o.line ? (v.x - o.line.x) * -o.line.dz + (v.z - o.line.z) * o.line.dx : 0;
+        side = lat + own + c.passSide * 2.9 - (o.hug || 0);
+        if (c.staged && st.trace.length < 70 && g.time - st.tt > 0.2) { st.tt = g.time; st.trace.push(`${g.time.toFixed(1)}s al ${al.toFixed(1)} lat ${lat.toFixed(1)} side ${side.toFixed(1)} sp ${sp.toFixed(0)}`); }
       }
     }
     if (!pt) { src.throttle = 0; src.brake = 0.4; src.steer = 0; return; }
@@ -163,7 +202,56 @@ const installDriver = () => {
     const t = g.streetEvents.tracked;
     return t ? { x: t.x + (t.dx || 0) * 30, z: t.z + (t.dz || 0) * 30 } : null;
   };
-  window.__lt = { st, drive, run, draw, src, beyond };
+  // One street event for the thumb driver: the car stands at `from` (a node of the street grid 160 to 320 m off the
+  // gate, in the direction `how`: behind it, beside it or ahead of it), the GPS leads to the gate, the event is played.
+  function approach(evId, how) {
+    const se = g.streetEvents, ev = se.byId(evId), v = g.player.vehicle;
+    const want = ev.heading + (how === 'behind' ? Math.PI : how === 'beside' ? Math.PI / 2 : 0);
+    // The grid points in that direction, best fit first; the first one the GPS reaches the gate from in 750 m or less (a one-way street can make a long way round).
+    const cand = [];
+    for (const n of g.city.nodes) {
+      const d = Math.hypot(n.x - ev.x, n.z - ev.z);
+      if (d < 160 || d > 320) continue;
+      let e = Math.atan2(n.z - ev.z, n.x - ev.x) - want;
+      cand.push({ n, e: Math.abs(Math.atan2(Math.sin(e), Math.cos(e))) });
+    }
+    cand.sort((p, q) => p.e - q.e);
+    const out = { id: evId, tpl: ev.tpl, how, start: 'ok', medal: '', value: NaN, why: '', started: [] };
+    if (!cand.length || !v) { out.start = 'no spot'; return out; }
+    run({ brake: true, seconds: 1.2 });
+    g.police.heat.level = 0; g.police.heat.points = 0;
+    let best = null;
+    for (let k = 0; k < Math.min(10, cand.length) && !best; k++) {
+      const n = cand[k].n;
+      v.x = v.px = n.x; v.z = v.pz = n.z;
+      v.heading = v.pheading = Math.atan2(ev.z - n.z, ev.x - n.x);
+      v.vx = v.vz = 0; v.speed = 0; v.yawRate = 0; v.asleep = false; v.meshDirty = true;
+      g.player.x = n.x; g.player.z = n.z; g.player.heading = v.heading;
+      se.track(ev);
+      g.objective.refresh();
+      const r = g.objective.tracker.route;
+      if (r.ok && r.length <= 750) best = n;
+    }
+    if (!best) { out.start = 'no short route'; se.track(null); return out; }
+    for (let i = g.vehicles.length - 1; i >= 0; i--) { const o = g.vehicles[i]; if (o !== v && o.kind === 'car' && !o.parked && Math.hypot(o.x - best.x, o.z - best.z) < 12) g.removeVehicle(o); }
+    const n0 = st.started.length;
+    const lt0 = { st };
+    run({ seconds: 120, cruise: 20, pass: true, to: beyond(), until: () => !!se.active });
+    out.started = st.started.slice(n0);
+    if (!se.active) { out.start = `no start (${Math.round(Math.hypot(g.player.x - ev.x, g.player.z - ev.z))} m off, ${lt0.st.stucks} stucks, route ${g.objective.tracker.route.ok ? Math.round(g.objective.tracker.route.length) + ' m' : 'none'}, ${Math.round(g.player.vehicle.speed * 2.237)} mph)`; se.track(null); return out; }
+    if (se.active.ev.id !== evId) { out.start = 'wrong gate ' + se.active.ev.id; se.cancel(); return out; }
+    const tpl = ev.tpl, line = { x: ev.x, z: ev.z, dx: ev.dx, dz: ev.dz };
+    const o = { seconds: ev.limit + 5, until: () => !se.active };
+    if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 26 : 21; o.pass = true; }
+    if (tpl === 'heat') { const c = g.city.crop; g.waypoint = { x: (c.x0 + c.x1) / 2, z: (c.z0 + c.z1) / 2 }; }
+    run(o);
+    g.waypoint = null;
+    const res = se.lastResult;
+    out.result = res.result; out.medal = res.medal || ''; out.value = Math.round(res.value * 10) / 10; out.why = res.why || '';
+    out.stars = g.police.heat.level;
+    return out;
+  }
+  window.__lt = { st, drive, run, draw, src, beyond, approach };
   return true;
 };
 
@@ -220,6 +308,41 @@ try {
   check(Object.keys(info.n).length === 6, 'all six templates are placed');
   check(info.parked, 'a new game starts in a parked car');
 
+  async function approachSection() {
+  // ---- every template from three approaches (behind the gate, beside it, ahead of it): medal shares ----
+  // The "seed" of a result is the gate: placement seed 41077 gives every gate its own street, traffic and targets.
+  const perTpl = Number(arg('approach-events', '2'));
+  const rows = [];
+  const saved = await page.evaluate(() => { const o = {}; for (const [id, e] of Object.entries(window.__rw.progress.loop.events)) if (e.m) o[id.split('_')[2]] = e.m; return o; });
+  for (const tpl of ['trap', 'miss', 'jump', 'dash', 'heat', 'wreck']) {
+    const ids = await page.evaluate(([tpl, n]) => window.__rw.streetEvents.list.filter((e) => e.tpl === tpl && !e.intro).slice(0, n).map((e) => e.id), [tpl, perTpl]);
+    for (const id of ids) {
+      for (const how of ['behind', 'beside', 'ahead']) {
+        const r = await page.evaluate(([id, how]) => window.__lt.approach(id, how), [id, how]);
+        rows.push(r);
+        console.log(`   ${tpl} ${id} ${how}: ${r.start === 'ok' ? `${r.result} ${r.medal || 'no medal'} ${r.value} ${r.why}${tpl === 'heat' ? ' stars ' + r.stars : ''}` : r.start}${r.started.length > 1 ? ' (gates passed: ' + r.started.join(', ') + ')' : ''}`);
+      }
+    }
+  }
+  const share = (list, m) => list.length ? Math.round(100 * list.filter((r) => m === 'gold' ? r.medal === 'gold' : r.medal).length / list.length) : 0;
+  for (const tpl of ['trap', 'miss', 'jump', 'dash', 'heat', 'wreck']) {
+    const mine = rows.filter((r) => r.tpl === tpl);
+    const by = (how) => { const l = mine.filter((r) => r.how === how); return `${how} ${share(l, 'bronze')}/${share(l, 'gold')}`; };
+    const started = mine.filter((r) => r.start === 'ok');
+    console.log(`   medals ${tpl}: bronze+ ${share(mine, 'bronze')}%, gold ${share(mine, 'gold')}% of ${mine.length} runs (${started.length} started); ${by('behind')}, ${by('beside')}, ${by('ahead')}`);
+    // The GPS-led approaches of the grid are the driver's weak spot (one-way streets, a long way round): they are reported, and the
+    // checks ask only for the medals: bronze from an approach or from the staged run, and gold not handed out every time.
+    const got = singleMedal[tpl] || saved[tpl] || '';
+    check(share(started, 'bronze') > 0 || !!got, `${tpl}: bronze is reachable by the thumb driver (approaches ${share(started, 'bronze')}% of ${started.length}, before them: ${got || 'none'})`);
+    check(started.length < 6 || share(started, 'gold') < 100, `${tpl}: gold is not trivial (${share(started, 'gold')}% of ${started.length})`);
+  }
+  const okStarts = rows.filter((r) => r.start === 'ok').length;
+  check(okStarts >= Math.ceil(rows.length / 3), `the GPS leads the thumb driver into the gate on at least a third of the approaches (${okStarts} of ${rows.length})`);
+  await shot('13b-approaches-done');
+  }
+
+  if (process.argv.includes('--approach-only')) { await approachSection(); throw 'first-only'; }
+
   // ---- beat 1: the first line and the gate ahead ----
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 1.2 }));
   let s = await state();
@@ -231,6 +354,8 @@ try {
   check(s.active === info.first && s.t - t0 <= 20, `pulled into the first near-miss run within 20 s (${(s.t - t0).toFixed(1)} s, ${s.active})`);
   const stagedN = await page.evaluate(() => window.__rw.vehicles.filter((v) => v.staged && !v.removed).length);
   check(stagedN >= 2, `slow cars are staged in the first run's lane to pass (${stagedN})`);
+  const stagedAt = await page.evaluate(() => { const e = window.__rw.streetEvents.list[0]; return window.__rw.vehicles.filter((v) => v.staged && !v.removed).map((v) => Math.round((v.x - e.x) * e.dx + (v.z - e.z) * e.dz)); });
+  console.log(`   staged cars now at ${stagedAt.join(', ')} m past the gate`);
   const firstRunT = s.t;
   await shot('02-traffic-run');
 
@@ -254,8 +379,10 @@ try {
   check(!!medal, `a first medal (${medal}) at ${s.t} s`);
   const moving = await page.evaluate((t0) => window.__lt.st.toasts.filter((x) => x[0] >= t0 && x[1] === 'score' && /^(Clean pass|Near miss|Head-on miss)/.test(x[2])).map((x) => x[2]), firstRunT);
   check(moving.length >= 1, `the first run pays passes on moving cars, not only parked ones (${moving.length}: ${moving.slice(0, 4).join(', ')})`);
+  check(moving.some((x) => /^Near miss/.test(x)), `a pass on a staged car pays a near miss (${moving.filter((x) => /^Near miss/.test(x)).length} near misses)`);
   check(s.t - t0 <= 120, `the first medal comes within 2 minutes (${(s.t - t0).toFixed(1)} s)`);
   await shot('03-first-medal');
+  if (process.argv.includes('--first-only')) { console.log('   rams: ' + (await page.evaluate(() => window.__lt.st.rams.join(' | ')))); console.log('   trace:\n' + (await page.evaluate(() => window.__lt.st.trace.join('\n')))); throw 'first-only'; } // a quick look at the first run alone
 
   // ---- beat 3: the police, and an escape ----
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 7 }));
@@ -276,10 +403,23 @@ try {
       const cx = r.x[k - 1] + (r.x[k] - r.x[k - 1]) * t - ev.x, cz = r.z[k - 1] + (r.z[k] - r.z[k - 1]) * t - ev.z;
       if (Math.abs(-cx * ev.dz + cz * ev.dx) <= ev.w + 1.2) back++;
     }
-    return { ok: end > 0 && back === 0, id: ev.id, end: Math.round(end * 10) / 10, back, m: Math.round(r.length) };
+    // other gates the line passes through (the GPS keeps out of them: a penalty, so a few may be unavoidable)
+    let others = 0;
+    for (const o of g.streetEvents.list) {
+      if (o === ev) continue;
+      for (let k = 1; k < r.n; k++) {
+        const a0 = (r.x[k - 1] - o.x) * o.dx + (r.z[k - 1] - o.z) * o.dz, a1 = (r.x[k] - o.x) * o.dx + (r.z[k] - o.z) * o.dz;
+        if (a0 * a1 > 0 || a0 === a1) continue;
+        const t = a0 / (a0 - a1);
+        const cx = r.x[k - 1] + (r.x[k] - r.x[k - 1]) * t - o.x, cz = r.z[k - 1] + (r.z[k] - r.z[k - 1]) * t - o.z;
+        if (Math.abs(-cx * o.dz + cz * o.dx) <= o.w + 1.2) { others++; break; }
+      }
+    }
+    return { ok: end > 0 && back === 0, id: ev.id, end: Math.round(end * 10) / 10, back, others, m: Math.round(r.length) };
   });
   const ap = await behind();
   check(ap.ok, `the GPS leads to the red gate from behind (${JSON.stringify(ap)})`);
+  check(ap.others === 0, `the GPS line to the red gate passes through no other gate (${ap.others})`);
   await shot('04-to-red-gate');
   let escaped = false;
   for (let go = 0; go < 3 && !escaped; go++) {
@@ -309,6 +449,8 @@ try {
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 0.5 }));
   const ap2 = await behind();
   check(ap2.ok, `the GPS leads to the purple gate from behind (${JSON.stringify(ap2)})`);
+  check(ap2.others === 0, `the GPS line to the purple gate passes through no other gate (${ap2.others})`);
+  const startedBefore = await page.evaluate(() => window.__lt.st.started.length);
   let jumped = false;
   for (let go = 0; go < 3 && !jumped; go++) {
     const drove = await page.evaluate(() => {
@@ -339,6 +481,8 @@ try {
     console.log(`   jump ${go + 1}: ${JSON.stringify(s.last)} step ${s.step}`);
     if (!jumped && s.retry) await page.tap('.rw-a-eventretry');
   }
+  const wrongGates = await page.evaluate((n0) => window.__lt.st.started.slice(n0), startedBefore);
+  check(wrongGates.every((id) => id === ap2.id), `on the way to the purple gate no other gate was driven through (${wrongGates.join(', ')})`);
   check(jumped, `found a ramp and flew it (${s.last && s.last.value} ft, ${s.last && s.last.medal})`);
 
   // ---- beat 5: the nearest garage ----
@@ -371,6 +515,7 @@ try {
   // ---- one event of each template (the ones not played yet), staged like a retry ----
   const played = await page.evaluate(() => Object.keys(window.__rw.progress.loop.events));
   const done = new Set(played.map((id) => id.split('_')[2]));
+  const singleMedal = {}; // the medal the thumb driver got in the staged run of each template
   for (const tpl of ['trap', 'miss', 'jump', 'dash', 'heat', 'wreck']) {
     if (done.has(tpl) && tpl !== 'trap') continue;
     const r = await page.evaluate((tpl) => {
@@ -396,6 +541,7 @@ try {
       return out;
     }, tpl);
     console.log('   ' + tpl + ': ' + r.join(' | '));
+    singleMedal[tpl] = ((r.map((x) => / done (bronze|silver|gold) /.exec(x)).find(Boolean)) || [])[1] || '';
     if (tpl === 'trap' || tpl === 'dash') {
       const lines = await page.evaluate((tpl) => { const L = window.__lt.st.eventLines; const re = tpl === 'trap' ? /^Trap / : /^\d+:\d\d · /; const out = L.filter((l) => re.test(l)); L.length = 0; return out; }, tpl);
       const marks = new Set(lines.map((l) => (/ · (bronze|silver|gold) /.exec(l) || [])[1]).filter(Boolean));
@@ -407,6 +553,8 @@ try {
     if (tpl === 'dash') await shot('12-rush-drop-result');
     if (tpl === 'wreck') await shot('13-wrecking-result');
   }
+
+  await approachSection();
 
   // ---- flow: build a run, then stop to bank it ----
   const bank = await page.evaluate(() => {
@@ -520,9 +668,8 @@ try {
   check(errors.length === 0, `no page errors (${errors.length})`);
   for (const e of errors.slice(0, 10)) console.log('   ', e);
 } catch (e) {
-  console.log('FAIL', e.stack || e.message);
+  if (e !== 'first-only') { console.log('FAIL', e.stack || e.message); failed = true; }
   for (const er of errors.slice(0, 10)) console.log('   ', er);
-  failed = true;
 } finally {
   try {
     const lines = kept ? kept.toasts : await page.evaluate(() => (window.__lt ? window.__lt.st.toasts : []));

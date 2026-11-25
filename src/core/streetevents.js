@@ -70,6 +70,9 @@ export const dashLimit = (targets) => Math.min(90, Math.round(targets.bronze * D
 
 // Heat escape: the seconds out of sight the level needs, plus a margin.
 export const HEAT_COOL = [0, 12, 18, 25], HEAT_MARGIN = [12, 26, 45], HEAT_LIMIT = 90;
+// A heat escape lets the stars climb one above the gate's (the speeding and
+// the rams of a chase must not make the bronze time out of reach).
+export const heatCeiling = (level) => Math.min(4, Math.max(1, level | 0) + 1);
 export function heatTargets(level) {
   const base = HEAT_COOL[Math.max(1, Math.min(3, level | 0))];
   return triple(base + HEAT_MARGIN[0], base + HEAT_MARGIN[1], base + HEAT_MARGIN[2]);

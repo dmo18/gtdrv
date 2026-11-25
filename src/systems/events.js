@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { placeEvents, eventRamps, regionSlug } from '../world/eventspots.js';
 import {
-  createEventRun, statusKey, statusLine, startLine, resultLine, eventPoints, TEMPLATE_INFO, GATE_MIN_SPEED, WRECK_POINTS, cap,
+  createEventRun, statusKey, statusLine, startLine, resultLine, eventPoints, TEMPLATE_INFO, GATE_MIN_SPEED, WRECK_POINTS, cap, heatCeiling,
 } from '../core/streetevents.js';
 import { loopOf, recordEvent, recordTry, noteBest } from '../core/records.js';
 import { resetHeat } from './police.js';
@@ -367,6 +367,7 @@ export function createStreetEvents(game, opts = {}) {
       const v = p.vehicle;
       if (retryT > 0) retryT -= dt;
       if (wrongT > 0) wrongT -= dt;
+      if (game.police && game.police.heat) game.police.heat.ceiling = run.on && run.ev.tpl === 'heat' ? heatCeiling(run.ev.level) : 4;
       const inCar = !!v && v.kind === 'car';
       if (run.on) {
         F.x = p.x; F.z = p.z; F.px = Number.isFinite(px) ? px : p.x; F.pz = Number.isFinite(pz) ? pz : p.z;

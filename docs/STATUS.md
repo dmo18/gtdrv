@@ -7,6 +7,36 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.13.2 combat allocations (2026-11-25)
+- Measured by allocation (`perf-phonecheck --alloc`, 4x, one pass, the 60 s drive; numbers in docs/PERF.md "Combat
+  allocations"). Combat allocates little: 7.4 MB in the Downtown drive (123 KB/s, 0.7 % of 17.3 MB/s), 1.4 MB at the
+  Beach; in node the same fight (player firing from a car, five stars, a blast every 10 s) is 7 KB/s and 0.06 to 0.13 ms
+  a step. Most of the Chrome share is number boxing in `stepActor` (6.0 MB) and the drive-by aim assist (`core/aim.js
+  consider`, 6.7 MB). combat.js has no literals, closures or spreads in its step loops.
+- The combat spikes of the Phone check (9.6 ms before, 12.8 ms in this run) are mostly the listeners that run inside
+  combat's step: the first shot's `damage` (crime and witness listeners) and the blast (`combatfx` onExplosion and
+  scatterProps). Combat's own mean is 0.15 to 0.24 ms a step.
+- Changed (behavior byte-identical: a node fight harness ends in the same state with and without the change, Downtown
+  and Beach): actors keep one shape each. `resetActor` declares `stumbleT`, `createFootActor` declares `seatNo` (police.js
+  set it later, so officers and crew had two shapes), `createWalker` declares the rest of resetActor's fields. Six actor
+  shapes in the drive became three. The allocation change is within noise (stepActor 6.0 to 5.7 MB, consider 6.7 to
+  5.8 MB, combat 7.4 to 7.0 MB in Downtown; Beach 1.4 to 1.5 MB).
+- `perf-phonecheck --alloc --alloc-raw file` also writes the raw sampled heap profile (callers, inclusive totals).
+- heightAt (1.7 MB/s in the Beach drive): ours, not three.js. 75 of its 103 MB come from the police helicopter pilot
+  (`helipilot.js` pathRoof and roofAt, about 150 calls a step over Beach roofs); the chase camera and crews add under
+  11 MB. Cause: collision shapes have eight or more shapes (building, prop and tree literals, lot shapes, edge segments,
+  and the hidden `grp` that `setBreakGroup` adds with defineProperty), so heightAt's field reads see too many shapes and
+  box every number they read. Tried in a scratch copy only (src/world is not mine this pass): one shape constructor for
+  every collision shape (all fields, `grp` hidden at creation) took heightAt from 103.6 MB to 0.4 MB, pathRoof 23.8 to
+  3.1 MB, rayList 49.6 MB to below the top 15, the whole Beach drive from 19.4 to 16.1 MB/s. Not applied: it adds
+  enumerable fields to shapes, which tests compare as JSON. Open, for the world owner.
+- Also found, not fixed: in Chrome hot functions (stepActor, consider, heightAt, pathRoof) end the drive as Maglev code
+  after repeated deopts "dependent prototype chain changed" (518 of 2817 deopts in a 40 s Downtown drive, in bursts every
+  few seconds). Nothing calls Object.create or setPrototypeOf and the Object, Array and Function prototypes keep their
+  keys; the cause is not found. It is the likely reason Chrome boxes numbers where node does not.
+- Checks: eslint, npm test (1118 of 1120: two timing tests over their limit under the soak's load,
+  miami.test.js helpers 436 ms and world-density dressLot 0.094 ms a lot), smoke --extra.
+
 ## 0.13.1 car noses (task 15, 2026-11-25)
 - Reviewed all 18 fleet bodies front, side and three-quarter at L0, L1 and L2 (`node scripts/vehicle-shots.mjs --fleet`,
   `dist/fleet/`). L0 was fine; the fixes are at L1 and L2, all in `src/render/carbody.js`, no new draws.
@@ -1033,3 +1063,24 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Left: citymesh.js keeps its old grass, facade and wet patches for the island map (overridden for Miami by patchCityMaterials); a shadow proxy normal (sharing the position buffer) would save one more depth program but needs the lotmesh test's "positions only" check changed.
 - Gates: lint, 1114 tests (one timing test failed once under load, passed on rerun), smoke --extra, smoke-regions (Downtown's Play click timed out once, passed on rerun).
 - 0.13.1 review note: citypatch.js sets CITY_U.uWet = M.wet (replaces the shared uniform); fine today (no patched material outlives a region), worth making in place later.
+
+## 2026-11-25: 0.13.2 wastelands (in the tree, no version bump)
+- Why: the owner: "map is still full of glitchy wastelands", roads look bad, "lots with brick cars filling them", repetitive.
+- Review: `node scripts/drive-review.mjs <out> <tag> --survey --size=748x360` (new): in each of the five regions ten places picked from the city data (downtown core, beach strip, longest bridge, residential yards, industrial, park, airfield or its approach, biggest parking lot, biggest grass lot, a street near the start), each from the player's eye at street level (1.6 m) and the chase camera, day and night (`--day` skips night). About 180 shots before (North has no residential yard lot; the South run stopped at its time limit after 15 views of each kind), day shots of Beach, Downtown and North after.
+- Defects, by how often a player sees them:
+  1. Every lane line, stop bar and crosswalk: ragged, chipped edges (the worn paint texture cut holes in 8 % of it; at street level they read as broken paint). Fixed: holes in about 1.6 % (render/textures.js makePaint). Same shader program.
+  2. Big parking lots (30 % of lot land in Downtown, North and West): unbroken rows of cars, a grid of bricks, filled to the 0.55 cap by day. Fixed: a planted island with a tree every 11 bays (was 14; 10 would push the Downtown shaped-prop share under its 85 % test floor), day fills Downtown 0.45, midtown and beach 0.42 (were 0.55, 0.5, 0.5).
+  3. Dead ends inside a region (399 drawn ends: Beach 63, Downtown 83, North 118, West 79, South 56, residential streets and cut-off motorway stubs): the asphalt stopped as a square cut in the lawn. Fixed: world/deadends.js `deadEnds(city)` (from the graph, cached, no city field changes) puts a striped barricade just past each end, drawn in render/props.js (same look as a road end, `drawBarrier`) and solid in world/collision.js (the road end posts). Skipped where the end runs on into another road, a building or water.
+  4. Shipping containers in works yards (North is 43 % works): flat saturated boxes. Fixed: weathered paint and a darker top rail (render/lotmesh.js, 10 triangles a tier more).
+  5. Review tooling: the lot cars follow the camera, which moves in draw, so the first shot at a new place showed empty lots. drive-review steps again after its draws (in play the field refreshes every 0.25 s).
+- Left (seen, not changed): big lawns with sparse shrubs and palms (grass lots are 37 % of lot land at Beach and South; their dressing is at the 120 a hectare feature cap); wide pale works yards and parking lot margins with nothing on them (North); hedges along parking lots still read as smooth tubes; the sand fringe triangles of `lotCut` poking into a beachfront plaza (Downtown); a gray seam along some planted medians (South); an asphalt sliver past a few dead ends where the road capsule runs past the node.
+- Fingerprints unchanged (lot types, rects and the lot grid are as before; bays and islands are dressing). Tests: test/wastelands.test.js (dead end barricades: count, place, solid; no parking lot row over 11 bays; day fills).
+
+## 2026-11-25: 0.13.2 loop open items (in the tree, no version bump)
+- From the open list of 0.13.0 loop tuning. Design notes in docs/LOOP.md (sections b and e).
+- Staged slow cars (first run): Ocean Drive is one lane between two rows of parked cars, so a car in the lane could not be passed at all (the thumb driver rammed it: 2 to 4 Ram toasts per run). `traffic.stageAhead` now keeps staged cars at least 30 m apart and clears the row of parked cars on the emptier side of each one (1.2 to 4.2 m out, 6 m behind to 70 m ahead: the car moves on at 6 m/s while the player closes up) so there is a bay to pass in; the other row stays for the close shaves. Node test: both rows full, one side open to pass afterwards, not both rows cleared.
+- loop-test driver: a pass of a driven car starts about 50 m out, holds the side chosen once per car (no flip-flop), measures the offset from the line (it halved the swing before: the target followed the car's own sway) and passes 0.9 m off the flank. Result: 2 near misses on staged cars in the first run (`Near miss +150`), no Ram on a staged car; two new checks (a pass on a moving car, a near miss).
+- GPS and other gates: `router.setAvoid(gates, goalX, goalZ)` adds `AVOID_COST` (350 m) to every street edge that runs through another gate's beam (gate half width + 1.5 m); the goal gate is skipped. A penalty, not a ban (a dead end or the only street still goes through). Set by the objective when the goal changes. Node test, 30 Beach gate pairs: gates crossed 46 to 22, total length +1 percent (the rest are streets with no other way, or the start edge). loop-test checks the red and the purple gate's line (0 other gates) and that no other gate starts on the way to the purple gate.
+- Heat escape: the stars climbed because of the chase itself (fleeing above 62 mph in sight of a patrol car adds 0.15 point per second after 3 s, a ram adds one), so a one-star gate went to three stars (25 s out of sight, 90 s limit). `heat.ceiling` (police.js; `heatCeiling(level)` in streetevents.js = the gate's level + 1, set by systems/events.js only while a heat event runs): at the ceiling the points are held below one, no step up. Node test (police.test.js). Targets and the 90 s limit are unchanged.
+- Medal shares (loop-test, "every template from three approaches": behind the gate, beside it, ahead of it; the car stands on a street grid point 160 to 320 m off in that direction, the GPS leads in, the thumb driver plays it; `--approach-events N` gates per template, default 2; "seed" = the gate: placement seed 41077 gives each its street, traffic and targets, and the game's rng is one stream that cannot be reseeded). Run with one gate per template (full run): jump gold/silver/gold, dash bronze/none/bronze, heat gold/gold/not started, wreck bronze from beside only, trap and miss mostly not reached (the thumb driver overshoots a gate it is led to from a grid point or gets stuck; the GPS legs are 0.4 to 2.4 km on one-way streets). The staged runs before them: trap silver, dash silver, wreck silver, miss gold, jump gold, heat gold. So bronze is reachable and gold is not trivial on every template: no medal target was changed.
+- Not done: a driver that reaches every gate from every approach (the number of started runs per template is printed; the check asks for a third of all approaches); trap and miss gates in the approach runs.

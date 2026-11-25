@@ -366,7 +366,10 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
 
 // ---- dressing ----
 
-const HEDGE = 0x46633a, WALLS = [0xe6dccb, 0xd4d0c8, 0xf0e8da, 0xc4b8a4], CONTAINERS = [0xb4442c, 0x2c5a8a, 0x3a7a4a, 0xd89a2a, 0x8a8e92, 0x6a3a6a];
+const HEDGE = 0x46633a, WALLS = [0xe6dccb, 0xd4d0c8, 0xf0e8da, 0xc4b8a4], CONTAINERS = [0x9a4a34, 0x3a5a78, 0x4a6a4e, 0xb88a3c, 0x8a8e92, 0x6a4a5a];
+// (0.13.2: weathered container paint, was saturated toy colors; each tier
+// has a darker top rail, so a stack no longer reads as
+// a plain colored brick.)
 const TOWELS = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
 // Leaf colors of hedges, shrubs and beds; a bed now and then flowers.
 const SHRUB_GREENS = [0x3f6c32, 0x4a7a3a, 0x3a6230, 0x52803e, 0x44703a];
@@ -698,7 +701,10 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const tiers = Math.max(1, Math.round((f.h || 2.6) / 2.6));
         for (let t = 0; t < tiers; t++) {
           const col = CONTAINERS[(f.v + t * 3) % CONTAINERS.length];
-          C.solid.at(x, z).obox(x, z, hl || 3, hw || 1.22, y + t * 2.6, y + (t + 1) * 2.6 - 0.04, h, col, shadeHex(col, 1.1), t ? 0.85 : 0.6, 1);
+          const sol = C.solid.at(x, z), ya = y + t * 2.6, yb = y + (t + 1) * 2.6 - 0.04;
+          sol.obox(x, z, (hl || 3) - 0.06, (hw || 1.22) - 0.04, ya, yb - 0.14, h, col, col, t ? 0.85 : 0.6, 0.95);
+          // The top rail, a hair proud of the walls.
+          sol.obox(x, z, hl || 3, hw || 1.22, yb - 0.14, yb, h, shadeHex(col, 0.62), shadeHex(col, 1.08), 0.8, 0.95);
         }
         C.ao.at(x, z).aoDisc(x, z, Math.max(hl, hw) + 1.5, FLAT_Y + 0.004, 0.6, 6);
         break;

@@ -295,7 +295,9 @@ function makePaint(rng, N) {
       const i = (y * S + x) * 4;
       const v = 215 + 40 * a;
       d[i] = v; d[i + 1] = v; d[i + 2] = v;
-      d[i + 3] = wear < 0.4 ? 0 : wear < 0.44 ? 150 : 255;
+      // (0.13.2: holes in about 1.6 % of the texture, was 8 %: at street
+      // level the old chips read as ragged, broken line edges.)
+      d[i + 3] = wear < 0.33 ? 0 : wear < 0.37 ? 150 : 255;
     }
   }
   g.putImageData(img, 0, 0);

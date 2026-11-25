@@ -105,6 +105,7 @@ export function createObjective(game) {
   const router = canRoute ? createRouter(city) : null;
   const tracker = router ? createTracker(router) : null;
   const routed = { x: 0, z: 0, src: '', on: false, legal: true, h: NaN };
+  let avoidSet = false;
   const aim = { x: 0, z: 0 };
   const lines = { kind: '', text: '', soon: false };
   let uturnT = 0, replanT = 0; // seconds the route has wanted a U-turn; time to the next search
@@ -176,8 +177,15 @@ export function createObjective(game) {
     }
     const moved = Math.hypot(goal.x - routed.x, goal.z - routed.z) > GOAL_MOVE_M;
     const turned = Number.isFinite(goal.h) !== Number.isFinite(routed.h) || (Number.isFinite(goal.h) && Math.cos(goal.h - routed.h) < 0.9);
-    if (force || !routed.on || moved || turned || routed.src !== goal.src || routed.legal !== legal) {
+    const goalChanged = moved || turned || routed.src !== goal.src;
+    if (force || !routed.on || goalChanged || routed.legal !== legal) {
       routed.on = true; routed.x = goal.x; routed.z = goal.z; routed.src = goal.src; routed.legal = legal; routed.h = goal.h;
+      // The GPS keeps out of the other street event gates (a penalty).
+      if (router.setAvoid && (goalChanged || !avoidSet)) {
+        const se = game.streetEvents;
+        router.setAvoid(se && se.list ? se.list : null, goal.x, goal.z);
+        avoidSet = true;
+      }
       tracker.setGoal(goal.x, goal.z, legal, goal.h);
     }
   }

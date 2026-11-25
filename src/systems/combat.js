@@ -210,6 +210,7 @@ export function resetActor(a) {
   a.ragYaw = 0;
   a.ragPitch = 0;
   a.ragRoll = 0;
+  a.stumbleT = 0; // set by a stumble (stepBumps); declared here so every actor keeps one shape
   return a;
 }
 
