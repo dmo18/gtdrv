@@ -91,6 +91,9 @@ const FLOW_CSS = `
 .rw-prompt.rw-event { border-color: #ffd34d; background: rgba(20, 16, 6, 0.78); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .rw-msg.rw-k-score.rw-in { animation: none; } }
 @media (max-height: 300px) { .rw-money { background-size: var(--flow) 3px; } }
+/* three digits ("100 mph" and up) at 28 px cut the unit off in the 80 px box (748x360, 0.13.4 play test) */
+.rw-speed.rw-wide { font-size: 21px; }
+html[data-rw-text="large"] .rw-speed.rw-wide { font-size: calc(21px * var(--rw-text-scale, 1)); }
 `;
 const TIER_COLORS = ['#ffb43a', '#ffb43a', '#ffd34d', '#8bd66f', '#45c7dc', '#ff5a8a'];
 // The meter's pop (a source: scale 1.16 for 0.22 s; a tier up, bank, crash or medal: 1.45 for 0.4 s) and the edge flash.
@@ -368,7 +371,7 @@ export function createHud(root) {
 
   // cached last values (undefined forces the first write)
   const last = {
-    mode: undefined, speed: undefined,
+    mode: undefined, speed: undefined, speedWide: false,
     score: undefined, pending: undefined, combo: undefined, wanted: undefined, cool: undefined, district: undefined, clock: undefined,
     veh: undefined, prompt: null, health: undefined, meter: undefined, meterOn: undefined, meterCraft: undefined,
     fx: undefined, boost: undefined, boostOn: undefined, boostLock: undefined,
@@ -399,6 +402,8 @@ export function createHud(root) {
     if (speed !== last.speed) {
       last.speed = speed;
       speedNum.nodeValue = String(speed);
+      const wide = speed >= 100 || speed <= -10;
+      if (wide !== last.speedWide) { last.speedWide = wide; speedEl.classList.toggle('rw-wide', wide); }
     }
     const score = s.score > 0 ? Math.floor(s.score) : 0;
     if (score !== last.score) {

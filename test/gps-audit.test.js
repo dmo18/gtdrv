@@ -130,3 +130,44 @@ test('a merged pair of turns onto an unnamed ramp keeps the street name', () => 
   for (let k = 0; k < r.turnCount - 1; k++) named.push(r.turns[k].name);
   assert.ok(named.some((n) => /8th/.test(n)), 'turn onto 8th Street Road is named: ' + named.join(' | '));
 });
+
+test('a goal off the road (a garage door up its drive): "You have arrived" once, no search again until the player drives away', () => {
+  const c = regionCity('miami-beach');
+  const g0 = c.garages.find((g) => g.id === 'g-beach'); // Sandbar Garage: the route ends 25 m from its door
+  const door = g0.door;
+  const toasts = [], arrived = [];
+  const car = { heading: 0, speed: 0 };
+  const game = {
+    city: c, paused: false, camHeading: 0,
+    player: { x: c.spawn.x, z: c.spawn.z, mode: 'car', vehicle: car },
+    missions: { objective: { x: door.x, z: door.z, label: 'Garage' } },
+    hud: { toast: (t) => toasts.push(t) },
+    events: { emit: (k, src) => { if (k === 'gpsArrived') arrived.push(src); } },
+  };
+  const o = createObjective(game);
+  o.refresh();
+  const r = o.route;
+  assert.ok(r.ok && o.routing);
+  const endGap = Math.hypot(r.x[r.n - 1] - door.x, r.z[r.n - 1] - door.z);
+  assert.ok(endGap > 15, 'the route ends on the road, short of the door (' + endGap.toFixed(0) + ' m)');
+  // drive the line at 15 m/s to its end, then stand there 3 s
+  const pts = [];
+  for (let i = 1; i < r.n; i++) pts.push([r.x[i - 1], r.z[i - 1], r.x[i], r.z[i]]);
+  const p = game.player;
+  for (const [x0, z0, x1, z1] of pts) {
+    const l = Math.hypot(x1 - x0, z1 - z0), steps = Math.max(1, Math.ceil(l / 0.25));
+    car.heading = Math.atan2(z1 - z0, x1 - x0); car.speed = 15;
+    for (let k = 1; k <= steps && !arrived.length; k++) { p.x = x0 + (x1 - x0) * k / steps; p.z = z0 + (z1 - z0) * k / steps; o.fixedUpdate(1 / 60); }
+    if (arrived.length) break;
+  }
+  assert.deepEqual(arrived, ['mission'], 'arrived on the way');
+  car.speed = 0;
+  for (let k = 0; k < 180; k++) o.fixedUpdate(1 / 60);
+  assert.equal(arrived.length, 1, 'no search and "arrived" again every step while the player stands there');
+  assert.equal(toasts.filter((t) => t === 'You have arrived').length, 1);
+  assert.equal(o.routing, false);
+  // driven away (100 m back along the route): the same goal is routed again
+  p.x = r.x[0] + (p.x - r.x[0]) * 0.5; p.z = r.z[0] + (p.z - r.z[0]) * 0.5;
+  o.fixedUpdate(1 / 60);
+  assert.equal(o.routing, true, 'a new route once the player is away from where they arrived');
+});

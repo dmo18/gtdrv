@@ -18,6 +18,47 @@ the final review and fix stage; nothing is in progress that blocks play.
 - Left: the Downtown seaplane's straight-in glide still ends in a shore wall (the review script's pattern, known); game.js "Land first" on a roof (not this task's file); thin poles (a lamp, a palm trunk) can still be inside the near plane for a frame.
 - Tests: test/craft-review.test.js (the floor for boat, tank and plane, Hard mode and other craft; heli off a car and a bench, roofs as pads; moored berths step out on the pier for every boat type; the camera never inside a tower). No new shader program, no per-frame allocation.
 - Gates: eslint; npm test 1129 of 1131 (two timing tests under a load average near 16: the whole-box build, 19 s wall against 3 s cpu, passes alone; dressLot 0.066 ms a lot, files this work does not touch); smoke --extra 80 ok (the first run timed out waiting for parked cars under load, the rerun passed).
+## 0.13.4 loop playtest (2026-11-25)
+- Played the loop with `node scripts/loop-test.mjs --map <region>` in all five regions (748x360), twice before the
+  fixes and once after, plus single-event probes (new: `--event <id> [--class <spec>]` traces speed, lane and the
+  nearest car every 0.5 s; `--garage-from <jump id>` plays the garage beat alone; `--approach-only` now skips the intro).
+- Garage beat wedge (the flake), two causes:
+  1. A door set back from the road (Sandbar Garage, Beach: the route ends 25 m short, GARAGE_NEAR is 40 m): the GPS
+     said "You have arrived", then searched again and "arrived" every step with no line to follow, and the beat
+     never ended. objective.js: after an arrival the same goal is searched again only once the player is REARM_M
+     (60 m) away; it emits `gpsArrived`, and the garage beat ends on it within 90 m (tutorial.js GARAGE_ARRIVED).
+  2. The nearest garage can be locked (Key Point Shed, Virginia Key, no road): the beat now picks the nearest open one.
+  The thumb driver still needs a RESPAWN now and then after the ramp in Downtown (police or traffic boxing it in;
+  `--garage-from` alone drives there clean in 42 and 57 s); the log now prints where and why it wedged.
+- The ramp beat became police chases: the GPS line to the purple gate ran back through the red gate just escaped
+  (Beach). While an intro beat leads somewhere a gate already played does not restart ("Not now: follow the GPS
+  first."); new gates, a RETRY or a Daily Go gate still start; Skip intro opens them (events.js holdOthers). A first
+  version shut every other gate: in North, where the driver never escaped, it shut all 36 approaches.
+- Unfair jump: Ocean Dr (one lane between parked rows) jump_2, the Beach intro ramp: a car pulling in at the light
+  left the run-up at 22 to 36 mph, 31 ft, no medal 3 runs in 4. A jump now clears driven cars in the lane from the
+  gate to 40 m past the ramp at the start, then whatever comes in over 30 m ahead (parked cars stay): gold 3 of 3.
+- Dead near-miss runs: on Biscayne Blvd, Alton Rd, SW 22nd St the driver met 0 to 3 cars in 45 s (0 or 1 pass). A
+  near-miss run now stages a slow car 125 m ahead every 3 s when nothing going its way is in the road ahead (25 to
+  170 m, 7 m to the side). Alton Rd: no medal 3 of 3 to bronze, silver, bronze. Biscayne stays poor for the driver
+  (it holds a straight line past the road's bends and into the end of the street).
+- HUD at 748x360: "100 mph" cut the unit off in the 80 px speed box (speed traps run 85 to 100 mph); three digits
+  now draw at 21 px (hud.js), checked in loop-test.
+- loop-test driver (scripts only): keeps the last GPS line after the GPS lets go near a gate and then lines up with
+  the gate's street (Beach approach-only: 10 of 18 approaches did not start without it, 2 with it); passes cars a
+  lane over in a near-miss run; RESPAWN when wedged on the way to the red gate (North: through a fence into a yard).
+- Medal targets: not changed (the bot gets bronze on every template and gold is never 100 %). Final Beach run, 36
+  approaches: bronze or better trap 100 %, jump 83 %, heat 83 %, dash 67 %, wreck 67 %, miss 17 %; 31 of 36 started.
+  Daily twist classes on a 420 m trap: Fieldhand 84 mph, Cartway 85 mph top (silver 73 reachable, gold 86 hard).
+- Final loop-test: Beach all ok. Downtown, North, West, South fail only on the driver's GPS approaches ("a third of the
+  approaches": Downtown 10, West 3, South 9 of 36; North 0, and 5 of 18 on the unchanged 0.13.3 code, so not new:
+  the driver ends 40 to 60 m short of the gate going round the block), on the purple-gate route arriving against the
+  gate in Downtown and North (core/route.js arrive, not mine) or through another gate in South and West (a route
+  penalty, not a ban), and in Downtown on wreck bronze (2 or 3 of 4 smashes for the ramming driver). The intro ends
+  at the garage in all five (4.6 to 8 min); the driver still takes a RESPAWN to the garage now and then (a GPS U-turn
+  after the landing, a traffic queue that does not move), logged as "wedged:".
+- Not fixed (not mine): the police beat often ends on a star from a bump before the red gate is reached.
+- Checks: eslint; npm test 1130 of 1130; loop-test (above); drive-review --survey at 748x360 in all five regions
+  (no loop issue); smoke --extra 80 ok, no FAIL.
 
 ## 0.13.3 visual leftovers (2026-11-25)
 - The five leftovers of "0.13.2 wastelands", checked with `node scripts/drive-review.mjs <out> <tag> --survey --size=748x360 --day` (Beach, South) and `--at` shots (Downtown hedge and causeway beach, South median, Beach dead ends), before and after.

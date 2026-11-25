@@ -15,8 +15,24 @@ import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
 
 export const RETRY_S = 9; // seconds the RETRY button stays after an event
 export const GATE_H = 5; // m, the posts
+export const HELD_LINE = 'Not now: follow the GPS first.'; // a gate driven through while the intro leads elsewhere
 export const TRACK_NEAR = 32; // m: this close to a tracked gate the GPS lets go (it would call the gate "arrived")
 const CURTAIN_OPACITY = 0.2;
+// A jump's run-up and landing are kept clear of driven traffic in the lane (0.13.4 play test:
+// on a one-lane street between parked rows, Ocean Dr, a car pulling in at the light ahead left
+// the run-up at 22 mph, 31 ft and no medal three runs in four, with no way round it). At the
+// start everything in the lane up to JUMP_CLEAR_PAST m past the ramp goes, then every
+// JUMP_CLEAR_EVERY s what comes in farther than JUMP_CLEAR_NEAR m ahead. Parked cars stay.
+export const JUMP_CLEAR_PAST = 40, JUMP_CLEAR_NEAR = 30, JUMP_CLEAR_EVERY = 0.25;
+// A near-miss run needs cars to pass (0.13.4 play test: on Biscayne Blvd and Alton Rd the
+// thumb driver met 0 to 3 cars in its lane in 45 s, 0 or 1 pass, never bronze). While one
+// runs, every MISS_STAGE_EVERY s with the car moving and no car in the lane MISS_LANE[0] to
+// MISS_LANE[1] m ahead, one slow car is staged MISS_STAGE_AHEAD m ahead (traffic's own spawn
+// distance is 90 m, so it never pops up in view), as the intro's first run does.
+// MISS_SIDE: m to the side that counts as ahead on the road (traffic stages in the curb lane:
+// on a three-lane boulevard that is 4 to 6 m over from the middle lane).
+export const MISS_STAGE_EVERY = 3, MISS_LANE = [25, 170], MISS_SIDE = 7, MISS_STAGE_SPEED = 6, MISS_STAGE_MOVING = 8;
+const MISS_STAGE_AHEAD = [125];
 
 export function createStreetEvents(game, opts = {}) {
   const city = game.city;
@@ -45,6 +61,10 @@ export function createStreetEvents(game, opts = {}) {
   let px = NaN, pz = NaN;
   let nearGate = false;
   let wrongT = 0;
+  let clearT = 0;
+  // The intro's gate (or garage): while set, every other gate stays shut (holdOthers).
+  let only = null;
+  let chosen = null; // a gate the player was put before (RETRY, Daily Go): it starts even while held
   const F = { x: 0, z: 0, px: 0, pz: 0, speed: 0, inCar: false, wrecked: false, passes: 0, smashes: 0, jump: 0, escaped: false, busted: false, stars: 0 };
   const OBJ = { x: 0, z: 0, label: '', heading: NaN }; // heading: the way the GPS arrives (a gate: from behind)
 
@@ -61,6 +81,7 @@ export function createStreetEvents(game, opts = {}) {
     if (ev.tpl === 'heat' && !policeOn()) { toast('Police chases are off in Settings', 2.5, 'info'); return false; }
     run.start(ev);
     last = ev;
+    chosen = null;
     retryT = 0;
     if (tracked === ev) { tracked = null; trackLabel = ''; }
     passes0 = game.flow ? game.flow.passes : 0;
@@ -89,7 +110,31 @@ export function createStreetEvents(game, opts = {}) {
       bus.emit('streetEventStart', ev);
     }
     markTarget(ev);
+    clearT = 0;
+    if (ev.tpl === 'jump') clearRunUp(ev, 2);
     return true;
+  }
+  // A slow car to pass, far ahead in the lane, when the lane ahead is empty (a near-miss run).
+  function stagePass(v) {
+    const tr = game.traffic;
+    if (!v || !tr || !tr.stageAhead || Math.abs(v.speed || 0) < MISS_STAGE_MOVING) return 0;
+    const fx = Math.cos(v.heading), fz = Math.sin(v.heading);
+    const vs = game.vehicles;
+    for (let i = 0; i < vs.length; i++) {
+      const o = vs[i];
+      if (o === v || o.kind !== 'car' || o.parked || !(o.ai || o.driver) || o.wrecked) continue;
+      if (Math.cos(o.heading - v.heading) < 0.5) continue; // oncoming: a head-on miss, gone in a moment
+      const dx = o.x - v.x, dz = o.z - v.z;
+      const al = dx * fx + dz * fz;
+      if (al > MISS_LANE[0] && al < MISS_LANE[1] && Math.abs(-dx * fz + dz * fx) < MISS_SIDE) return 0;
+    }
+    return tr.stageAhead(v.x, v.z, fx, fz, MISS_STAGE_AHEAD, MISS_STAGE_SPEED);
+  }
+  // The lane from `from` m ahead to JUMP_CLEAR_PAST m past the ramp, while the ramp is still ahead.
+  function clearRunUp(ev, from) {
+    const p = game.player;
+    const ahead = (ev.tx - p.x) * ev.dx + (ev.tz - p.z) * ev.dz;
+    if (ahead > 0) sys.clearAhead(ahead + JUMP_CLEAR_PAST, from, true);
   }
 
   function finish(result) {
@@ -189,6 +234,7 @@ export function createStreetEvents(game, opts = {}) {
     if (game.snapCam) game.snapCam();
     retryT = 0;
     tracked = ev;
+    chosen = ev;
     trackLabel = '';
     if (bus) bus.emit('ui', 'event');
     return true;
@@ -208,7 +254,7 @@ export function createStreetEvents(game, opts = {}) {
     });
     bus.on('policeEscaped', () => { escaped = true; });
     bus.on('busted', () => { busted = true; });
-    bus.on('progressReset', () => { if (run.on) { run.abort('Reset'); markTarget(null); } last = null; lastResult = null; retryT = 0; tracked = null; });
+    bus.on('progressReset', () => { if (run.on) { run.abort('Reset'); markTarget(null); } last = null; lastResult = null; retryT = 0; tracked = null; only = null; });
   }
   // RETRY: the offer cell above MORE, for a few seconds after an event.
   let action = null;
@@ -301,6 +347,12 @@ export function createStreetEvents(game, opts = {}) {
     // `ev`: an event, or any { x, z, name } (the intro's garage). `label`:
     // the line the objective shows instead of the event's name (the intro's line).
     track(ev, label = '') { tracked = ev || null; trackLabel = label || ''; },
+    // The intro leads to one gate (or a garage) at a time: meanwhile a gate already played does
+    // not start again when driven through (0.13.4 play test: the GPS line to the purple gate ran
+    // back through the red gate just escaped, and the ramp beat became three police chases).
+    // New gates still start (an intro left half done never shuts the map). null opens them all.
+    holdOthers(ev) { only = ev || null; },
+    get held() { return only; },
     // Stopped traffic in the lane ahead of the player makes room (the start
     // of the intro: the first gate must be reachable without a queue).
     // `from`: only traffic at least this far ahead (the far end of the view, where it is small).
@@ -384,6 +436,8 @@ export function createStreetEvents(game, opts = {}) {
         F.stars = game.police ? game.police.heat.level : 0;
         const res = run.step(dt, F);
         if (res) finish(res);
+        else if (run.ev.tpl === 'jump' && (clearT -= dt) <= 0) { clearT = JUMP_CLEAR_EVERY; clearRunUp(run.ev, JUMP_CLEAR_NEAR); }
+        else if (run.ev.tpl === 'miss' && (clearT -= dt) <= 0) { clearT = MISS_STAGE_EVERY; stagePass(v); }
       } else if (inCar && !v.wrecked && Number.isFinite(px) && !game.phoneCheckRunning) {
         // Through a gate, the right way, at more than a crawl: the event starts.
         const sp = Math.abs(v.speed || 0);
@@ -396,6 +450,10 @@ export function createStreetEvents(game, opts = {}) {
             const a0 = (px - ev.x) * ev.dx + (pz - ev.z) * ev.dz;
             const across = Math.abs(-dx * ev.dz + dz * ev.dx) <= ev.w + 1.2;
             if (a0 < 0 && a1 >= 0 && a1 - a0 < 6 && across) {
+              if (only && ev !== only && ev !== chosen && Object.hasOwn(loop().events, ev.id)) {
+                if (wrongT <= 0) { wrongT = 6; toast(HELD_LINE, 3, 'info'); }
+                break;
+              }
               begin(ev);
               break;
             }

@@ -47,6 +47,7 @@ export const INTRO_LINES = {
 export const INTRO_REPEAT_S = 35; // a beat's line comes again after this long without progress
 export const INTRO_GAP_S = 5; // seconds between two intro lines
 export const GARAGE_NEAR = 40; // m from the garage that ends the last beat
+export const GARAGE_ARRIVED = 90; // m: the GPS arriving at the garage this close ends it too (the route ends on the road)
 export const CLEAR_NEAR = 70, CLEAR_FAR = 170; // m ahead: where the first run's lane is kept clear of moving traffic
 export const QUEUE_NEAR = 40; // m ahead: from here on, traffic standing in the first run's lane is taken away
 // Slow cars staged in the first run's lane, to pass (moving traffic is
@@ -117,26 +118,31 @@ export function createTutorial(game) {
     const step = INTRO_STEPS[intro().step];
     target = null;
     beatLabel = '';
-    if (!introOn()) { s.track(null); return; }
+    if (!introOn()) { s.track(null); if (s.holdOthers) s.holdOthers(null); return; }
     if (step === 'run' || step === 'medal') target = nearestEvent(s.list, p.x, p.z, 'miss');
     else if (step === 'police') target = s.list.find((e) => e.tpl === 'heat' && e.level === 1) || nearestEvent(s.list, p.x, p.z, 'heat');
     else if (step === 'ramp') target = nearestEvent(s.list, p.x, p.z, 'jump');
     else if (step === 'garage') {
       let best = null, bd = Infinity;
       for (const g of (game.city && game.city.garages) || []) {
+        // Only one the player can use now: a locked garage (Key Point Shed, out on a key
+        // with no road) is no "last stop", its door stays shut.
+        // (Locked ones count only as a last resort, a region with no open garage.)
         const at = g.door || g;
-        const d = Math.hypot(at.x - p.x, at.z - p.z);
+        const d = Math.hypot(at.x - p.x, at.z - p.z) + (garageUsable(g) ? 0 : 1e6);
         if (d < bd) { bd = d; best = at; }
       }
       if (best) { GAR.x = best.x; GAR.z = best.z; target = GAR; }
     }
     s.track(step === 'medal' ? null : target); // during the first run and its RETRY offer the GPS stays quiet
+    if (s.holdOthers) s.holdOthers(target); // the other gates stay shut while a beat leads somewhere
   }
   function finish() {
     setStep(INTRO_STEPS.length);
     say('done');
   }
   const stepName = () => INTRO_STEPS[intro().step] || '';
+  const garageUsable = (g) => (game.explore && game.explore.garageOpen ? game.explore.garageOpen(g.id) : !g.locked);
 
   game.events.on('streetEventStart', (ev) => {
     if (!introOn()) return;
@@ -159,6 +165,13 @@ export function createTutorial(game) {
     if (v && v.air && v.air.spot === e.spot && !v.air.on) { setStep(4); say('air'); pendingNext = 'garage'; }
   });
   game.events.on('garageFound', () => { if (introOn() && stepName() === 'garage') finish(); });
+  // The GPS said "You have arrived" at the garage: the beat is done there, even
+  // when the door stands farther than GARAGE_NEAR back from the road.
+  game.events.on('gpsArrived', () => {
+    const s = se();
+    if (!introOn() || stepName() !== 'garage' || !target || !s || s.active || s.tracked !== target) return;
+    if (Math.hypot(target.x - game.player.x, target.z - game.player.z) < GARAGE_ARRIVED) finish();
+  });
   game.events.on('progressReset', () => { said = ''; pending = ''; pendingNext = ''; saidBank = saidTier = saidWanted = false; target = null; started = false; staged = false; });
   let pendingNext = ''; // the next beat's line, said after the line that closed the last beat
   let started = false;
@@ -269,6 +282,7 @@ export function createTutorial(game) {
       pending = pendingNext = '';
       target = null;
       se().track(null);
+      if (se().holdOthers) se().holdOthers(null);
       game.events.emit('progress');
     },
     // Pause, Replay intro: from the first beat, from wherever the player is.

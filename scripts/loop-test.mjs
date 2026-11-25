@@ -33,6 +33,10 @@ const page = await browser.newPage({ viewport: { width: 748, height: 360 }, hasT
 page.setDefaultTimeout(120000); // the soak and the software renderer can make a tap slow
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
+// A renderer crash (the software renderer running out of memory) closes the page: say so, not only "page closed" on the next tap.
+page.on('crash', () => { console.log(`   (the page crashed: renderer, ${Math.round(process.memoryUsage().rss / 1e6)} MB in node)`); errors.push('page crashed'); });
+let closing = false;
+browser.on('disconnected', () => { if (!closing) console.log('   (the browser disconnected)'); });
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
 let failed = false;
@@ -48,7 +52,7 @@ const url = `http://127.0.0.1:${port}/` + (map ? `?map=${map}` : '');
 const installDriver = () => {
   const g = window.__rw;
   const src = g.input.addSource({ steer: 0, throttle: 0, brake: 0, handbrake: false });
-  const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, stucks: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
+  const st = { stuckLog: [], stuck: 0, rev: 0, revSteer: 0, revs: 0, stucks: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
   const toast0 = g.hud.toast;
   st.trace = []; st.tt = 0;
   st.rams = []; // what the car hit when a Ram paid (staged or ordinary traffic, how far off its lane, its speed)
@@ -69,15 +73,49 @@ const installDriver = () => {
   // Every gate an event started at, in order (a drive that passes through the wrong gate shows here).
   st.started = [];
   g.events.on('streetEventStart', (ev) => { if (ev && ev.id) st.started.push(ev.id); });
+  // The last GPS line, kept: the GPS lets go 32 m before a gate's approach point (and on
+  // "You have arrived"), and a player still drives the way it showed, round the last corner.
+  const kept = { x: [], z: [], rev: -1, ev: null };
+  function keptAhead(v, dist) {
+    const n = kept.x.length;
+    if (n < 2 || kept.ev !== g.streetEvents.tracked) return null;
+    let bi = -1, bd = 25;
+    for (let i = 0; i < n; i++) { const d = Math.hypot(kept.x[i] - v.x, kept.z[i] - v.z); if (d < bd) { bd = d; bi = i; } }
+    if (bi < 0) return null;
+    let i = bi, run = 0;
+    while (i + 1 < n && run < dist) { run += Math.hypot(kept.x[i + 1] - kept.x[i], kept.z[i + 1] - kept.z[i]); i++; }
+    return i > bi && bi < n - 3 ? { x: kept.x[i], z: kept.z[i] } : null; // near its end: the gate line takes over
+  }
   function ahead(dist) {
     const tr = g.objective.tracker, r = tr.route;
-    if (!tr.active || !r.ok || r.n < 2) return null;
+    if (!tr.active || !r.ok || r.n < 2) return keptAhead(g.player.vehicle, dist);
+    if (tr.rev !== kept.rev) {
+      // the line resampled every 3 m (the route's own points can be far apart)
+      kept.rev = tr.rev; kept.ev = g.streetEvents.tracked; kept.x.length = 0; kept.z.length = 0;
+      for (let m = 0; m <= r.length; m += 3) {
+        let k = 0;
+        while (k + 2 < r.n && r.cum[k + 1] < m) k++;
+        const f = Math.max(0, Math.min(1, (m - r.cum[k]) / (r.cum[k + 1] - r.cum[k] || 1)));
+        kept.x.push(r.x[k] + (r.x[k + 1] - r.x[k]) * f); kept.z.push(r.z[k] + (r.z[k + 1] - r.z[k]) * f);
+      }
+    }
     const want = Math.min(r.length, tr.along + dist);
     let i = Math.max(0, tr.seg);
     while (i + 2 < r.n && r.cum[i + 1] < want) i++;
     const l = r.cum[i + 1] - r.cum[i] || 1;
     const t = Math.max(0, Math.min(1, (want - r.cum[i]) / l));
     return { x: r.x[i] + (r.x[i + 1] - r.x[i]) * t, z: r.z[i] + (r.z[i + 1] - r.z[i]) * t };
+  }
+  // The GPS lets go 32 m before a tracked gate's approach point (the gate is in view): from there a
+  // player lines up with the gate's street, so the driver heads for a point on the gate's line ahead
+  // of where it is (not straight at a point past the gate, through the corner block).
+  function gateLine(v, sp) {
+    const ev = g.streetEvents.tracked;
+    if (!ev || ev.dx === undefined || g.streetEvents.active) return null;
+    const al = (v.x - ev.x) * ev.dx + (v.z - ev.z) * ev.dz;
+    if (al > 0) return null;
+    const a = Math.min(30, Math.max(-18, al + 14 + sp * 0.7));
+    return { x: ev.x + ev.dx * a - ev.dz * (ev.side || 0), z: ev.z + ev.dz * a + ev.dx * (ev.side || 0) };
   }
   // o: { to: {x, z} (when there is no GPS line), cruise (m/s), pass, ram, line: {x, z, dx, dz} (hold a straight line) }
   function drive(o) {
@@ -90,7 +128,7 @@ const installDriver = () => {
       const a = (v.x - o.line.x) * o.line.dx + (v.z - o.line.z) * o.line.dz + 14 + sp * 0.7;
       const h = o.hug || 0; // m to the right of the line: toward the parked row
       pt = { x: o.line.x + o.line.dx * a - o.line.dz * h, z: o.line.z + o.line.dz * a + o.line.dx * h };
-    } else pt = ahead(Math.max(7, Math.min(20, 5 + sp * 0.6))) || o.to || null;
+    } else pt = ahead(Math.max(7, Math.min(20, 5 + sp * 0.6))) || gateLine(v, sp) || o.to || null;
     let cruise = o.cruise || 19;
     // Slow down for the next turn of the GPS line.
     const tr = g.objective.tracker;
@@ -116,7 +154,9 @@ const installDriver = () => {
         const passing = o.pass || !c.driver;
         // A pass of a driven car is begun early (the car swings out over about 50 m) and held until its tail is clear.
         const early = passing && !!c.driver;
-        if (al < (early ? -5 : 2) || al > (early ? 14 + sp * 2.4 : 10 + sp * 1.3) || Math.abs(lat) > 2.3) continue;
+        // o.seek (a near-miss run): a moving car a lane or two over is gone after too, as a player hunting passes would
+        const seek = o.seek && early && Math.abs(c.speed || 0) > 2;
+        if (al < (early ? -5 : 2) || al > (early ? 14 + sp * 2.4 : 10 + sp * 1.3) || Math.abs(lat) > (seek ? 7 : 2.3)) continue;
         if (!early) {
           if (passing) side = lat >= 0 ? -3.3 : 3.3;
           else cruise = Math.min(cruise, Math.max(3, Math.abs(c.speed || 0) + (al - 9) * 0.5));
@@ -134,7 +174,7 @@ const installDriver = () => {
             if (ql > 1.2 && ql < 4.2) right++;
             else if (ql < -1.2 && ql > -4.2) left++;
           }
-          c.passSide = right < left ? 1 : left < right ? -1 : (lat >= 0 ? -1 : 1);
+          c.passSide = seek && Math.abs(lat) > 2.3 ? (lat >= 0 ? -1 : 1) : right < left ? 1 : left < right ? -1 : (lat >= 0 ? -1 : 1);
         }
         // the target is a lateral offset from the line (or the GPS line), so the player's own offset from it counts
         const own = o.line ? (v.x - o.line.x) * -o.line.dz + (v.z - o.line.z) * o.line.dx : 0;
@@ -167,6 +207,12 @@ const installDriver = () => {
       st.stuck = 0;
       st.revs++;
       st.stucks++;
+      if (st.stuckLog.length < 40) {
+        const tr = g.objective.tracker, t = tr.active && tr.route.ok ? tr.next() : null;
+        let near = '', bd = 8;
+        for (const c of g.vehicles) { if (c === v) continue; const d = Math.hypot(c.x - v.x, c.z - v.z); if (d < bd) { bd = d; near = (c.police ? 'police' : c.parked ? 'parked' : c.driver ? 'traffic' : 'car') + ' ' + d.toFixed(1) + ' m'; } }
+        st.stuckLog.push(`${g.time.toFixed(1)} s at ${Math.round(v.x)},${Math.round(v.z)} err ${err.toFixed(2)} ${t ? t.kind + ' in ' + Math.round(tr.toTurn) + ' m' : 'no route'} ${near} stars ${g.police.heat.level}`);
+      }
       st.rev = 1.6 + (st.revs % 3) * 0.6;
       st.revSteer = (st.revs % 2 ? -1 : 1) * Math.sign(err || 1) * 0.9;
     }
@@ -238,11 +284,11 @@ const installDriver = () => {
     const lt0 = { st };
     run({ seconds: 120, cruise: 20, pass: true, to: beyond(), until: () => !!se.active });
     out.started = st.started.slice(n0);
-    if (!se.active) { out.start = `no start (${Math.round(Math.hypot(g.player.x - ev.x, g.player.z - ev.z))} m off, ${lt0.st.stucks} stucks, route ${g.objective.tracker.route.ok ? Math.round(g.objective.tracker.route.length) + ' m' : 'none'}, ${Math.round(g.player.vehicle.speed * 2.237)} mph)`; se.track(null); return out; }
+    if (!se.active) { out.start = `no start (${Math.round(Math.hypot(g.player.x - ev.x, g.player.z - ev.z))} m off, ${lt0.st.stucks} stucks, route ${g.objective.tracker.route.ok ? Math.round(g.objective.tracker.route.length) + ' m' : 'none'}, ${Math.round(g.player.vehicle.speed * 2.237)} mph, along ${Math.round((g.player.x - ev.x) * ev.dx + (g.player.z - ev.z) * ev.dz)} m, ${se.held ? 'held ' + (se.held.id || 'garage') + ', ' : ''}${g.vehicles.filter((c) => c.staged && !c.removed).length} staged, ${g.police.heat.level} stars)`; se.track(null); return out; }
     if (se.active.ev.id !== evId) { out.start = 'wrong gate ' + se.active.ev.id; se.cancel(); return out; }
     const tpl = ev.tpl, line = { x: ev.x, z: ev.z, dx: ev.dx, dz: ev.dz };
     const o = { seconds: ev.limit + 5, until: () => !se.active };
-    if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 26 : 21; o.pass = true; }
+    if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.seek = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 26 : 21; o.pass = true; }
     if (tpl === 'heat') { const c = g.city.crop; g.waypoint = { x: (c.x0 + c.x1) / 2, z: (c.z0 + c.z1) / 2 }; }
     run(o);
     g.waypoint = null;
@@ -251,7 +297,15 @@ const installDriver = () => {
     out.stars = g.police.heat.level;
     return out;
   }
-  window.__lt = { st, drive, run, draw, src, beyond, approach };
+  // RESPAWN (the game's own button), then the nearest free car.
+  function respawn() {
+    g.respawnPlayer();
+    run({ brake: true, seconds: 1 });
+    const p = g.player;
+    const near = g.vehicles.filter((c) => c.kind === 'car' && !c.wrecked && !c.driver).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
+    if (near) g.enterVehicle(near);
+  }
+  window.__lt = { st, drive, run, draw, src, beyond, approach, respawn };
   return true;
 };
 
@@ -308,6 +362,7 @@ try {
   check(Object.keys(info.n).length === 6, 'all six templates are placed');
   check(info.parked, 'a new game starts in a parked car');
 
+  const singleMedal = {}; // the medal the thumb driver got in the staged run of each template (before approachSection: --approach-only reads it)
   async function approachSection() {
   // ---- every template from three approaches (behind the gate, beside it, ahead of it): medal shares ----
   // The "seed" of a result is the gate: placement seed 41077 gives every gate its own street, traffic and targets.
@@ -341,7 +396,90 @@ try {
   await shot('13b-approaches-done');
   }
 
-  if (process.argv.includes('--approach-only')) { await approachSection(); throw 'first-only'; }
+  if (process.argv.includes('--approach-only')) { await page.evaluate(() => window.__rw.tutorial.skip()); await approachSection(); throw 'first-only'; }
+
+  // --event <id> [--class <vehicle spec>]: that one event, staged three times like a RETRY (in a car of that class), with a trace of the run
+  // (the speed, where the car is against the gate's line and the nearest car ahead every 0.5 s).
+  // --garage-from <jump event id>: the garage beat alone, from that jump's landing (the car standing 60 m past the ramp).
+  const garageFrom = arg('garage-from', '');
+  if (garageFrom) {
+    const r = await page.evaluate((id) => {
+      const g = window.__rw, lt = window.__lt, ev = g.streetEvents.byId(id), v = g.player.vehicle;
+      const L = g.progress.loop.intro;
+      L.step = 3; L.done = false;
+      g.tutorial.replay(); L.step = 4;
+      const x = ev.tx + ev.dx * 60, z = ev.tz + ev.dz * 60;
+      v.x = v.px = x; v.z = v.pz = z; v.heading = v.pheading = ev.heading; v.vx = v.vz = 0; v.speed = 0; v.asleep = false; v.meshDirty = true;
+      g.player.x = x; g.player.z = z;
+      lt.run({ brake: true, seconds: 1 });
+      const t0 = g.time;
+      lt.run({ seconds: 240, cruise: 18, to: lt.beyond(), until: () => !g.tutorial.introOn || lt.st.stucks >= 4 });
+      return `${g.tutorial.introOn ? 'still on (' + g.tutorial.introStep + ')' : 'done'} after ${(g.time - t0).toFixed(0)} s, ${lt.st.stucks} stucks: ${lt.st.stuckLog.join(' | ')}`;
+    }, garageFrom);
+    console.log('   garage from ' + garageFrom + ': ' + r);
+    throw 'first-only';
+  }
+  const only = arg('event', '');
+  if (only) {
+    const r = await page.evaluate(([id, spec]) => {
+      const g = window.__rw, se = g.streetEvents, lt = window.__lt, ev = se.byId(id);
+      if (!ev) return ['no event ' + id];
+      g.tutorial.skip();
+      const out = ['targets ' + JSON.stringify(ev.targets) + ' limit ' + ev.limit + ' run ' + ev.run + ' street ' + ev.street];
+      // the slow cars a near-miss run stages (systems/events.js): when, and whether one was placed
+      const stages = [];
+      if (g.traffic && g.traffic.stageAhead && !g.traffic.stageAhead.wrapped) {
+        const sa = g.traffic.stageAhead;
+        g.traffic.stageAhead = (...a) => { const n = sa(...a); stages.push(Math.round(g.time) + 's ' + (n ? 'placed' : 'none')); return n; };
+        g.traffic.stageAhead.wrapped = true;
+      }
+      for (let k = 0; k < 3; k++) {
+        lt.run({ brake: true, seconds: 1.5 });
+        if (!se.stage(ev, spec || null)) { out.push('stage refused'); continue; }
+        const line = { x: ev.x, z: ev.z, dx: ev.dx, dz: ev.dz };
+        lt.run({ seconds: 12, cruise: 20, line, until: () => !!se.active });
+        if (!se.active) { out.push('no start'); continue; }
+        const o = { seconds: ev.limit + 5, until: () => !se.active };
+        const tpl = ev.tpl;
+        if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.seek = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 28 : 21; o.pass = true; }
+        const trace = [];
+        let next = 0;
+        const until0 = o.until;
+        o.until = (g2) => {
+          if (g2.time >= next) {
+            next = g2.time + 0.5;
+            const v = g2.player.vehicle;
+            if (v) {
+              const al = (v.x - ev.x) * ev.dx + (v.z - ev.z) * ev.dz, lat = -(v.x - ev.x) * ev.dz + (v.z - ev.z) * ev.dx;
+              const fx = Math.cos(v.heading), fz = Math.sin(v.heading);
+              let near = '';
+              let bd = 30;
+              for (const c of g2.vehicles) {
+                if (c === v || c.kind !== 'car') continue;
+                const dx = c.x - v.x, dz = c.z - v.z, a = dx * fx + dz * fz;
+                if (a < 0 || a > bd || Math.abs(-dx * fz + dz * fx) > 3) continue;
+                bd = a; near = `${c.parked ? 'parked' : c.staged ? 'staged' : 'car'} ${a.toFixed(0)} m ${Math.round(Math.abs(c.speed || 0) * 2.237)} mph`;
+              }
+              trace.push(`${Math.round(Math.abs(v.speed) * 2.237)} mph a ${al.toFixed(0)} l ${lat.toFixed(1)}${v.air && v.air.on ? ' AIR' : ''}${near ? ' [' + near + ']' : ''}`);
+            }
+          }
+          return until0(g2);
+        };
+        if (tpl === 'heat') { const c = g.city.crop; g.waypoint = { x: (c.x0 + c.x1) / 2, z: (c.z0 + c.z1) / 2 }; }
+        const t0 = lt.st.toasts.length;
+        lt.run(o);
+        g.waypoint = null;
+        const res = se.lastResult;
+        out.push('   lines: ' + lt.st.toasts.slice(t0).map((x) => x[0] + ' ' + x[2]).join(' | '));
+        out.push(`${res.result} ${res.medal || 'no medal'} ${Math.round(res.value * 10) / 10} ${res.why || ''}${stages.length ? ' staged: ' + stages.join(', ') : ''}`);
+        stages.length = 0;
+        out.push('   ' + trace.join(' | '));
+      }
+      return out;
+    }, [only, arg('class', '')]);
+    for (const l of r) console.log('   ' + l);
+    throw 'first-only';
+  }
 
   // ---- beat 1: the first line and the gate ahead ----
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 1.2 }));
@@ -423,9 +561,21 @@ try {
   await shot('04-to-red-gate');
   let escaped = false;
   for (let go = 0; go < 3 && !escaped; go++) {
-    await page.evaluate(() => window.__lt.run({ seconds: 120, cruise: 18, to: window.__lt.beyond(), until: (g) => !!g.streetEvents.active || g.tutorial.introStep !== 'police' }));
+    const toRed = await page.evaluate(() => {
+      const g = window.__rw, lt = window.__lt;
+      lt.run({ seconds: 120, cruise: 18, to: lt.beyond(), until: (g2) => !!g2.streetEvents.active || g2.tutorial.introStep !== 'police' || lt.st.stucks >= 4 });
+      if (g.streetEvents.active || g.tutorial.introStep !== 'police' || lt.st.stucks < 4) return '';
+      // Wedged (through a fence into a yard, North): RESPAWN and the nearest car, as a player would, then on.
+      const log = lt.st.stuckLog.slice(-2).join(' | ');
+      lt.respawn();
+      lt.run({ seconds: 120, cruise: 18, to: lt.beyond(), until: (g2) => !!g2.streetEvents.active || g2.tutorial.introStep !== 'police' });
+      return 'respawned after wedging: ' + log;
+    });
+    if (toRed) console.log('   ' + toRed);
     s = await state();
     if (go === 0) { console.log(`   toward the red gate: ${s.active || s.step} at ${s.t} s, stars ${s.stars}`); await shot('05-police'); }
+    if (!s.active && s.step === 'police') console.log('   not there: ' + (await page.evaluate(() => { const g = window.__rw, ev = g.streetEvents.tracked, r = g.objective.tracker.route; return `${ev ? Math.round(Math.hypot(g.player.x - ev.x, g.player.z - ev.z)) + ' m from the gate, ' : ''}route ${r.ok ? Math.round(g.objective.tracker.remaining) + ' m left' : 'none'}, at ${Math.round(g.player.x)},${Math.round(g.player.z)} ${Math.round(Math.abs(g.player.vehicle ? g.player.vehicle.speed : 0) * 2.237)} mph; stucks: ${window.__lt.st.stuckLog.slice(-4).join(' | ')}`; })));
+    if (process.argv.includes('--until-police')) throw 'first-only';
     // Away from them: a far corner of the region by GPS, as fast as the car goes.
     await page.evaluate(() => {
       const g = window.__rw, p = g.player, c = g.city.crop;
@@ -497,11 +647,7 @@ try {
       lt.run({ seconds: 150, cruise: 18, to: lt.beyond(), until: () => !g.tutorial.introOn || lt.st.stucks >= 4 });
       if (g.tutorial.introOn && lt.st.stucks >= 4) {
         // Wedged: RESPAWN (the game's own button), then the nearest car, as a player would.
-        g.respawnPlayer();
-        lt.run({ brake: true, seconds: 1 });
-        const p = g.player;
-        const near = g.vehicles.filter((c) => c.kind === 'car' && !c.wrecked && !c.driver).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
-        if (near) g.enterVehicle(near);
+        lt.respawn();
         how = 'respawned and took the nearest car';
       }
     }
@@ -509,13 +655,13 @@ try {
   });
   s = await state();
   console.log('   to the garage: ' + toGarage + ' (' + s.t + ' s)');
+  if (toGarage !== 'drove there') console.log('   wedged: ' + (await page.evaluate(() => window.__lt.st.stuckLog.slice(-8).join(' | '))));
   check(!s.on, `the intro ends at the garage (${s.t} s, ${((s.t - t0) / 60).toFixed(1)} min from the start)`);
   await shot('10-garage-done');
 
   // ---- one event of each template (the ones not played yet), staged like a retry ----
   const played = await page.evaluate(() => Object.keys(window.__rw.progress.loop.events));
   const done = new Set(played.map((id) => id.split('_')[2]));
-  const singleMedal = {}; // the medal the thumb driver got in the staged run of each template
   for (const tpl of ['trap', 'miss', 'jump', 'dash', 'heat', 'wreck']) {
     if (done.has(tpl) && tpl !== 'trap') continue;
     const r = await page.evaluate((tpl) => {
@@ -530,7 +676,7 @@ try {
         lt.run({ seconds: 12, cruise: 20, line, until: () => !!se.active });
         if (!se.active) { out.push('no start'); continue; }
         const o = { seconds: ev.limit + 5, until: () => !se.active };
-        if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 28 : 21; o.pass = true; }
+        if (tpl === 'trap' || tpl === 'jump') { o.line = line; o.cruise = 45; } else if (tpl === 'wreck') { o.ram = true; o.cruise = 20; o.to = { x: ev.x + ev.dx * 300, z: ev.z + ev.dz * 300 }; } else if (tpl === 'miss') { o.line = line; o.pass = true; o.seek = true; o.cruise = 22; } else { o.cruise = tpl === 'heat' ? 28 : 21; o.pass = true; }
         if (tpl === 'heat') { const c = g.city.crop; g.waypoint = { x: (c.x0 + c.x1) / 2, z: (c.z0 + c.z1) / 2 }; }
         lt.run(o);
         g.waypoint = null;
@@ -582,6 +728,18 @@ try {
   check(bank.tier >= 2 && bank.run > 0, `five near misses raise the multiplier (x${bank.tier}, run ${bank.run})`);
   check(banked.run === 0 && banked.total >= bank.before + bank.run, `stopping banks the run with the tier bonus (${bank.before} + ${bank.run} -> ${banked.total})`);
   await shot('15-banked');
+  // A trap is driven at 90 mph and more: three digits and the unit fit the speed box.
+  const fits = await page.evaluate(() => {
+    const g = window.__rw, out = [];
+    for (const kmh of [60, 161, 199, 330]) {
+      g.hud.update(Object.assign({}, g.hudState, { mode: 'car', speedKmh: kmh }));
+      const box = document.querySelector('.rw-speedbox'), sp = document.querySelector('.rw-speed');
+      const b = box.getBoundingClientRect(), u = sp.querySelector('small').getBoundingClientRect();
+      out.push({ text: sp.textContent, over: Math.round(u.right - (b.right - 2)) });
+    }
+    return out;
+  });
+  check(fits.every((f) => f.over <= 0), `the speed and its unit fit the speed box (${fits.map((f) => f.text + ' ' + f.over).join(', ')})`);
 
   // ---- records, save ----
   const rec = await page.evaluate(() => {
@@ -676,6 +834,7 @@ try {
     console.log('   lines shown: ' + lines.length);
     if (process.argv.includes('--lines')) for (const l of lines) console.log('     ', l.join(' | '));
   } catch { /* the page is gone */ }
+  closing = true;
   await browser.close();
   server.close();
 }

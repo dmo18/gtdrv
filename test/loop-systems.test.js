@@ -6,7 +6,7 @@ import { createEvents } from '../src/core/events.js';
 import { defaultProgress } from '../src/core/save.js';
 import { createScore, POINTS, SHAVE_GAP } from '../src/systems/score.js';
 import { createMissions } from '../src/systems/missions.js';
-import { createStreetEvents, RETRY_S, TRACK_NEAR } from '../src/systems/events.js';
+import { createStreetEvents, RETRY_S, TRACK_NEAR, JUMP_CLEAR_PAST, JUMP_CLEAR_NEAR, MISS_STAGE_EVERY, HELD_LINE } from '../src/systems/events.js';
 import { markMedal } from '../src/core/streetevents.js';
 import { createTutorial, INTRO_LINES, INTRO_MAX_WORDS, INTRO_STEPS, STAGE_AT, STAGE_SPEED } from '../src/systems/tutorial.js';
 import { createHeat, updateHeat } from '../src/systems/police.js';
@@ -513,4 +513,144 @@ test('a tier up plays its own bigger chime (flowTier with the tier), not the pla
   for (let i = 0; i < 4; i++) g.flow.feed('nearMiss', 150, 'Near miss');
   assert.equal(g.flow.tier, 2);
   assert.deepEqual(heard, [['flowTier', 2]]);
+});
+
+test('a jump keeps its run-up and landing clear of driven traffic in the lane; parked cars and cars past the ramp stay', () => {
+  const g = world();
+  const se = g.streetEvents;
+  const jump = se.list[2]; // gate at x 100, ramp at x 195, z 800
+  const queue = car({ x: 150, z: 800, ai: {}, driver: {}, speed: 4 }); // pulling in at the light ahead
+  const landing = car({ x: 195 + JUMP_CLEAR_PAST - 5, z: 800.5, ai: {}, driver: {}, speed: 9 });
+  const far = car({ x: 195 + JUMP_CLEAR_PAST + 30, z: 800, ai: {}, driver: {}, speed: 9 });
+  const parked = car({ x: 140, z: 802.9, parked: true });
+  const beside = car({ x: 150, z: 806, ai: {}, driver: {}, speed: 9 }); // the other lane
+  g.vehicles.push(queue, landing, far, parked, beside);
+  g.place(jump.x - 10, jump.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === jump);
+  assert.ok(queue.removed && landing.removed, 'the run-up and the landing are clear');
+  assert.ok(!far.removed && !parked.removed && !beside.removed, 'not past the landing, not the parked row, not the other lane');
+  // a car that turns into the lane later, far enough ahead, goes too; one right in front stays (no pop in the face)
+  const late = car({ x: g.player.x + JUMP_CLEAR_NEAR + 15, z: 800, ai: {}, driver: {}, speed: 5 });
+  const close = car({ x: g.player.x + JUMP_CLEAR_NEAR - 12, z: 800, ai: {}, driver: {}, speed: 5 });
+  g.vehicles.push(late, close);
+  g.run(0.3, 20 * DT, 0);
+  assert.ok(late.removed && !close.removed);
+  // past the ramp nothing is taken away
+  g.place(200, 800);
+  const after = car({ x: 230, z: 800, ai: {}, driver: {}, speed: 5 });
+  g.vehicles.push(after);
+  g.run(0.5);
+  assert.ok(!after.removed, 'once the ramp is behind, traffic is as it is');
+});
+
+test('a near-miss run on an empty street stages a slow car far ahead in the lane to pass, not while the lane has one', () => {
+  const g = world();
+  const se = g.streetEvents;
+  const calls = [];
+  g.traffic = {
+    stageAhead(x, z, dx, dz, dists, speed) {
+      calls.push({ t: g.time, x, dx, d: dists[0], speed });
+      g.vehicles.push(car({ x: x + dx * dists[0], z: z + dz * dists[0], ai: {}, driver: {}, speed, staged: true }));
+      return 1;
+    },
+  };
+  const miss = se.list[0];
+  g.place(miss.x - 10, miss.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === miss);
+  assert.equal(calls.length, 1, 'staged as the run starts on an empty street');
+  assert.ok(calls[0].d >= 90, 'no nearer than traffic spawns: it never pops up in view');
+  assert.ok(calls[0].dx === 1 && calls[0].speed * 2.237 < 20, 'ahead along the car, a slow car');
+  // the staged car is in the lane ahead: nothing more until it is passed
+  g.run(MISS_STAGE_EVERY + 0.5, 20 * DT, 0); // (the player closes on it at 20 m/s: still 50 m ahead)
+  assert.equal(calls.length, 1);
+  // passed (behind now): the next one comes within MISS_STAGE_EVERY
+  g.vehicles[g.vehicles.length - 1].x = g.player.x - 20;
+  g.run(MISS_STAGE_EVERY + 0.1, 20 * DT, 0);
+  assert.equal(calls.length, 2);
+  // standing still: none
+  g.vehicles[g.vehicles.length - 1].x = g.player.x - 20;
+  g.run(MISS_STAGE_EVERY * 2, 0, 0);
+  assert.equal(calls.length, 2);
+  // a car coming the other way ahead is a head-on miss, gone in a moment: it does not hold the next one back
+  g.vehicles.push(car({ x: g.player.x + 80, z: miss.z + 3, heading: Math.PI, ai: {}, driver: {}, speed: 9 }));
+  g.run(MISS_STAGE_EVERY + 0.1, 20 * DT, 0);
+  assert.equal(calls.length, 3);
+  // other templates do not stage
+  se.cancel();
+  const trap = se.list[1];
+  const n = calls.length;
+  g.place(trap.x - 10, trap.z);
+  g.run(2, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === trap);
+  assert.equal(calls.length, n);
+});
+
+test('while the intro leads to a gate a gate already played stays shut, a new one, a RETRY or Daily Go gate still starts, a skip opens them', () => {
+  const g = world({ intro: true });
+  const se = g.streetEvents, t = g.tutorialSys;
+  const [, trap, jump, , heat] = se.list;
+  g.progress.loop.intro.step = 3; // the ramp beat, just after the red gate
+  g.progress.loop.events[heat.id] = { m: 'gold', b: 12, n: 1 }; // escaped there
+  g.run(0.1);
+  // a gate not played yet starts as always (an intro left half done never shuts the map)
+  g.place(trap.x - 10, trap.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === trap);
+  se.cancel();
+  delete g.progress.loop.events[trap.id];
+  assert.equal(t.introStep, 'ramp');
+  assert.equal(se.held, jump);
+  g.place(heat.x - 10, heat.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.equal(se.active, null, 'the red gate driven through again on the way does not start a chase');
+  assert.ok(g.toasts.some((x) => x[1] === HELD_LINE));
+  // the beat's own gate starts
+  g.place(jump.x - 10, jump.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === jump);
+  se.cancel();
+  // a gate the player was put before (RETRY, Daily Go) starts
+  assert.ok(se.stage(heat));
+  g.run(3, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === heat);
+  se.cancel();
+  // skipped: every gate is open
+  t.skip();
+  assert.equal(se.held, null);
+  g.police.heat.level = 0;
+  g.place(heat.x - 10, heat.z);
+  g.run(0.6, 20 * DT, 0);
+  assert.ok(se.active && se.active.ev === heat);
+});
+
+test('the garage beat: a locked garage is not the last stop, and the GPS arriving on the road ends it', () => {
+  const g = world({ intro: true });
+  // the nearest is locked (out on a key), the open one is farther
+  g.city.garages = [{ id: 'g-key', x: 300, z: 0, door: { x: 300, z: 0 }, locked: 'a-far-key' }, { id: 'g-beach', x: 900, z: 900, door: { x: 905, z: 900 } }];
+  g.explore = { garageOpen: (id) => id !== 'g-key' };
+  const se = g.streetEvents, t = g.tutorialSys;
+  g.progress.loop.intro.step = 4;
+  g.run(0.1);
+  assert.equal(t.introStep, 'garage');
+  assert.deepEqual([se.tracked.x, se.tracked.z], [905, 900], 'the open garage, not the nearer locked one');
+  // the route ends on the road 60 m from the door: "You have arrived" there ends the beat
+  g.place(905, 840);
+  assert.equal(t.introStep, 'garage', 'farther than GARAGE_NEAR from the door');
+  g.events.emit('gpsArrived', 'mission', 905, 900);
+  g.run(0.1);
+  assert.equal(t.introOn, false);
+  // with only a locked garage in the region the beat still has somewhere to go
+  const h = world({ intro: true });
+  h.city.garages = [{ id: 'g-key', x: 300, z: 0, door: { x: 300, z: 0 }, locked: 'a-far-key' }];
+  h.explore = { garageOpen: () => false };
+  h.progress.loop.intro.step = 4;
+  h.run(0.1);
+  assert.deepEqual([h.streetEvents.tracked.x, h.streetEvents.tracked.z], [300, 0]);
+  // an arrival far from the garage does not end it
+  h.place(0, 0);
+  h.events.emit('gpsArrived', 'waypoint', 0, 0);
+  h.run(0.1);
+  assert.equal(h.tutorialSys.introStep, 'garage');
 });

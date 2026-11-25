@@ -33,6 +33,10 @@ const AIM_AHEAD_M = 45; // the arrow aims this far ahead on the route
 const STREET_EVERY = 0.25; // seconds between street lookups
 export const UTURN_WAIT_S = 3; // the route has wanted a U-turn this long before the pill asks for one
 export const REPLAN_S = 1; // while it wants one, search again this often (a way ahead wins)
+// After "You have arrived" the same goal gets no new route until the player is this far from
+// where they arrived (a goal off the road, like a garage door 25 m up a drive, would else be
+// searched again and "arrived" every step: the line repeated and no route to follow).
+export const REARM_M = 60;
 // Goals that get turn by turn: chosen (waypoint) or accepted (activity, mission).
 export const NAV_SOURCES = { waypoint: true, activity: true, mission: true };
 export function wantsTurnByTurn(src, checking) {
@@ -114,6 +118,7 @@ export function createObjective(game) {
   let chimeTurn = -1, chimeStage = 0, chimeRev = -1;
   let alertCraft = null;
   let navB = -2, navTurn = -1, navRev = -1, navWalk = false;
+  const arrivedAt = { x: NaN, z: NaN, gx: NaN, gz: NaN }; // where the player was told "arrived", and the goal then
 
   function pickGoal() {
     goal.on = false;
@@ -178,6 +183,9 @@ export function createObjective(game) {
     const moved = Math.hypot(goal.x - routed.x, goal.z - routed.z) > GOAL_MOVE_M;
     const turned = Number.isFinite(goal.h) !== Number.isFinite(routed.h) || (Number.isFinite(goal.h) && Math.cos(goal.h - routed.h) < 0.9);
     const goalChanged = moved || turned || routed.src !== goal.src;
+    // Arrived at this goal already: no new search until the player drives away from it.
+    if (!force && routed.src === 'arrived' && Math.hypot(goal.x - arrivedAt.gx, goal.z - arrivedAt.gz) <= GOAL_MOVE_M &&
+      Math.hypot(p.x - arrivedAt.x, p.z - arrivedAt.z) < REARM_M) return;
     if (force || !routed.on || goalChanged || routed.legal !== legal) {
       routed.on = true; routed.x = goal.x; routed.z = goal.z; routed.src = goal.src; routed.legal = legal; routed.h = goal.h;
       // The GPS keeps out of the other street event gates (a penalty).
@@ -199,7 +207,11 @@ export function createObjective(game) {
   }
 
   function onArrive() {
+    const p = game.player;
+    arrivedAt.x = p.x; arrivedAt.z = p.z; arrivedAt.gx = goal.x; arrivedAt.gz = goal.z;
     if (game.hud && game.hud.toast) game.hud.toast('You have arrived', 3, 'objective');
+    // The intro's garage beat ends here (its door may stand back from the road).
+    if (game.events && game.events.emit) game.events.emit('gpsArrived', goal.src, goal.x, goal.z);
     if (goal.src === 'waypoint' && game.waypoint) {
       game.waypoint = null;
       if (game.map && game.map.clearWaypoint) game.map.clearWaypoint();

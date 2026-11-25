@@ -98,6 +98,13 @@ and a heat escape the best medal the clock still allows (gold, then silver, then
 drop the GPS pill. The result is one line in the top stack ("Silver! 84 mph (gold 91 mph)"), a
 chime or the fail tone, a 3 frame hold for a medal and the slow motion beat for gold. Points:
 1,000 / 2,000 / 3,000, +500 for a new best; no medal, no points. The flow run is banked.
+Traffic in a run (0.13.4 play test): a jump keeps its run-up and landing clear of driven cars
+in the lane (all of them from 2 m ahead to 40 m past the ramp at the start, then every 0.25 s
+whatever comes in farther than 30 m ahead; parked cars stay), because on a one-lane street a car
+pulling in at the light left the Ocean Dr jump at 22 mph and 31 ft three runs in four. A
+near-miss run stages one slow car (6 m/s) 125 m ahead (past traffic's 90 m spawn distance)
+every 3 s while the car is moving and no car going its way is within 7 m to the side, 25 to
+170 m ahead, because on Biscayne Blvd and Alton Rd the thumb driver met 0 to 3 cars in 45 s.
 RETRY (the offer cell above MORE, 9 s) puts the car back 14 to 40 m before the gate, standing
 still, traffic on the spot removed, stars cleared: about 3 s from tap to gate. Leaving the car
 or wrecking it ends the event. The first gate (a near-miss run with bronze 2) stands 115 m ahead
@@ -154,7 +161,19 @@ progress.
 | by 2:00 | medal | "First medal! Gates glow on the map." | the line is up |
 | 2:10 | police | "Red gate next: it calls the police." (one star, under 800 m) | any escape; "Police! Break their line of sight." on the first star |
 | 3:00 | ramp | "You lost them. That pays big.", "Purple gate: hit the ramp fast." | a jump lands; "Brake flips, steer rolls. Land flat." |
-| 4:00 | garage | "Last stop: a garage. Paint is free." (the nearest) | within 40 m of it: "You are set. Three dailies wait in Pause." |
+| 4:00 | garage | "Last stop: a garage. Paint is free." (the nearest open one) | within 40 m of it, or the GPS's "You have arrived" within 90 m: "You are set. Three dailies wait in Pause." |
+
+The garage beat (0.13.4): a locked garage (Key Point Shed, out on Virginia Key with no road) is
+never the last stop, and a door that stands back from the road (Sandbar Garage, 25 m up its drive)
+ends the beat where the GPS says "You have arrived". The GPS then searches that goal again only
+once the player is 60 m from where it said so (it used to search and "arrive" every step there,
+with no line to follow: the loop-test garage wedge).
+
+While a beat leads to a gate or the garage, a gate already played does not start again when
+driven through ("Not now: follow the GPS first.", at most every 6 s); gates not played yet start
+as always (an intro left half done never shuts the map), a gate the player is put before (RETRY,
+Daily Go) still starts, and Skip intro opens them all (0.13.4: the GPS line to the purple gate ran back through the red gate
+just escaped, and the ramp beat became three police chases).
 
 Once each, when they first happen: "Flow x2: everything pays double.", "Stop anywhere to bank
 your flow." Pause, Skip intro ends it; Pause, Replay intro starts it again from where the
@@ -180,6 +199,8 @@ the glass tint are uniforms of the existing shaders: no new shader program, no n
   pill is dropped, the same bar runs along the bottom of the score pill.
 - Event status: the existing prompt strip. Start, result, intro lines: the existing top stack.
 - RETRY: the existing offer cell (BOOST hides while it shows, 9 s). Edge flashes: 0.3 to 0.5 s.
+- The speed readout drops to 21 px at three digits (0.13.4): "100 mph" at 28 px cut the unit off
+  in the 80 px box at 748x360 (a speed trap is driven at 90 mph and more). loop-test checks it.
 - Nothing new is permanent and nothing enters the keep-out rect. `scripts/ui-test.mjs` checks
   the meter, the event line and RETRY at 915x412, 780x360, 748x360, 748x285 and 690x280.
 
