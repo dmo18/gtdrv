@@ -309,7 +309,7 @@ export function triangulate(ring) {
 }
 
 // Convex hull (x, z pairs), counterclockwise in x, z.
-function hullOf(pts) {
+export function hullOf(pts) {
   const P = [];
   for (let k = 0; k < pts.length; k += 2) P.push([pts[k], pts[k + 1]]);
   P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);

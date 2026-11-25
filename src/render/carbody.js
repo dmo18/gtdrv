@@ -1139,8 +1139,11 @@ function fascia(acc, headAcc, tailAcc, sh, spec, lod) {
         // The rays find the near surface; the coarser one-draw body can
         // stand proud of it at the corners and bury the lens edges (spiky
         // lamps), so the lens sits a little further out and stops short of
-        // the corner.
-        lens(headAcc, sh, ff, { ...h, q: [h.q[0], Math.min(h.q[1], 0.93)], bulge: 0, lift: 0.02 }, side, () => cell, WHITE, 0, N);
+        // the corner. A dark rim (cell 4, never lit) round a lit core, as
+        // the near lamp's smoked housing: the lamp reads on white paint.
+        const P = patchGrid(sh, ff, { ...h, q: [h.q[0], Math.min(h.q[1], 0.93)], bulge: 0, lift: 0.02 }, side, [1, 0.5, 0], 6);
+        const res = { col: lin(WHITE), cls: 0, u: 0, v: 0.5 };
+        emitOut(headAcc, P, (i, r) => { res.u = ((r === 0 ? 4 : cell) + 0.5) / 8; return res; }, (c) => [c[0] - ff.ox, 0, c[2]], { crease: 0.3 });
         continue;
       }
       lens(headAcc, sh, ff, h, side, () => 4, WHITE, 0, N);

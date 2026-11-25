@@ -10,7 +10,7 @@
 // The answer is a pure function of the city and the point.
 
 import { divideOf, GUTTER } from './roadprofile.js';
-import { inJunctionArea, pointInRing, ringDist, supAt, curbsAt, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
+import { inJunctionArea, pointInRing, ringDist, supAt, curbsAt, hullOf, walkOf, walkLeftOf, medianBand, medianAt } from './junctions.js';
 
 export const CURB_H = 0.15; // m, curb step (docs/MAP.md edge contract)
 export const SIDEWALK_W = 2.0; // m, sidewalk on an edge without `sidewalk`
@@ -143,6 +143,25 @@ export function createGround(city) {
   // Edges whose reach covered the last geoSurface point (read at once by
   // surfaceAt for the narrow-gap net below).
   let nearEdges = 0;
+  // Fan junctions (rings that cross themselves): the convex hull of their
+  // arm mouths, made on first use. Inside it an arm's sidewalk or median
+  // band stops at its mouth, not at its node: on toward the node it ran
+  // across the other arms' asphalt (docs/STREETSCAPE.md 3, fan1).
+  const mouthHulls = new Map();
+  function mouthHull(J) {
+    let h = mouthHulls.get(J.id);
+    if (!h) {
+      const pts = [];
+      for (let m = 0; m < J.arms.length; m++) {
+        const q = J.arms[m], k = q >> 1, d = q & 1 ? len[k] - geo.trim[q] : geo.trim[q];
+        const C = curbsAt(geo, edges[k], d), l = C.l, r = C.r;
+        pts.push(ax[k] + ux[k] * d - uz[k] * l, az[k] + uz[k] * d + ux[k] * l, ax[k] + ux[k] * d - uz[k] * r, az[k] + uz[k] * d + ux[k] * r);
+      }
+      h = Float64Array.from(hullOf(pts));
+      mouthHulls.set(J.id, h);
+    }
+    return h;
+  }
   function geoSurface(x, z, c, fills = true) {
     const js = cellJ[c];
     for (let q = 0; q < js.length; q++) {
@@ -161,8 +180,13 @@ export function createGround(city) {
       if (d < -reach[k] || d > len[k] + reach[k]) continue;
       const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
       if (Math.abs(s) > reach[k]) continue;
-      nearEdges++;
       const qa = 2 * k, qb = qa + 1;
+      const qf = d < geo.trim[qa] ? qa : d > len[k] - geo.trim[qb] ? qb : -1;
+      if (qf >= 0 && geo.jEnd[qf] >= 0) {
+        const J = geo.junctions[geo.jEnd[qf]];
+        if (J.fan && pointInRing(mouthHull(J), x, z)) continue;
+      }
+      nearEdges++;
       const d0 = geo.jEnd[qa] >= 0 ? 0 : geo.trim[qa] + geo.miter[qa] * s;
       const d1 = geo.jEnd[qb] >= 0 ? len[k] : len[k] - geo.trim[qb] + geo.miter[qb] * s;
       if (d < d0 || d > d1) continue;

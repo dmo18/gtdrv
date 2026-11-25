@@ -184,6 +184,9 @@ function groundRuns(B, G, i0, i1, j0, j1, show, inLot) {
 // beyond it) stays square. Returns corner | b << 3 (corner 1 NE, 2 NW,
 // 3 SE, 4 SW) or 0. `show`: lotGrid.ground. Pure; no allocation.
 const sameLook = (p, q) => p === q || (!!p && !!q && p.key === q.key && p.col === q.col);
+// The first type code of each ground's look (yard, grass and park: yard),
+// so the two cells of a stair agree on which is split.
+const LOOK_T = Uint8Array.from(GROUND_BY_T, (g, t) => (g ? GROUND_BY_T.findIndex((o) => sameLook(o, g)) : t));
 export function lotCut(G, show, k) {
   const { w, h } = G;
   const a = show[k], ga = GROUND_BY_T[a];
@@ -192,7 +195,7 @@ export function lotCut(G, show, k) {
   if (i === 0 || j === 0 || i === w - 1 || j === h - 1) return 0;
   for (let c = 1; c <= 4; c++) {
     const v = show[c <= 2 ? k - w : k + w], hs = show[c & 1 ? k + 1 : k - 1];
-    if (!(a < v)) continue;
+    if (!(LOOK_T[a] < LOOK_T[v])) continue;
     const gb = GROUND_BY_T[v];
     if (!gb || sameLook(gb, ga) || !sameLook(GROUND_BY_T[hs], gb)) continue;
     if (sameLook(GROUND_BY_T[show[c <= 2 ? k + w : k - w]], gb) || sameLook(GROUND_BY_T[show[c & 1 ? k - 1 : k + 1]], gb)) continue;
