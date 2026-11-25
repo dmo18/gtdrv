@@ -125,6 +125,9 @@ function createLotCarView(game, field) {
     if (!b) {
       b = new THREE.InstancedMesh(r.bodyGeo, paintMaterial(color), LOT_NEAR_MAX);
       b.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      // White instance colors (times 1: no change): every instanced caster
+      // then has them, so the shadow pass needs one depth program for all.
+      b.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(LOT_NEAR_MAX * 3).fill(1), 3);
       b.frustumCulled = false;
       b.castShadow = true;
       b.count = 0;

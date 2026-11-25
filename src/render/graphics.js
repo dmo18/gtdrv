@@ -621,6 +621,7 @@ export function createGraphics(game) {
         const mid = m.userData && m.userData.bodyMid;
         if (mid && mid.isMesh && typeof THREE.InstancedMesh === 'function') {
           const im = new THREE.InstancedMesh(mid.geometry, mid.material, 1);
+          im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3).fill(1), 3);
           im.castShadow = true;
           warmGroup.add(im);
         }

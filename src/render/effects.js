@@ -133,14 +133,34 @@ function makeShadowTex() {
 }
 
 // ---- billboard particle system ---------------------------------------------------
+// The tire marks (createSkids) run in the same program (uSkid 1): their
+// own attributes and varyings, the particle ones unused.
 const VERT = /* glsl */`
 attribute vec3 iPos;
 attribute vec4 iData; // size, alpha, rotation, cell (+4 flat, +8 stretched)
 attribute vec3 iCol;
 attribute vec3 iVel;
+attribute float aBirth;
+attribute vec2 aEdge;
+uniform float uSkid;
+uniform float uTime;
+uniform float uLife;
 varying vec2 vUv;
 varying vec4 vCol;
+varying float vA;
+varying float vE;
 void main() {
+  if (uSkid > 0.5) {
+    float age = uTime - aBirth;
+    vA = aEdge.y * (1.0 - smoothstep(uLife * 0.6, uLife, age));
+    vE = aEdge.x;
+    vUv = vec2(0.0);
+    vCol = vec4(0.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    return;
+  }
+  vA = 0.0;
+  vE = 0.0;
   float size = iData.x;
   float rot = iData.z;
   float mode = floor(iData.w / 4.0);
@@ -176,9 +196,20 @@ const FRAG_POOL = /* glsl */`
 uniform sampler2D map;
 uniform float uLight;
 uniform float uAdd;
+uniform float uSkid;
+uniform vec3 uColor;
 varying vec2 vUv;
 varying vec4 vCol;
+varying float vA;
+varying float vE;
 void main() {
+  if (uSkid > 0.5) {
+    // Tire mark: soft at both edges; too faint writes nothing.
+    float e = 1.0 - abs(vE * 2.0 - 1.0);
+    float a = vA * smoothstep(0.0, 0.45, e);
+    gl_FragColor = a < 0.003 ? vec4(0.0) : vec4(uColor, a);
+    return;
+  }
   vec4 t = texture2D(map, vUv);
   float a = t.a * vCol.a;
   if (uAdd > 0.5) gl_FragColor = vec4(vCol.rgb * a, 1.0);
@@ -202,7 +233,7 @@ export function createPool(max, additive, atlas, scene) {
   geo.setAttribute('iVel', iVel);
   geo.instanceCount = 0;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: atlas }, uLight: { value: 1 }, uAdd: { value: additive ? 1 : 0 } },
+    uniforms: { map: { value: atlas }, uLight: { value: 1 }, uAdd: { value: additive ? 1 : 0 }, uSkid: { value: 0 }, uTime: { value: 0 }, uLife: { value: 0 }, uColor: { value: new THREE.Color() } },
     vertexShader: VERT,
     fragmentShader: FRAG_POOL,
     transparent: true,
@@ -348,32 +379,6 @@ export function writePool(P, cam, sort, extra) {
 }
 
 // ---- skid marks -------------------------------------------------------------------
-const SKID_VERT = /* glsl */`
-attribute float aBirth;
-attribute vec2 aEdge;
-uniform float uTime;
-uniform float uLife;
-varying float vA;
-varying float vE;
-void main() {
-  float age = uTime - aBirth;
-  vA = aEdge.y * (1.0 - smoothstep(uLife * 0.6, uLife, age));
-  vE = aEdge.x;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-const SKID_FRAG = /* glsl */`
-uniform vec3 uColor;
-varying float vA;
-varying float vE;
-void main() {
-  float e = 1.0 - abs(vE * 2.0 - 1.0);
-  float a = vA * smoothstep(0.0, 0.45, e);
-  if (a < 0.003) discard;
-  gl_FragColor = vec4(uColor, a);
-}
-`;
-
 function createSkids(scene) {
   const N = MAX_SKID;
   const geo = new THREE.BufferGeometry();
@@ -389,9 +394,10 @@ function createSkids(scene) {
   geo.setAttribute('aEdge', new THREE.BufferAttribute(edge, 2).setUsage(THREE.DynamicDrawUsage));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, uLife: { value: 26 }, uColor: { value: new THREE.Color(0.018, 0.017, 0.016) } },
-    vertexShader: SKID_VERT,
-    fragmentShader: SKID_FRAG,
+    // The particle program (VERT, FRAG_POOL) with its tire-mark part on.
+    uniforms: { uTime: { value: 0 }, uLife: { value: 26 }, uColor: { value: new THREE.Color(0.018, 0.017, 0.016) }, uSkid: { value: 1 }, map: { value: null }, uLight: { value: 1 }, uAdd: { value: 0 } },
+    vertexShader: VERT,
+    fragmentShader: FRAG_POOL,
     transparent: true,
     depthWrite: false,
     polygonOffset: true,
@@ -408,15 +414,19 @@ function createSkids(scene) {
 }
 
 // ---- contact shadows ----------------------------------------------------------------
-// Instanced ground quads; the blast scorch decals (combatfx.js) use the
-// same program, uDecal switching the fragment part.
+// Instanced ground quads; the blast scorch decals and the blood
+// (combatfx.js) use the same program, uDecal picking the fragment part:
+// 0 contact shadow, 1 scorch, 2 blood (iSeed: only the blood has it).
 export const GROUND_VERT = /* glsl */`
 attribute float iOp;
+attribute float iSeed;
 varying vec2 vUv;
 varying float vOp;
+varying float vSeed;
 void main() {
   vUv = uv;
   vOp = iOp;
+  vSeed = iSeed;
   gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
 }
 `;
@@ -425,8 +435,19 @@ uniform sampler2D map;
 uniform float uDecal;
 varying vec2 vUv;
 varying float vOp;
+varying float vSeed;
 void main() {
-  if (uDecal > 0.5) {
+  if (uDecal > 1.5) {
+    vec2 p = vUv - 0.5;
+    float r = length(p) * 2.0;
+    float a = atan(p.y, p.x);
+    float rim = 0.74 + 0.26 * sin(a * 5.0 + vSeed) * sin(a * 3.0 - vSeed * 1.7);
+    float k = smoothstep(rim, rim * 0.4, r);
+    float al = k * min(1.0, vOp) * 0.9;
+    if (al < 0.01) discard;
+    float shade = 0.85 + 0.15 * sin(a * 9.0 + vSeed * 3.0);
+    gl_FragColor = vec4(0.58 * shade, 0.02, 0.03, al);
+  } else if (uDecal > 0.5) {
     // Scorch: a dark ragged disc.
     vec2 p = vUv - 0.5;
     float r = length(p) * 2.0;

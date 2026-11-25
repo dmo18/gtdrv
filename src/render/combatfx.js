@@ -44,36 +44,6 @@ const NEAR = 170; // meters from the camera where small effects are made
 // Atlas cells: 0 puff, 1 ring, 2 streak, 3 glow. +4 flat on the ground, +8 stretched.
 const PUFF = 0, RING = 1, STREAK = 2, GLOW = 3;
 
-const BLOOD_VERT = /* glsl */`
-attribute float iOp;
-attribute float iSeed;
-varying vec2 vUv;
-varying float vOp;
-varying float vSeed;
-void main() {
-  vUv = uv;
-  vOp = iOp;
-  vSeed = iSeed;
-  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
-}
-`;
-const BLOOD_FRAG = /* glsl */`
-varying vec2 vUv;
-varying float vOp;
-varying float vSeed;
-void main() {
-  vec2 p = vUv - 0.5;
-  float r = length(p) * 2.0;
-  float a = atan(p.y, p.x);
-  float rim = 0.74 + 0.26 * sin(a * 5.0 + vSeed) * sin(a * 3.0 - vSeed * 1.7);
-  float k = smoothstep(rim, rim * 0.4, r);
-  float al = k * min(1.0, vOp) * 0.9;
-  if (al < 0.01) discard;
-  float shade = 0.85 + 0.15 * sin(a * 9.0 + vSeed * 3.0);
-  gl_FragColor = vec4(0.58 * shade, 0.02, 0.03, al);
-}
-`;
-
 function clamp(v, a, b) {
   return v < a ? a : v > b ? b : v;
 }
@@ -188,9 +158,11 @@ export function createCombatFx(game) {
     for (let i = 0; i < BLOOD; i++) bseed.array[i] = rng.next() * 6.28;
     bgeo.setAttribute('iOp', bloodOp);
     bgeo.setAttribute('iSeed', bseed);
+    // The contact shadows' program (effects.js), its blood part on.
     const bmat = new THREE.ShaderMaterial({
-      vertexShader: BLOOD_VERT,
-      fragmentShader: BLOOD_FRAG,
+      uniforms: { map: { value: null }, uDecal: { value: 2 } },
+      vertexShader: GROUND_VERT,
+      fragmentShader: GROUND_FRAG,
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
