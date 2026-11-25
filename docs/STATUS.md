@@ -1032,3 +1032,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Same picture: WebGL read-back of four views (Downtown day, Beach night, South dusk with wet roads, West with a blast and skid marks) is bit-identical before and after; draw calls and triangles unchanged (212/290k, 127/234k, 128/279k, 147/255k).
 - Left: citymesh.js keeps its old grass, facade and wet patches for the island map (overridden for Miami by patchCityMaterials); a shadow proxy normal (sharing the position buffer) would save one more depth program but needs the lotmesh test's "positions only" check changed.
 - Gates: lint, 1114 tests (one timing test failed once under load, passed on rerun), smoke --extra, smoke-regions (Downtown's Play click timed out once, passed on rerun).
+- 0.13.1 review note: citypatch.js sets CITY_U.uWet = M.wet (replaces the shared uniform); fine today (no patched material outlives a region), worth making in place later.
