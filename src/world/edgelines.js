@@ -1,3 +1,4 @@
+import { mkShape } from './shape.js';
 // Sea walls and rails (docs/PLAN_V3.md 2.2 item 4). The edge of everything
 // a car can stand on (the drawn land, plus every road strip widened to its
 // rail line) is traced on a fixed 2 m lattice into short segments, cell by
@@ -262,7 +263,7 @@ export function createEdgeLayer(city) {
     const list = [];
     for (let s = 0, t = 0; s < r.segs.length; s += 4, t++) {
       if (!isWallTag(r.tags[t])) continue;
-      list.push({ kind: 2, x0: r.segs[s], z0: r.segs[s + 1], x1: r.segs[s + 2], z1: r.segs[s + 3], r: WALL_R, h: WALL_H, tag: r.tags[t], stamp: 0, off: false, brk: null });
+      list.push(mkShape(2, r.segs[s], r.segs[s + 1], r.segs[s + 2], r.segs[s + 3], 0, 0, WALL_R, WALL_H, r.tags[t]));
       stats.walls++;
     }
     r.shapes = list.length ? list : NO_ITEMS;

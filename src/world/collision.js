@@ -21,6 +21,7 @@ import { PROP_SOLIDS, createPropLayer, setBreakGroup } from './propsolid.js';
 import { createEdgeLayer } from './edgelines.js';
 import { attachGround } from './ground.js';
 import { deadEnds } from './deadends.js';
+import { mkShape } from './shape.js';
 
 export const BREAK_BACK_T = 120, BREAK_BACK_FAR = 150, BREAK_RING = 16;
 
@@ -53,7 +54,7 @@ export function createCollisionWorld() {
 
   let joined = null; // boxes and circles with the lot layer's, by lot id
   function addBox(x0, z0, x1, z1, h = 10, tag = null) {
-    const b = { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
+    const b = mkShape(0, x0, z0, x1, z1, 0, 0, 0, h, tag);
     boxes.push(b);
     insert(b, x0, z0, x1, z1);
     joined = null;
@@ -61,7 +62,7 @@ export function createCollisionWorld() {
   }
 
   function addCircle(x, z, r, h = 5, tag = null) {
-    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
+    const c = mkShape(1, 0, 0, 0, 0, x, z, r, h, tag);
     circles.push(c);
     insert(c, x - r, z - r, x + r, z + r);
     joined = null;
@@ -71,7 +72,7 @@ export function createCollisionWorld() {
   // A capsule segment (sea walls, rails): every point within r of the
   // segment from (x0, z0) to (x1, z1).
   function addSegment(x0, z0, x1, z1, r = 0.25, h = 0.9, tag = null) {
-    const g = { kind: 2, x0, z0, x1, z1, r, h, tag, stamp: 0, off: false, brk: null };
+    const g = mkShape(2, x0, z0, x1, z1, 0, 0, r, h, tag);
     segments.push(g);
     insert(g, Math.min(x0, x1) - r, Math.min(z0, z1) - r, Math.max(x0, x1) + r, Math.max(z0, z1) + r);
     return g;
@@ -698,8 +699,8 @@ export const LOT_SHAPE_REACH = 6;
 // The shape objects of the collision world, made without a grid: the
 // lazy layer lists them in its own cells.
 const SHAPE_SINK = {
-  addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
-  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
+  addBox: (x0, z0, x1, z1, h = 10, tag = null) => mkShape(0, x0, z0, x1, z1, 0, 0, 0, h, tag),
+  addCircle: (x, z, r, h = 5, tag = null) => mkShape(1, 0, 0, 0, 0, x, z, r, h, tag),
 };
 
 // The lots' solids as a lazy layer of `collision` (replacing any layer it
