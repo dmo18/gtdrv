@@ -85,11 +85,12 @@ const SHORE_TONE = `
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.97, 0.97), clamp(rwFoamL, 0.0, 0.9));
           }`;
 
-function makeNearMaterial(color, uniforms) {
-  // PBR so the sea mirrors the sky (scene.environment) with a Fresnel
-  // edge and a sun glint; a few small ripples perturb the normal near
-  // the camera.
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.16, metalness: 0, envMapIntensity: 1.15 });
+// The near patch (waves, ripples, shore) and the far plane (the same tone,
+// no waves) are one program: uRwNear (per material) switches the near
+// parts on, so the far plane runs its old code and nothing else.
+function makeSeaMaterial(params, uniforms, nearOn) {
+  const mat = new THREE.MeshStandardMaterial(params);
+  const uNear = { value: nearOn ? 1 : 0 };
   mat.onBeforeCompile = (shader) => {
     try {
       const vs = shader.vertexShader;
@@ -101,32 +102,44 @@ function makeNearMaterial(color, uniforms) {
       shader.uniforms.uShore = uniforms.uShore;
       shader.uniforms.uShoreOrg = uniforms.uShoreOrg;
       shader.uniforms.uShoreOn = uniforms.uShoreOn;
-      shader.vertexShader = waveGlsl() + vs
+      shader.uniforms.uRwNear = uNear;
+      shader.vertexShader = 'uniform float uRwNear;\n' + waveGlsl() + vs
         .replace('#include <beginnormal_vertex>', `
-          vec2 rwXZ = (modelMatrix * vec4(position, 1.0)).xz;
-          float rwF = rwFade(rwXZ);
-          vec2 rwG = rwGrad(rwXZ, uTime) * rwF;
-          vec3 objectNormal = normalize(vec3(-rwG.x, 1.0, -rwG.y));
+          vec2 rwXZ = vec2(0.0);
+          float rwF = 0.0;
+          vec3 objectNormal;
+          if (uRwNear > 0.5) {
+            rwXZ = (modelMatrix * vec4(position, 1.0)).xz;
+            rwF = rwFade(rwXZ);
+            vec2 rwG = rwGrad(rwXZ, uTime) * rwF;
+            objectNormal = normalize(vec3(-rwG.x, 1.0, -rwG.y));
+          } else {
+            objectNormal = vec3(normal);
+          }
           #ifdef USE_TANGENT
             vec3 objectTangent = vec3(tangent.xyz);
           #endif`)
         .replace('#include <begin_vertex>', `
           vec3 transformed = vec3(position);
-          float rwRaw = rwWave(rwXZ, uTime);
-          vRwH = rwRaw;
-          vRwP = rwXZ;
-          transformed.y += mix(${glslFloat(FAR_Y)}, rwRaw, rwF);`);
-      shader.uniforms.uTime = uniforms.uTime;
+          vRwH = 0.0;
+          if (uRwNear > 0.5) {
+            float rwRaw = rwWave(rwXZ, uTime);
+            vRwH = rwRaw;
+            vRwP = rwXZ;
+            transformed.y += mix(${glslFloat(FAR_Y)}, rwRaw, rwF);
+          }`)
+        .replace('#include <project_vertex>', '#include <project_vertex>\n  if (uRwNear < 0.5) vRwP = (modelMatrix * vec4(transformed, 1.0)).xz;');
       shader.fragmentShader = `
 uniform float uTime;
 uniform sampler2D uShore;
 uniform vec2 uShoreOrg;
 uniform float uShoreOn;
+uniform float uRwNear;
 varying float vRwH;
 varying vec2 vRwP;
 ` + fs.replace('#include <color_fragment>', `
           #include <color_fragment>
-          {
+          if (uRwNear > 0.5) {
             // Darker troughs, lighter crests with a hint of foam, and
             // broad slow patches so the sea is not one flat color.
             float rwT = clamp(vRwH / 0.24 * 0.5 + 0.5, 0.0, 1.0);
@@ -137,7 +150,7 @@ varying vec2 vRwP;
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.93, 0.95), rwFoam * 0.35);
           }`).replace('#include <normal_fragment_maps>', `
           #include <normal_fragment_maps>
-          {
+          if (uRwNear > 0.5) {
             float rwD = length(vViewPosition);
             float rwK = 1.0 - smoothstep(30.0, 140.0, rwD);
             vec2 q = vRwP;
@@ -151,25 +164,24 @@ varying vec2 vRwP;
             normal = normalize(normal + rwOff * rwK);
           }
           ${SEA_TONE}
-          ${SHORE_TONE}`);
+          if (uRwNear > 0.5) ${SHORE_TONE}`);
     } catch {
-      // Leave the stock Lambert shader: a flat colored plane.
+      // Leave the stock shader: a flat colored plane.
     }
   };
-  mat.customProgramCacheKey = () => 'rustwater-sea-v4';
+  mat.customProgramCacheKey = () => 'rustwater-sea-v5';
   return mat;
 }
 
+// PBR so the sea mirrors the sky (scene.environment) with a Fresnel edge
+// and a sun glint; a few small ripples perturb the normal near the camera.
+function makeNearMaterial(color, uniforms) {
+  return makeSeaMaterial({ color, roughness: 0.16, metalness: 0, envMapIntensity: 1.15 }, uniforms, true);
+}
+
 // The far sea: a plain plane with the same tone (no waves).
-function makeFarMaterial(color) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0, envMapIntensity: 1.1 });
-  mat.onBeforeCompile = (shader) => {
-    if (!shader.fragmentShader.includes('#include <normal_fragment_maps>')) return;
-    shader.vertexShader = 'varying vec2 vRwP;\n' + shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vRwP = (modelMatrix * vec4(transformed, 1.0)).xz;');
-    shader.fragmentShader = 'varying vec2 vRwP;\n' + shader.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + SEA_TONE);
-  };
-  mat.customProgramCacheKey = () => 'rustwater-sea-far';
-  return mat;
+function makeFarMaterial(color, uniforms) {
+  return makeSeaMaterial({ color, roughness: 0.2, metalness: 0, envMapIntensity: 1.1 }, uniforms, false);
 }
 
 // A scrolling window (SHORE_SPAN meters) of distance-to-shore round the
@@ -238,16 +250,16 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
   farGeo.rotateX(-Math.PI / 2);
   // Slightly darker than the near patch average so the hand-off is soft.
   const farCol = col.clone().multiplyScalar(0.92);
-  const far = new THREE.Mesh(farGeo, makeFarMaterial(farCol));
+  const uniforms = {
+    uTime: { value: 0 }, uCenter: { value: new THREE.Vector2() },
+    uShore: { value: null }, uShoreOrg: { value: new THREE.Vector2() }, uShoreOn: { value: 0 },
+  };
+  const far = new THREE.Mesh(farGeo, makeFarMaterial(farCol, uniforms));
   far.position.y = FAR_Y;
   far.name = 'sea-far';
   far.renderOrder = -2;
   group.add(far);
 
-  const uniforms = {
-    uTime: { value: 0 }, uCenter: { value: new THREE.Vector2() },
-    uShore: { value: null }, uShoreOrg: { value: new THREE.Vector2() }, uShoreOn: { value: 0 },
-  };
   const shore = createShoreMap(uniforms);
   const nearGeo = new THREE.PlaneGeometry(NEAR_SIZE, NEAR_SIZE, NEAR_CELLS, NEAR_CELLS);
   nearGeo.rotateX(-Math.PI / 2);

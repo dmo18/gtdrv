@@ -598,7 +598,9 @@ export function createGraphics(game) {
         if (!m || !m.isMaterial || seen.has(m)) continue;
         seen.add(m);
         const o = new THREE.Mesh(g, m);
-        o.castShadow = !m.transparent;
+        // Road paint lies on the ground and never casts: its cut-out
+        // depth program would be compiled for nothing.
+        o.castShadow = !m.transparent && m !== M.paintMat;
         warmGroup.add(o);
       }
     }
@@ -614,6 +616,14 @@ export function createGraphics(game) {
         noteVehicleHit(m, 1, 0, 0, 20);
         K.car.updateMesh(m, { spec: pol, x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, health: pol.health * 0.3, brake: 1, speed: -1, driver: 'player' }, 1, 0);
         warmGroup.add(m);
+        // The parked lot cars' real bodies are instanced (parked.js): that
+        // paint program too, so the first lot met in play compiles nothing.
+        const mid = m.userData && m.userData.bodyMid;
+        if (mid && mid.isMesh && typeof THREE.InstancedMesh === 'function') {
+          const im = new THREE.InstancedMesh(mid.geometry, mid.material, 1);
+          im.castShadow = true;
+          warmGroup.add(im);
+        }
       } catch {
         /* best effort */
       }
@@ -669,6 +679,35 @@ export function createGraphics(game) {
     sys.warmPrograms = renderer.info.programs ? renderer.info.programs.length : 0;
     sys.warmDone = true;
   }
+  // Meshes drawn only on the shadow layer (the street tiles' shadow
+  // proxies, the cars' shadow bodies) never draw in the view: compile
+  // would build a view program for them all the same (an unused program).
+  // Their depth programs come from the warm draw's shadow pass. Their
+  // materials are held back while compile walks the scene.
+  const heldMeshes = [], heldMats = [];
+  function holdShadowOnly() {
+    heldMeshes.length = heldMats.length = 0;
+    scene.traverse((o) => {
+      if (o.material && (o.isMesh || o.isPoints || o.isLine || o.isSprite) && !o.layers.test(camera.layers) && !o.layers.isEnabled(WARM_LAYER)) {
+        heldMeshes.push(o);
+        heldMats.push(o.material);
+        o.material = null;
+      }
+    });
+    return heldMeshes.length;
+  }
+  function giveBack() {
+    for (let i = 0; i < heldMeshes.length; i++) heldMeshes[i].material = heldMats[i];
+    heldMeshes.length = heldMats.length = 0;
+  }
+  function compileSeen() {
+    holdShadowOnly();
+    try {
+      renderer.compile(scene, camera);
+    } finally {
+      giveBack();
+    }
+  }
   // The sky reflection map must exist before anything compiles: a
   // material compiled without it is compiled again (an envMap variant)
   // at the first draw, and both programs are kept (about half of them
@@ -687,9 +726,16 @@ export function createGraphics(game) {
       // The async form lets the driver compile in parallel where it can
       // (KHR_parallel_shader_compile) instead of stalling this frame.
       if (renderer.compileAsync) {
-        renderer.compileAsync(scene, camera).then(() => warmDone(performance.now())).catch(() => warmDone(performance.now()));
+        const held = holdShadowOnly();
+        let p;
+        try {
+          p = renderer.compileAsync(scene, camera);
+        } finally {
+          giveBack(held);
+        }
+        p.then(() => warmDone(performance.now())).catch(() => warmDone(performance.now()));
       } else {
-        renderer.compile(scene, camera);
+        compileSeen();
         warmDone(t);
         t = performance.now();
       }
@@ -706,7 +752,7 @@ export function createGraphics(game) {
       envFirst();
       fillWarmGroup();
       scene.add(warmGroup);
-      renderer.compile(scene, camera);
+      compileSeen();
       warmDone(performance.now());
     } else if (!sys.warmDone) warmDone(performance.now());
   }

@@ -309,7 +309,7 @@ export function triangulate(ring) {
 }
 
 // Convex hull (x, z pairs), counterclockwise in x, z.
-export function hullOf(pts) {
+function hullOf(pts) {
   const P = [];
   for (let k = 0; k < pts.length; k += 2) P.push([pts[k], pts[k + 1]]);
   P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -378,6 +378,32 @@ function inTri(t, k, x, z) {
   const d2 = (cx - bx) * (z - bz) - (cz - bz) * (x - bx);
   const d3 = (ax - cx) * (z - cz) - (az - cz) * (x - cx);
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+// A fan junction's mouth hull: the convex hull of its arm mouths (each
+// arm's curbs where its strip ends), x, z pairs; made on first use, kept
+// per junction. Inside it the crossing is asphalt: an arm's sidewalk does
+// not run on past its mouth (world/ground.js), and the hull is paved
+// under the arms (render/citymesh.js). `streetsOnly`: of the arms that are
+// not pedestrian streets (where a mall meets a junction, render/citymesh.js
+// paves the ring outside it as the mall).
+const MOUTH_HULLS = new WeakMap(), STREET_HULLS = new WeakMap();
+export function fanMouthHull(city, J, streetsOnly = false) {
+  const M = streetsOnly ? STREET_HULLS : MOUTH_HULLS;
+  let h = M.get(J);
+  if (!h) {
+    const geo = city.roadGeo, pts = [];
+    for (let m = 0; m < J.arms.length; m++) {
+      const q = J.arms[m], e = city.edges[q >> 1], a = city.nodes[e.a], b = city.nodes[e.b];
+      if (streetsOnly && e.ped) continue;
+      const L = e.length, ux = e.ux ?? (b.x - a.x) / L, uz = e.uz ?? (b.z - a.z) / L;
+      const d = q & 1 ? L - geo.trim[q] : geo.trim[q];
+      const C = curbsAt(geo, e, d), l = C.l, r = C.r;
+      pts.push(a.x + ux * d - uz * l, a.z + uz * d + ux * l, a.x + ux * d - uz * r, a.z + uz * d + ux * r);
+    }
+    h = Float64Array.from(pts.length >= 6 ? hullOf(pts) : pts);
+    M.set(J, h);
+  }
+  return h;
 }
 // Is (x, z) on junction J's asphalt (its ring; a fan junction: its
 // triangles)?
@@ -1174,14 +1200,67 @@ export function edgePaint(city, e, out) {
   return clipPaint(city, e, out);
 }
 
-// Paint never lies on a junction's asphalt: a line with a point on one
-// (a neighbor's polygon reaching over the strip) keeps only its pieces off
-// every junction, found in 0.5 m steps.
+// Is (x, z) on edge f's strip (its asphalt between its ends), at least
+// `m` m in from both curbs?
+function onStrip(city, f, x, z, m) {
+  const geo = city.roadGeo, a = city.nodes[f.a];
+  const d = (x - a.x) * f.ux + (z - a.z) * f.uz;
+  if (d < geo.trim[2 * f.id] || d > f.length - geo.trim[2 * f.id + 1]) return false;
+  const s = -(x - a.x) * f.uz + (z - a.z) * f.ux;
+  curbsAt(geo, f, d);
+  return s > CURBS.l + m && s < CURBS.r - m;
+}
+// The strips whose asphalt overlaps edge e's away from any junction (two
+// carriageways of the data drawn over each other: S Miami Ave at SW 6th
+// St) and that keep their paint there: the wider, or of two as wide the
+// lower id. Not e's divided partner, nor an edge sharing a node with it.
+// Made once per edge (city build time), kept per road geometry.
+const NEAR = [], RIVALS = new WeakMap();
+function paintRivals(city, e) {
+  const geo = city.roadGeo;
+  let M = RIVALS.get(geo);
+  if (!M) { M = new Map(); RIVALS.set(geo, M); }
+  let R = M.get(e.id);
+  if (R) return R;
+  R = [];
+  const a = city.nodes[e.a], sA = geo.trim[2 * e.id], sB = e.length - geo.trim[2 * e.id + 1];
+  NEAR.length = 0;
+  if (city.edgesNear && sB - sA > 1) city.edgesNear(a.x + e.ux * e.length / 2, a.z + e.uz * e.length / 2, e.length / 2 + e.width + 30, NEAR);
+  for (let q = 0; q < NEAR.length; q++) {
+    const f = city.edges[NEAR[q]];
+    if (!f || f === e || f.id === e.pair || f.ped || geo.inner[f.id] || f.lanesF === undefined) continue;
+    if (f.a === e.a || f.a === e.b || f.b === e.a || f.b === e.b) continue;
+    if (!(f.width > e.width || (f.width === e.width && f.id < e.id))) continue;
+    let hit = false;
+    for (let d = sA + 0.25; d < sB && !hit; d += 1) {
+      curbsAt(geo, e, d);
+      const l = CURBS.l, r = CURBS.r;
+      for (let t = 0; t <= 6 && !hit; t++) {
+        const o = l + ((r - l) * t) / 6;
+        if (onStrip(city, f, a.x + e.ux * d - e.uz * o, a.z + e.uz * d + e.ux * o, 0.3)) hit = true;
+      }
+    }
+    if (hit) R.push(f);
+  }
+  M.set(e.id, R);
+  return R;
+}
+
+// Paint never lies on a junction's asphalt, nor on the asphalt of a strip
+// that overlaps this one and keeps its own paint there (paintRivals: two
+// sets of lane lines crossed): a line with a point on one keeps only its
+// pieces off them, found in 0.5 m steps.
 const CLIP = [];
 function clipPaint(city, e, out) {
   const geo = city.roadGeo, a = city.nodes[e.a];
-  const on = (d, o) => onJunction(geo, a.x + e.ux * d - e.uz * o, a.z + e.uz * d + e.ux * o);
-  let dirty = false;
+  const R = paintRivals(city, e);
+  const on = (d, o) => {
+    const x = a.x + e.ux * d - e.uz * o, z = a.z + e.uz * d + e.ux * o;
+    if (onJunction(geo, x, z)) return true;
+    for (let r = 0; r < R.length; r++) if (onStrip(city, R[r], x, z, 0)) return true;
+    return false;
+  };
+  let dirty = R.length > 0;
   for (let k = 0; k < out.length && !dirty; k += 6) {
     if (on(out[k], out[k + 1]) || on(out[k + 2], out[k + 3]) || on((out[k] + out[k + 2]) / 2, (out[k + 1] + out[k + 3]) / 2)) dirty = true;
   }

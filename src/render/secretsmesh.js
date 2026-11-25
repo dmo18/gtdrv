@@ -5,6 +5,7 @@
 // whole set is a handful of draw calls. Local frame of each piece: +x is
 // the spot's heading.
 import * as THREE from 'three';
+import { cityPatch } from './citypatch.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { createRng } from '../core/rng.js';
 import { GARAGE_DEPTH, GARAGE_HALF } from '../world/secrets.js';
@@ -12,7 +13,8 @@ import { GARAGE_DEPTH, GARAGE_HALF } from '../world/secrets.js';
 let stdMat = null, glowMat = null;
 function mats() {
   if (!stdMat) {
-    stdMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+    // The city patch, features off: one program with the street solids.
+    stdMat = cityPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }));
     glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   }
   return { std: stdMat, glow: glowMat };
@@ -221,9 +223,13 @@ function buildAlley(spot, M) {
   addPart(g, k, M.std);
   const tex = tagTexture();
   if (tex) {
+    // White vertex colors and the city patch (features off): the street
+    // decals' program.
+    const geo = new THREE.PlaneGeometry(5.6, 2.8);
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
     const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(5.6, 2.8),
-      new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }),
+      geo,
+      cityPatch(new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, transparent: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 })),
     );
     m.position.set(0.04, 2.6, 0);
     m.rotation.y = Math.PI / 2;

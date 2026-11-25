@@ -261,39 +261,35 @@ void main() {
   vD = -mv.z;
   gl_Position = projectionMatrix * mv;
 }`;
+// Lamp and tail-light pools (uHead 0) and the headlight throw (uHead 1):
+// one program, the shape picked per material.
+// Lamp pool: a broad soft pool with a brighter core right under the lamp.
+// Headlight throw on the road: a cone that widens away from the car (quad
+// local -x end), brightest just ahead of the lamps, two soft lobes.
 const POOL_FS = `
 uniform vec3 uColor;
 uniform float uIntensity;
 uniform float uFadeNear;
 uniform float uFadeFar;
+uniform float uHead;
 varying vec3 vC;
 varying vec2 vUv;
 varying float vD;
 void main() {
-  float d2 = dot(vUv, vUv);
-  float r = clamp(1.0 - d2, 0.0, 1.0);
-  // Broad soft pool with a brighter core right under the lamp.
-  float a = (r * r + 1.6 * exp(-d2 * 9.0) * r) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
-  gl_FragColor = vec4(uColor * vC * a, 1.0);
-}`;
-// Headlight throw on the road: a cone that widens away from the car
-// (quad local -x end), brightest just ahead of the lamps, two soft lobes.
-const HEAD_FS = `
-uniform vec3 uColor;
-uniform float uIntensity;
-uniform float uFadeNear;
-uniform float uFadeFar;
-varying vec3 vC;
-varying vec2 vUv;
-varying float vD;
-void main() {
-  float t = vUv.x * 0.5 + 0.5;
-  float w = 0.2 + 0.8 * t;
-  float q = abs(vUv.y) / w;
-  float across = 1.0 - smoothstep(0.55, 1.0, q);
-  float lobes = 0.75 + 0.25 * cos(clamp(q, 0.0, 1.0) * 6.2832);
-  float along = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.35);
-  float a = across * along * mix(1.0, lobes, 1.0 - t) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  float a;
+  if (uHead > 0.5) {
+    float t = vUv.x * 0.5 + 0.5;
+    float w = 0.2 + 0.8 * t;
+    float q = abs(vUv.y) / w;
+    float across = 1.0 - smoothstep(0.55, 1.0, q);
+    float lobes = 0.75 + 0.25 * cos(clamp(q, 0.0, 1.0) * 6.2832);
+    float along = smoothstep(0.0, 0.1, t) * pow(1.0 - t, 1.35);
+    a = across * along * mix(1.0, lobes, 1.0 - t) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  } else {
+    float d2 = dot(vUv, vUv);
+    float r = clamp(1.0 - d2, 0.0, 1.0);
+    a = (r * r + 1.6 * exp(-d2 * 9.0) * r) * uIntensity * (1.0 - smoothstep(uFadeNear, uFadeFar, vD));
+  }
   gl_FragColor = vec4(uColor * vC * a, 1.0);
 }`;
 
@@ -400,16 +396,17 @@ function quadGeometry() {
 // Lights the ground under it: the picture below times (1 + light), so a
 // warm pool takes the color of the asphalt or paving it falls on, and
 // dark ground stays dark instead of turning a flat milky gray.
-function poolMaterial(color, fs = POOL_FS) {
+function poolMaterial(color, head = false) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color().setHex(color, THREE.SRGBColorSpace) },
       uIntensity: { value: 0 },
       uFadeNear: { value: 160 },
       uFadeFar: { value: 420 },
+      uHead: { value: head ? 1 : 0 },
     },
     vertexShader: POOL_VS,
-    fragmentShader: fs,
+    fragmentShader: POOL_FS,
     vertexColors: true,
     transparent: true,
     depthWrite: false,
@@ -638,7 +635,10 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       pg.setIndex(poolIdx);
       pg.computeBoundingSphere();
       const poolMat = poolMaterial(0xffc98a);
-      const pools = new THREE.Mesh(pg, poolMat);
+      // One instance (identity, white): the program of the car pools.
+      const pools = new THREE.InstancedMesh(pg, poolMat, 1);
+      pools.setMatrixAt(0, new THREE.Matrix4());
+      pools.setColorAt(0, new THREE.Color(1, 1, 1));
       pools.name = 'lamp-pools';
       pools.visible = false;
       pools.renderOrder = 1;
@@ -693,7 +693,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     // Headlight pools: instanced quads in front of lit vehicles.
     const hq = quadGeometry();
     hq.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
-    const headMat = poolMaterial(0xfff0d8, HEAD_FS);
+    const headMat = poolMaterial(0xfff0d8, true);
     headMat.uniforms.uFadeNear.value = 80;
     headMat.uniforms.uFadeFar.value = 200;
     const NH = MAX_CARS + 1;

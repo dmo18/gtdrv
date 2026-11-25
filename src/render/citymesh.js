@@ -11,7 +11,7 @@ import { addProps } from './props.js';
 import { fillCollision } from '../world/collision.js';
 import { DRAWN_T, FAR_LOT_COL } from './lotmesh.js';
 import { CURB_H, MEDIAN_PLANT } from '../world/roadprofile.js';
-import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt, pairGap, MEDIAN_GAP, curbsAt, supAt, onJunction, inJunctionArea } from '../world/junctions.js';
+import { buildRoadGeo, edgeStations, edgePaint, edgePoint, walkOf, walkLeftOf, medianBand, medianAt, pairGap, MEDIAN_GAP, curbsAt, supAt, onJunction, inJunctionArea, fanMouthHull, pointInRing } from '../world/junctions.js';
 import { groundFn, groundOf, FILL_STEP } from '../world/ground.js';
 
 // Vertex tints. Textures are painted pale, so these set the real tone.
@@ -888,6 +888,31 @@ function cornerTri(wb, G, J, ax, az, bx, bz, cx, cz, depth) {
   cornerTri(wb, G, J, abx, abz, bcx, bcz, cax, caz, depth + 1);
 }
 
+// A junction where a pedestrian street meets two or more streets.
+function mallJunction(city, J) {
+  let ped = 0, streets = 0;
+  for (let m = 0; m < J.arms.length; m++) { if (city.edges[J.arms[m] >> 1].ped) ped++; else streets++; }
+  return ped > 0 && streets >= 2;
+}
+// One triangle of such a junction's ring: asphalt inside the hull of its
+// streets' mouths, the mall's flush paving outside; a triangle across the
+// hull's edge cut in four, five cuts at most.
+function mallTri(B, J, hull, ax, az, bx, bz, cx, cz, depth) {
+  const ia = pointInRing(hull, ax, az), ib = pointInRing(hull, bx, bz), ic = pointInRing(hull, cx, cz);
+  const im = pointInRing(hull, (ax + bx + cx) / 3, (az + bz + cz) / 3);
+  if ((ia === ib && ib === ic && ic === im) || depth >= 5) {
+    TRI6[0] = ax; TRI6[1] = az; TRI6[2] = bx; TRI6[3] = bz; TRI6[4] = cx; TRI6[5] = cz;
+    if (im) flatTris(B.asphalt.at(J.x, J.z), TRI6, -0.004, COL.junction);
+    else flatTris(B.sidewalk.at(J.x, J.z), TRI6, 0.005, COL.plaza);
+    return;
+  }
+  const abx = (ax + bx) / 2, abz = (az + bz) / 2, bcx = (bx + cx) / 2, bcz = (bz + cz) / 2, cax = (cx + ax) / 2, caz = (cz + az) / 2;
+  mallTri(B, J, hull, ax, az, abx, abz, cax, caz, depth + 1);
+  mallTri(B, J, hull, abx, abz, bx, bz, bcx, bcz, depth + 1);
+  mallTri(B, J, hull, cax, caz, bcx, bcz, cx, cz, depth + 1);
+  mallTri(B, J, hull, abx, abz, bcx, bcz, cax, caz, depth + 1);
+}
+
 // Is the side (0 right, 1 left) of edge end q bare just outside its
 // junction: no sidewalk there (kept clear by a gore or a median nose, or
 // asphalt up to a facing strip)?
@@ -917,7 +942,13 @@ export function realRoads(city, B, nodes, edges, own = null) {
   for (const n of nodes) {
     const J = geo.junctions[geo.nodeJ[n.id]];
     if (!J || J.lead !== n.id || (own && !own(n.x, n.z))) continue;
-    flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
+    // (Where a pedestrian street meets two or more streets, the ring past
+    // the streets' mouths is the mall's paving, not asphalt: no wedge of
+    // road out to the mall's end, Lincoln Road.)
+    if (!J.fan && mallJunction(city, J)) {
+      const hull = fanMouthHull(city, J, true), t = J.tris;
+      for (let k = 0; k + 5 < t.length; k += 6) mallTri(B, J, hull, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0);
+    } else flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
     // Fork and merge gores: asphalt with white edge lines and chevrons.
     for (const G of J.gores) {
       flatTris(B.asphalt.at(J.x, J.z), G.tris, -0.004, COL.junction);
@@ -929,6 +960,10 @@ export function realRoads(city, B, nodes, edges, own = null) {
         orientedQuad(lb, P[k] + nx, P[k + 1] + nz, P[k + 2] + nx, P[k + 3] + nz, P[k + 2] - nx, P[k + 3] - nz, P[k] - nx, P[k + 1] - nz, 0.015, COL.line);
       }
     }
+    // A fan junction: its mouth hull paved under the arms, so no lot or
+    // land shows in the crossing where an arm's sidewalk no longer runs
+    // on past its mouth (world/junctions.js fanMouthHull).
+    if (J.fan) flatPoly(B.asphalt.at(J.x, J.z), fanMouthHull(city, J), -0.007, COL.junction);
     const wb = B.sidewalk.at(J.x, J.z);
     const GJ = groundOf(city);
     for (const c of J.corners) {

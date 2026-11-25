@@ -33,6 +33,7 @@ import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
 import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, netRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { groundFn } from '../world/ground.js';
+import { cityPatch, patchCityMaterials } from './citypatch.js';
 import { lotGround, lotFringe, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
 import { dressLot, lotDressCache } from '../world/lots.js';
 
@@ -298,46 +299,9 @@ function treeMaterial(detail) {
 function makeFarMaterial() {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, emissive: 0xffd2a0, emissiveIntensity: 0 });
   mat.name = 'far';
-  mat.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>
-attribute float aWin;
-varying vec3 vRwW;
-varying vec3 vRwN;
-varying float vRwWin;`)
-      .replace('#include <project_vertex>', `#include <project_vertex>
-	vRwW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
-	vRwN = normal;
-	vRwWin = aWin;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>
-varying vec3 vRwW;
-varying vec3 vRwN;
-varying float vRwWin;`)
-      .replace('#include <color_fragment>', `#include <color_fragment>
-	float rwWin = 0.0, rwLit = 0.0;
-	if ( vRwWin > 0.5 && abs( vRwN.y ) < 0.5 ) {
-		float rwAlong = abs( vRwN.x ) > 0.5 ? vRwW.z : vRwW.x;
-		bool rwSmall = vRwWin > 1.5;
-		vec2 rwC = rwSmall ? vec2( rwAlong / 4.0, ( vRwW.y - 0.2 ) / 3.0 ) : vec2( rwAlong / 3.1, ( vRwW.y - 0.8 ) / 3.4 );
-		vec2 rwF = fract( rwC );
-		rwWin = rwSmall
-			? step( 0.3, rwF.x ) * step( rwF.x, 0.7 ) * step( 0.32, rwF.y ) * step( rwF.y, 0.78 )
-			: step( 0.18, rwF.x ) * step( rwF.x, 0.82 ) * step( 0.28, rwF.y ) * step( rwF.y, 0.86 ) * step( 1.0, rwC.y );
-		float rwH = fract( sin( dot( floor( rwC ) + floor( vRwW.xz * 0.05 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
-		// Far off the pattern turns into its average (no shimmer).
-		float rwFade = smoothstep( 450.0, 1100.0, length( vRwW - cameraPosition ) );
-		rwLit = mix( rwWin * step( rwSmall ? 0.7 : 0.6, rwH ), 0.16, rwFade );
-		rwWin = mix( rwWin, rwSmall ? 0.2 : 0.45, rwFade );
-		// A darker shop or lobby band at street level.
-		if ( !rwSmall ) diffuseColor.rgb *= mix( 0.78, 1.0, step( 4.0, vRwW.y ) );
-	}
-	diffuseColor.rgb *= 1.0 - 0.3 * rwWin;`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-	totalEmissiveRadiance *= rwLit;`);
-  };
-  mat.customProgramCacheKey = () => 'rw-far';
-  return mat;
+  // The windows are the city patch's far feature (one program with the
+  // plain street solids).
+  return cityPatch(mat, { far: true });
 }
 
 // Grows typed arrays for one far block. Packed to keep memory down
@@ -554,6 +518,8 @@ export function buildRealCity(city, collision, opts = {}) {
   // Sand and dirt lots sit over the land: no push back (sandMat has one).
   M.lotSandMat = M.sandMat.clone();
   M.lotSandMat.polygonOffset = false;
+  // One program for the lit surfaces that share their maps (citypatch.js).
+  patchCityMaterials(M);
   const DR = T.decals.rects, R = T.details.rects;
   const timings = {};
   let tm = tStart;

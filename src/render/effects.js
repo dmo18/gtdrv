@@ -168,26 +168,21 @@ void main() {
   vCol = vec4(iCol, iData.y);
 }
 `;
-const FRAG_ALPHA = /* glsl */`
+// One program for both pools (uAdd per material). Smoke and dust: a
+// texel too faint to show writes nothing (alpha 0 over normal blending
+// leaves the pixel as it was, as a discard did). Additive glow: color
+// times alpha added.
+const FRAG_POOL = /* glsl */`
 uniform sampler2D map;
 uniform float uLight;
+uniform float uAdd;
 varying vec2 vUv;
 varying vec4 vCol;
 void main() {
   vec4 t = texture2D(map, vUv);
   float a = t.a * vCol.a;
-  if (a < 0.004) discard;
-  gl_FragColor = vec4(vCol.rgb * uLight, a);
-}
-`;
-const FRAG_ADD = /* glsl */`
-uniform sampler2D map;
-varying vec2 vUv;
-varying vec4 vCol;
-void main() {
-  vec4 t = texture2D(map, vUv);
-  float a = t.a * vCol.a;
-  gl_FragColor = vec4(vCol.rgb * a, 1.0);
+  if (uAdd > 0.5) gl_FragColor = vec4(vCol.rgb * a, 1.0);
+  else gl_FragColor = a < 0.004 ? vec4(0.0) : vec4(vCol.rgb * uLight, a);
 }
 `;
 
@@ -207,9 +202,9 @@ export function createPool(max, additive, atlas, scene) {
   geo.setAttribute('iVel', iVel);
   geo.instanceCount = 0;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: atlas }, uLight: { value: 1 } },
+    uniforms: { map: { value: atlas }, uLight: { value: 1 }, uAdd: { value: additive ? 1 : 0 } },
     vertexShader: VERT,
-    fragmentShader: additive ? FRAG_ADD : FRAG_ALPHA,
+    fragmentShader: FRAG_POOL,
     transparent: true,
     depthWrite: false,
     blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
@@ -412,8 +407,10 @@ function createSkids(scene) {
   return { mesh, geo, pos, birth, edge, head: 0, lo: N, hi: -1, mat, used: 0, attrs: [at.position, at.aBirth, at.aEdge], sizes: [12, 4, 8] };
 }
 
-// ---- contact shadows --------------------------------------------------------------
-const SH_VERT = /* glsl */`
+// ---- contact shadows ----------------------------------------------------------------
+// Instanced ground quads; the blast scorch decals (combatfx.js) use the
+// same program, uDecal switching the fragment part.
+export const GROUND_VERT = /* glsl */`
 attribute float iOp;
 varying vec2 vUv;
 varying float vOp;
@@ -423,14 +420,27 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
 }
 `;
-const SH_FRAG = /* glsl */`
+export const GROUND_FRAG = /* glsl */`
 uniform sampler2D map;
+uniform float uDecal;
 varying vec2 vUv;
 varying float vOp;
 void main() {
-  float a = texture2D(map, vUv).r * vOp;
-  if (a < 0.004) discard;
-  gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  if (uDecal > 0.5) {
+    // Scorch: a dark ragged disc.
+    vec2 p = vUv - 0.5;
+    float r = length(p) * 2.0;
+    float a = atan(p.y, p.x);
+    float rim = 0.78 + 0.22 * sin(a * 7.0 + vOp * 40.0) * sin(a * 3.0 - vOp * 17.0);
+    float k = smoothstep(rim, rim * 0.35, r);
+    float al = k * min(1.0, vOp) * 0.85;
+    if (al < 0.01) discard;
+    gl_FragColor = vec4(0.03, 0.028, 0.025, al);
+  } else {
+    float a = texture2D(map, vUv).r * vOp;
+    if (a < 0.004) discard;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  }
 }
 `;
 
@@ -546,9 +556,9 @@ export function createEffects(game) {
   shOp.setUsage(THREE.DynamicDrawUsage);
   shGeo.setAttribute('iOp', shOp);
   const shMat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: shTex } },
-    vertexShader: SH_VERT,
-    fragmentShader: SH_FRAG,
+    uniforms: { map: { value: shTex }, uDecal: { value: 0 } },
+    vertexShader: GROUND_VERT,
+    fragmentShader: GROUND_FRAG,
     transparent: true,
     depthWrite: false,
     polygonOffset: true,

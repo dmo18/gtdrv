@@ -7,6 +7,7 @@
 // Call patchWindows(materials, atlas) once, before the first draw; then
 // set the returned uniforms each frame (night level and game time).
 import * as THREE from 'three';
+import { CITY_U, CARS as CITY_CARS, cityExtra, cityFeature, cityHas, cityPatched } from './citypatch.js';
 
 // Per style: x = how many windows are lit (scale), y = 1 for offices
 // (whole floors lit together, mostly cool light), 0 for homes and
@@ -81,9 +82,7 @@ export function patchWindows(mats, atlas) {
     if (!m || !m.emissiveMap || m.userData.rwWindows) continue;
     m.userData.rwWindows = true;
     const style = { value: new THREE.Vector3().fromArray(STYLE[name]) };
-    const prev = m.onBeforeCompile;
-    m.onBeforeCompile = (shader, renderer) => {
-      if (prev) prev.call(m, shader, renderer);
+    const win = (shader) => {
       shader.uniforms.uWinAtlas = shared.uWinAtlas;
       shader.uniforms.uWinNight = shared.uWinNight;
       shader.uniforms.uWinTime = shared.uWinTime;
@@ -92,9 +91,19 @@ export function patchWindows(mats, atlas) {
         .replace('#include <common>', '#include <common>\nuniform sampler2D uWinAtlas;\nuniform float uWinNight;\nuniform float uWinTime;\nuniform vec3 uWinStyle;' + HASH)
         .replace('#include <emissivemap_fragment>', WINDOW_FRAG);
     };
-    // Its own program (the plain facades share 'rw-facade').
-    m.customProgramCacheKey = () => 'rw-facade-win';
-    m.needsUpdate = true;
+    if (cityHas(m, 'facade')) {
+      // On top of the city patch (citypatch.js): one program for all five.
+      cityExtra(m, 'win', win);
+    } else {
+      const prev = m.onBeforeCompile;
+      m.onBeforeCompile = (shader, renderer) => {
+        if (prev) prev.call(m, shader, renderer);
+        win(shader);
+      };
+      // Its own program (the plain facades share 'rw-facade').
+      m.customProgramCacheKey = () => 'rw-facade-win';
+      m.needsUpdate = true;
+    }
     done.push(m);
   }
   return { uniforms: shared, materials: done };
@@ -198,7 +207,7 @@ const LAMP_FRAG = `
 }`;
 
 // Cars whose lamps light the ground (the player's and the nearest).
-export const CARS = 6;
+export const CARS = CITY_CARS;
 
 // Police searchlight pool: the first lit beam among the craft (aircraft
 // meshes keep their world cone in userData.spotW). `day` 0..1 dims it in
@@ -222,25 +231,25 @@ export function setSpotLight(U, crafts, day, tan) {
 // searchlight uSpotA / uSpotB (setSpotLight), and per car uCarA = (x, z,
 // cos heading, sin heading), uCarB = (headlight, tail glow, half length,
 // 0) for the first uCarN entries.
+const LAMP_KEYS = ['uLampMap', 'uLampBox', 'uLampK', 'uCarN', 'uCarA', 'uCarB', 'uSpotA', 'uSpotB'];
 export function patchLampLight(mats, baked) {
-  const U = {
-    uLampMap: { value: baked.texture },
-    uLampBox: { value: baked.box },
-    uLampK: { value: 0 },
-    uCarN: { value: 0 },
-    uCarA: { value: Array.from({ length: CARS }, () => new THREE.Vector4()) },
-    uCarB: { value: Array.from({ length: CARS }, () => new THREE.Vector4()) },
-    uSpotA: { value: new THREE.Vector4() },
-    uSpotB: { value: new THREE.Vector4(0, -1, 0, 0.06) },
-  };
+  // The uniforms are the city patch's (citypatch.js): its materials only
+  // switch the lamp feature on; any other material gets the old patch.
+  const U = CITY_U;
+  U.uLampMap.value = baked.texture;
+  U.uLampBox.value.copy(baked.box);
   for (const m of mats) {
     if (!m || m.userData.rwLamp) continue;
+    if (cityPatched(m)) {
+      cityFeature(m, 'lamp');
+      continue;
+    }
     m.userData.rwLamp = true;
     const prev = m.onBeforeCompile;
     const prevKey = m.customProgramCacheKey.call(m);
     m.onBeforeCompile = (shader, renderer) => {
       if (prev) prev.call(m, shader, renderer);
-      Object.assign(shader.uniforms, U);
+      for (let i = 0; i < LAMP_KEYS.length; i++) shader.uniforms[LAMP_KEYS[i]] = U[LAMP_KEYS[i]];
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vRwLampW;')
         .replace('#include <project_vertex>', '#include <project_vertex>\n\tvRwLampW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');

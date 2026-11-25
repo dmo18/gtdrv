@@ -7,6 +7,40 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.13.1 car noses (task 15, 2026-11-25)
+- Reviewed all 18 fleet bodies front, side and three-quarter at L0, L1 and L2 (`node scripts/vehicle-shots.mjs --fleet`,
+  `dist/fleet/`). L0 was fine; the fixes are at L1 and L2, all in `src/render/carbody.js`, no new draws.
+- L2 shell: straight sill (`sh.sill`, the sill without arch cut-outs) instead of `sh.bottom` at its 8 stations, which
+  tilted whole panels up into wedges over the wheels (wheels hanging under a raised sill); the dark wheel arcs are 5 cm
+  wider so the arch reads round the tire.
+- L2 face: lamp, grille and tail quads follow the nose's and tail's lean (they floated ahead of rounded noses) and stop
+  at 0.93 of the cap width (they stuck out past its corners); one dark band behind lamps and grille (lamps read on white
+  paint); the grille spans to the lamps (wide US face) in a chrome or dark frame. Triangles unchanged (cars 288, taxi 300).
+- L1 head lamps: the lens sits 2 cm out and stops at 0.93 of the width (the coarser one-draw body buried its edges:
+  spiky bow-tie lamps on the trucks), as a dark rim round a lit core like the near lamp's smoked housing (white lamps
+  vanished on white paint). L1 +8 triangles a car (taxi 1,396 of 1,400).
+
+## 0.13.1 streets (task 11, 2026-11-25)
+- Lot to lot steps (STREETSCAPE 4d): `render/lotmesh.js lotCut`. A lot cell on a stair between two drawn grounds (two
+  perpendicular sides on one other ground, the other two not, the stair going on along the cut) is drawn split on its
+  diagonal, the corner half in the other ground; of a stair's two candidate cells only the one of the lower look rank is split,
+  so 1-cell staircases become one straight line and square lot corners stay square. Lawn edging and carpark curbs follow the
+  cut (`cutStrip`). Five regions: 1641 (South) to 8506 (Downtown) cells cut; lot ground in a 600 m square +98 tris (Downtown).
+- Fan junctions (fan1, S 1st Ave at SE 4th St): `world/junctions.js fanMouthHull` (convex hull of the arm mouths). In
+  `world/ground.js` an arm's sidewalk or median band no longer runs on past its mouth inside that hull (the slip lane's left
+  sidewalk crossed the other arms, raised in physics); `render/citymesh.js` paves the hull under the arms (-0.007).
+- Crossing lane paint (S Miami Ave at SW 6th St): `clipPaint` also drops paint lying on a strip that overlaps this one away
+  from junctions and outranks it (wider, else lower id; not the divided partner, no shared node; `paintRivals`, once per edge).
+  Paint points on another painted carriageway: Downtown 425 to 0, Beach 43 to 0.
+- Lincoln Road wedge: where a pedestrian street meets two or more streets, the junction ring outside the hull of the
+  streets' mouths is drawn as the mall's flush paving (`mallTri`), not asphalt; the ring and physics are unchanged (both flat).
+- Hedges and plain paving round towers: not done (skipped by the task).
+- Fingerprints in test/regions.test.js: not repinned (no change to nodes, edges, buildings, lots or lot grid).
+- Tests: test/lotsteps.test.js (staircase drawn within 0.3 m of its diagonal, edging on the cut, square corners kept, every
+  clean stair cut in five regions); test/streetscape.test.js (fan1 crossing flat and paved, no paint on another painted
+  carriageway in Downtown and Beach, Lincoln Road rings: asphalt only inside the streets' hull, paving outside);
+  test/lotmesh.test.js reads lone triangles as well as quads.
+
 ## 0.13.0 accessibility (task 16)
 - Four settings on one new screen, Settings, "Access" button in the head (every Settings group already holds 6 rows, so no row
   was added anywhere; the four-group and 6-row menu-test checks are unchanged). Rows: HUD text size (Normal/Large),

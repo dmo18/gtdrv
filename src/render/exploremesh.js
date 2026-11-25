@@ -5,6 +5,7 @@
 // pieces, so it is a handful of draw calls. Local frame of a garage: the
 // group sits on the door line and +x is the way the door faces.
 import * as THREE from 'three';
+import { cityPatch } from './citypatch.js';
 import { MeshBuilder } from './meshbuilder.js';
 import { createPersonMesh, updatePersonMesh, PERSON_PALETTES } from './personmesh.js';
 import { SHED_W, SHED_D, SHED_H } from '../world/garages.js';
@@ -14,7 +15,8 @@ import { specOf } from '../core/garage.js';
 let stdMat = null, glowMat = null;
 function mats() {
   if (!stdMat) {
-    stdMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 });
+    // The city patch, features off: one program with the street solids.
+    stdMat = cityPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05 }));
     glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   }
   return { std: stdMat, glow: glowMat };

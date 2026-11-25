@@ -80,6 +80,10 @@ function createLotCarView(game, field) {
     }
     const m = new THREE.InstancedMesh(g, mat, MAXC);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // The color per instance from the start (setColorAt would add it at
+    // the first car): the warm-up then compiles the program play uses,
+    // not one without instance colors that is never drawn.
+    m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXC * 3).fill(1), 3);
     m.count = 0;
     m.frustumCulled = false;
     m.castShadow = true;

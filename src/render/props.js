@@ -1088,7 +1088,9 @@ export function createEdgeLineView(game) {
   if (!scene || !layer || typeof document === 'undefined') return null;
   const geo = new THREE.BoxGeometry(1, 1, 1);
   geo.translate(0, 0.5, 0);
-  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), EDGE_VIEW_MAX);
+  // White vertex colors: one program with the blast debris (combatfx.js).
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), EDGE_VIEW_MAX);
   mesh.name = 'edge-walls';
   mesh.frustumCulled = false;
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);

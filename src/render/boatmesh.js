@@ -399,7 +399,7 @@ function sprayGeometry(sp) {
         pos.push(p[0], p[1], p[2]);
         const t = i / (n - 1);
         const c = (j === 0 ? c0 : c1) * 0.32 * Math.sin(Math.PI * Math.min(1, t * 1.15)) * (1 - t * 0.6);
-        col.push(c * 0.95, c, c);
+        col.push(c * 0.95, c, c, 1);
       }
     }
     for (let i = 0; i < n - 1; i++) idx.push(base + i * 2, base + i * 2 + 1, base + i * 2 + 2, base + i * 2 + 1, base + i * 2 + 3, base + i * 2 + 2);
@@ -446,7 +446,10 @@ function sprayGeometry(sp) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  // Opaque alpha and (unused) normals: the same program as the marker
+  // glows (markers.js), alpha 1 and an unlit material change nothing.
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(pos.length), 3));
   g.setIndex(idx);
   g.computeBoundingSphere();
   return g;

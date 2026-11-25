@@ -46,7 +46,7 @@ sidewalk.
 | 4a | Lawns and yards everywhere | Planting beds drawn as smooth green tubes | `render/lotmesh.js softStrip` drew a bed as one extruded profile | Beds are rows of faceted shrub mounds (15 triangles each, two sizes, one every 2.6 m, flowers on some); single shrubs use the same mound (was a 48-triangle blob); rows (hedge, fence, wall, bed) turn to the street grid of the block (`world/lots.js gridSkew`) | Fixed for beds. Clipped hedges stay soft strips (test "hedges, beds and shrubs are low soft forms" keeps them; a box hedge was tried and fails it); long ones along parking lots still read heavy |
 | 4b | Forecourts (plaza lots), Downtown and North | The same 9 m lattice of tree, bed, bed, seat wall in every forecourt, on the raster axes | `dressLot` plaza: `gridPts(9, ...)` with a fixed modular pattern | A pitch of 8 to 11 m per lot, points nudged up to 1.1 m, one in five left open, the kind drawn per point from the lot's seed; seat walls turned to the street grid where both ends stay on the lot | Fixed (North `fc`) |
 | 4c | Lawns beside every street | Lawns ended in 5 m stair steps with a band of pale paving before the sidewalk | Lots stop 4 m back from every curb on the 5 m raster; the band was plain land | `world/lots.js spreadGround` (`lotGrid.ground`): lot grounds spread two cells into land in no lot, so the lawn runs under the sidewalk and ends on its straight edge (`lotmesh.js lotFringe`). Lot ground and fringe quads now merge down z as well as along x (`groundRuns`), in 15-row bands: fewer triangles than before the fringe | Fixed |
-| 4d | Lot to lot boundaries | A paved forecourt meets a lawn in 5 m steps | The lot raster itself | None: needs lot outlines as polygons | Open |
+| 4d | Lot to lot boundaries | A paved forecourt meets a lawn in 5 m steps | The lot raster itself | `render/lotmesh.js lotCut` (0.13.1): a cell on a stair between two grounds is split on its diagonal, edging along the cut | Fixed for 1-cell stairs; steeper steps keep a chamfer |
 
 Also from the parked work, checked in the shots and kept: a planted median
 runs on through a T that nothing crosses (`roadGeo.mthru`); where a street
@@ -73,13 +73,14 @@ the event layer, not city materials.
 
 ## Not done
 
-- Lot to lot steps (4d) and large plain paving round towers downtown.
+- Large plain paving round towers downtown.
 - Hedges as described in 4a.
 - Fan junctions are still wide asphalt where the data's arms cross; the
-  list is `roadGeo.junctions.filter((j) => j.fan)`.
-- Lane paint of two overlapping carriageways still crosses (S Miami Ave
-  at SW 6th St): the paint is per strip and does not know the other.
-- Lincoln Road junction ring keeps a diagonal wedge toward the mall.
+  list is `roadGeo.junctions.filter((j) => j.fan)`. (0.13.1: an arm's
+  sidewalk stops at its mouth inside the mouth hull, which is paved.)
+- 0.13.1 fixed: lot to lot 1-cell steps (4d), crossing lane paint of two
+  overlapping carriageways (`paintRivals`), the Lincoln Road wedge (the
+  ring past the streets' mouths drawn as mall paving). See docs/STATUS.md.
 
 ## Data added
 

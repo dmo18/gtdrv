@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { regionCity, REGION_IDS } from './regionfixture.js';
 import { groundOf, CURB_H } from '../src/world/ground.js';
 import { createEdgeLayer } from '../src/world/edgelines.js';
-import { pairGap, curbsAt, inJunctionArea, MEDIAN_GAP } from '../src/world/junctions.js';
+import { pairGap, curbsAt, inJunctionArea, MEDIAN_GAP, fanMouthHull, pointInRing, ringDist, edgePaint } from '../src/world/junctions.js';
 import { ChunkedBuilder } from '../src/render/meshbuilder.js';
 import { realRoads, netRoads } from '../src/render/citymesh.js';
 
@@ -121,4 +121,95 @@ test('no raised sidewalk drawn on road: S Miami Ave at SW 6th St and a fan junct
     const raised = heightsAt(B, ['sidewalk', 'grass'], x, z).filter((y) => y > 0.1);
     assert.equal(raised.length, 0, `raised sidewalk on the road at ${x}, ${z}`);
   }
+});
+
+// 0.13.1 (docs/PLAN_V4.md task 11): fan sidewalk, crossing paint, Lincoln Road.
+
+test('fan junction: an arm\'s sidewalk stops at its mouth, the crossing paved (fan1, S 1st Ave at SE 4th St)', () => {
+  const city = regionCity('miami-downtown'), G = groundOf(city), geo = city.roadGeo;
+  const J = geo.junctions.filter((j) => j.fan).sort((a, b) => Math.hypot(a.x + 1187, a.z - 953) - Math.hypot(b.x + 1187, b.z - 953))[0];
+  const hull = fanMouthHull(city, J);
+  assert.ok(hull.length >= 6);
+  const B = builders();
+  const near = [];
+  city.edgesNear(J.x, J.z, 80, near);
+  realRoads(city, B, city.nodes.filter((n) => Math.hypot(n.x - J.x, n.z - J.z) < 80), near.map((k) => city.edges[k]));
+  // The slip lane's left sidewalk ran on past its mouth across the
+  // crossing (raised there in physics).
+  for (const [x, z] of [[-1180, 942.4], [-1179, 943.4]]) {
+    assert.equal(G.groundAt(x, z), 0, `flat at ${x}, ${z}`);
+    assert.ok(heightsAt(B, ['asphalt'], x, z).length > 0, `asphalt drawn at ${x}, ${z}`);
+    assert.equal(heightsAt(B, ['sidewalk', 'grass'], x, z).filter((y) => y > 0.1).length, 0, `nothing raised drawn at ${x}, ${z}`);
+  }
+  // No point of the mouth hull is left without asphalt or a raised side.
+  let bare = 0, n = 0;
+  for (let z = J.z0; z <= J.z1; z += 1) {
+    for (let x = J.x0; x <= J.x1; x += 1) {
+      if (!pointInRing(hull, x, z)) continue;
+      n++;
+      if (!heightsAt(B, ['asphalt', 'sidewalk', 'grass'], x, z).length) bare++;
+    }
+  }
+  assert.ok(n > 100 && bare === 0, `${bare} of ${n} points bare`);
+});
+
+test('two overlapping carriageways: only one paints its lane lines there (S Miami Ave at SW 6th St)', () => {
+  const P = [], near = [];
+  for (const id of ['miami-downtown', 'miami-beach']) {
+    const city = regionCity(id), geo = city.roadGeo;
+    let points = 0, crossed = 0;
+    for (const e of city.edges) {
+      edgePaint(city, e, P);
+      const a = city.nodes[e.a];
+      for (let k = 0; k + 5 < P.length; k += 6) {
+        if (P[k] === P[k + 2]) continue; // across: crosswalks, stop bars
+        const n = Math.ceil(Math.hypot(P[k + 2] - P[k], P[k + 3] - P[k + 1]) / 2);
+        for (let m = 0; m <= n; m++) {
+          const d = P[k] + ((P[k + 2] - P[k]) * m) / n, o = P[k + 1] + ((P[k + 3] - P[k + 1]) * m) / n;
+          const x = a.x + e.ux * d - e.uz * o, z = a.z + e.uz * d + e.ux * o;
+          points++;
+          near.length = 0;
+          city.edgesNear(x, z, 20, near);
+          for (const q of near) {
+            const f = city.edges[q];
+            if (f === e || f.id === e.pair || geo.inner[f.id] || f.ped || f.lanesF === undefined) continue;
+            if (f.a === e.a || f.a === e.b || f.b === e.a || f.b === e.b) continue;
+            if (!(f.width > e.width || (f.width === e.width && f.id < e.id))) continue;
+            const fa = city.nodes[f.a], fd = (x - fa.x) * f.ux + (z - fa.z) * f.uz;
+            if (fd < geo.trim[2 * f.id] || fd > f.length - geo.trim[2 * f.id + 1]) continue;
+            const s = -(x - fa.x) * f.uz + (z - fa.z) * f.ux, C = curbsAt(geo, f, fd);
+            if (s > C.l + 0.3 && s < C.r - 0.3) crossed++;
+          }
+        }
+      }
+    }
+    assert.ok(points > 10000, `${id} paint points ${points}`);
+    // (Were 425 points in Downtown, 43 in Beach.)
+    assert.equal(crossed, 0, `${id}: paint on another painted carriageway`);
+  }
+});
+
+test('Lincoln Road: no asphalt wedge out to the mall, the ring past the streets paved as the mall', () => {
+  const city = regionCity('miami-beach'), geo = city.roadGeo;
+  let checked = 0, paved = 0;
+  for (const J of geo.junctions) {
+    const arms = [...J.arms];
+    if (J.fan || !arms.some((q) => /^Lincoln Road/.test(city.edges[q >> 1].name || '') && city.edges[q >> 1].ped)) continue;
+    if (arms.filter((q) => !city.edges[q >> 1].ped).length < 2) continue;
+    const hull = fanMouthHull(city, J, true);
+    const B = builders();
+    realRoads(city, B, [city.nodes[J.lead]], []);
+    for (let z = J.z0; z <= J.z1; z += 0.5) {
+      for (let x = J.x0; x <= J.x1; x += 0.5) {
+        if (!inJunctionArea(J, x, z) || ringDist(J.ring, x, z) < 0.3) continue;
+        const inside = pointInRing(hull, x, z), d = ringDist(hull, x, z);
+        if (d < 0.6) continue; // (the hull's edge: cut in 1.5 m triangles)
+        const asphalt = heightsAt(B, ['asphalt'], x, z).length > 0, paving = heightsAt(B, ['sidewalk'], x, z).length > 0;
+        assert.equal(asphalt, inside, `junction ${J.id} at ${x}, ${z}: asphalt ${asphalt}`);
+        if (!inside) { assert.ok(paving, `junction ${J.id} at ${x}, ${z}: paved`); paved++; }
+      }
+    }
+    checked++;
+  }
+  assert.ok(checked >= 10 && paved > 50, `Lincoln Road junctions ${checked}, paved points ${paved}`);
 });

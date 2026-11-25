@@ -13,7 +13,7 @@
 // `scene` is missing (node tests).
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
-import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt } from './effects.js';
+import { makeAtlas, createPool, emitP, tintP, stepPool, writePool, nightAt, GROUND_VERT, GROUND_FRAG } from './effects.js';
 import { PARTS_MAX, PART, createParts, addPart, launchCarParts, stepParts, partScale, liveParts } from './carparts.js';
 import { BLAST, ROLL_V, ROLL_S0, ROLL_S1, blastScale, fireRadius, shakeAt, dustTone } from './blastplan.js';
 import { createEdgeLineView } from './props.js';
@@ -43,31 +43,6 @@ const NEAR = 170; // meters from the camera where small effects are made
 
 // Atlas cells: 0 puff, 1 ring, 2 streak, 3 glow. +4 flat on the ground, +8 stretched.
 const PUFF = 0, RING = 1, STREAK = 2, GLOW = 3;
-
-const DECAL_VERT = /* glsl */`
-attribute float iOp;
-varying vec2 vUv;
-varying float vOp;
-void main() {
-  vUv = uv;
-  vOp = iOp;
-  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
-}
-`;
-const DECAL_FRAG = /* glsl */`
-varying vec2 vUv;
-varying float vOp;
-void main() {
-  vec2 p = vUv - 0.5;
-  float r = length(p) * 2.0;
-  float a = atan(p.y, p.x);
-  float rim = 0.78 + 0.22 * sin(a * 7.0 + vOp * 40.0) * sin(a * 3.0 - vOp * 17.0);
-  float k = smoothstep(rim, rim * 0.35, r);
-  float al = k * min(1.0, vOp) * 0.85;
-  if (al < 0.01) discard;
-  gl_FragColor = vec4(0.03, 0.028, 0.025, al);
-}
-`;
 
 const BLOOD_VERT = /* glsl */`
 attribute float iOp;
@@ -132,6 +107,11 @@ function mergeShaded(pieces) {
 }
 // A door lying flat (thin on y): the lower panel in the paint, the window
 // frame dark, a handle.
+function whiteColors(geo) {
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
+  return geo;
+}
+
 function doorGeometry() {
   const lower = new THREE.BoxGeometry(1, 1, 0.58).translate(0, 0, 0.21);
   const pillarA = new THREE.BoxGeometry(0.1, 0.9, 0.42).translate(-0.45, 0, -0.29);
@@ -180,9 +160,11 @@ export function createCombatFx(game) {
     decalOp = new THREE.InstancedBufferAttribute(new Float32Array(DECALS), 1);
     decalOp.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('iOp', decalOp);
+    // The contact shadows' program (effects.js), its scorch part on.
     const mat = new THREE.ShaderMaterial({
-      vertexShader: DECAL_VERT,
-      fragmentShader: DECAL_FRAG,
+      uniforms: { map: { value: null }, uDecal: { value: 1 } },
+      vertexShader: GROUND_VERT,
+      fragmentShader: GROUND_FRAG,
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
@@ -228,7 +210,10 @@ export function createCombatFx(game) {
     // Parts: boxes (plain color), doors (a window band) and wheels (a dark
     // tire round a light hub), the last two shaded by vertex color.
     const mk = (geo, vc, name) => {
-      const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: vc }), DEBRIS_MAX);
+      // Plain boxes get white vertex colors: the same program as the
+      // shaded parts (color times 1 is the color).
+      if (!vc) whiteColors(geo);
+      const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), DEBRIS_MAX);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       const c0 = new THREE.Color(0x333333);
       for (let i = 0; i < DEBRIS_MAX; i++) {

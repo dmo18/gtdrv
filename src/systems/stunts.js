@@ -12,6 +12,7 @@
 // markers are made only when game.scene / game.map exist.
 // Docs: docs/SPEC.md "Stunt jumps".
 import * as THREE from 'three';
+import { cityPatch } from '../render/citypatch.js';
 import { generateStuntSpots, rampHeight } from '../world/stunts.js';
 import { createAirState, beginAir, stepAir, judgeLanding, medalRank } from '../core/stunt.js';
 import { createMarkers } from '../render/markers.js';
@@ -309,7 +310,8 @@ export function tiltMesh(m, heading, pitch, roll) {
 function buildRamps(scene, spots, seaY) {
   const root = new THREE.Group();
   root.name = 'stunt-ramps';
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.15 });
+  // The city patch with every feature off: one program with the street solids.
+  const mat = cityPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.15 }));
   const DECK = new THREE.Color(0xb8612f), FRAME = new THREE.Color(0x3a3330), STRIPE = new THREE.Color(0xf2e6c8);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), t = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
   const part = (geo, color, x = 0, y = 0, z = 0, rz = 0) => {
