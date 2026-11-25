@@ -278,7 +278,13 @@ function whiteMap() {
 // The street tiles' materials (citymesh.js makeMaterials, after the lot
 // sand clone): the city patch on every lit one, with its features.
 export function patchCityMaterials(M) {
-  if (M.wet) CITY_U.uWet = M.wet;
+  // The shared uniform object stays the same (materials hold it); the
+  // weather's own object forwards its value to it.
+  if (M.wet && M.wet !== CITY_U.uWet) {
+    const shared = CITY_U.uWet;
+    shared.value = M.wet.value;
+    Object.defineProperty(M.wet, 'value', { get: () => shared.value, set: (v) => { shared.value = v; }, configurable: true, enumerable: true });
+  }
   for (const k in M) {
     const m = M[k];
     if (m && m.isMeshStandardMaterial && m !== M.detailMat) cityPatch(m);

@@ -740,6 +740,58 @@ export const GROUND_RINGS = 2;
 const T_VERGE = LOT_TYPES.indexOf('verge') + 1, T_AIRFIELD = LOT_TYPES.indexOf('airfield') + 1;
 const T_PLAZA = LOT_TYPES.indexOf('plaza') + 1, T_GRASS = LOT_TYPES.indexOf('grass') + 1;
 const PED_REACH = 7; // m past a pedestrian street's paving that stays paved
+// (0.13.3) A beach runs on SAND_RINGS cells further into the land in no
+// lot beside it, up to the carriageway of the nearest road: between a
+// beach and a causeway or a shore road the setback band can be wider
+// than the rings above reach, and the rest was bare paving with the
+// beach's 5 m stair steps cut into it (sand triangles along the road).
+// A cell takes sand where three or more of its eight neighbors are sand,
+// so the front moves on straight; a cell on a road's asphalt stays out.
+export const SAND_RINGS = 3;
+const T_BEACH = LOT_TYPES.indexOf('beach') + 1;
+const SAND_NEAR = [];
+function onCarriageway(city, x, z) {
+  if (!city.edgesNear) return false;
+  city.edgesNear(x, z, 20, SAND_NEAR);
+  for (let k = 0; k < SAND_NEAR.length; k++) {
+    const e = city.edges[SAND_NEAR[k]];
+    if (!e) continue;
+    const a = city.nodes[e.a], b = city.nodes[e.b];
+    const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+    let t = ((x - a.x) * dx + (z - a.z) * dz) / L2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    if (Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < e.width / 2 + (e.off ? Math.abs(e.off) : 0)) return true;
+  }
+  return false;
+}
+function spreadSand(city, g, land, W, H, rings) {
+  // The box of the sand cells, padded by the rings.
+  let i0 = W, i1 = -1, j0 = H, j1 = -1;
+  for (let c = 0; c < W * H; c++) {
+    if (g[c] !== T_BEACH) continue;
+    const i = c % W, j = (c - i) / W;
+    if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j;
+  }
+  if (i1 < 0) return;
+  i0 = Math.max(1, i0 - rings); i1 = Math.min(W - 2, i1 + rings); j0 = Math.max(1, j0 - rings); j1 = Math.min(H - 2, j1 + rings);
+  const G = city.landGrid, cell = G.cell;
+  const add = [];
+  for (let ring = 0; ring < rings; ring++) {
+    add.length = 0;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const c = j * W + i;
+        if (g[c] || !land[c]) continue;
+        const n = (g[c - W - 1] === T_BEACH) + (g[c - W] === T_BEACH) + (g[c - W + 1] === T_BEACH) + (g[c - 1] === T_BEACH) + (g[c + 1] === T_BEACH) + (g[c + W - 1] === T_BEACH) + (g[c + W] === T_BEACH) + (g[c + W + 1] === T_BEACH);
+        if (n < 3) continue;
+        if (onCarriageway(city, G.x0 + (i + 0.5) * cell, G.z0 + (j + 0.5) * cell)) continue;
+        add.push(c);
+      }
+    }
+    if (!add.length) return;
+    for (let k = 0; k < add.length; k++) g[add[k]] = T_BEACH;
+  }
+}
 function spreadGround(city, typeGrid, land, W, H) {
   const ground = typeGrid.slice();
   const N = W * H;
@@ -767,10 +819,15 @@ function spreadGround(city, typeGrid, land, W, H) {
   // The middle of a wide planted median (over 8 m: a raised grass band
   // runs along each curb, world/junctions.js medianBand) is lawn, whatever
   // lot or land lies there: no strip of paving down the middle.
+  // (0.13.3: from 4 m, was over 8. A median of 4 to 8 m is two bands of
+  // half the data's median each, but the real gap between the curbs of a
+  // pair wanders past that, and on a diagonal road the rings below do not
+  // reach its middle: a jagged gray seam of bare land down the lawn.
+  // Under a band the lawn is hidden, so it only shows in that gap.)
   for (const e of city.edges || []) {
-    if (!(e.median > 8) || e.bridge || !(e.width > 0)) continue;
+    if (!(e.median > 4) || e.bridge || !(e.width > 0)) continue;
     const a = city.nodes[e.a], ux = e.ux, uz = e.uz, L = e.length;
-    const lc = (e.off || 0) - e.width / 2, lo = lc - e.median / 2 - 1.5;
+    const lc = (e.off || 0) - e.width / 2, lo = lc - e.median / 2 - 3; // (0.13.3: 3 m past the middle, was 1.5: a 5 m cell whose center is off a narrow band)
     const r = Math.abs(lo) + 3;
     const bx = a.x + ux * L, bz = a.z + uz * L;
     const i0 = Math.max(0, Math.floor((Math.min(a.x, bx) - r - G.x0) / cell)), i1 = Math.min(W - 1, Math.floor((Math.max(a.x, bx) + r - G.x0) / cell));
@@ -786,6 +843,7 @@ function spreadGround(city, typeGrid, land, W, H) {
     }
   }
   spreadRings(ground, land, W, H, GROUND_RINGS);
+  spreadSand(city, ground, land, W, H, SAND_RINGS);
   const from = ground;
   // A verge no ground reached keeps the land it stands on.
   return from;
@@ -1332,10 +1390,13 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   };
   // Lawn planting: trees in clusters on a 17 m grid (two to four a
   // cluster), shrub beds between them, `k` scales the trees.
-  const greens = (ar, k) => {
+  // `lone` (a lawn, 0.13.3): every other bed point a lone tree instead,
+  // so a big green has trees standing over it, not only low lumps.
+  const greens = (ar, k, lone = false) => {
     gridPts(17, 3, 5, (x, z, a, q) => {
       if ((a + 2 * q) % 3 === 0) cluster(x, z, 2 + (rng.next() < 0.3 * k ? 1 : 0), 3.5, 'tree', 1.1, 7, true, 1.8, tree);
-      else if (!bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 10 + rng.int(0, 3), false) && !bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6, false)) cluster(x, z, 2, 1.4, 'shrub', 0.75, 1.0, false, 0.4, tree);
+      else if (lone && (a + q) % 2 === 1 && cluster(x, z, 1, 2, 'tree', 1.1, 7.5, true, 2.5, tree)) { /* a lone tree */ }
+      else if (!bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, (lone ? 13 : 10) + rng.int(0, 3), false) && !bed(x, z, rng.chance(0.5) ? 0 : Math.PI / 2, 6, false)) cluster(x, z, 2, 1.4, 'shrub', 0.75, 1.0, false, 0.4, tree);
     });
     if (!out.some((f) => f.kind === 'tree' || f.kind === 'shrub')) {
       if (!scatter(1, 'tree', 1.1, 7, true, 3, tree, 1.5)) scatter(1, 'shrub', 0.6, 1.0, false, 1.5, tree, 0.8);
@@ -1548,10 +1609,27 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
           const px = alongX ? cx : cx + o * across, pz = alongX ? cz + o * across : cz;
           if ((ok = putLong('path', px, pz, hd, len, 2, 0, false, set.furn) || putLong('path', px, pz, hd, len * 0.6, 2, 0, false, set.furn) || put('path', px, pz, hd, Math.min(len, 10), 2, 0, 0, false, set.furn))) break;
         }
-        void ok;
+        // (0.13.3, "big sparse lawns") Benches along the path, a cross
+        // path on a big green, a bin by the first bench: a lawn a player
+        // reads as a used green. A path is one feature for its whole
+        // length (a unit per FEATURE_RUN m), so the fill below adds fewer
+        // beds and the feature count a hectare does not grow.
+        if (ok) {
+          const pf = out[out.length - 1], pl = pf.l, pc = Math.cos(pf.heading), ps = Math.sin(pf.heading);
+          const nb = Math.max(1, Math.min(4, Math.floor(pl / 18)));
+          for (let k = 0; k < nb; k++) {
+            const t = ((k + 0.5) / nb - 0.5) * pl, sd = (k + lot.seed) % 2 ? -2.1 : 2.1;
+            const bx = pf.x + pc * t - ps * sd, bz = pf.z + ps * t + pc * sd;
+            if (clearAt(bx, bz, 0.6, 0.6) && put('bench', bx, bz, pf.heading, 1.8, 0.6, 0.5, 0, false, set.furn) && k === 0 && lot.seed % 2 === 0) {
+              put('bin', bx + pc * 1.7, bz + ps * 1.7, 0, 0, 0, 1, 0.3, false, set.furn);
+            }
+          }
+          const cross = (alongX ? z1 - z0 : x1 - x0) - 4;
+          if (area > 3000 && cross > 24 && pl > 30) putLong('path', pf.x, pf.z, hd + Math.PI / 2, cross, 1.8, 0, false, set.furn) || putLong('path', pf.x, pf.z, hd + Math.PI / 2, cross * 0.6, 1.8, 0, false, set.furn);
+        }
       }
       if (area >= 1500) lowFence(front);
-      greens(area, 1);
+      greens(area, 1, true);
       break;
     }
     case 'works':

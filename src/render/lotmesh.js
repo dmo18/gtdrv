@@ -432,6 +432,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
     const hw = hw0 * (1 + (q - 0.5) * 0.4 * bump) * endK;
     const flower = bloom && q > 0.72;
     const col = bump > 0.5 ? SHRUB_GREENS[(Math.round(q * 97) + k) % SHRUB_GREENS.length] : color;
+    // (0.13.3) A clipped hedge's leaf tone wanders section by section and
+    // its face is darker toward the foot, so a long run reads as clipped
+    // shrubs, not as one smooth green tube.
+    const tone = bump > 0.5 ? 1 : 0.84 + 0.3 * q;
     // A flowering bed shows its blooms on the tops of its mounds only, half
     // in the leaves.
     const fcol = flower ? FLOWERS[(Math.round(cx * 7) & 255) % FLOWERS.length] : col;
@@ -440,10 +444,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
       // Lumps: every point above the base pushed in or out by its own
       // hash, its normal tipped the same way, its leaf tone varied, so the
       // strip reads as foliage, not as a smooth solid.
-      const j = edge ? 0 : (cellHash(k * 7 + p + Math.round(cx * 5), p * 13 + Math.round(cz * 5)) - 0.5) * (0.35 + bump * 0.5);
+      const j = edge ? 0 : (cellHash(k * 7 + p + Math.round(cx * 5), p * 13 + Math.round(cz * 5)) - 0.5) * (bump > 0.5 ? 0.35 + bump * 0.5 : 0.75);
       const yy = edge ? y0 : Math.min(y0 + h * 1.12, y0 + (hh - top) + PS[p] * top + j * top * 0.6);
       const across = PC[p] * hw * (edge ? 0.92 : 1 + j * 0.5);
-      const sh = (0.55 + 0.5 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.7) * (bump > 0.5 && k % 2 ? 0.85 : 1);
+      const sh = (0.5 + 0.55 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.9) * (bump > 0.5 && k % 2 ? 0.85 : tone);
       const tip = j * 0.8;
       const pn = PR.nx[p], pny = PR.ny[p];
       const nx = rx * pn + ca * tip, nz = rz * pn + sa * tip, ny = pny;
@@ -580,7 +584,8 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const col = shadeHex(HEDGE, 0.92 + (f.v % 4) * 0.05);
         // Low planting is small stuff: shown to the middle level (170 m), as
         // the street props are; the hedge's collision stays.
-        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 5, 0.35);
+        // (0.13.3: sections every 2.2 m, were 5: a lumpy clipped top.)
+        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 2.2, 0.45);
         if (Math.abs(sa) < 0.02 || Math.abs(ca) < 0.02) C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.5, EDGE_Y + 0.004, 0.75);
         break;
       }

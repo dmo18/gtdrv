@@ -106,28 +106,37 @@ function roofAt(game, x, z) {
   const h = col.heightAt(x, z);
   return h > 0 ? h : 0;
 }
-// Highest roof within r of (x, z): the center and 8 points around it.
+// Highest roof within r of (x, z): the center and 8 points around it at
+// r and 8 at r / 2. (One roofAt call site in the loop, here and in
+// pathRoof: the optimizer inlines it, and heightAt with it, once, so the
+// sample coordinates are not boxed as call arguments.)
 function roofNear(game, x, z, r) {
   let m = roofAt(game, x, z);
-  for (let k = 0; k < 8; k++) {
-    const a = (k * Math.PI) / 4;
-    const h = roofAt(game, x + Math.cos(a) * r, z + Math.sin(a) * r);
+  for (let q = 0; q < 16; q++) {
+    const a = ((q >> 1) * Math.PI) / 4, f = q & 1 ? 0.5 : 1;
+    const h = roofAt(game, x + Math.cos(a) * r * f, z + Math.sin(a) * r * f);
     if (h > m) m = h;
-    const h2 = roofAt(game, x + Math.cos(a) * r * 0.5, z + Math.sin(a) * r * 0.5);
-    if (h2 > m) m = h2;
   }
   return m;
 }
 // Highest roof along a strip from (x, z) in direction (ux, uz), len m
-// long and 2 x lat wide, sampled every PATH_STEP m from 3 m out.
+// long and 2 x lat wide, sampled every PATH_STEP m from 3 m out: at each
+// step the center line and both edges.
 const PATH_STEP = 7;
 function pathRoof(game, x, z, ux, uz, len, lat) {
   let m = 0;
-  const n = Math.min(12, Math.ceil(len / PATH_STEP));
-  for (let k = 0; k < n; k++) {
-    const d = Math.min(len, 3 + k * PATH_STEP);
-    const px = x + ux * d, pz = z + uz * d;
-    const h = Math.max(roofAt(game, px, pz), roofAt(game, px - uz * lat, pz + ux * lat), roofAt(game, px + uz * lat, pz - ux * lat));
+  const n = Math.min(12, Math.ceil(len / PATH_STEP)) * 3;
+  let px = 0, pz = 0;
+  for (let q = 0; q < n; q++) {
+    const s = q % 3;
+    if (s === 0) {
+      const d = Math.min(len, 3 + ((q / 3) | 0) * PATH_STEP);
+      px = x + ux * d;
+      pz = z + uz * d;
+    }
+    const qx = s === 0 ? px : s === 1 ? px - uz * lat : px + uz * lat;
+    const qz = s === 0 ? pz : s === 1 ? pz + ux * lat : pz - ux * lat;
+    const h = roofAt(game, qx, qz);
     if (h > m) m = h;
   }
   return m;

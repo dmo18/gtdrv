@@ -8,7 +8,7 @@ import { MeshBuilder } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
 import { PALM_PLACES, miamiPalmSpots as palmSpots } from '../world/propsolid.js';
 import { WALL_H } from '../world/edgelines.js';
-import { deadEnds } from '../world/deadends.js';
+import { deadEnds, DEAD_END_BASE } from '../world/deadends.js';
 
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
 const UMBRELLA = [0xd8452c, 0x2c7fb8, 0xf0c030, 0x2fa88a, 0xf4f0e6, 0xe07aa0];
@@ -657,7 +657,7 @@ function drawRoadEnd(P, re) {
 // (world/deadends.js, 0.13.2).
 function drawBarrier(P, bx, bz, h, w) {
   const px = -Math.sin(h), pz = Math.cos(h);
-  P.obox(bx, bz, 0.34, w / 2, 0, 0.5, h, 0xb8b4ac, 0xc8c4bc, 0.6, 0.95);
+  P.obox(bx, bz, DEAD_END_BASE, w / 2, 0, 0.5, h, 0xb8b4ac, 0xc8c4bc, 0.6, 0.95);
   const n = Math.max(2, Math.round(w / 1.5)), seg = w / n;
   for (let k = 0; k < n; k++) {
     const t = -w / 2 + seg * (k + 0.5);

@@ -1087,3 +1087,8 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Gates: eslint, npm test (1120: two failures not from this change: a Beach `shoreDist` timing test under load and the US English test on the British phrase for a parking lot in docs/STREETSCAPE.md and STATUS lines of another helper), loop-test, smoke --extra, ui-test: smoke --extra had one FAIL in combat ("the player cannot die: a blast over the sea", another helper's area), ui-test all ok (one transient fail under load on the first run).
 - Budget: smoke Downtown street view 208 calls, 293k triangles; perf North day 165 / 234k, night 164 / 230k, 60 programs (no new program: same materials).
 - Gates: lint; npm test 1117 of 1120 (the British-spelling check, since fixed in these docs, and two timing tests under a load average near 20, helpers on the whole box and dressLot cost, which fail alike with the old island spacing); smoke-regions passed; smoke --extra 79 ok, one FAIL in the combat checks ("the player cannot die: a blast over the sea"), files other helpers are changing, not this work.
+
+## 2026-11-25: 0.13.3 store shots (in the tree, no version bump)
+- scripts/store-shots.mjs retaken for Miami: 8 shots, 1920x1080 (960x540 viewport at 2x), Beach (day, dusk, night), Downtown (dusk, night rain), North, West, South. Checks that no PNG has EXIF, text or time chunks. store/screenshot-1..8.png replaced.
+- render/citypatch.js: `CITY_U.uWet` is no longer replaced by the weather's object; the shared object stays and the weather's `value` forwards to it. Test: test/citypatch-wet.test.js.
+- docs/RC.md lists exactly the five owner-only items (privacy email, phone check, Play account, signing key, closed test); docs/STORE.md screenshot note updated.

@@ -9,7 +9,12 @@
 // deadEnds(city) -> [{ node, edge, x, z, heading, w }] (barricade middle,
 // heading along the road out of the end, width across), cached per city.
 
-export const DEAD_END_GAP = 0.8; // m past the node
+// m past the node. (0.13.3: was 0.8. The strip of a dead end runs 1.5 m
+// past its node, world/junctions.js; the barricade's base, DEAD_END_BASE
+// either side of its line, now covers that end, no sliver of asphalt
+// beyond it.)
+export const DEAD_END_GAP = 1.25;
+export const DEAD_END_BASE = 0.34; // half the depth of the base (render/props.js drawBarrier)
 const cache = new WeakMap();
 const NEAR = [];
 

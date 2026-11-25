@@ -860,10 +860,85 @@ function readWays(data, S, crop, landCell, coastLand, baseLand) {
     ways: [], wayS: [], wayE: [], P: new Float64Array(1 << 16), np: 0, cuts: [],
     // decodePolyline's output for one road, reused (pts[0, m)).
     pts: new Float64Array(4096),
+    // At-grade freeway ramps left out by readRoad, for keepJoinedRamps.
+    ramps: [],
   };
   const roads = data.roads;
-  for (let k = 0; k < roads.length; k++) readRoad(R, roads[k]);
+  for (let k = 0; k < roads.length; k++) readRoad(R, roads[k], false);
+  keepJoinedRamps(R);
   return R;
+}
+// An at-grade ramp (motorway_link) between dropped flyovers is left out
+// with them, but some are how the streets get on and off a kept water
+// crossing (Biscayne Boulevard onto the eastbound MacArthur Causeway:
+// without its two ramps that carriageway, Watson Island and the islands
+// past it could be left but never reached by a legal route). Ramps that
+// touch end to end make a group; a group is kept (in data order) when
+// every end of it meets another ramp of the group or a road that is kept
+// and goes on there: within RAMP_JOIN m of the inside of one of its
+// segments (1 m or more from that road's own ends), of the end of a
+// plain road (not a bridge, not a ramp) or of the ends of two roads. So a
+// kept ramp does not end at the loose end of a flyover stub.
+const RAMP_JOIN = 2.2;
+function keepJoinedRamps(R) {
+  const list = R.ramps, n = list.length;
+  if (!n) return;
+  const pts = [];
+  for (let i = 0; i < n; i++) pts.push(decodePolyline(list[i].p));
+  // Groups of ramps that touch (union-find).
+  const up = new Int32Array(n);
+  for (let i = 0; i < n; i++) up[i] = i;
+  const touch = new Uint8Array(n * 2); // end 0 / 1 of ramp i meets another ramp
+  for (let i = 0; i < n; i++) {
+    for (let e = 0; e < 2; e++) {
+      const P = pts[i], q = e ? P.length - 2 : 0;
+      for (let j = 0; j < n; j++) {
+        if (j === i || !nearLine(pts[j], 0, pts[j].length, P[q], P[q + 1], -1)) continue;
+        touch[i * 2 + e] = 1;
+        const ra = findRoot(up, i), rb = findRoot(up, j);
+        if (ra !== rb) up[ra] = rb;
+      }
+    }
+  }
+  // Ends that hang loose (no ramp, no kept road going on): their group stays out.
+  const bad = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    for (let e = 0; e < 2; e++) {
+      if (touch[i * 2 + e]) continue;
+      const P = pts[i], q = e ? P.length - 2 : 0;
+      if (!meetsWay(R, P[q], P[q + 1])) bad[findRoot(up, i)] = 1;
+    }
+  }
+  for (let i = 0; i < n; i++) if (!bad[findRoot(up, i)]) readRoad(R, list[i], true);
+}
+// True when (x, z) is within RAMP_JOIN of a segment of P (flat x, z pairs)
+// from k0 to k1; with skip >= 0, not within skip m of P's own two ends.
+function nearLine(P, k0, k1, x, z, skip) {
+  const r2 = RAMP_JOIN * RAMP_JOIN;
+  if (skip >= 0) {
+    const s2 = skip * skip;
+    if ((x - P[k0]) ** 2 + (z - P[k0 + 1]) ** 2 < s2 || (x - P[k1 - 2]) ** 2 + (z - P[k1 - 1]) ** 2 < s2) return false;
+  }
+  for (let k = k0; k + 3 < k1; k += 2) {
+    const ax = P[k], az = P[k + 1], bx = P[k + 2], bz = P[k + 3];
+    if (x < Math.min(ax, bx) - RAMP_JOIN || x > Math.max(ax, bx) + RAMP_JOIN || z < Math.min(az, bz) - RAMP_JOIN || z > Math.max(az, bz) + RAMP_JOIN) continue;
+    if (segDist2(x, z, ax, az, bx, bz) <= r2) return true;
+  }
+  return false;
+}
+// True when a road read so far goes on at (x, z) (see keepJoinedRamps).
+function meetsWay(R, x, z) {
+  let ends = 0;
+  for (let w = 0; w < R.ways.length; w++) {
+    const k0 = R.wayS[w], k1 = R.wayE[w];
+    if (nearLine(R.P, k0, k1, x, z, 1)) return true;
+    if (!nearLine(R.P, k0, k1, x, z, -1)) continue;
+    // At its end: a plain road goes on from there; a bridge or another
+    // ramp may itself hang loose (a stub of a dropped flyover).
+    const info = R.ways[w];
+    if ((!info.bridge && info.cls !== 'motorway_link') || ++ends >= 2) return true;
+  }
+  return false;
 }
 // The district key at a point straight from the hand table (the raster
 // comes later): for the sidewalk width of a road. (The last rect holding
@@ -935,7 +1010,8 @@ function flyoverOverLand(landCell, baseLand, pts, m) {
 }
 // One way of the data.
 const TUNNEL = /tunnel/i;
-function readRoad(R, r) {
+// ramp: a ramp keepJoinedRamps keeps (not left out as at grade).
+function readRoad(R, r, ramp) {
   // Pedestrian streets: only the named malls (2.1 item 8), drivable.
   if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) return;
   if (r.name && TUNNEL.test(r.name)) return;
@@ -968,7 +1044,10 @@ function readRoad(R, r) {
   const landCell = R.landCell, coastLand = R.coastLand;
   // Freeway pieces at grade between the dropped flyovers are islands of
   // ramps; only the ones that run out to a water crossing are kept.
-  if (!r.bridge && r.class.startsWith('motorway') && !nearWater(landCell, coastLand, pts[0], pts[1]) && !nearWater(landCell, coastLand, pts[m - 2], pts[m - 1])) return;
+  if (!ramp && !r.bridge && r.class.startsWith('motorway') && !nearWater(landCell, coastLand, pts[0], pts[1]) && !nearWater(landCell, coastLand, pts[m - 2], pts[m - 1])) {
+    if (r.class === 'motorway_link') R.ramps.push(r);
+    return;
+  }
   // A long bridge over land is a flyover: the flat world would make it
   // cross the streets below at grade, so it is left out. Bridges that
   // land near the water are approaches to a crossing: kept.

@@ -1,17 +1,18 @@
-# 1.0.0 release candidate status (0.12.1)
+# 1.0.0 release candidate status (0.13.3)
 
 Measured by me, no owner action needed:
-- Tests 1039, lint, build, gate (regions, ui, touch), smoke: pass on 0.12.1.
-- Security: reviews at each milestone; none critical or high open (0.12.0 review, two lows closed).
+- Lint, tests, build, gate (regions, ui, touch), smoke: pass on the 0.13.x line (last full gate run on 0.13.0; 0.13.2 and 0.13.3 changes were checked with lint, npm test, smoke --extra).
+- Security: reviews at each milestone; none critical or high open.
 - No runtime network call in src. No secret in git. Dependencies pinned.
 - Draw budget Normal street view: all regions within 210 calls / 295k triangles.
+- Store screenshots: 8 current Miami shots in `store/` (0.13.3), no metadata.
 
-Needs the owner (cannot be done here):
-1. Phone check line on 0.12.1 (real S24: median, worst, steering, sound).
-2. Privacy contact email (placeholder stays until supplied).
-3. Play developer account, signing key, closed test (Android bundle deferred).
-4. Decisions with defaults: no ads, no purchases (monetization A).
-5. Optional: "scrub the screenshots" to remove owner screenshot metadata from 3 old commits.
+Owner-only, exactly these five (cannot be done here):
+1. Privacy contact email: replace PRIVACY_EMAIL_PLACEHOLDER (docs/STORE.md, public/privacy.html).
+2. Real phone check on the S24 (median, worst, steering, sound).
+3. Play developer account.
+4. Signing key (upload key and keystore, docs/ANDROID.md).
+5. Closed test (Play requirement before production).
 
 Known open: lot-to-lot 5 m steps, heavy hedges, memory about 185 to 202 MB,
 Actions not pinned to SHAs (blocked), shader programs 75 (target 60).
