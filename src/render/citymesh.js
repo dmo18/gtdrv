@@ -1188,7 +1188,10 @@ export function realRoads(city, B, nodes, edges, own = null) {
           // (Never on a junction's asphalt, nor beside a gore.)
           if (supAt(geo, e, side, (d0 + d1) / 2) || G.gapAt(e.id, side, (d0 + d1) / 2) > 0 || onJunction(geo, mx + (wx(0, side ? -1 : 1) - wx(0, 0)) * 0.5, mz + (wz(0, side ? -1 : 1) - wz(0, 0)) * 0.5)) continue;
           const lo0 = side ? b0 - w0 : b0, hi0 = side ? b0 : b0 + w0, lo1 = side ? b1 - w1 : b1, hi1 = side ? b1 : b1 + w1;
-          orientedQuad(B.sidewalk.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, COL.sidewalk);
+          // (0.13.3: beyond a planted median, lawn like the median, not a
+          // pale seam of concrete down the middle of a green.)
+          const lawn = side === 1 && med > 0 && e.median > MEDIAN_PLANT;
+          orientedQuad((lawn ? B.grass : B.sidewalk).at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, lawn ? COL.lawn : COL.sidewalk);
         }
       }
     }
@@ -1244,11 +1247,20 @@ export function netRoads(city, B, x0, z0, x1, z1) {
     for (let k = 0; k + 3 < NETQ.length; k += 4) {
       const xa = NETQ[k], za = NETQ[k + 1], xb = NETQ[k + 2], zb = NETQ[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
       if (kind === 1) B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
+      else if (betweenMedians(G, xa, za, xb, zb)) B.grass.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.lawn);
       else B.sidewalk.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.sidewalk);
       n++;
     }
   }
   return n;
+}
+
+// (0.13.3) A raised net quad with a median band beside it (the gap
+// between the two bands of a divided road, a jagged pale seam down a
+// planted median before): drawn as lawn. Probes 0.6 m out of each side.
+function betweenMedians(G, xa, za, xb, zb) {
+  const mx = (xa + xb) / 2, mz = (za + zb) / 2, hx = (xb - xa) / 2 + 0.6, hz = (zb - za) / 2 + 0.6;
+  return G.surfaceAt(mx - hx, mz) === 3 || G.surfaceAt(mx + hx, mz) === 3 || G.surfaceAt(mx, mz - hz) === 3 || G.surfaceAt(mx, mz + hz) === 3;
 }
 
 function edgeHash(id) {

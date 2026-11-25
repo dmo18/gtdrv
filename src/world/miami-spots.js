@@ -31,7 +31,7 @@ export const MIAMI_COURSES = {
     { id: 'street-fernside', name: 'Calle Ocho Loop', laps: 2, blurb: 'Two quick laps of Little Havana, out along Calle Ocho and back.',
       via: [{ x: -1760, z: 1530 }, { x: -2420, z: 1530 }, { x: -2420, z: 1010 }, { x: -1760, z: 1010 }] },
     { id: 'street-rim', name: 'Bay Bridges Rally', laps: 1, blurb: 'One long lap of the bay bridges: the Venetian Causeway, the MacArthur Causeway and Biscayne Boulevard.',
-      via: [{ x: -780, z: 400 }, { x: -760, z: -1150 }, { x: 2100, z: -1600 }, { x: 2100, z: -800 }, { x: -780, z: -620 }, { x: 1800, z: -100 }] },
+      via: [{ x: -780, z: 400 }, { x: -760, z: -1150 }, { x: 2100, z: -1600 }, { x: 2100, z: -800 }, { x: -780, z: -620 }, { x: 1760, z: 40 }] },
   ],
   causeway: { name: 'Causeway Dash', blurb: 'From Edgewater across the causeway to the airfield gate and back.', a: { x: -900, z: -2560 }, b: { x: -900, z: -2200 }, c: { x: -1100, z: -2400 } },
   boats: [

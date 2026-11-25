@@ -276,3 +276,6 @@ the tree between the runs, so totals move a few percent on their own.
   drive, read with V8's `--log-deopt`). No code calls Object.create or setPrototypeOf during play
   and the Object, Array and Function prototypes keep their keys; the cause is open. Node, whose
   hot code stays optimized, shows none of this boxing.
+  0.13.3: cause found. The bursts come when Blink builds a DOM interface's prototype on its
+  first use (IdleDeadline, URL, the Event family up to HTMLInputElement when the Phone check
+  opens Settings), once per page load; see docs/STATUS.md "0.13.3 allocations and routing".

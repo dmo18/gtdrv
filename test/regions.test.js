@@ -69,9 +69,16 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // neighbors merge into one edge. Only the Beach (all five: junction blades,
 // buildings and lots follow the road strips) and the whole box change;
 // Downtown, North, West and South keep their pins.
+// 0.13.3 routing re-pin (deliberate; docs/STATUS.md "0.13.3 allocations
+// and routing"): the two at-grade ramps from Biscayne Boulevard onto the
+// eastbound MacArthur Causeway are kept (miami.js keepJoinedRamps), so
+// Watson, Palm, Hibiscus and Star Islands can be driven to. Downtown and
+// the whole box change (2 nodes, 4 edges, 2 lots more in Downtown; its
+// buildings and lot grid follow the new road strip); Beach, North, West
+// and South keep their pins.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '797851b0', edges: '2e4e0268', buildings: '0151a92c', lots: '78e4569b', lotGrid: '051fda0d' },
-  'miami-downtown': { nodes: 'f293d4b5', edges: '42de42cb', buildings: '29b8852e', lots: '6d1ba28d', lotGrid: 'f0a57934' },
+[WHOLE_BOX]: { nodes: '88cf0989', edges: 'ceab4da8', buildings: '0151a92c', lots: 'fdcd55db', lotGrid: 'ecba9539' },
+  'miami-downtown': { nodes: '584d937d', edges: '153db9ad', buildings: '4922b018', lots: '11144f11', lotGrid: 'c2bd21e4' },
   'miami-beach': { nodes: '17dca3b5', edges: '065cd791', buildings: '7d8e9776', lots: 'f4183abf', lotGrid: 'bdea5737' },
   'miami-north': { nodes: '2debc075', edges: '337da624', buildings: 'b0e601a9', lots: '4fdb5c68', lotGrid: 'dd88bfe0' },
   'miami-west': { nodes: '1c6e85c8', edges: 'e974bccf', buildings: 'a44fb8ea', lots: '718ee8b4', lotGrid: '939234c7' },

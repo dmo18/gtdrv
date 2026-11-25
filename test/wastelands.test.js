@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
 import { deadEnds, DEAD_END_GAP, DEAD_END_BASE } from '../src/world/deadends.js';
 import { createCollisionWorld, fillCollision } from '../src/world/collision.js';
+import { pairGap } from '../src/world/junctions.js';
 import { dressLot, bayCount, lotFill, LOT_TYPES } from '../src/world/lots.js';
 
 const load = (id) => createMiamiCity(JSON.parse(fs.readFileSync(new URL(`../src/world/data/${id}.json`, import.meta.url), 'utf8')), { region: id });
@@ -105,8 +106,13 @@ test('medians: the middle of a planted median of over 4 m is drawn ground, no ba
   const at = [];
   for (const e of south.edges) {
     if (!(e.median > 4) || e.bridge || !(e.width > 0)) continue;
-    const a = south.nodes[e.a], lc = (e.off || 0) - e.width / 2, o = lc - e.median / 2;
+    const a = south.nodes[e.a], lc = (e.off || 0) - e.width / 2;
     for (let d = 2; d < e.length - 2; d += 5) {
+      // The middle of the real gap to the partner (it can be wider than
+      // the data's median), else of the median.
+      const g = e.pair >= 0 ? pairGap(south, e, d, lc) : e.median;
+      if (!(g < 40)) continue;
+      const o = lc - Math.max(e.median, g) / 2;
       const x = a.x + e.ux * d - e.uz * o, z = a.z + e.uz * d + e.ux * o;
       const i = Math.floor((x - G.x0) / G.cell), j = Math.floor((z - G.z0) / G.cell);
       if (!LG.data[j * LG.w + i]) continue;

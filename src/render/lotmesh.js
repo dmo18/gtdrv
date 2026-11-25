@@ -406,7 +406,9 @@ function panels(D, r, ax, az, bx, bz, y, hgt, color) {
 // A clipped hedge (6 points): sides upright to the shoulder, the round only
 // at the top edges, so it reads as a hedge, not a pipe. A bed of shrubs (4
 // points): a low mound, round all over (its lumps carry the shape).
-const HEDGE_PROF = { n: 6, c: [1, 1, 0.7, -0.7, -1, -1], s: [0, 0, 1, 1, 0, 0], nx: [1, 0.97, 0.35, -0.35, -0.97, -1], ny: [0, 0.24, 0.94, 0.94, 0.24, 0], top: [2, 3] };
+// (0.13.3: a squarer shoulder and a top lit apart from the sides, so a
+// clipped hedge reads as a box of leaves, not a tube.)
+const HEDGE_PROF = { n: 6, c: [1, 1, 0.86, -0.86, -1, -1], s: [0, 0, 1, 1, 0, 0], nx: [1, 0.99, 0.2, -0.2, -0.99, -1], ny: [0, 0.12, 0.98, 0.98, 0.12, 0], top: [2, 3] };
 const BED_PROF = { n: 4, c: [1, 0.72, -0.72, -1], s: [0, 1, 1, 0], nx: [1, 0.5, -0.5, -1], ny: [0, 0.87, 0.87, 0], top: [1, 2] };
 export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump, bloom = 0) {
   const ca = Math.cos(heading), sa = Math.sin(heading);
@@ -419,7 +421,7 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
   const base = B.count;
   // Height of the round top: a bed of shrubs is round all over, a clipped
   // hedge has straight sides and a flat top with soft, rounded edges.
-  const top = bump > 0.5 ? h * 0.35 : Math.min(0.2, h * 0.25);
+  const top = bump > 0.5 ? h * 0.35 : Math.min(0.12, h * 0.16);
   for (let k = 0; k < n; k++) {
     const t = k / (n - 1) - 0.5;
     const cx = x + ca * len * t, cz = z + sa * len * t;
@@ -435,7 +437,7 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
     // (0.13.3) A clipped hedge's leaf tone wanders section by section and
     // its face is darker toward the foot, so a long run reads as clipped
     // shrubs, not as one smooth green tube.
-    const tone = bump > 0.5 ? 1 : 0.84 + 0.3 * q;
+    const tone = bump > 0.5 ? 1 : 0.8 + 0.36 * q;
     // A flowering bed shows its blooms on the tops of its mounds only, half
     // in the leaves.
     const fcol = flower ? FLOWERS[(Math.round(cx * 7) & 255) % FLOWERS.length] : col;
@@ -447,7 +449,10 @@ export function softStrip(B, x, z, heading, len, width, y0, h, color, step, bump
       const j = edge ? 0 : (cellHash(k * 7 + p + Math.round(cx * 5), p * 13 + Math.round(cz * 5)) - 0.5) * (bump > 0.5 ? 0.35 + bump * 0.5 : 0.75);
       const yy = edge ? y0 : Math.min(y0 + h * 1.12, y0 + (hh - top) + PS[p] * top + j * top * 0.6);
       const across = PC[p] * hw * (edge ? 0.92 : 1 + j * 0.5);
-      const sh = (0.5 + 0.55 * (yy - y0) / Math.max(0.1, hh)) * (1 + j * 0.9) * (bump > 0.5 && k % 2 ? 0.85 : tone);
+      // (A hedge: dark only at the foot, the sides one tone, the clipped
+      // top lighter; a bed shades from foot to crown.)
+      const rise = (yy - y0) / Math.max(0.1, hh);
+      const sh = (bump > 0.5 ? 0.55 + 0.5 * rise : PS[p] ? 1.18 : rise > 0.5 ? 0.86 : 0.62) * (1 + j * 0.9) * (bump > 0.5 && k % 2 ? 0.85 : tone);
       const tip = j * 0.8;
       const pn = PR.nx[p], pny = PR.ny[p];
       const nx = rx * pn + ca * tip, nz = rz * pn + sa * tip, ny = pny;
@@ -584,8 +589,8 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const col = shadeHex(HEDGE, 0.92 + (f.v % 4) * 0.05);
         // Low planting is small stuff: shown to the middle level (170 m), as
         // the street props are; the hedge's collision stays.
-        // (0.13.3: sections every 2.2 m, were 5: a lumpy clipped top.)
-        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 2.2, 0.45);
+        // (0.13.3: sections every 3.4 m, were 5: a lumpy clipped top.)
+        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 3.4, 0.45);
         if (Math.abs(sa) < 0.02 || Math.abs(ca) < 0.02) C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.5, EDGE_Y + 0.004, 0.75);
         break;
       }
@@ -671,6 +676,9 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         // kinds; the model variant comes from the position.
         if (f.v === 0 || f.v === 1) stamps.palm(x, z, y, f.h || 8, cellHash(Math.round(x * 4), Math.round(z * 4)));
         else stamps.tree(x, z, y, f.h || 6, cellHash(Math.round(x * 4) + f.v, Math.round(z * 4)));
+        // (0.13.3) On a lawn a soft shade under a broadleaf crown (a palm's
+        // is thin): the tree stands on the grass, not over a flat carpet.
+        if (f.v > 1 && LAWN_T[lot.type] && !(f.l > 0)) C.ao.at(x, z).aoDisc(x, z, (f.h || 6) * 0.36, EDGE_Y + 0.006, 0.72, 6);
         break;
       case 'shrub':
         shrubMound(P, x, z, y, Math.min(1.1, f.r || f.w / 2 || 0.7), f.h || 1, f.v + Math.abs(Math.round(x)), h);
@@ -793,9 +801,34 @@ export function* lotJob(C, lots, dress, over) {
       drawLotFeatures(C, lot, fs, Math.min(n, q + 2), stamps, q);
       if (over()) yield 'lots';
     }
+    if (LAWN_T[lot.type]) lawnMottle(C, lot);
     if (stats) { stats.lots++; stats.features += n; }
     if (over()) yield 'lots';
   }
+}
+
+// (0.13.3, "big sparse lawns") A big lawn is one flat green: a few wide,
+// soft darker patches on it (multiply-blended, the contact shadow
+// material, so no new program; under the paths, which lie higher), placed
+// by a hash of the lot, only where the lot's own cells are. One a 500 m2,
+// at most 8 a lot, 7 triangles each.
+const LAWN_T = { grass: 1, park: 1 };
+export const MOTTLE_PER_M2 = 500, MOTTLE_MAX = 8;
+export function lawnMottle(C, lot) {
+  const G = C.city && C.city.lotGrid;
+  if (!G || !C.ao) return 0;
+  const n = Math.min(MOTTLE_MAX, Math.floor(lot.area / MOTTLE_PER_M2));
+  let made = 0;
+  for (let k = 0; k < n * 2 && made < n; k++) {
+    const hx = cellHash(lot.id * 31 + k, 7 + k), hz = cellHash(lot.id * 17 + k, 91 + k * 3);
+    const x = lot.x0 + 3 + hx * (lot.x1 - lot.x0 - 6), z = lot.z0 + 3 + hz * (lot.z1 - lot.z0 - 6);
+    const i = Math.floor((x - G.x0) / G.cell), j = Math.floor((z - G.z0) / G.cell);
+    if (i < 0 || j < 0 || i >= G.w || j >= G.h || G.id[j * G.w + i] !== lot.id) continue;
+    const q = cellHash(i + k, j - k);
+    C.ao.at(x, z).aoDisc(x, z, 4.5 + 4 * q, EDGE_Y + 0.005, 0.84 + 0.06 * hx, 7);
+    made++;
+  }
+  return made;
 }
 
 // ---- Cars in the bays ----

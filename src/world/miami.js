@@ -877,8 +877,10 @@ function readWays(data, S, crop, landCell, coastLand, baseLand) {
 // every end of it meets another ramp of the group or a road that is kept
 // and goes on there: within RAMP_JOIN m of the inside of one of its
 // segments (1 m or more from that road's own ends), of the end of a
-// plain road (not a bridge, not a ramp) or of the ends of two roads. So a
-// kept ramp does not end at the loose end of a flyover stub.
+// plain road (not a bridge, not a ramp) or of the ends of two roads, and
+// one end of it merges into a kept freeway past its ends (an on or off
+// ramp of a crossing). So a kept ramp does not end at the loose end of a
+// flyover stub, nor join one freeway stub to another.
 const RAMP_JOIN = 2.2;
 function keepJoinedRamps(R) {
   const list = R.ramps, n = list.length;
@@ -900,16 +902,19 @@ function keepJoinedRamps(R) {
       }
     }
   }
-  // Ends that hang loose (no ramp, no kept road going on): their group stays out.
-  const bad = new Uint8Array(n);
+  // Ends that hang loose (no ramp, no kept road going on) keep their group
+  // out; so does a group that merges into no kept freeway.
+  const bad = new Uint8Array(n), onto = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     for (let e = 0; e < 2; e++) {
       if (touch[i * 2 + e]) continue;
       const P = pts[i], q = e ? P.length - 2 : 0;
-      if (!meetsWay(R, P[q], P[q + 1])) bad[findRoot(up, i)] = 1;
+      const m = meetsWay(R, P[q], P[q + 1]);
+      if (!m) bad[findRoot(up, i)] = 1;
+      else if (m === 2) onto[findRoot(up, i)] = 1;
     }
   }
-  for (let i = 0; i < n; i++) if (!bad[findRoot(up, i)]) readRoad(R, list[i], true);
+  for (let i = 0; i < n; i++) if (!bad[findRoot(up, i)] && onto[findRoot(up, i)]) readRoad(R, list[i], true);
 }
 // True when (x, z) is within RAMP_JOIN of a segment of P (flat x, z pairs)
 // from k0 to k1; with skip >= 0, not within skip m of P's own two ends.
@@ -926,20 +931,26 @@ function nearLine(P, k0, k1, x, z, skip) {
   }
   return false;
 }
-// True when a road read so far goes on at (x, z) (see keepJoinedRamps).
+// Whether a road read so far goes on at (x, z) (see keepJoinedRamps):
+// 0 no, 1 yes, 2 yes and it is a freeway (motorway or trunk) going on past
+// the point (the ramp merges into it or leaves it there).
 function meetsWay(R, x, z) {
-  let ends = 0;
+  let ends = 0, got = 0;
   for (let w = 0; w < R.ways.length; w++) {
-    const k0 = R.wayS[w], k1 = R.wayE[w];
-    if (nearLine(R.P, k0, k1, x, z, 1)) return true;
-    if (!nearLine(R.P, k0, k1, x, z, -1)) continue;
+    const k0 = R.wayS[w], k1 = R.wayE[w], info = R.ways[w];
+    if (nearLine(R.P, k0, k1, x, z, 1)) {
+      if (info.cls === 'motorway' || info.cls === 'trunk') return 2;
+      got = 1;
+      continue;
+    }
+    if (got || !nearLine(R.P, k0, k1, x, z, -1)) continue;
     // At its end: a plain road goes on from there; a bridge or another
     // ramp may itself hang loose (a stub of a dropped flyover).
-    const info = R.ways[w];
-    if ((!info.bridge && info.cls !== 'motorway_link') || ++ends >= 2) return true;
+    if ((!info.bridge && info.cls !== 'motorway_link') || ++ends >= 2) got = 1;
   }
-  return false;
+  return got;
 }
+
 // The district key at a point straight from the hand table (the raster
 // comes later): for the sidewalk width of a road. (The last rect holding
 // the point wins: read from the end.)

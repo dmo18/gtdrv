@@ -9,7 +9,7 @@
 // toward +z.
 import { createRng, firstNext } from '../core/rng.js';
 import { SERVICE_SPOTS } from '../entities/servicevehicles.js';
-import { onJunction, junctionsInBox } from './junctions.js';
+import { onJunction, junctionsInBox, pairGap } from './junctions.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -740,6 +740,7 @@ export const GROUND_RINGS = 2;
 const T_VERGE = LOT_TYPES.indexOf('verge') + 1, T_AIRFIELD = LOT_TYPES.indexOf('airfield') + 1;
 const T_PLAZA = LOT_TYPES.indexOf('plaza') + 1, T_GRASS = LOT_TYPES.indexOf('grass') + 1;
 const PED_REACH = 7; // m past a pedestrian street's paving that stays paved
+const MEDIAN_REACH = 40; // m: a pair further apart is two roads, not one with a median
 // (0.13.3) A beach runs on SAND_RINGS cells further into the land in no
 // lot beside it, up to the carriageway of the nearest road: between a
 // beach and a causeway or a shore road the setback band can be wider
@@ -823,12 +824,16 @@ function spreadGround(city, typeGrid, land, W, H) {
   // half the data's median each, but the real gap between the curbs of a
   // pair wanders past that, and on a diagonal road the rings below do not
   // reach its middle: a jagged gray seam of bare land down the lawn.
-  // Under a band the lawn is hidden, so it only shows in that gap.)
+  // Under a band the lawn is hidden, so it only shows in that gap. And
+  // the land in no lot out to the middle of the real gap to the partner,
+  // where that is wider than the data's median: up to MEDIAN_REACH m.)
   for (const e of city.edges || []) {
     if (!(e.median > 4) || e.bridge || !(e.width > 0)) continue;
     const a = city.nodes[e.a], ux = e.ux, uz = e.uz, L = e.length;
     const lc = (e.off || 0) - e.width / 2, lo = lc - e.median / 2 - 3; // (0.13.3: 3 m past the middle, was 1.5: a 5 m cell whose center is off a narrow band)
-    const r = Math.abs(lo) + 3;
+    const pg = e.pair >= 0 ? Math.max(pairGap(city, e, 0, lc), pairGap(city, e, L, lc)) : 0;
+    const reach = pg < MEDIAN_REACH ? pg / 2 + 3 : 0;
+    const r = Math.max(Math.abs(lo), Math.abs(lc) + reach) + 3;
     const bx = a.x + ux * L, bz = a.z + uz * L;
     const i0 = Math.max(0, Math.floor((Math.min(a.x, bx) - r - G.x0) / cell)), i1 = Math.min(W - 1, Math.floor((Math.max(a.x, bx) + r - G.x0) / cell));
     const j0 = Math.max(0, Math.floor((Math.min(a.z, bz) - r - G.z0) / cell)), j1 = Math.min(H - 1, Math.floor((Math.max(a.z, bz) + r - G.z0) / cell));
@@ -838,7 +843,9 @@ function spreadGround(city, typeGrid, land, W, H) {
         if (!land[c]) continue;
         const x = G.x0 + (i + 0.5) * cell - a.x, z = G.z0 + (j + 0.5) * cell - a.z;
         const d = x * ux + z * uz, o = -x * uz + z * ux;
-        if (d >= -1 && d <= L + 1 && o <= lc && o >= lo) ground[c] = T_GRASS;
+        if (!(d >= -1 && d <= L + 1 && o <= lc)) continue;
+        if (o >= lo) ground[c] = T_GRASS;
+        else if (reach && !typeGrid[c] && o >= lc - Math.min(reach, pairGap(city, e, d, lc) / 2 + 3)) ground[c] = T_GRASS;
       }
     }
   }

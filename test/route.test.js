@@ -285,3 +285,31 @@ test('the GPS keeps out of the other event gates: fewer gates crossed, never a b
   assert.ok(longer <= pairs * 0.1, 'few routes take a big detour (' + longer + ' of ' + pairs + ')');
   rr.setAvoid(null);
 });
+
+// 0.13.3: Downtown's islands (Watson, Palm, Hibiscus, Star) were reachable
+// only out, never in: the ramps from Biscayne Boulevard onto the eastbound
+// MacArthur Causeway were left out with the flyovers (world/miami.js
+// keepJoinedRamps). Every place a goal can be put there gets a full legal
+// route from the start (before: the Watson garage, aviary, helipad, the
+// Palm Island ramp and secret and 6 race checkpoints ended at the nearest
+// road across the water).
+test('Downtown: every garage, landmark, pad, secret, ramp and race checkpoint gets a full legal route from the start', () => {
+  const city = regionCity('miami-downtown');
+  const rr = createRouter(city), r = createRoute();
+  const s = city.spawn;
+  const goals = [
+    ...city.garages, ...city.landmarkSites, ...city.helipads, ...city.secretSpots, ...city.rampSpots, ...city.pois,
+    ...city.courses.filter((c) => c.checkpoints.every((cp) => cp.kind === 'ground')).flatMap((c) => c.checkpoints),
+  ].filter((p) => Number.isFinite(p.x) && Number.isFinite(p.z));
+  assert.ok(goals.length > 60, goals.length + ' goals');
+  const partial = [];
+  for (const p of goals) {
+    assert.ok(rr.search(s.x, s.z, s.heading, p.x, p.z, r), 'a route to ' + (p.id || p.name || '') + ' ' + p.x + ', ' + p.z);
+    if (r.partial) partial.push((p.id || p.name || '?') + ' ' + Math.round(p.x) + ', ' + Math.round(p.z));
+    else assertLegal(city, r);
+  }
+  assert.deepEqual(partial, []);
+  // Watson Island itself, by name.
+  const watson = city.garages.find((g) => g.id === 'g-watson');
+  assert.ok(watson && rr.search(s.x, s.z, s.heading, watson.x, watson.z, r) && !r.partial, 'the Watson Island garage');
+});
