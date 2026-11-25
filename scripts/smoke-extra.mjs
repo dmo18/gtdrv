@@ -777,6 +777,12 @@ export default async function extra(page, check) {
     // let the unpowered heli drop into the sea first (a ditch, not the
     // blast), which made this check depend on the machine's frame rate.
     const wasRunning = await page.evaluate(() => { const g = window.__rw; const r = g.loop.running; g.loop.stop(); return r; });
+    // The fleet fills its berths a few at a time, so on a slow machine the
+    // heli may not exist yet: step the held sim until it does (up to 60 s).
+    await page.evaluate(() => {
+      const g = window.__rw;
+      for (let i = 0; i < 3600 && !g.vehicles.find((v) => v.spec.id === 'heli' && v.home && !v.driver); i++) g.step(1 / 60);
+    });
     const boarded2 = await spawnAndBoard('heli', { x: sea.x, z: sea.z, y: 25 });
     const boom = await page.evaluate(() => {
       const g = window.__rw;
@@ -785,7 +791,7 @@ export default async function extra(page, check) {
       g.combat.explode(c.x, c.y, c.z, 20);
       for (let i = 0; i < 90; i++) g.step(1 / 60);
       const w = g.player.walker;
-      return { wrecked: !!c.wrecked, onFoot: !g.player.vehicle && g.player.mode === 'foot', shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
+      return { why: [c.crashed, +c.y.toFixed(1), c.health, c.spec.id].join(','), wrecked: !!c.wrecked, onFoot: !g.player.vehicle && g.player.mode === 'foot', shore: +g.city.shoreDist(w.x, w.z).toFixed(1) };
     });
     check(boarded2 && !boom.wrecked && !boom.onFoot, `the player cannot die: a blast over the sea leaves the craft and pilot unharmed (${JSON.stringify(boom)})`);
     if (wasRunning) await page.evaluate(() => window.__rw.loop.start());

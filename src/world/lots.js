@@ -1622,7 +1622,7 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
         // length (a unit per FEATURE_RUN m), so the fill below adds fewer
         // beds and the feature count a hectare does not grow.
         if (ok) {
-          const pf = out[out.length - 1], pl = pf.l, pc = Math.cos(pf.heading), ps = Math.sin(pf.heading);
+          const pf = out[out.length - 1], pl = pf.l || 0, pc = Math.cos(pf.heading), ps = Math.sin(pf.heading);
           const nb = Math.max(1, Math.min(4, Math.floor(pl / 18)));
           for (let k = 0; k < nb; k++) {
             const t = ((k + 0.5) / nb - 0.5) * pl, sd = (k + lot.seed) % 2 ? -2.1 : 2.1;
