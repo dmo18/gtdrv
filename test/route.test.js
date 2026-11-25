@@ -274,7 +274,7 @@ test('the GPS keeps out of the other event gates: fewer gates crossed, never a b
     rr.setAvoid(evs, gx, gz);
     if (!rr.search(sx, sz, a.heading, gx, gz, r, true, b.heading) || r.partial) continue;
     const c1 = gatesCrossed(r, evs, b), l1 = r.length;
-    assert.ok(c1 <= c0 + 0 || l1 < l0 + 1, 'a penalty does not add crossings: ' + a.id + ' to ' + b.id);
+    assert.ok(c1 <= c0, 'a penalty does not add crossings: ' + a.id + ' to ' + b.id);
     plain += c0; avoid += c1; pairs++; lenPlain += l0; lenAvoid += l1;
     if (l1 > l0 * 1.5 + 100) longer++;
   }

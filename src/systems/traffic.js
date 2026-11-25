@@ -1051,7 +1051,7 @@ export function createTraffic(game, { max = 14 } = {}) {
       if (pass === 1) best = n1 <= nm ? 1 : -1;
       for (let m = game.vehicles.length - 1; m >= 0; m--) {
         const o = game.vehicles[m];
-        if (!o.parked) continue;
+        if (!o.parked || o.home || o.svcHome || o.staged || o === game.player.vehicle) continue;
         const rx = o.x - lp.x, rz = o.z - lp.z;
         const al = rx * hx + rz * hz;
         if (al < STAGE_BAY[0] || al > STAGE_BAY[1]) continue;
