@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   TEMPLATES, TEMPLATE_INFO, trapTargets, missTargets, jumpTargets, jumpDistance, dashTargets, dashLimit, heatTargets, wreckTargets,
-  refSpeed, medalFor, better, valueText, eventPoints, createEventRun, statusLine, statusKey, startLine, resultLine, mph,
+  refSpeed, medalFor, better, valueText, eventPoints, createEventRun, statusLine, statusKey, startLine, resultLine, mph, markMedal,
   TRAP_CAP, MISS_LIMIT, WRECK_LIMIT, HEAT_COOL, DASH_ARRIVE, END_HOLD,
 } from '../src/core/streetevents.js';
 import { COOLDOWN } from '../src/systems/police.js';
@@ -187,4 +187,39 @@ test('lines: one short line each, US units, no step allocates a new line unless 
   assert.equal(resultLine(t), 'Silver! 70 mph (gold 80 mph)');
   assert.equal(statusLine(t, 0), '');
   assert.equal(statusKey(t, 0), -1);
+});
+
+test('the running line shows the next medal: in a trap the one above the speed, in a drop or an escape the best the clock allows', () => {
+  const run = createEventRun();
+  const T = { gold: 80, silver: 68, bronze: 54 };
+  run.start(ev('trap', { tx: 500, tz: 0, targets: T }));
+  const lineAt = (mphNow) => {
+    run.step(DT, facts({ x: 0, px: -0.1, speed: mphNow / mph(1) }));
+    return [markMedal(run), statusLine(run, 300), statusKey(run, 300)];
+  };
+  const a = lineAt(40), b = lineAt(60), c = lineAt(75), d = lineAt(85);
+  assert.deepEqual([a[0], b[0], c[0], d[0]], ['bronze', 'silver', 'gold', 'gold']);
+  assert.equal(a[1], 'Trap 984 ft · bronze 54 mph');
+  assert.equal(b[1], 'Trap 984 ft · silver 68 mph');
+  assert.equal(d[1], 'Trap 984 ft · gold 80 mph');
+  assert.ok(a[2] !== b[2] && b[2] !== c[2] && c[2] === d[2], 'the key moves with the medal shown, so the line is rebuilt');
+  for (const tpl of ['dash', 'heat']) {
+    const r = createEventRun();
+    r.start(ev(tpl, { tx: 5000, tz: 0, limit: 90, targets: { gold: 30, silver: 40, bronze: 50 } }));
+    const seen = [];
+    let key = -2;
+    for (let i = 0; i < 60 * 55; i++) {
+      r.step(DT, facts({ x: 0, px: 0, stars: 1 }));
+      const k = statusKey(r, 900);
+      if (k !== key) { key = k; seen.push(statusLine(r, 900)); }
+      // the medal shown is always the one stopping now would earn (or bronze, once past it)
+      const m = markMedal(r);
+      assert.equal(m, medalFor(r.ev, r.t) || 'bronze', tpl + ' at ' + r.t.toFixed(2));
+    }
+    const pre = tpl === 'heat' ? 'Lose them ' : '';
+    assert.ok(seen.includes(pre + '0:29 · gold 0:30'), seen.join(' | '));
+    assert.ok(seen.includes(pre + '0:31 · silver 0:40'), seen.join(' | '));
+    assert.ok(seen.includes(pre + '0:45 · bronze 0:50'), seen.join(' | '));
+    assert.ok(seen.every((l) => l.length <= 30), 'short lines');
+  }
 });

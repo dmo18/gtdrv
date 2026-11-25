@@ -653,6 +653,21 @@ const CSS = `
   /* the prompt strip: 20 high under the keep-out rect (it ends at 90 percent of the height), 190 wide */
   .rw-prompt { width: 190px; margin-left: -95px; height: 20px; line-height: 18px; font-size: 12px; }
 }
+
+/* Accessibility (0.13.0, core/access.js): data attributes on <html>. Larger HUD text uses --rw-text-scale; high
+   contrast adds white outlines (outline, so no box moves); both are off by default and change no layout. */
+html[data-rw-text="large"] .rw-msg, html[data-rw-text="large"] .rw-prompt { font-size: calc(14px * var(--rw-text-scale, 1)); }
+html[data-rw-text="large"] .rw-nav { font-size: calc(13px * var(--rw-text-scale, 1)); }
+html[data-rw-text="large"] .rw-street, html[data-rw-text="large"] .rw-navrem { font-size: calc(11px * var(--rw-text-scale, 1)); }
+html[data-rw-text="large"] .rw-speed { font-size: calc(28px * var(--rw-text-scale, 1)); }
+html[data-rw-text="large"] .rw-money { font-size: calc(17px * var(--rw-text-scale, 1)); }
+html[data-rw-text="large"] .rw-combo { font-size: calc(12px * var(--rw-text-scale, 1)); }
+html[data-rw-contrast="high"] .rw-msg, html[data-rw-contrast="high"] .rw-prompt, html[data-rw-contrast="high"] .rw-nav,
+html[data-rw-contrast="high"] .rw-street, html[data-rw-contrast="high"] .rw-speedbox, html[data-rw-contrast="high"] .rw-money,
+html[data-rw-contrast="high"] .rw-hpmeter, html[data-rw-contrast="high"] .rw-clock, html[data-rw-contrast="high"] .rw-objcell {
+  outline: 2px solid #fff; outline-offset: -2px; background-color: rgba(0, 0, 0, 0.82); color: #fff; text-shadow: 0 0 2px #000, 0 1px 3px #000;
+}
+html[data-rw-contrast="high"] .rw-btn { outline: 2px solid #fff; outline-offset: -2px; }
 `;
 
 // Adds the style element once (safe to call many times).

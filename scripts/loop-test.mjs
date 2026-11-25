@@ -50,6 +50,10 @@ const installDriver = () => {
   const st = { stuck: 0, rev: 0, revSteer: 0, revs: 0, stucks: 0, lx: 0, lz: 0, lt: 0, toasts: [], steps: 0, ms: 0, worst: 0 };
   const toast0 = g.hud.toast;
   g.hud.toast = (t, s, k) => { st.toasts.push([Math.round(g.time * 10) / 10, k || '', String(t)]); toast0(t, s, k); };
+  // The event line as the prompt strip gets it (the driver steps without drawing: it asks for the line now and then).
+  st.eventLines = [];
+  const setEvent0 = g.hud.setEvent;
+  g.hud.setEvent = (t) => { if (t && st.eventLines.length < 400 && st.eventLines[st.eventLines.length - 1] !== t) st.eventLines.push(String(t)); setEvent0(t); };
   function ahead(dist) {
     const tr = g.objective.tracker, r = tr.route;
     if (!tr.active || !r.ok || r.n < 2) return null;
@@ -145,6 +149,7 @@ const installDriver = () => {
       if (o.brake) idle(); else drive(o);
       const a = performance.now();
       g.step(1 / 60);
+      if (i % 30 === 0 && g.streetEvents.active) g.streetEvents.render();
       const d = performance.now() - a;
       st.ms += d; st.steps++;
       if (d > st.worst) st.worst = d;
@@ -224,6 +229,9 @@ try {
   await page.evaluate(() => { const e = window.__rw.streetEvents.list[0]; window.__lt.run({ seconds: 30, cruise: 20, pass: true, line: { x: e.x, z: e.z, dx: e.dx, dz: e.dz }, until: (g) => !!g.streetEvents.active }); });
   s = await state();
   check(s.active === info.first && s.t - t0 <= 20, `pulled into the first near-miss run within 20 s (${(s.t - t0).toFixed(1)} s, ${s.active})`);
+  const stagedN = await page.evaluate(() => window.__rw.vehicles.filter((v) => v.staged && !v.removed).length);
+  check(stagedN >= 2, `slow cars are staged in the first run's lane to pass (${stagedN})`);
+  const firstRunT = s.t;
   await shot('02-traffic-run');
 
   // ---- beat 2: a first medal within 2 minutes (RETRY when it takes two goes) ----
@@ -244,6 +252,8 @@ try {
     }
   }
   check(!!medal, `a first medal (${medal}) at ${s.t} s`);
+  const moving = await page.evaluate((t0) => window.__lt.st.toasts.filter((x) => x[0] >= t0 && x[1] === 'score' && /^(Clean pass|Near miss|Head-on miss)/.test(x[2])).map((x) => x[2]), firstRunT);
+  check(moving.length >= 1, `the first run pays passes on moving cars, not only parked ones (${moving.length}: ${moving.slice(0, 4).join(', ')})`);
   check(s.t - t0 <= 120, `the first medal comes within 2 minutes (${(s.t - t0).toFixed(1)} s)`);
   await shot('03-first-medal');
 
@@ -251,6 +261,25 @@ try {
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 7 }));
   s = await state();
   check(s.step === 'police', `the intro moves on to the police beat (${s.step}): "${s.line}"`);
+  // The GPS leads to the red gate from behind: its line ends running the gate's way and never crosses the gate backward.
+  const behind = () => page.evaluate(() => {
+    const g = window.__rw, ev = g.streetEvents.tracked, r = g.objective.tracker.route;
+    if (!ev || !ev.id || !r.ok || r.n < 2) return { ok: false, why: 'no route to a gate' };
+    let i = r.n - 2;
+    while (i > 0 && Math.hypot(r.x[r.n - 1] - r.x[i], r.z[r.n - 1] - r.z[i]) < 4) i--;
+    const end = (r.x[r.n - 1] - r.x[i]) * ev.dx + (r.z[r.n - 1] - r.z[i]) * ev.dz;
+    let back = 0;
+    for (let k = 1; k < r.n; k++) {
+      const a0 = (r.x[k - 1] - ev.x) * ev.dx + (r.z[k - 1] - ev.z) * ev.dz, a1 = (r.x[k] - ev.x) * ev.dx + (r.z[k] - ev.z) * ev.dz;
+      if (!(a0 > 0 && a1 <= 0)) continue;
+      const t = a0 / (a0 - a1);
+      const cx = r.x[k - 1] + (r.x[k] - r.x[k - 1]) * t - ev.x, cz = r.z[k - 1] + (r.z[k] - r.z[k - 1]) * t - ev.z;
+      if (Math.abs(-cx * ev.dz + cz * ev.dx) <= ev.w + 1.2) back++;
+    }
+    return { ok: end > 0 && back === 0, id: ev.id, end: Math.round(end * 10) / 10, back, m: Math.round(r.length) };
+  });
+  const ap = await behind();
+  check(ap.ok, `the GPS leads to the red gate from behind (${JSON.stringify(ap)})`);
   await shot('04-to-red-gate');
   let escaped = false;
   for (let go = 0; go < 3 && !escaped; go++) {
@@ -277,6 +306,9 @@ try {
   await page.evaluate(() => window.__lt.run({ brake: true, seconds: 6 }));
   s = await state();
   check(s.step === 'ramp', `the intro points at a ramp (${s.step}): "${s.line}"`);
+  await page.evaluate(() => window.__lt.run({ brake: true, seconds: 0.5 }));
+  const ap2 = await behind();
+  check(ap2.ok, `the GPS leads to the purple gate from behind (${JSON.stringify(ap2)})`);
   let jumped = false;
   for (let go = 0; go < 3 && !jumped; go++) {
     const drove = await page.evaluate(() => {
@@ -364,6 +396,12 @@ try {
       return out;
     }, tpl);
     console.log('   ' + tpl + ': ' + r.join(' | '));
+    if (tpl === 'trap' || tpl === 'dash') {
+      const lines = await page.evaluate((tpl) => { const L = window.__lt.st.eventLines; const re = tpl === 'trap' ? /^Trap / : /^\d+:\d\d · /; const out = L.filter((l) => re.test(l)); L.length = 0; return out; }, tpl);
+      const marks = new Set(lines.map((l) => (/ · (bronze|silver|gold) /.exec(l) || [])[1]).filter(Boolean));
+      check(lines.length > 0 && lines.every((l) => / · (bronze|silver|gold) /.test(l)), `the ${tpl} line shows the next medal's mark (${[...marks].join(', ')}; ${lines.slice(0, 3).join(' | ')})`);
+      if (tpl === 'trap') check(marks.size >= 2, `the trap's mark moves up with the speed (${[...marks].join(' to ')})`);
+    }
     check(r.some((x) => / done /.test(x)), `a ${tpl} event was completed`);
     if (tpl === 'trap') await shot('11-speed-trap-result');
     if (tpl === 'dash') await shot('12-rush-drop-result');

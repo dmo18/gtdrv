@@ -57,7 +57,7 @@ Juice (`src/systems/flow.js`; off under Reduce motion except the text and the so
 | Smash, ram | "Smash x4  +40", "Ram  +80" | the prop's and the crash's own | kick 4, 2 frame hold |
 | Takedown | "Wrecked  +250" | the blast (combat) | kick 6, combat's 4 frame hold |
 | Escape | "Escaped  +1,000" | chime | 3 frame hold |
-| Tier up | "FLOW x3" | chime | kick 8, 2 frame hold, edge flash in the tier color |
+| Tier up | "FLOW x3" | its own bigger chime (`chimeTier`: a low thump and a four-note rise, a whole tone higher per tier; 0.13.0) | kick 8, 2 frame hold, edge flash in the tier color |
 | Bank | "Banked  4,620  (x3 bonus)" or "Best flow run!  4,620" | chime | 3 frame hold, green edge flash |
 | Crash, wipe | "Crash  -840", "Run lost  -4,200" | fail tone | red edge flash |
 
@@ -74,7 +74,10 @@ from a gate of the same template, clear of garages, travel pads and the old ramp
 posts and a beam across the street with a see-through curtain in the template's color (three
 instanced draws for all of them). Driving through it the right way at 7 mph or more starts the
 event at once: no menu, no countdown, no card. The wrong way says "Wrong way: turn around, then
-drive through." (the play test showed the player is then on the near side, facing away). A gate the GPS leads to is approached from 18 m behind it, in the lane.
+drive through." (the play test showed the player is then on the near side, facing away). A gate the GPS leads to is approached from 18 m behind it, in the lane, and the route
+arrives the gate's way (0.13.0, core/route.js `search(..., arrive)`): it never drives the gate's
+street back through the gate, and turns round at a dead end if that is the only way in. The first
+heat escape and the first jump face away from the start place, so the natural way there is from behind.
 
 | template (color) | rule | value | bronze / silver / gold | limit |
 |---|---|---|---|---|
@@ -89,8 +92,9 @@ Sample (Miami Beach): Ocean Dr near-miss run 2 / 3 / 5; a 420 m trap 61 / 77 / 9
 a 95 m run-up 52 / 76 / 106 ft; a 600 m drop 0:41 / 0:51 / 1:06 (gold first); two stars 0:30 /
 0:44 / 1:03.
 
-While it runs: one line in the prompt strip ("Passes 2/3 · 0:31", "Trap 320 ft · gold 91 mph",
-"0:24 · gold 0:41"), the white trap line or the green drop gate in the world, and for a rush
+While it runs: one line in the prompt strip ("Passes 2/3 · 0:31", "Trap 320 ft · silver 77 mph",
+"0:24 · gold 0:41"); a trap shows the next medal above the speed the car is doing, a rush drop
+and a heat escape the best medal the clock still allows (gold, then silver, then bronze; 0.13.0), the white trap line or the green drop gate in the world, and for a rush
 drop the GPS pill. The result is one line in the top stack ("Silver! 84 mph (gold 91 mph)"), a
 chime or the fail tone, a 3 frame hold for a medal and the slow motion beat for gold. Points:
 1,000 / 2,000 / 3,000, +500 for a new best; no medal, no points. The flow run is banked.
@@ -136,7 +140,9 @@ two rows of parked cars with a traffic light every block, so the first run would
 a ram: until the first medal, moving traffic 70 to 170 m ahead in the player's lane is taken
 away (and the queue at the gate once, as the run starts), and a queue standing 40 to 70 m ahead
 at a light goes before the player reaches it. The parked cars stay: they are what the player
-passes close. Until the police beat a bump or a fast stretch does not call the police (the
+passes close. So the run also pays passes on moving cars, three slow cars (6 m/s, 13 mph) are
+staged in the lane 45, 85 and 130 m past the gate when the player comes within 75 m of it from
+behind (each approach, a RETRY too); the lane clearing keeps them while they move (0.13.0). Until the police beat a bump or a fast stretch does not call the police (the
 first play-through got a star from a bump at 7 s, before anything had explained the police). One line at a time in the top stack, 9 words at most, the GPS on the
 beat's gate. Beats wait for what the player does; a beat's line comes again after 35 s without
 progress.

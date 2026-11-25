@@ -132,6 +132,7 @@ export const END_HOLD = 0.6; // seconds a counting event lingers after gold (the
 export function createEventRun() {
   const st = {
     ev: null, on: false, t: 0, value: NaN, count: 0, result: '', why: '', medal: null, armed: false, endT: 0,
+    v: 0, // m/s, the speed of the last step (the trap's line shows the medal it is on for)
     daily: -1, // the Daily Three slot this run counts for (set by the game system)
   };
   st.start = function start(ev) {
@@ -145,6 +146,7 @@ export function createEventRun() {
     st.medal = null;
     st.armed = false;
     st.endT = 0;
+    st.v = 0;
     return st;
   };
   function end(result, why) {
@@ -160,6 +162,7 @@ export function createEventRun() {
     if (!st.on) return '';
     const ev = st.ev;
     st.t += dt;
+    st.v = f.speed || 0;
     if (!f.inCar) return end('fail', 'Left the car');
     if (f.wrecked) return end('fail', 'Wrecked');
     const tpl = ev.tpl;
@@ -213,9 +216,25 @@ export function statusKey(st, dist) {
   const left = Math.max(0, Math.ceil(st.ev.limit - st.t));
   const tpl = st.ev.tpl;
   if (tpl === 'miss' || tpl === 'wreck') return st.count * 1000 + left;
-  if (tpl === 'dash') return Math.floor(st.t) * 1000 + Math.min(999, Math.round((dist || 0) / 20));
-  if (tpl === 'heat') return Math.floor(st.t);
-  return left * 1000 + Math.min(999, Math.round((dist || 0) / 10));
+  if (tpl === 'dash') return (medalRank(markMedal(st)) * 100000 + Math.floor(st.t)) * 1000 + Math.min(999, Math.round((dist || 0) / 20));
+  if (tpl === 'heat') return medalRank(markMedal(st)) * 100000 + Math.floor(st.t);
+  return (medalRank(markMedal(st)) * 1000 + left) * 1000 + Math.min(999, Math.round((dist || 0) / 10));
+}
+// The medal whose mark the running line shows: in a trap the next one
+// above the speed the car is doing (gold once over it); in a rush drop or
+// a heat escape the best one the clock still allows (bronze once all are
+// past). Other templates: gold.
+export function markMedal(st) {
+  const ev = st.ev, t = ev.targets;
+  if (ev.tpl === 'trap') {
+    const v = mph(st.v || 0);
+    return v < t.bronze ? 'bronze' : v < t.silver ? 'silver' : 'gold';
+  }
+  if (ev.tpl === 'dash' || ev.tpl === 'heat') {
+    // a medal while the time is still at or under its mark (medalFor)
+    return st.t <= t.gold ? 'gold' : st.t <= t.silver ? 'silver' : 'bronze';
+  }
+  return 'gold';
 }
 export function statusLine(st, dist) {
   if (!st.on) return '';
@@ -223,11 +242,11 @@ export function statusLine(st, dist) {
   const left = clock(Math.max(0, Math.ceil(ev.limit - st.t)));
   const far = formatDistance(Math.round((dist || 0) / 3) * 3); // "320 ft", "0.3 mi"
   switch (ev.tpl) {
-    case 'trap': return 'Trap ' + far + ' · gold ' + t.gold + ' mph';
+    case 'trap': { const m = markMedal(st); return 'Trap ' + far + ' · ' + m + ' ' + t[m] + ' mph'; }
     case 'miss': return 'Passes ' + st.count + '/' + nextTarget(ev, st.count) + ' · ' + left;
     case 'jump': return 'Ramp ' + far + ' · gold ' + t.gold + ' ft';
-    case 'dash': return clock(st.t) + ' · gold ' + clock(t.gold);
-    case 'heat': return 'Lose them ' + clock(st.t) + ' · gold ' + clock(t.gold);
+    case 'dash': { const m = markMedal(st); return clock(st.t) + ' · ' + m + ' ' + clock(t[m]); }
+    case 'heat': { const m = markMedal(st); return 'Lose them ' + clock(st.t) + ' · ' + m + ' ' + clock(t[m]); }
     default: return 'Smashed ' + st.count + '/' + nextTarget(ev, st.count) + ' · ' + left;
   }
 }

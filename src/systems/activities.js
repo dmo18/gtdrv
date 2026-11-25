@@ -70,7 +70,7 @@ export function createActivities(game, uiRoot = null) {
   const radiusOf = (c) => START_RADIUS[c.type] || 9;
   const progress = () => game.progress;
 
-  const markers = game.scene ? createMarkers(game.scene, { seaY: game.seaY ?? 0 }) : null;
+  const markers = game.scene ? createMarkers(game.scene, { seaY: game.seaY ?? 0, colorSafe: () => !!(game.progress && game.progress.settings && game.progress.settings.colorSafe === true) }) : null;
   const ui = typeof document !== 'undefined'
     ? createPanel(uiRoot, { onStart: () => acceptOffer(), onQuit: () => abort() })
     : null;

@@ -374,7 +374,7 @@ export function createChaseCamera(camera) {
     const a = clamp((spd - lastSpeed) / dt, -30, 30);
     lastSpeed = spd;
     accel += (a - accel) * Math.min(1, 4 * dt);
-    const wantKick = clamp(accel * feel.fovKick, 0, 4);
+    const wantKick = shakeScale > 0 ? clamp(accel * feel.fovKick, 0, 4) : 0; // Reduce motion (shake 0): no FOV kick either
     fovKick += (wantKick - fovKick) * Math.min(1, (wantKick > fovKick ? 3 : 1.5) * dt);
     // Weight: roll into the turn from the cornering g, pitch from braking.
     let wantRoll = 0, wantPitch = 0;

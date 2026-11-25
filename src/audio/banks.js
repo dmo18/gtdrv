@@ -607,6 +607,25 @@ const SHOTS = {
     }
     return fadeEdges(normalize(out, 0.7), 16, 2000);
   },
+  // A flow tier up (docs/LOOP.md a): bigger than the chime, from the same
+  // mallet partials. A soft low thump, then an original four-note rising
+  // motif (C5 E5 G5 C6) over a held octave below, so it lands on the body
+  // and not only on the top end.
+  chimeTier() {
+    const n = len(1.5);
+    const out = z(n);
+    sweep(out, 150, 70, 0.05, 0.5, 0.35);
+    const notes = [[0.02, 523.3], [0.1, 659.3], [0.18, 784], [0.27, 1046.5]];
+    for (const [t, f] of notes) {
+      const at = Math.floor(t * R.sr);
+      addMode(out, at, f, 0.36, 0.55);
+      addMode(out, at, f / 2, 0.42, 0.3);
+      addMode(out, at, f * 2.01, 0.08, 0.08);
+    }
+    addMode(out, Math.floor(0.27 * R.sr), 261.6, 0.6, 0.35);
+    lp1(out, 3200, { loop: false });
+    return fadeEdges(normalize(out, 0.78), 16, 3000);
+  },
   fail() {
     const n = len(0.75);
     const out = z(n);

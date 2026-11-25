@@ -1023,6 +1023,13 @@ export function createAudio(game) {
     if (!ready) return;
     voices.play(bus.ui, g, 0, (v, t) => v.add(name, t, 1, 1));
   }
+  // A flow tier up: the bigger chime, louder than the plain one and
+  // raised a whole tone per tier (x2 as made, x5 three whole tones up).
+  function onFlowTier(tier) {
+    if (!ready) return;
+    const rate = Math.pow(2, (2 * Math.max(0, Math.min(3, (tier | 0) - 2))) / 12);
+    voices.play(bus.ui, 0.85, 0, (v, t) => v.add('chimeTier', t, 1, rate));
+  }
   function onSplash(a, b) {
     if (!ready) return;
     let x = fin(game.player.x);
@@ -1703,6 +1710,7 @@ export function createAudio(game) {
         ev.on('exit', guard(onExit)),
         ev.on('ui', guard(() => uiShot('click', 0.5))),
         ev.on('reward', guard(() => uiShot('chime', 0.6))),
+        ev.on('flowTier', guard(onFlowTier)),
         ev.on('fail', guard(() => uiShot('fail', 0.6))),
         ev.on('checkpoint', guard(() => uiShot('checkpoint', 0.5))),
         ev.on('splash', guard(onSplash)),

@@ -112,6 +112,8 @@ test('each template keeps its rule', () => {
     // the first heat escape and the first jump are a short drive from the start
     const jump = ev.find((e) => e.tpl === 'jump');
     for (const e of [heats[0], jump]) assert.ok(Math.hypot(e.x - c.spawn.x, e.z - c.spawn.z) < 800, id + ' ' + e.id + ' far from the start');
+    // ... and face away from it: driven to from the start, they are reached from behind
+    for (const e of [heats[0], jump]) assert.ok((e.x - c.spawn.x) * e.dx + (e.z - c.spawn.z) * e.dz > 0, id + ' ' + e.id + ' faces the start');
     assert.equal(eventRamps(ev).length, ev.filter((e) => e.tpl === 'jump').length);
     for (const r of eventRamps(ev)) for (const o of c.rampSpots.filter((s) => !s.event)) assert.ok(Math.hypot(r.x - o.x, r.z - o.z) > 100);
   }

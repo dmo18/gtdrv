@@ -94,7 +94,8 @@ export function createFlowSystem(game) {
       if (!b) { sound('ui'); return; } // a tier lost: a click, the bar steps down
       noteBest(loop(), 'tier', a);
       callout(a >= TIER_MAX ? 'FLOW x' + a + '  MAX' : 'FLOW x' + a, 1.5);
-      sound('reward');
+      // its own, bigger chime (systems/audio.js), a little higher each tier
+      if (events) events.emit('flowTier', a);
       kick(8, 2);
       if (h && h.flowPop) h.flowPop('tier', a);
     } else if (kind === 'bank') {

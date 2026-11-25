@@ -1027,11 +1027,74 @@ export function createTraffic(game, { max = 14 } = {}) {
     return placed;
   }
 
+  // Staged cars (the first run, docs/LOOP.md section e): a slow moving car
+  // in the lane at each of `dists` m along (dx, dz) from (x, z), driving
+  // that way at `speed` m/s (lane speed scaled down, so it keeps to it
+  // after turns too). Marked `staged`, so the intro's lane clearing keeps
+  // them. Skips a spot off a street, at a junction or next to another car.
+  // Returns how many were placed. Called once per first run, not per step.
+  const STAGE_LP = { x: 0, z: 0, heading: 0 };
+  const STAGE_GAP = 14, STAGE_PARKED = 2.6; // m: clearance to a driven car, to a parked one
+  function stageAhead(x, z, dx, dz, dists, speed = 6) {
+    const rng = game.rng;
+    let placed = 0;
+    for (let k = 0; k < dists.length; k++) {
+      const qx = x + dx * dists[k], qz = z + dz * dists[k];
+      const ids = edgesAround(city, qx, qz, 30, nearIds);
+      const ne = ids ? ids.length : city.edges.length;
+      let be = null, bd = 12, bt = 0;
+      for (let j = 0; j < ne; j++) {
+        const e = city.edges[ids ? ids[j] : j];
+        if (Math.abs(e.ux * dx + e.uz * dz) < 0.9) continue;
+        const a = city.nodes[e.a];
+        const t = clamp((qx - a.x) * e.ux + (qz - a.z) * e.uz, 0, e.length);
+        const d = Math.hypot(a.x + e.ux * t - qx, a.z + e.uz * t - qz);
+        if (d < bd) { bd = d; be = e; bt = t; }
+      }
+      if (!be) continue;
+      const fwd = be.ux * dx + be.uz * dz >= 0;
+      const from = fwd ? be.a : be.b;
+      if (!canDrive(be, from)) continue;
+      const along = fwd ? bt : be.length - bt;
+      const d0 = extAt(city.nodes[from], be) + 8, d1 = be.length - extAt(city.nodes[otherEnd(be, from)], be) - 14;
+      if (along < d0 || along > d1) continue;
+      lanePoint(city, be, from, along, 0, STAGE_LP);
+      let clear = true;
+      for (let m = 0; m < game.vehicles.length; m++) {
+        const o = game.vehicles[m];
+        // parked cars line the curb beside the lane: only one on the spot itself blocks it
+        const r = o.parked || !(o.ai || o.driver) ? STAGE_PARKED : STAGE_GAP;
+        if ((o.x - STAGE_LP.x) * (o.x - STAGE_LP.x) + (o.z - STAGE_LP.z) * (o.z - STAGE_LP.z) < r * r) { clear = false; break; }
+      }
+      if (!clear) continue;
+      const kinds = MIX[city.districtOf(STAGE_LP.x, STAGE_LP.z)] || MIX.midtown;
+      const v = createVehicle(rng.pick(kinds), STAGE_LP.x, STAGE_LP.z, STAGE_LP.heading, rng);
+      const dr = createDriver(city, rng);
+      dr.speedFactor = Math.min(1, speed / laneSpeedOf(be));
+      placeDriver(dr, v, be.id, from, along, -1);
+      const v0 = Math.min(laneSpeedOf(be) * dr.speedFactor, v.spec.maxSpeed * 0.8);
+      v.vx = Math.cos(v.heading) * v0;
+      v.vz = Math.sin(v.heading) * v0;
+      v.speed = v0;
+      v.controls = { steer: 0, throttle: 0, brake: 0, handbrake: false };
+      v.ai = dr;
+      v.driver = dr;
+      v.traffic = true;
+      v.staged = true;
+      v.asleep = false;
+      game.addVehicle(v);
+      cars.push(v);
+      placed++;
+    }
+    return placed;
+  }
+
   return {
     name: 'traffic',
     cars,
     wrecks,
     seedStart,
+    stageAhead,
     get count() {
       return cars.length;
     },

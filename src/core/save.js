@@ -31,6 +31,7 @@ import { MAP_CHOICE_KEY } from '../world/maps.js';
 import { kindOfSpec } from './garage.js';
 import { defaultLoop, REGION_SLUGS, TOTAL_KEYS, BEST_KEYS as LOOP_BEST_KEYS, EVENT_ID, MAX_EVENTS, MAX_DRIVEN, MAX_VALUE } from './records.js';
 import { sanitizeLook, isDefaultLook, MAX_LOOKS } from './custom.js';
+import { sanitizeAccess } from './access.js';
 import { validDay } from './daily.js';
 
 export const SAVE_KEY = 'rustwater.save.v1';
@@ -248,6 +249,8 @@ export function sanitizeProgress(raw) {
       if (own(s, 'mapNorthUp') && typeof s.mapNorthUp === 'boolean') d.mapNorthUp = s.mapNorthUp;
       // car radio: only a known station id is kept; absent means off (core/radio.js)
       if (own(s, 'station') && typeof s.station === 'string' && STATION_IDS.includes(s.station)) d.station = s.station;
+      // Accessibility (core/access.js): text size, reduce motion, high contrast, color-safe markers.
+      sanitizeAccess(s, d);
       if (own(s, 'steerSensitivity') && isNum(s.steerSensitivity)) {
         d.steerSensitivity = Math.round(Math.max(0.5, Math.min(1.5, s.steerSensitivity)) * 100) / 100;
       }

@@ -1371,7 +1371,7 @@ try {
     await hudCar({ pending: 2450, combo: 3, flow: 0.6, flowTier: 3 });
     fl = await flowNow();
     check(`Flow meter ${w}x${h}: the pill is dropped, the bar runs along the bottom of the score pill`, !fl.shown && /^60% 3px/.test(fl.scoreSize), JSON.stringify(fl));
-    for (const line of ['Trap 980 ft \u00b7 gold 91 mph', 'Passes 12/12 \u00b7 0:45', 'Ramp 310 ft \u00b7 gold 106 ft', '1:12 \u00b7 gold 0:41', 'Lose them 1:29 \u00b7 gold 0:37', 'Smashed 11/12 \u00b7 0:40']) {
+    for (const line of ['Trap 980 ft \u00b7 gold 91 mph', 'Passes 12/12 \u00b7 0:45', 'Ramp 310 ft \u00b7 gold 106 ft', '1:12 \u00b7 gold 0:41', 'Lose them 1:29 \u00b7 gold 0:37', 'Smashed 11/12 \u00b7 0:40', 'Trap 980 ft \u00b7 silver 77 mph', 'Trap 0.2 mi \u00b7 bronze 58 mph', '1:12 \u00b7 silver 0:51', 'Lose them 1:29 \u00b7 silver 0:44', 'Lose them 1:29 \u00b7 bronze 0:57']) {
       await page.evaluate((t) => rw.hud.setEvent(t), line);
       const q = await promptNow();
       check(`event line ${w}x${h}: "${line}" fits 190 px, in the prompt strip's own rect (190 by 20, 8 px above the bottom)`, q.sw <= q.cw && Math.abs(q.w - 190) < 1 && Math.abs(q.h - 20) < 1 && Math.abs(q.b - (h - 8)) < 1, JSON.stringify(q));

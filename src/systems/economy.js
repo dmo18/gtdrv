@@ -6,6 +6,7 @@ import { loadProgress, saveProgress, defaultProgress } from '../core/save.js';
 import { setHandlingMode, setHandlingPreset } from '../entities/vehicle.js';
 import { volumeFromSettings } from '../audio/levels.js';
 import { RULES } from '../core/weapons.js';
+import { applyAccess } from '../core/access.js';
 import { DISTRICTS } from '../world/citygen.js';
 import { SHORE_NAME } from '../world/maps.js';
 
@@ -53,6 +54,7 @@ export function createEconomy(game, storage) {
     }
     if (game.touch && game.touch.setHudMode) game.touch.setHudMode(s.hud);
     if (game.hud && game.hud.setHudMode) game.hud.setHudMode(s.hud);
+    applyAccess(s, typeof document !== 'undefined' ? document.documentElement : null, game);
     if (game.radio && game.radio.sync) game.radio.sync();
     if (game.combatHud && game.combatHud.setHudMode) game.combatHud.setHudMode(s.hud);
     if (game.quality !== s.quality) {

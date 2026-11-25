@@ -46,7 +46,7 @@ export function createStreetEvents(game, opts = {}) {
   let nearGate = false;
   let wrongT = 0;
   const F = { x: 0, z: 0, px: 0, pz: 0, speed: 0, inCar: false, wrecked: false, passes: 0, smashes: 0, jump: 0, escaped: false, busted: false, stars: 0 };
-  const OBJ = { x: 0, z: 0, label: '' };
+  const OBJ = { x: 0, z: 0, label: '', heading: NaN }; // heading: the way the GPS arrives (a gate: from behind)
 
   const smashCount = () => {
     const f = game.flow;
@@ -316,8 +316,10 @@ export function createStreetEvents(game, opts = {}) {
         if (o === v || o.kind !== 'car' || !o.ai) continue;
         const dx = o.x - v.x, dz = o.z - v.z;
         const al = dx * fx + dz * fz;
-        // anything within 35 m, and whatever stands still farther on
-        if (al > from && al < dist && Math.abs(-dx * fz + dz * fx) < 3.4 && (all || al < 35 || Math.abs(o.speed || 0) < 2)) { game.removeVehicle(o); n++; }
+        // anything within 35 m, and whatever stands still farther on;
+        // a car staged for the first run only when it stands (a queue)
+        const standing = Math.abs(o.speed || 0) < 2;
+        if (al > from && al < dist && Math.abs(-dx * fz + dz * fx) < 3.4 && (o.staged ? standing : all || al < 35 || standing)) { game.removeVehicle(o); n++; }
       }
       return n;
     },
@@ -340,7 +342,7 @@ export function createStreetEvents(game, opts = {}) {
     get objective() {
       if (run.on) {
         if (run.ev.tpl !== 'dash') return null;
-        OBJ.x = run.ev.tx; OBJ.z = run.ev.tz; OBJ.label = 'Drop on ' + run.ev.to;
+        OBJ.x = run.ev.tx; OBJ.z = run.ev.tz; OBJ.label = 'Drop on ' + run.ev.to; OBJ.heading = NaN;
         return OBJ;
       }
       if (tracked) {
@@ -354,6 +356,8 @@ export function createStreetEvents(game, opts = {}) {
         if (d < TRACK_NEAR) nearGate = true; else if (d > TRACK_NEAR + 14) nearGate = false;
         if (nearGate) return null;
         OBJ.x = ax; OBJ.z = az; OBJ.label = trackLabel || cap(tracked.name);
+        // The route arrives the gate's way, so it never leads through the gate backward to its approach point.
+        OBJ.heading = a ? tracked.heading : NaN;
         return OBJ;
       }
       return null;

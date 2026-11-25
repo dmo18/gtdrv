@@ -696,6 +696,26 @@ try {
       check(`layout Settings ${g} ${size.width}: targets 48+, in view, no scroll`, !m.bad.length && !m.over && !m.sx && m.sy <= 1 && m.bot, JSON.stringify(m));
       await page.screenshot({ path: path.join(out, `settings-${g}-${size.width}x${size.height}.png`) });
     }
+    // Accessibility (0.13.0): its own screen from the Access button in the Settings head; targets 48+, no scroll.
+    await page.locator('[data-role="access"]').tap();
+    const mAcc = await probe();
+    check(`layout accessibility ${size.width}: 4 rows, targets 48+, in view, no scroll`, (await rowCount()) === 4 && !mAcc.bad.length && !mAcc.over && !mAcc.sx && mAcc.sy <= 1 && mAcc.bot, JSON.stringify(mAcc));
+    if (size.width === 915) {
+      await page.locator('[data-textsize="large"]').tap();
+      await page.locator('[data-setting="reduceMotion"]').tap();
+      await page.locator('[data-setting="highContrast"]').tap();
+      await page.locator('[data-setting="colorSafe"]').tap();
+      const st = (await progress()).settings;
+      const at = await ev(() => [document.documentElement.dataset.rwText, document.documentElement.dataset.rwContrast, document.documentElement.dataset.rwCalm, document.documentElement.style.getPropertyValue('--rw-text-scale')]);
+      check('accessibility: each setting is saved and applied at once', st.textSize === 'large' && st.reduceMotion === true && st.highContrast === true && st.colorSafe === true && JSON.stringify(at) === JSON.stringify(['large', 'high', 'on', '1.15']), JSON.stringify([st, at]));
+      const mb = await probe();
+      check('layout accessibility large text: nothing off screen, no scroll', !mb.bad.length && !mb.over && mb.sy <= 1, JSON.stringify(mb));
+      await page.locator('[data-textsize="normal"]').tap();
+      for (const k of ['reduceMotion', 'highContrast', 'colorSafe']) await page.locator(`[data-setting="${k}"]`).tap();
+      const st2 = (await progress()).settings;
+      check('accessibility: back to defaults', st2.textSize === 'normal' && !st2.reduceMotion && !st2.highContrast && !st2.colorSafe, JSON.stringify(st2));
+    }
+    await page.locator('.rw-menu-back').tap();
     await tab('Help');
     for (const role of ['about']) {
       await page.locator(`[data-role="${role}"]`).tap();

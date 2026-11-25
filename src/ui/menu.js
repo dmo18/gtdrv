@@ -17,6 +17,7 @@ import { MAP_CHOICE_KEY } from '../world/maps.js';
 import { loopOf, medalCounts, boardRows, closestMedals, bestFlow, totalDistance, REGION_SLUGS, REGION_NAMES } from '../core/records.js';
 import { valueText, TEMPLATE_INFO, nextMedal, cap } from '../core/streetevents.js';
 import { PAINTS, FINISHES, WHEELS, TINTS, DECALS, lockText } from '../core/custom.js';
+import { TEXT_SIZES } from '../core/access.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 
 const STYLE_ID = 'rw-menu-style';
@@ -63,6 +64,7 @@ const CSS = `
 .rw-menu-points { font-weight: 700; color: #ffd08a; font-variant-numeric: tabular-nums; }
 .rw-menu-groups { display: flex; gap: 4px; flex: 1 1 auto; }
 .rw-menu-groups button { flex: 1 1 0; min-width: 0; height: 48px; min-height: 48px; margin: 0; padding: 0 6px; }
+.rw-menu-access { flex: 0 0 auto; height: 48px; min-height: 48px; min-width: 56px; margin: 0; padding: 0 8px; }
 .rw-menu-groups button[aria-selected="true"] { background: var(--rw-accent); color: #1b120d; }
 .rw-menu-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 12px 4px; }
 .rw-menu-body p { margin: 0 0 8px; }
@@ -233,7 +235,13 @@ export function createMenu(root, game, economy) {
   groupBar.setAttribute('aria-label', 'Settings groups');
   const pointsEl = h('span', 'rw-menu-points');
   pointsEl.setAttribute('aria-label', 'Score');
-  head.append(title, groupBar, pointsEl);
+  // Accessibility opens its own screen from a head button (every Settings group is full at 6 rows).
+  const accessBtn = h('button', 'rw-menu-btn rw-menu-access', 'Access');
+  accessBtn.type = 'button';
+  accessBtn.setAttribute('aria-label', 'Accessibility settings');
+  accessBtn.dataset.role = 'access';
+  accessBtn.addEventListener('click', () => go('access'));
+  head.append(title, groupBar, accessBtn, pointsEl);
   const body = h('div', 'rw-menu-body');
   body.tabIndex = -1;
   main.append(head, body);
@@ -592,6 +600,25 @@ export function createMenu(root, game, economy) {
     }
   }
 
+  // ---------- Accessibility: text size, reduce motion, high contrast, color-safe markers ----------
+  function renderAccess() {
+    const s = settings();
+    const set = (k, v) => { settings()[k] = v; applySettings(); commit(); render(); };
+    body.appendChild(segRow('HUD text size', [['normal', 'Normal'], ['large', 'Large']], TEXT_SIZES.includes(s.textSize) ? s.textSize : 'normal', 'textsize', (v) => set('textSize', v)));
+    for (const [label, key] of [['Reduce motion', 'reduceMotion'], ['High contrast HUD', 'highContrast'], ['Color-safe markers', 'colorSafe']]) {
+      const on = s[key] === true;
+      const row = h('div', 'rw-menu-setting');
+      row.appendChild(h('span', '', label));
+      const b = button(on ? 'On' : 'Off', 'rw-menu-switch', () => set(key, !on), label);
+      b.setAttribute('role', 'switch');
+      b.setAttribute('aria-checked', String(on));
+      b.dataset.setting = key;
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+    body.appendChild(h('p', 'rw-menu-dim', 'Reduce motion: no camera shake or kick, no hit freeze. Color-safe markers add an arrow and a new palette to gates.'));
+  }
+
   // ---------- Sound test: the eight numbered sounds of the Phone check ----------
   function renderSoundTest() {
     body.appendChild(h('p', 'rw-menu-dim', 'The Phone check drives a test car for ' + DRIVE_SECONDS + ' seconds, then plays these ' + SOUNDS.length + ' sounds in order, ' + SOUND_SECONDS + ' seconds each. Tap the number of any that sounds bad.'));
@@ -894,6 +921,7 @@ export function createMenu(root, game, economy) {
     help: { title: 'Help', render: renderHelp },
     about: { title: 'About', render: renderAbout },
     soundtest: { title: 'Sound test', render: renderSoundTest },
+    access: { title: 'Accessibility', render: renderAccess },
     handlinglab: { title: 'Handling lab', render: renderHandlingLab },
     newgame: { title: 'New game', render: renderNewGame },
     mapchoice: { title: 'Map', render: renderMapChoice },
@@ -909,13 +937,14 @@ export function createMenu(root, game, economy) {
     const top = body.scrollTop;
     body.textContent = '';
     const sc = screenOf(active) || BUILTIN.resume;
-    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' || active === 'soundtest' || active === 'handlinglab' ? 'settings' : (active === 'about' ? 'help' : 'resume')));
+    const railId = isTop(active) ? active : (parents.get(active) && isTop(parents.get(active)) ? parents.get(active) : (active === 'newgame' || active === 'mapchoice' || active === 'soundtest' || active === 'handlinglab' || active === 'access' ? 'settings' : (active === 'about' ? 'help' : 'resume')));
     for (const [id] of TABS) {
       tabButtons[id].setAttribute('aria-selected', String(id === railId));
       tabButtons[id].tabIndex = id === railId ? 0 : -1;
     }
     const inSettings = active === 'settings';
     groupBar.style.display = inSettings ? '' : 'none';
+    accessBtn.style.display = inSettings ? '' : 'none';
     title.style.display = inSettings ? 'none' : '';
     title.textContent = active === 'customize' && game.player && game.player.vehicle && game.player.vehicle.spec ? 'Customize: ' + game.player.vehicle.spec.label : sc.title;
     // Customize steps aside (the car shows while its look changes) and keeps a Done button in its head.

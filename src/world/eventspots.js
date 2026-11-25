@@ -147,11 +147,17 @@ export function placeEvents(city, seed = EVENT_SEED) {
   };
   // The same order with the candidates within 250 to 700 m of the start
   // place first (nearest first): the first heat escape and the first jump
-  // are a short drive from the start (the first five minutes).
+  // are a short drive from the start (the first five minutes). Among them
+  // the gates that face away from the start come first: driven to from
+  // the start, they are reached from behind, the right way through.
   const nearFirst = (list) => {
     if (!spawn) return list;
     const d = (c) => Math.hypot(city.nodes[c.from].x - spawn.x, city.nodes[c.from].z - spawn.z);
-    const near = list.filter((c) => d(c) >= 250 && d(c) <= 700).sort((a, b) => d(a) - d(b) || a.e.id - b.e.id);
+    const away = (c) => {
+      const n = city.nodes[c.from], k = c.e.a === c.from ? 1 : -1;
+      return (n.x - spawn.x) * c.e.ux * k + (n.z - spawn.z) * c.e.uz * k > 0 ? 0 : 1;
+    };
+    const near = list.filter((c) => d(c) >= 250 && d(c) <= 700).sort((a, b) => away(a) - away(b) || d(a) - d(b) || a.e.id - b.e.id);
     return near.concat(list.filter((c) => !(d(c) >= 250 && d(c) <= 700)));
   };
   // The gate spot on a walked run: the first point with 14 m to both junction boxes.

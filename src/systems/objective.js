@@ -99,12 +99,12 @@ export function navPill(tr, out, walk = false) {
 export function createObjective(game) {
   let shownAngle = 1e9, shownDist = -1, shownOn = null, shownText = '';
   let distText = '';
-  const goal = { x: 0, z: 0, on: false, text: '', src: '' };
+  const goal = { x: 0, z: 0, on: false, text: '', src: '', h: NaN }; // h: the heading to arrive in (a street event gate), NaN any
   const city = game.city;
   const canRoute = !!(city && Array.isArray(city.nodes) && city.nodes.length > 1 && Array.isArray(city.edges) && city.edges.length);
   const router = canRoute ? createRouter(city) : null;
   const tracker = router ? createTracker(router) : null;
-  const routed = { x: 0, z: 0, src: '', on: false, legal: true };
+  const routed = { x: 0, z: 0, src: '', on: false, legal: true, h: NaN };
   const aim = { x: 0, z: 0 };
   const lines = { kind: '', text: '', soon: false };
   let uturnT = 0, replanT = 0; // seconds the route has wanted a U-turn; time to the next search
@@ -116,6 +116,7 @@ export function createObjective(game) {
 
   function pickGoal() {
     goal.on = false;
+    goal.h = NaN;
     const act = game.activities && game.activities.active;
     if (act && act.course && act.course.checkpoints) {
       const cp = act.course.checkpoints[act.index];
@@ -135,6 +136,7 @@ export function createObjective(game) {
       goal.on = true;
       goal.text = m.label || 'Objective';
       goal.src = 'mission';
+      if (Number.isFinite(m.heading)) goal.h = m.heading;
       return;
     }
     // A destination the player set on the map comes before a merely tracked
@@ -173,9 +175,10 @@ export function createObjective(game) {
       return;
     }
     const moved = Math.hypot(goal.x - routed.x, goal.z - routed.z) > GOAL_MOVE_M;
-    if (force || !routed.on || moved || routed.src !== goal.src || routed.legal !== legal) {
-      routed.on = true; routed.x = goal.x; routed.z = goal.z; routed.src = goal.src; routed.legal = legal;
-      tracker.setGoal(goal.x, goal.z, legal);
+    const turned = Number.isFinite(goal.h) !== Number.isFinite(routed.h) || (Number.isFinite(goal.h) && Math.cos(goal.h - routed.h) < 0.9);
+    if (force || !routed.on || moved || turned || routed.src !== goal.src || routed.legal !== legal) {
+      routed.on = true; routed.x = goal.x; routed.z = goal.z; routed.src = goal.src; routed.legal = legal; routed.h = goal.h;
+      tracker.setGoal(goal.x, goal.z, legal, goal.h);
     }
   }
   function headingOf(p) {

@@ -258,6 +258,24 @@ export function createRouter(city, opts = {}) {
 
   const gE = new Int32Array(2), gD = new Float64Array(2);
   let gCount = 1, bestNode = -1;
+  // The way the route must arrive (a street event gate is approached from
+  // behind): a unit direction, or 0, 0 for any.
+  let gHx = 0, gHz = 0;
+  const arriveOk = (e, from) => (gHx === 0 && gHz === 0) || dirX(e, from) * gHx + dirZ(e, from) * gHz > 0;
+  // With a way to arrive: a goal edge is never driven the other way (that
+  // would go back through the gate, and the node search would close the
+  // far end of it before the right way gets there) ...
+  const againstGoal = (e, from) => {
+    if (gHx === 0 && gHz === 0) return false;
+    for (let q = 0; q < gCount; q++) if (gE[q] === e.id) return !arriveOk(e, from);
+    return false;
+  };
+  // ... nor, from the start on a goal edge, the other way past the goal.
+  const pastGoal = (e, from, sd) => {
+    if ((gHx === 0 && gHz === 0) || arriveOk(e, from)) return false;
+    for (let q = 0; q < gCount; q++) if (gE[q] === e.id && (from === e.a ? gD[q] > sd : gD[q] < sd)) return true;
+    return false;
+  };
   // A* from the start edge (both ends seeded; the one behind costs a
   // U-turn) to the virtual GOAL node, entered from the goal edges.
   function astar(es, sd, fwd, tx, tz, ok) {
@@ -265,8 +283,8 @@ export function createRouter(city, opts = {}) {
     HL = 0;
     bestNode = -1;
     let bestD = Infinity, expanded = 0;
-    if (ok(es, es.a)) relax(es.b, (es.length - sd) * cost[es.id] + (fwd ? 0 : UTURN_COST), -1, es.id, tx, tz);
-    if (ok(es, es.b)) relax(es.a, sd * cost[es.id] + (fwd ? UTURN_COST : 0), -1, es.id, tx, tz);
+    if (ok(es, es.a) && !pastGoal(es, es.a, sd)) relax(es.b, (es.length - sd) * cost[es.id] + (fwd ? 0 : UTURN_COST), -1, es.id, tx, tz);
+    if (ok(es, es.b) && !pastGoal(es, es.b, sd)) relax(es.a, sd * cost[es.id] + (fwd ? UTURN_COST : 0), -1, es.id, tx, tz);
     let found = false;
     while (HL > 0) {
       const u = pop();
@@ -283,14 +301,22 @@ export function createRouter(city, opts = {}) {
       for (let q = 0; q < gCount; q++) { // onto a goal edge
         const ge = edges[gE[q]];
         if (inE === ge.id) continue;
-        if (u === ge.a && ok(ge, ge.a)) relax(GOAL, gu + gD[q] * cost[ge.id] + turnCost(edges[inE], inFrom, ge, u), u, ge.id, tx, tz);
-        if (u === ge.b && ok(ge, ge.b)) relax(GOAL, gu + (ge.length - gD[q]) * cost[ge.id] + turnCost(edges[inE], inFrom, ge, u), u, ge.id, tx, tz);
+        if (u === ge.a && ok(ge, ge.a) && arriveOk(ge, ge.a)) relax(GOAL, gu + gD[q] * cost[ge.id] + turnCost(edges[inE], inFrom, ge, u), u, ge.id, tx, tz);
+        if (u === ge.b && ok(ge, ge.b) && arriveOk(ge, ge.b)) relax(GOAL, gu + (ge.length - gD[q]) * cost[ge.id] + turnCost(edges[inE], inFrom, ge, u), u, ge.id, tx, tz);
       }
+      // A route that must arrive a set way may turn round at a dead end
+      // (a gate on a street that ends there is reached that way).
+      const turnRound = n.edges.length === 1 && (gHx !== 0 || gHz !== 0);
       for (let k = 0; k < n.edges.length; k++) {
         const id = n.edges[k];
-        if (id === inE) continue; // no U-turn at a junction
+        if (id === inE && !turnRound) continue; // no U-turn at a junction
+        if (id === inE) {
+          if (ok(edges[id], u)) relax(edges[id].a === u ? edges[id].b : edges[id].a, gu + edges[id].length * cost[id] + UTURN_COST, u, id, tx, tz);
+          continue;
+        }
         const e = edges[id];
         if (!ok(e, u)) continue;
+        if (againstGoal(e, u)) continue;
         const v = e.a === u ? e.b : e.a;
         relax(v, gu + e.length * cost[id] + turnCost(edges[inE], inFrom, e, u), u, id, tx, tz);
       }
@@ -302,7 +328,9 @@ export function createRouter(city, opts = {}) {
 
   // Fill `route` with the way from (fx, fz) facing `heading` to (tx, tz).
   // Returns route.ok. legal: false ignores one-way rules (on foot).
-  function search(fx, fz, heading, tx, tz, route, legal = true) {
+  // arrive: the heading the route must arrive in (NaN: any); when no way
+  // arrives so, the route arrives as it can.
+  function search(fx, fz, heading, tx, tz, route, legal = true, arrive = NaN) {
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     route.ok = false;
     route.rev++;
@@ -316,8 +344,11 @@ export function createRouter(city, opts = {}) {
       tx = Math.max(box.x0 + 5, Math.min(box.x1 - 5, tx));
       tz = Math.max(box.z0 + 5, Math.min(box.z1 - 5, tz));
     }
+    const wantArrive = Number.isFinite(arrive) && legal;
+    gHx = wantArrive ? Math.cos(arrive) : 0;
+    gHz = wantArrive ? Math.sin(arrive) : 0;
     nearestEdge(city, fx, fz, snapA, heading, legal);
-    nearestEdge(city, tx, tz, snapB);
+    nearestEdge(city, tx, tz, snapB, wantArrive ? arrive : NaN, legal);
     if (snapA.edge < 0 || snapB.edge < 0) return false;
     const es = edges[snapA.edge];
     let eg = edges[snapB.edge];
@@ -338,13 +369,18 @@ export function createRouter(city, opts = {}) {
     if (snapA.edge === snapB.edge) {
       const ahead = fwd ? snapB.d >= snapA.d : snapB.d <= snapA.d;
       const want = snapB.d >= snapA.d ? 1 : -1;
-      if (ok(es, want > 0 ? es.a : es.b)) { direct = want; directU = !ahead; }
+      if (ok(es, want > 0 ? es.a : es.b) && arriveOk(es, want > 0 ? es.a : es.b)) { direct = want; directU = !ahead; }
     }
     let pc = 0;
     let startFrom = -1; // node id the start edge is driven away from (its direction)
     route.partial = false;
     if (!direct) {
       let found = astar(es, snapA.d, fwd, tx, tz, ok);
+      if (!found && (gHx !== 0 || gHz !== 0)) {
+        // No way arrives the wanted way (a dead end): any way there.
+        gHx = gHz = 0;
+        found = astar(es, snapA.d, fwd, tx, tz, ok);
+      }
       if (!found && bestNode >= 0 && prevE[bestNode] >= 0) {
         // No way to the spot (another island, a one-way trap): to the
         // nearest junction the car can reach instead.
@@ -540,7 +576,7 @@ export function createTracker(router, opts = {}) {
     route,
     active: false, // a destination is set
     arrived: false,
-    goalX: 0, goalZ: 0, legal: true,
+    goalX: 0, goalZ: 0, legal: true, goalH: NaN, // goalH: the heading to arrive in (NaN: any)
     seg: 0, along: 0, off: 0, offT: 0, nearT: 0, wrongT: 0, sinceSearch: 99,
     turn: 0, // index of the next turn in route.turns
     toTurn: 0, remaining: 0, eta: 0,
@@ -548,9 +584,9 @@ export function createTracker(router, opts = {}) {
     pending: false,
   };
 
-  function setGoal(x, z, legal = true) {
+  function setGoal(x, z, legal = true, arrive = NaN) {
     st.active = Number.isFinite(x) && Number.isFinite(z);
-    st.goalX = x; st.goalZ = z; st.legal = legal !== false;
+    st.goalX = x; st.goalZ = z; st.legal = legal !== false; st.goalH = Number.isFinite(arrive) ? arrive : NaN;
     st.arrived = false;
     st.pending = st.active;
     st.sinceSearch = 99;
@@ -559,7 +595,7 @@ export function createTracker(router, opts = {}) {
   function clear() { setGoal(NaN, NaN); }
 
   function doSearch(x, z, heading) {
-    router.search(x, z, heading, st.goalX, st.goalZ, route, st.legal);
+    router.search(x, z, heading, st.goalX, st.goalZ, route, st.legal, st.goalH);
     st.searches++;
     st.lastMs = route.searchMs;
     st.sinceSearch = 0;

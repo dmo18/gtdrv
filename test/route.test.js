@@ -209,3 +209,34 @@ test('a search takes under 8 ms on the largest region', () => {
   times.sort((a, b) => a - b);
   assert.ok(times[4] < 8, 'median ' + times[4].toFixed(2) + ' ms');
 });
+
+test('a street event gate is routed to from behind: from ahead of it, behind it and beside it, never back through it', async () => {
+  const { placeEvents } = await import('../src/world/eventspots.js');
+  const evs = placeEvents(beach);
+  const r = createRoute();
+  let checked = 0, behind = 0;
+  for (const ev of evs) {
+    const ax = ev.x - ev.dx * 18, az = ev.z - ev.dz * 18;
+    // ahead of the gate (the wrong side), behind it, and off to one side
+    const starts = [[ev.x + ev.dx * 220, ev.z + ev.dz * 220], [ev.x - ev.dx * 260, ev.z - ev.dz * 260], [ev.x - ev.dz * 240, ev.z + ev.dx * 240]];
+    for (const [sx, sz] of starts) {
+      // facing the gate's way: from ahead, a plain search would turn round and come straight back through it
+      if (!router.search(sx, sz, ev.heading, ax, az, r, true, ev.heading) || r.partial || r.n < 2) continue;
+      checked++;
+      // the last stretch runs the gate's way (it may be the turn in, when the approach point is just past a junction)
+      let i = r.n - 2;
+      while (i > 0 && Math.hypot(r.x[r.n - 1] - r.x[i], r.z[r.n - 1] - r.z[i]) < 4) i--;
+      if ((r.x[r.n - 1] - r.x[i]) * ev.dx + (r.z[r.n - 1] - r.z[i]) * ev.dz > 0) behind++;
+      // and the line never crosses the gate backward
+      for (let k = 1; k < r.n; k++) {
+        const a0 = (r.x[k - 1] - ev.x) * ev.dx + (r.z[k - 1] - ev.z) * ev.dz, a1 = (r.x[k] - ev.x) * ev.dx + (r.z[k] - ev.z) * ev.dz;
+        if (!(a0 > 0 && a1 <= 0)) continue;
+        const t = a0 / (a0 - a1);
+        const cx = r.x[k - 1] + (r.x[k] - r.x[k - 1]) * t - ev.x, cz = r.z[k - 1] + (r.z[k] - r.z[k - 1]) * t - ev.z;
+        assert.ok(Math.abs(-cx * ev.dz + cz * ev.dx) > ev.w + 1.2, ev.id + ': the route goes back through the gate');
+      }
+    }
+  }
+  assert.ok(checked >= evs.length * 2, 'routes checked ' + checked);
+  assert.ok(behind >= checked * 0.95, 'arrive the gate way (a few on island loops cannot) ' + behind + ' of ' + checked);
+});

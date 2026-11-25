@@ -7,6 +7,23 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.13.0 accessibility (task 16)
+- Four settings on one new screen, Settings, "Access" button in the head (every Settings group already holds 6 rows, so no row
+  was added anywhere; the four-group and 6-row menu-test checks are unchanged). Rows: HUD text size (Normal/Large),
+  Reduce motion, High contrast HUD, Color-safe markers. All default off, applied at once, saved.
+- `src/core/access.js`: allow-lists, `sanitizeAccess` (called by the save sanitizer: strict booleans, text size only
+  'normal' or 'large'; anything else keeps the default; absent keys stay absent), `markerLook`, `applyAccess` (economy
+  `applySettings` runs it at load and on every change). Text size sets `--rw-text-scale` (1.15) and `data-rw-text` on <html>;
+  high contrast sets `data-rw-contrast` (white outlines by `outline`, nothing moves); styles.js holds the rules.
+- Reduce motion: `settings.reduceMotion` was already read by flow, events, cinematic (hit-stop), combatfx, daynight and the
+  service lightbar; now it is also saved by the sanitizer, and it turns the chase camera shake and FOV kick off
+  (`chase.setShake(0)`; FOV kick follows it).
+- Color-safe markers (render/markers.js, race gates from activities.js): blue/amber/white palette, an arrow over the next
+  and finish checkpoints (bigger on finish), the far gate thinner; a change redraws shown markers at once. Not covered: event
+  gates (events.js, other helper's file) and the HUD objective arrow.
+- Tests: test/access.test.js; scripts/menu-test.mjs checks the screen at 915x412, 780x360, 748x360 (4 rows, 48 px, no scroll)
+  and a save/apply round trip.
+
 ## 0.12.6 Beach checklist (2026-11-24)
 - Task 9, Miami Beach familiarity. `node scripts/beach-checklist.mjs` builds the Beach region from the repo's OSM file (no
   network) and checks 43 streets and 12 places: name present, the streets it meets, typical lanes, one-way share, width in

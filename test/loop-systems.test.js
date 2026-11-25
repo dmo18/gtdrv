@@ -7,7 +7,8 @@ import { defaultProgress } from '../src/core/save.js';
 import { createScore, POINTS, SHAVE_GAP } from '../src/systems/score.js';
 import { createMissions } from '../src/systems/missions.js';
 import { createStreetEvents, RETRY_S, TRACK_NEAR } from '../src/systems/events.js';
-import { createTutorial, INTRO_LINES, INTRO_MAX_WORDS, INTRO_STEPS } from '../src/systems/tutorial.js';
+import { markMedal } from '../src/core/streetevents.js';
+import { createTutorial, INTRO_LINES, INTRO_MAX_WORDS, INTRO_STEPS, STAGE_AT, STAGE_SPEED } from '../src/systems/tutorial.js';
 import { createHeat, updateHeat } from '../src/systems/police.js';
 import { PASS_POINTS, SMASH_POINTS, SMASH_CHAIN_BONUS, RAM_POINTS } from '../src/systems/flow.js';
 import { BANK_STILL_S, BANK_BONUS, CRASH_LOSS } from '../src/core/flow.js';
@@ -194,7 +195,10 @@ test('driving through a gate the right way starts its event; the result is recor
   g.run(0.6, 20 * DT, 0);
   assert.ok(se.active && se.active.ev === trap);
   assert.ok(g.toasts.some((t) => t[0] === 'objective' && /Speed trap ahead/.test(t[1])));
-  assert.match(g.eventLine, /^Trap \d+ ft · gold \d+ mph$/);
+  // the line shows the mark of the next medal above the speed the car is doing
+  const mark = markMedal(se.active);
+  assert.equal(mark, mph(20) < trap.targets.bronze ? 'bronze' : mph(20) < trap.targets.silver ? 'silver' : 'gold');
+  assert.match(g.eventLine, new RegExp('^Trap \\d+ ft · ' + mark + ' ' + trap.targets[mark] + ' mph$'));
   // no bank while it runs, even standing still with points
   g.flow.feed('nearMiss', 150);
   g.run(1.5, 0, 0);
@@ -457,4 +461,52 @@ test('a car driving into the player standing still is neither a ram nor a crash'
   assert.equal(g.flow.rams, 0);
   assert.equal(g.flow.run, run);
   assert.equal(g.progress.loop.totals.crashes, 0);
+});
+
+test('the first run: slow cars are staged in the lane past the gate as the player comes up to it, and the lane clearing keeps them', () => {
+  const g = world({ intro: true });
+  const calls = [];
+  g.traffic = {
+    stageAhead(x, z, dx, dz, dists, speed) {
+      calls.push([x, z, dx, dz, dists.slice(), speed]);
+      for (const d of dists) g.vehicles.push(car({ x: x + dx * d, z: z + dz * d, ai: {}, driver: {}, speed, staged: true }));
+      return dists.length;
+    },
+  };
+  const miss = g.streetEvents.list[0];
+  g.run(0.5);
+  assert.equal(calls.length, 0, 'not from the start place, 100 m back');
+  g.place(miss.x - 60, 0);
+  g.run(0.1);
+  assert.equal(calls.length, 1, 'once the player is coming up to the gate from behind');
+  assert.deepEqual(calls[0], [miss.x, miss.z, miss.dx, miss.dz, STAGE_AT, STAGE_SPEED]);
+  assert.ok(STAGE_AT[0] >= 40 && STAGE_SPEED * 2.237 <= 20, 'slow cars a good way past the gate');
+  const staged = g.vehicles.filter((v) => v.staged);
+  const other = car({ x: miss.x - 60 + 120, z: 0.4, ai: {}, driver: {}, speed: 9 });
+  g.vehicles.push(other);
+  g.run(1);
+  assert.ok(other.removed, 'other moving traffic far ahead in the lane is still cleared');
+  assert.ok(staged.every((v) => !v.removed), 'the staged cars stay');
+  // the run starts at the gate: its sweep of the lane keeps the staged cars that move
+  g.run(3.3, 20 * DT, 0);
+  assert.ok(g.streetEvents.active && g.streetEvents.active.ev === miss);
+  assert.ok(staged.every((v) => !v.removed), 'still there once the run is on');
+  assert.equal(calls.length, 1, 'staged once per approach');
+  // one stopped in the lane ahead (a queue at a light) goes like any queue
+  const first = staged[0];
+  first.speed = 0;
+  first.x = g.player.x + 55;
+  g.run(0.5, 0, 0);
+  assert.ok(first.removed, 'a staged car standing in the lane is a queue and goes');
+});
+
+test('a tier up plays its own bigger chime (flowTier with the tier), not the plain reward chime', () => {
+  const g = world();
+  const heard = [];
+  g.events.on('flowTier', (t) => heard.push(['flowTier', t]));
+  g.events.on('reward', (a, why) => heard.push(['reward', why]));
+  g.run(0.1);
+  for (let i = 0; i < 4; i++) g.flow.feed('nearMiss', 150, 'Near miss');
+  assert.equal(g.flow.tier, 2);
+  assert.deepEqual(heard, [['flowTier', 2]]);
 });

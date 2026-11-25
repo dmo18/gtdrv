@@ -49,6 +49,13 @@ export const INTRO_GAP_S = 5; // seconds between two intro lines
 export const GARAGE_NEAR = 40; // m from the garage that ends the last beat
 export const CLEAR_NEAR = 70, CLEAR_FAR = 170; // m ahead: where the first run's lane is kept clear of moving traffic
 export const QUEUE_NEAR = 40; // m ahead: from here on, traffic standing in the first run's lane is taken away
+// Slow cars staged in the first run's lane, to pass (moving traffic is
+// cleared, so without them only the parked cars would pay): m past the
+// gate, put there as the player comes up to it from behind (a long way
+// ahead of the player, so they do not pop up in view), and their speed.
+export const STAGE_AT = [45, 85, 130];
+export const STAGE_SPEED = 6; // m/s (13 mph): a car the run passes at 40 mph and more
+export const STAGE_FROM = [-75, -4]; // m along the gate's way: where the player is when they are put there
 const words = (s) => s.split(/\s+/).filter(Boolean).length;
 export const INTRO_MAX_WORDS = Math.max(...Object.values(INTRO_LINES).map(words));
 
@@ -135,6 +142,7 @@ export function createTutorial(game) {
     if (stepName() === 'run' && ev.tpl === 'miss') { setStep(1); say('runOn'); }
   });
   game.events.on('streetEventEnd', (r) => {
+    if (r && r.tpl === 'miss') staged = false; // a RETRY of the first run gets its own
     if (!introOn()) return;
     const st = stepName();
     if ((st === 'run' || st === 'medal') && r.medal) { setStep(2); say('medal'); lineGap = 6; pendingNext = 'police'; } else if (st === 'medal' && !r.medal) say('medalMiss');
@@ -150,11 +158,28 @@ export function createTutorial(game) {
     if (v && v.air && v.air.spot === e.spot && !v.air.on) { setStep(4); say('air'); pendingNext = 'garage'; }
   });
   game.events.on('garageFound', () => { if (introOn() && stepName() === 'garage') finish(); });
-  game.events.on('progressReset', () => { said = ''; pending = ''; pendingNext = ''; saidBank = saidTier = saidWanted = false; target = null; started = false; });
+  game.events.on('progressReset', () => { said = ''; pending = ''; pendingNext = ''; saidBank = saidTier = saidWanted = false; target = null; started = false; staged = false; });
   let pendingNext = ''; // the next beat's line, said after the line that closed the last beat
   let started = false;
   let beatLabel = ''; // the beat line the GPS goal carries
   let clearT = 0, wasFirstRun = false;
+  let staged = false; // the first run's slow cars are out for this approach
+
+  // The player in a car coming up to the first gate from behind: the slow
+  // cars of the first run go into the lane past it.
+  function stageFirstRun(s, p) {
+    const v = p.vehicle;
+    const tr = game.traffic;
+    if (!v || v.kind !== 'car' || !tr || !tr.stageAhead) return;
+    let ev = null;
+    for (let i = 0; i < s.list.length && !ev; i++) if (s.list[i].intro) ev = s.list[i];
+    if (!ev) return;
+    const dx = p.x - ev.x, dz = p.z - ev.z;
+    const al = dx * ev.dx + dz * ev.dz;
+    if (al < STAGE_FROM[0] || al > STAGE_FROM[1] || Math.abs(-dx * ev.dz + dz * ev.dx) > ev.w + 4) return;
+    staged = true;
+    tr.stageAhead(ev.x, ev.z, ev.dx, ev.dz, STAGE_AT, STAGE_SPEED);
+  }
 
   function stepIntro(dt) {
     const s = se();
@@ -185,6 +210,7 @@ export function createTutorial(game) {
         // for the first light) goes too, before the player can reach it.
         s.clearAhead(CLEAR_NEAR, QUEUE_NEAR, false);
       }
+      if (!staged && !s.active) stageFirstRun(s, p);
     }
     // Before the police beat, a bump or a fast stretch does not call the
     // police: the first run is about passing close, and a star nobody has
@@ -252,6 +278,7 @@ export function createTutorial(game) {
       said = pending = pendingNext = '';
       saidBank = saidTier = saidWanted = false;
       started = false;
+      staged = false;
       sinceLine = 99;
       game.events.emit('progress');
     },

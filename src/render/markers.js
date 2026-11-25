@@ -4,6 +4,8 @@
 // update() animates without allocating.
 import * as THREE from 'three';
 
+import { markerLook } from '../core/access.js';
+
 export const MARKER_COLORS = {
   street: 0xe2733a, // rust orange
   boat: 0x45c7dc,
@@ -230,7 +232,7 @@ export function createMarkers(scene, opts = {}) {
     slots.push({
       grp, ground, gTube, gDisc, arrow, gate, buoys, gLine, ring, torus, halo,
       tubeMat, discMat, ringMat, haloMat, buoyMat, flagMat, beamMat,
-      kind: null, style: null, r: 1, alpha: 1, phase: k * 2.1, y: 0,
+      cp: null, styleArg: null, safe: false, kind: null, style: null, r: 1, alpha: 1, phase: k * 2.1, y: 0,
     });
   }
 
@@ -240,8 +242,11 @@ export function createMarkers(scene, opts = {}) {
     const s = slots[slot];
     if (!s || !cp) return;
     const kind = cp.kind || 'ground';
-    const color = MARKER_COLORS[style] ?? MARKER_COLORS.next;
+    const safe = typeof opts.colorSafe === 'function' && opts.colorSafe() === true;
+    const look = markerLook(style, safe, MARKER_COLORS[style] ?? MARKER_COLORS.next);
+    const color = look.color;
     const a = STYLE_ALPHA[style] ?? 1;
+    s.cp = cp; s.styleArg = style; s.safe = safe;
     s.kind = kind;
     s.style = style;
     s.alpha = a;
@@ -268,10 +273,10 @@ export function createMarkers(scene, opts = {}) {
       const pad = kind === 'pad';
       s.y = pad ? cp.y - 0.9 : 0;
       s.ground.position.y = s.y;
-      s.gTube.scale.set(cp.r, pad ? 5 : 6, cp.r);
+      s.gTube.scale.set(cp.r * look.wide, pad ? 5 : 6, cp.r * look.wide);
       s.gDisc.scale.set(cp.r, 1, cp.r);
-      s.arrow.visible = pad;
-      s.arrow.scale.setScalar(Math.max(1.2, cp.r * 0.3));
+      s.arrow.visible = pad || look.arrow; // color-safe: the arrow marks next and finish by shape
+      s.arrow.scale.setScalar(Math.max(1.2, cp.r * 0.3) * look.arrowScale);
     } else if (kind === 'buoy') {
       s.y = seaY;
       s.gate.position.y = seaY;
@@ -283,7 +288,8 @@ export function createMarkers(scene, opts = {}) {
       s.gLine.scale.set(0.5, 0.08, cp.r * 2);
       s.gLine.rotation.y = -dir;
       s.gLine.position.y = 0.55;
-      s.gLine.visible = style !== 'after';
+      s.gLine.visible = style !== 'after' || safe; // color-safe: the far gate keeps a line, a thin one
+      s.gLine.scale.y = safe && style === 'after' ? 0.03 : 0.08;
     } else {
       s.y = cp.y;
       s.ring.position.y = cp.y;
@@ -319,6 +325,8 @@ export function createMarkers(scene, opts = {}) {
     for (let k = 0; k < slots.length; k++) {
       const s = slots[k];
       if (!s.grp.visible) continue;
+      // The color-safe setting changed while a marker shows: draw it again at once.
+      if (typeof opts.colorSafe === 'function' && s.cp && (opts.colorSafe() === true) !== s.safe) showCheckpoint(k, s.cp, s.styleArg);
       const t = time + s.phase;
       const pulse = 0.5 + 0.5 * Math.sin(t * 4);
       if (s.kind === 'ring') {
