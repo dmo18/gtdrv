@@ -196,3 +196,40 @@ Not reached yet, and where to look next:
 - Allocation in `stepVehicle`, collision and ground (core files): the same many-shape reads.
 - The phone's 83 ms worst frame is not reproduced here; the check's own full screen request
   resizes every render target at its start (the parked patch skips those frames in phonecheck.js).
+
+## Allocation pass (0.12.6, docs/PLAN_V4.md task 10)
+
+Most per-step garbage was V8 boxing numbers, not literals or closures: a property read site that
+has seen more than one or two object shapes (V8 "maps") reads a number field through a generic
+lookup that allocates a fresh 16-byte number box on every read. What changed:
+
+- `src/entities/vehicle.js` `createVehicle`: every field the systems and the renderer add to a
+  car later (controls, ai, traffic, parked, police fields, mesh, combat hit and toss fields,
+  stunt ramp fields, wreck fields) is declared as `undefined` up front, so all cars share one
+  shape. Before, a Downtown drive had 4 to 6 car shapes (parked, traffic, police, hit, ramp),
+  and stepVehicle, collideVehicles and the traffic scan read through generic lookups.
+- `src/world/collision.js` `resolveIn`: `off` and `h` are read inside each shape kind's branch
+  (one read site per kind), and a bay car's hash `bayU` lives in a WeakMap instead of on the
+  circle (it gave bay circles their own shape). The circle height read boxed about 22 numbers a
+  call in Downtown before.
+- Tried and left out: passing ground query points through Float64Arrays (geoSurface then
+  boxed the same numbers at its own calls: more garbage, not less).
+
+Measured by allocation, not time (bytes per simulated second, sampled heap, collected objects
+included). Behavior is the same: the drives end in the same state before and after.
+
+| drive | before | after |
+|---|---|---|
+| node, survival harness drive, Beach, 60 s | 8.6 MB/s | 4.2 MB/s |
+| node, survival harness drive, Downtown, 60 s | 11.9 MB/s | 7.6 MB/s |
+| Chrome, steps only, Beach start, 30 s | 6.1 MB/s | 3.5 MB/s |
+| Chrome, steps only, Downtown, five stars, 30 s | 11.4 MB/s | 8.6 MB/s |
+| perf-phonecheck --alloc, 4x, steps and draws, Beach | 20.4 MB/s | 19.6 MB/s |
+| perf-phonecheck --alloc, 4x, steps and draws, Downtown | 21.2 MB/s | 19.8 MB/s |
+
+Still open: in the Beach Phone check drive `heightAt` (collision, called by the chase camera
+and crews) now shows about 1.7 MB/s that it did not show before (cause not found; node shows
+none); three.js uniform uploads (`setValueM4`, `setValueV3f`), `geoSurface`/`netRound`
+(ground) and the remaining stepVehicle boxing (numbers passed to calls V8 does not inline).
+The task's 5 ms collection target is not met; worst collections in single throttled passes
+vary from 18 to over 60 ms here while other work runs.

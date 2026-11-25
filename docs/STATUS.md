@@ -953,3 +953,10 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Draw budget unchanged: smoke street view 210 calls, 294k triangles.
 - Gates: lint, 1070 tests, smoke --extra, touch-test 309/309 (one rerun: a slider touchcancel check flaked once), ui-test 765/771: the 6 failures are the handling lab "Controls has 6 rows" check against the concurrent menu.js change (a seventh row) from task 3, not this work.
 - Router: trunk class cost 0.75 to 0.8 so a correct Alton Rd route stays within 1.2 of the shortest after the Beach lane merge (no test limit changed).
+
+## 2026-11-25: 0.12.6 allocations (in the tree, no version bump)
+- docs/PLAN_V4.md task 10. Cause: V8 boxed numbers read through generic lookups at read sites that saw several object shapes (cars with fields added later by different systems; collision circles with and without a bay hash). Fixes in src/entities/vehicle.js (createVehicle declares the later fields as undefined: one car shape) and src/world/collision.js (resolveIn reads `off`/`h` per shape kind; the bay hash in a WeakMap). Details and the table in docs/PERF.md, "Allocation pass".
+- Bytes allocated per simulated second, before to after: node survival-harness drive Beach 8.6 to 4.2 MB/s, Downtown 11.9 to 7.6; Chrome steps only, Beach 6.1 to 3.5, Downtown five stars 11.4 to 8.6; perf-phonecheck --alloc at 4x with draws, Beach 20.4 to 19.6, Downtown 21.2 to 19.8 (three.js uniforms and the ground net now lead).
+- Same behavior: the drives end in the same state hashes before and after; no test or fingerprint changed.
+- Open: Beach Phone check `heightAt` about 1.7 MB/s new (cause not found), ground `geoSurface`/`netRound`, three.js uniform uploads; the 5 ms collection target is not met.
+- Gates: lint (changed files), 1082 tests (one timing test, dressLot cost, failed once under load and passed alone), smoke --extra.

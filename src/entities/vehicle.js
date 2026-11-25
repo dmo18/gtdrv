@@ -297,7 +297,13 @@ export function createVehicle(specId, x, z, heading = 0, rng = null) {
     controls: undefined, ai: undefined, traffic: undefined, parked: undefined, police: undefined,
     asleep: undefined, mesh: undefined, meshDirty: undefined, lodFar: undefined,
     siren: undefined, role: undefined, officers: undefined, outCool: undefined, occ: undefined,
-    occDown: undefined, copsDead: undefined,
+    occDown: undefined, copsDead: undefined, cop: undefined, onCall: undefined, starter: undefined, arms: undefined,
+    // Combat hits and tosses, stunt ramps, wrecks.
+    lastHitBy: undefined, lastKind: undefined, combatHit: undefined, hitT: undefined, chainDepth: undefined,
+    tossing: undefined, tvy: undefined, tT: undefined, tt: undefined, tRoll: undefined, tPitch: undefined,
+    tRollEnd: undefined, tRollAmp: undefined, tPitchAmp: undefined,
+    stuntRamp: undefined, rampH: undefined, air: undefined, airPitch: undefined, airRoll: undefined,
+    crashWreck: undefined, burning: undefined, burnT: undefined, wreckFade: undefined,
   };
 }
 

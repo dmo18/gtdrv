@@ -60,10 +60,7 @@ export function createCollisionWorld() {
   }
 
   function addCircle(x, z, r, h = 5, tag = null) {
-    // bayU (a parked bay car's hash, set by the lot layer) is declared on
-    // every circle so all circles share one object shape (resolveIn reads
-    // them inline, without boxing numbers).
-    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', bayU: undefined };
+    const c = { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
     circles.push(c);
     insert(c, x - r, z - r, x + r, z + r);
     joined = null;
@@ -638,6 +635,11 @@ export function addLotSolids(collision, feats, n, list = null) {
   return made;
 }
 
+// A bay car circle's hash (the lot layer turns the car off at a lower
+// fill), kept beside the shape rather than on it: one more property on
+// some circles gave them a second object shape, and the circle reads in
+// resolveIn then boxed every number (docs/PERF.md, 0.12.6).
+const BAY_U = new WeakMap();
 // Two circles per static bay car (front and back half), tag 'car'.
 export function addBayCars(city, collision, feats, n, list = null) {
   let made = 0;
@@ -651,8 +653,8 @@ export function addBayCars(city, collision, feats, n, list = null) {
       const a = collision.addCircle(bx - cx * 1.2, bz - cz * 1.2, 1.0, 1.4, 'car');
       const b = collision.addCircle(bx + cx * 1.2, bz + cz * 1.2, 1.0, 1.4, 'car');
       // The bay's hash: the lot layer turns the car off at a lower fill.
-      if (a) a.bayU = u;
-      if (b) b.bayU = u;
+      if (a) BAY_U.set(a, u);
+      if (b) BAY_U.set(b, u);
       made += 2;
       if (list) list.push(a, b);
     });
@@ -687,7 +689,7 @@ export const LOT_SHAPE_REACH = 6;
 // lazy layer lists them in its own cells.
 const SHAPE_SINK = {
   addBox: (x0, z0, x1, z1, h = 10, tag = null) => ({ kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
-  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', bayU: undefined }),
+  addCircle: (x, z, r, h = 5, tag = null) => ({ kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' }),
 };
 
 // The lots' solids as a lazy layer of `collision` (replacing any layer it
@@ -746,7 +748,7 @@ export function createLotLayer(city, dress = dressLot) {
     if (!(h >= 0) || h === fillHour) return;
     fillHour = h;
     for (let i = 0; i < carShapes.length; i++) {
-      carShapes[i].off = carShapes[i].bayU >= lotFill(carLots[i], h);
+      carShapes[i].off = BAY_U.get(carShapes[i]) >= lotFill(carLots[i], h);
     }
   }
   const stats = { cells: 0, lots: 0, shapes: 0 };
@@ -765,7 +767,7 @@ export function createLotLayer(city, dress = dressLot) {
     for (let i = n0; i < list.length; i++) {
       carShapes.push(list[i]);
       carLots.push(lot);
-      if (fillHour === fillHour) list[i].off = list[i].bayU >= lotFill(lot, fillHour);
+      if (fillHour === fillHour) list[i].off = BAY_U.get(list[i]) >= lotFill(lot, fillHour);
     }
     lotShapes[k] = list;
     stats.lots++;

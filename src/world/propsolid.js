@@ -187,7 +187,7 @@ export function eachStreetProp(city, fn) {
 // hidden `grp` (all shapes of the same prop: they break together).
 const TAGS = { tree: 'tree', palm: 'tree', streettree: 'tree', palmtree: 'tree' };
 function circle(x, z, r, h, tag) {
-  return { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '', bayU: undefined };
+  return { kind: 1, x, z, r, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
 }
 function box(x0, z0, x1, z1, h, tag) {
   return { kind: 0, x0, z0, x1, z1, h, tag, stamp: 0, off: false, brk: null, ptype: '' };
