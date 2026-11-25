@@ -914,7 +914,24 @@ function keepJoinedRamps(R) {
       else if (m === 2) onto[findRoot(up, i)] = 1;
     }
   }
-  for (let i = 0; i < n; i++) if (!bad[findRoot(up, i)] && onto[findRoot(up, i)]) readRoad(R, list[i], true);
+  // A group is kept whole or not at all: if readRoad rejects any member
+  // (not drivable, outside the crop, cut to nothing), the members read so
+  // far are taken back, since a kept part would end at a dead end.
+  const done = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const g = findRoot(up, i);
+    if (done[g]) continue;
+    done[g] = 1;
+    if (bad[g] || !onto[g]) continue;
+    const w0 = R.ways.length, np0 = R.np, c0 = R.cuts.length;
+    let ok = true;
+    for (let j = i; j < n && ok; j++) if (findRoot(up, j) === g) ok = readRoad(R, list[j], true);
+    if (!ok) {
+      R.ways.length = R.wayS.length = R.wayE.length = w0;
+      R.np = np0;
+      R.cuts.length = c0;
+    }
+  }
 }
 // True when (x, z) is within RAMP_JOIN of a segment of P (flat x, z pairs)
 // from k0 to k1; with skip >= 0, not within skip m of P's own two ends.
@@ -1022,7 +1039,13 @@ function flyoverOverLand(landCell, baseLand, pts, m) {
 // One way of the data.
 const TUNNEL = /tunnel/i;
 // ramp: a ramp keepJoinedRamps keeps (not left out as at grade).
+// Returns whether the road became at least one way (false: left out).
 function readRoad(R, r, ramp) {
+  const w0 = R.ways.length;
+  readRoadInto(R, r, ramp);
+  return R.ways.length > w0;
+}
+function readRoadInto(R, r, ramp) {
   // Pedestrian streets: only the named malls (2.1 item 8), drivable.
   if (!DRIVE.has(r.class) && !(r.class === 'pedestrian' && (r.mall || PED_STREETS.has(r.name)))) return;
   if (r.name && TUNNEL.test(r.name)) return;
