@@ -535,11 +535,6 @@ export function createMenu(root, game, economy) {
         fromUi: (v) => Math.max(0.5, Math.min(1.5, v / 100)), text: (v) => v + '%',
       }));
       body.appendChild(segRow('Handling', [['arcade', 'Arcade'], ['sim', 'Sim']], s.handling, 'handling', (id) => { settings().handling = id; commit(); render(); }));
-      // Standard / Relaxed / Sharp, two taps from pause (Settings, then this row);
-      // the lab below holds the same pick with the test drive and the verdicts.
-      body.appendChild(segRow('Steering feel', PRESETS.map((id) => [id, PRESET_LABELS[id]]), validPreset(s.handlingPreset), 'preset', (id) => {
-        settings().handlingPreset = id; setHandlingPreset(id); commit(); render();
-      }));
       body.appendChild(goRow('Handling lab', PRESET_LABELS[validPreset(s.handlingPreset)], 'handlinglab', 'handlinglab'));
       body.appendChild(toggleRow('Left-handed', 'leftHanded'));
       body.appendChild(toggleRow('Invert flying stick', 'invertPitch'));

@@ -901,7 +901,7 @@ async function liveLayout(check) {
           return out;
         }, L);
         const tag = `handling lab ${w}x${h} L${L}`;
-        check(`${tag}: Controls has 7 rows (Steering feel added), the lab opens, every control 48+, inside the screen, no overlap, no scrolling`, r.rows === 7 && r.title === 'Handling lab' && r.controls >= 12 && r.bad.length === 0, JSON.stringify(r));
+        check(`${tag}: Controls has 6 rows, the lab opens, every control 48+, inside the screen, no overlap, no scrolling`, r.rows === 6 && r.title === 'Handling lab' && r.controls >= 12 && r.bad.length === 0, JSON.stringify(r));
       }
       // The test drive overlay: Finish at the top center, then the verdict card.
       const dv = await lp.evaluate(() => {

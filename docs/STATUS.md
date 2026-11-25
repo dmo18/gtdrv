@@ -960,3 +960,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Same behavior: the drives end in the same state hashes before and after; no test or fingerprint changed.
 - Open: Beach Phone check `heightAt` about 1.7 MB/s new (cause not found), ground `geoSurface`/`netRound`, three.js uniform uploads; the 5 ms collection target is not met.
 - Gates: lint (changed files), 1082 tests (one timing test, dressLot cost, failed once under load and passed alone), smoke --extra.
+- 0.12.5: the extra Steering feel row made the Controls page scroll on phones (340 px against 304), so it was removed; presets stay in the Handling lab (three taps). Menu and ui tests are back to their original expectations.
