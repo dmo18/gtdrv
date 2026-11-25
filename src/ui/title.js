@@ -34,6 +34,7 @@ export function fillAbout(doc, parent, opts = {}) {
   add('p', 'rw-about-p', 'Version ' + (opts.version || 'dev'), 'about-version');
   add('div', 'rw-about-h', 'Credits');
   add('p', 'rw-about-p', 'Rustwater is an original game: its names, characters and art are its own. It is drawn with three.js (MIT license).', 'about-credits');
+  add('p', 'rw-about-p', 'Rustwater is free and plays offline. It has no ads and no purchases.', 'about-offline');
   add('div', 'rw-about-h', 'Map');
   add('p', 'rw-about-p', MAP_CREDIT, 'about-map');
   add('p', 'rw-about-p rw-about-dim', 'The map is built from OpenStreetMap data, used under the Open Database License (ODbL).');
