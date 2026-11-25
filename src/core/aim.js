@@ -112,7 +112,7 @@ export function lineOfSight(collision, x0, y0, z0, x1, y1, z1) {
 // lineOfSight stopped after 4 passes of 0.3 m, the combat trace after
 // the first solid, low or not, and shots and sight went through
 // buildings behind a bench or a parked car).
-export const WALL_PASSES = 8;
+export const WALL_PASSES = 16;
 export function wallAlong(collision, x0, y0, z0, ux, uz, slope, len) {
   if (!collision || typeof collision.raycast !== 'function' || !(len > 0)) return Infinity;
   const tops = typeof collision.heightAt === 'function';
