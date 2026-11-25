@@ -365,7 +365,7 @@ export function createStreetEvents(game, opts = {}) {
       const vs = game.vehicles;
       for (let i = vs.length - 1; i >= 0; i--) {
         const o = vs[i];
-        if (o === v || o.kind !== 'car' || !o.ai) continue;
+        if (o === v || o.kind !== 'car' || !o.ai || o.cop || o.police) continue; // police chasing in the lane are never removed
         const dx = o.x - v.x, dz = o.z - v.z;
         const al = dx * fx + dz * fz;
         // anything within 35 m, and whatever stands still farther on;
