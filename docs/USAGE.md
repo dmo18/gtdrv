@@ -57,3 +57,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 2026-11-25: 0.13.0 published (loop tuning 276k, accessibility 152k, review 109k). Total about 14.8M of 16M. Remaining: release checklist 5.6 (offline, old saves) then RC.
 2026-11-25: owner raised the cap from 16M to 24M (answer: 'Raise to 24M'). Used about 14.9M before F1 streets, F2 car noses, F3 shader programs, E2 checklist helpers.
 2026-11-25: 0.13.1 published. Helpers: checklist 103k, car noses 160k, streets 235k, shaders 327k, review 134k. Total about 16.4M of 24M. Soak 60 min running on 0.13.0.
+- 0.13.2 published (37673cb). Helpers G1 to G3 about 0.76M. Total about 17.8M of 24M. Soak resumed on 0.13.0.
