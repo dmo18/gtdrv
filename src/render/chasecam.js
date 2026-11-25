@@ -203,6 +203,7 @@ export function createChaseCamera(camera) {
   // height (m) behind the target, and a FOV zoom fraction. `touched` is set
   // whenever the player drags the camera, so an effect can cancel itself.
   const fx = { yaw: 0, dist: 0, rise: 0, zoom: 0, touched: false };
+  let lastCol = null; // the collision world of the last update (snap uses it)
 
   // Distance at which the view line from the target back to the camera
   // is first blocked, or `dist` if it is clear. Height-aware: roofs below
@@ -258,6 +259,28 @@ export function createChaseCamera(camera) {
       px += (tx - px) * k;
       py += (ty - py) * k;
       pz += (tz - pz) * k;
+    }
+    // The pull-in above snaps the wanted distance in, but the eased
+    // position lags behind it (a heli's follow rate 6 took 25 frames), and
+    // a snap had no collision at all: the camera sat inside a tower beside
+    // a parked heli, or a building that turned in between. When the eased
+    // point is inside something, bring it in along its own line to the
+    // target. One height query a frame while clear.
+    if (collision && mode.dist > 0.5 && typeof collision.heightAt === 'function') {
+      const ox = px - target.x, oz = pz - target.z;
+      const L = Math.sqrt(ox * ox + oz * oz);
+      if (L > 1.2 && collision.heightAt(px, pz) > py - 0.3) {
+        const y0 = baseY + mode.lookHeight;
+        const hit = clearDist(collision, target.x, y0, target.z, ox / L, oz / L, L, py);
+        const keep = Math.max(1.2, hit - 0.6);
+        if (keep < L) {
+          const f = keep / L;
+          px = target.x + ox * f;
+          pz = target.z + oz * f;
+          py = y0 + (py - y0) * f;
+          if (keep < curDist) curDist = keep;
+        }
+      }
     }
     // Stay above the ground or sea, and above a roof the target is over.
     let floor = MIN_CLEAR;
@@ -570,6 +593,7 @@ export function createChaseCamera(camera) {
 
   return {
     update(target, dt, input, collision) {
+      lastCol = collision || null;
       syncNear();
       if (firstOn()) {
         if (input && (input.lookX || input.lookY)) fx.touched = true;
@@ -672,7 +696,8 @@ export function createChaseCamera(camera) {
         if (fp.att) fp.att.update(target.vehicle);
         return;
       }
-      place(target, 0, null, true);
+      // The last world seen by update: a snap beside a tower pulls in too.
+      place(target, 0, lastCol, true);
       updateFov(Math.abs(target.speed || 0), 0, true, target.boost);
     },
     setMode(m) {

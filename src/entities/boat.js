@@ -7,6 +7,7 @@
 import { clamp, angleDiff } from '../core/rng.js';
 import { windPush } from '../core/weather.js';
 import { stepBoost, BOAT_BOOST } from './boost.js';
+import { getDamageRule } from './vehicle.js';
 
 const WIND = { x: 0, z: 0 };
 
@@ -100,8 +101,18 @@ export function createBoat(specId, x, z, heading = 0, rng = null) {
   };
 }
 
-export function damageBoat(b, amount) {
+// kind 'crash' (shore, pier, another hull) goes through the damage rule
+// as a car's crash does (vehicle.js damageVehicle): in the default "cannot
+// die" mode a crash never takes the player's boat under combat.js
+// CRASH_FLOOR of its health. (It did: a jetski driven along the shore lost
+// three quarters of its health in 90 s, a wrecked boat cannot move.)
+export function damageBoat(b, amount, kind = 'crash') {
   if (!(amount > 0)) return;
+  const rule = getDamageRule();
+  if (rule) {
+    amount = rule(b, amount, kind, null);
+    if (!(amount > 0)) return;
+  }
   b.health -= amount;
   if (b.health <= 0) {
     b.health = 0;

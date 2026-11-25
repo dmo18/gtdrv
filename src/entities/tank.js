@@ -10,6 +10,7 @@
 // pair: it shoves, rams and crushes (crushed cars are flagged for the
 // armor system, which applies the damage and the event).
 import { angleDiff } from '../core/rng.js';
+import { getDamageRule } from './vehicle.js';
 
 export const TANK_ID0 = 300000;
 let nextId = TANK_ID0;
@@ -243,8 +244,15 @@ export function stepTank(t, controls, dt, world) {
   }
   if (close > 0) {
     t.impact = close;
-    // Armored: only a hard crash hurts (ram armor 0.15).
-    if (close > 4) t.health = Math.max(0, t.health - (close - 4) * 40 * s.armor.ram);
+    // Armored: only a hard crash hurts (ram armor 0.15). Through the
+    // damage rule like a car's crash: the default mode's floor holds for
+    // the player's tank.
+    if (close > 4) {
+      let dmg = (close - 4) * 40 * s.armor.ram;
+      const rule = getDamageRule();
+      if (rule) dmg = rule(t, dmg, 'crash', null);
+      if (dmg > 0) t.health = Math.max(0, t.health - dmg);
+    }
     if (t.health <= 0) t.wrecked = true;
   }
   const ch3 = Math.cos(t.heading), sh3 = Math.sin(t.heading);
