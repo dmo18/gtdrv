@@ -97,24 +97,38 @@ export function angleTo(ox, oy, oz, fx, fy, fz, tx, ty, tz) {
 // counts where the line at that distance is below the wall's top, so a
 // target on the far side of a low wall or a roof below the line is fine.
 export function lineOfSight(collision, x0, y0, z0, x1, y1, z1) {
-  if (!collision || typeof collision.raycast !== 'function') return true;
   const dx = x1 - x0, dz = z1 - z0;
   const hl = Math.sqrt(dx * dx + dz * dz);
   if (hl < 1e-6) return true;
-  const ux = dx / hl, uz = dz / hl;
+  return !(wallAlong(collision, x0, y0, z0, dx / hl, dz / hl, (y1 - y0) / hl, hl - 0.05) < hl - 0.05);
+}
+
+// Distance (horizontal, m) along the unit 2D direction (ux, uz) from
+// (x0, z0) to the first solid whose top is above the line there (the
+// line's height is y0 + slope x distance), or Infinity within `len`.
+// Solids the line clears over are stepped past, up to WALL_PASSES of
+// them; from inside one (a low box: a bay car, a planter) it steps a
+// longer way, so a building behind a parked car still counts (0.13.5:
+// lineOfSight stopped after 4 passes of 0.3 m, the combat trace after
+// the first solid, low or not, and shots and sight went through
+// buildings behind a bench or a parked car).
+export const WALL_PASSES = 8;
+export function wallAlong(collision, x0, y0, z0, ux, uz, slope, len) {
+  if (!collision || typeof collision.raycast !== 'function' || !(len > 0)) return Infinity;
+  const tops = typeof collision.heightAt === 'function';
   let from = 0;
-  // Step past walls the line clears over (at most a few).
-  for (let k = 0; k < 4; k++) {
-    const d = collision.raycast(x0 + ux * from, z0 + uz * from, ux, uz, hl - from);
-    if (!(d < hl - from - 0.05)) return true;
+  for (let k = 0; k < WALL_PASSES; k++) {
+    const lim = len - from;
+    if (!(lim > 0)) return Infinity;
+    const d = collision.raycast(x0 + ux * from, z0 + uz * from, ux, uz, lim);
+    if (!(d < lim)) return Infinity;
     const at = from + d;
-    const yy = y0 + (y1 - y0) * (at / hl);
-    const top = typeof collision.heightAt === 'function' ? collision.heightAt(x0 + ux * (at + 0.05), z0 + uz * (at + 0.05)) : Infinity;
-    if (yy < top) return false;
-    from = at + 0.3;
-    if (from >= hl) return true;
+    const yy = y0 + slope * at;
+    const top = tops ? collision.heightAt(x0 + ux * (at + 0.05), z0 + uz * (at + 0.05)) : Infinity;
+    if (yy < top) return at;
+    from = at + (d < 0.02 ? 0.8 : 0.3);
   }
-  return true;
+  return Infinity;
 }
 
 const TP = { x: 0, y: 0, z: 0 };
@@ -144,6 +158,16 @@ function dist3(a, b) {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+// A civilian, or a craft with a civilian at the wheel: the assist adds
+// ASSIST_BYSTANDER to its score, so a bystander nearer than a shooter
+// in the cone no longer takes the bent shots (0.13.5) unless the
+// crosshair is well onto it (centered: 0.6 against the cone edge's 1).
+export const ASSIST_BYSTANDER = 0.6;
+function bystander(t, self) {
+  if (isCraft(t)) return !(t.police || t.cop || t.crew || t.occupantTeam === 'police' || t.occupantTeam === 'crew');
+  return lockTier(t, self) === TIER_CIV;
+}
+
 // Search state shared by the pickers below (no closures, no allocation).
 const Q = { mode: 0, range: 0, cone: 0, skip: null, side: 0, curYaw: 0, best: null, tier: 99, score: Infinity };
 const Q_ASSIST = 0, Q_LOCK = 1, Q_FLICK = 2;
@@ -171,7 +195,8 @@ function consider(ctx, t, eye, fwd, muzzle) {
   if (Q.mode === Q_ASSIST) {
     const cone = Q.cone || assistCone(d);
     if (ang > cone) return;
-    const score = ang / cone + 0.8 * (d / Q.range);
+    let score = ang / cone + 0.8 * (d / Q.range);
+    if (bystander(t, ctx.self)) score += ASSIST_BYSTANDER;
     if (score >= Q.score) return;
     if (!lineOfSight(ctx.collision, muzzle.x, muzzle.y, muzzle.z, TP.x, TP.y, TP.z)) return;
     Q.best = t;

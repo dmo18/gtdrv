@@ -29,7 +29,7 @@ import {
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
-import { targetPoint, angleTo, lineOfSight, AIR_REACH, airborne } from '../core/aim.js';
+import { targetPoint, angleTo, lineOfSight, wallAlong, AIR_REACH, airborne } from '../core/aim.js';
 import { createRagdolls, startRagdoll, kickRagdoll, directRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
 import { poseRagdoll } from '../render/ragdoll.js';
 
@@ -42,6 +42,7 @@ export const HIT_FLASH = 0.15;
 export const KNOCK_DECAY = 6; // m/s^2
 export const ACTOR_HEIGHT = 1.8;
 export const MUZZLE_Y = 1.4;
+export const MELEE_Y = 1.1; // m, the height a swing has to clear
 // Bodies stay (REVAMP 6.7, decision D5): a dead person lies BODY_LIE_T s,
 // then fades over FADE_T s. At most BODY_MAX lie at once: one more makes
 // the oldest start its fade at once. (Was 3 s: nothing you killed stayed.)
@@ -607,15 +608,13 @@ export function trace(game, x, y, z, dx, dy, dz, len, skipActor, skipCraft, out)
   const col = game && game.collision;
   const hl = Math.sqrt(dx * dx + dz * dz);
   if (col && hl > 1e-6) {
-    const d2 = col.raycast(x, z, dx, dz, out.t * hl);
-    if (d2 < out.t * hl) {
-      const t = d2 / hl;
-      const yy = y + dy * t;
-      const hx = x + dx * t + (dx / hl) * 0.05, hz = z + dz * t + (dz / hl) * 0.05;
-      if (yy < col.heightAt(hx, hz)) {
-        out.kind = 'wall';
-        out.t = t;
-      }
+    // Past what the ray clears over (a bench, a hedge, a bay car) to the
+    // next solid: a building behind a low obstacle still stops the shot
+    // (0.13.5: only the first solid was looked at).
+    const at = wallAlong(col, x, y, z, dx / hl, dz / hl, dy / hl, out.t * hl);
+    if (at < out.t * hl) {
+      out.kind = 'wall';
+      out.t = at / hl;
     }
   }
   // People.
@@ -1079,6 +1078,11 @@ export function createCombat(game, { seed = 23023 } = {}) {
     return DIR;
   }
 
+  // Nothing solid above waist height between the swing and (x, z).
+  function meleeClear(actor, x, z) {
+    const y = (actor.y || 0) + MELEE_Y;
+    return lineOfSight(game.collision, actor.x, y, actor.z, x, y, z);
+  }
   function melee(actor, w, dx, dz) {
     const hl = Math.sqrt(dx * dx + dz * dz) || 1;
     const ux = dx / hl, uz = dz / hl;
@@ -1096,11 +1100,17 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const d = c - (a.radius || 0.35);
       if (d > bestD) continue;
       if (c > 0.3 && (ex * ux + ez * uz) / c < cosArc) continue;
+      // Not through a wall or a fence (0.13.5: a swing hit people on the
+      // far side of a garden wall).
+      if (!meleeClear(actor, a.x, a.z)) continue;
       best = a;
       bestD = d;
     }
-    const vs = game.vehicles;
-    for (let i = 0; i < vs.length; i++) {
+    // A craft only when no person is in reach: a car's reach is its
+    // radius, so a parked car beside the target always won the swing the
+    // aim had turned toward the person (0.13.5).
+    const vs = best ? null : game.vehicles;
+    for (let i = 0; vs && i < vs.length; i++) {
       const c = vs[i];
       if (!c || c.removed || craftBase(game, c) - (actor.y || 0) > 1.5) continue;
       const ex = c.x - actor.x, ez = c.z - actor.z;
@@ -1108,6 +1118,7 @@ export function createCombat(game, { seed = 23023 } = {}) {
       const d = cl - (c.radius || 2) * 0.7;
       if (d > bestD) continue;
       if (cl > 0.3 && (ex * ux + ez * uz) / cl < Math.cos(w.spread * 2)) continue;
+      if (!meleeClear(actor, c.x, c.z)) continue;
       best = c;
       bestD = d;
     }

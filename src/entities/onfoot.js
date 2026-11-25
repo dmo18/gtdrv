@@ -2,6 +2,7 @@
 // walls and shorelines, and can find a craft to climb into. Pure logic.
 import { angleDiff, clamp, TAU } from '../core/rng.js';
 import { groundFn } from '../world/ground.js';
+import { lineOfSight } from '../core/aim.js';
 
 const WALK = 2.4; // m/s at full stick
 const SPRINT = 6; // m/s at full stick
@@ -20,6 +21,7 @@ export function createWalker(x, z, heading = 0) {
     moving: false, sprinting: false,
     stride: 0, radius: 0.35, stamina: 1,
     winded: false,
+    col: null, // the collision world of the last step (findEnterable)
     // Combat actor fields (docs/COMBAT.md; systems/combat.js runs them).
     team: 'player', hp: 100, maxHp: 100, height: 1.8,
     life: 'ok', lifeT: 0, fade: 0, hitT: 0, kx: 0, kz: 0,
@@ -40,6 +42,7 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
   w.px = w.x;
   w.pz = w.z;
   w.pheading = w.heading;
+  w.col = (world && world.collision) || null;
 
   // Knocked down (or getting up): no walking of our own.
   if (w.life && w.life !== 'ok') {
@@ -165,21 +168,39 @@ export function stepWalker(w, controls, dt, world, camHeading = 0) {
   return w;
 }
 
-// Nearest craft the walker can reach and climb into, or null.
-export function findEnterable(w, crafts, maxDist = 3.2, accept = null) {
+// Nearest craft the walker can reach and climb into, or null. Not one
+// on the far side of a fence or a wall (0.13.5: ENTER took the player
+// through a garden wall into a car parked behind it, and the step out
+// left them on the other side): the collision world is `collision`,
+// else the one the walker last stepped in.
+export function findEnterable(w, crafts, maxDist = 3.2, accept = null, collision = null) {
   let best = null, bestD = maxDist;
   if (!crafts) return null;
+  const col = collision || w.col;
   for (let i = 0; i < crafts.length; i++) {
     const c = crafts[i];
     if (!c || c.wrecked || !(Math.abs(c.speed) < 4) || !(c.y < 1.5)) continue;
     if (accept && !accept(c)) continue;
     const d = Math.hypot(c.x - w.x, c.z - w.z) - c.radius * 0.7;
+    if (d < bestD && col && !reachable(col, w, c)) continue;
     if (d < bestD) {
       bestD = d;
       best = c;
     }
   }
   return best;
+}
+
+// A step out may cross what is under STEP_OVER m (a curb post, a sea
+// wall), never a taller fence, hedge or wall: the spot past a garden
+// fence beside a parked car shut the player in the yard (0.13.5). From a
+// boat's deck the climb is BOAT_STEP_OVER (a pier rail, a dock edge).
+export const STEP_OVER = 0.95, BOAT_STEP_OVER = 1.25;
+
+// Nothing over a step between the walker and the craft's center.
+function reachable(col, w, c) {
+  const over = c.kind === 'boat' ? BOAT_STEP_OVER : STEP_OVER;
+  return lineOfSight(col, w.x, over, w.z, c.x, over, c.z);
 }
 
 // Where someone stepping out of `craft` should stand. Tries the left
@@ -189,6 +210,7 @@ export function exitPosition(craft, world, out = { x: 0, z: 0, ok: false }) {
   const side = craft.spec.width / 2 + 0.8;
   const end = craft.spec.length / 2 + 0.8;
   const col = world && world.collision;
+  const over = craft.kind === 'boat' ? BOAT_STEP_OVER : STEP_OVER;
   for (let i = 0; i < 4; i++) {
     let ax, az;
     if (i === 0) { ax = s * side; az = -c * side; } // left
@@ -198,6 +220,7 @@ export function exitPosition(craft, world, out = { x: 0, z: 0, ok: false }) {
     const x = craft.x + ax, z = craft.z + az;
     if (!groundAt(world, x, z)) continue;
     if (col && col.resolveCircle(x, z, 0.35, 0).hit) continue;
+    if (col && !lineOfSight(col, craft.x, over, craft.z, x, over, z)) continue;
     out.x = x;
     out.z = z;
     out.ok = true;
