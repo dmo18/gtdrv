@@ -589,8 +589,10 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         const col = shadeHex(HEDGE, 0.92 + (f.v % 4) * 0.05);
         // Low planting is small stuff: shown to the middle level (170 m), as
         // the street props are; the hedge's collision stays.
-        // (0.13.3: sections every 3.4 m, were 5: a lumpy clipped top.)
-        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 3.4, 0.45);
+        // (0.13.3: the squarer profile, a lit top and a tone per 5 m
+        // section, softStrip; more sections cost 1.7k triangles in the
+        // Downtown street view, which sits at its budget.)
+        softStrip(P, x, z, h, Math.max(0.6, 2 * hl), Math.max(0.5, 2 * hw), y, hgt, col, 5, 0.45);
         if (Math.abs(sa) < 0.02 || Math.abs(ca) < 0.02) C.ao.at(x, z).aoSkirt(x - Math.abs(ca * hl) - Math.abs(sa * hw), z - Math.abs(sa * hl) - Math.abs(ca * hw), x + Math.abs(ca * hl) + Math.abs(sa * hw), z + Math.abs(sa * hl) + Math.abs(ca * hw), 0.5, EDGE_Y + 0.004, 0.75);
         break;
       }
@@ -678,7 +680,7 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         else stamps.tree(x, z, y, f.h || 6, cellHash(Math.round(x * 4) + f.v, Math.round(z * 4)));
         // (0.13.3) On a lawn a soft shade under a broadleaf crown (a palm's
         // is thin): the tree stands on the grass, not over a flat carpet.
-        if (f.v > 1 && LAWN_T[lot.type] && !(f.l > 0)) C.ao.at(x, z).aoDisc(x, z, (f.h || 6) * 0.36, EDGE_Y + 0.006, 0.72, 6);
+        if (f.v > 1 && LAWN_T[lot.type] && !(f.l > 0)) C.ao.at(x, z).aoDisc(x, z, (f.h || 6) * 0.4, EDGE_Y + 0.006, 0.6, 6);
         break;
       case 'shrub':
         shrubMound(P, x, z, y, Math.min(1.1, f.r || f.w / 2 || 0.7), f.h || 1, f.v + Math.abs(Math.round(x)), h);
@@ -825,7 +827,7 @@ export function lawnMottle(C, lot) {
     const i = Math.floor((x - G.x0) / G.cell), j = Math.floor((z - G.z0) / G.cell);
     if (i < 0 || j < 0 || i >= G.w || j >= G.h || G.id[j * G.w + i] !== lot.id) continue;
     const q = cellHash(i + k, j - k);
-    C.ao.at(x, z).aoDisc(x, z, 4.5 + 4 * q, EDGE_Y + 0.005, 0.84 + 0.06 * hx, 7);
+    C.ao.at(x, z).aoDisc(x, z, 5 + 4 * q, EDGE_Y + 0.005, 0.66 + 0.1 * hx, 7);
     made++;
   }
   return made;
