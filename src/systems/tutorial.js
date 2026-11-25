@@ -51,11 +51,12 @@ export const CLEAR_NEAR = 70, CLEAR_FAR = 170; // m ahead: where the first run's
 export const QUEUE_NEAR = 40; // m ahead: from here on, traffic standing in the first run's lane is taken away
 // Slow cars staged in the first run's lane, to pass (moving traffic is
 // cleared, so without them only the parked cars would pay): m past the
-// gate, put there as the player comes up to it from behind (a long way
-// ahead of the player, so they do not pop up in view), and their speed.
-export const STAGE_AT = [45, 85, 130];
+// gate, put there as the player comes up to it from behind (at least
+// traffic's own spawn distance, 90 m, ahead of the player on the drive up),
+// and their speed.
+export const STAGE_AT = [50, 90, 135];
 export const STAGE_SPEED = 6; // m/s (13 mph): a car the run passes at 40 mph and more
-export const STAGE_FROM = [-75, -4]; // m along the gate's way: where the player is when they are put there
+export const STAGE_FROM = [-45, -4]; // m along the gate's way: where the player is when they are put there
 const words = (s) => s.split(/\s+/).filter(Boolean).length;
 export const INTRO_MAX_WORDS = Math.max(...Object.values(INTRO_LINES).map(words));
 

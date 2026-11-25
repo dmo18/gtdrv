@@ -141,8 +141,8 @@ a ram: until the first medal, moving traffic 70 to 170 m ahead in the player's l
 away (and the queue at the gate once, as the run starts), and a queue standing 40 to 70 m ahead
 at a light goes before the player reaches it. The parked cars stay: they are what the player
 passes close. So the run also pays passes on moving cars, three slow cars (6 m/s, 13 mph) are
-staged in the lane 45, 85 and 130 m past the gate when the player comes within 75 m of it from
-behind (each approach, a RETRY too); the lane clearing keeps them while they move (0.13.0). Until the police beat a bump or a fast stretch does not call the police (the
+staged in the lane 50, 90 and 135 m past the gate when the player comes within 45 m of it from
+behind (so at least traffic's own 90 m spawn distance ahead) (each approach, a RETRY too); the lane clearing keeps them while they move (0.13.0). Until the police beat a bump or a fast stretch does not call the police (the
 first play-through got a star from a bump at 7 s, before anything had explained the police). One line at a time in the top stack, 9 words at most, the GPS on the
 beat's gate. Beats wait for what the player does; a beat's line comes again after 35 s without
 progress.

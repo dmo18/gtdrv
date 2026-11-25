@@ -478,17 +478,21 @@ test('the first run: slow cars are staged in the lane past the gate as the playe
   assert.equal(calls.length, 0, 'not from the start place, 100 m back');
   g.place(miss.x - 60, 0);
   g.run(0.1);
+  assert.equal(calls.length, 0, 'not yet 60 m back');
+  g.place(miss.x - 42, 0);
+  g.run(0.1);
   assert.equal(calls.length, 1, 'once the player is coming up to the gate from behind');
+  assert.ok(STAGE_AT[0] + 42 >= 90, 'no nearer the player than traffic spawns');
   assert.deepEqual(calls[0], [miss.x, miss.z, miss.dx, miss.dz, STAGE_AT, STAGE_SPEED]);
   assert.ok(STAGE_AT[0] >= 40 && STAGE_SPEED * 2.237 <= 20, 'slow cars a good way past the gate');
   const staged = g.vehicles.filter((v) => v.staged);
-  const other = car({ x: miss.x - 60 + 120, z: 0.4, ai: {}, driver: {}, speed: 9 });
+  const other = car({ x: miss.x - 42 + 120, z: 0.4, ai: {}, driver: {}, speed: 9 });
   g.vehicles.push(other);
   g.run(1);
   assert.ok(other.removed, 'other moving traffic far ahead in the lane is still cleared');
   assert.ok(staged.every((v) => !v.removed), 'the staged cars stay');
   // the run starts at the gate: its sweep of the lane keeps the staged cars that move
-  g.run(3.3, 20 * DT, 0);
+  g.run(2.4, 20 * DT, 0);
   assert.ok(g.streetEvents.active && g.streetEvents.active.ev === miss);
   assert.ok(staged.every((v) => !v.removed), 'still there once the run is on');
   assert.equal(calls.length, 1, 'staged once per approach');
