@@ -865,6 +865,10 @@ delete SHOTS.blast; // replaced by the layered blastCrack/Body/Tail + debris
 // Low-frequency beds rendered at half rate (less memory and work).
 const LOW_RATE = new Set(['road', 'wind', 'buffet', 'city', 'lap', 'tail']);
 
+// Built by the one-shot table but played as a loop (the bank lists it in
+// `loops`, so tests hold its seam to the loop rules).
+const LOOP_SHOTS = new Set(['fireCrackle']);
+
 // Deep one-shots rendered at half rate too.
 // (whoosh and boostWhoosh hold nothing above 4.5 kHz: half rate saves memory)
 const LOW_SHOTS = new Set(['blastTail', 'whoosh', 'boostWhoosh', 'm:pad', 'm:bass', 'm:kick', ...RADIO_LOW]);
@@ -1135,7 +1139,7 @@ export function createBank(ctx, { first = null, engines = ['v6'] } = {}) {
         R.sr = sr;
         const d = SHOTS[name](rng);
         R.sr = SR;
-        put(v > 1 ? `${name}${k}` : name, d, false, sr);
+        put(v > 1 ? `${name}${k}` : name, d, LOOP_SHOTS.has(name), sr);
       }));
     }
   };
