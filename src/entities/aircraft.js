@@ -812,7 +812,7 @@ function stepHeli(a, controls, dt, world) {
   if (lift && a.vy < -0.1) settleDrift(a, world, dt);
 
   // Visual attitude: nose down when flying forward, lean into turns.
-  const wp =clamp(-(vf / s.maxSpeed) * 0.2 - ((wantVf - vf) / s.maxSpeed) * 0.22, -0.4, 0.4);
+  const wp = clamp(-(vf / s.maxSpeed) * 0.2 - ((wantVf - vf) / s.maxSpeed) * 0.22, -0.4, 0.4);
   const wr = clamp(a.steer * 0.28 * (0.35 + Math.abs(vf) / s.maxSpeed) + vl * 0.02, -0.5, 0.5);
   a.pitch += (wp - a.pitch) * Math.min(1, 4 * dt);
   a.roll += (wr - a.roll) * Math.min(1, 4 * dt);

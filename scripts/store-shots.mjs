@@ -59,6 +59,7 @@ for (const [region, hour, weather, drive, cam] of VIEWS.slice(n)) {
         const px = a.x + e.ux * t, pz = a.z + e.uz * t, d = Math.hypot(px - cam.x, pz - cam.z);
         if (d < bd) { bd = d; best = { e, px, pz }; }
       }
+      if (!best) throw new Error('store shot: no road near ' + cam.x + ',' + cam.z);
       const { e, px, pz } = best;
       v.x = px; v.z = pz;
       v.heading = Math.atan2(e.uz, e.ux) + (cam.back ? Math.PI : 0);
