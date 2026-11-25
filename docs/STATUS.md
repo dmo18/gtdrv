@@ -989,3 +989,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Draw budget: smoke Downtown street view 210 calls, 294k triangles. A staged car in view costs one call (seen at 211 when they were placed 75 m out; now placed later, so the snapshot does not see them).
 - Open: the thumb driver often rams the first staged car (it slows when the player closes up) and drives through the red gate again on its way to the purple one (the GPS does not route around other gates); in one run a one-star heat escape ran out of time twice while the stars rose to three. Not done from task 12: each template from 3 directions by the thumb driver, the bronze / gold seed shares.
 - Gates: lint, 1093 tests, loop-test 39 ok, smoke --extra, ui-test 781/781.
+- 0.13.0 note: the new gate ordering (jump and heat face away from the start) renumbers some street event ids, so a few medals saved on 0.12.x may sit on a different gate. Accepted: the loop is one day old.
