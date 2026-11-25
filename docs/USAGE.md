@@ -55,3 +55,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 2026-11-24: 0.12.4 published. Helpers: collisions 392k, GPS/HUD 255k, review 81k, build time 578k. Total about 12.5M of 16M.
 2026-11-25: 0.12.5 published (CI green first try). Helpers since 0.12.4: cockpit/flight 270k, steering/sound 153k, Beach 218k, allocations 309k, reviews 104k, store/android 110k. Total about 14.2M of 16M. Next: loop tuning, accessibility, then RC checks.
 2026-11-25: 0.13.0 published (loop tuning 276k, accessibility 152k, review 109k). Total about 14.8M of 16M. Remaining: release checklist 5.6 (offline, old saves) then RC.
+2026-11-25: owner raised the cap from 16M to 24M (answer: 'Raise to 24M'). Used about 14.9M before F1 streets, F2 car noses, F3 shader programs, E2 checklist helpers.

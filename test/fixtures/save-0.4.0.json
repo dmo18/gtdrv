@@ -1,0 +1,6 @@
+{
+ "version": "0.4.0",
+ "rustwater.save.v1": "{\"version\":3,\"score\":{\"total\":4205,\"sessionBest\":900,\"best\":{\"combo\":5,\"jump\":33,\"airtime\":4.2,\"drift\":120,\"nearMiss\":12},\"missions\":{},\"courses\":{}},\"medals\":{\"stunt-1\":\"gold\",\"hint_boost\":\"bronze\",\"seen_help\":\"silver\"},\"bestTimes\":{\"race-1\":61.5},\"stats\":{\"distance\":12345,\"flights\":3,\"races\":2},\"session\":{\"map\":\"miami\",\"mode\":\"foot\",\"x\":1200.5,\"z\":-300.25,\"heading\":1.2,\"craft\":null,\"garage\":[]},\"mapSessions\":{},\"secrets\":{\"found\":[],\"ghostwake\":false},\"settings\":{\"master\":0.6,\"invertPitch\":true,\"leftHanded\":false,\"quality\":1.25,\"police\":true,\"steering\":\"tilt\",\"steerSensitivity\":1,\"handling\":\"arcade\",\"hud\":\"full\"}}",
+ "rustwater.explore.v1": "{\"version\":1,\"garages\":{\"found\":[\"g-downtown\",\"g-brickell\"],\"seen\":[\"g-downtown\",\"g-brickell\"],\"cars\":[],\"last\":null},\"adventures\":{\"seen\":[\"a-first-light\",\"a-roads-end\"],\"done\":[\"a-first-light\"],\"step\":{},\"tracked\":null},\"cells\":\"IQAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+ "rustwater.map": "miami"
+}

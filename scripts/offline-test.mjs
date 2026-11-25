@@ -58,7 +58,7 @@ try {
   check(true, 'offline reload: the game started and is running');
   // Travel with the network off: the second region's chunk comes from the offline cache.
   await page.goto(`${base}?pwa`);
-  await page.waitForFunction(() => window.__rw && window.__rw.session && window.__rw.city.mapId === 'miami-downtown', null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__rw && window.__rw.session && window.__rw.city.mapId === 'miami-beach', null, { timeout: 30000 });
   await Promise.all([page.waitForNavigation({ timeout: 30000 }).catch(() => {}), page.evaluate(() => window.__rw.session.travelTo('miami-west'))]);
   await page.waitForFunction(() => window.__rw && window.__rw.loop.running && window.__rw.city.mapId === 'miami-west', null, { timeout: 60000 });
   await page.waitForFunction(() => document.getElementById('boot').style.display === 'none', null, { timeout: 30000 }).catch(() => {});
