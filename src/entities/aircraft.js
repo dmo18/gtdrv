@@ -4,6 +4,7 @@
 // of the ground-contact point, pitch is nose up, roll is right side down.
 import { clamp, angleDiff } from '../core/rng.js';
 import { stepBoost, PLANE_BOOST, HELI_BOOST } from './boost.js';
+import { getDamageRule } from './vehicle.js';
 
 const G = 9.81;
 const TAU = Math.PI * 2;
@@ -144,13 +145,25 @@ export function createAircraft(specId, x, z, heading = 0, rng = null) {
   };
 }
 
-export function damageAircraft(a, amount) {
+// Bumps and hard landings ('crash') go through the damage rule as a car's
+// crash does (vehicle.js damageVehicle): in the default mode they never
+// take the player's craft under combat.js CRASH_FLOOR (five taxi bumps
+// wrecked the prop on the ground). A real crash (crash(), ditch()) still
+// wrecks it.
+export function damageAircraft(a, amount, kind = 'crash') {
+  amount = ruled(a, amount, kind);
   if (!(amount > 0)) return;
   a.health -= amount;
   if (a.health <= 0) {
     a.health = 0;
     a.wrecked = true;
   }
+}
+
+function ruled(c, amount, kind) {
+  if (!(amount > 0)) return 0;
+  const rule = getDamageRule();
+  return rule ? rule(c, amount, kind, null) : amount;
 }
 
 function impactDamage(c) {
@@ -688,6 +701,29 @@ function planeTouchdown(a, s) {
 }
 
 // ---- helicopters -----------------------------------------------------------------
+// A parked car, a bench or a planter is no landing pad: a heli coming down
+// within SETTLE_H of something lower than PERCH_MIN (under its center or
+// inside its hit circle) drifts off it sideways at up to SETTLE_DRIFT m/s
+// before the skids touch. (It sat down on a bay car's roof, 1.4 m up, in 9
+// percent of carpark landings, also beside the North region's own pad, and
+// game.js refuses to let the player out above 0.6 m: "Land first".) Roofs
+// and real pads (PERCH_MIN and up) are landed on as before.
+export const PERCH_MIN = 2.5, SETTLE_H = 6, SETTLE_DRIFT = 4;
+function settleDrift(a, world, dt) {
+  const col = world && world.collision;
+  if (!col || typeof col.resolveCircle !== 'function') return;
+  const s = surfaceAt(world, a.x, a.z);
+  if (s >= PERCH_MIN || surfWater || a.y - s > SETTLE_H) return;
+  const res = col.resolveCircle(a.x, a.z, a.spec.hitRadius, 0);
+  if (!res.hit) return;
+  const dx = res.x - a.x, dz = res.z - a.z;
+  const d = Math.sqrt(dx * dx + dz * dz);
+  if (!(d > 1e-6)) return;
+  const step = Math.min(d, SETTLE_DRIFT * dt) / d;
+  a.x += dx * step;
+  a.z += dz * step;
+}
+
 function stepHeli(a, controls, dt, world) {
   const s = a.spec;
   let steerIn = 0, pitchIn = 0, throttle = 0, brake = 0;
@@ -773,8 +809,10 @@ function stepHeli(a, controls, dt, world) {
     a.vy = Math.max(a.vy - G * (1 - frac * 0.7) * dt, -(5 + 25 * (1 - frac)));
   }
 
+  if (lift && a.vy < -0.1) settleDrift(a, world, dt);
+
   // Visual attitude: nose down when flying forward, lean into turns.
-  const wp = clamp(-(vf / s.maxSpeed) * 0.2 - ((wantVf - vf) / s.maxSpeed) * 0.22, -0.4, 0.4);
+  const wp =clamp(-(vf / s.maxSpeed) * 0.2 - ((wantVf - vf) / s.maxSpeed) * 0.22, -0.4, 0.4);
   const wr = clamp(a.steer * 0.28 * (0.35 + Math.abs(vf) / s.maxSpeed) + vl * 0.02, -0.5, 0.5);
   a.pitch += (wp - a.pitch) * Math.min(1, 4 * dt);
   a.roll += (wr - a.roll) * Math.min(1, 4 * dt);
@@ -852,7 +890,7 @@ const HIT_SCALE = 0.6; // bounding spheres are generous (wing tips), shrink them
 function afterHit(c, close) {
   if (close > c.impact) c.impact = close;
   if (!isAircraft(c)) {
-    const dmg = impactDamage(close);
+    const dmg = ruled(c, impactDamage(close), 'crash');
     if (dmg > 0 && typeof c.health === 'number') {
       c.health -= dmg;
       if (c.health <= 0) {

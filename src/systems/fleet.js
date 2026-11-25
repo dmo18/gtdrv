@@ -7,7 +7,7 @@
 // gate (core/spatial.js): the berths near the player at once, the far ones
 // a few steps apart, so every craft is waiting within a few seconds and no
 // step builds a burst of meshes.
-import { createBoat } from '../entities/boat.js';
+import { createBoat, BOAT_SPECS } from '../entities/boat.js';
 import { createAircraft } from '../entities/aircraft.js';
 import { createTank } from '../entities/tank.js';
 import { beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } from '../core/spatial.js';
@@ -22,9 +22,35 @@ const ADOPT_R = 40; // m: as session.js NEAR_FLEET
 // berths from the start like every other craft.
 export const PREMIUM = ['jet', 'stunt', 'heavyheli', 'yacht'];
 
+// Boats are moored alongside their pier: the city's berth is 3.2 m out
+// from the pier edge, so the hull floated 1 to 2 m off it and the player
+// could not step out at the berth ("Pull up to a pier to get out", every
+// berth of the five regions). The berth slides sideways until the hull's
+// side is BERTH_GAP off the nearest pier within BERTH_REACH (the step out,
+// onfoot.js exitPosition, lands 0.8 m past the hull, clear of the pier rail).
+export const BERTH_GAP = 0.15, BERTH_REACH = 8;
+export function mooredBerth(s, piers, out = { x: s.x, z: s.z }) {
+  out.x = s.x;
+  out.z = s.z;
+  const spec = BOAT_SPECS[s.spec];
+  if (!spec || !piers) return out;
+  let best = null, bd = BERTH_REACH, bx = 0, bz = 0;
+  for (const p of piers) {
+    const px = Math.max(p.x0, Math.min(p.x1, s.x)), pz = Math.max(p.z0, Math.min(p.z1, s.z));
+    const d = Math.hypot(px - s.x, pz - s.z);
+    if (d > 1e-6 && d < bd) { bd = d; best = p; bx = px; bz = pz; }
+  }
+  const want = spec.width / 2 + BERTH_GAP;
+  if (!best || bd <= want) return out;
+  const k = (bd - want) / bd;
+  out.x = s.x + (bx - s.x) * k;
+  out.z = s.z + (bz - s.z) * k;
+  return out;
+}
+
 export function createFleet(game) {
   const spots = [];
-  for (const s of game.city.boatSpots) spots.push({ ...s, make: createBoat, craft: null, made: false });
+  for (const s of game.city.boatSpots) spots.push({ ...s, ...mooredBerth(s, game.city.piers), make: createBoat, craft: null, made: false });
   for (const s of game.city.aircraftSpots) spots.push({ ...s, make: createAircraft, craft: null, made: false });
   // Tanks wait at the depot and in Cinder Row (docs/ARMS.md section 3).
   for (const s of game.city.tankSpots || []) spots.push({ ...s, make: createTank, craft: null, made: false });
