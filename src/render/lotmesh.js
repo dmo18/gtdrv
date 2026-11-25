@@ -116,6 +116,8 @@ export function lotGround(city, B, i0, i1, j0, j1) {
 const RUNS = [], RUNG = [];
 function groundRuns(B, G, i0, i1, j0, j1, show, inLot) {
   const { x0, z0, cell, w, type } = G;
+  // (Cells split on a diagonal, lotCut, are drawn after the runs.)
+  const cuts = G.ground === show;
   let quads = 0;
   // Open quads: first column, end column, first row; and their ground.
   RUNS.length = 0;
@@ -125,7 +127,7 @@ function groundRuns(B, G, i0, i1, j0, j1, show, inLot) {
     B[g.key].at((xa + xb) / 2, (za + zb) / 2).flat(xa, za, xb, zb, LOT_Y, g.col);
     quads++;
   };
-  const at = (k) => (!GROUND_BY_T[type[k]] === !inLot ? GROUND_BY_T[show[k]] : null);
+  const at = (k) => (!GROUND_BY_T[type[k]] === !inLot && !(cuts && lotCut(G, show, k)) ? GROUND_BY_T[show[k]] : null);
   for (let j = j0; j < j1; j++) {
     const from = RUNS.length;
     let i = i0;
@@ -151,7 +153,89 @@ function groundRuns(B, G, i0, i1, j0, j1, show, inLot) {
   for (let a = 0; a < RUNS.length; a += 3) emit(a, j1);
   RUNS.length = 0;
   RUNG.length = 0;
+  if (cuts) {
+    for (let j = j0; j < j1; j++) {
+      for (let i = i0; i < i1; i++) {
+        const k = j * w + i;
+        if (!GROUND_BY_T[type[k]] !== !inLot) continue;
+        const cut = lotCut(G, show, k);
+        if (!cut) continue;
+        cutCorners(G, k);
+        const c = CUT_IDX[cut & 7];
+        const ga = GROUND_BY_T[show[k]], gb = GROUND_BY_T[cut >> 3];
+        const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
+        cutTri(B[gb.key].at(cx, cz), (c + 3) & 3, c, (c + 1) & 3, gb.col);
+        cutTri(B[ga.key].at(cx, cz), (c + 1) & 3, (c + 2) & 3, (c + 3) & 3, ga.col);
+        quads++;
+      }
+    }
+  }
   return quads;
+}
+
+// ---- lot to lot boundaries (docs/STREETSCAPE.md 4d) ----
+// Two drawn grounds that meet along a diagonal meet in 5 m stair steps of
+// the lot raster. A cell on such a stair (two perpendicular sides on one
+// other ground b, its other two sides not on b, and the stair going on
+// through a cell along the cut) is drawn split on its diagonal, the half
+// at that corner in b's ground. Of the two cells of a stair that could be
+// split only the one of the lower ground code is, so a staircase of 1-cell
+// steps is drawn as one straight line; a square lot corner (no stair
+// beyond it) stays square. Returns corner | b << 3 (corner 1 NE, 2 NW,
+// 3 SE, 4 SW) or 0. `show`: lotGrid.ground. Pure; no allocation.
+const sameLook = (p, q) => p === q || (!!p && !!q && p.key === q.key && p.col === q.col);
+export function lotCut(G, show, k) {
+  const { w, h } = G;
+  const a = show[k], ga = GROUND_BY_T[a];
+  if (!ga) return 0;
+  const i = k % w, j = (k - i) / w;
+  if (i === 0 || j === 0 || i === w - 1 || j === h - 1) return 0;
+  for (let c = 1; c <= 4; c++) {
+    const v = show[c <= 2 ? k - w : k + w], hs = show[c & 1 ? k + 1 : k - 1];
+    if (!(a < v)) continue;
+    const gb = GROUND_BY_T[v];
+    if (!gb || sameLook(gb, ga) || !sameLook(GROUND_BY_T[hs], gb)) continue;
+    if (sameLook(GROUND_BY_T[show[c <= 2 ? k + w : k - w]], gb) || sameLook(GROUND_BY_T[show[c & 1 ? k - 1 : k + 1]], gb)) continue;
+    const nw = c === 1 || c === 4;
+    if (!sameLook(GROUND_BY_T[show[nw ? k - w - 1 : k - w + 1]], ga) && !sameLook(GROUND_BY_T[show[nw ? k + w + 1 : k + w - 1]], ga)) continue;
+    return c | (v << 3);
+  }
+  return 0;
+}
+// True where cell k is cut (lotCut) with neighbor n on its b side.
+function cutToward(G, show, k, n) {
+  const cut = lotCut(G, show, k) & 7;
+  if (!cut) return false;
+  return n === (cut <= 2 ? k - G.w : k + G.w) || n === (cut & 1 ? k + 1 : k - 1);
+}
+// Cell corners in drawing order SW, SE, NE, NW (as MeshBuilder.flat), and
+// the index of each cut corner in it.
+const CUT_IDX = [0, 2, 3, 1, 0];
+const CCX = new Float64Array(4), CCZ = new Float64Array(4);
+function cutCorners(G, k) {
+  const i = k % G.w, j = (k - i) / G.w;
+  const xa = G.x0 + i * G.cell, xb = xa + G.cell, za = G.z0 + j * G.cell, zb = za + G.cell;
+  CCX[0] = xa; CCZ[0] = zb; CCX[1] = xb; CCZ[1] = zb; CCX[2] = xb; CCZ[2] = za; CCX[3] = xa; CCZ[3] = za;
+}
+function cutTri(bld, p, q, r, col) {
+  const u = 1 / bld.uvScale;
+  bld.tri(CCX[p], LOT_Y, CCZ[p], CCX[q], LOT_Y, CCZ[q], CCX[r], LOT_Y, CCZ[r], col, 0, 1, 0, CCX[p] * u, CCZ[p] * u, CCX[q] * u, CCZ[q] * u, CCX[r] * u, CCZ[r] * u);
+}
+// An edging strip along the cut of cell k (corners from cutCorners), from
+// d0 to d1 in from the cut on the side of corner c (toward: true) or away
+// from it; its ends kept inside the half.
+function cutStrip(bld, c, toward, d0, d1, y, col) {
+  const p = (c + 3) & 3, q = (c + 1) & 3;
+  const px = CCX[p], pz = CCZ[p], qx = CCX[q], qz = CCZ[q];
+  const L = Math.hypot(qx - px, qz - pz), tx = (qx - px) / L, tz = (qz - pz) / L;
+  let nx = CCX[c] - (px + qx) / 2, nz = CCZ[c] - (pz + qz) / 2;
+  const nl = Math.hypot(nx, nz) * (toward ? 1 : -1);
+  nx /= nl; nz /= nl;
+  const ax = px + (nx + tx) * d0, az = pz + (nz + tz) * d0, bx = qx + (nx - tx) * d0, bz = qz + (nz - tz) * d0;
+  const cx = qx + (nx - tx) * d1, cz = qz + (nz - tz) * d1, dx = px + (nx + tx) * d1, dz = pz + (nz + tz) * d1;
+  // (Winding as MeshBuilder.flat: negative area in x, z.)
+  if ((bx - ax) * (cz - az) - (bz - az) * (cx - ax) < 0) orientedQuad(bld, ax, az, bx, bz, cx, cz, dx, dz, y, col);
+  else orientedQuad(bld, dx, dz, cx, cz, bx, bz, ax, az, y, col);
 }
 
 // The fringe of the lot ground, over the same cell range: the cells in no
@@ -183,13 +267,19 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
   let strips = 0;
   // Which edge cell k shows toward neighbor cell n (-1 off the grid):
   // 1 lawn edge, 4 parking lot curb, 0 none.
+  const cuts = !!G.ground;
+  const kindOf = (code, o) => {
+    const g = GROUND_BY_T[code];
+    if (g.key === 'grass') return o && o.key === 'grass' ? 0 : 1;
+    if (code === T_CARPARK) return o && o.key === 'asphalt' ? 0 : 4;
+    return 0;
+  };
   const edgeOf = (k, n) => {
     const g = GROUND_BY_T[type[k]] ? GROUND_BY_T[ground[k]] : null;
     if (!g) return 0;
-    const o = n < 0 ? null : GROUND_BY_T[ground[n]];
-    if (g.key === 'grass') return o && o.key === 'grass' ? 0 : 1;
-    if (ground[k] === T_CARPARK) return o && o.key === 'asphalt' ? 0 : 4;
-    return 0;
+    // (A side on a diagonal cut has its strip along the cut, below.)
+    if (cuts && n >= 0 && (cutToward(G, ground, k, n) || cutToward(G, ground, n, k))) return 0;
+    return kindOf(ground[k], n < 0 ? null : GROUND_BY_T[ground[n]]);
   };
   // side: 0 north (-z), 1 south (+z), 2 west (-x), 3 east (+x).
   const strip = (kind, side, a0, a1, line) => {
@@ -240,6 +330,30 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
           run = -1;
         }
         if (kind && run < 0) { run = j; runKind = kind; }
+      }
+    }
+  }
+  // Along the cut of every split cell (lotCut): the strip of its own
+  // half if a lot cell, and of the other half if the cell beside it on
+  // that side is a lot cell.
+  if (cuts) {
+    for (let j = j0; j < j1; j++) {
+      for (let i = i0; i < i1; i++) {
+        const k = j * w + i, cut = lotCut(G, ground, k);
+        if (!cut) continue;
+        const c = CUT_IDX[cut & 7], b = cut >> 3, nb = (cut & 7) <= 2 ? k - w : k + w;
+        cutCorners(G, k);
+        const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
+        for (let side = 0; side < 2; side++) {
+          if (!GROUND_BY_T[type[side ? nb : k]]) continue;
+          const kind = side ? kindOf(b, GROUND_BY_T[ground[k]]) : kindOf(ground[k], GROUND_BY_T[b]);
+          if (!kind) continue;
+          for (let layer = 0; layer < (kind === 1 ? 2 : 1); layer++) {
+            const d0 = layer ? CURB : 0, d1 = layer ? CURB + VERGE : CURB;
+            cutStrip((layer ? B.grass : B.sidewalk).at(cx, cz), c, side === 1, d0, d1, EDGE_Y, layer ? VERGE_COL : CURB_COL);
+            strips++;
+          }
+        }
       }
     }
   }

@@ -19,15 +19,19 @@ const builders = () => {
   for (const k of KEYS) B[k] = new ChunkedBuilder(1e7, 1, true, 4);
   return B;
 };
-// Every quad (4 vertices) of a builder set, as [cx, cz, key].
+// Every quad (4 vertices) or lone triangle (a lot cell split on its
+// diagonal, lotCut) of a builder set, as [cx, cz, key].
 const quads = (B, keys) => {
   const out = [];
   for (const k of keys) {
     for (const mb of B[k].map.values()) {
-      for (let v = 0; v + 3 < mb.count; v += 4) {
+      const I = mb.idx;
+      for (let t = 0; t < I.length;) {
+        const n = I[t + 3] === I[t] && I[t + 4] === I[t + 2] ? 4 : 3;
         let x = 0, z = 0;
-        for (let q = 0; q < 4; q++) { x += mb.pos[(v + q) * 3]; z += mb.pos[(v + q) * 3 + 2]; }
-        out.push([x / 4, z / 4, k]);
+        for (let q = 0; q < n; q++) { x += mb.pos[(I[t] + q) * 3]; z += mb.pos[(I[t] + q) * 3 + 2]; }
+        out.push([x / n, z / n, k]);
+        t += n === 4 ? 6 : 3;
       }
     }
   }

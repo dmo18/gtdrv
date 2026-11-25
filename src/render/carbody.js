@@ -462,7 +462,10 @@ function shape(spec) {
     }
     return 0;
   } : () => 0;
-  return { S, L, W, H, hw, wr, R, wheels, x0, x1, mid, planW, top, yc, bottom, tipX, bed, q, shoulder, lean, cache: new Map(), inBed: (x) => bed && x > bed[0] && x < bed[1] };
+  // The sill without the arch cut-outs (the L2 shell: a straight sill with
+  // dark arcs laid over the wheels, so the wheels sit in the body).
+  const sill = (x) => Math.min(botC(x / L) * H, yc(x) - 0.06);
+  return { S, L, W, H, hw, wr, R, wheels, x0, x1, mid, planW, top, yc, bottom, sill, tipX, bed, q, shoulder, lean, cache: new Map(), inBed: (x) => bed && x > bed[0] && x < bed[1] };
 }
 
 // Side sections (fraction of the sill-to-shoulder height, fraction of the
@@ -1133,7 +1136,11 @@ function fascia(acc, headAcc, tailAcc, sh, spec, lod) {
       // and an LED strip along the top edge (cell 2).
       const cell = side < 0 ? 0 : 1;
       if (!near) {
-        lens(headAcc, sh, ff, { ...h, bulge: 0 }, side, () => cell, WHITE, 0, N);
+        // The rays find the near surface; the coarser one-draw body can
+        // stand proud of it at the corners and bury the lens edges (spiky
+        // lamps), so the lens sits a little further out and stops short of
+        // the corner.
+        lens(headAcc, sh, ff, { ...h, q: [h.q[0], Math.min(h.q[1], 0.93)], bulge: 0, lift: 0.02 }, side, () => cell, WHITE, 0, N);
         continue;
       }
       lens(headAcc, sh, ff, h, side, () => 4, WHITE, 0, N);
@@ -2443,7 +2450,9 @@ export function shellStations(spec) {
 // Half ring of the shell at x (bottom center outward, up to the top center).
 function shellHalf(sh, gs, x) {
   const w = sh.planW(x);
-  const y0 = sh.bottom(x);
+  // A straight sill: with only 8 stations the arch cut-outs of sh.bottom
+  // would tilt whole panels up into wedges over the wheels.
+  const y0 = sh.sill(x);
   const c = sh.yc(x);
   const ws = w * sh.shoulder;
   const out = [[w * 0.88, y0], [w, y0 + Math.min(0.14, (c - y0) * 0.3)], [ws * 0.995, c]];
@@ -2518,8 +2527,9 @@ export function buildCarL2(spec) {
   // Lamp dots, grille and plate: flat quads just off the end caps.
   const quad = (x, ya, yb, za, zb, nx, hex, cls) => {
     const col = lin(hex);
-    // Just off the end station (the cap's outermost plane).
-    const d = () => x;
+    // Just off the end cap, following the nose's and tail's lean (a quad
+    // on the unleaned station would float ahead of a rounded nose).
+    const d = (y) => (x === xf || x === xr ? x - Math.sign(nx) * sh.lean(x, y) : x);
     const sx = Math.sign(nx);
     const v = [[d(ya), ya, za], [d(ya), ya, zb], [d(yb), yb, zb], [d(yb), yb, za]].map((p) => acc.vert(p[0] + nx * 0.012, p[1], p[2], sx, 0, 0, col, cls));
     const flip = (nx > 0) === (zb > za);
@@ -2531,15 +2541,25 @@ export function buildCarL2(spec) {
   const ffr = { yb: sh.bottom(sh.x1 - 0.06), yt: sh.yc(sh.x1 - 0.22) };
   const rfr = { yb: sh.bottom(sh.x0 + 0.06), yt: sh.yc(sh.x0 + 0.22) };
   const fy = (fr, f) => fr.yb + f * (fr.yt - fr.yb);
-  const hd = F.head, tl = F.tail;
+  const hd = F.head, tl = F.tail, gr = F.grille;
+  // Head lamps reach in to the grille, so the face reads as one wide band
+  // (lamps, chrome frame, dark mesh) and not as dots on a flat panel. The
+  // lamps stop short of the cap's corners so they never overhang it.
+  const q0 = Math.max(0.42, hd.q[0]);
+  const hy0 = fy(ffr, hd.f[0] + (hd.f[1] - hd.f[0]) * 0.3), hy1 = fy(ffr, Math.min(0.96, hd.f[1]));
+  // A dark band behind lamps and grille (the lamp housings): white lamps
+  // must read on white paint too.
+  quad(xf, hy0 - 0.03, hy1 + 0.02, -wf * 0.95, wf * 0.95, 0.35, 0x202326, CLS.TRIM);
   for (const s of [1, -1]) {
-    // Head lamp in a dark housing (reads on white paint too).
-    const ya = fy(ffr, hd.f[0] + (hd.f[1] - hd.f[0]) * 0.3), yb = fy(ffr, Math.min(0.98, hd.f[1])), q0 = Math.max(0.42, hd.q[0]);
-    quad(xf, ya - 0.03, yb + 0.02, s * wf * (q0 - 0.04), s * wf * 0.985, 0.6, 0x202326, CLS.TRIM);
-    quad(xf, ya, yb, s * wf * q0, s * wf * 0.96, 1, 0xdfe6ee, CLS.GLOW);
-    if (tl) quad(xr, fy(rfr, tl.f[0]), fy(rfr, Math.min(0.98, tl.f[1])), s * wrr * Math.max(0.42, tl.q[0]), s * wrr * 0.96, -1, 0xc01414, CLS.GLOW);
+    quad(xf, hy0, hy1, s * wf * q0, s * wf * 0.93, 1, 0xdfe6ee, CLS.GLOW);
+    if (tl) quad(xr, fy(rfr, tl.f[0]), fy(rfr, Math.min(0.96, tl.f[1])), s * wrr * Math.max(0.42, tl.q[0]), s * wrr * 0.93, -1, 0xc01414, CLS.GLOW);
   }
-  if (F.grille) quad(xf, fy(ffr, F.grille.f[0]), fy(ffr, Math.min(0.95, F.grille.f[1])), -wf * F.grille.q[1] * 0.85, wf * F.grille.q[1] * 0.85, 1, 0x1a1c1f, CLS.TRIM);
+  if (gr) {
+    const gq = Math.min(gr.q[1], q0 - 0.03), b = 0.035;
+    const g0 = fy(ffr, gr.f[0]), g1 = Math.min(fy(ffr, Math.min(0.95, gr.f[1])), hy1);
+    if (gr.bezel) quad(xf, g0 - b, g1 + b, -wf * (gq + b), wf * (gq + b), 0.65, gr.bezel, gr.bezel === CHROME ? CLS.CHROME : CLS.TRIM);
+    quad(xf, g0, g1, -wf * gq, wf * gq, 1, 0x1a1c1f, CLS.TRIM);
+  }
   // Wheels: a dark arc in the side over each wheel, the tire face (a fan
   // from a gray hub out to the black tread) and the lower half of the tread.
   const { wr, tw, ax, az } = wheelLayout(spec);
@@ -2556,7 +2576,10 @@ export function buildCarL2(spec) {
         const ar = [];
         for (let k = 0; k <= 4; k++) {
           const a = (k / 4) * Math.PI;
-          ar.push(acc.vert(wx + Math.cos(a) * sh.R, wr + Math.sin(a) * sh.R, zs, 0, 0, s, arc, CLS.TRIM));
+          // A little wider than the arch so a dark rim reads round the tire
+          // over the straight sill.
+          const ra = sh.R + 0.05;
+          ar.push(acc.vert(wx + Math.cos(a) * ra, wr + Math.sin(a) * ra, zs, 0, 0, s, arc, CLS.TRIM));
         }
         for (let k = 0; k < 4; k++) if (s > 0) acc.tri(c0, ar[k], ar[k + 1]); else acc.tri(c0, ar[k + 1], ar[k]);
       }
