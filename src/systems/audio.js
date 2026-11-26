@@ -530,7 +530,8 @@ export function createAudio(game) {
     if (fx.squeal.s) set(fx.squeal.s.playbackRate, 0.86 + 0.2 * sq + 0.04 * sf, now, 0.12);
     set(fx.wet.g.gain, isCar ? 0.5 * rain * clamp(speed / 22, 0, 1) : 0, now, 0.2);
     let rush = 0;
-    if (isCar) rush = 0.3 * Math.pow(clamp(speed / 45, 0, 1.3), 2);
+    // (0.13.7: heard from town speed on, 0.05 at 30 mph, was 0.027; 0.33 at 100 mph, was 0.30)
+    if (isCar) rush = 0.3 * Math.pow(clamp(speed / 42, 0, 1.3), 1.6);
     else if (isBoat) rush = 0.15 * Math.pow(sf, 2);
     else if (isAir) rush = 0.5 * Math.pow(clamp(speed / maxS, 0, 1.3), 2);
     set(fx.rush.g.gain, rush, now, 0.1);

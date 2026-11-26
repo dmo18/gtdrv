@@ -127,6 +127,20 @@ export const LOOK = { drag: 0.006, yawMax: (110 * Math.PI) / 180, pitchMax: (25 
 export const FIRST = { hoodShare: 0.15, hoodPitch: [-12, 8], lean: 0.03 };
 const BOOST_FOV = 9; // degrees of extra field of view at full boost
 const RAD = Math.PI / 180;
+// A car's chase views keep their width from a 16:9 screen up (0.13.7, the
+// owner: "a single city block feels like it takes an hour"). baseFov is
+// vertical, so a wider screen saw more to the sides: 62 degrees vertical
+// is 94 across at 16:9 but 104 across a 748x360 phone and 106 across the
+// S24 Ultra, and the street, the cars and the facades all came out about a
+// fifth smaller and slower on the screen than the view was made for.
+// Past CHASE_ASPECT the vertical angle narrows so the width stays the
+// 16:9 one (52 degrees vertical at 2.2:1); the speed, kick and boost
+// widening still add on top.
+export const CHASE_ASPECT = 16 / 9;
+export function chaseBaseFov(baseFov, aspect) {
+  if (!(aspect > CHASE_ASPECT)) return baseFov;
+  return (2 * Math.atan((Math.tan((baseFov * RAD) / 2) * CHASE_ASPECT) / aspect)) / RAD;
+}
 function prefersReducedMotion() {
   try {
     return typeof globalThis.matchMedia === 'function' && !!globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -416,7 +430,8 @@ export function createChaseCamera(camera) {
   function updateFov(spd, dt, snap, boost = 0) {
     const wantB = leanOn ? BOOST_FOV * clamp(boost, 0, 1) : 0;
     boostFov = snap ? wantB : boostFov + (wantB - boostFov) * Math.min(1, 4 * dt);
-    const want = mode.baseFov + Math.min(spd, 50) * 0.22 + fovKick + boostFov;
+    const base = modeKey === 'car' && !mode.fp ? chaseBaseFov(mode.baseFov, camera.aspect) : mode.baseFov;
+    const want = base + Math.min(spd, 50) * 0.22 + fovKick + boostFov;
     const next = snap ? want : curFov + (want - curFov) * Math.min(1, 3 * dt);
     curFov = next;
     // The aim view blends its own FOV in with the same 0.2 s ease.

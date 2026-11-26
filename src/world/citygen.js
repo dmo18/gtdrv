@@ -756,14 +756,59 @@ export function lanePoint(city, edge, from, d, lane = 0, out = { x: 0, z: 0, hea
   return out;
 }
 
-// Traffic-light state for traffic traveling along an edge into a
-// signaled junction: 'green', 'amber' or 'red'.
+// Traffic-light timing (s). The cycle is short on purpose (a real one is 60
+// to 90 s): a game block is driven in about 7 s, and a real cycle would
+// add 10 to 20 s at every red. The two directions split it evenly, with
+// half a second of all-red between them.
+// Phase (0.13.7): one per junction. The offset is 7 s per id of the
+// junction's cluster (signalClusters: sigC, the two to four signal nodes
+// of one junction, under SIGNAL.cluster m apart), so all its nodes show
+// the same light. It was 7 s per node id: 50 of the 51 such pairs in Beach
+// and Downtown were out of phase, green at the first line and red 15 m on.
+// `wave` > 0 (m/s) instead sets a green wave from the cluster's mean point
+// (sigX + sigZ) / wave, a car going east or south at that speed meeting
+// every light in phase; measured off (Downtown signal stops 21 to 31 % of
+// junctions: west and north lose what east and south gain).
+export const SIGNAL = { cycle: 24, green: 9, amber: 2.5, wave: 0, cluster: 30 };
 export function signalState(node, horizontal, time) {
   if (!node.signal) return 'green';
-  const cycle = 24;
-  const t = (time + node.id * 7) % cycle;
-  const mine = horizontal ? t : (t + cycle / 2) % cycle;
-  if (mine < 9) return 'green';
-  if (mine < 11.5) return 'amber';
+  const c = SIGNAL.cycle;
+  const px = node.sigX === undefined ? node.x : node.sigX, pz = node.sigZ === undefined ? node.z : node.sigZ;
+  const off = SIGNAL.wave > 0 ? -(px + pz) / SIGNAL.wave : (node.sigC === undefined ? node.id : node.sigC) * 7;
+  let t = (time + off) % c;
+  if (t < 0) t += c;
+  const mine = horizontal ? t : (t + c / 2) % c;
+  if (mine < SIGNAL.green) return 'green';
+  if (mine < SIGNAL.green + SIGNAL.amber) return 'amber';
   return 'red';
+}
+// Groups signal nodes joined by an edge under SIGNAL.cluster m (one
+// junction of a divided road) and gives each its group's mean point
+// (sigX, sigZ) and id (sigC, the lowest node id). Once per city; called by
+// the traffic system at start (systems/traffic.js), before any light shows.
+export function signalClusters(city) {
+  if (!city || !city.nodes || city.signalClustered) return city;
+  const nodes = city.nodes, edges = city.edges || [];
+  const root = new Int32Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) root[i] = i;
+  const find = (i) => { while (root[i] !== i) { root[i] = root[root[i]]; i = root[i]; } return i; };
+  for (const e of edges) {
+    if (!(e.length < SIGNAL.cluster) || !nodes[e.a].signal || !nodes[e.b].signal) continue;
+    const ra = find(e.a), rb = find(e.b);
+    if (ra !== rb) { if (ra < rb) root[rb] = ra; else root[ra] = rb; }
+  }
+  const sx = new Float64Array(nodes.length), sz = new Float64Array(nodes.length), sn = new Int32Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    if (!nodes[i].signal) continue;
+    const r = find(i);
+    sx[r] += nodes[i].x; sz[r] += nodes[i].z; sn[r]++;
+  }
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (!n.signal) continue;
+    const r = find(i);
+    n.sigC = r; n.sigX = sx[r] / sn[r]; n.sigZ = sz[r] / sn[r];
+  }
+  city.signalClustered = true;
+  return city;
 }

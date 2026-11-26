@@ -9,7 +9,7 @@
 // edge it is on (A -> B), a curve through the next junction (B -> C) and
 // the lane of the following edge (C -> D). When the car gets onto C -> D
 // the route moves one hop on and the polyline is rebuilt.
-import { lanePoint as lanePointBase, lanesPerDirection, laneOffset, signalState, canDrive } from '../world/citygen.js';
+import { lanePoint as lanePointBase, lanesPerDirection, laneOffset, signalState, signalClusters, canDrive } from '../world/citygen.js';
 import { createVehicle, steerLock, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { beginSpawnStep, takeSpawn, spawnsLeft, belowLiveCap, createWarmer, SPAWNER } from '../core/spatial.js';
 import { exitPosition } from '../entities/onfoot.js';
@@ -944,6 +944,7 @@ const JAM_WAIT = 40, JAM_NEAR = 30; // s behind a car, m from the player
 
 export function createTraffic(game, { max = 14 } = {}) {
   const city = game.city;
+  signalClusters(city); // one phase per junction (world/citygen.js)
   const cars = [];
   const wrecks = []; // cars their drivers left: cleared once out of view
   const near = [];
