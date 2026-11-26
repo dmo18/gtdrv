@@ -9,7 +9,7 @@
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, STREET_W, lanePoint, laneOffset, SIGNAL } from './citygen.js';
 import { roadProfile, pairDivided, harmonizeStreets, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
-import { buildRoadGeo, onJunction } from './junctions.js';
+import { buildRoadGeo, onJunction, curbsAt } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, BAYS_ONLY_FAST, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
@@ -1642,11 +1642,25 @@ function adjLink(G, ways, a, b, wi) {
 }
 function linkReps(seg, parent, ways, links, rx, rz) {
   const G = makeAdjacency(parent.length, 2 * seg.n + 2 * links.length + 2);
+  const folds = [];
   for (let s = 0; s < seg.n; s++) {
     const a = findRoot(parent, seg.a[s]), b = findRoot(parent, seg.b[s]);
     if (a === b) continue;
+    // (A way that links a and b a second time ran there and back: a
+    // traffic circle round one merged junction node, out to a point of
+    // its ring and back in.)
+    const was = adjEntry(G, a, b);
+    if (was >= 0 && G.way[was] === seg.w[s]) folds.push(was);
     const e = adjLink(G, ways, a, b, seg.w[s]);
     if (ways[seg.w[s]].oneway) G.legal[e] = 1;
+  }
+  // (0.13.8) Such a fold that ends at a rep with no other neighbor is a
+  // dead-end stub out of the junction (drawn as a 12 m two-way stub, a
+  // wedge of road and sidewalk across the crossing: SW 20th Road at SW
+  // 5th Avenue): never walked, so it makes no edge.
+  for (const e of folds) {
+    const b = G.to[e], a = G.to[G.mate[e]];
+    if (G.deg[a] === 1 || G.deg[b] === 1) G.seen[e] = G.seen[G.mate[e]] = 1;
   }
   for (let k = 0; k < links.length; k++) {
     // Hand-made links: nearest representative to each end.
@@ -1757,6 +1771,16 @@ function simplifyChain(W, len, wi) {
     // (Two reps: nothing between them to keep or drop.)
     keep.fill(0, 1, len - 1);
     chainDP(chain, keep, W.stack, W.rx, W.rz, len);
+  }
+  // (0.13.8) A chain that leaves a node and comes back to it keeping
+  // under two points between its ends folds into a dead-end stub out of
+  // the node (two passes over one pair of nodes are one two-way road,
+  // drawn 12 m wide): dropped. (A loop of three points or more, a
+  // turning circle, stays.)
+  if (chain[0] === chain[len - 1]) {
+    let kept = 0;
+    for (let i = 1; i < len - 1; i++) if (keep[i]) kept++;
+    if (kept < 2) return;
   }
   let prev = nodeFor(W, chain[0]), prevI = 0;
   const oneway = W.ways[wi].oneway;
@@ -3086,7 +3110,10 @@ export function createMiamiCity(data, opts = {}) {
           // asphalt is dropped by inJunctionBox.)
           for (let d = a.hx + 9; d < e.length - nodes[e.b].hx - 9; d += 6.5) {
             if (!rng.chance(0.22)) continue;
-            const off = (e.off || 0) + side * (half - GUTTER - PARK_W / 2);
+            // (0.13.8: in the parking lane as drawn, tapers and side
+            // shifts included, not the edge's nominal cross section.)
+            const C = curbsAt(roadGeo, e, d);
+            const off = side > 0 ? C.r - GUTTER - PARK_W / 2 : C.l + GUTTER + PARK_W / 2;
             const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rzv * off;
             if (mainShore(x, z) < 3 || inBuilding(x, z, 1.5) || onOtherRoad(x, z, e, 1.5) || inJunctionBox(x, z, 3)) continue;
             const heading = side > 0 || e.oneway ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);

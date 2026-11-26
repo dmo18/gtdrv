@@ -269,10 +269,40 @@ export function pairDivided(nodes, edges, edgesNear) {
       e.median = 0;
       // Left curb (off - w/2) onto the middle line (-d/2).
       e.off = round2((e.width - bd) / 2);
+      // (0.13.8) The drawn strip runs straight from the middle line at
+      // node a to the middle line at node b (world/junctions.js
+      // pairEnds): `off` is its middle, the mean of the two ends, so the
+      // lanes lie in it (was: the gap at the edge's midpoint, a kink in
+      // the curbs at the middle).
+      // (Not on a bridge: the land under it was stamped along `off`.)
+      const ga = e.bridge ? Infinity : endGap(nodes, edges, e, 0, edgesNear, near), gb = e.bridge ? Infinity : endGap(nodes, edges, e, 1, edgesNear, near);
+      if (ga <= PAIR_MAX && gb <= PAIR_MAX) {
+        const m = (e.width - (ga + gb) / 2) / 2;
+        if (Math.abs(m - e.off) <= PAIR_END_MAX) e.off = round2(m);
+      }
     }
     paired++;
   }
   return paired;
+}
+// Distance from edge e's node at `end` to the nearest one-way of its name
+// running the other way on its left (any edge of the partner street;
+// Infinity when none within PAIR_MAX m).
+export const PAIR_END_MAX = 3;
+export function endGap(nodes, edges, e, end, edgesNear, near) {
+  const n = nodes[end ? e.b : e.a];
+  edgesNear(n.x, n.z, PAIR_MAX, near);
+  let bd = Infinity;
+  for (let i = 0; i < near.length; i++) {
+    const o = edges[near[i]];
+    if (o === e || !o.oneway || o.name !== e.name || e.ux * o.ux + e.uz * o.uz > -0.85) continue;
+    const oa = nodes[o.a];
+    const t = (n.x - oa.x) * o.ux + (n.z - oa.z) * o.uz;
+    if (t < -2 || t > o.length + 2) continue;
+    const lat = (oa.x + o.ux * t - n.x) * -e.uz + (oa.z + o.uz * t - n.z) * e.ux;
+    if (lat < 0 && -lat < bd) bd = -lat;
+  }
+  return bd;
 }
 
 const nominalW = (e) => (PARKING.has(e.cls) && !e.bridge && !e.ped ? e.width + 2 * PARK_W - e.parkL - e.parkR : e.width);

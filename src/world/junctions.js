@@ -25,12 +25,14 @@
 // Lateral offsets are meters right of the node line seen a -> b (the edge
 // frame of docs/MAP.md); along distances are meters from node a.
 
-import { GUTTER, paintLines, divideOf } from './roadprofile.js';
+import { GUTTER, paintLines, divideOf, PAIR_MAX, PAIR_END_MAX, endGap } from './roadprofile.js';
 
 export const CLUSTER_LEN = 14;
 export const STUB_LEN = 8;
 export const DIVIDED_LINK = 45;
 export const TAPER_LEN = 10;
+// (0.13.8) A bend's taper runs at least this many m per m of change.
+export const TAPER_SLOPE = 25;
 export const CURB_R_MIN = 1.5;
 export const CURB_R_MAX = 4.5;
 export const ARC_SEGS = 3;
@@ -561,6 +563,16 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
     taper[A.q] = A.tl;
     tlin[A.q] = 1;
   });
+  // (0.13.8) The halves of a one-way pair drawn as one road (no median,
+  // `off`): `off` puts the left curb on the middle line at the edge's
+  // midpoint only. Where the two node lines converge or part along the
+  // street, each block's half sat on its own straight line, so the
+  // curbs stepped at every joint and the two yellow edge lines crossed
+  // and parted (NW 1st Avenue). Each end's curbs now sit on the middle
+  // line at its node (measured against whichever half lies there), and
+  // the strip runs straight from end to end (two linear tapers over
+  // half the edge each, meeting at `off`).
+  if (edgesNear) pairEnds(nodes, edges, edgesNear, eoff, taper, tcl, tcr, tlin);
   // Bends: mitered joins and tapers.
   for (let i = 0; i < NN; i++) {
     if (arms.has(find(uf, i)) || deg(i) !== 2) continue;
@@ -583,17 +595,28 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
     flip[q1] = flip[q2] = end1 === end2 ? 1 : 0;
     stats.bends++;
     // Curbs at the node in each edge's frame; a taper where they differ.
+    // (The curbs at the node: an end target of pairEnds, else the
+    // edge's own cross section.)
     const o1 = (e1.off || 0) + eoff[e1.id], o2 = (e2.off || 0) + eoff[e2.id];
-    const lc1 = o1 - e1.width / 2, rc1 = o1 + e1.width / 2;
+    const lc1 = taper[q1] > 0 ? tcl[q1] : o1 - e1.width / 2, rc1 = taper[q1] > 0 ? tcr[q1] : o1 + e1.width / 2;
     const f = end1 === end2 ? -1 : 1;
-    let lc2 = o2 - e2.width / 2, rc2 = o2 + e2.width / 2;
+    let lc2 = taper[q2] > 0 ? tcl[q2] : o2 - e2.width / 2, rc2 = taper[q2] > 0 ? tcr[q2] : o2 + e2.width / 2;
     if (f < 0) { const t = lc2; lc2 = -rc2; rc2 = -t; }
     if (Math.abs(lc1 - lc2) > 0.05 || Math.abs(rc1 - rc2) > 0.05) {
       const ml = (lc1 + lc2) / 2, mr = (rc1 + rc2) / 2;
-      tcl[q1] = ml; tcr[q1] = mr;
-      if (f < 0) { tcl[q2] = -mr; tcr[q2] = -ml; } else { tcl[q2] = ml; tcr[q2] = mr; }
-      taper[q1] = Math.min(TAPER_LEN, 0.4 * e1.length);
-      taper[q2] = Math.min(TAPER_LEN, 0.4 * e2.length);
+      // (0.13.8) A linear taper as long as the change needs (1 in
+      // TAPER_SLOPE, at least TAPER_LEN) up to half of each edge: a
+      // 10 m smoothstep made a 3 m jog read as a kink in the street.
+      const need = Math.max(TAPER_LEN, TAPER_SLOPE * Math.max(Math.abs(lc1 - lc2), Math.abs(rc1 - rc2)) / 2);
+      const t1 = Math.min(need, 0.5 * e1.length), t2 = Math.min(need, 0.5 * e2.length);
+      const fit = (q, e, t, l, r) => {
+        // (An end already tapering to a target: the target moves to the
+        // meeting point over the same or a longer run.)
+        taper[q] = Math.max(t, taper[q] > 0 ? taper[q] : 0);
+        tcl[q] = l; tcr[q] = r; tlin[q] = 1;
+      };
+      fit(q1, e1, t1, ml, mr);
+      if (f < 0) fit(q2, e2, t2, -mr, -ml); else fit(q2, e2, t2, ml, mr);
       stats.tapers++;
     }
   }
@@ -718,6 +741,33 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
     }
   }
   return { junctions, nodeJ, trim, miter, taper, tcl, tcr, tlin, nbr, flip, inner, jEnd, ctrl, stats, jGrid, eoff, sup, mthru };
+}
+
+// The node-end curbs of every half of a one-way pair drawn as one road
+// (pair, no median): its left curb on the middle line between its node
+// and the nearest opposite half of the same name on its left there (any
+// edge of the partner street, not only `pair`: roadprofile.js endGap),
+// moved at most PAIR_END_MAX m from the edge's own `off`; linear tapers
+// over half the edge.
+function pairEnds(nodes, edges, edgesNear, eoff, taper, tcl, tcr, tlin) {
+  const near = [];
+  for (let k = 0; k < edges.length; k++) {
+    const e = edges[k];
+    if (!(e.pair >= 0) || e.median > 0 || !e.oneway || e.causeway || e.bridge || e.lanesF === undefined) continue;
+    for (let end = 0; end < 2; end++) {
+      const bd = endGap(nodes, edges, e, end, edgesNear, near);
+      if (!(bd <= PAIR_MAX)) continue;
+      let off = (e.width - bd) / 2;
+      const o0 = e.off || 0;
+      off = Math.max(o0 - PAIR_END_MAX, Math.min(o0 + PAIR_END_MAX, off));
+      if (Math.abs(off - o0) <= 0.05) continue;
+      const q = 2 * k + end, c = off + eoff[k];
+      taper[q] = 0.5 * e.length;
+      tcl[q] = c - e.width / 2;
+      tcr[q] = c + e.width / 2;
+      tlin[q] = 1;
+    }
+  }
 }
 
 // Two one-way ways in the same direction drawn over each other (a turn
@@ -1175,6 +1225,21 @@ export function edgePaint(city, e, out) {
     if (ta > 0) for (const d of [ta / 3, (2 * ta) / 3, ta]) if (d > dA + 0.2 && d < dB - 0.2) DS.push(d);
     if (tb > 0) for (const d of [e.length - tb, e.length - (2 * tb) / 3, e.length - tb / 3]) if (d > DS[DS.length - 1] + 0.2 && d < dB - 0.2) DS.push(d);
     DS.push(dB);
+    if (kind === 'yellow' && e.pair >= 0 && !(e.median > 0)) {
+      // (0.13.8) The halves of a pair drawn as one road: each half's
+      // yellow edge line on the middle between the two left curbs
+      // (midYellow), 0.12 m on its own side, every 4 m: the two lines
+      // read as one double yellow where the data's halves do not run
+      // exactly side by side (they parted and crossed: Water Avenue).
+      for (let k = 0; k + 1 < DS.length; k++) {
+        const n = Math.max(1, Math.ceil((DS[k + 1] - DS[k]) / 4));
+        for (let m = 0; m < n; m++) {
+          const d0 = DS[k] + ((DS[k + 1] - DS[k]) * m) / n, d1 = DS[k] + ((DS[k + 1] - DS[k]) * (m + 1)) / n;
+          emitLine(out, kind, o, d0, midYellow(city, e, d0, o), d1, midYellow(city, e, d1, o), div);
+        }
+      }
+      continue;
+    }
     for (let k = 0; k + 1 < DS.length; k++) {
       const d0 = DS[k], d1 = DS[k + 1];
       emitLine(out, kind, o, d0, mapAt(geo, e, Math.max(0, Math.min(e.length, d0)), o), d1, mapAt(geo, e, Math.max(0, Math.min(e.length, d1)), o), div);
@@ -1202,6 +1267,23 @@ export function edgePaint(city, e, out) {
   return clipPaint(city, e, out);
 }
 
+// The yellow edge line of a half of a pair drawn as one road, at d
+// (lateral, e's frame): halfway between its left curb and its partner's
+// left curb there, 0.12 m toward its own lanes; where the partner does
+// not reach, or lies over 6 m off, the line's own place (mapAt).
+function midYellow(city, e, d, o) {
+  const geo = city.roadGeo, dd = Math.max(0, Math.min(e.length, d));
+  const own = mapAt(geo, e, dd, o);
+  const p = city.edges[e.pair], a = city.nodes[e.a], pa = city.nodes[p.a];
+  const lc = curbsAt(geo, e, dd).l;
+  const x = a.x + e.ux * dd - e.uz * lc, z = a.z + e.uz * dd + e.ux * lc;
+  const t = (x - pa.x) * p.ux + (z - pa.z) * p.uz;
+  if (t < 0 || t > p.length) return own;
+  const lat = -(x - pa.x) * p.uz + (z - pa.z) * p.ux;
+  const g = lat - curbsAt(geo, p, t).l;
+  if (Math.abs(g) > 6) return own;
+  return lc + g / 2 + 0.12;
+}
 // Is (x, z) on edge f's strip (its asphalt between its ends), at least
 // `m` m in from both curbs?
 function onStrip(city, f, x, z, m) {

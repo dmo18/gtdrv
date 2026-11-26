@@ -880,6 +880,14 @@ center turn lane (`center`), same width (0.12.6, `roadProfile(way, { turnLane })
   is unmarked; a local one-way of two lanes gets its lane line only. Park
   lines only on collectors and up.
 
+0.13.8 street alignment: a paired one-way drawn as one road takes `off`
+from the middle line at both its nodes (the mean; roadprofile.js
+`endGap`), its curbs run straight from end to end on that middle line
+(junctions.js `pairEnds`, linear tapers over half the edge; not on
+bridges) and its yellow edge line is painted halfway to its partner's
+left curb (`midYellow`). Bend tapers are linear, 25 m per m of change.
+A traffic circle folded into one node makes no stub edges.
+
 Also on every edge, derived (old callers): `avenue` = two or more lanes each
 way (`min(lanesF, lanesB) >= 2`, or a one-way of 3 or more); optional
 `sidewalk` (1.8 residential, 3.0 downtown and on Lincoln Road; the 0.15 m curb
