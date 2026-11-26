@@ -3,12 +3,12 @@
 No key, password or secret is in this file or in the repository. Everything marked
 OWNER can only be done by you.
 
-## 1. Config check (done offline, from the files, for 0.12.5)
+## 1. Config check (done offline, from the files, for 0.13.5)
 
 | Item | Result | Where |
 | --- | --- | --- |
-| Version name | 0.12.5, same as package.json and android/package.json | `android/native/version.properties` |
-| Version code | 21 (must be higher than `release/last.json` before an upload; `npm run release:check` tests it) | same file |
+| Version name | 0.13.5, same as package.json and android/package.json | `android/native/version.properties` |
+| Version code | 27 (must be higher than `release/last.json` before an upload; `npm run release:check` tests it) | same file |
 | applicationId and namespace | `io.github.dmo18.rustwater`, same in `capacitor.config.json`; permanent after the first upload | `app/build.gradle` |
 | SDK levels | minSdk 24, compileSdk 36, targetSdk 36. Play required API 35 for updates from August 2025; 36 is expected from August 2026. Re-check "Target API level requirements" in Play Console help before upload | `variables.gradle` |
 | Orientation | `sensorLandscape` (landscape both ways) on the only activity | `AndroidManifest.xml` |
@@ -21,7 +21,7 @@ OWNER can only be done by you.
 
 Not verifiable here, so not claimed: a fresh Gradle build and the WebView on a real phone. The
 copy of the game in `native/app/src/main/assets/public` is git-ignored and was synced on
-2026-11-20, so it is older than 0.12.5. Always run `npm run sync` (inside `android/`) before building;
+2026-11-20, so it is older than 0.13.5. Always run `npm run sync` (inside `android/`) before building;
 that rebuilds the web game and copies it in. A debug APK and a release AAB from an earlier
 build exist under `android/native/app/build/outputs/`; do not upload those.
 
@@ -77,7 +77,7 @@ Screens move, so match words, not positions. Forms and answers are in docs/STORE
 6. Left menu, **Test and release**, **Testing**, **Internal testing**, tap **Create new release**.
 7. Under **App signing** accept **Play App Signing** (default). Play keeps the real signing key; your
    `.jks` is only the upload key.
-8. Tap **Upload**, pick `app-release.aab`. Release name and notes: "0.12.5" and one plain sentence. Tap **Next**,
+8. Tap **Upload**, pick `app-release.aab`. Release name and notes: "0.13.5" and one plain sentence. Tap **Next**,
    fix any warning (target API, 64-bit are already met), tap **Save**, then **Go to overview**,
    then **Start rollout to internal testing**.
 9. Tab **Testers**, tap **Create email list**, add your own address, save, copy the **opt-in link**,

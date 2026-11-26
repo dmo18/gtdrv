@@ -14,7 +14,7 @@ Technical facts used below:
 - Permissions: none. The app asks for no permission at all (checked in the
   merged manifest: no INTERNET permission, see docs/ANDROID.md).
 - The game is bundled inside the app and runs offline.
-- Version at the time of writing: 0.12.x (the game as it is now: five Miami
+- Version at the time of writing: 0.13.x (the game as it is now: five Miami
   regions plus the classic island, Flow meter, street events, records, Daily
   Three, free paint and wheels, steering styles and feel presets).
 

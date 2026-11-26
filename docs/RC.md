@@ -51,3 +51,30 @@ Run by me; the 60 minute soak was running at the same time, so timings are not u
 4. Version: PASS. package.json, release/last.json, android/package.json, and
    android/native/version.properties (VERSION_NAME 0.13.0, VERSION_CODE 22) agree; the build
    shows v0.13.0 in game (built `dist/index.html` and the menu from package.json).
+
+## 0.13.6 RC audit (run on 0.13.5, code 27)
+
+Machine load average was 9 to 17 (other jobs), so timings are not used.
+
+- Lint: pass. `npm test`: 1190 of 1192 on the full run; the two failures were timing tests
+  (miami.test.js "whole box builds in under 3 s", wall 9.7 s under load; world-density
+  "dressLot ... under 0.05 ms a lot"). Rerun alone: both pass (0.0404 ms a lot). Nothing loosened.
+- Build: pass. dist 6.2 MB raw. Offline test: 8 of 8 ok (cache of 25 files, offline reload and travel, 0 outside requests).
+- Supply chain: `npm audit --omit=dev` 0 vulnerabilities (root and android). All dependencies pinned
+  exact. Runtime deps: three 0.187.0 (MIT) only; android adds Capacitor 8.6.2 (MIT) inside the wrapper.
+  No postinstall script in either lock file (esbuild, dev only, has an install script flag). Actions as before: tags, not SHAs.
+- `release:check`: fails only on "VERSION_CODE 27 must be greater than the last published code 27";
+  that is the expected state after `release:record` for 0.13.5, so the next bump clears it.
+- Versions agree: package.json, android/package.json, version.properties (0.13.5, code 27),
+  release/last.json. Service worker cache is `rustwater-` plus a build hash (447dac542291), not a version.
+- Play assets: 512 px icon and maskable 192 and 512 present; store/icon-512.png 512x512, feature
+  graphic 1024x500, 8 screenshots all 1920x1080 (0.8 to 2.6 MB), matching docs/STORE.md. No PNG has
+  EXIF, text or time chunks.
+- Privacy: code uses localStorage keys `rustwater.save.v1`, `.explore.v1`, `.map`, `.res`, and
+  sessionStorage `rustwater.travel`; no fetch, XHR or beacon in src. privacy.html now also says session
+  storage, Daily Three and map data (as in docs/STORE.md); date 25 November 2026.
+- Secrets and personal data: no email address (only PRIVACY_EMAIL_PLACEHOLDER), no key or token patterns,
+  no keystore files tracked; every commit author is "Claude".
+- Not fixed, for the owner: first play download measures about 0.96 to 1.01 MB gzip (game.js 696 KB,
+  chunk 58 KB, index 2 KB, plus one region chunk 207 to 252 KB, gzip -9) against the 0.95 MB in
+  docs/PERF.md; release-check.mjs does not measure it. Both package-lock files say 0.1.0 for the root.
