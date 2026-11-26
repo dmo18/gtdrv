@@ -1246,3 +1246,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Tried and taken out: a cell-list cache with packed shape boxes (node: resolveCircle -28 %, heightAt -18 %; Chrome: the cache itself cost 380 to 650 ms a drive, a net loss).
 - Gates: eslint, npm test 1191 of 1192 (the H1 spatial timing test under load; passes alone), smoke --extra ok.
 - 0.13.6 review lows (not fixed): traffic.js:143 dead-end fallback order; police.js:220 ram closing speed measured along the center line; traffic.js:632 boxOcc wait has no timeout (jam despawn at 40 s covers it).
+- Phone check from the owner on 0.13.6 (miami-south, 780x360, standard handling): median 16.6 ms, worst 33.4 ms, 3 frames over 33 ms, render scale 1.75, start 3.5 s, memory 215 MB, slowest system police 2.4 ms. Frame rate is fine; the soft look matches scale 1.75 (raised in 0.13.7). Police 2.4 ms in South is worth a look.
