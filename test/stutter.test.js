@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { ChunkedBuilder } from '../src/render/meshbuilder.js';
-import { netRoads } from '../src/render/citymesh.js';
+import { netRoads, netRoadsJob } from '../src/render/citymesh.js';
+import { groundOf } from '../src/world/ground.js';
 import { buildRealCity, NEAR_BY_TIER, PROPS_R, LOD } from '../src/render/realcity.js';
 
 const region = 'miami-downtown';
@@ -55,6 +56,37 @@ test('the narrow-gap net: one kind at a time and from the cache, the same quads 
     assert.deepEqual(dump(C), dump(A));
   }
   assert.ok(quads > 0, 'some net drawn round the spawn');
+});
+
+test('the net flood in slices (netQuadsJob, two boxes interleaved, a slice ends at every ask): the same quads as netQuads', () => {
+  const G = groundOf(city);
+  const x = Math.floor(city.spawn.x / 60) * 60 - 120, z = Math.floor(city.spawn.z / 60) * 60 - 120;
+  let slices = 0, quads = 0;
+  for (let k = 0; k < 9; k += 2) {
+    for (let kind = 1; kind <= 2; kind++) {
+      const ax = x + (k % 3) * 60, az = z + Math.floor(k / 3) * 60;
+      const bx = x + ((k + 1) % 3) * 60, bz = z + Math.floor((k + 1) / 3) * 60;
+      const qa = [], qb = [];
+      const ja = G.netQuadsJob(ax, az, ax + 60, az + 60, qa, kind, () => true);
+      const jb = G.netQuadsJob(bx, bz, bx + 60, bz + 60, qb, kind, () => true);
+      let da = false, db = false;
+      while (!da || !db) {
+        if (!da) { da = ja.next().done; slices++; }
+        if (!db) { db = jb.next().done; slices++; }
+        // Another box flooded in between changes nothing either.
+        if (slices % 50 === 0) G.netQuads(ax - 60, az, ax, az + 60, [], kind);
+      }
+      assert.deepEqual(qa, G.netQuads(ax, az, ax + 60, az + 60, [], kind));
+      assert.deepEqual(qb, G.netQuads(bx, bz, bx + 60, bz + 60, [], kind));
+      quads += qa.length + qb.length;
+    }
+  }
+  assert.ok(quads > 0 && slices > 100, 'net drawn and sliced: ' + quads + ' numbers, ' + slices + ' slices');
+  // And through the mesh path: netRoadsJob draws what netRoads draws.
+  const A = builders(), B = builders();
+  netRoads(city, A, x, z, x + 60, z + 60);
+  for (const _ of netRoadsJob(city, B, x, z, x + 60, z + 60, 3, null, () => true)) slices++;
+  assert.deepEqual(dump(B), dump(A));
 });
 
 test('start: no tiles at build with startNear -1, then one tile a stage near the start, the rest stream', () => {

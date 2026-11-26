@@ -239,6 +239,9 @@ export function createRouter(city, opts = {}) {
   // the goal (setAvoid): driving through one starts that event by accident.
   const extra = new Float32Array(edges.length);
   let avoided = 0;
+  const nearAvoid = [];
+  let maxOff = 0;
+  for (let k = 0; k < edges.length; k++) maxOff = Math.max(maxOff, Math.abs(edges[k].off || 0));
   // gates: [{ x, z, dx, dz, w }]; skipX/skipZ: a gate within 30 m of it is
   // the goal, not to be avoided. Called when the goal changes, not per frame.
   function setAvoid(gates, skipX = NaN, skipZ = NaN) {
@@ -250,7 +253,18 @@ export function createRouter(city, opts = {}) {
       if (Math.hypot(g.x - skipX, g.z - skipZ) < 30) continue;
       const half = g.w + AVOID_PAD, px = -g.dz, pz = g.dx; // the beam: g +- half * (px, pz)
       const x0 = g.x - px * half, z0 = g.z - pz * half, bx = px * half * 2, bz = pz * half * 2;
-      for (let k = 0; k < edges.length; k++) {
+      // (The edges near the gate from the city's grid when it has one: an
+      // edge that crosses the beam passes within its half length of the gate, its
+      // strip within half + |off|. Every edge on a map without one. The
+      // same edges marked either way; 0.13.8: all 2500 edges for each
+      // gate was most of the check's first step.)
+      let list = null, nk = edges.length;
+      if (typeof city.edgesNear === 'function') {
+        list = city.edgesNear(g.x, g.z, half * Math.hypot(g.dx, g.dz) + maxOff + 1, nearAvoid);
+        nk = list.length;
+      }
+      for (let q = 0; q < nk; q++) {
+        const k = list ? list[q] : q;
         const e = edges[k];
         const a = nodes[e.a], b = nodes[e.b];
         const ex = b.x - a.x, ez = b.z - a.z;
@@ -308,19 +322,30 @@ export function createRouter(city, opts = {}) {
   };
   // A* from the start edge (both ends seeded; the one behind costs a
   // U-turn) to the virtual GOAL node, entered from the goal edges.
-  function astar(es, sd, fwd, tx, tz, ok) {
+  // In two parts so a search can run over several frames (0.13.8
+  // remaining hitches): astarSeed, then astarRun with a budget of nodes
+  // closed (Infinity: to the end). The same nodes in the same order either
+  // way, so the same route.
+  let aTx = 0, aTz = 0, aOk = null, aBestD = Infinity, aExp = 0, aLeft = 0;
+  function astarSeed(es, sd, fwd, tx, tz, ok) {
     mark++;
     HL = 0;
     bestNode = -1;
-    let bestD = Infinity, expanded = 0;
+    aTx = tx; aTz = tz; aOk = ok; aBestD = Infinity; aExp = 0;
     if (ok(es, es.a) && !pastGoal(es, es.a, sd)) relax(es.b, (es.length - sd) * cost[es.id] + (fwd ? 0 : UTURN_COST), -1, es.id, tx, tz);
     if (ok(es, es.b) && !pastGoal(es, es.b, sd)) relax(es.a, sd * cost[es.id] + (fwd ? UTURN_COST : 0), -1, es.id, tx, tz);
-    let found = false;
+  }
+  // 1 found, 0 no way (the heap ran dry), -1 the budget ran out first.
+  function astarRun(budget) {
+    const tx = aTx, tz = aTz, ok = aOk;
+    let bestD = aBestD, expanded = aExp, found = false, left = budget;
     while (HL > 0) {
+      if (left <= 0) { aBestD = bestD; aExp = expanded; return -1; }
       const u = pop();
       if (closed[u] === mark) continue;
       closed[u] = mark;
       expanded++;
+      left--;
       if (u === GOAL) { found = true; break; }
       const n = nodes[u];
       const dd = Math.hypot(n.x - tx, n.z - tz);
@@ -351,8 +376,9 @@ export function createRouter(city, opts = {}) {
         relax(v, gu + e.length * cost[id] + extra[id] + turnCost(edges[inE], inFrom, e, u), u, id, tx, tz);
       }
     }
+    aBestD = bestD; aExp = expanded; aLeft = left;
     expandedLast = expanded;
-    return found;
+    return found ? 1 : 0;
   }
   let expandedLast = 0;
 
@@ -360,28 +386,37 @@ export function createRouter(city, opts = {}) {
   // Returns route.ok. legal: false ignores one-way rules (on foot).
   // arrive: the heading the route must arrive in (NaN: any); when no way
   // arrives so, the route arrives as it can.
+  // A search in parts (begin, then step until it returns true): the route
+  // is only written when it is done, so the one it replaces stays in use
+  // until then. J holds the parts' state; a new begin or a whole search
+  // drops a search under way (jobId).
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : 0);
+  const J = { on: false, id: 0, route: null, legal: true, tx: 0, tz: 0, es: null, eg: null, fwd: true, ok: null, direct: 0, directU: false, phase: 0, partial: false, fail: false, ms: 0 };
+  let jobId = 0;
   function search(fx, fz, heading, tx, tz, route, legal = true, arrive = NaN) {
-    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-    route.ok = false;
-    route.rev++;
-    route.n = 0;
-    route.turnCount = 0;
-    route.length = 0;
-    route.time = 0;
-    route.startUturn = false;
-    if (!N || !edges.length) return false;
+    begin(fx, fz, heading, tx, tz, route, legal, arrive);
+    step(Infinity);
+    return route.ok;
+  }
+  // Start a search; returns its id (step goes on with the latest only).
+  function begin(fx, fz, heading, tx, tz, route, legal = true, arrive = NaN) {
+    const t0 = now();
+    J.on = true; J.id = ++jobId; J.route = route; J.legal = legal; J.fail = false; J.partial = false;
+    J.direct = 0; J.directU = false; J.phase = 0; J.ms = 0; J.es = null; J.eg = null;
+    if (!N || !edges.length) { J.fail = true; J.phase = 9; return J.id; }
     if (box) {
       tx = Math.max(box.x0 + 5, Math.min(box.x1 - 5, tx));
       tz = Math.max(box.z0 + 5, Math.min(box.z1 - 5, tz));
     }
+    J.tx = tx; J.tz = tz;
     const wantArrive = Number.isFinite(arrive) && legal;
     gHx = wantArrive ? Math.cos(arrive) : 0;
     gHz = wantArrive ? Math.sin(arrive) : 0;
     nearestEdge(city, fx, fz, snapA, heading, legal);
     nearestEdge(city, tx, tz, snapB, wantArrive ? arrive : NaN, legal);
-    if (snapA.edge < 0 || snapB.edge < 0) return false;
+    if (snapA.edge < 0 || snapB.edge < 0) { J.fail = true; J.phase = 9; return J.id; }
     const es = edges[snapA.edge];
-    let eg = edges[snapB.edge];
+    const eg = edges[snapB.edge];
     // Goal edges: the nearest, and its partner on a divided road (the
     // other carriageway is as good a place to stop as the near one).
     gE[0] = eg.id; gD[0] = snapB.d; gCount = 1;
@@ -392,34 +427,78 @@ export function createRouter(city, opts = {}) {
       gCount = 2;
     }
     const fwd = Math.cos(heading) * es.ux + Math.sin(heading) * es.uz >= 0;
-    const ok = (e, from) => !legal || canDrive(e, from);
+    const ok = legal ? canDrive : () => true;
+    J.es = es; J.eg = eg; J.fwd = fwd; J.ok = ok;
     // Same edge: straight there (with a U-turn first when it is behind on a two-way road).
-    let direct = 0; // 1 forward (a -> b), -1 backward
-    let directU = false;
     if (snapA.edge === snapB.edge) {
       const ahead = fwd ? snapB.d >= snapA.d : snapB.d <= snapA.d;
       const want = snapB.d >= snapA.d ? 1 : -1;
-      if (ok(es, want > 0 ? es.a : es.b) && arriveOk(es, want > 0 ? es.a : es.b)) { direct = want; directU = !ahead; }
+      if (ok(es, want > 0 ? es.a : es.b) && arriveOk(es, want > 0 ? es.a : es.b)) { J.direct = want; J.directU = !ahead; }
     }
-    let pc = 0;
-    let startFrom = -1; // node id the start edge is driven away from (its direction)
-    route.partial = false;
-    if (!direct) {
-      let found = astar(es, snapA.d, fwd, tx, tz, ok);
-      if (!found && (gHx !== 0 || gHz !== 0)) {
+    if (J.direct) J.phase = 8;
+    else astarSeed(es, snapA.d, fwd, tx, tz, ok);
+    J.ms += now() - t0;
+    return J.id;
+  }
+  // Go on with the search under way for at most `budget` nodes closed;
+  // true when it is done (the route written; route.ok says whether a way
+  // was found), false while there is more to do. A search dropped by a
+  // newer begin or search (id given and not the latest) returns true and
+  // writes nothing.
+  function step(budget = Infinity, id = jobId) {
+    if (!J.on || id !== J.id) return true;
+    const t0 = now();
+    const es = J.es, ok = J.ok;
+    while (J.phase < 8) {
+      const r = astarRun(budget);
+      if (r < 0) { J.ms += now() - t0; return false; }
+      budget = aLeft;
+      if (r === 1) { J.phase = 8; break; }
+      if (J.phase === 0 && (gHx !== 0 || gHz !== 0)) {
         // No way arrives the wanted way (a dead end): any way there.
         gHx = gHz = 0;
-        found = astar(es, snapA.d, fwd, tx, tz, ok);
+        J.phase = 1;
+        astarSeed(es, snapA.d, J.fwd, J.tx, J.tz, ok);
+        continue;
       }
-      if (!found && bestNode >= 0 && prevE[bestNode] >= 0) {
+      if (J.phase < 2 && bestNode >= 0 && prevE[bestNode] >= 0) {
         // No way to the spot (another island, a one-way trap): to the
         // nearest junction the car can reach instead.
         const e = edges[prevE[bestNode]];
         gE[0] = e.id; gD[0] = bestNode === e.a ? 0 : e.length; gCount = 1;
-        route.partial = true;
-        found = astar(es, snapA.d, fwd, nodes[bestNode].x, nodes[bestNode].z, ok);
+        J.partial = true;
+        J.phase = 2;
+        const bn = bestNode;
+        astarSeed(es, snapA.d, J.fwd, nodes[bn].x, nodes[bn].z, ok);
+        continue;
       }
-      if (!found) { route.searchMs = (typeof performance !== 'undefined' ? performance.now() : 0) - t0; return false; }
+      J.fail = true;
+      J.phase = 9;
+    }
+    J.on = false;
+    J.ms += now() - t0;
+    const t1 = now();
+    finish(J.route);
+    J.route.searchMs = J.ms + now() - t1;
+    return true;
+  }
+  // Write the route of the search just done (J).
+  function finish(route) {
+    route.ok = false;
+    route.rev++;
+    route.n = 0;
+    route.turnCount = 0;
+    route.length = 0;
+    route.time = 0;
+    route.startUturn = false;
+    if (J.fail && !J.es) return;
+    route.partial = J.partial;
+    if (J.fail) return;
+    const es = J.es, direct = J.direct, directU = J.directU, tx = J.tx, tz = J.tz, fwd = J.fwd;
+    let eg = J.eg;
+    let pc = 0;
+    let startFrom = -1; // node id the start edge is driven away from (its direction)
+    if (!direct) {
       eg = edges[prevE[GOAL]];
       snapB.d = gD[eg.id === gE[0] ? 0 : 1];
       // Walk back: GOAL <- ... <- seed node.
@@ -511,8 +590,6 @@ export function createRouter(city, opts = {}) {
     route.expanded = expandedLast;
     buildTurns(route, direct ? 0 : pc, es, eg, startFrom);
     route.ok = n >= 2;
-    route.searchMs = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
-    return route.ok;
   }
 
   // Direction of the path `look` m before / after cumulative distance `at`
@@ -594,7 +671,7 @@ export function createRouter(city, opts = {}) {
     route.turnCount = tc;
   }
 
-  return { search, setAvoid, cost, speed, nodes, edges, nearestEdge: (x, z, out = { edge: -1, d: 0, d2: 0 }, heading) => nearestEdge(city, x, z, out, heading) };
+  return { search, begin, step, current: () => (J.on ? J.id : 0), setAvoid, cost, speed, nodes, edges, nearestEdge: (x, z, out = { edge: -1, d: 0, d2: 0 }, heading) => nearestEdge(city, x, z, out, heading) };
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +689,14 @@ export function createTracker(router, opts = {}) {
     toTurn: 0, remaining: 0, eta: 0,
     reroutes: 0, searches: 0, lastMs: 0, rev: 0,
     pending: false,
+    job: 0, jobKind: '', // a search under way over several updates (opts.budget)
   };
+  // Nodes a search may close per update (0: the whole search at once). A
+  // search that needs more goes on in the next updates; until it is done
+  // the route it replaces stays drawn and followed (0.13.8 remaining
+  // hitches: the check's first search was 30 ms at a 4x throttle). The
+  // route found is the same, from where the car was when it began.
+  let budget = opts.budget > 0 ? opts.budget : 0;
 
   function setGoal(x, z, legal = true, arrive = NaN) {
     st.active = Number.isFinite(x) && Number.isFinite(z);
@@ -620,12 +704,28 @@ export function createTracker(router, opts = {}) {
     st.arrived = false;
     st.pending = st.active;
     st.sinceSearch = 99;
+    st.job = 0;
     if (!st.active) { route.ok = false; route.n = 0; route.rev++; st.rev++; }
   }
   function clear() { setGoal(NaN, NaN); }
 
   function doSearch(x, z, heading) {
+    st.job = 0;
     router.search(x, z, heading, st.goalX, st.goalZ, route, st.legal, st.goalH);
+    searched();
+  }
+  // A search from (x, z): true when done now (the whole search without a
+  // budget, or one that fits it), false when it goes on in later updates.
+  function startSearch(x, z, heading, kind) {
+    if (!budget || !router.begin) { doSearch(x, z, heading); return true; }
+    const id = router.begin(x, z, heading, st.goalX, st.goalZ, route, st.legal, st.goalH);
+    st.pending = false;
+    if (router.step(budget, id)) { st.job = 0; searched(); return true; }
+    st.job = id;
+    st.jobKind = kind;
+    return false;
+  }
+  function searched() {
     st.searches++;
     st.lastMs = route.searchMs;
     st.sinceSearch = 0;
@@ -657,9 +757,19 @@ export function createTracker(router, opts = {}) {
   function update(x, z, heading, spd, dt) {
     if (!st.active || st.arrived) return false;
     st.sinceSearch += dt;
-    if (st.pending || !route.ok) {
+    let changed = false;
+    if (st.job) {
+      // A search under way: on with it; the old route holds until it is done.
+      if (!router.step(budget, st.job)) return false;
+      const kind = st.jobKind;
+      st.job = 0;
+      searched();
+      if (kind === 'reroute') { st.reroutes++; changed = true; }
+      if (!route.ok) return true;
+      if (kind === 'reroute') { project(x, z, 0, Math.min(route.n, 24)); st.seg = bSeg; st.along = bAlong; }
+    } else if (st.pending || !route.ok) {
       if (st.sinceSearch < 2 && !st.pending) return false; // no way there: try again now and then
-      doSearch(x, z, heading);
+      if (!startSearch(x, z, heading, 'goal')) return false;
       if (!route.ok) return true;
     }
     // Cursor window: a few segments back, more ahead.
@@ -683,14 +793,15 @@ export function createTracker(router, opts = {}) {
     // A missed turn: moving, off the line and not along it (a car cutting a
     // corner is within a few meters of the line, so this does not fire there).
     if (off > OFF_NEAR_M && spd > 2 && dot < 0.5) st.nearT += dt; else st.nearT = 0;
-    let changed = false;
     if ((st.offT >= OFF_ROUTE_S || (st.nearT >= OFF_NEAR_S && st.sinceSearch >= NEAR_REROUTE_GAP_S) || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
-      doSearch(x, z, heading);
-      st.reroutes++;
-      changed = true;
-      if (!route.ok) return true;
-      project(x, z, 0, Math.min(route.n, 24));
-      st.seg = bSeg; st.along = bAlong;
+      if (startSearch(x, z, heading, 'reroute')) {
+        st.reroutes++;
+        changed = true;
+        if (!route.ok) return true;
+        project(x, z, 0, Math.min(route.n, 24));
+        st.seg = bSeg; st.along = bAlong;
+      }
+      // (Else it goes on in the next updates: the line so far holds.)
     }
     // Next turn: the first one past the car (a turn counts as passed 5 m on).
     const T = route.turns;
@@ -727,7 +838,17 @@ export function createTracker(router, opts = {}) {
   };
   st.setGoal = setGoal;
   st.clear = clear;
+  // Update with no budget: a search under way (or due) is finished now (the
+  // full map's tap while paused shows its route at once).
+  st.settle = (x, z, heading) => {
+    const b = budget;
+    budget = Infinity;
+    try { return update(x, z, heading, 0, 0); } finally { budget = b; }
+  };
   st.update = update;
   st.search = doSearch;
+  // A search from here within the budget: true when done at once, else it
+  // goes on in the next updates.
+  st.searchSoon = (x, z, heading) => startSearch(x, z, heading, 'goal');
   return st;
 }

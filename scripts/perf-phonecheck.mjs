@@ -270,7 +270,24 @@ function driveFrames(cfg) {
     // A shader program compiled in play: which one (its name, the head of its key).
     const progs = info.programs;
     if (progs && progs.length > (D.nProg || 0)) {
-      if (D.nProg) for (let k = D.nProg; k < progs.length; k++) (D.newProgs || (D.newProgs = [])).push({ frame: D.frame, name: progs[k].name, key: String(progs[k].cacheKey).slice(0, 120) });
+      if (D.nProg) {
+        for (let k = D.nProg; k < progs.length; k++) {
+          // And how its key differs from the nearest program compiled before
+          // (field index: new value / old value), to tell which material variant it is.
+          const f = String(progs[k].cacheKey).split(',');
+          let best = null, bestSame = -1;
+          for (let j = 0; j < k; j++) {
+            const o = String(progs[j].cacheKey).split(',');
+            if (o.length !== f.length) continue;
+            let same = 0;
+            for (let q = 0; q < f.length; q++) if (o[q] === f[q]) same++;
+            if (same > bestSame) { bestSame = same; best = o; }
+          }
+          const diff = [];
+          if (best) for (let q = 0; q < f.length && diff.length < 8; q++) if (best[q] !== f[q]) diff.push(q + ':' + String(f[q]).slice(0, 24) + '/' + String(best[q]).slice(0, 24));
+          (D.newProgs || (D.newProgs = [])).push({ frame: D.frame, name: progs[k].name, key: String(progs[k].cacheKey).slice(0, 120), tail: String(progs[k].cacheKey).slice(-40), diff: diff.join(' ') });
+        }
+      }
       D.nProg = progs.length;
     }
     D.frame++;
@@ -568,7 +585,7 @@ async function main() {
       console.log(`  frames over (excess above ${overMs} ms): ${d.over}   worst excess ${d.worstExcess.toFixed(1)} ms = ${d.phoneWorst.toFixed(0)} ms on the phone   over half: ${d.half}   res ${d.res === null ? 'n/a' : d.res.toFixed(2)}`);
       console.log(`  main thread per frame: median ${d.median.toFixed(1)} ms (step ${d.meanStepMs} + draw ${d.meanDrawMs} mean), p99 ${d.p99.toFixed(1)}, worst ${d.worst.toFixed(1)}   programs ${d.programsStart} to ${d.programsEnd}   slowest system call ${d.slowsys}`);
       if (d.gc) console.log(`  garbage collection (first pass, throttled): ${d.gc.minor} minor, ${d.gc.major} major, ${d.gc.pauseMs} ms in all, worst ${d.gc.worstMs} ms; ${d.gc.allocMb} MB allocated = ${(d.gc.allocMb * 1024 / Math.max(1, d.frames)).toFixed(1)} KB a frame`);
-      if (d.newProgs && d.newProgs.length) console.log('  programs compiled in play (frame, name, key): ' + d.newProgs.slice(0, 6).map((p) => `${p.frame} ${p.name} ${p.key}`).join('; '));
+      if (d.newProgs && d.newProgs.length) console.log('  programs compiled in play (frame, name, key, tail, differs from the nearest: field new/old): ' + d.newProgs.slice(0, 6).map((p) => `${p.frame} ${p.name} ${p.key} ... ${p.tail || ''} [${p.diff || ''}]`).join('; '));
       if (d.gc && d.gc.majors.length) console.log('  major collections (second, ms, type, MB before to after): ' + d.gc.majors.map((m) => `${m.s}s ${m.ms} ${m.type} ${m.beforeMb}>${m.afterMb}`).join('; '));
       console.log(`  to the GPU in play: ${d.uploadMb} MB uploaded; ${d.gpuEvents.filter((e) => e.newPrograms > 0).length} frames with new programs, ${d.gpuEvents.filter((e) => e.newTextures > 0).length} with new textures, ${d.gpuEvents.filter((e) => e.uploadKb > 256).length} with over 256 KB`);
       console.log('  worst system calls (ms, frame of each pass): ' + d.systems.slice(0, 8).map((x) => `${x.name} ${x.worstMs.toFixed(1)} @${x.at.join('/')}`).join(', '));

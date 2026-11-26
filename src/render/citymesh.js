@@ -1310,6 +1310,15 @@ const NETQ = [];
 // takes the quads from it instead of the ground's flood fill (0.13.8:
 // one box of the flood was up to 140 ms at a 4x throttle).
 export function netRoads(city, B, x0, z0, x1, z1, kinds = 3, cache = null) {
+  const it = netRoadsJob(city, B, x0, z0, x1, z1, kinds, cache, null);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+// The same in slices: yields whenever over() says the slice's time is up
+// (the ground's flood, world/ground.js netQuadsJob), returns the quads
+// drawn; the same quads as netRoads (0.13.8 remaining hitches).
+export function* netRoadsJob(city, B, x0, z0, x1, z1, kinds = 3, cache = null, over = null) {
   const G = groundOf(city);
   if (!G || !G.netQuads) return 0;
   let n = 0;
@@ -1318,12 +1327,20 @@ export function netRoads(city, B, x0, z0, x1, z1, kinds = 3, cache = null) {
     let Q = NETQ;
     const key = cache ? x0 + ',' + z0 + ',' + x1 + ',' + z1 + ',' + kind : '';
     if (cache && cache.has(key)) Q = cache.get(key);
-    else {
+    else if (over && G.netQuadsJob) {
+      // (Its own list: another box may use NETQ between the slices.)
+      Q = [];
+      yield* G.netQuadsJob(x0, z0, x1, z1, Q, kind, over);
+      if (cache) cache.set(key, Float64Array.from(Q));
+    } else {
       NETQ.length = 0;
       G.netQuads(x0, z0, x1, z1, NETQ, kind);
       if (cache) cache.set(key, Float64Array.from(NETQ));
     }
     for (let k = 0; k + 3 < Q.length; k += 4) {
+      // (A raised quad asks the ground round it, which can be slow where
+      // nothing near is known yet: a stop between quads.)
+      if (over && kind === 2 && over()) yield 'net';
       const xa = Q[k], za = Q[k + 1], xb = Q[k + 2], zb = Q[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
       if (kind === 1) B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
       else if (betweenMedians(G, xa, za, xb, zb)) B.grass.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.lawn);

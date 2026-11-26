@@ -577,52 +577,111 @@ export function createGround(city) {
     }
     return n >= 2 && best <= close;
   }
-  let nqKind = 1;
-  const nqIs = (qx, qz) => {
+  const nqIs = (qx, qz, kind) => {
     const x = qx * NET_STEP, z = qz * NET_STEP;
-    return baseSurface(x, z) === 0 && baseAt(x, z) === 0 && netAt(x, z) === nqKind;
+    return baseSurface(x, z) === 0 && baseAt(x, z) === 0 && netAt(x, z) === kind;
   };
+  // nqIs in slices: one cell's net answer can take thousands of ground
+  // probes where nothing near is known yet (5 to 10 ms at 1x), so the
+  // second round's probes are made one at a time, with a stop wherever
+  // over() says so. The same answer (and the same cache) as netAt.
+  function* nqIsJob(qx, qz, kind, over) {
+    const x = qx * NET_STEP, z = qz * NET_STEP;
+    if (baseSurface(x, z) !== 0 || baseAt(x, z) !== 0) return false;
+    const c = netCache;
+    const keyed = (qx | 0) === qx && (qz | 0) === qz;
+    const slot = keyed ? (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS) : 0;
+    if (keyed && c.v[slot] >= 0 && c.qx[slot] === qx && c.qz[slot] === qz) return c.v[slot] === kind;
+    // netRound(x, z, netCache, net1) with a stop between probes.
+    let out = net1(x, z);
+    for (let q = 0, raised = !out; q < 8 && (!out || (raised && out !== 1)); q += 2) {
+      const ux2 = NET_DIRS[q], uz2 = NET_DIRS[q + 1];
+      let a = 0, sa = 0;
+      for (let g = NET_STEP / 2; g <= NET_MAX; g += NET_STEP / 2) {
+        if (over()) yield 'net';
+        sa = net1(x + ux2 * g, z + uz2 * g);
+        if (sa) { a = g; break; }
+      }
+      if (!a) continue;
+      for (let g = NET_STEP / 2; a + g <= NET_MAX + 1e-9; g += NET_STEP / 2) {
+        if (over()) yield 'net';
+        const sb = net1(x - ux2 * g, z - uz2 * g);
+        if (sb) { out = sa === 1 || sb === 1 ? 1 : 2; break; }
+      }
+    }
+    if (keyed) { c.qx[slot] = qx; c.qz[slot] = qz; c.v[slot] = out; }
+    return out === kind;
+  }
   // kind: 1 the flat net (road beside it), 2 the raised net (between two
   // sidewalks or medians).
   function netQuads(x0, z0, x1, z1, out, kind = 1) {
     if (!geo) return out;
-    nqKind = kind;
+    const it = netFlood(x0, z0, x1, z1, kind, nqSeen, nqCells, nqStack, null);
+    while (!it.next().done);
+    return netMerge(x0, z0, x1, z1, out, nqCells);
+  }
+  // The same quads in slices (0.13.8 remaining hitches: a dense 60 m box
+  // of the flood was 30 to 50 ms at a 4x throttle in one go): a generator
+  // that yields whenever over() says the slice's time is up (asked every
+  // NQ_ASK cell tests) and returns `out` with exactly what netQuads
+  // pushes. Its own seen set and cell lists, so another box flooded
+  // between its slices (netQuads, another job) changes nothing; the
+  // ground's answers are pure, so the order of the slices does not matter.
+  const NQ_ASK = 4;
+  function* netQuadsJob(x0, z0, x1, z1, out, kind = 1, over = null) {
+    if (!geo) return out;
+    const cells = [];
+    yield* netFlood(x0, z0, x1, z1, kind, new Set(), cells, [], over);
+    return netMerge(x0, z0, x1, z1, out, cells);
+  }
+  function* netFlood(x0, z0, x1, z1, kind, seen, cells, stack, over) {
     const S = NET_STEP;
     const qx0 = Math.ceil(x0 / S - 1e-9), qx1 = Math.ceil(x1 / S - 1e-9), qz0 = Math.ceil(z0 / S - 1e-9), qz1 = Math.ceil(z1 / S - 1e-9);
-    if (qx1 <= qx0 || qz1 <= qz0) return out;
+    seen.clear();
+    cells.length = 0;
+    if (qx1 <= qx0 || qz1 <= qz0) return;
     const nx = qx1 - qx0;
-    nqSeen.clear();
-    nqCells.length = 0;
+    let asks = 0;
     // Seeds on a 1 m lattice (the same points whatever the box), tried
     // only in the 4 m squares two roads can reach.
     const SQ = 4 * NQ_SEED;
     for (let sz = Math.floor(qz0 / SQ) * SQ; sz < qz1; sz += SQ) {
       for (let sx = Math.floor(qx0 / SQ) * SQ; sx < qx1; sx += SQ) {
+        if (over && ++asks >= NQ_ASK) { asks = 0; if (over()) yield 'net'; }
         if (!twoRoads((sx + SQ / 2) * S, (sz + SQ / 2) * S, SQ * S * 0.71)) continue;
         for (let qz = Math.max(sz, Math.ceil(qz0 / NQ_SEED) * NQ_SEED); qz < sz + SQ && qz < qz1; qz += NQ_SEED) {
           for (let qx = Math.max(sx, Math.ceil(qx0 / NQ_SEED) * NQ_SEED); qx < sx + SQ && qx < qx1; qx += NQ_SEED) {
             const key = (qz - qz0) * nx + (qx - qx0);
-            if (nqSeen.has(key)) continue;
-            nqSeen.add(key);
-            if (!twoRoads(qx * S, qz * S, 0) || !nqIs(qx, qz)) continue;
-            nqStack.length = 0;
-            nqStack.push(qx, qz);
-            while (nqStack.length) {
-              const pz = nqStack.pop(), px = nqStack.pop();
-              nqCells.push((pz - qz0) * nx + (px - qx0));
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (over && ++asks >= NQ_ASK) { asks = 0; if (over()) yield 'net'; }
+            if (!twoRoads(qx * S, qz * S, 0)) continue;
+            if (!(over ? (yield* nqIsJob(qx, qz, kind, over)) : nqIs(qx, qz, kind))) continue;
+            stack.length = 0;
+            stack.push(qx, qz);
+            while (stack.length) {
+              const pz = stack.pop(), px = stack.pop();
+              cells.push((pz - qz0) * nx + (px - qx0));
               for (let n = 0; n < 4; n++) {
                 const ex = px + (n === 0 ? 1 : n === 1 ? -1 : 0), ez = pz + (n === 2 ? 1 : n === 3 ? -1 : 0);
                 if (ex < qx0 || ex >= qx1 || ez < qz0 || ez >= qz1) continue;
                 const k2 = (ez - qz0) * nx + (ex - qx0);
-                if (nqSeen.has(k2)) continue;
-                nqSeen.add(k2); // (tried: a miss is not tried again)
-                if (nqIs(ex, ez)) nqStack.push(ex, ez);
+                if (seen.has(k2)) continue;
+                seen.add(k2); // (tried: a miss is not tried again)
+                if (over && ++asks >= NQ_ASK) { asks = 0; if (over()) yield 'net'; }
+                if (over ? (yield* nqIsJob(ex, ez, kind, over)) : nqIs(ex, ez, kind)) stack.push(ex, ez);
               }
             }
           }
         }
       }
     }
+  }
+  // The flooded cells of a box as merged quads pushed on `out`.
+  function netMerge(x0, z0, x1, z1, out, nqCells) {
+    const S = NET_STEP;
+    const qx0 = Math.ceil(x0 / S - 1e-9), qx1 = Math.ceil(x1 / S - 1e-9), qz0 = Math.ceil(z0 / S - 1e-9);
+    const nx = qx1 - qx0;
     if (!nqCells.length) return out;
     // Runs along x, then runs of one extent merged down z.
     nqCells.sort((a, b) => a - b);
@@ -781,7 +840,7 @@ export function createGround(city) {
     }
     return 0;
   }
-  return { groundAt, surfaceAt, baseAt, roadAt, netQuads, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
+  return { groundAt, surfaceAt, baseAt, roadAt, netQuads, netQuadsJob, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
 }
 
 // The ground of a city, made once and kept (city.groundAt when the city

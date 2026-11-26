@@ -156,8 +156,12 @@ function gunGeo(id) {
   return g;
 }
 const GUN_MAT = {};
+// (0.13.8 remaining hitches: a plain lit color, the program of the water
+// and the buoys, compiled at the warm-up in every region. A standard
+// material here was a program of its own, first compiled mid-play at the
+// first shot: 60 to 61 programs and a hitch.)
 function gunMat(id) {
-  return GUN_MAT[id] || (GUN_MAT[id] = new THREE.MeshStandardMaterial({ color: GUN_DIMS[id][3], roughness: 0.5, metalness: 0.4 }));
+  return GUN_MAT[id] || (GUN_MAT[id] = new THREE.MeshLambertMaterial({ color: GUN_DIMS[id][3] }));
 }
 
 // One private copy shared by the near and far bodies.

@@ -212,6 +212,10 @@ export default async function extra(page, check) {
     const events = { shot: 0, hit: 0, down: 0 };
     const blood0 = g.combatFx.counts().blood;
     const offs = ['shot', 'hit', 'down'].map((n) => g.events.on(n, () => events[n]++));
+    // Shader programs before the first shot (drawn once, so the view is compiled).
+    const progN = () => (g.renderer.info.programs ? g.renderer.info.programs.length : 0);
+    g.draw(1, 0);
+    const prog0 = progN();
     g.input.press('fire');
     let steps = 0;
     while (ped.life === 'ok' && steps < 240) {
@@ -224,20 +228,27 @@ export default async function extra(page, check) {
       w.heading = Math.atan2(dz, dx);
       run(1);
       steps++;
+      if (steps % 10 === 1) g.draw(1, 0);
     }
     g.input.release('fire');
+    // Drawn after the fight too: the gun in the hand, the flash, sparks and blood.
+    g.draw(1, 0);
     g.aim.manual = false;
     run(30);
+    g.draw(1, 0);
     offs.forEach((f) => f());
     window.__downed = ped;
     return { ok: ped.life !== 'ok', life: ped.life, hp: ped.hp, steps, events, actors: g.actors.length,
-      blood0, blood1: g.combatFx.counts().blood };
+      blood0, blood1: g.combatFx.counts().blood, prog0, prog1: progN() };
   });
   await page.waitForTimeout(400);
   await page.screenshot({ path: 'shots/combat-down.png' });
   check(fight.ok, `holding fire downs a ped (${fight.life}, hp ${fight.hp}, ${fight.steps} steps, ${JSON.stringify(fight.events)})`);
   check(fight.hp === 0 && fight.blood1 > fight.blood0, `the shot ped is dead and blood decals rise (${fight.blood0} -> ${fight.blood1})`);
   check(fight.actors > 1 && fight.actors <= 36, `combat actors registered (${fight.actors})`);
+  // 0.13.8: the first shot compiled a program of its own (the gun's material): none now (the
+  // 60 program budget is the Miami regions', checked in smoke.mjs; the island has its own set).
+  check(fight.prog1 === fight.prog0, `the first shots compile no shader program (${fight.prog0} -> ${fight.prog1})`);
   const later = await page.evaluate(() => {
     const g = window.__rw;
     const p = window.__downed;

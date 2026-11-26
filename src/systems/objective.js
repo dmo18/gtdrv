@@ -1,5 +1,5 @@
 import { formatDistance } from '../core/units.js';
-import { createRouter, createTracker, turnPhrase, formatTurnDistance, shortStreet as shortName } from '../core/route.js';
+import { createRouter, createRoute, createTracker, turnPhrase, formatTurnDistance, shortStreet as shortName } from '../core/route.js';
 // Objective arrow and GPS: while a race or delivery is running, a mission
 // or an adventure is tracked, or a map waypoint is set, an arrow in the HUD
 // status row points to where to go, with the distance; on the road network
@@ -37,6 +37,9 @@ export const REPLAN_S = 1; // while it wants one, search again this often (a way
 // where they arrived (a goal off the road, like a garage door 25 m up a drive, would else be
 // searched again and "arrived" every step: the line repeated and no route to follow).
 export const REARM_M = 60;
+// Road graph nodes a route search may close in one step (about 1.5 ms on a
+// slow phone; most searches fit in one, a search across Downtown takes about 10).
+export const ROUTE_BUDGET = 150;
 // Goals that get turn by turn: chosen (waypoint) or accepted (activity, mission).
 export const NAV_SOURCES = { waypoint: true, activity: true, mission: true };
 export function wantsTurnByTurn(src, checking) {
@@ -107,7 +110,17 @@ export function createObjective(game) {
   const city = game.city;
   const canRoute = !!(city && Array.isArray(city.nodes) && city.nodes.length > 1 && Array.isArray(city.edges) && city.edges.length);
   const router = canRoute ? createRouter(city) : null;
-  const tracker = router ? createTracker(router) : null;
+  // A long search runs over several steps (ROUTE_BUDGET nodes a step):
+  // the guidance before it stays until it is done (0.13.8 remaining hitches).
+  const tracker = router ? createTracker(router, { budget: ROUTE_BUDGET }) : null;
+  // One throwaway search at load (into a small route of its own): the
+  // search code's first run is several times slower than the next, and it
+  // landed on the first step of a check or event (0.13.8: 10 to 20 ms at
+  // a 4x throttle). No state is kept between searches, so no route changes.
+  if (router && city.spawn) {
+    const sp = city.spawn, h = sp.heading || 0;
+    router.search(sp.x, sp.z, h, sp.x + Math.cos(h) * 600, sp.z + Math.sin(h) * 600, createRoute(64, 8), true, NaN);
+  }
   const routed = { x: 0, z: 0, src: '', on: false, legal: true, h: NaN };
   let avoidSet = false;
   const aim = { x: 0, z: 0 };
@@ -251,7 +264,7 @@ export function createObjective(game) {
       pickGoal();
       syncRoute(true);
       const p = game.player;
-      if (tracker && tracker.active && p) tracker.update(p.x, p.z, headingOf(p), 0, 0);
+      if (tracker && tracker.active && p) tracker.settle(p.x, p.z, headingOf(p));
     },
     fixedUpdate(dt) {
       pickGoal();
@@ -268,9 +281,12 @@ export function createObjective(game) {
         replanT -= dt;
         if (replanT <= 0 && uturnT < UTURN_WAIT_S && speedOf(p) > 2) {
           replanT = REPLAN_S;
-          tracker.search(p.x, p.z, headingOf(p));
-          const n = tracker.route.ok ? tracker.next() : null;
-          if (!n || n.kind !== 'uturn') uturnT = 0;
+          // (Within the search budget: a long search ends in a later step,
+          // whose route is then read here as it is now.)
+          if (tracker.searchSoon(p.x, p.z, headingOf(p))) {
+            const n = tracker.route.ok ? tracker.next() : null;
+            if (!n || n.kind !== 'uturn') uturnT = 0;
+          }
         }
       } else { uturnT = 0; replanT = REPLAN_S; }
     },

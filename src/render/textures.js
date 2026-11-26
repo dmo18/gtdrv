@@ -29,23 +29,29 @@ function toTexture(c, { srgb = true, repeat = true, aniso = 8 } = {}) {
 // coarsest lattice; each octave doubles the detail.
 function noiseField(size, period, octaves, rng, gain = 0.5) {
   const out = new Float32Array(size * size);
+  // Per column, worked out once an octave (the same numbers as per pixel:
+  // 0.13.8, texture painting was 1.3 s of a throttled start).
+  const XA = new Int32Array(size), XB = new Int32Array(size), SX = new Float64Array(size);
   let amp = 1, total = 0;
   for (let o = 0; o < octaves; o++) {
     const p = Math.min(size, period << o);
     const lat = new Float32Array(p * p);
     for (let i = 0; i < lat.length; i++) lat[i] = rng.next();
     const k = p / size;
+    for (let x = 0; x < size; x++) {
+      const fx = x * k, x0 = fx | 0, tx = fx - x0;
+      SX[x] = tx * tx * (3 - 2 * tx);
+      XA[x] = x0 % p; XB[x] = (x0 + 1) % p;
+    }
     for (let y = 0; y < size; y++) {
       const fy = y * k, y0 = fy | 0, ty = fy - y0;
       const sy = ty * ty * (3 - 2 * ty);
-      const r0 = (y0 % p) * p, r1 = ((y0 + 1) % p) * p;
+      const r0 = (y0 % p) * p, r1 = ((y0 + 1) % p) * p, row = y * size;
       for (let x = 0; x < size; x++) {
-        const fx = x * k, x0 = fx | 0, tx = fx - x0;
-        const sx = tx * tx * (3 - 2 * tx);
-        const xa = x0 % p, xb = (x0 + 1) % p;
+        const sx = SX[x], xa = XA[x], xb = XB[x];
         const a = lat[r0 + xa] + (lat[r0 + xb] - lat[r0 + xa]) * sx;
         const b = lat[r1 + xa] + (lat[r1 + xb] - lat[r1 + xa]) * sx;
-        out[y * size + x] += (a + (b - a) * sy) * amp;
+        out[row + x] += (a + (b - a) * sy) * amp;
       }
     }
     total += amp;
@@ -64,11 +70,21 @@ function grain(c, field, fsize, amount, rng, speckle = 0, ox = 0, oy = 0) {
   const w = c.width, h = c.height;
   for (let y = 0; y < h; y++) {
     const fy = ((y + oy) % fsize) * fsize;
-    for (let x = 0; x < w; x++) {
-      let k = 1 + (field[fy + ((x + ox) % fsize)] - 0.5) * amount;
-      if (speckle) k += (rng.next() - 0.5) * speckle;
-      const i = (y * w + x) * 4;
-      d[i] *= k; d[i + 1] *= k; d[i + 2] *= k;
+    // (The field column without a remainder per pixel.)
+    let fx = ox % fsize, i = y * w * 4;
+    if (speckle) {
+      for (let x = 0; x < w; x++, i += 4) {
+        let k = 1 + (field[fy + fx] - 0.5) * amount;
+        k += (rng.next() - 0.5) * speckle;
+        d[i] *= k; d[i + 1] *= k; d[i + 2] *= k;
+        if (++fx === fsize) fx = 0;
+      }
+    } else {
+      for (let x = 0; x < w; x++, i += 4) {
+        const k = 1 + (field[fy + fx] - 0.5) * amount;
+        d[i] *= k; d[i + 1] *= k; d[i + 2] *= k;
+        if (++fx === fsize) fx = 0;
+      }
     }
   }
   g.putImageData(img, 0, 0);

@@ -31,7 +31,7 @@ import { lookOf } from './miamilook.js';
 import { addProps, treeSpecies, rectColor } from './props.js';
 import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
-import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, netRoads, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, netRoadsJob, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { groundFn } from '../world/ground.js';
 import { cityPatch, patchCityMaterials } from './citypatch.js';
 import { lotGround, lotFringe, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
@@ -848,7 +848,9 @@ export function buildRealCity(city, collision, opts = {}) {
           // The flat and the raised net in slices of their own; the quads
           // are kept (netCache), so a tile drawn again does not flood again.
           for (let kind = 1; kind <= 2; kind++) {
-            netRoads(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX), kind, netCache);
+            // (The flood itself stops and goes on inside a box: a dense
+            // box was 30 to 50 ms at 4x in one piece.)
+            for (const _ of netRoadsJob(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX), kind, netCache, over)) { yield 'roads'; ts = now(); }
             if (over()) { yield 'roads'; ts = now(); }
           }
         }
