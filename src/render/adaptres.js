@@ -20,8 +20,14 @@
 //   seconds: the caller keeps it and passes it back as `start` next time,
 //   so a phone that holds 60 starts (and stays) at its full resolution
 //   and one that cannot starts where it settled, without probing again.
-// - The floor is 1.0 (one physical pixel per CSS pixel; below that the
-//   picture goes soft and stair-stepped, docs/REVAMP.md section 2). When
+// - Frames the main thread itself made late (the optional `work`, the
+//   frame's JavaScript time) are not the resolution's fault: drawing fewer
+//   pixels would not have saved them, so they count as on budget here
+//   (0.13.7: a fast phone with an occasional slow step was walked down to
+//   the floor and never came back, a soft picture that stayed laggy).
+// - The floor is 1.0 by default (one physical pixel per CSS pixel; below
+//   that the picture goes soft and stair-stepped, docs/REVAMP.md section
+//   2); a dense phone screen passes a higher one (floorFor). When
 //   the floor is reached and frames are still over budget for `shedAfter`
 //   seconds, `shed` goes up by one (at most 2): the caller then drops
 //   detail instead (graphics.js: smaller shadow map, lower draw tier).
@@ -38,10 +44,10 @@ export const DEFAULTS = {
   downAt: 1.11, // smoothed frame time over budget * downAt: step down
   upAt: 1.045, // smoothed frame time under budget * upAt: may step up
   stepDown: 0.1,
-  stepUp: 0.05,
+  stepUp: 0.1, // (0.13.7: was 0.05, a lost level took a minute to come back)
   settle: 0.5, // seconds to wait after any change
   upWait: 5, // seconds of calm before the first probe up (at least minGap)
-  upWaitMax: 60,
+  upWaitMax: 20, // (0.13.7: was 60, a level lost to a busy spell came back too slowly)
   probeFail: 2.5, // a drop this soon after a probe may first change (minGap) counts against it
   calm: 30, // seconds without a drop that halve the probe wait
   smooth: 0.05, // weight of each new sample in the average
@@ -52,14 +58,15 @@ export const DEFAULTS = {
   minGap: 5, // seconds at least between two resolution changes
   goodAfter: 10, // seconds a level must hold to count as good
   firstWait: 0, // probe wait to begin with (0: upWait); longer when start is a level known good
+  cpuAt: 0.8, // a late frame whose own work took budget * cpuAt or more was the main thread's
 };
 
 export function createAdaptiveRes(opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const st = {
     scale: 0, avg: o.budget, sinceChange: 0, sinceUp: 1e9, sinceDrop: 0,
-    wait: o.firstWait > 0 ? Math.min(o.upWaitMax, o.firstWait) : o.upWait, samples: 0, changes: 0, shed: 0, overFloor: 0, calmFloor: 0,
-    sinceScale: 1e9, held: 0, good: 0,
+    wait: o.firstWait > 0 ? o.firstWait : o.upWait, samples: 0, changes: 0, shed: 0, overFloor: 0, calmFloor: 0,
+    sinceScale: 1e9, held: 0, good: 0, cpuFrames: 0,
   };
   const q = (x) => Math.round(x * 20) / 20; // keep to steps of 0.05
   const clampS = (x) => Math.min(o.max, Math.max(Math.min(o.min, o.max), x));
@@ -96,10 +103,19 @@ export function createAdaptiveRes(opts = {}) {
       if (n !== st.scale) set(n);
       return st.scale;
     },
-    // One drawn frame of `dt` seconds. Returns the scale to use.
-    update(dt) {
+    // Frames counted as the main thread's (late, with work over budget * cpuAt).
+    get cpuFrames() { return st.cpuFrames; },
+    // One drawn frame of `dt` seconds; `work` (optional, seconds): the
+    // frame's own main-thread time. Returns the scale to use.
+    update(dt, work) {
       // Pauses, hidden tabs and loading stalls tell nothing about load.
       if (!(dt > 0) || dt > 0.25) return st.scale;
+      // Late because of its own JavaScript (a slow step, a tile build, a
+      // collection): the pixels were not the cause.
+      if (work >= o.budget * o.cpuAt && dt > o.budget * 1.2) {
+        st.cpuFrames++;
+        dt = o.budget;
+      }
       st.sinceChange += dt;
       st.sinceScale += dt;
       st.sinceUp += dt;
@@ -169,13 +185,26 @@ export function createAdaptiveRes(opts = {}) {
 }
 
 // Highest pixel ratio for a device and the Settings quality option
-// (0.75 Low, 1 Normal, 1.25 High). Phones get at most 2 physical pixels
-// per CSS pixel; High allows the full 2, Normal 1.6, Low 1.2.
+// (0.75 Low, 1 Normal, 1.25 High), never over the device's own ratio:
+// High 2.5, Normal 2.25, Low 1.5 physical pixels per CSS pixel.
+// (0.13.7: Normal was 1.6 and Low 1.2. A 3.5 ratio phone such as a
+// 1440p flagship then showed each drawn pixel 2.2 times wide (Low: 2.9),
+// a soft, smeared picture; about 2.25 is where it looks sharp.)
+export const RATIO_CAPS = { low: 1.5, normal: 2.25, high: 2.5 };
 export function maxRatioFor(devicePixelRatio, quality = 1) {
   const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
   const q = Number.isFinite(quality) ? quality : 1;
-  const cap = 2 * Math.min(1, Math.max(0.5, q / 1.25));
+  const cap = q >= 1.25 ? RATIO_CAPS.high : q >= 1 ? RATIO_CAPS.normal : RATIO_CAPS.low;
   return Math.round(Math.min(dpr, cap) * 20) / 20;
+}
+
+// The lowest pixel ratio the adaptive resolution may use on a screen:
+// 1.0 on ordinary screens, more on dense ones (1.5 at a 3.5 ratio), where
+// one drawn pixel to a CSS pixel is blown up three times or more and the
+// picture turns to mush. Below it the controller sheds detail instead.
+export function floorFor(devicePixelRatio) {
+  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return Math.round(Math.max(1, Math.min(1.5, dpr * 0.43)) * 20) / 20;
 }
 
 // Multisampling (MSAA) on every device: the drawing pixel ratio runs

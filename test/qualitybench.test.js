@@ -54,6 +54,13 @@ test('only a player who never chose one is measured', () => {
   assert.equal(neverChosen(null), false);
 });
 
+test('a benchmark that left Normal is measured again; a player choice never', () => {
+  assert.equal(neverChosen({ quality: 0.75, qualityBenchmarked: true }), true);
+  assert.equal(neverChosen({ quality: 1.25, qualityBenchmarked: true }), true);
+  assert.equal(neverChosen({ quality: 0.75, qualityBenchmarked: true, qualityChosen: true }), false);
+  assert.equal(neverChosen({ quality: 1.25, qualityChosen: true }), false);
+});
+
 test('the stored flags are validated by the save sanitiser', () => {
   const ok = sanitizeProgress({ settings: { quality: 0.75, qualityBenchmarked: true, qualityChosen: true } });
   assert.equal(ok.settings.quality, 0.75);

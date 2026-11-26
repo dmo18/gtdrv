@@ -142,7 +142,9 @@ function runQualityBench(game) {
   const bench = createQualityBench();
   let last = 0;
   const tick = (now) => {
-    if (document.hidden || game.paused) {
+    // Not while hidden, paused or still compiling the shaders behind the
+    // title (0.13.7: those frames sent fast phones to Low).
+    if (document.hidden || game.paused || (game.graphics && game.graphics.warmDone === false)) {
       last = 0;
       requestAnimationFrame(tick);
       return;

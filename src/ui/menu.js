@@ -79,6 +79,7 @@ const CSS = `
 .rw-menu-setting input[type=range] { flex: 1 1 120px; min-width: 0; height: 48px; margin: 0; accent-color: var(--rw-accent); }
 .rw-menu-setting input[type=range]:disabled { opacity: 0.4; }
 .rw-menu-value { flex: 0 0 3em; text-align: right; opacity: 0.9; font-variant-numeric: tabular-nums; }
+.rw-menu-tier { display: block; font-size: 12px; color: var(--rw-dim); font-variant-numeric: tabular-nums; }
 .rw-menu-switch { min-width: 92px; }
 .rw-menu-switch[aria-checked="true"] { background: var(--rw-accent); color: #1b120d; }
 .rw-menu-seg { display: flex; gap: 4px; }
@@ -196,6 +197,14 @@ const h = (tag, cls, text) => {
   if (text !== undefined) e.textContent = text;
   return e;
 };
+// The Settings graphics row's note: what is drawn now, e.g. "Now Normal at 2.25x"
+// (pixels per CSS pixel), "of 2.25x" when the adaptive resolution is under its cap.
+export function tierText(t) {
+  const f = (x) => String(Math.round(x * 100) / 100);
+  const under = t.max > 0 && t.ratio < t.max - 0.01 ? ` of ${f(t.max)}x` : '';
+  return `Now ${t.name} at ${f(t.ratio)}x${under}${t.shed > 0 ? ', detail shed' : ''}`;
+}
+
 function button(text, cls, onClick, label) {
   const b = h('button', 'rw-menu-btn' + (cls ? ' ' + cls : ''), text);
   b.type = 'button';
@@ -582,7 +591,12 @@ export function createMenu(root, game, economy) {
       body.appendChild(goRow('New game', 'Open', 'newgame', 'newgame'));
     } else {
       body.appendChild(segRow('HUD', [['minimal', 'Minimal'], ['full', 'Full']], s.hud, 'hud', (v) => { settings().hud = v; commit(); render(); }));
-      body.appendChild(segRow('Graphics quality', [[0.75, 'Low'], [1, 'Normal'], [1.25, 'High']], s.quality, 'quality', (v) => { settings().quality = v; settings().qualityChosen = true; commit(); render(); }));
+      const qRow = segRow('Graphics quality', [[0.75, 'Low'], [1, 'Normal'], [1.25, 'High']], s.quality, 'quality', (v) => { settings().quality = v; settings().qualityChosen = true; commit(); render(); });
+      // The tier drawn now (render/graphics.js): the adaptive resolution and
+      // shed detail move it under the chosen setting.
+      const tn = game.graphics && game.graphics.tierNow ? game.graphics.tierNow() : null;
+      if (tn) qRow.firstChild.appendChild(h('span', 'rw-menu-tier', tierText(tn)));
+      body.appendChild(qRow);
       if (typeof s.liveTime !== 'boolean') s.liveTime = true;
       body.appendChild(toggleRow('Live day and night', 'liveTime', true));
       body.appendChild(sliderRow('Time of day', 'timeOfDay', {

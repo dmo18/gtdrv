@@ -8,7 +8,7 @@
 // system exist.
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
-import { createAdaptiveRes, maxRatioFor } from './adaptres.js';
+import { createAdaptiveRes, maxRatioFor, floorFor } from './adaptres.js';
 import { vehicleStats, noteVehicleHit, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { BOAT_SPECS } from '../entities/boat.js';
@@ -441,11 +441,24 @@ export function createGraphics(game) {
     renderer.setRenderTarget(target);
     renderer.render(quad, quadCam);
   }
+  // The frame's own main-thread time (seconds): from the frame's start
+  // (the animation frame time, document.timeline) to the end of its draw
+  // calls, for the adaptive resolution (a frame made late by the steps or
+  // the draw's JavaScript is not the pixels' fault). -1: not known.
+  const timeline = typeof document !== 'undefined' && document.timeline ? document.timeline : null;
+  let lastWork = -1;
+  function noteWork() {
+    const t0 = timeline ? timeline.currentTime : null;
+    lastWork = typeof t0 === 'number' && t0 > 0 ? Math.max(0, performance.now() - t0) / 1000 : -1;
+  }
   function renderFrame() {
     renderer.render(scene, camera);
     sys.calls = renderer.info.render.calls;
     sys.triangles = renderer.info.render.triangles;
-    if (!bloom.on) return;
+    if (!bloom.on) {
+      noteWork();
+      return;
+    }
     const sky = game.daynight && game.daynight.sky;
     const lit = sky ? sky.lit : 0;
     renderer.copyFramebufferToTexture(bloom.fb);
@@ -467,6 +480,7 @@ export function createGraphics(game) {
     drawPass(addMat, null);
     renderer.autoClear = ac;
     renderer.shadowMap.autoUpdate = sm;
+    noteWork();
   }
   game.resizeHooks.push(() => {
     if (bloom.on) sizeBloom();
@@ -540,16 +554,20 @@ export function createGraphics(game) {
   }
 
   // ---- adaptive resolution ----
-  // The loop's real frame time moves the pixel ratio between 0.6 and the
-  // device cap (2 physical pixels per CSS pixel at most, lower for the
-  // Normal and Low quality settings).
+  // The loop's real frame time moves the pixel ratio between the screen's
+  // floor (floorFor: 1.0, up to 1.5 on a dense phone screen) and the
+  // device cap (maxRatioFor: 2.5 High, 2.25 Normal, 1.5 Low, never over
+  // the device's own ratio). Frames the main thread made late (lastWork)
+  // do not count against the pixels.
   // It starts at full resolution, or at the level that held last time
   // on this device (kept with the cap it was found under), so a phone
   // that holds 60 is never probed down and one that cannot starts where
-  // it settled. A level below the cap waits longer before probing up.
-  const resMax = maxRatioFor(window.devicePixelRatio || 1, game.quality);
+  // it settled. A level below the cap waits a little before probing up
+  // (0.13.7: 10 s, was 30; a level lost to one busy spell came back late).
+  const dpr0 = window.devicePixelRatio || 1;
+  const resMax = maxRatioFor(dpr0, game.quality);
   const saved = loadRes(resMax);
-  res = createAdaptiveRes({ max: resMax, start: saved || resMax, firstWait: saved && saved < resMax ? 30 : 0 });
+  res = createAdaptiveRes({ max: resMax, min: floorFor(dpr0), start: saved || resMax, firstWait: saved && saved < resMax ? 10 : 0 });
   let resApplied = res.scale, resSaved = saved, resSavedMax = resMax;
 
   // ---- shader warm-up ----
@@ -795,7 +813,7 @@ export function createGraphics(game) {
       const sky = game.daynight && game.daynight.sky;
       if (game.quality !== quality || res.shed !== shedApplied) applyQuality(game.quality);
       if (!warmed) warmUp();
-      if (sys.adaptive && res.update(dt) !== resApplied && game.resize) {
+      if (sys.adaptive && res.update(dt, lastWork) !== resApplied && game.resize) {
         resApplied = res.scale;
         game.resize();
       }
@@ -876,6 +894,12 @@ export function createGraphics(game) {
     },
     adaptive: true,
     res,
+    // What the Settings graphics row shows: the tier drawn now (shed steps
+    // drop it to Low), the pixel ratio and whether detail is being shed.
+    tierNow() {
+      const names = ['Low', 'Normal', 'High'];
+      return { name: names[ud.tier == null ? 1 : ud.tier], ratio: renderer.getPixelRatio(), max: res.max, shed: shedApplied };
+    },
     warmMs: 0,
     warmPrograms: 0,
     warmDone: false,

@@ -17,9 +17,13 @@ export const LOW = 0.75, NORMAL = 1, HIGH = 1.25;
 
 // The setting has never been chosen: neither by the player (the menu sets
 // qualityChosen), nor by an earlier benchmark, nor by any move away from Normal.
+// A benchmark that moved away from Normal (and the player never chose) is
+// measured again at each start (0.13.7): a run spoiled by the start-up work
+// (shader compiles, the map raster) left a fast phone on Low, drawn soft.
 export function neverChosen(settings) {
   if (!settings || typeof settings !== 'object') return false;
-  if (settings.qualityChosen === true || settings.qualityBenchmarked === true) return false;
+  if (settings.qualityChosen === true) return false;
+  if (settings.qualityBenchmarked === true) return settings.quality === LOW || settings.quality === HIGH;
   return settings.quality === undefined || settings.quality === NORMAL;
 }
 

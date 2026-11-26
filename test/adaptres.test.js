@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAdaptiveRes, maxRatioFor, wantsAntialias } from '../src/render/adaptres.js';
+import { createAdaptiveRes, maxRatioFor, floorFor, wantsAntialias } from '../src/render/adaptres.js';
 
 const run = (c, dt, seconds) => {
   const n = Math.round(seconds / dt);
@@ -94,9 +94,11 @@ test('setMax clamps the current scale', () => {
 });
 
 test('device and quality caps', () => {
-  assert.equal(maxRatioFor(3.5, 1.25), 2);
-  assert.equal(maxRatioFor(3.5, 1), 1.6);
-  assert.equal(maxRatioFor(3.5, 0.75), 1.2);
+  // 0.13.7: a 3.5 ratio phone draws sharp (was 2, 1.6 and 1.2).
+  assert.equal(maxRatioFor(3.5, 1.25), 2.5);
+  assert.equal(maxRatioFor(3.5, 1), 2.25);
+  assert.equal(maxRatioFor(3.5, 0.75), 1.5);
+  assert.equal(maxRatioFor(2, 1), 2);
   assert.equal(maxRatioFor(1, 1.25), 1);
   assert.equal(maxRatioFor(0, 1), 1);
   // MSAA on every device (the ratio never drops under 1.0).
@@ -143,4 +145,46 @@ test('good is the level that held; it is the start next time', () => {
   for (let i = 0; i < 60 * 30; i++) d.update(dev(d.scale));
   assert.ok(d.changes <= 1, `changes ${d.changes}`);
   assert.ok(d.scale <= 1.3 + 1e-9);
+});
+
+test('dense screens get a higher floor', () => {
+  assert.equal(floorFor(1), 1);
+  assert.equal(floorFor(2), 1);
+  assert.equal(floorFor(3.5), 1.5);
+  assert.equal(floorFor(0), 1);
+  const c = createAdaptiveRes({ max: maxRatioFor(3.5, 1), min: floorFor(3.5), start: 2.25 });
+  run(c, 1 / 20, 60);
+  assert.equal(c.scale, 1.5, 'never under the floor');
+  assert.ok(c.shed > 0, 'sheds detail there instead');
+});
+
+test('frames made late by the main thread do not lower the resolution', () => {
+  // A phone whose GPU holds 60 at full resolution; one frame in nine is a
+  // slow step (20 ms of JavaScript) that misses a refresh.
+  const c = createAdaptiveRes({ max: 2.25, min: 1.5, start: 2.25 });
+  for (let i = 0; i < 60 * 180; i++) c.update(i % 9 === 0 ? 2 / 60 : 1 / 60, i % 9 === 0 ? 0.02 : 0.009);
+  assert.equal(c.scale, 2.25);
+  assert.equal(c.changes, 0);
+  assert.ok(c.cpuFrames > 1000);
+  // The same frames without the work hint: the old behavior, walked down.
+  const d = createAdaptiveRes({ max: 2.25, min: 1.5, start: 2.25 });
+  for (let i = 0; i < 60 * 180; i++) d.update(i % 9 === 0 ? 2 / 60 : 1 / 60);
+  assert.ok(d.scale < 2.25);
+  // Late frames with light work are the pixels' fault: still stepped down.
+  const e = createAdaptiveRes({ max: 2.25, min: 1.5, start: 2.25 });
+  run(e, 1 / 40, 8);
+  for (let i = 0; i < 60 * 8; i++) e.update(1 / 40, 0.006);
+  assert.ok(e.scale < 2.25);
+});
+
+test('a level lost to a busy spell comes back within half a minute', () => {
+  // GPU-bound over 1.4 for 15 s (a big fire fight), then calm again.
+  const c = createAdaptiveRes({ max: 2.25, min: 1.5, start: 2.25 });
+  let back = -1;
+  for (let i = 0; i < 60 * 120; i++) {
+    const t = i / 60;
+    c.update(t > 20 && t < 35 && c.scale > 1.4 ? 1 / 40 : 1 / 60, 0.008);
+    if (t > 35 && back < 0 && c.scale === 2.25) back = t - 35;
+  }
+  assert.ok(back >= 0 && back < 30, `back after ${back.toFixed(1)} s`);
 });
