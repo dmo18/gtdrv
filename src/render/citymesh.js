@@ -913,6 +913,41 @@ function mallTri(B, J, hull, ax, az, bx, bz, cx, cz, depth) {
   mallTri(B, J, hull, abx, abz, bcx, bcz, cax, caz, depth + 1);
 }
 
+// The arms of junction J whose strip from the node to its mouth the ring
+// does not hold (0.13.7: a fork of two arms a few degrees apart trims them
+// up to 40 m back, and the ring's corner between them cuts across both):
+// the ground calls an arm's strip road from the node on (world/ground.js
+// geoSurface), so it is drawn as asphalt there too, as the junction's own
+// (same color and height, under the strips), in pieces of up to 5 m. Lot
+// ground showed through, green, in the road.
+function armUnderlay(city, geo, bld, J) {
+  for (let m = 0; m < J.arms.length; m++) {
+    const q = J.arms[m], e = city.edges[q >> 1];
+    const t = geo.trim[q];
+    if (!e || e.ped || geo.inner[e.id] || !(t > 1)) continue;
+    const end = q & 1, a = city.nodes[e.a], L = e.length;
+    let miss = false;
+    for (let s = 0.5; s < t && !miss; s += 2) {
+      const d = end ? L - s : s;
+      const C = curbsAt(geo, e, d);
+      for (let k = 0; k <= 4 && !miss; k++) {
+        const o = C.l + 0.3 + ((C.r - C.l - 0.6) * k) / 4;
+        if (!pointInRing(J.ring, a.x + e.ux * d - e.uz * o, a.z + e.uz * d + e.ux * o)) miss = true;
+      }
+    }
+    if (!miss) continue;
+    const n = Math.max(1, Math.ceil(t / 5));
+    for (let i = 0; i < n; i++) {
+      const s0 = (t * i) / n, s1 = (t * (i + 1)) / n;
+      const d0 = end ? L - s0 : s0, d1 = end ? L - s1 : s1;
+      const c0 = curbsAt(geo, e, d0), l0 = c0.l, r0 = c0.r;
+      const c1 = curbsAt(geo, e, d1), l1 = c1.l, r1 = c1.r;
+      orientedQuad(bld, a.x + e.ux * d0 - e.uz * r0, a.z + e.uz * d0 + e.ux * r0, a.x + e.ux * d1 - e.uz * r1, a.z + e.uz * d1 + e.ux * r1,
+        a.x + e.ux * d1 - e.uz * l1, a.z + e.uz * d1 + e.ux * l1, a.x + e.ux * d0 - e.uz * l0, a.z + e.uz * d0 + e.ux * l0, -0.004, COL.junction);
+    }
+  }
+}
+
 // Is the side (0 right, 1 left) of edge end q bare just outside its
 // junction: no sidewalk there (kept clear by a gore or a median nose, or
 // asphalt up to a facing strip)?
@@ -948,7 +983,10 @@ export function realRoads(city, B, nodes, edges, own = null) {
     if (!J.fan && mallJunction(city, J)) {
       const hull = fanMouthHull(city, J, true), t = J.tris;
       for (let k = 0; k + 5 < t.length; k += 6) mallTri(B, J, hull, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0);
-    } else flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
+    } else {
+      flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
+      armUnderlay(city, geo, B.asphalt.at(J.x, J.z), J);
+    }
     // Fork and merge gores: asphalt with white edge lines and chevrons.
     for (const G of J.gores) {
       flatTris(B.asphalt.at(J.x, J.z), G.tris, -0.004, COL.junction);
@@ -1007,15 +1045,30 @@ export function realRoads(city, B, nodes, edges, own = null) {
     const t = shade(COL.asphalt, 0.9 + 0.16 * edgeHash(e.id));
     // World x, z of (d, o) on the edge.
     const wx = (d, o) => a.x + ux * d + rx * o, wz = (d, o) => a.z + uz * d + rz * o;
-    // Half a disc of radius m / 2 on the median band (lateral l - m .. l)
-    // at along d, bulging toward dir (-1: node a), with its curb.
+    // The round end of the median band (lateral l - m .. l) at along d,
+    // bulging toward dir (-1: node a), with its curb.
+    // (0.13.7: a quarter disc from the curb to the middle of the median,
+    // so the two halves' noses make one round end; each half drew a half
+    // disc on its own band before, two green lobes with a notch between.
+    // A median over 8 m, whose middle is lot ground, gets its middle filled
+    // 6 m back from the nose, so the lot's 5 m raster does not show as a
+    // notch.)
     const nose = (mb, wb, d, l, m, dir, col) => {
-      const r = m / 2, oc = l - r;
-      if (!(r > 0.05)) return;
+      if (!(m > 0.05)) return;
+      const g = e.pair >= 0 ? pairGap(city, e, d, l) : 2 * m;
+      const r = e.median > 8 && g < 24 ? g / 2 + 0.15 : m, oc = l - r;
+      // (Along the road it reaches m / 2 past d, as the half disc did: an
+      // elliptic quarter, so a wide nose does not run onto the crossing.)
+      const ra = Math.min(r, Math.max(m / 2, 1));
+      // (Not on road in the ground: a street crossing the median there.)
+      if (G.surfaceAt(wx(d + dir * ra * 0.5, l - r * 0.5), wz(d + dir * ra * 0.5, l - r * 0.5)) === 1) return;
+      if (r > m + 0.05) {
+        orientedQuad(mb, wx(d, l - m), wz(d, l - m), wx(d, oc), wz(d, oc), wx(d - dir * 6, oc), wz(d - dir * 6, oc), wx(d - dir * 6, l - m), wz(d - dir * 6, l - m), CURB_H - 0.002, col);
+      }
       NOSE.length = 0;
       for (let k = 0; k <= 6; k++) {
-        const t = (k / 6) * Math.PI;
-        NOSE.push(wx(d + dir * r * Math.sin(t), oc + r * Math.cos(t)), wz(d + dir * r * Math.sin(t), oc + r * Math.cos(t)));
+        const t = (k / 6) * Math.PI / 2;
+        NOSE.push(wx(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)), wz(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)));
       }
       const cx = wx(d, oc), cz = wz(d, oc);
       for (let k = 0; k + 3 < NOSE.length; k += 2) {
@@ -1144,6 +1197,15 @@ export function realRoads(city, B, nodes, edges, own = null) {
         const lc = curbsAt(geo, e, end ? da : db).l;
         const m0 = medianAt(city, e, da, lc), m1 = medianAt(city, e, db, lc);
         if (!(m0 > 0 && m1 > 0)) continue;
+        // (0.13.7: not where a street that does cross the median lies on
+        // it, road in the ground: a lawn across its asphalt.)
+        const GM = groundOf(city);
+        let onRoad = false;
+        for (let k = 0; k <= 4 && !onRoad; k++) {
+          const dk = da + ((db - da) * k) / 4, ok = lc - (m0 + ((m1 - m0) * k) / 4) / 2;
+          if (GM.surfaceAt(wx(dk, ok), wz(dk, ok)) === 1) onRoad = true;
+        }
+        if (onRoad) continue;
         const planted = e.median > MEDIAN_PLANT;
         orientedQuad((planted ? B.grass : B.sidewalk).at(mx, mz), wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), wx(db, lc - m1), wz(db, lc - m1), wx(da, lc - m0), wz(da, lc - m0), CURB_H, planted ? COL.lawn : COL.curb);
         B.sidewalk.at(mx, mz).wall(wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), -0.02, CURB_H, COL.curb, 0, 0, (db - da) / 4.8, 0.05, 1, 1);
@@ -1156,7 +1218,11 @@ export function realRoads(city, B, nodes, edges, own = null) {
     if (e.divided && e.pair >= 0 && !geo.inner[e.id] && !geo.inner[e.pair] && !e.bridge) {
       for (let end = 0; end < 2; end++) {
         const q = 2 * e.id + end;
-        if (geo.mthru[q] || geo.jEnd[q] < 0) continue;
+        if (geo.jEnd[q] < 0) continue;
+        // (A median carried through the junction, mthru, keeps the gap;
+        // one too narrow to draw leaves it to this asphalt, 0.13.7: lot
+        // ground showed between the halves on 5th Street at Collins.)
+        if (geo.mthru[q] && medianAt(city, e, end ? e.length - geo.trim[q] : geo.trim[q], curbsAt(geo, e, end ? e.length - geo.trim[q] : geo.trim[q]).l) > 0) continue;
         const reach = Math.min(e.length / 2, Math.max(geo.trim[q], geo.sup[2 * q + 1]));
         if (!(reach > 0.5)) continue;
         const da = end ? e.length - reach : 0, db = end ? e.length : reach;

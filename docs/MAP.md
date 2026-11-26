@@ -855,6 +855,31 @@ Miami two-way roads tagged `lanes` odd with `lanes:forward` and `lanes:backward`
 differing by one (2 + 1, 3 + 2) are drawn as equal lanes each way plus the
 center turn lane (`center`), same width (0.12.6, `roadProfile(way, { turnLane })`).
 
+0.13.7 road logic (`roadprofile.js laneCaps`, `harmonizeStreets`):
+- Lanes by class, whatever the tags. Two-way roads always have equal lanes
+  each way; an odd total, or a tag past the class's lanes where the class
+  has a turn lane, is the center turn lane. Local (residential,
+  living_street, unclassified, service): 1 + 1, one-way 1 (2 when tagged).
+  Collector (tertiary): 1 + 1 and a turn lane, one-way 1 (2 tagged).
+  Arterial (secondary, primary): 2 + 2 and a turn lane, one-way 2 (3
+  tagged). Trunk: 2 + 2 (3 + 3 tagged) and a turn lane, one-way 2 (4).
+  Motorway: one-way 3 (5). Links: one-way 1 (2).
+- Parking: a two-way street of 1 + 1 on both curbs, a wider one or one
+  with a turn lane on neither; a one-way of 1 or 2 lanes on both curbs, of
+  3 on the right. A divided half (`pairDivided`) never parks on its left
+  curb; whether the pair has a raised median is judged as if both halves
+  parked on both curbs (no median out of space a narrower half gave up).
+- One cross section along a street: edges that run straight on through a
+  node (same name, both one-way or both two-way, within 35 degrees, a
+  one-way entering where the other leaves, each the other's straightest
+  partner and no second partner within 15 degrees: a fork joins neither
+  branch) form a street, which takes the lanes, turn lane and parking that
+  cover most of its length. A block tagged under 4 lanes is not widened
+  past `MAX_UNTAGGED_W` (15 m). Bridges keep no parking.
+- Paint: a local street of one lane each way, or a one-lane local one-way,
+  is unmarked; a local one-way of two lanes gets its lane line only. Park
+  lines only on collectors and up.
+
 Also on every edge, derived (old callers): `avenue` = two or more lanes each
 way (`min(lanesF, lanesB) >= 2`, or a one-way of 3 or more); optional
 `sidewalk` (1.8 residential, 3.0 downtown and on Lincoln Road; the 0.15 m curb

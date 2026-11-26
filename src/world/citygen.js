@@ -774,7 +774,8 @@ export function signalState(node, horizontal, time) {
   if (!node.signal) return 'green';
   const c = SIGNAL.cycle;
   const px = node.sigX === undefined ? node.x : node.sigX, pz = node.sigZ === undefined ? node.z : node.sigZ;
-  const off = SIGNAL.wave > 0 ? -(px + pz) / SIGNAL.wave : (node.sigC === undefined ? node.id : node.sigC) * 7;
+  // (node.phase: a phase set by hand, world/miami.js startLight, wins.)
+  const off = node.phase !== undefined ? node.phase : SIGNAL.wave > 0 ? -(px + pz) / SIGNAL.wave : (node.sigC === undefined ? node.id : node.sigC) * 7;
   let t = (time + off) % c;
   if (t < 0) t += c;
   const mine = horizontal ? t : (t + c / 2) % c;

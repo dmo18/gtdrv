@@ -76,13 +76,21 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // the whole box change (2 nodes, 4 edges, 2 lots more in Downtown; its
 // buildings and lot grid follow the new road strip); Beach, North, West
 // and South keep their pins.
+// 0.13.7 road logic re-pin (deliberate; docs/STATUS.md "0.13.7 road
+// logic", docs/STREETSCAPE.md): lanes by road class (world/roadprofile.js
+// laneCaps), one cross section along a street (harmonizeStreets), a divided
+// half no longer parks on its left curb. Edge widths and lanes change in
+// every region; equal neighbor ways now merge into one chain (fewer nodes
+// and edges); buildings, lots and the lot grid follow the road strips and
+// junction boxes. All six change. Downtown's and the whole box's nodes
+// also carry the start light's phase (miami.js startLight).
 const PINNED = {
-[WHOLE_BOX]: { nodes: '88cf0989', edges: 'ceab4da8', buildings: '0151a92c', lots: 'fdcd55db', lotGrid: 'ecba9539' },
-  'miami-downtown': { nodes: '584d937d', edges: '153db9ad', buildings: '4922b018', lots: '11144f11', lotGrid: 'c2bd21e4' },
-  'miami-beach': { nodes: '17dca3b5', edges: '065cd791', buildings: '7d8e9776', lots: 'f4183abf', lotGrid: 'bdea5737' },
-  'miami-north': { nodes: '2debc075', edges: '337da624', buildings: 'b0e601a9', lots: '4fdb5c68', lotGrid: 'dd88bfe0' },
-  'miami-west': { nodes: '1c6e85c8', edges: 'e974bccf', buildings: 'a44fb8ea', lots: '718ee8b4', lotGrid: '939234c7' },
-  'miami-south': { nodes: '4c3195bc', edges: '23af5f5c', buildings: 'f9041bd0', lots: 'd27b67ef', lotGrid: '6110b03c' },
+[WHOLE_BOX]: { nodes: 'b07aa4c2', edges: '6de39b86', buildings: '584f0bd3', lots: '95260013', lotGrid: 'd4517aff' },
+  'miami-downtown': { nodes: 'dda17a5a', edges: '7207b3f7', buildings: 'c7dfb9b9', lots: '708f9f87', lotGrid: '33e0f025' },
+  'miami-beach': { nodes: '474313ca', edges: 'fc8a229c', buildings: '064a6632', lots: '4e546423', lotGrid: '6c321403' },
+  'miami-north': { nodes: '485a494e', edges: 'b42d5fed', buildings: 'aeb7166d', lots: '58a058a2', lotGrid: 'c9f0a63a' },
+  'miami-west': { nodes: '46554827', edges: '8c0caa7e', buildings: '2a93d062', lots: 'a7888c8c', lotGrid: 'b2bc56e6' },
+  'miami-south': { nodes: '8a9e7968', edges: 'c30818d8', buildings: '15ea0807', lots: 'f1ee9ffd', lotGrid: 'a7eaa8d1' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

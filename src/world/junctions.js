@@ -81,7 +81,9 @@ export function medianAt(city, e, d, lc) {
   if (!(m > 0) || !(e.pair >= 0)) return m;
   // (No median against a partner drawn as part of a junction.)
   if (city.roadGeo && city.roadGeo.inner[e.pair]) return 0;
-  if (e.median > 8) return m;
+  // (0.13.7: a median over 8 m wide at the pair's middle is measured too:
+  // where the two halves come together toward a junction a 4 m band ran
+  // onto the partner's asphalt.)
   const dist = pairGap(city, e, d, lc);
   // (+0.3 m: the two halves overlap a little, so no ground shows between
   // them where the pair is not parallel.)
@@ -1232,7 +1234,7 @@ function paintRivals(city, e) {
     if (f.a === e.a || f.a === e.b || f.b === e.a || f.b === e.b) continue;
     if (!(f.width > e.width || (f.width === e.width && f.id < e.id))) continue;
     let hit = false;
-    for (let d = sA + 0.25; d < sB && !hit; d += 1) {
+    for (let d = Math.min(sA, 0) - 2.75; d < Math.max(sB, e.length + 3) && !hit; d += 1) {
       curbsAt(geo, e, d);
       const l = CURBS.l, r = CURBS.r;
       for (let t = 0; t <= 6 && !hit; t++) {

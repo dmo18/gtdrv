@@ -47,7 +47,10 @@ test('groundAt: road 0, sidewalk +0.15, land beyond 0, the sea floor below the w
     const rx = -e.uz, rz = e.ux;
     if (city.mainShore(mx, mz) < 30) continue;
     // Only edges whose sides are clear of other roads.
-    const side = e.width / 2 + 1;
+    // (1 m past the right curb, which lies `off` right of the node line on
+    // a tight divided pair: 0.13.7 drops the parking lane against the
+    // partner, so such a half is narrower and sits further right.)
+    const side = e.width / 2 + (e.off || 0) + 1;
     const clear = (k) => g.surfaceAt(mx + rx * k * (e.width / 2 + 8), mz + rz * k * (e.width / 2 + 8)) === 0;
     if (!clear(1) || !clear(-1)) continue;
     assert.equal(g.groundAt(mx, mz) - (e.median > 0 ? g.groundAt(mx, mz) : 0), 0, 'the road');

@@ -143,7 +143,9 @@ export function placeEvents(city, seed = EVENT_SEED) {
       if (!e.oneway) list.push({ e, from: e.b, k: rng.next() });
     }
     list.sort((a, b) => a.k - b.k || a.e.id - b.e.id);
-    return list;
+    // (A run that starts at a dead end has a gate no car can reach from
+    // behind but through the gate itself: 0.13.7, 38th Street on the Beach.)
+    return list.filter((c) => city.nodes[c.from].edges.length > 1);
   };
   // The same order with the candidates within 250 to 700 m of the start
   // place first (nearest first): the first heat escape and the first jump

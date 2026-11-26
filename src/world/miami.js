@@ -8,7 +8,7 @@
 // Coordinates: x east, z south, meters, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
-import { roadProfile, pairDivided, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
+import { roadProfile, pairDivided, harmonizeStreets, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
 import { buildRoadGeo, onJunction } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
 import { buildLots, planInfill, stepDistance, dressLot, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
@@ -856,7 +856,7 @@ const GROW_F64 = (a, n) => {
 function readWays(data, S, crop, landCell, coastLand, baseLand) {
   const R = {
     crop, landCell, coastLand, baseLand, districts: S.districts, curb: S.curbParking || [],
-    popts: { district: '', curbParking: false, turnLane: false }, classIds: new Map(), profiles: new Map(),
+    popts: { district: '', curbParking: false }, classIds: new Map(), profiles: new Map(),
     ways: [], wayS: [], wayE: [], P: new Float64Array(1 << 16), np: 0, cuts: [],
     // decodePolyline's output for one road, reused (pts[0, m)).
     pts: new Float64Array(4096),
@@ -983,7 +983,9 @@ function districtKeyAt(districts, x, z) {
 // and of the options only whether the district is downtown and whether
 // the street parks on its curbs): one frozen profile per key. Lane tags
 // other than whole numbers 0 to 15 (or none) are not cached.
-const BEACH_X0_DM = 35000;
+// The service homes' marked curb bays (x, z, heading; entities/
+// servicevehicles.js SERVICE_SPOTS with `curb: true`), kept as curb spots.
+const CURB_BAYS = [-1053.16, 948.3, -2.462, -964.83, -118.63, 3.1043, -1174.5, 1739.29, -2.9102];
 const laneKey = (v) => (v === undefined || v === null || v === 0 ? 0 : Number.isInteger(v) && v > 0 && v < 16 ? v : -1);
 function cachedProfile(R, r, downtown, curb) {
   const lanes = laneKey(r.lanes), lf = laneKey(r.lf), lb = laneKey(r.lb);
@@ -992,10 +994,6 @@ function cachedProfile(R, r, downtown, curb) {
   const popts = R.popts;
   popts.district = downtown ? 'downtown' : '';
   popts.curbParking = curb;
-  // Miami Beach island (east of the Venetian Islands, x 3500 m, in decimeters): a
-  // two-way 2 + 1 road is equal lanes each way and a center turn lane.
-  const beach = r.p && r.p[0] >= BEACH_X0_DM;
-  popts.turnLane = beach;
   if (lanes < 0 || lf < 0 || lb < 0 || ci > 63) return roadProfile(r, popts);
   const name = r.name || '';
   let key = ci;
@@ -1009,7 +1007,6 @@ function cachedProfile(R, r, downtown, curb) {
   key = key * 2 + (name === 'Lincoln Road' ? 1 : 0);
   key = key * 2 + (downtown ? 1 : 0);
   key = key * 2 + (curb ? 1 : 0);
-  key = key * 2 + (beach ? 1 : 0);
   let prof = R.profiles.get(key);
   if (!prof) R.profiles.set(key, (prof = Object.freeze(roadProfile(r, popts))));
   return prof;
@@ -1974,6 +1971,8 @@ function buildRoadGraph(data, S, crop, landCell, coastLand, baseLand) {
   const parent = M.parent, rx = M.rx, rz = M.rz;
   const G = linkReps(seg, parent, ways, S.links || [], rx, rz);
   const g = walkChains(G, ways, rx, rz);
+  // One cross section along each street (0.13.7 road logic).
+  harmonizeStreets(g.nodes, g.edges);
   return { nodes: g.nodes, edges: g.edges, joined: { uf: g.uf, nodes: g.nodes.length, edges: g.edges.length }, cuts: R.cuts };
 }
 
@@ -2989,6 +2988,26 @@ export function createMiamiCity(data, opts = {}) {
         }
       }
     }
+    // The service homes' marked curb bays (entities/servicevehicles.js,
+    // `curb: true`) are curb spots whatever the seeded draws above gave
+    // (0.13.7: the draws run in one sequence over every edge, so a parking
+    // lane changed anywhere moved them), where the point lies in the middle
+    // of a parking lane of an edge, clear of its junction boxes.
+    for (let k = 0; k < CURB_BAYS.length; k += 3) {
+      const x = CURB_BAYS[k], z = CURB_BAYS[k + 1];
+      if (!inCrop(x, z) || anyWithin(parkingSpots, x, z, 0.5)) continue;
+      for (let eIdx = 0; eIdx < edges.length; eIdx++) {
+        const e = edges[eIdx], a = nodes[e.a];
+        if (e.causeway || e.bridge) continue;
+        const d = (x - a.x) * e.ux + (z - a.z) * e.uz, s = -(x - a.x) * e.uz + (z - a.z) * e.ux;
+        if (d < a.hx + 9 || d > e.length - nodes[e.b].hx - 9) continue;
+        const side = s - (e.off || 0) > 0 ? 1 : -1;
+        if (!((side > 0 ? e.parkR : e.parkL) > 0)) continue;
+        if (Math.abs(s - (e.off || 0) - side * (e.width / 2 - GUTTER - PARK_W / 2)) > 0.3) continue;
+        parkingSpots.push({ x, z, heading: CURB_BAYS[k + 2], lot: false });
+        break;
+      }
+    }
     const TREE_P = { downtown: 0.55, midtown: 0.5, residential: 0.7, beach: 0.7, docks: 0.08, industrial: 0.1, park: 0.7, airfield: 0 };
     for (let eIdx = 0; eIdx < edges.length; eIdx++) {
       const e = edges[eIdx];
@@ -3118,6 +3137,38 @@ export function createMiamiCity(data, opts = {}) {
           }
         }
       }
+    }
+  })();
+  // The first light ahead of the start along the start street turns green
+  // as the game starts (`node.phase`, citygen.js signalState), so the first
+  // view's cars drive off. (0.13.7: the phase came from the node id alone,
+  // and the road logic renumbered the nodes: the light stayed red for the
+  // whole first view.)
+  (function startLight() {
+    if (!S.startView) return;
+    const fx = Math.cos(spawn.heading), fz = Math.sin(spawn.heading);
+    let cur = null, at = -1, bd = 8;
+    for (let k = 0; k < edges.length; k++) {
+      const e = edges[k], a = nodes[e.a];
+      const t = (spawn.x - a.x) * e.ux + (spawn.z - a.z) * e.uz;
+      if (t < 0 || t > e.length || Math.abs(e.ux * fx + e.uz * fz) < 0.9) continue;
+      const d = Math.abs(-(spawn.x - a.x) * e.uz + (spawn.z - a.z) * e.ux);
+      if (d < bd) { bd = d; cur = e; at = e.ux * fx + e.uz * fz > 0 ? e.b : e.a; }
+    }
+    for (let walked = 0; cur && walked < 400; ) {
+      const n = nodes[at];
+      if (n.signal) { n.phase = cur.horizontal ? 0 : 12; return; }
+      walked += cur.length;
+      let next = null, best = 0.9;
+      for (let k = 0; k < n.edges.length; k++) {
+        const o = edges[n.edges[k]];
+        if (o === cur) continue;
+        const s = o.a === at ? 1 : -1, c = (o.ux * fx + o.uz * fz) * s;
+        if (c > best) { best = c; next = o; }
+      }
+      if (!next) return;
+      at = next.a === at ? next.b : next.a;
+      cur = next;
     }
   })();
 

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  roadProfile, profileWidth, profileLaneOffset, divideOf, paintLines, pairDivided,
+  roadProfile, profileWidth, profileLaneOffset, divideOf, paintLines, pairDivided, laneCaps,
   LANE_W, LANE_W_FAST, PARK_W, GUTTER, MAX_UNTAGGED_W, MEDIAN_MIN,
 } from '../src/world/roadprofile.js';
 import { laneOffset, lanesPerDirection, lanePoint, canDrive, generateCity } from '../src/world/citygen.js';
@@ -44,8 +44,11 @@ test('the profile of a way: US lane widths, parking, gutters (the plan\'s worked
   // on a two-way road is a center turn lane.
   assert.deepEqual((({ lanesF, lanesB, center }) => [lanesF, lanesB, center])(roadProfile({ class: 'primary', lanes: 4 })), [2, 2, 0]);
   assert.deepEqual((({ lanesF, lanesB, center }) => [lanesF, lanesB, center])(roadProfile({ class: 'primary', lanes: 5 })), [2, 2, LANE_W]);
-  assert.deepEqual((({ lanesF, lanesB }) => [lanesF, lanesB])(roadProfile({ class: 'primary', lanes: 3, lf: 2, lb: 1 })), [2, 1]);
-  assert.equal(roadProfile({ class: 'secondary', oneway: 1, lanes: 4 }).lanesF, 4);
+  // (0.13.7: a two-way road is equal each way; the odd lane of 2 + 1 is the
+  // center turn lane, everywhere, not only on the Beach.)
+  assert.deepEqual((({ lanesF, lanesB, center }) => [lanesF, lanesB, center])(roadProfile({ class: 'primary', lanes: 3, lf: 2, lb: 1 })), [1, 1, LANE_W]);
+  assert.equal(roadProfile({ class: 'secondary', oneway: 1, lanes: 4 }).lanesF, 3); // 0.13.7: an arterial one-way has 3 at most
+  assert.equal(roadProfile({ class: 'trunk', oneway: 1, lanes: 4 }).lanesF, 4);
   // Pedestrian streets (Lincoln Road Mall, Espanola Way): paving, wide walks.
   const mall = roadProfile({ class: 'pedestrian', name: 'Lincoln Road', mall: 1 });
   assert.ok(mall.ped && mall.parkL === 0 && mall.sidewalk === 3);
@@ -125,13 +128,14 @@ test('every edge: width = profile sum, lanes from the tag, no wide untagged road
       assert.ok(near(e.width, profileWidth(e), 0.011), `${id} edge ${e.id} width ${e.width} vs ${profileWidth(e)}`);
       assert.ok(e.laneW === LANE_W || e.laneW === LANE_W_FAST, `${id} edge ${e.id} lane width`);
       assert.ok(e.lanesF >= 1 && (e.oneway ? e.lanesB === 0 : e.lanesB >= 1), `${id} edge ${e.id} lanes`);
-      // Lanes from the tag (a merged pair carries both carriageways' tags).
+      // Lanes from the tag (a merged pair carries both carriageways' tags)
+      // inside the class's lanes (0.13.7 road logic, laneCaps): a two-way
+      // road equal each way, a turn lane only where the class has one.
       const tag = e.lanesTag * (e.merged ? 2 : 1);
-      if (tag) {
-        tagged++;
-        const lanes = e.lanesF + e.lanesB + (e.center ? 1 : 0);
-        assert.ok(lanes === tag || (tag === 1 && !e.oneway && lanes === 2), `${id} edge ${e.id} ${e.name}: ${lanes} lanes, tag ${tag}`);
-      }
+      const cap = laneCaps(e.cls);
+      if (e.oneway) assert.ok(e.lanesF <= cap[3] && !e.center, `${id} edge ${e.id} ${e.name} ${e.cls}: ${e.lanesF} lanes one-way`);
+      else if (!e.causeway) assert.ok(e.lanesF === e.lanesB && e.lanesF <= cap[1] && (!e.center || cap[4]), `${id} edge ${e.id} ${e.name} ${e.cls}: ${e.lanesF} + ${e.lanesB}`);
+      if (tag) tagged++;
       if (e.width > MAX_UNTAGGED_W) {
         wide++;
         assert.ok(tag >= 4, `${id} edge ${e.id} ${e.name} ${e.width} m wide, tag ${tag}`);

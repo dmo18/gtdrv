@@ -30,8 +30,33 @@ export const MAX_UNTAGGED_W = 15;
 
 const FAST = new Set(['trunk', 'trunk_link', 'motorway', 'motorway_link']);
 const PARKING = new Set(['residential', 'tertiary']);
-const ONE_EACH = new Set(['residential', 'living_street', 'unclassified', 'tertiary', 'service', 'pedestrian']);
 const LINK = /_link$/;
+// Sane lanes by class (0.13.7 road logic; the owner drove 5 to 8 lane
+// residential and collector streets that no city builds). Per class:
+// [lanes each way on a two-way road (untagged, most), lanes of a one-way
+// (untagged, most), center turn lane allowed]. A tag is kept inside these
+// bounds; a two-way road's lanes are always equal each way, an odd total
+// (or a tag past the cap where a turn lane is allowed) is the center turn
+// lane. Local streets: 1 + 1; collectors (tertiary) 1 + 1 and a turn lane;
+// arterials (secondary, primary) up to 2 + 2 and a turn lane; only trunks
+// and motorways more.
+const LOCAL = [1, 1, 1, 2, false];
+const CAPS = {
+  residential: LOCAL, living_street: LOCAL, unclassified: LOCAL, service: LOCAL, pedestrian: LOCAL, road: LOCAL,
+  tertiary: [1, 1, 1, 2, true], tertiary_link: [1, 1, 1, 2, false],
+  secondary: [2, 2, 2, 3, true], primary: [2, 2, 2, 3, true],
+  secondary_link: [1, 1, 1, 2, false], primary_link: [1, 1, 1, 2, false],
+  trunk: [2, 3, 2, 4, true], trunk_link: [1, 2, 1, 2, false],
+  motorway: [3, 4, 3, 5, false], motorway_link: [1, 2, 1, 2, false],
+};
+// [two-way untagged, two-way max, one-way untagged, one-way max, center].
+export function laneCaps(cls) {
+  return CAPS[cls] || (LINK.test(cls) ? CAPS.primary_link : LOCAL);
+}
+const clampInt = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+// Local streets: no center line, no parking lane line (US residential
+// streets are mostly unmarked).
+const UNMARKED = new Set(['residential', 'living_street', 'unclassified', 'service', 'road']);
 // The pedestrian streets drawn as paving (2.1 item 8).
 export const PED_STREETS = new Set(['Lincoln Road', 'Espanola Way', 'Española Way']);
 
@@ -39,9 +64,8 @@ export const PED_STREETS = new Set(['Lincoln Road', 'Espanola Way', 'Española W
 // "Contents": class, oneway, lanes, lf, lb, name, bridge, mall).
 // opts: { district } (the district key at the way, for the sidewalk),
 // curbParking (a hand table says the street parks on its curbs where the
-// data has no parking tags: MIAMI_SPOTS.curbParking), turnLane (Miami: a
-// two-way road tagged lanes:forward / lanes:backward as 2 + 1 or 3 + 2 is
-// an equal number each way and a center turn lane).
+// data has no parking tags: MIAMI_SPOTS.curbParking). (`turnLane`, the
+// 0.12.6 Beach rule, is now the rule everywhere: see laneCaps.)
 // Returns a new object with the edge contract's fields:
 // { lanesF, lanesB, laneW, parkL, parkR, median, center, width, oneway,
 //   sidewalk, ped, tagged }. `lanesF` is along the way's own direction
@@ -57,62 +81,51 @@ export function roadProfile(way, opts = {}) {
   const laneW = FAST.has(cls) ? LANE_W_FAST : LANE_W;
   let lanesF, lanesB, center = 0, tagged = false;
   const lanes = way.lanes > 0 ? way.lanes | 0 : 0;
+  const cap = laneCaps(cls);
   if (oneway) {
     lanesB = 0;
-    if (lanes) { lanesF = lanes; tagged = true; }
-    else if (LINK.test(cls)) lanesF = 1;
-    else if (cls === 'motorway') lanesF = 3;
-    else lanesF = ONE_EACH.has(cls) && cls !== 'tertiary' ? 1 : 2;
-  } else if (way.lf > 0 || way.lb > 0) {
-    // lanes:forward / lanes:backward; the missing one from `lanes`, and the
-    // total kept to `lanes` where the tags disagree.
-    let f = way.lf | 0, b = way.lb | 0;
-    if (lanes) {
-      if (!f) f = lanes - b;
-      if (!b) b = lanes - f;
-    }
-    f = Math.max(1, f);
-    b = Math.max(1, b);
-    if (lanes >= 2 && f + b > lanes) {
-      b = Math.max(1, lanes - f);
-      if (f + b > lanes) f = Math.max(1, lanes - b);
-    }
-    // The odd lane of a two-way road mapped as 2 + 1 (or 3 + 2) is the shared
-    // middle lane, which OSM assigns to either direction by way (Collins
-    // Avenue and Alton Road swapped 2/1 and 1/2 every block): with `turnLane`
-    // it is drawn as the painted center turn lane, so a street keeps one
-    // count along its length. The width is the same.
-    if (opts.turnLane && lanes >= 3 && (lanes & 1) && f + b === lanes && Math.abs(f - b) === 1) {
-      f = b = Math.min(f, b);
-      center = laneW;
-    }
-    lanesF = f;
-    lanesB = b;
-    if (lanes === f + b + 1) center = laneW;
-    tagged = true;
-  } else if (lanes) {
-    tagged = true;
-    if (lanes === 1) { lanesF = 1; lanesB = 1; }
-    else {
-      lanesF = lanesB = lanes >> 1;
-      if (lanes & 1) center = laneW;
-    }
-  } else if (ONE_EACH.has(cls) || LINK.test(cls)) {
-    lanesF = lanesB = 1;
-  } else if (cls === 'motorway') {
-    lanesF = lanesB = 3;
+    if (lanes) tagged = true;
+    lanesF = clampInt(lanes || cap[2], 1, cap[3]);
   } else {
-    // secondary, primary, trunk: 2 each way.
-    lanesF = lanesB = 2;
+    // The total of the tags: lanes:forward + lanes:backward (the missing
+    // one from `lanes`), else `lanes`. OSM gives the shared middle lane of
+    // a 2 + 1 or 3 + 2 road to either direction by way (Collins Avenue and
+    // Alton Road swapped 2/1 and 1/2 every block), and turn bays add a lane
+    // a block: the road is drawn with equal lanes each way, the odd lane
+    // as the painted center turn lane, so a street keeps one count.
+    let total = 0;
+    if (way.lf > 0 || way.lb > 0) {
+      let f = way.lf | 0, b = way.lb | 0;
+      if (lanes) {
+        if (!f) f = lanes - b;
+        if (!b) b = lanes - f;
+      }
+      f = Math.max(1, f);
+      b = Math.max(1, b);
+      total = Math.max(f + b, lanes);
+      tagged = true;
+    } else if (lanes) {
+      total = lanes === 1 ? 2 : lanes;
+      tagged = true;
+    }
+    if (!total) lanesF = cap[0];
+    else {
+      lanesF = clampInt(total >> 1, 1, cap[1]);
+      // An odd total, or a tag past the class's lanes, is the turn lane.
+      if (cap[4] && ((total & 1) || total > 2 * cap[1])) center = laneW;
+    }
+    lanesB = lanesF;
   }
   // Parking lanes: residential and tertiary streets, not on bridges, not
-  // on a pedestrian street; a one-way street parks on both curbs too. A
-  // street of three driving lanes (a turn lane counts) parks on the right
-  // curb only and one of four or more on neither, so no untagged-wide
-  // street passes MAX_UNTAGGED_W.
+  // on a pedestrian street. A two-way street of one lane each way parks on
+  // both curbs, a wider one (or one with a turn lane) on neither; a one-way
+  // of one or two lanes on both curbs, of three on the right only.
   const park = (PARKING.has(cls) || opts.curbParking) && !way.bridge && !ped ? PARK_W : 0;
-  const drive = lanesF + lanesB + (center ? 1 : 0);
-  const parkR = drive <= 3 ? park : 0, parkL = drive <= 2 ? park : 0;
+  let parkL = 0, parkR = 0;
+  if (oneway) {
+    parkR = lanesF <= 3 ? park : 0;
+    parkL = lanesF <= 2 ? park : 0;
+  } else if (!center && lanesF === 1) parkL = parkR = park;
   const width = (lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER;
   const district = opts.district || '';
   const sidewalk = cls === 'motorway' || cls === 'motorway_link' || way.bridge ? 0
@@ -158,8 +171,16 @@ export function paintLines(e, out = []) {
   const R = e.width / 2 - GUTTER + (e.off || 0);
   const s = divideOf(e);
   if (e.ped) return out;
-  if (e.parkL > 0) out.push(L + e.parkL, 'park');
-  if (e.parkR > 0) out.push(R - e.parkR, 'park');
+  // A local street of one lane each way (or a one-lane one-way) is not
+  // marked at all; a wider local street gets its lane lines only.
+  const local = UNMARKED.has(e.cls);
+  if (local && !e.divided && !e.center) {
+    // (Only the lane lines of a one-way of two lanes.)
+    if (e.oneway) for (let k = 1; k < e.lanesF; k++) out.push(s + k * e.laneW, 'dash');
+    return out;
+  }
+  if (!local && e.parkL > 0) out.push(L + e.parkL, 'park');
+  if (!local && e.parkR > 0) out.push(R - e.parkR, 'park');
   if (e.oneway) {
     // Yellow on the left edge, white on the right, dashes between lanes.
     out.push(L + e.parkL + 0.15, 'yellow');
@@ -195,6 +216,7 @@ export function paintLines(e, out = []) {
 export function pairDivided(nodes, edges, edgesNear) {
   const near = [];
   let paired = 0;
+  const found = new Array(edges.length).fill(null), dist = new Float64Array(edges.length);
   for (const e of edges) {
     if (!e.oneway || !e.name || e.causeway) continue;
     const a = nodes[e.a], b = nodes[e.b];
@@ -217,10 +239,30 @@ export function pairDivided(nodes, edges, edgesNear) {
       if (d < bd && d <= PAIR_MAX) { bd = d; best = o; }
     }
     if (!best) continue;
+    found[e.id] = best;
+    dist[e.id] = bd;
+  }
+  // A carriageway of a divided road parks on its right curb only: no
+  // parking lane against the median or the other carriageway (0.13.7: two
+  // overlapping halves each with two parking lanes made 24 m of asphalt).
+  for (const e of edges) {
+    if (!found[e.id] || !(e.parkL > 0)) continue;
+    e.parkL = 0;
+    e.width = profileWidth(e);
+  }
+  for (const e of edges) {
+    const best = found[e.id];
+    if (!best) continue;
+    const bd = dist[e.id];
     const gap = bd - (e.width + best.width) / 2;
+    // Raised median or one road: judged as if both halves parked on both
+    // curbs where their class parks, so a half drawn narrower (no parking
+    // against the partner, fewer lanes than a bad tag) does not turn the
+    // space it gave up into a median.
+    const gapN = bd - (nominalW(e) + nominalW(best)) / 2;
     e.pair = best.id;
     e.divided = true;
-    if (gap >= MEDIAN_MIN) {
+    if (gap >= MEDIAN_MIN && gapN >= MEDIAN_MIN) {
       e.median = round2(gap);
       e.off = 0;
     } else {
@@ -231,4 +273,133 @@ export function pairDivided(nodes, edges, edgesNear) {
     paired++;
   }
   return paired;
+}
+
+const nominalW = (e) => (PARKING.has(e.cls) && !e.bridge && !e.ped ? e.width + 2 * PARK_W - e.parkL - e.parkR : e.width);
+
+// One cross section along a street (0.13.7 road logic). OSM splits a
+// street into many ways and tags them unevenly (a turn bay's extra lane, a
+// block with parking tags, a lane count missing on one block), so the
+// road went from big to small and back along one street. Edges of one
+// street, joined where they run on through a node (same name, both
+// one-way or both two-way, a one-way entering where the other leaves,
+// within 35 degrees of straight; same class except at a plain bend; an
+// unnamed road only at a bend), take the lanes, turn lane and parking of
+// the cross section that covers most of that street's length. Bridges
+// keep no parking. Pedestrian streets and causeways are left alone.
+// Mutates edges (lanesF, lanesB, center, parkL, parkR, width, avenue);
+// returns the count of edges changed.
+const RUN_COS = Math.cos((35 * Math.PI) / 180), FORK = (15 * Math.PI) / 180;
+export function harmonizeStreets(nodes, edges) {
+  const n = edges.length;
+  const uf = new Int32Array(n);
+  for (let i = 0; i < n; i++) uf[i] = i;
+  const find = (v) => {
+    while (uf[v] !== v) { uf[v] = uf[uf[v]]; v = uf[v]; }
+    return v;
+  };
+  const skip = (e) => e.ped || e.causeway || e.lanesF === undefined;
+  // How straight e runs on into f through node (cosine of the turn; -2: not
+  // the same street running on).
+  const onward = (node, e, f, bend) => {
+    if (f === e || skip(f)) return -2;
+    if (e.oneway !== f.oneway || (e.name || '') !== (f.name || '')) return -2;
+    if (!bend && (!e.name || e.cls !== f.cls)) return -2;
+    // Directions leaving the node: straight on when they are opposite.
+    const se = e.a === node.id ? 1 : -1, sf = f.a === node.id ? 1 : -1;
+    const c = -(e.ux * se * f.ux * sf + e.uz * se * f.uz * sf);
+    if (c < RUN_COS || (e.oneway && se === sf)) return -2;
+    return c;
+  };
+  // Each edge end runs on into its straightest partner; two edges join
+  // where each is the other's (a fork, two carriageways or a slip lane
+  // leaving one street, joins neither branch: widened to the street's
+  // lanes, the two branches ran over each other).
+  // (Two partners within 15 degrees of each other: a fork, neither.)
+  const bestOf = (node, e, bend) => {
+    let best = -1, bc = -2, second = -2;
+    for (let j = 0; j < node.edges.length; j++) {
+      const c = onward(node, e, edges[node.edges[j]], bend);
+      if (c > bc) { second = bc; bc = c; best = node.edges[j]; } else if (c > second) second = c;
+    }
+    if (bc <= -2 || (second > -2 && Math.acos(Math.min(1, second)) - Math.acos(Math.min(1, bc)) < FORK)) return -1;
+    return best;
+  };
+  for (const node of nodes) {
+    const list = node.edges;
+    if (!list || list.length < 2) continue;
+    const bend = list.length === 2;
+    for (let i = 0; i < list.length; i++) {
+      const e = edges[list[i]];
+      if (skip(e)) continue;
+      const f = bestOf(node, e, bend);
+      if (f < 0 || f < e.id || bestOf(node, edges[f], bend) !== e.id) continue;
+      const ra = find(e.id), rb = find(f);
+      if (ra !== rb) uf[ra] = rb;
+    }
+  }
+  // Length per (group, cross section): lanes as lanesF and the turn lane
+  // (a two-way road has equal lanes each way), parking as left and right.
+  const lanesLen = new Map(), parkLen = new Map();
+  const add = (M, key, len) => M.set(key, (M.get(key) || 0) + len);
+  for (const e of edges) {
+    if (skip(e)) continue;
+    const g = find(e.id);
+    add(lanesLen, g * 64 + e.lanesF * 2 + (e.center ? 1 : 0), e.length);
+    if (!e.bridge) add(parkLen, g * 4 + (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0), e.length);
+  }
+  const bestLanes = new Map(), bestPark = new Map();
+  const pick = (M, div, out) => {
+    for (const [key, len] of M) {
+      const g = Math.floor(key / div), v = key - g * div;
+      const b = out.get(g);
+      if (!b || len > b[1] + 1e-9 || (Math.abs(len - b[1]) <= 1e-9 && v > b[0])) out.set(g, [v, len]);
+    }
+  };
+  pick(lanesLen, 64, bestLanes);
+  pick(parkLen, 4, bestPark);
+  let changed = 0;
+  for (const e of edges) {
+    if (e.causeway || e.lanesF === undefined) continue;
+    const g = find(e.id);
+    // (A pedestrian street keeps its own lanes, inside the class's.)
+    if (e.ped) fitSection(e, e.lanesF * 2 + (e.center ? 1 : 0), (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0), FIT);
+    else fitSection(e, bestLanes.get(g)[0], e.bridge ? 0 : bestPark.has(g) ? bestPark.get(g)[0] : 0, FIT);
+    // A block the data tags under 4 lanes is not widened past
+    // MAX_UNTAGGED_W by the rest of its street: it keeps its own lanes.
+    if (FIT.width > MAX_UNTAGGED_W && (e.lanesTag || 0) * (e.merged ? 2 : 1) < 4) {
+      fitSection(e, e.lanesF * 2 + (e.center ? 1 : 0), (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0), FIT);
+    }
+    if (e.lanesF === FIT.lanesF && e.lanesB === FIT.lanesB && (e.center || 0) === FIT.center && e.parkL === FIT.parkL && e.parkR === FIT.parkR) continue;
+    e.lanesF = FIT.lanesF;
+    e.lanesB = FIT.lanesB;
+    e.center = FIT.center;
+    e.parkL = FIT.parkL;
+    e.parkR = FIT.parkR;
+    e.width = FIT.width;
+    e.avenue = e.oneway ? e.lanesF >= 3 : e.lanesF >= 2;
+    changed++;
+  }
+  return changed;
+}
+const FIT = { lanesF: 0, lanesB: 0, center: 0, parkL: 0, parkR: 0, width: 0 };
+// The cross section of edge e for lanes key L (lanesF * 2 + turn lane) and
+// parking key P (2 left, 1 right), inside the class's lanes (a pair of
+// one-ways merged into one road carries both halves' lanes) and the
+// parking rule of roadProfile, into out.
+function fitSection(e, L, P, out) {
+  const cap = laneCaps(e.cls);
+  let lanesF = L >> 1, center = L & 1 ? e.laneW : 0;
+  if (lanesF > cap[e.oneway ? 3 : 1]) {
+    lanesF = cap[e.oneway ? 3 : 1];
+    if (!e.oneway && cap[4]) center = e.laneW;
+  }
+  if (center && (e.oneway || !cap[4])) center = 0;
+  out.lanesF = lanesF;
+  out.lanesB = e.oneway ? 0 : lanesF;
+  out.center = center;
+  out.parkL = P & 2 && (e.oneway ? lanesF <= 2 : !center && lanesF === 1) ? PARK_W : 0;
+  out.parkR = P & 1 && (e.oneway ? lanesF <= 3 : !center && lanesF === 1) ? PARK_W : 0;
+  out.width = round2((out.lanesF + out.lanesB) * e.laneW + center + out.parkL + out.parkR + 2 * GUTTER);
+  return out;
 }

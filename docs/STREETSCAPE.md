@@ -128,3 +128,29 @@ past a few dead ends.
 Tests: test/streetscape.test.js (net kinds in physics and mesh, bridge
 gaps on the road field, fan arms in the junction area, no raised sidewalk
 drawn on road at the two defect places).
+
+## 0.13.7 road logic
+
+Owner, after driving the live game on a phone: "grass in the streets,
+illogical multi-lane streets that would not exist, streets that go from
+big to small and do not match, lines all over the place". Shots: `node
+scripts/drive-review.mjs <out> <tag> --size=748x360` (routes) and
+`--survey --day`, before and after, all five regions; top views with
+`--at` on the Beach (5th Street at Michigan Avenue, 5th Street at Ocean
+Drive and Collins Avenue). Checks in node (scratch scripts, not kept): a
+0.5 m raster of the drawn flat asphalt, sidewalk and lawn against
+`groundOf(city).surfaceAt` in boxes round each start and along the routes,
+and lane counts at every straight same-street join.
+
+| # | Defect | Cause in code | Fix |
+|---|---|---|---|
+| 1 | Five to eight lane minor streets | `roadProfile` kept any lane tag; an untagged collector one-way got 2 lanes and 2 parking lanes (12 m), two such halves of a divided road side by side 24 m of asphalt; a merged pair carried both halves' lanes | `laneCaps(cls)`: lanes by class (MAP.md "0.13.7 road logic"); a collector one-way untagged has 1 lane; a divided half never parks on its left curb (`pairDivided`, median judged on the widths with parking) |
+| 2 | Big to small along a street | OSM tags each block on its own (turn bays, a block untagged, a 2 + 1 swapped to 1 + 2) | two-way roads equal each way everywhere (the odd lane the center turn lane, was the Beach only); `harmonizeStreets`: a street's straight run takes the cross section of most of its length. Lane changes at straight same-street joins: 576 to 7 in five regions |
+| 3 | Lines all over the place | every residential street had a double yellow and two parking lines; the paint of a bend's miter past the node was not tested against crossing strips (`paintRivals` sampled only inside the strip) | local streets unmarked (a local one-way of two lanes: its lane line); park lines on collectors and up; `paintRivals` samples 3 m past both ends |
+| 4 | Grass in the streets: green lobes and notches at median ends | each half of a divided road drew a half disc on its own band, two lobes with a notch; a median over 8 m left its lot ground's 5 m raster as a notch | one quarter disc per half (one round end), the middle of a wide median filled 6 m back; no nose and no median carried through a junction where the ground says road (a crossing street) |
+| 5 | Grass in the streets: lawn in forks and Y junctions | an arm's strip is road in the ground from the node on (`geoSurface`), but drawn only past its trim; where two arms leave a few degrees apart the trim is up to 40 m and the ring's corner cuts across both | `citymesh.js armUnderlay`: such an arm's strip from node to mouth drawn as junction asphalt (same color and height). Road the ground calls road but drawn bare, boxes round the starts: Downtown 0.19 % to 0.04 %, North 0.13 to 0.03, South 0.07 to 0.04 |
+| 6 | Lawn across a crossing street (South, SW 15th Road at SW 1st Avenue) | the median carried through a junction (`mthru`) and its noses were drawn over a street that does cross; a pair's median over 8 m was not measured against the halves' real distance | not where the ground says road; `medianAt` measures every pair. Lawn or sidewalk drawn on road: South 0.43 % to 0.10 % |
+
+Moved by the road change and re-pinned or followed (docs/STATUS.md): the
+region fingerprints, two generated ramps' ids, the Central Patrol Base
+home 0.9 m east, the service curb bays kept as curb spots.

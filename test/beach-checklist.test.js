@@ -51,16 +51,18 @@ test('the numbered streets 6th to 20th are mapped, run 22 to 90 ft, and 5th and 
 });
 
 test('a two-way road tagged 2 + 1 or 3 + 2 lanes keeps equal lanes each way and a center turn lane (Collins, Alton)', () => {
+  // (0.13.7: the rule holds everywhere, `turnLane` or not.)
   const plain = roadProfile({ class: 'primary', lanes: 3, lf: 2, lb: 1 });
-  assert.deepEqual([plain.lanesF, plain.lanesB, plain.center], [2, 1, 0]); // the default keeps the tag
+  assert.deepEqual([plain.lanesF, plain.lanesB, plain.center], [1, 1, 3.3]);
   const w = roadProfile({ class: 'primary', lanes: 3, lf: 2, lb: 1 }, { turnLane: true });
   assert.deepEqual([w.lanesF, w.lanesB, w.center, w.width], [1, 1, 3.3, plain.width]);
   const w5 = roadProfile({ class: 'trunk', lanes: 5, lf: 3, lb: 2 }, { turnLane: true });
   assert.deepEqual([w5.lanesF, w5.lanesB, w5.center, w5.width], [2, 2, 3.6, 18.6]);
-  // Not touched: a one-way, a 2 + 2 road, a 4 + 1 approach lane.
+  // Not touched: a one-way, a 2 + 2 road. A 4 + 1 approach is 2 + 2 and
+  // the turn lane (0.13.7: equal each way).
   assert.equal(roadProfile({ class: 'primary', oneway: 1, lanes: 3 }, { turnLane: true }).lanesF, 3);
   assert.deepEqual((({ lanesF, lanesB, center }) => [lanesF, lanesB, center])(roadProfile({ class: 'primary', lanes: 4, lf: 2, lb: 2 }, { turnLane: true })), [2, 2, 0]);
-  assert.deepEqual((({ lanesF, lanesB }) => [lanesF, lanesB])(roadProfile({ class: 'primary', lanes: 5, lf: 4, lb: 1 }, { turnLane: true })), [4, 1]);
+  assert.deepEqual((({ lanesF, lanesB, center }) => [lanesF, lanesB, center])(roadProfile({ class: 'primary', lanes: 5, lf: 4, lb: 1 }, { turnLane: true })), [2, 2, 3.3]);
 });
 
 test('no Beach street keeps unequal lanes each way over a large share of a two-way street', () => {
