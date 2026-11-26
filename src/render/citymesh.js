@@ -1303,15 +1303,28 @@ export function realRoads(city, B, nodes, edges, own = null) {
 // drawn.
 export const NET_Y = -0.008;
 const NETQ = [];
-export function netRoads(city, B, x0, z0, x1, z1) {
+// kinds: 1 the flat net only, 2 the raised net only, 3 both (a streamed
+// tile asks for each in its own slice). cache: an optional Map the
+// streamer keeps per city; netQuads is a pure function of the city and
+// the box, so a tile drawn again (a prop broke, the camera came back)
+// takes the quads from it instead of the ground's flood fill (0.13.8:
+// one box of the flood was up to 140 ms at a 4x throttle).
+export function netRoads(city, B, x0, z0, x1, z1, kinds = 3, cache = null) {
   const G = groundOf(city);
   if (!G || !G.netQuads) return 0;
   let n = 0;
   for (let kind = 1; kind <= 2; kind++) {
-    NETQ.length = 0;
-    G.netQuads(x0, z0, x1, z1, NETQ, kind);
-    for (let k = 0; k + 3 < NETQ.length; k += 4) {
-      const xa = NETQ[k], za = NETQ[k + 1], xb = NETQ[k + 2], zb = NETQ[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
+    if (!(kinds & kind)) continue;
+    let Q = NETQ;
+    const key = cache ? x0 + ',' + z0 + ',' + x1 + ',' + z1 + ',' + kind : '';
+    if (cache && cache.has(key)) Q = cache.get(key);
+    else {
+      NETQ.length = 0;
+      G.netQuads(x0, z0, x1, z1, NETQ, kind);
+      if (cache) cache.set(key, Float64Array.from(NETQ));
+    }
+    for (let k = 0; k + 3 < Q.length; k += 4) {
+      const xa = Q[k], za = Q[k + 1], xb = Q[k + 2], zb = Q[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
       if (kind === 1) B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
       else if (betweenMedians(G, xa, za, xb, zb)) B.grass.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.lawn);
       else B.sidewalk.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.sidewalk);

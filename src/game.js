@@ -15,9 +15,9 @@ import { createErrorLog, consoleLog } from './core/errorlog.js';
 import { createEvents } from './core/events.js';
 import { createRng } from './core/rng.js';
 import { createVehicle, stepVehicle, collideVehicles } from './entities/vehicle.js';
-import { createVehicleMesh, updateVehicleMesh, setVehicleLights } from './render/vehiclemesh.js';
+import { createVehicleMesh, updateVehicleMesh, setVehicleLights, FLEET_L2_M } from './render/vehiclemesh.js';
 import { createChaseCamera } from './render/chasecam.js';
-import { createTitleCam } from './render/titlecam.js';
+import { createTitleCam, titlePose } from './render/titlecam.js';
 import { createTouchControls } from './ui/touch.js';
 import { createHud } from './ui/hud.js';
 import { injectStyles } from './ui/styles.js';
@@ -74,6 +74,21 @@ import { registerExploreScreens } from './ui/explore.js';
 import { SEA_LEVEL } from './world/ground.js';
 
 const SKY = 0x9fc8e8;
+// Street tiles built before the first frame (docs/PERF.md, 0.13.8
+// start): pairs of (m ahead of the first view's camera along its view,
+// reach m; a tile's distance counts the camera height): the tiles round
+// the camera and two points down the view. The other near tiles stream
+// in round the camera (behind the title on a phone).
+export const START_AT = [0, 40, 80, 5, 160, 5];
+// Tile building time a frame (ms): while the title shows (nothing to
+// steer yet) the streamer gets more, so the near tiles are done sooner.
+const STREAM_MS = 3, STREAM_TITLE_MS = 6;
+// Cars past this (m) are drawn as a body only (no wheels or lamps; a fleet
+// body as its L2 shell): FLEET_L2_M, where the fleet's own levels put it
+// (was 75 m, 0.13.8).
+const CAR_FAR_M = FLEET_L2_M;
+// The wake trail's foam lives under 5.8 s (render/water.js).
+const WAKE_IDLE = 6;
 
 // city: a ready-made city object (the Miami map, see world/maps.js);
 // left out, the procedural island is generated as before.
@@ -121,7 +136,26 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     textures = createTextures(city.seed + 7, names);
   }
   yield { label: 'Building streets', pct: 20 };
-  const cityMesh = city.landGrid ? buildRealCity(city, collision, textures ? { textures } : {}) : buildCityMesh(city, collision);
+  // A real map: the far level and the whole map's collision here, then only
+  // the street tiles the first view stands on, one stage each (the rest
+  // stream in round the camera, behind the title on a phone).
+  const cityMesh = city.landGrid ? buildRealCity(city, collision, { ...(textures ? { textures } : {}), startNear: -1 }) : buildCityMesh(city, collision);
+  const stream0 = cityMesh.userData.stream;
+  if (stream0) {
+    // The tiles the first view sees close: round the title shot's camera
+    // (the designed start view) or the start, and two points ahead.
+    const sv = city.startView, sp = city.spawn;
+    const pose = sv && sv.camera ? titlePose(sv, 0, true, { x: 0, y: 0, z: 0, lx: 0, ly: 0, lz: 0, fov: 0 }) : null;
+    const x0 = pose ? pose.x : sp.x, z0 = pose ? pose.z : sp.z;
+    const h = pose ? Math.atan2(pose.lz - pose.z, pose.lx - pose.x) : sp.heading || 0;
+    const at = { position: { x: 0, y: 2, z: 0 } };
+    let n = 0;
+    for (let k = 0; k < START_AT.length; k += 2) {
+      at.position.x = x0 + Math.cos(h) * START_AT[k];
+      at.position.z = z0 + Math.sin(h) * START_AT[k];
+      while (n < 6 && stream0.flush(at, START_AT[k + 1], true)) yield { label: 'Building streets', pct: 26 + 2 * n++ };
+    }
+  }
   yield { label: 'Building streets', pct: 40 };
   scene.add(cityMesh);
   // Animated sea in place of the flat placeholder. Sea level sits a
@@ -626,6 +660,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   const placeNow = { key: '', name: '' };
   let promptFor = null;
   let wakeTick = 0;
+  let wakeLast = -1e9;
   // The loop's frame timing (for the adaptive resolution only): the first
   // step of a frame, or its draw when it has no step, opens the frame.
   let frameOpen = false;
@@ -651,7 +686,10 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       game.kinds[v.kind].updateMesh(v.mesh, v, v.asleep ? 1 : alpha, game.time);
       if (v.kind === 'boat') {
         v.mesh.position.y += SEA_Y;
-        if (v.wake > 0.15 && (wakeTick + v.id) % 4 === 0) wake.emit(v.x - Math.cos(v.heading) * v.spec.length * 0.45, v.z - Math.sin(v.heading) * v.spec.length * 0.45, v.heading, v.wake);
+        if (v.wake > 0.15 && (wakeTick + v.id) % 4 === 0) {
+          wakeLast = game.time;
+          wake.emit(v.x - Math.cos(v.heading) * v.spec.length * 0.45, v.z - Math.sin(v.heading) * v.spec.length * 0.45, v.heading, v.wake);
+        }
       }
       v.meshDirty = false;
     }
@@ -662,7 +700,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       const v = vs[i];
       if (v.kind !== 'car' || !v.mesh) continue;
       const dx = v.x - camera.position.x, dz = v.z - camera.position.z;
-      const far = dx * dx + dz * dz > 75 * 75;
+      const far = dx * dx + dz * dz > CAR_FAR_M * CAR_FAR_M;
       if (v.lodFar === far) continue;
       v.lodFar = far;
       const ud = v.mesh.userData;
@@ -671,7 +709,14 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       if (ud.tail) ud.tail.visible = !far;
     }
     water.update(game.time, camera.position);
-    wake.update(dt, game.time);
+    // The wake trail only while some foam lives (its longest life is
+    // under WAKE_IDLE s): 160 instances drawn, moved and uploaded every
+    // frame for nothing otherwise (0.13.8).
+    const wakeOn = game.time - wakeLast < WAKE_IDLE;
+    if (wakeOn || wake.mesh.visible) {
+      wake.update(dt, game.time);
+      wake.mesh.visible = wakeOn;
+    }
     if (p.vehicle) {
       const v = p.vehicle;
       if (v.kind === 'car' && v.mesh) setVehicleLights(v.mesh, { brake: v.brake > 0.1 || v.handbrake, siren: false, time: game.time });
@@ -765,7 +810,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     }
     hud.update(h);
     // Real map: build and swap detail tiles round the camera.
-    if (cityMesh.userData.stream) cityMesh.userData.stream.update(camera);
+    if (cityMesh.userData.stream) cityMesh.userData.stream.update(camera, titleCam.active ? STREAM_TITLE_MS : STREAM_MS);
     // A graphics module may take over the final draw (post effects).
     try {
       if (game.renderFrame) game.renderFrame(dt);

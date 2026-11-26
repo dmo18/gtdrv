@@ -183,6 +183,7 @@ function installTimers(cfg) {
   D.heat = false;
   D.frame = 0;
   D.sysWorst = new Float64Array(g.systems.length + 4);
+  D.sysWorstAt = new Int32Array(g.systems.length + 4);
   D.sysSum = new Float64Array(g.systems.length + 4);
   D.maxStars = 0; D.liveMax = 0; D.dist = 0;
   return { systems: names.length };
@@ -215,7 +216,9 @@ function startCheck(cfg) {
   D.heat = !!cfg.heat;
   D.frame = 0;
   D.programs0 = g.renderer.info.programs ? g.renderer.info.programs.length : 0;
-  D.sysWorst.fill(0); D.sysSum.fill(0);
+  D.newProgs = [];
+  D.nProg = D.programs0;
+  D.sysWorst.fill(0); D.sysSum.fill(0); D.sysWorstAt.fill(-1);
   D.maxStars = 0; D.liveMax = 0; D.dist = 0;
   return { started: D.started, error: D.error };
 }
@@ -254,7 +257,7 @@ function driveFrames(cfg) {
       const c = D.cur[k];
       sysStep += c;
       D.sysSum[k] += c;
-      if (c > D.sysWorst[k]) D.sysWorst[k] = c;
+      if (c > D.sysWorst[k]) { D.sysWorst[k] = c; D.sysWorstAt[k] = D.frame; }
       if (c > bm) { bm = c; bi = k; }
     }
     const core = Math.max(0, t1 - t0 - sysStep);
@@ -264,6 +267,12 @@ function driveFrames(cfg) {
     for (let k = 0; k < D.cur.length - 1; k++) { const c = D.cur[k]; D.sysSum[k] += c; if (c > bm) { bm = c; bi = k; } }
     // Let the renderer process catch up outside the measured time.
     D.gl.getError();
+    // A shader program compiled in play: which one (its name, the head of its key).
+    const progs = info.programs;
+    if (progs && progs.length > (D.nProg || 0)) {
+      if (D.nProg) for (let k = D.nProg; k < progs.length; k++) (D.newProgs || (D.newProgs = [])).push({ frame: D.frame, name: progs[k].name, key: String(progs[k].cacheKey).slice(0, 120) });
+      D.nProg = progs.length;
+    }
     D.frame++;
     const stars = g.police ? g.police.stars : 0;
     if (stars > D.maxStars) D.maxStars = stars;
@@ -271,8 +280,10 @@ function driveFrames(cfg) {
     if (pv && g.player.vehicle === pv) D.dist += Math.hypot(pv.x - x0, pv.z - z0);
     // The state of the run, to tell whether two passes played the same drive.
     const sig = Math.round(g.player.x * 100) + Math.round(g.player.z * 100) * 7 + g.vehicles.length * 1000003 + stars * 17;
+    const sst = g.cityMesh.userData.stream && g.cityMesh.userData.stream.stats;
     rows.push([t2 - t0, t1 - t0, t2 - t1, sig, bi, bm, core, D.part[0], D.part[1], D.part[2],
-      info.programs ? info.programs.length : 0, info.memory.geometries, info.memory.textures, g.vehicles.length, stars, t0, t2, D.up]);
+      info.programs ? info.programs.length : 0, info.memory.geometries, info.memory.textures, g.vehicles.length, stars, t0, t2, D.up,
+      sst && sst.frameSliceMs > 1 ? sst.frameSlice : '']);
   }
   return { rows, done };
 }
@@ -284,10 +295,10 @@ function driveSummary() {
   for (const v of g.vehicles) kinds[v.kind] = (kinds[v.kind] || 0) + 1;
   const st = g.cityMesh.userData.stream && g.cityMesh.userData.stream.stats;
   return {
-    names: D.names, sysWorst: Array.from(D.sysWorst), sysSum: Array.from(D.sysSum), frames: D.frame,
+    names: D.names, sysWorst: Array.from(D.sysWorst), sysWorstAt: Array.from(D.sysWorstAt), sysSum: Array.from(D.sysSum), frames: D.frame,
     maxStars: D.maxStars, tanks: pst ? pst.tanks : null,
     liveMax: D.liveMax, kinds, meters: Math.round(D.dist), programs: g.renderer.info.programs ? g.renderer.info.programs.length : 0,
-    programs0: D.programs0, geometries: g.renderer.info.memory.geometries, textures: g.renderer.info.memory.textures,
+    programs0: D.programs0, newProgs: D.newProgs || [], geometries: g.renderer.info.memory.geometries, textures: g.renderer.info.memory.textures,
     tiles: st ? { built: st.built, worstSliceMs: Math.round(st.worstSliceMs * 10) / 10 } : null,
     errors: g.errors && g.errors.count ? g.errors.count() : null,
     heapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
@@ -504,13 +515,16 @@ async function main() {
         gc: passes[0].trace ? gcStats(passes[0].trace, key === 'first' ? 'first play' : 'drive') : null,
         mixed: f.mixed, res: makeRes ? resAfter(makeRes, ms, overMs) : null,
         maxStars: sum.maxStars, tanks: sum.tanks, liveMax: sum.liveMax, kinds: sum.kinds, meters: sum.meters,
-        programsStart: rows.length ? rows[0][10] : 0, programsEnd: sum.programs, geometries: sum.geometries, textures: sum.textures, tiles: sum.tiles,
+        programsStart: rows.length ? rows[0][10] : 0, programsEnd: sum.programs, newProgs: sum.newProgs, geometries: sum.geometries, textures: sum.textures, tiles: sum.tiles,
         meanStepMs: +(rows.reduce((a, r) => a + r[1], 0) / Math.max(1, rows.length)).toFixed(2), meanDrawMs: +(rows.reduce((a, r) => a + r[2], 0) / Math.max(1, rows.length)).toFixed(2),
       });
-      // A system's worst call: the lowest of the passes' worsts (each pass saw the same calls).
+      // A system's worst call: the lowest of the passes' worsts (each pass saw the same calls),
+      // and the frame of each pass's worst (the same frame in every pass: the call's own cost;
+      // different frames: something else landed on it, a collection or the machine).
       out.systems = names.map((nm, k) => ({
         name: nm, meanMs: +(sum.sysSum[k] / Math.max(1, sum.frames)).toFixed(3),
         worstMs: +Math.min(...passes.map((p) => p[key].sum.sysWorst[k])).toFixed(2),
+        at: passes.map((p) => (p[key].sum.sysWorstAt ? p[key].sum.sysWorstAt[k] : -1)),
       })).sort((a, b) => b.worstMs - a.worstMs).slice(0, 12);
       out.slowsys = out.systems[0] ? `${out.systems[0].name} ${out.systems[0].worstMs.toFixed(1)} ms` : 'n/a';
       const slow = [];
@@ -522,7 +536,7 @@ async function main() {
           frame: i, s: +(i / 60).toFixed(1), ms: +r[0].toFixed(1), excess: +excess[i].toFixed(1), stepMs: +r[1].toFixed(1), drawMs: +r[2].toFixed(1),
           topSystem: r[4] >= 0 ? names[r[4]] : '', topSystemMs: +r[5].toFixed(1), coreMs: +r[6].toFixed(1), streamMs: +r[7].toFixed(1),
           renderMs: +r[8].toFixed(1), hudMs: +r[9].toFixed(1), newPrograms: r[10] - prev[10], newGeometries: r[11] - prev[11], newTextures: r[12] - prev[12],
-          vehicles: r[13], stars: r[14], uploadKb: Math.round((r[17] || 0) / 1024),
+          vehicles: r[13], stars: r[14], uploadKb: Math.round((r[17] || 0) / 1024), slice: r[18] || '',
         };
         const P = passes[f.from[i]];
         if (P.index) {
@@ -554,8 +568,10 @@ async function main() {
       console.log(`  frames over (excess above ${overMs} ms): ${d.over}   worst excess ${d.worstExcess.toFixed(1)} ms = ${d.phoneWorst.toFixed(0)} ms on the phone   over half: ${d.half}   res ${d.res === null ? 'n/a' : d.res.toFixed(2)}`);
       console.log(`  main thread per frame: median ${d.median.toFixed(1)} ms (step ${d.meanStepMs} + draw ${d.meanDrawMs} mean), p99 ${d.p99.toFixed(1)}, worst ${d.worst.toFixed(1)}   programs ${d.programsStart} to ${d.programsEnd}   slowest system call ${d.slowsys}`);
       if (d.gc) console.log(`  garbage collection (first pass, throttled): ${d.gc.minor} minor, ${d.gc.major} major, ${d.gc.pauseMs} ms in all, worst ${d.gc.worstMs} ms; ${d.gc.allocMb} MB allocated = ${(d.gc.allocMb * 1024 / Math.max(1, d.frames)).toFixed(1)} KB a frame`);
+      if (d.newProgs && d.newProgs.length) console.log('  programs compiled in play (frame, name, key): ' + d.newProgs.slice(0, 6).map((p) => `${p.frame} ${p.name} ${p.key}`).join('; '));
       if (d.gc && d.gc.majors.length) console.log('  major collections (second, ms, type, MB before to after): ' + d.gc.majors.map((m) => `${m.s}s ${m.ms} ${m.type} ${m.beforeMb}>${m.afterMb}`).join('; '));
       console.log(`  to the GPU in play: ${d.uploadMb} MB uploaded; ${d.gpuEvents.filter((e) => e.newPrograms > 0).length} frames with new programs, ${d.gpuEvents.filter((e) => e.newTextures > 0).length} with new textures, ${d.gpuEvents.filter((e) => e.uploadKb > 256).length} with over 256 KB`);
+      console.log('  worst system calls (ms, frame of each pass): ' + d.systems.slice(0, 8).map((x) => `${x.name} ${x.worstMs.toFixed(1)} @${x.at.join('/')}`).join(', '));
       if (quiet) return;
       console.log('  slow frames: frame, second, excess, step, draw | cause');
       for (const r of d.slow.slice().sort((a, b) => b.excess - a.excess).slice(0, has('--all') ? 1e9 : 25)) {
@@ -564,7 +580,7 @@ async function main() {
         if (r.newGeometries > 0) cause.push(`${r.newGeometries} new geometries`);
         if (r.newTextures > 0) cause.push(`${r.newTextures} new textures`);
         if (r.uploadKb > 64) cause.push(`upload ${r.uploadKb} KB`);
-        if (r.streamMs > 4) cause.push(`tiles ${r.streamMs}`);
+        if (r.streamMs > 4) cause.push(`tiles ${r.streamMs}${r.slice ? ' (' + r.slice + ')' : ''}`);
         if (r.topSystemMs > 4) cause.push(`${r.topSystem} ${r.topSystemMs}`);
         if (r.coreMs > 4) cause.push(`core ${r.coreMs}`);
         if (r.gcMs > 1) cause.push(`gc ${r.gcMs}`);

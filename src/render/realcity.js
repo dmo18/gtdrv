@@ -40,6 +40,16 @@ import { dressLot, lotDressCache } from '../world/lots.js';
 export const TILE = 300; // m, a near-detail tile
 export const SUPER = 4; // tiles per far block side
 export const LOD = { near: 340, mid: 170, build: 520, drop: 860, hyst: 40 };
+// Near-detail distance by quality tier (Low, Normal, High; m to a tile's
+// edge): past it the far level draws the tile. 0.13.8: Normal 340 to 300
+// (Downtown street view 210 to 174 draw calls; the far level's boxes and
+// window shader carry a block 300 m off in the haze); High keeps LOD.near.
+export const NEAR_BY_TIER = [280, 300, 340];
+// Street props and lot dressing (the 'props' quarters, with the building
+// trim) are drawn out to this distance (m, by tier) from the camera to a
+// quarter's bounds, and never past LOD.mid; hysteresis PROPS_HYST.
+export const PROPS_R = [80, 110, 150];
+const PROPS_HYST = 15;
 const FAR_LAND_Y = -0.3, FAR_ROAD_Y = -0.1;
 const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // Longest piece of tile work between two yields (ms): a slice ends at
@@ -247,10 +257,13 @@ class QuarterBuilder {
   }
 }
 const FACADES = ['glass', 'brick', 'office', 'stucco', 'siding', 'corrugated', 'roofing', 'shopfront', 'havana'];
-const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao', 'lotSolid', ...FACADES]);
+const QUARTERED = new Set(['plain', 'treeDetail', 'props', 'ao', 'lotSolid', 'trim', ...FACADES]);
 // Quartered builders drawn as one mesh per tile (fewer draws; the
 // quarters only split the shadow proxies, or cull too little to pay).
-const ONE_MESH = new Set(['props', 'ao', 'lotSolid', 'trim', ...FACADES]);
+// The props (with the trim merged in) are drawn by quarter (0.13.8), so
+// a quarter past PROPS_R is left out: they were 50k of the 290k
+// triangles of the Downtown street view, most of them far off.
+const ONE_MESH = new Set(['ao', 'lotSolid', 'trim', ...FACADES]);
 
 // The shadow casters of a tile (the solid, opaque ones) cast through
 // one position-only proxy mesh per quarter on SHADOW_LAYER (the sun's
@@ -707,7 +720,8 @@ export function buildRealCity(city, collision, opts = {}) {
     const list = signals.bulbs;
     list.length = 0;
     for (const t of tiles) {
-      if (!t.shown) continue;
+      // (Not the middle level: a 23 cm lamp past 170 m is under a pixel.)
+      if (!t.shown || t.mid) continue;
       for (const b of t.bulbs) {
         if (list.length >= CAP) break;
         p4.set(b.x, b.y, b.z);
@@ -718,6 +732,9 @@ export function buildRealCity(city, collision, opts = {}) {
       }
     }
     signalMesh.count = list.length;
+    // (Only the slots in use go to the GPU, not all CAP of them.)
+    signalMesh.instanceMatrix.clearUpdateRanges();
+    signalMesh.instanceMatrix.addUpdateRange(0, Math.max(1, list.length) * 16);
     signalMesh.instanceMatrix.needsUpdate = true;
     signalMesh.computeBoundingSphere();
     signals.version++;
@@ -776,6 +793,9 @@ export function buildRealCity(city, collision, opts = {}) {
   const cachedDress = (c, lot) => dressCache.get(lot);
   const dressOf = () => cachedDress;
 
+  // The narrow-gap net quads of every box drawn so far (citymesh.js
+  // netRoads); the same answers as asking the ground again.
+  const netCache = new Map();
   // One tile, built a slice at a time: yields between pieces of work,
   // at the first break point after SLICE_MS of work.
   function* tileJob(t) {
@@ -811,8 +831,10 @@ export function buildRealCity(city, collision, opts = {}) {
       lotEdges(city, B, li0, li1, j, Math.min(lj1, j + 3));
       if (over()) { yield 'lotGround'; ts = now(); }
     }
-    for (let a = 0; a < t.nodes.length; a += 3) {
-      realRoads(city, B, t.nodes.slice(a, a + 3), [], own);
+    // One junction a piece (a fan or mall junction alone was up to 20 ms
+    // at 1x; three of them in one piece made the worst tile slice).
+    for (let a = 0; a < t.nodes.length; a++) {
+      realRoads(city, B, t.nodes.slice(a, a + 1), [], own);
       if (over()) { yield 'roads'; ts = now(); }
     }
     for (let a = 0; a < t.edges.length; a++) {
@@ -823,8 +845,12 @@ export function buildRealCity(city, collision, opts = {}) {
     if (city.roadGeo) {
       for (let z = t.z0; z < t.z1; z += NET_BOX) {
         for (let x = t.x0; x < t.x1; x += NET_BOX) {
-          netRoads(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX));
-          if (over()) { yield 'roads'; ts = now(); }
+          // The flat and the raised net in slices of their own; the quads
+          // are kept (netCache), so a tile drawn again does not flood again.
+          for (let kind = 1; kind <= 2; kind++) {
+            netRoads(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX), kind, netCache);
+            if (over()) { yield 'roads'; ts = now(); }
+          }
         }
       }
     }
@@ -948,6 +974,8 @@ export function buildRealCity(city, collision, opts = {}) {
     t.meshes = meshes;
     t.trees = meshes.filter((m) => m.name === 'trees-detail');
     t.treeOn = null;
+    t.props = meshes.filter((m) => m.name === 'props');
+    t.propsOn = null;
     t.mid = false;
     g.visible = was;
     // Static: world matrices worked out once here, never per frame (the
@@ -965,7 +993,7 @@ export function buildRealCity(city, collision, opts = {}) {
       const i = tiered.indexOf(m);
       if (i >= 0) tiered.splice(i, 1);
     }
-    t.group = t.small = t.meshes = t.trees = null;
+    t.group = t.small = t.meshes = t.trees = t.props = null;
     if (trees) trees.removeTile(t.k);
     if (t.shown) {
       t.shown = false;
@@ -988,7 +1016,9 @@ export function buildRealCity(city, collision, opts = {}) {
   }
   // speed: the player's speed (m/s), set by the caller (graphics.js)
   // before each update; hold: new tiles are held back this frame.
-  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {}, speed: 0, hold: false };
+  // frameSliceMs, frameSlice: the longest slice of the last update and its
+  // kind (perf-phonecheck.mjs names the slow frames' tile work with it).
+  const stats = { built: 0, dropped: 0, buildMs: 0, worstSliceMs: 0, near: 0, worst: {}, speed: 0, hold: false, frameSliceMs: 0, frameSlice: '', lastOne: -1 };
   // Tree detail by distance: each quarter mesh on within r of the camera
   // (ground distance to its bounds, with a little hysteresis).
   function treeDetail(t, x, z, r) {
@@ -1007,6 +1037,30 @@ export function buildRealCity(city, collision, opts = {}) {
       }
     }
   }
+  // Props quarters by distance (PROPS_R): on within r of the camera, never
+  // at the middle level. propsOn: 1 on, 0 off, 2 not set yet.
+  function propsDetail(t, x, z, r) {
+    const list = t.props;
+    if (!list || !list.length) return;
+    if (!t.propsOn) t.propsOn = new Uint8Array(list.length).fill(2);
+    for (let i = 0; i < list.length; i++) {
+      let on = 0;
+      if (!t.mid) {
+        const bb = list[i].geometry.boundingBox;
+        const dx = x < bb.min.x ? bb.min.x - x : x > bb.max.x ? x - bb.max.x : 0;
+        const dz = z < bb.min.z ? bb.min.z - z : z > bb.max.z ? z - bb.max.z : 0;
+        const rr = t.propsOn[i] === 1 ? r + PROPS_HYST : r;
+        on = dx * dx + dz * dz < rr * rr ? 1 : 0;
+      }
+      if (on !== t.propsOn[i]) {
+        t.propsOn[i] = on;
+        list[i].visible = on === 1;
+      }
+    }
+  }
+  // The near distance of the tier drawn now (graphics.js sets ud.tier).
+  const nearOf = () => NEAR_BY_TIER[ud.tier ?? 1] ?? LOD.near;
+  let bulbsStale = false;
   let fogTick = 0;
   const lastCam = { x: city.spawn.x, y: 2, z: city.spawn.z };
   const fwd = new THREE.Vector3();
@@ -1016,9 +1070,12 @@ export function buildRealCity(city, collision, opts = {}) {
     return Math.sqrt(dx * dx + dz * dz + hy * hy);
   }
   // budgetMs: time for tile building this frame (Infinity: finish every
-  // tile that should be near now, e.g. at start or for a screenshot).
-  function update(camera, budgetMs = 3) {
+  // tile within `reach` of the camera now, e.g. at start or for a
+  // screenshot; with `one`, stop after the first tile built).
+  function update(camera, budgetMs = 3, reach = nearOf(), one = false) {
     const x = camera.position.x, z = camera.position.z, hy = Math.max(0, camera.position.y) * 0.6;
+    const nearR = nearOf();
+    const propsR = PROPS_R[ud.tier ?? 1] ?? PROPS_R[1];
     lastCam.x = x;
     lastCam.y = camera.position.y;
     lastCam.z = z;
@@ -1058,7 +1115,7 @@ export function buildRealCity(city, collision, opts = {}) {
       }
       if (fd !== farDetail[k]) { farDetail[k] = fd; farChanged = true; }
       if (t.group) {
-        const show = d < (t.shown ? LOD.near + LOD.hyst : LOD.near);
+        const show = d < (t.shown ? nearR + LOD.hyst : nearR);
         if (show !== t.shown) {
           t.shown = show;
           t.group.visible = show;
@@ -1073,8 +1130,11 @@ export function buildRealCity(city, collision, opts = {}) {
           if (mid !== t.mid) {
             t.mid = mid;
             for (const m of t.small) m.visible = !mid;
+            t.propsOn = null;
+            bulbsStale = true;
           }
           treeDetail(t, x, z, treeR);
+          propsDetail(t, x, z, propsR);
         } else if (d > LOD.drop && t !== jobTile) {
           dropTile(t);
           stats.dropped++;
@@ -1090,12 +1150,14 @@ export function buildRealCity(city, collision, opts = {}) {
       if (!changed) for (const m of farMeshes) compactFar(m, nearMask, farDetail);
     }
     // A tile right under the camera that is not ready yet gets more time.
-    const urgent = !hold && ((jobTile && dist(jobTile, x, z, hy) < LOD.near * 0.5) || (best && bd < LOD.near * 0.5));
+    const urgent = !hold && ((jobTile && dist(jobTile, x, z, hy) < nearR * 0.5) || (best && bd < nearR * 0.5));
     const budget = budgetMs === Infinity ? Infinity : urgent ? Math.max(budgetMs, 6) : budgetMs;
     const t0 = now();
+    stats.frameSliceMs = 0;
+    stats.frameSlice = '';
     while (now() - t0 < budget) {
       if (!job) {
-        if (!best || (budgetMs === Infinity && bd >= LOD.near)) {
+        if (!best || (budgetMs === Infinity && bd >= reach)) {
           // Nothing new to build: a shown tile whose props changed.
           if (!redo) break;
           best = redo;
@@ -1110,13 +1172,14 @@ export function buildRealCity(city, collision, opts = {}) {
       const r = job.next();
       const ds = now() - s0;
       if (ds > stats.worstSliceMs) stats.worstSliceMs = ds;
+      if (ds > stats.frameSliceMs) { stats.frameSliceMs = ds; stats.frameSlice = r.value || 'end'; }
       if (r.value && !(stats.worst[r.value] >= ds)) stats.worst[r.value] = Math.round(ds * 10) / 10;
       if (r.done) {
         stats.built++;
         const t = jobTile;
         job = jobTile = null;
         const d = dist(t, x, z, hy);
-        if (d < LOD.near) {
+        if (d < nearR) {
           t.shown = true;
           t.group.visible = true;
           if (trees) trees.setShown(t.k, true);
@@ -1126,15 +1189,18 @@ export function buildRealCity(city, collision, opts = {}) {
           for (const m of t.small) m.visible = !t.mid;
           t.treeOn = null;
           treeDetail(t, x, z, treeR);
+          t.propsOn = null;
+          propsDetail(t, x, z, propsR);
         }
         if (budgetMs === Infinity) {
+          if (one) { stats.lastOne = t.k; break; }
           // Look for the next one that should be near.
           best = null;
           bd = Infinity;
           for (const u of tiles) {
             if (u.group) continue;
             const du = dist(u, x, z, hy);
-            if (du < LOD.near && du < bd) { bd = du; best = u; }
+            if (du < reach && du < bd) { bd = du; best = u; }
           }
         }
       }
@@ -1144,14 +1210,18 @@ export function buildRealCity(city, collision, opts = {}) {
       const tier = TREE_NEAR_R[ud.tier] ? ud.tier : 1;
       trees.update(camera, TREE_NEAR_R[tier], TREE_FAR_R[tier]);
     }
-    if (changed) {
-      for (const m of farMeshes) compactFar(m, nearMask, farDetail);
+    if (changed) for (const m of farMeshes) compactFar(m, nearMask, farDetail);
+    if (changed || bulbsStale) {
+      bulbsStale = false;
       refillBulbs();
     }
   }
-  // Every tile near the point, now (start, screenshots, tests).
-  function flush(camera) {
-    update(camera, Infinity);
+  // Every tile near the point, now (start, screenshots, tests); within
+  // `reach` only, or (one) a single tile: true when one was built.
+  function flush(camera, reach = nearOf(), one = false) {
+    stats.lastOne = -1;
+    update(camera, Infinity, reach, one);
+    return stats.lastOne >= 0;
   }
   // Throws every near tile away (they build again as needed): after the
   // city's lots were replaced, for the stand-in lots of the dev scripts.
@@ -1180,8 +1250,13 @@ export function buildRealCity(city, collision, opts = {}) {
   ud.trees = trees;
   ud.stream = { update, flush, reset, propBreak, setTreeBatch, trees: () => trees, tileJob, stats, lotStats, tiles, tileOf, NX, NZ, LOD, lotShapes: () => lotLayer.count(), lotLayer: () => lotLayer };
 
-  // Start: the tiles round the spawn point.
-  flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } });
+  // Start: the tiles round the spawn point. opts.startNear: only those
+  // within this distance (m; a negative one: none, the caller builds
+  // them in its own stages with flush(camera, reach, true)); the rest
+  // stream in round the camera (0.13.8: the start built every tile
+  // within LOD.near, 12 of them in Downtown, over half the start).
+  const startNear = opts.startNear === undefined ? nearOf() : opts.startNear;
+  if (startNear >= 0) flush({ position: { x: city.spawn.x, y: 2, z: city.spawn.z } }, startNear);
   lap('near');
   ud.buildMs = now() - tStart;
   group.userData = ud;

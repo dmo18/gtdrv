@@ -346,3 +346,85 @@ Where to look next: resolveIn's cost per call in Chrome is about four times node
 queries, which points at its shape reads (the same boxing as 0.12.6) rather than its arithmetic;
 the calls per step (three body circles per car, peds, crews) are the other lever. The minimap
 redraws whenever the craft moves 0.35 px or turns 0.004 rad (nearly every frame while driving).
+
+## Stutter and start (0.13.8)
+
+Owner's phones on 0.13.7: a weaker phone (780x360, Downtown) median 16.7 ms, worst 83.7 ms,
+397 frames over 33 ms, render scale down to 1.35, start 9.8 s, slowest call parked 8.9 ms; the
+S24 (South) worst 49.9 ms, 10 frames over, start 3.7 s, slowest call peds 7.2 ms.
+
+Found with `node scripts/perf-phonecheck.mjs --passes 2` (and `--profile --all`), Downtown,
+4x throttle. The script now also names the tile work of a slow frame (`tiles 40.9 (roads)`, from
+the streamer's `stats.frameSlice`), the frame of each system's worst call in each pass (the same
+frame in both passes: the call's own cost; different frames: a collection or the machine landed
+on it) and every shader program compiled in play. Causes of the drive's frames over, 0.13.7:
+
+1. Street tile slices (27 of 52 frames over in a profiled pass, up to 168 ms): the tile job's
+   "pieces" were too big. Three junctions in one piece (a fan or mall junction alone is up to
+   20 ms at 1x), and above all the narrow-gap net: `netRoads` asks `ground.js netQuads` for a
+   60 m box, a flood fill whose every cell probes the ground up to 128 times (30 to 100 ms at 1x
+   for a dense box, 140 ms at 4x). A smaller box would cut it, but the fill only grows inside its
+   box, so a 20 m box drew 3 percent less net (slivers at the box edges): not done.
+2. Uploads: the seawall and rail view (`render/props.js` edge-walls) refilled every frame while
+   its cells were still missing and sent all 4000 instance slots (300 KB) each time, even empty;
+   the signal lamps sent all 4096 slots on each refill; the boat wake trail moved and sent 160
+   instances every frame with no boat about.
+3. First play with `?autostart` (no title, so the mesh warmers have not run): traffic, fleet and
+   peds build car and person bodies (50 to 100 ms), parked its first lot cars (80 to 130 ms).
+   On a phone these run behind the title; not changed.
+4. Not in this pass's files: the check's own start (objective `syncRoute`/`setAvoid`, 20 to
+   30 ms on the drive's first frame), combat's first hit (13 ms, and one MeshPhysicalMaterial
+   program compiled at the first hit: `programs 60 to 61`), the major collections (15 to 40 ms).
+
+What changed:
+
+- `render/realcity.js` tile job: one junction a piece; the net box asked once per kind (flat,
+  raised) a piece; net quads kept per box (`netCache`, `citymesh.js netRoads(..., kinds, cache)`),
+  so a tile drawn again (a prop broke, the camera came back) does not flood again. Same meshes
+  (hash of every mesh of six Downtown tiles before and after; test/stutter.test.js checks the net
+  by kind and from the cache against both at once).
+- Start (`game.js`, `buildRealCity({ startNear: -1 })`, `stream.flush(camera, reach, one)`): the
+  far level and the whole map's collision at build, then only the tiles the first view needs, one
+  stage each (`START_AT`: round the title shot's camera, 40 m, and two points down its view): 2
+  or 3 tiles in Downtown, was every tile within 340 m (12, about 5 s of the 4x start). The rest
+  stream round the camera, 6 ms a frame while the title shows (3 ms in play). The title shot looks
+  the same (checked by screenshot).
+- Downtown street view: Normal draws near tiles to 300 m (`NEAR_BY_TIER`, Low 280, High keeps 340;
+  past it the far level); street props and lot dressing (with the building trim) are drawn by
+  tile quarter and only within `PROPS_R` (Low 80, Normal 110, High 150 m) of the camera; traffic
+  light bulbs only short of the middle level (170 m); the wake trail is hidden and not updated
+  when no foam lives; cars go body-only at FLEET_L2_M (60 m, was 75). The street view shot
+  looks the same.
+- Uploads: edge-walls and signal lamps send only the slots in use (update ranges), nothing while
+  empty.
+
+Measured, same session, the 0.13.7 tree then this one (4x, 2 passes, load average 6 to 8):
+
+| measure | 0.13.7 | 0.13.8 |
+|---|---|---|
+| drive: frames over (28 ms excess) | 14 | 8 |
+| drive: worst excess, in phone ms | 93.5 (72) | 48.0 (45) |
+| drive: median, p99, worst frame, ms | 18.4, 38.6, 113.6 | 17.6, 36.9, 80.7 |
+| drive: frames over half the threshold | 45 | 39 |
+| drive: worst tile work in a frame, ms | 79.5 | 48.8 (a net box) |
+| drive: uploaded; frames with over 256 KB | 689 MB; 213 | 644 MB; 80 |
+| start at 4x, s | 14.9 | 11.4 |
+| street view, Downtown day, same tiles: calls, triangles | 210.6, 292k | 171, 217k |
+
+`node scripts/perf.mjs map=miami-downtown` as it stands (Normal): day 163 calls / 209k triangles,
+night 163 / 206k (0.13.7: 208 / 294.5k), 60 programs.
+(An earlier pair the same day: frames over 17 and 13, start 18.3 and 15.6 s; this machine moves
+10 to 20 percent between runs.) The street view row is `scripts/perf.mjs`'s view with the tiles
+round the start built first in both trees (0.13.7 kept two tiles from its start at 340 to 380 m
+that a camera arriving there would not show).
+
+Not reached: frames over cut by 80 percent (43 here), every system call under 4 ms (objective
+30 ms at the check's start, combat 13 ms at the first hit, the rest land on different frames in
+the two passes: collections), start under 5 s at 4x. Where the rest is:
+
+- The net flood (`world/ground.js netQuads`) is the largest remaining hitch, 30 to 50 ms at 4x a
+  box: it needs a way to stop and go on (a cursor or a generator over the seed squares), in the
+  ground file.
+- Start at 4x (profiled): createMiamiCity 2.5 to 3 s, textures 1.3 s, attachExplore 0.5 s, the far
+  level and whole-map props 1.3 s, the first draw 1.5 s (texture uploads, the minimap's first
+  redraw, programs).

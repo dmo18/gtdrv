@@ -1131,9 +1131,21 @@ export function createEdgeLineView(game) {
         put(n++, x0, z0, x1, z1, y + 0.82, 0.08, 0.12, EDGE_COLORS.steel);
       } else put(n++, x0, z0, x1, z1, -0.95, 0.95 + WALL_H, 0.5, EDGE_COLORS.seawall); // from below the water to the cap
     }
+    // Only the instances in use go to the GPU, and nothing while it stays
+    // empty (0.13.8: a refill runs every frame while cells are still
+    // missing, and uploaded all EDGE_VIEW_MAX slots, 300 KB, each time).
+    const was = mesh.count;
     mesh.count = n;
+    if (!n && !was) return;
+    const up = Math.max(n, was);
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.addUpdateRange(0, up * 16);
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (mesh.instanceColor) {
+      mesh.instanceColor.clearUpdateRanges();
+      mesh.instanceColor.addUpdateRange(0, up * 3);
+      mesh.instanceColor.needsUpdate = true;
+    }
   }
   return {
     mesh,
