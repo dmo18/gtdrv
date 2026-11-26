@@ -61,3 +61,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 - 0.13.3 and 0.13.4 published together (fa83f71). 0.13.3 itself never went live (CI timing flake, then merged with 0.13.4). Helpers this round about 1.9M. Total about 19.8M of 24M.
 - 0.13.5 published (58f4950). Helpers K1 to K6 about 1.1M (K1 and K6 cut off by the 5 hour limit, not merged). Total about 21.9M of 24M.
 - 0.13.6 published (0ea9544). Round: K1 0.42M, K6 0.37M, L1 0.10M, reviews 0.09M. Total about 23.0M of 24M. Soak restarted on 0.13.5.
+- Cap raised by the owner to 32M (about 23.0M used at 0.13.6). Owner phone test of 0.13.6: streets messy (grass in roads, light poles in roads, illogical lane counts, width jumps, stray lines), cars poor, laggy and pixelated. Round 0.13.7: four helpers M1 to M4.
