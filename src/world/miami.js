@@ -11,7 +11,7 @@ import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
 import { roadProfile, pairDivided, harmonizeStreets, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
 import { buildRoadGeo, onJunction } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
-import { buildLots, planInfill, stepDistance, dressLot, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
+import { buildLots, planInfill, stepDistance, dressLot, BAYS_ONLY_FAST, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
@@ -192,7 +192,9 @@ function stampRect(R, x0, z0, x1, z1, v) {
 }
 // Even-odd fill of a closed polygon (pts meters, implicit closing edge).
 let POLY_XS = new Float64Array(64); // scratch: the crossings of one row
-function fillPolygon(R, pts, v) {
+// The last fillPolygon's written cells: count, then i0, j0, i1, j1 of their box.
+const FILL = new Int32Array(5);
+function fillPolygon(R, pts, v, spans = false) {
   const n = pts.length / 2;
   let zmin = Infinity, zmax = -Infinity;
   for (let k = 0; k < n; k++) { zmin = Math.min(zmin, pts[2 * k + 1]); zmax = Math.max(zmax, pts[2 * k + 1]); }
@@ -200,6 +202,10 @@ function fillPolygon(R, pts, v) {
   const j0 = Math.max(0, Math.ceil((zmin - R.z0) / c - 0.5)), j1 = Math.min(R.h - 1, Math.floor((zmax - R.z0) / c - 0.5));
   if (POLY_XS.length < n) POLY_XS = new Float64Array(n * 2);
   const xs = POLY_XS;
+  // (The cells written, counted with their bounding box, into FILL.)
+  let fn = 0, fi0 = R.w, fi1 = -1, fj0 = R.h, fj1 = -1;
+  // (spans: each row's first and last column written, SPAN_L / SPAN_R.)
+  if (spans) { SPAN_L.fill(R.w, 0, R.h); SPAN_R.fill(-1, 0, R.h); }
   for (let j = j0; j <= j1; j++) {
     const z = R.z0 + (j + 0.5) * c;
     let nx = 0;
@@ -216,9 +222,18 @@ function fillPolygon(R, pts, v) {
     }
     for (let k = 0; k + 1 < nx; k += 2) {
       const i0 = Math.max(0, Math.ceil((xs[k] - R.x0) / c - 0.5)), i1 = Math.min(R.w - 1, Math.floor((xs[k + 1] - R.x0) / c - 0.5));
-      if (i1 >= i0) fillRun(R.data, v, j * R.w + i0, j * R.w + i1 + 1);
+      if (i1 >= i0) {
+        fillRun(R.data, v, j * R.w + i0, j * R.w + i1 + 1);
+        if (spans) { if (i0 < SPAN_L[j]) SPAN_L[j] = i0; if (i1 > SPAN_R[j]) SPAN_R[j] = i1; }
+        fn += i1 - i0 + 1;
+        if (i0 < fi0) fi0 = i0;
+        if (i1 > fi1) fi1 = i1;
+        if (j < fj0) fj0 = j;
+        fj1 = j;
+      }
     }
   }
+  FILL[0] = fn; FILL[1] = fi0; FILL[2] = fj0; FILL[3] = fi1; FILL[4] = fj1;
 }
 // 4-connected line of cells (no diagonal leaks for a 4-connected fill).
 function stampLine(R, ax, az, bx, bz, v) {
@@ -573,6 +588,9 @@ function settleWalls(wall, land, W, H) {
 // later one: the cover stops there (the caller drops pieces that small).
 const ROW_A = new Int32Array(201), ROW_I0 = new Int32Array(201), ROW_I1 = new Int32Array(201), ROW_H = new Int32Array(201);
 const HIST = new Int32Array(201 * 201), STACK_H = new Int32Array(202);
+// Per row of the footprint raster, the first and last column fillPolygon
+// wrote (lo > hi: none).
+const SPAN_L = new Int32Array(201), SPAN_R = new Int32Array(201);
 function largestRects(cells, cw, ch, filled, stack, out, minLater = 0) {
   // filled < 0: the first pass, which reads every cell, counts them.
   let fresh = false;
@@ -607,34 +625,43 @@ function largestRects(cells, cw, ch, filled, stack, out, minLater = 0) {
 // so is every row after it (a column's run there grows from that row's):
 // the pass stops there, the rows below keep their values. Returns the
 // count of 1-cells in the rows it made.
+// Only the columns of each row's span (SPAN_L..SPAN_R, fillPolygon: every
+// 1-cell of the row is in it) are swept: outside it a row is all 0 (its
+// histogram 0, never stored), and a 0 column only empties the stack,
+// with areas of 0 that never beat the row's best.
 function histRows(cells, cw, ch, from, stack, i0, i1, j1) {
-  const hist = HIST, hs = STACK_H;
+  const hist = HIST, hs = STACK_H, SL = SPAN_L, SR = SPAN_R;
   let ones = 0;
   for (let j = from; j < ch; j++) {
-    const row = j * cw;
+    const row = j * cw, lo = SL[j], hi = SR[j];
     if (j > j1) {
       let hit = false;
-      for (let i = i0; i <= i1; i++) if (hist[row + i] > j - j1) { hit = true; break; }
+      const a = i0 > lo ? i0 : lo, b = i1 < hi ? i1 : hi;
+      for (let i = a; i <= b; i++) if (hist[row + i] > j - j1) { hit = true; break; }
       if (!hit) break;
     }
     // The stack holds each column (stack) with its height (hs); the
     // row's histogram is made in the same sweep.
-    const up = j === 0 ? -1 : row - cw;
+    // (The row above: its histogram where its span holds the column.)
+    const up = j === 0 ? -1 : row - cw, ulo = j === 0 ? 0 : SL[j - 1], uhi = j === 0 ? -1 : SR[j - 1];
     let best = 0, b0 = 0, b1 = 0, bh = 0, sp = 0;
-    for (let i = 0; i <= cw; i++) {
-      let hh = 0;
-      if (i < cw) {
-        if (cells[row + i] === 1) { hh = up < 0 ? 1 : hist[up + i] + 1; ones++; }
-        hist[row + i] = hh;
+    if (hi >= lo) {
+      // (The stack starts as after the 0 column before the span.)
+      for (let i = lo; i <= hi + 1; i++) {
+        let hh = 0;
+        if (i <= hi) {
+          if (cells[row + i] === 1) { hh = i < ulo || i > uhi ? 1 : hist[up + i] + 1; ones++; }
+          hist[row + i] = hh;
+        }
+        while (sp > 0 && hs[sp - 1] >= hh) {
+          const height = hs[--sp];
+          const left = sp > 0 ? stack[sp - 1] + 1 : lo;
+          const a = height * (i - left);
+          if (a > best) { best = a; b0 = left; b1 = i - 1; bh = height; }
+        }
+        stack[sp] = i;
+        hs[sp++] = hh;
       }
-      while (sp > 0 && hs[sp - 1] >= hh) {
-        const height = hs[--sp];
-        const left = sp > 0 ? stack[sp - 1] + 1 : 0;
-        const a = height * (i - left);
-        if (a > best) { best = a; b0 = left; b1 = i - 1; bh = height; }
-      }
-      stack[sp] = i;
-      hs[sp++] = hh;
     }
     ROW_A[j] = best; ROW_I0[j] = b0; ROW_I1[j] = b1; ROW_H[j] = bh;
   }
@@ -695,7 +722,16 @@ function polyBox(pts, out) {
 function footprintRects(R, pts, stack, rects, minLater = 0) {
   const cw = R.w, ch = R.h, cells = R.data;
   cells.fill(0, 0, cw * ch);
-  fillPolygon(R, pts, 1);
+  fillPolygon(R, pts, 1, true);
+  // Cells that fill their own bounding box are one rectangle: the cover
+  // is that box (largestRects would find it first and stop, 100 %
+  // covered; under 4 cells it finds none).
+  const n = FILL[0];
+  if (n ===(FILL[3] - FILL[1] + 1) * (FILL[4] - FILL[2] + 1)) {
+    if (n < 4) return 0;
+    rects[0] = FILL[1]; rects[1] = FILL[2]; rects[2] = FILL[3]; rects[3] = FILL[4];
+    return 1;
+  }
   // (largestRects counts the filled cells in its first pass.)
   return largestRects(cells, cw, ch, -1, stack, rects, minLater);
 }
@@ -892,10 +928,16 @@ function keepJoinedRamps(R) {
   const up = new Int32Array(n);
   for (let i = 0; i < n; i++) up[i] = i;
   const touch = new Uint8Array(n * 2); // end 0 / 1 of ramp i meets another ramp
+  // (Each ramp's box: an end more than RAMP_JOIN outside it is near no
+  // segment of it.)
+  const rbox = new Float64Array(4 * n);
+  for (let j = 0; j < n; j++) ptsBox(pts[j], 0, pts[j].length, rbox, 4 * j);
   for (let i = 0; i < n; i++) {
     for (let e = 0; e < 2; e++) {
       const P = pts[i], q = e ? P.length - 2 : 0;
+      const x = P[q], z = P[q + 1];
       for (let j = 0; j < n; j++) {
+        if (x < rbox[4 * j] - RAMP_JOIN || x > rbox[4 * j + 2] + RAMP_JOIN || z < rbox[4 * j + 1] - RAMP_JOIN || z > rbox[4 * j + 3] + RAMP_JOIN) continue;
         if (j === i || !nearLine(pts[j], 0, pts[j].length, P[q], P[q + 1], -1)) continue;
         touch[i * 2 + e] = 1;
         const ra = findRoot(up, i), rb = findRoot(up, j);
@@ -906,11 +948,12 @@ function keepJoinedRamps(R) {
   // Ends that hang loose (no ramp, no kept road going on) keep their group
   // out; so does a group that merges into no kept freeway.
   const bad = new Uint8Array(n), onto = new Uint8Array(n);
+  const WG = wayGrid(R);
   for (let i = 0; i < n; i++) {
     for (let e = 0; e < 2; e++) {
       if (touch[i * 2 + e]) continue;
       const P = pts[i], q = e ? P.length - 2 : 0;
-      const m = meetsWay(R, P[q], P[q + 1]);
+      const m = meetsWay(R, P[q], P[q + 1], WG);
       if (!m) bad[findRoot(up, i)] = 1;
       else if (m === 2) onto[findRoot(up, i)] = 1;
     }
@@ -952,9 +995,18 @@ function nearLine(P, k0, k1, x, z, skip) {
 // Whether a road read so far goes on at (x, z) (see keepJoinedRamps):
 // 0 no, 1 yes, 2 yes and it is a freeway (motorway or trunk) going on past
 // the point (the ramp merges into it or leaves it there).
-function meetsWay(R, x, z) {
+// (WG: wayGrid. Only the runs listed in the point's cell can be within
+// RAMP_JOIN of it; the answer does not depend on the order they are
+// asked in: 2 when any is a freeway the point lies along, else 1 when
+// any rule below holds, else 0.)
+function meetsWay(R, x, z, WG) {
   let ends = 0, got = 0;
-  for (let w = 0; w < R.ways.length; w++) {
+  const ci = Math.floor((x - WG.x0) / WAY_CELL), cj = Math.floor((z - WG.z0) / WAY_CELL);
+  if (ci < 0 || cj < 0 || ci >= WG.gw || cj >= WG.gh) return 0;
+  const c = cj * WG.gw + ci, box = WG.box;
+  for (let t = WG.start[c]; t < WG.start[c + 1]; t++) {
+    const w = WG.items[t], o = 4 * w;
+    if (x < box[o] - RAMP_JOIN || x > box[o + 2] + RAMP_JOIN || z < box[o + 1] - RAMP_JOIN || z > box[o + 3] + RAMP_JOIN) continue;
     const k0 = R.wayS[w], k1 = R.wayE[w], info = R.ways[w];
     if (nearLine(R.P, k0, k1, x, z, 1)) {
       if (info.cls === 'motorway' || info.cls === 'trunk') return 2;
@@ -967,6 +1019,46 @@ function meetsWay(R, x, z) {
     if ((!info.bridge && info.cls !== 'motorway_link') || ++ends >= 2) got = 1;
   }
   return got;
+}
+
+// The bounding box (x0, z0, x1, z1) of points k0..k1 of P into out at o.
+function ptsBox(P, k0, k1, out, o) {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let k = k0; k + 1 < k1; k += 2) {
+    const x = P[k], z = P[k + 1];
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  out[o] = x0; out[o + 1] = z0; out[o + 2] = x1; out[o + 3] = z1;
+}
+// The runs read so far by WAY_CELL m cell of their boxes grown by
+// RAMP_JOIN: { box, x0, z0, gw, gh, start, items } (cell c lists
+// items[start[c]] .. items[start[c + 1] - 1]).
+const WAY_CELL = 200;
+function wayGrid(R) {
+  const n = R.ways.length, box = new Float64Array(4 * n);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (let w = 0; w < n; w++) {
+    ptsBox(R.P, R.wayS[w], R.wayE[w], box, 4 * w);
+    x0 = Math.min(x0, box[4 * w] - RAMP_JOIN); z0 = Math.min(z0, box[4 * w + 1] - RAMP_JOIN);
+    x1 = Math.max(x1, box[4 * w + 2] + RAMP_JOIN); z1 = Math.max(z1, box[4 * w + 3] + RAMP_JOIN);
+  }
+  if (!n) { x0 = z0 = 0; x1 = z1 = 1; }
+  const gw = Math.floor((x1 - x0) / WAY_CELL) + 1, gh = Math.floor((z1 - z0) / WAY_CELL) + 1;
+  const start = new Int32Array(gw * gh + 1);
+  const cellsOf = (w, f) => {
+    const o = 4 * w;
+    const i0 = Math.floor((box[o] - RAMP_JOIN - x0) / WAY_CELL), i1 = Math.floor((box[o + 2] + RAMP_JOIN - x0) / WAY_CELL);
+    const j0 = Math.floor((box[o + 1] - RAMP_JOIN - z0) / WAY_CELL), j1 = Math.floor((box[o + 3] + RAMP_JOIN - z0) / WAY_CELL);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) f(j * gw + i);
+  };
+  for (let w = 0; w < n; w++) cellsOf(w, (c) => { start[c + 1]++; });
+  for (let c = 0; c < gw * gh; c++) start[c + 1] += start[c];
+  const items = new Int32Array(start[gw * gh]), fill = start.slice(0, gw * gh);
+  for (let w = 0; w < n; w++) cellsOf(w, (c) => { items[fill[c]++] = w; });
+  return { box, x0, z0, gw, gh, start, items };
 }
 
 // The district key at a point straight from the hand table (the raster
@@ -3755,7 +3847,7 @@ export function createMiamiCity(data, opts = {}) {
     for (let lotIdx = 0; lotIdx < city.lots.length; lotIdx++) {
       const lot = city.lots[lotIdx];
       if (lot.type !== 'carpark') continue;
-      dressLot(city, lot, F, true);
+      dressLot(city, lot, F, BAYS_ONLY_FAST);
       let n = 0;
       for (let k = 0; k < F.length; k++) if (F[k].kind === 'bay') n += bayCount(F[k]);
       const keep = Math.min(BAY_LIST_MAX, Math.floor(n * 0.6));

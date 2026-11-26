@@ -116,7 +116,7 @@ export function createGround(city) {
       if (segD2(mx, mz, k) <= r * r) keep.push(k);
     }
     keep.sort((a, b) => a - b);
-    cellE[c] = keep.length ? Int32Array.from(keep) : EMPTY;
+    cellE[c] = keep.length ? new Int32Array(keep) : EMPTY;
     // Junction boxes: the ends of those edges that reach the cell.
     const nk = [];
     const h = CELL / 2 + 0.5;
@@ -129,7 +129,7 @@ export function createGround(city) {
       }
     }
     nk.sort((a, b) => a - b);
-    cellN[c] = nk.length ? Int32Array.from(nk) : EMPTY;
+    cellN[c] = nk.length ? new Int32Array(nk) : EMPTY;
     if (geo) {
       const jl = [];
       for (let q = 0; q < 2 * keep.length; q++) {
@@ -138,7 +138,7 @@ export function createGround(city) {
         if (J && !jl.includes(J.id) && J.x0 <= mx + h && J.x1 >= mx - h && J.z0 <= mz + h && J.z1 >= mz - h) jl.push(J.id);
       }
       jl.sort((a, b) => a - b);
-      cellJ[c] = jl.length ? Int32Array.from(jl) : EMPTY;
+      cellJ[c] = jl.length ? new Int32Array(jl) : EMPTY;
     }
     return cellE[c];
   }

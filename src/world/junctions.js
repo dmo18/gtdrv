@@ -369,7 +369,7 @@ function goreOf(PG, A, B) {
     }
   }
   return {
-    poly: Float64Array.from(poly), tris: Float64Array.from(triangulate(poly)), paint: Float64Array.from(paint),
+    poly: new Float64Array(poly), tris: new Float64Array(triangulate(poly)), paint: new Float64Array(paint),
     qa: A.q, sideA: A.end ? 1 : 0, la: A.trim + 2 * (m - 1), qb: B.q, sideB: B.end ? 0 : 1, lb: B.trim + 2 * (m - 1),
   };
 }
@@ -402,7 +402,7 @@ export function fanMouthHull(city, J, streetsOnly = false) {
       const C = curbsAt(geo, e, d), l = C.l, r = C.r;
       pts.push(a.x + ux * d - uz * l, a.z + uz * d + ux * l, a.x + ux * d - uz * r, a.z + uz * d + ux * r);
     }
-    h = Float64Array.from(pts.length >= 6 ? hullOf(pts) : pts);
+    h = new Float64Array(pts.length >= 6 ? hullOf(pts) : pts);
     M.set(J, h);
   }
   return h;
@@ -994,12 +994,12 @@ function finishJunction(D) {
   const corners = D.corners;
   for (let k = 0; k < corners.length; k++) {
     const c = corners[k];
-    corners[k] = { curb: Float64Array.from(c.curb), tris: c.tris ? Float64Array.from(c.tris) : null, qa: c.qa, sideA: c.sideA, qb: c.qb, sideB: c.sideB };
+    corners[k] = { curb: new Float64Array(c.curb), tris: c.tris ? new Float64Array(c.tris) : null, qa: c.qa, sideA: c.sideA, qb: c.qb, sideB: c.sideB };
   }
   return {
-    id: D.id, lead: D.lead, nodes: Int32Array.from(D.nodes), x: D.x, z: D.z, signal: D.signal, stop: D.stop, hull: D.hull, fan: D.fan,
-    ring: Float64Array.from(D.ring), tris: D.arms.length < 2 ? new Float64Array(0) : Float64Array.from(D.tris || triangulate(D.ring)),
-    corners, gores: D.gores, arms: Int32Array.from(D.arms.map((A) => A.q)), x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, hullRing: D.hullRing,
+    id: D.id, lead: D.lead, nodes: new Int32Array(D.nodes), x: D.x, z: D.z, signal: D.signal, stop: D.stop, hull: D.hull, fan: D.fan,
+    ring: new Float64Array(D.ring), tris: D.arms.length < 2 ? new Float64Array(0) : new Float64Array(D.tris || triangulate(D.ring)),
+    corners, gores: D.gores, arms: new Int32Array(D.arms.map((A) => A.q)), x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, hullRing: D.hullRing,
   };
 }
 

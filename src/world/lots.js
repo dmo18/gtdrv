@@ -1001,11 +1001,13 @@ const SEAT_T = [-0.5, 0, 0.5];
 const BAY_OX = new Float64Array(7), BAY_OZ = new Float64Array(7);
 const BAY_F = new Int32Array(7), BAY_V = new Int32Array(3);
 const BAY_VM_X = [0, 0, 0, 1, 2, 1, 2], BAY_VM_Z = [0, 0, 0, 1, 1, 2, 2]; // point k's offset along the row: 0, +q, -q
-const BAY_Q = { gx0: 0.5, gz0: 0.5, cell: 1, W: 0, gh: 0, gid: null, id: 0, NB: null, nb: 0, inB: null, depth0: 0.5, sgn: 1, span0: 0.5, span1: 0.5, depthLen: 0.5, alongX: false, bayMax: 0 };
+const BAY_Q = { gx0: 0.5, gz0: 0.5, cell: 1, W: 0, gh: 0, gid: null, id: 0, NB: null, nb: 0, RB: null, rb: 0, inB: null, depth0: 0.5, sgn: 1, span0: 0.5, span1: 0.5, depthLen: 0.5, alongX: false, bayMax: 0 };
+// (Q.RB, Q.rb: the boxes of the row being tested, rowBoxes.)
+let ROW_B = new Float64Array(256);
 function bayInB(Q, x, z, m) {
   if (Q.nb < 0) return Q.inB(x, z, m);
-  const NB = Q.NB;
-  for (let k = 0, n = 4 * Q.nb; k < n; k += 4) {
+  const NB = Q.RB;
+  for (let k = 0, n = 4 * Q.rb; k < n; k += 4) {
     if (x > NB[k] - m && x < NB[k + 2] + m && z > NB[k + 1] - m && z < NB[k + 3] + m) return true;
   }
   return false;
@@ -1037,6 +1039,7 @@ function bayRows(Q, rows, islands) {
       const f = Math.floor((d + (alongX ? OZ[k] : OX[k]) - f0) / cell);
       F[k] = f >= 0 && f < fMax ? f : -1;
     }
+    if (Q.nb >= 0) rowBoxes(Q, alongX, d - 2.2 - 1.5 - 0.01, d + 2.2 + 1.5 + 0.01);
     let runA = -1, runN = 0, slot = 0;
     for (let a = span0 + 2.75; a <= span1 - 2.75 + 1e-6; a += 2.5) {
       const x = alongX ? a : d, z = alongX ? d : a;
@@ -1071,6 +1074,23 @@ function bayRows(Q, rows, islands) {
     }
     off += row % 2 === 0 ? 11 : 5; // bay, aisle, bay | bay, aisle, bay
   }
+}
+// The lot's boxes (Q.NB) that reach across the row's band lo..hi (z
+// along x, x along z): the only ones the row's building tests (points
+// at most 2.2 m off the row's line, 1.5 m margin) can meet, in their
+// order, into Q.RB and Q.rb.
+function rowBoxes(Q, alongX, lo, hi) {
+  const NB = Q.NB, n = Q.nb;
+  if (ROW_B.length < 4 * n) ROW_B = new Float64Array(8 * n);
+  const RB = ROW_B, a = alongX ? 1 : 0;
+  let m = 0;
+  for (let k = 0; k < 4 * n; k += 4) {
+    if (NB[k + a] > hi || NB[k + a + 2] < lo) continue;
+    RB[m] = NB[k]; RB[m + 1] = NB[k + 1]; RB[m + 2] = NB[k + 2]; RB[m + 3] = NB[k + 3];
+    m += 4;
+  }
+  Q.RB = RB;
+  Q.rb = m / 4;
 }
 let NB_BOX = new Float64Array(256); // scratch: their boxes, 4 values each
 const NEAR_E = []; // scratch: edges round the lot being dressed
@@ -1154,8 +1174,12 @@ function gridSkew(city, x, z) {
 }
 // baysOnly (a parking lot): stop once the bay rows are placed (the
 // features so far are the full dressing's first ones, its bays all among
-// them), for the build's parking spots.
+// them). BAYS_ONLY_FAST (the build's parking spots, world/miami.js): the same
+// bays, the solid features before them not tested against the road
+// (see put), and no road verdicts kept.
+export const BAYS_ONLY_FAST = 2;
 export function dressLot(city, lot, out = [], baysOnly = false) {
+  const noRoad = baysOnly === BAYS_ONLY_FAST;
   out.length = 0;
   const G = city.lotGrid;
   if (!G || !lot || lot.type === 'verge' || lot.type === 'airfield') return out;
@@ -1330,10 +1354,11 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   const skew = lot.type === 'works' || lot.type === 'site' ? 0 : gridSkew(city, (lot.x0 + lot.x1) / 2, (lot.z0 + lot.z1) / 2);
   // Adds a feature when its center is in the lot and the caps allow.
   // (roadSkip: boundary rows left out for the road only, counted against
-  // the cap as if they stood. The build's parking spots (baysOnly) run the
-  // same road test as a full dressing, so a parking lot's hedges and bays
-  // are the same in both; the verdicts are kept for the tiles that draw
-  // the lot later, roadVerdicts.)
+  // the cap as if they stood. A baysOnly dressing runs the same road test
+  // as a full one, so a parking lot's hedges and bays are the same in both;
+  // the verdicts are kept for the tiles that draw the lot later,
+  // roadVerdicts. The build's parking spots, BAYS_ONLY_FAST, read only the
+  // bays: no road test, the first tile that draws the lot works them out.)
   const put = (kind, x0f, z0f, heading, l, w, h, r, isSolid, v) => {
     if (out.length + roadSkip >= cap || (isSolid && solid >= MAX_SOLID)) return false;
     // Rounded to the centimeter first, so the stored point is the tested one.
@@ -1343,7 +1368,12 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
     // lot raster: a tree would stand in the road).
     if (nearJunction && onJunction(roadGeo, x, z)) return false;
     // Nor any part of a solid one on a road strip, a gap or a crosswalk.
-    if (footOnRoad(kind, x, z, heading, l, w, r)) { roadHit = true; return false; }
+    // (Not tested for the build's parking spots, BAYS_ONLY_FAST: a bay
+    // is not solid, and no bay depends on the features before it but
+    // through the cap, which counts a row the road keeps out as if it
+    // stood: the first place a row reaches that passes the tests above
+    // counts one either way.)
+    if (!noRoad && footOnRoad(kind, x, z, heading, l, w, r)) { roadHit = true; return false; }
     const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays
@@ -1673,7 +1703,7 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
         put('bay', alongX ? a : d, alongX ? d : a, rowHead, n * 2.5, 5, 0, 0, false, rng.int(0, 3));
       }
       // Nothing after this point adds, moves or drops a bay.
-      if (baysOnly) { saveVerdicts(); return out; }
+      if (baysOnly) { if (!noRoad) saveVerdicts(); return out; }
       // Islands with a tree (or a planter downtown when the tree will not fit).
       let nt = 0;
       for (let k = 0; k < islands.length; k += 2) {

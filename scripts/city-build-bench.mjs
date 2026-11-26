@@ -2,7 +2,8 @@
 // region, from its own data file), stage by stage, each run in a fresh
 // (cold) node process like the unit test, and prints the median of the
 // runs, with the heap and buffers held after a forced collection.
-// usage: node scripts/city-build-bench.mjs [--runs 3] [--slow] [--json] [--stages] [--region miami-downtown]
+// usage: node scripts/city-build-bench.mjs [--runs 3] [--best] [--slow] [--json] [--stages] [--region miami-downtown]
+//   --best   the best (lowest) of the runs instead of the median.
 //   --slow   mimic a slow shared CI runner: every run and a busy node loop
 //            share one CPU (taskset -c 0), so the build gets about half a core.
 //   --child  one cold run, prints its stage times as JSON (used by the parent;
@@ -30,6 +31,7 @@ const region = opt('--region', null);
 const CITY_STAGES = [
   ['land mask', ['land.coast', 'land.fill', 'land.votes', 'land.walls', 'land.water', 'land']],
   ['roads and graph', ['graph', 'network']],
+  ['junctions', ['junctions']],
   ['shore field', ['shore.stamp', 'shore.field', 'shore']],
   ['blocks', ['blocks']],
   ['buildings', ['buildings']],
@@ -43,6 +45,7 @@ const CITY_STAGES = [
   ['secrets', ['places.secrets']],
   ['courses', ['places.courses']],
   ['places (rest)', ['places']],
+  ['street props settle', ['streetscape']],
 ];
 
 async function child() {
@@ -192,9 +195,10 @@ async function main() {
   } finally {
     if (busy) busy.kill('SIGKILL');
   }
+  const best = args.includes('--best');
   const med = (k) => {
     const v = res.map((r) => r[k]).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
-    return v.length ? v[(v.length - 1) >> 1] : NaN;
+    return v.length ? v[best ? 0 : (v.length - 1) >> 1] : NaN;
   };
   const keys = Object.keys(res[0]);
   if (args.includes('--json')) {
@@ -203,7 +207,7 @@ async function main() {
     console.log(JSON.stringify(o));
     return;
   }
-  console.log(`${slow ? 'slow-runner simulation (taskset -c 0 with a busy loop)' : 'normal'}: median of ${runs} cold runs, ms`);
+  console.log(`${slow ? 'slow-runner simulation (taskset -c 0 with a busy loop)' : 'normal'}: ${best ? 'best' : 'median'} of ${runs} cold runs, ms`);
   for (const k of keys) console.log(`${k.padEnd(28)} ${String(Math.round(med(k))).padStart(7)}   [${res.map((r) => Math.round(r[k])).join(', ')}]`);
 }
 
