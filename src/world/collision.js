@@ -27,6 +27,10 @@ export const BREAK_BACK_T = 120, BREAK_BACK_FAR = 150, BREAK_RING = 16;
 
 const CELL = 32;
 const NO_ITEMS = [];
+// Margin (m) of the quick box rejects in front of the exact capsule tests:
+// far over the rounding of coordinates under 1e5 m (about 1e-11 m), so a
+// shape the quick test skips is one the exact test misses too.
+const SEG_EPS = 1e-3;
 
 export function createCollisionWorld() {
   const cells = new Map();
@@ -158,6 +162,12 @@ export function createCollisionWorld() {
               }
             } else if (kind === 2) {
               if (it.off || it.h <= y) continue;
+              // Clear of the segment's box by more than its reach (plus a
+              // margin well over any rounding of the exact test below): the
+              // exact test would miss too, so skip its division.
+              const qx = out.x, qz = out.z, qr = r + it.r + SEG_EPS;
+              if ((qx - it.x0 > qr && qx - it.x1 > qr) || (it.x0 - qx > qr && it.x1 - qx > qr) ||
+                (qz - it.z0 > qr && qz - it.z1 > qr) || (it.z0 - qz > qr && it.z1 - qz > qr)) continue;
               const sx = it.x1 - it.x0, sz = it.z1 - it.z0;
               const L2 = sx * sx + sz * sz;
               let t = L2 > 1e-12 ? ((out.x - it.x0) * sx + (out.z - it.z0) * sz) / L2 : 0;
@@ -180,6 +190,9 @@ export function createCollisionWorld() {
               if (it.off || it.h <= y) continue;
               const dx = out.x - it.x, dz = out.z - it.z;
               const rr = r + it.r;
+              // |dx| or |dz| at least rr: d2 >= rr * rr below as well (squares
+              // and sums round monotonically), so this skips the same shapes.
+              if (dx >= rr || dx <= -rr || dz >= rr || dz <= -rr) continue;
               const d2 = dx * dx + dz * dz;
               if (d2 >= rr * rr) continue;
               const d = Math.sqrt(d2) || 1e-6;
@@ -238,6 +251,11 @@ export function createCollisionWorld() {
       } else if (it.kind === 2) {
         // Ray against a capsule, as against its swept circle: sampled at the
         // closest approach of the ray to the segment's line, then refined.
+        // A capsule whose box (plus its radius and SEG_EPS) lies clear of
+        // the box of the ray up to best cannot give a hit before best.
+        const ex = x + dx * best, ez = z + dz * best, qr = it.r + SEG_EPS;
+        if ((it.x0 < it.x1 ? it.x0 : it.x1) - qr > (x > ex ? x : ex) || (it.x0 > it.x1 ? it.x0 : it.x1) + qr < (x < ex ? x : ex) ||
+          (it.z0 < it.z1 ? it.z0 : it.z1) - qr > (z > ez ? z : ez) || (it.z0 > it.z1 ? it.z0 : it.z1) + qr < (z < ez ? z : ez)) continue;
         const t = rayCapsule(x, z, dx, dz, it);
         if (t >= 0 && t < best) best = t;
       } else {
@@ -460,19 +478,22 @@ function segDist2(x, z, it) {
 // Distance along the unit ray (x, z) + t (dx, dz) to a capsule, or -1.
 // The capsule is the union of a slab (a rectangle about the segment) and
 // two end circles; the smallest entry t of the three is the answer.
+// (The end circles go through a plain function, not a closure made per
+// call: the same arithmetic, nothing allocated.)
+function rayCircleT(x, z, dx, dz, cx, cz, r) {
+  const ox = x - cx, oz = z - cz;
+  const b = ox * dx + oz * dz, c = ox * ox + oz * oz - r * r;
+  const disc = b * b - c;
+  if (disc < 0) return -1;
+  const t = -b - Math.sqrt(disc);
+  return t >= 0 ? t : c <= 0 ? 0 : -1;
+}
 function rayCapsule(x, z, dx, dz, it) {
   let best = -1;
-  const circ = (cx, cz) => {
-    const ox = x - cx, oz = z - cz;
-    const b = ox * dx + oz * dz, c = ox * ox + oz * oz - it.r * it.r;
-    const disc = b * b - c;
-    if (disc < 0) return;
-    const t = -b - Math.sqrt(disc);
-    const tt = t >= 0 ? t : c <= 0 ? 0 : -1;
-    if (tt >= 0 && (best < 0 || tt < best)) best = tt;
-  };
-  circ(it.x0, it.z0);
-  circ(it.x1, it.z1);
+  let tt = rayCircleT(x, z, dx, dz, it.x0, it.z0, it.r);
+  if (tt >= 0 && (best < 0 || tt < best)) best = tt;
+  tt = rayCircleT(x, z, dx, dz, it.x1, it.z1, it.r);
+  if (tt >= 0 && (best < 0 || tt < best)) best = tt;
   const sx = it.x1 - it.x0, sz = it.z1 - it.z0, L = Math.hypot(sx, sz);
   if (L > 1e-9) {
     const ux = sx / L, uz = sz / L, nx = -uz, nz = ux;

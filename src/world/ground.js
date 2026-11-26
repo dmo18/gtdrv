@@ -89,6 +89,14 @@ export function createGround(city) {
     if (geo) reach[k] = reach[k] * 1.6 + 1;
     if (reach[k] > maxReach) maxReach = reach[k];
   }
+  // The same per edge numbers side by side (a, unit direction, length,
+  // reach: one cache line an edge) for the reject that geoSurface runs on
+  // every edge near a point.
+  const ER = new Float64Array(6 * NE);
+  for (let k = 0; k < NE; k++) {
+    const o = 6 * k;
+    ER[o] = ax[k]; ER[o + 1] = az[k]; ER[o + 2] = ux[k]; ER[o + 3] = uz[k]; ER[o + 4] = len[k]; ER[o + 5] = reach[k];
+  }
   const scratch = [];
   const segD2 = (px, pz, k) => {
     let t = (px - ax[k]) * ux[k] + (pz - az[k]) * uz[k];
@@ -147,6 +155,9 @@ export function createGround(city) {
     const js = cellJ[c];
     for (let q = 0; q < js.length; q++) {
       const J = geo.junctions[js[q]];
+      // (The junction's box holds its ring and its gores: off it, neither
+      // holds the point.)
+      if (x < J.x0 || x > J.x1 || z < J.z0 || z > J.z1) continue;
       if (inJunctionArea(J, x, z)) return 1;
       for (let gq = 0; gq < J.gores.length; gq++) if (pointInRing(J.gores[gq].poly, x, z)) return 1;
     }
@@ -154,13 +165,15 @@ export function createGround(city) {
     let side = false, median = false;
     nearEdges = 0;
     for (let q = 0; q < es.length; q++) {
-      const k = es[q];
+      const k = es[q], o = 6 * k;
+      // (Out of reach first, then inner: either skips the edge.)
+      const rk = ER[o + 5], ox = x - ER[o], oz = z - ER[o + 1];
+      const d = ox * ER[o + 2] + oz * ER[o + 3];
+      if (d < -rk || d > ER[o + 4] + rk) continue;
+      const s = -ox * ER[o + 3] + oz * ER[o + 2];
+      if (Math.abs(s) > rk) continue;
       if (geo.inner[k]) continue;
       const e = edges[k];
-      const d = (x - ax[k]) * ux[k] + (z - az[k]) * uz[k];
-      if (d < -reach[k] || d > len[k] + reach[k]) continue;
-      const s = -(x - ax[k]) * uz[k] + (z - az[k]) * ux[k];
-      if (Math.abs(s) > reach[k]) continue;
       nearEdges++;
       const qa = 2 * k, qb = qa + 1;
       const qf = d < geo.trim[qa] ? qa : d > len[k] - geo.trim[qb] ? qb : -1;
@@ -204,7 +217,9 @@ export function createGround(city) {
   // from fillOf), so no strip of ground under 1.5 m is left between two
   // roads. Per edge, sampled every FILL_STEP m from strip end to strip end,
   // right side then left; computed the first time it is asked for.
-  const fillCache = new Map();
+  // (Per edge id, null until asked: a plain array, not a Map, for the
+  // lookups geoSurface makes for every edge near a point.)
+  const fillCache = new Array(NE).fill(null);
   const NOFILL = new Float32Array(0);
   // (Samples are worked out one at a time when first needed, so no call
   // costs more than a couple of samples; fillOf, for the meshes, works
@@ -215,15 +230,15 @@ export function createGround(city) {
   // m. That gap is asphalt: no sidewalk, median or fill on that side, so
   // two strips that fork or run close read as one widening surface.
   // Per edge, right then left; a station is worked out when first asked.
-  const gapCache = new Map();
+  const gapCache = new Array(NE).fill(null);
   function gapArr(k) {
-    let f = gapCache.get(k);
+    let f = gapCache[k];
     if (f) return f;
     const e = edges[k];
-    if (geo.inner[k] || e.ped) { gapCache.set(k, NOFILL); return NOFILL; }
+    if (geo.inner[k] || e.ped) { gapCache[k] = NOFILL; return NOFILL; }
     const n = Math.max(1, Math.ceil((len[k] - geo.trim[2 * k + 1] - geo.trim[2 * k]) / FILL_STEP)) + 1;
     f = new Float32Array(2 * n).fill(NaN);
-    gapCache.set(k, f);
+    gapCache[k] = f;
     return f;
   }
   function gapStation(k, f, i) {
@@ -280,13 +295,13 @@ export function createGround(city) {
   }
 
   function fillArr(k) {
-    let f = fillCache.get(k);
+    let f = fillCache[k];
     if (f) return f;
     const e = edges[k];
-    if (geo.inner[k] || e.bridge || e.causeway || e.ped) { fillCache.set(k, NOFILL); return NOFILL; }
+    if (geo.inner[k] || e.bridge || e.causeway || e.ped) { fillCache[k] = NOFILL; return NOFILL; }
     const n = Math.max(1, Math.ceil((len[k] - geo.trim[2 * k + 1] - geo.trim[2 * k]) / FILL_STEP)) + 1;
     f = new Float32Array(2 * n).fill(NaN);
-    fillCache.set(k, f);
+    fillCache[k] = f;
     return f;
   }
   function fillOf(k) {
@@ -442,9 +457,16 @@ export function createGround(city) {
   // ends and suppressed sides, so no strip of ground under 1.5 m survives
   // between two roads. Only points within reach of an edge get here;
   // results are kept in a small cache on a 0.25 m lattice.
-  const NET_MAX = 2.0, NET_STEP = 0.25, NET_CAP = 20000;
+  const NET_MAX = 2.0, NET_STEP = 0.25;
   const NET_DIRS = [1, 0, 0, 1, Math.SQRT1_2, Math.SQRT1_2, Math.SQRT1_2, -Math.SQRT1_2];
-  const netCache = new Map(), netCache1 = new Map();
+  // The caches: direct-mapped tables of lattice points (2^NET_BITS slots,
+  // a newer point takes the slot over). The answer is a pure function of
+  // the point, so what is kept only changes the cost, never the answer;
+  // integer keys in typed arrays, so a lookup allocates nothing (a Map
+  // boxed the large keys of far points).
+  const NET_BITS = 15;
+  const netTable = () => ({ qx: new Int32Array(1 << NET_BITS), qz: new Int32Array(1 << NET_BITS), v: new Int8Array(1 << NET_BITS).fill(-1) });
+  const netCache = netTable(), netCache1 = netTable();
   // Two rounds: the second sees what the first filled, so a fill never
   // leaves a new narrow strip beside itself.
   const net1 = (x, z) => baseSurface(x, z) || netRound(x, z, netCache1, baseSurface);
@@ -453,9 +475,10 @@ export function createGround(city) {
   }
   function netRound(x, z, cache, probe) {
     const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
-    const key = qx * 131071 + qz;
-    const hit = cache.get(key);
-    if (hit !== undefined) return hit;
+    // (A point off the int32 range is worked out every time.)
+    const keyed = (qx | 0) === qx && (qz | 0) === qz;
+    const slot = keyed ? (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS) : 0;
+    if (keyed && cache.v[slot] >= 0 && cache.qx[slot] === qx && cache.qz[slot] === qz) return cache.v[slot];
     // Worked out at the lattice point, so the answer is one value per cell
     // whatever point of the cell asked first.
     x = qx * NET_STEP;
@@ -480,8 +503,7 @@ export function createGround(city) {
         if (sb) { out = sa === 1 || sb === 1 ? 1 : 2; break; }
       }
     }
-    if (cache.size >= NET_CAP) cache.clear();
-    cache.set(key, out);
+    if (keyed) { cache.qx[slot] = qx; cache.qz[slot] = qz; cache.v[slot] = out; }
     return out;
   }
 

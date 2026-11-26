@@ -279,3 +279,70 @@ the tree between the runs, so totals move a few percent on their own.
   0.13.3: cause found. The bursts come when Blink builds a DOM interface's prototype on its
   first use (IdleDeadline, URL, the Event family up to HTMLInputElement when the Phone check
   opens Settings), once per page load; see docs/STATUS.md "0.13.3 allocations and routing".
+
+## Frame hotspots of the step (0.13.5)
+
+Profile: `perf-phonecheck.mjs --profile --passes 1 --no-gc` (4x, 60 s drive, five stars), its
+samples cut to the `g.step` part of each frame and summed by function (self time) and by source
+file (an unminified build of the same tree maps lines to files). Beach and Downtown, the old tree
+(the main branch at 0.13.5) and the new one played one after the other in the same session.
+Outside combat and helipilot, the step's largest costs in the files of this pass were:
+
+| step self time, 60 s drive, 4x, ms (share of the step) | Beach | Downtown |
+|---|---|---|
+| collision.js: resolveIn, heightAt, rayList, raycast | 2261 to 3691 (10 to 15 %) | 2322 to 2717 (9 to 11 %) |
+| ground.js plus junctions.js (geoSurface, inJunctionArea, gapArr, net) | 275 to 809 (1 to 3 %) | 2174 to 3050 (9 to 12 %) |
+| minimap draw (canvas calls included) | about 500 (2 %) | about 350 (1.5 %) |
+| route tracker, HUD update | under 20 | under 20 |
+
+(Ranges are over two baseline runs of each map.) Route tracking and the HUD are already
+change-only and do not show up. Shadows, lights and the traffic and ped mesh updates belong to
+the draw and to files outside this pass.
+
+What changed (byte-identical answers: a node check hashes 200k ground answers, 100k
+resolveCircle, heightAt and raycast answers, netQuads, fillOf and gapOf of every seventh edge,
+and every craft and ped position of a 900-step survival-harness drive, Beach and Downtown: the same
+hashes before and after):
+
+- collision.js resolveIn: a circle with |dx| or |dz| of at least the summed radii is skipped
+  before its squares (squares and sums round monotonically, so the exact test skips the same
+  ones); a capsule whose box, grown by both radii and 1 mm, is clear of the point is skipped
+  before its division.
+- collision.js rayList / rayCapsule: a capsule whose box (grown by its radius and 1 mm) is clear of
+  the ray's box up to the best hit so far is skipped; the two end circles go through a plain
+  function, not a closure made for every capsule.
+- ground.js: per-edge gap and fill caches are arrays by edge id (were Maps); geoSurface's
+  per-edge reject reads one interleaved record per edge and the `inner` flag only after it;
+  the junction loop skips junctions whose box (it holds the ring and the gores) is clear of the
+  point before the gore rings; the two narrow-gap net caches are direct-mapped typed tables (a
+  Map boxed the large lattice keys on every lookup; the answer is a pure function of the point,
+  so what the cache keeps changes only the cost).
+
+Measured (node 22, the same V8 family as Chrome, replay of the queries a 900-step Downtown
+survival drive made, best of 7 passes, CPU time, the two trees run alternately):
+
+| replay, Downtown | before | after |
+|---|---|---|
+| 45,437 resolveCircle | 13.3 to 14.1 ms | 13.1 ms |
+| 454,380 heightAt | 95 to 97 ms | 96 ms |
+| 22,719 x 20 jittered raycasts + 920 x 8 rays of 60 m | 17.6 to 17.7 ms | 9.4 to 9.9 ms |
+| 71,738 groundAt / surfaceAt on a fresh ground (cold caches) | 49.1 to 49.7 ms mean | 45.9 to 51.0 ms mean |
+
+In Chrome at 4x the same comparison is within the noise of this shared machine: between two
+runs of the same tree the step's total moved 10 to 15 percent and single functions 30 to 50
+percent (load average 9 to 46). New tree, one run each: Beach collision 2498 ms of 26.9 s
+(9.3 %), ground 460 (1.7 %); Downtown collision 3333 of 28.6 s (11.7 %), ground 3101
+(10.9 %). The phone frame time is not measurably changed by this pass.
+
+Tried and taken out: a direct-mapped cache of the cell lists (static and lazy layers) with the
+shapes' boxes packed per list in Float64Arrays (one cell: the packed boxes are read and a shape
+object is touched only when the query reaches its box). In node it cut the resolveCircle
+replay by 28 percent and heightAt by 18, but in Chrome the cache function itself took 380 to 650 ms
+of self time in both maps (its loads and the WeakMap lookups of the packs, not inlined there) and
+resolveIn did not get cheaper: a net loss there. Also tried: the height test first in heightAt
+(no gain in node).
+
+Where to look next: resolveIn's cost per call in Chrome is about four times node's for the same
+queries, which points at its shape reads (the same boxing as 0.12.6) rather than its arithmetic;
+the calls per step (three body circles per car, peds, crews) are the other lever. The minimap
+redraws whenever the craft moves 0.35 px or turns 0.004 rad (nearly every frame while driving).
