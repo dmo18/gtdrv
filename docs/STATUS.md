@@ -1245,3 +1245,4 @@ Note on 0.11.1 (2026-11-24): the first release commit also carried unfinished PE
 - Behavior: byte-identical (node hash of ground, resolve, height and ray answers, netQuads, fills, gaps and a 900-step survival drive, Beach and Downtown, same before and after). Node replays: raycasts 1.8 times faster, ground on fresh caches and resolveCircle about the same to a few percent; in Chrome at 4x no change beyond this machine's run-to-run noise (10 to 15 % on the step's total).
 - Tried and taken out: a cell-list cache with packed shape boxes (node: resolveCircle -28 %, heightAt -18 %; Chrome: the cache itself cost 380 to 650 ms a drive, a net loss).
 - Gates: eslint, npm test 1191 of 1192 (the H1 spatial timing test under load; passes alone), smoke --extra ok.
+- 0.13.6 review lows (not fixed): traffic.js:143 dead-end fallback order; police.js:220 ram closing speed measured along the center line; traffic.js:632 boxOcc wait has no timeout (jam despawn at 40 s covers it).
