@@ -231,6 +231,17 @@ export function createGround(city) {
   // two strips that fork or run close read as one widening surface.
   // Per edge, right then left; a station is worked out when first asked.
   const gapCache = new Array(NE).fill(null);
+  // How far from a station point a strip that can face it may be: its
+  // node line within hw + |off| + |eoff| + GAP_MAX + 1 (the test below),
+  // its strip (city.edgesNear: the node line moved off, plus half its
+  // width) within that plus |off| again.
+  const GAP_NEAR = [];
+  let gapReach = 0;
+  if (geo) {
+    let mOff = 0, mE = 0;
+    for (let k = 0; k < NE; k++) { mOff = Math.max(mOff, Math.abs(edges[k].off || 0)); mE = Math.max(mE, Math.abs(geo.eoff[k] || 0)); }
+    gapReach = 2 * mOff + mE + GAP_MAX + 1.5;
+  }
   function gapArr(k) {
     let f = gapCache[k];
     if (f) return f;
@@ -255,9 +266,16 @@ export function createGround(city) {
       const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), ci = cx - gx0, cj = cz - gz0;
       if (ci < 0 || cj < 0 || ci >= W || cj >= H) continue;
       const c = cj * W + ci;
-      const es = cellE[c] || build(c, cx, cz);
+      // (The strips within reach of the station point: the cell's list
+      // when it is built; else the city's edge index, asked for no more
+      // than a facing curb can be away (a station need not build its 32 m
+      // cell, which lists every strip whose sidewalk reaches it).)
+      let es = cellE[c], ns;
+      if (es) ns = es.length;
+      else if (city.edgesNear && NE > 400) { es = GAP_NEAR; ns = city.edgesNear(x, z, gapReach, GAP_NEAR).length; }
+      else { es = build(c, cx, cz); ns = es.length; }
       let best = Infinity;
-      for (let q = 0; q < es.length; q++) {
+      for (let q = 0; q < ns; q++) {
         const k2 = es[q];
         if (k2 === k || geo.inner[k2] || edges[k2].ped || !!edges[k2].bridge !== !!e.bridge) continue;
         if (Math.abs(ux[k] * ux[k2] + uz[k] * uz[k2]) < GAP_COS) continue;
@@ -694,6 +712,62 @@ export function createGround(city) {
     return geo ? geoSurface(x, z, c) : surfaceAt(x, z);
   }
 
+  // 1 where baseAt is 1 (the strips, paved gaps, junctions and gores),
+  // else 0: baseAt without its sliver fills, which only tell sidewalk from
+  // land.
+  function roadAt(x, z) {
+    if (!geo) return baseAt(x, z) === 1 ? 1 : 0;
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    const i = cx - gx0, j = cz - gz0;
+    if (i < 0 || j < 0 || i >= W || j >= H) return 0;
+    const c = j * W + i;
+    if (!cellE[c]) build(c, cx, cz);
+    return geoRoad(x, z, c);
+  }
+  // geoSurface's road answer alone (1 where it returns 1, else 0): the
+  // junction areas and gores, the strips between their ends, the paved
+  // gaps beside them. (A small function of its own: it runs where the
+  // build asks the ground, and compiles small.)
+  function geoRoad(x, z, c) {
+    const js = cellJ[c];
+    for (let q = 0; q < js.length; q++) {
+      const J = geo.junctions[js[q]];
+      if (x < J.x0 || x > J.x1 || z < J.z0 || z > J.z1) continue;
+      if (inJunctionArea(J, x, z)) return 1;
+      for (let gq = 0; gq < J.gores.length; gq++) if (pointInRing(J.gores[gq].poly, x, z)) return 1;
+    }
+    const es = cellE[c];
+    for (let q = 0; q < es.length; q++) {
+      const k = es[q], o = 6 * k;
+      const rk = ER[o + 5], ox = x - ER[o], oz = z - ER[o + 1];
+      const d = ox * ER[o + 2] + oz * ER[o + 3];
+      if (d < -rk || d > ER[o + 4] + rk) continue;
+      const s = -ox * ER[o + 3] + oz * ER[o + 2];
+      if (Math.abs(s) > rk) continue;
+      if (geo.inner[k]) continue;
+      const qa = 2 * k, qb = qa + 1;
+      const qf = d < geo.trim[qa] ? qa : d > len[k] - geo.trim[qb] ? qb : -1;
+      if (qf >= 0 && geo.jEnd[qf] >= 0) {
+        const J = geo.junctions[geo.jEnd[qf]];
+        if (J.fan && pointInRing(fanMouthHull(city, J), x, z)) continue;
+      }
+      const d0 = geo.jEnd[qa] >= 0 ? 0 : geo.trim[qa] + geo.miter[qa] * s;
+      const d1 = geo.jEnd[qb] >= 0 ? len[k] : len[k] - geo.trim[qb] + geo.miter[qb] * s;
+      if (d < d0 || d > d1) continue;
+      const C = curbsAt(geo, edges[k], d);
+      const cl = C.l, cr = C.r;
+      if (s >= cl && s <= cr) return 1;
+      if (s > cr) {
+        const g = gapAt(k, 0, d);
+        if (g > 0 && s <= cr + g) return 1;
+        continue;
+      }
+      const gl = gapAt(k, 1, d);
+      if (gl > 0 && s >= cl - gl) return 1;
+    }
+    return 0;
+  }
+
   function groundAt(x, z) {
     const s = surfaceAt(x, z);
     if (s === 2 || s === 3) return CURB_H;
@@ -707,7 +781,7 @@ export function createGround(city) {
     }
     return 0;
   }
-  return { groundAt, surfaceAt, baseAt, netQuads, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
+  return { groundAt, surfaceAt, baseAt, roadAt, netQuads, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
 }
 
 // The ground of a city, made once and kept (city.groundAt when the city

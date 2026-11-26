@@ -157,3 +157,113 @@ test('streets keep their lamps and signaled junctions their masts', () => {
     assert.ok(bare <= Math.max(1, nodes * 0.04), `${id}: ${bare} of ${nodes} signaled junctions with no mast`);
   }
 });
+
+// ---- 0.13.7 build speed and density (docs/STATUS.md) ----
+
+test('a signaled junction whose masts all find no room loses its light; one with a mast that stands keeps it', async () => {
+  const { settleStreetProps } = await import('../src/world/streetscape.js');
+  const city = regionCity('miami-downtown'), geo = city.roadGeo;
+  // A signaled node of a one-node junction with masts.
+  const byNode = new Map();
+  for (const s of city.signals) byNode.set(s.node, (byNode.get(s.node) || 0) + 1);
+  const n = city.nodes.find((q) => q.signal && byNode.get(q.id) && geo.nodeJ[q.id] >= 0 && geo.junctions[geo.nodeJ[q.id]].nodes.length === 1);
+  assert.ok(n, 'a signaled single-node junction');
+  // A copy of the city with that node's masts alone, each meant for a
+  // place far off its edge: nothing can stand there.
+  const away = [n.edges[0], 1, -1000, 0.9, 1];
+  const nodes = city.nodes.slice();
+  nodes[n.id] = { ...n };
+  const masts = city.signals.filter((s) => s.node === n.id).map((s) => ({ ...s }));
+  const c2 = { ...city, nodes, props: [], furniture: [], signals: masts };
+  const st = settleStreetProps(c2, new Map(masts.map((s) => [s, away])));
+  assert.equal(c2.signals.length, 0);
+  assert.equal(st.unlit, 1, JSON.stringify(st));
+  assert.equal(nodes[n.id].signal, false, 'no light without a mast');
+  assert.equal(n.signal, true, 'the city itself is untouched');
+  // The same with a second mast that stands where it is: the light stays.
+  const nodes3 = city.nodes.slice();
+  nodes3[n.id] = { ...n };
+  const keep = city.signals.find((s) => s.node === n.id);
+  const gone = { ...keep }, one = { ...keep };
+  const c3 = { ...city, nodes: nodes3, props: [], furniture: [], signals: [gone, one] };
+  const st3 = settleStreetProps(c3, new Map([[gone, away]]));
+  assert.equal(nodes3[n.id].signal, true);
+  assert.ok(!st3.unlit && c3.signals.length === 1, JSON.stringify(st3));
+  // No region's build left a lit junction without a mast it had.
+  for (const id of REGION_IDS) {
+    const s = regionCity(id).graphStats.streetProps;
+    assert.ok(!s.unlit, `${id}: ${s.unlit} junctions lost their light`);
+  }
+});
+
+test('parking bays: the build\'s parking spots pass (baysOnly) and the full dressing place the same hedges and bays', () => {
+  let lots = 0, bays = 0, off = 0, spots = 0;
+  const part = [], full = [];
+  for (const id of ['miami-downtown', 'miami-west']) {
+    const city = regionCity(id);
+    for (const lot of city.lots) {
+      if (lot.type !== 'carpark') continue;
+      dressLot(city, lot, part, true);
+      dressLot(city, lot, full);
+      lots++;
+      // The bays-only dressing is the full one's first features, value for value.
+      assert.ok(part.length <= full.length, `lot ${lot.id}`);
+      for (let k = 0; k < part.length; k++) {
+        const a = part[k], b = full[k];
+        assert.ok(a.kind === b.kind && a.x === b.x && a.z === b.z && a.l === b.l && a.heading === b.heading, `${id} lot ${lot.id} feature ${k}: ${a.kind} at ${a.x}, ${a.z} vs ${b.kind} at ${b.x}, ${b.z}`);
+        if (a.kind === 'bay') bays++;
+      }
+    }
+    // Every parking spot of a lot lies on a bay of the drawn dressing.
+    for (const p of city.parkingSpots) {
+      if (!p.lot) continue;
+      const lot = city.lotAt(p.x, p.z);
+      if (!lot) continue;
+      spots++;
+      dressLot(city, lot, full);
+      const on = full.some((f) => {
+        if (f.kind !== 'bay') return false;
+        const c = Math.cos(f.heading), s = Math.sin(f.heading), dx = p.x - f.x, dz = p.z - f.z;
+        return Math.abs(dx * c + dz * s) <= f.l / 2 + 0.01 && Math.abs(-dx * s + dz * c) <= f.w / 2 + 0.01;
+      });
+      if (!on) off++;
+    }
+  }
+  assert.ok(lots > 500 && bays > 1000 && spots > 500, `${lots} parking lots, ${bays} bay rows, ${spots} spots`);
+  assert.equal(off, 0, `${off} parking spots off the drawn bays`);
+});
+
+test('road verdicts kept per lot: a dressing read from them is the dressing worked out afresh', () => {
+  const city = regionCity('miami-beach');
+  const a = [], b = [];
+  let n = 0;
+  for (const lot of city.lots) {
+    if (lot.id % 7) continue;
+    dressLot(city, lot, a);
+    dressLot(city, lot, a);
+    // A copy of the lot object: nothing kept for it yet.
+    dressLot(city, { ...lot }, b);
+    assert.equal(a.length, b.length, `lot ${lot.id}`);
+    for (let k = 0; k < a.length; k++) assert.deepEqual(a[k], b[k], `lot ${lot.id} feature ${k}`);
+    n++;
+  }
+  assert.ok(n > 500, `${n} lots`);
+});
+
+test('ground roadAt: 1 exactly where baseAt is 1', () => {
+  for (const id of ['miami-downtown', 'miami-south']) {
+    const city = regionCity(id), G = groundOf(city);
+    let road = 0;
+    for (let k = 0; k < 400; k++) {
+      const e = city.edges[(k * 37) % city.edges.length], a = city.nodes[e.a];
+      const d = ((k % 10) * e.length) / 10;
+      for (let s = -12; s <= 12; s += 1.5) {
+        const x = a.x + e.ux * d - e.uz * s, z = a.z + e.uz * d + e.ux * s;
+        const want = G.baseAt(x, z) === 1 ? 1 : 0;
+        assert.equal(G.roadAt(x, z), want, `${id} at ${x}, ${z}`);
+        road += want;
+      }
+    }
+    assert.ok(road > 1000, `${road} road points`);
+  }
+});

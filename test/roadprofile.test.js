@@ -229,3 +229,49 @@ test('city.streetAt: the street under a point, the cross street ahead', () => {
   const named = c.edges.filter((e) => e.name && e.length >= 20).length;
   assert.ok(n / named > 0.97, `${n} of ${named}`);
 });
+
+// (0.13.7 review) A lane tag is kept as far as the class's cap allows:
+// a tag at or under the cap is the road's lanes, one past it is cut to
+// the cap (laneCaps), never below. The lanes a tag gives, clamped:
+// one-way min(tag, cap); two-way half the total each way (a one lane tag
+// is one each way), the odd lane or one past the cap a turn lane where
+// the class has one.
+function clampedTag(cls, oneway, tag) {
+  const cap = laneCaps(cls);
+  if (oneway) return [Math.max(1, Math.min(tag, cap[3])), 0, 0];
+  const total = tag === 1 ? 2 : tag;
+  const each = Math.max(1, Math.min(total >> 1, cap[1]));
+  return [each, each, cap[4] && ((total & 1) || total > 2 * cap[1]) ? 1 : 0];
+}
+test('lane tags are kept up to the class cap, clamped past it', () => {
+  const classes = ['residential', 'living_street', 'unclassified', 'service', 'tertiary', 'tertiary_link', 'secondary', 'secondary_link', 'primary', 'primary_link', 'trunk', 'trunk_link', 'motorway', 'motorway_link'];
+  for (const cls of classes) {
+    const cap = laneCaps(cls);
+    for (const oneway of [0, 1]) {
+      for (let tag = 1; tag <= 9; tag++) {
+        const p = roadProfile({ class: cls, lanes: tag, oneway });
+        const got = [p.lanesF, p.lanesB, p.center ? 1 : 0];
+        assert.deepEqual(got, clampedTag(cls, oneway, tag), `${cls} ${oneway ? 'one-way' : 'two-way'} lanes=${tag}`);
+        // At or under the cap the tag is kept whole.
+        const lanes = p.lanesF + p.lanesB + (p.center ? 1 : 0);
+        if (oneway && tag <= cap[3]) assert.equal(lanes, tag, `${cls} one-way ${tag}`);
+        if (!oneway && tag >= 2 && tag <= 2 * cap[1] + (cap[4] ? 1 : 0) && (cap[4] || tag % 2 === 0)) assert.equal(lanes, tag, `${cls} two-way ${tag}`);
+      }
+    }
+  }
+  // On the map: a tagged edge has the clamped tag's lanes unless its
+  // street's one cross section (harmonizeStreets) gave it the lanes of
+  // the rest of the street (0.13.7: 7 to 19 % of them, by region).
+  for (const id of REGION_IDS) {
+    let tagged = 0, kept = 0;
+    for (const e of cities[id].edges) {
+      if (!e.lanesTag || e.merged || e.causeway || e.ped) continue;
+      tagged++;
+      const want = clampedTag(e.cls, e.oneway, e.lanesTag);
+      if (e.lanesF === want[0] && e.lanesB === want[1] && (e.center ? 1 : 0) === want[2]) kept++;
+      else assert.ok(e.lanesF <= laneCaps(e.cls)[e.oneway ? 3 : 1], `${id} edge ${e.id} over the cap`);
+    }
+    console.log(`# ${id}: ${kept} of ${tagged} tagged edges keep their clamped tag`);
+    assert.ok(tagged > 100 && kept >= 0.8 * tagged, `${id}: ${kept} of ${tagged}`);
+  }
+});

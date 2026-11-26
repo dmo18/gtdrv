@@ -174,3 +174,45 @@ test('road the ground calls road is drawn as asphalt, with no lawn or sidewalk o
     assert.ok(pts > 500 && off === 0, `${id}: ${off} of ${pts} paint points off road`);
   }
 });
+
+// (0.13.7 review) Routability after the lane and width changes: every
+// node of each region's road graph is reached by road from the player's
+// start (any way along an edge: the GPS falls back to that when no legal
+// route exists). Driven legally (a one-way only from its node a, citygen
+// canDrive), from the start and back to it, no more nodes are out of reach
+// than on 0.13.6, before the road logic (one-way runs cut by the region's
+// crop and a few one-way traps of the data: Downtown 51 and 96, Beach 44
+// and 37, North 38 and 25, West 40 and 21, South 55 and 32).
+const LEGAL_0136 = { 'miami-downtown': [51, 96], 'miami-beach': [44, 37], 'miami-north': [38, 25], 'miami-west': [40, 21], 'miami-south': [55, 32] };
+test('routability: every road node of each region is reached from the player start; legal reach no worse than 0.13.6', () => {
+  for (const id of REGION_IDS) {
+    const c = regionCity(id), N = c.nodes.length;
+    const near = c.edgesNear(c.spawn.x, c.spawn.z, 3, []);
+    assert.ok(near.length, `${id}: the start is on a road`);
+    // dir 0: any way; 1: legal from the start; 2: legal back to it.
+    const reach = (dir) => {
+      const seen = new Uint8Array(N), stack = [];
+      for (const eid of near) for (const v of [c.edges[eid].a, c.edges[eid].b]) if (!seen[v]) { seen[v] = 1; stack.push(v); }
+      while (stack.length) {
+        const v = stack.pop();
+        for (const eid of c.nodes[v].edges) {
+          const e = c.edges[eid];
+          let o = -1;
+          if (dir === 0) o = e.a === v ? e.b : e.a;
+          else if (dir === 1) { if (e.a === v) o = e.b; else if (!e.oneway) o = e.a; }
+          else if (e.b === v) o = e.a; else if (!e.oneway) o = e.b;
+          if (o >= 0 && !seen[o]) { seen[o] = 1; stack.push(o); }
+        }
+      }
+      let out = 0;
+      const ex = [];
+      for (const n of c.nodes) if (n.edges.length && !seen[n.id]) { out++; if (ex.length < 5) ex.push(`${n.id} at ${n.x.toFixed(0)}, ${n.z.toFixed(0)}`); }
+      return [out, ex];
+    };
+    const [any, ex] = reach(0);
+    assert.equal(any, 0, `${id}: ${any} road nodes cut off from the start (${ex.join('; ')})`);
+    const [fwd] = reach(1), [back] = reach(2);
+    const [f0, b0] = LEGAL_0136[id];
+    assert.ok(fwd <= f0 && back <= b0, `${id}: ${fwd} nodes out of legal reach from the start (0.13.6 ${f0}), ${back} with no legal way back (${b0})`);
+  }
+});

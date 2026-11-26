@@ -2314,6 +2314,7 @@ export function createMiamiCity(data, opts = {}) {
   };
   // The strip of an edge: its node line moved `off` to the right.
   const SEG = [0, 0, 0, 0];
+  let STRIPS = null;
   const stripOf = (e) => {
     const a = nodes[e.a], b = nodes[e.b], o = e.off || 0;
     SEG[0] = a.x - e.uz * o; SEG[1] = a.z + e.ux * o; SEG[2] = b.x - e.uz * o; SEG[3] = b.z + e.ux * o;
@@ -2327,6 +2328,14 @@ export function createMiamiCity(data, opts = {}) {
   // Where the strip of edge e starts, from node id: past the junction box
   // and the junction polygon (props stand back from both).
   const trimAt = (e, id) => Math.max(nodes[id].hx, roadGeo.trim[2 * e.id + (e.b === id ? 1 : 0)]);
+  // The strips are final from here on (pairDivided set `off`): edgesNear
+  // reads them from flat arrays, x0, z0, x1, z1 and half the width per
+  // edge (the edge objects come in many shapes).
+  STRIPS = new Float64Array(5 * edges.length);
+  for (let k = 0; k < edges.length; k++) {
+    const g = stripOf(edges[k]);
+    STRIPS[5 * k] = g[0]; STRIPS[5 * k + 1] = g[1]; STRIPS[5 * k + 2] = g[2]; STRIPS[5 * k + 3] = g[3]; STRIPS[5 * k + 4] = edges[k].width / 2;
+  }
   lap('junctions');
   // Distance from a rect to the nearest road strip edge (negative = overlap).
   const roadClearance = (x0, z0, x1, z1, skip = null) => {
@@ -3163,7 +3172,9 @@ export function createMiamiCity(data, opts = {}) {
       const d = Math.abs(-(spawn.x - a.x) * e.uz + (spawn.z - a.z) * e.ux);
       if (d < bd) { bd = d; cur = e; at = e.ux * fx + e.uz * fz > 0 ? e.b : e.a; }
     }
-    for (let walked = 0; cur && walked < 400; ) {
+    // (At most 64 hops as well: a run of very short or zero-length edges
+    // would never add up to 400 m.)
+    for (let walked = 0, hops = 0; cur && walked < 400 && hops < 64; hops++) {
       const n = nodes[at];
       if (n.signal) { n.phase = cur.horizontal ? 0 : 12; return; }
       walked += cur.length;
@@ -3409,6 +3420,15 @@ export function createMiamiCity(data, opts = {}) {
   function edgesNear(x, z, r, out) {
     out.length = 0;
     const n = edgeIds(x - r, z - r, x + r, z + r);
+    const S = STRIPS;
+    if (S !== null && S.length === 5 * edges.length) {
+      for (let k = 0; k < n; k++) {
+        const o = 5 * EIDS[k], h = r + S[o + 4];
+        if (boxFar(x, z, S[o], S[o + 1], S[o + 2], S[o + 3], h)) continue;
+        if (segDist2(x, z, S[o], S[o + 1], S[o + 2], S[o + 3]) <= h * h) out.push(EIDS[k]);
+      }
+      return out;
+    }
     for (let k = 0; k < n; k++) {
       const e = edges[EIDS[k]];
       // The strip (moved `off` on a tight divided pair).
