@@ -8,7 +8,7 @@
 // system exist.
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
-import { createAdaptiveRes, maxRatioFor, floorFor } from './adaptres.js';
+import { createAdaptiveRes, maxRatioFor, floorFor, sizeCapFor, pixelBudgetFor, contextLimits, watchContext, RATIO_CAPS } from './adaptres.js';
 import { vehicleStats, noteVehicleHit, setVehicleLod, setVehicleNearLevel, setContactGround, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { BOAT_SPECS } from '../entities/boat.js';
@@ -455,24 +455,25 @@ export function createGraphics(game) {
     renderer.setRenderTarget(target);
     renderer.render(quad, quadCam);
   }
-  // The frame's own main-thread time (seconds): from the frame's start
-  // (the animation frame time, document.timeline) to the end of its draw
-  // calls, for the adaptive resolution (a frame made late by the steps or
-  // the draw's JavaScript is not the pixels' fault). -1: not known.
-  const timeline = typeof document !== 'undefined' && document.timeline ? document.timeline : null;
+  // The frame's own JavaScript time (seconds), for the adaptive
+  // resolution: from the frame's first step (game.frameStartMs, set by the
+  // loop in game.js) to just before the draw is issued, so the steps and
+  // the systems' updates count and the draw calls do not. A GPU-bound
+  // phone waits inside the draw calls (the bloom copy most of all); that
+  // wait is the pixels' fault and must lower the resolution (0.13.7
+  // render safety: the time ran to the end of the draw). -1: not known.
   let lastWork = -1;
   function noteWork() {
-    const t0 = timeline ? timeline.currentTime : null;
-    lastWork = typeof t0 === 'number' && t0 > 0 ? Math.max(0, performance.now() - t0) / 1000 : -1;
+    const t0 = game.frameStartMs;
+    lastWork = typeof t0 === 'number' && t0 >= 0 ? Math.max(0, performance.now() - t0) / 1000 : -1;
   }
   function renderFrame() {
+    noteWork();
+    if (ctx.lost) return;
     renderer.render(scene, camera);
     sys.calls = renderer.info.render.calls;
     sys.triangles = renderer.info.render.triangles;
-    if (!bloom.on) {
-      noteWork();
-      return;
-    }
+    if (!bloom.on) return;
     const sky = game.daynight && game.daynight.sky;
     const lit = sky ? sky.lit : 0;
     renderer.copyFramebufferToTexture(bloom.fb);
@@ -494,7 +495,6 @@ export function createGraphics(game) {
     drawPass(addMat, null);
     renderer.autoClear = ac;
     renderer.shadowMap.autoUpdate = sm;
-    noteWork();
   }
   game.resizeHooks.push(() => {
     if (bloom.on) sizeBloom();
@@ -546,14 +546,15 @@ export function createGraphics(game) {
 
   // ---- quality tiers ----
   let res = null;
-  let quality = -1, shedApplied = 0;
+  let quality = -1, shedApplied = 0, safeLow = false;
   function applyQuality(q0) {
     quality = q0;
-    // The adaptive controller sheds detail when the 1.0 pixel ratio
+    // The adaptive controller sheds detail when the pixel ratio
     // floor cannot hold the frame rate: one step drops to the Low tier's
     // shadow map and draw ranges.
     shedApplied = res ? res.shed : 0;
-    const q = shedApplied > 0 ? Math.min(q0, 0.75) : q0;
+    // After a lost WebGL context the rest of the session draws at Low.
+    const q = shedApplied > 0 || safeLow ? Math.min(q0, 0.75) : q0;
     const tier = q < 1 ? 0 : q > 1 ? 2 : 1;
     ud.tier = tier; // for tiles a streamed map builds later
     CAST_R = CAST_RS[tier];
@@ -569,7 +570,7 @@ export function createGraphics(game) {
 
   // ---- adaptive resolution ----
   // The loop's real frame time moves the pixel ratio between the screen's
-  // floor (floorFor: 1.0, up to 1.5 on a dense phone screen) and the
+  // floor (floorFor: 1.0, up to 1.25 on a dense phone screen) and the
   // device cap (maxRatioFor: 2.5 High, 2.25 Normal, 1.5 Low, never over
   // the device's own ratio). Frames the main thread made late (lastWork)
   // do not count against the pixels.
@@ -578,11 +579,63 @@ export function createGraphics(game) {
   // that holds 60 is never probed down and one that cannot starts where
   // it settled. A level below the cap waits a little before probing up
   // (0.13.7: 10 s, was 30; a level lost to one busy spell came back late).
+  // The cap also keeps the drawing buffer within the GPU's renderbuffer,
+  // viewport and texture sizes and a pixel budget (adaptres.js sizeCapFor:
+  // 2.6 million pixels, 3.2 million at High), so a tablet or a large
+  // window does not ask for a 10 million pixel buffer (0.13.7 render
+  // safety). The limits are read once; a lost context leaves them as read.
+  const gpuLimits = contextLimits(renderer.getContext ? renderer.getContext() : null);
+  function capFor(dpr, w, h) {
+    let m = Math.min(maxRatioFor(dpr, game.quality), sizeCapFor(w, h, gpuLimits, pixelBudgetFor(game.quality)));
+    if (safeLow) m = Math.min(m, RATIO_CAPS.low);
+    return m;
+  }
   const dpr0 = window.devicePixelRatio || 1;
-  const resMax = maxRatioFor(dpr0, game.quality);
+  const resMax = capFor(dpr0, window.innerWidth, window.innerHeight);
   const saved = loadRes(resMax);
   res = createAdaptiveRes({ max: resMax, min: floorFor(dpr0), start: saved || resMax, firstWait: saved && saved < resMax ? 10 : 0 });
   let resApplied = res.scale, resSaved = saved, resSavedMax = resMax;
+
+  // ---- lost WebGL context ----
+  // A phone short of GPU memory may take the context away. It is claimed
+  // (preventDefault) so the browser can give it back; three.js then makes
+  // its buffers, textures and programs again as they are drawn. Here the
+  // rest of the session drops to Low (tier and the 1.5 cap: less memory),
+  // the sky reflection is drawn again and the canvas resized. A notice
+  // shows while it is gone; a tap on it reloads (the session is saved).
+  let lostNote = null;
+  function showLost(on) {
+    if (typeof document === 'undefined' || !document.body) return;
+    if (!lostNote && on) {
+      lostNote = document.createElement('div');
+      lostNote.textContent = 'The browser reset the graphics. Restoring at Low quality; tap here to reload.';
+      lostNote.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:9999;max-width:80vw;padding:10px 16px;border-radius:8px;background:rgba(0,0,0,0.8);color:#fff;font:14px sans-serif;text-align:center;pointer-events:auto';
+      lostNote.addEventListener('click', () => {
+        try { window.location.reload(); } catch { /* nothing more to do */ }
+      });
+      document.body.appendChild(lostNote);
+    }
+    if (lostNote) lostNote.style.display = on ? 'block' : 'none';
+  }
+  const ctx = watchContext(renderer.domElement, {
+    onLost() {
+      safeLow = true;
+      quality = -1;
+      showLost(true);
+    },
+    onRestored() {
+      quality = -1;
+      bloom.fb = null; // remade at the new size if bloom comes back
+      const sky = game.daynight && game.daynight.sky;
+      try {
+        if (sky) updateEnv(sky, true);
+        if (game.resize) game.resize();
+      } catch (e) {
+        if (game.errors) game.errors.report('graphics.restore', e);
+      }
+      showLost(false);
+    },
+  });
 
   // ---- shader warm-up ----
   // Every shader program the game can need is compiled behind the title
@@ -826,6 +879,7 @@ export function createGraphics(game) {
     render(alpha, dt) {
       const sky = game.daynight && game.daynight.sky;
       if (game.quality !== quality || res.shed !== shedApplied) applyQuality(game.quality);
+      if (ctx.lost) return; // nothing is drawn; frame times mean nothing
       if (!warmed) warmUp();
       if (sys.adaptive && res.update(dt, lastWork) !== resApplied && game.resize) {
         resApplied = res.scale;
@@ -899,15 +953,18 @@ export function createGraphics(game) {
       if (sky) updateEnv(sky, true);
     },
     // Pixel ratio to draw at, for game.resize(): the adaptive scale,
-    // bounded by the device and the quality setting.
-    resolution(dpr) {
-      const max = maxRatioFor(dpr, game.quality);
+    // bounded by the device, the quality setting and the size of the
+    // drawing buffer for a w x h CSS px canvas (sizeCapFor).
+    resolution(dpr, w, h) {
+      const max = capFor(dpr, w > 0 ? w : window.innerWidth, h > 0 ? h : window.innerHeight);
       res.setMax(max);
       resApplied = res.scale;
       return sys.adaptive ? res.scale : max;
     },
     adaptive: true,
     res,
+    context: ctx, // { lost, losses, restores }: the WebGL context's state
+    get safeLow() { return safeLow; },
     // What the Settings graphics row shows: the tier drawn now (shed steps
     // drop it to Low), the pixel ratio and whether detail is being shed.
     tierNow() {

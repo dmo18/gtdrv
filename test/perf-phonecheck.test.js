@@ -24,12 +24,14 @@ test('drive statistics: a frame is judged by its excess over the running level',
 });
 
 test('gate rows: the pinned limits of the drive', () => {
-  const ok = checkDrive({ over: LIMITS.maxOver, phoneWorst: LIMITS.maxWorstPhoneMs, newPrograms: 0 });
-  assert.equal(ok.length, 3);
+  const ok = checkDrive({ over: LIMITS.maxOver, phoneWorst: LIMITS.maxWorstPhoneMs, newPrograms: 0, programsEnd: LIMITS.maxPrograms });
+  // 0.13.7 render safety: a fourth row, the programs in all (any region).
+  assert.equal(ok.length, 4);
   assert.ok(ok.every((r) => r.ok));
-  const bad = checkDrive({ over: LIMITS.maxOver + 1, phoneWorst: LIMITS.maxWorstPhoneMs + 0.1, newPrograms: 1 });
+  const bad = checkDrive({ over: LIMITS.maxOver + 1, phoneWorst: LIMITS.maxWorstPhoneMs + 0.1, newPrograms: 1, programsEnd: LIMITS.maxPrograms + 1 });
   assert.ok(bad.every((r) => !r.ok));
   assert.ok(LIMITS.maxOver <= 4 && LIMITS.maxWorstPhoneMs <= 50 && LIMITS.maxNewPrograms === 0, 'the limits are never looser than the owner\'s target');
+  assert.ok(LIMITS.maxPrograms <= 60, 'docs/PERF.md programs_start');
 });
 
 test('fastest frames: each frame takes its fastest pass; a frame whose state differs keeps the first', () => {

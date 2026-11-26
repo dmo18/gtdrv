@@ -21,13 +21,20 @@
 //   so a phone that holds 60 starts (and stays) at its full resolution
 //   and one that cannot starts where it settled, without probing again.
 // - Frames the main thread itself made late (the optional `work`, the
-//   frame's JavaScript time) are not the resolution's fault: drawing fewer
-//   pixels would not have saved them, so they count as on budget here
-//   (0.13.7: a fast phone with an occasional slow step was walked down to
-//   the floor and never came back, a soft picture that stayed laggy).
+//   frame's JavaScript time before the draw is issued) are not the
+//   resolution's fault: drawing fewer pixels would not have saved them, so
+//   they count as on budget here (0.13.7: a fast phone with an occasional
+//   slow step was walked down to the floor and never came back, a soft
+//   picture that stayed laggy). Such a frame needs work of budget * cpuAt
+//   or more AND at least cpuShare of the frame: a frame with some
+//   JavaScript but mostly a GPU wait is the pixels' (0.13.7 render safety:
+//   `work` used to run to the end of the draw calls, so a GPU stall inside
+//   them, the bloom copy, counted as JavaScript and a GPU-bound phone
+//   never stepped down).
 // - The floor is 1.0 by default (one physical pixel per CSS pixel; below
 //   that the picture goes soft and stair-stepped, docs/REVAMP.md section
-//   2); a dense phone screen passes a higher one (floorFor). When
+//   2); a dense phone screen passes a higher one (floorFor, at most 1.25,
+//   under the Low cap so Low can adapt too). When
 //   the floor is reached and frames are still over budget for `shedAfter`
 //   seconds, `shed` goes up by one (at most 2): the caller then drops
 //   detail instead (graphics.js: smaller shadow map, lower draw tier).
@@ -59,6 +66,7 @@ export const DEFAULTS = {
   goodAfter: 10, // seconds a level must hold to count as good
   firstWait: 0, // probe wait to begin with (0: upWait); longer when start is a level known good
   cpuAt: 0.8, // a late frame whose own work took budget * cpuAt or more was the main thread's
+  cpuShare: 0.5, // ... and at least this share of the frame (else mostly a GPU wait)
 };
 
 export function createAdaptiveRes(opts = {}) {
@@ -106,13 +114,15 @@ export function createAdaptiveRes(opts = {}) {
     // Frames counted as the main thread's (late, with work over budget * cpuAt).
     get cpuFrames() { return st.cpuFrames; },
     // One drawn frame of `dt` seconds; `work` (optional, seconds): the
-    // frame's own main-thread time. Returns the scale to use.
+    // frame's own JavaScript time up to issuing its draw (the steps and
+    // the systems' updates, never the draw calls, where a GPU-bound phone
+    // waits). Returns the scale to use.
     update(dt, work) {
       // Pauses, hidden tabs and loading stalls tell nothing about load.
       if (!(dt > 0) || dt > 0.25) return st.scale;
       // Late because of its own JavaScript (a slow step, a tile build, a
       // collection): the pixels were not the cause.
-      if (work >= o.budget * o.cpuAt && dt > o.budget * 1.2) {
+      if (work >= o.budget * o.cpuAt && work >= dt * o.cpuShare && dt > o.budget * 1.2) {
         st.cpuFrames++;
         dt = o.budget;
       }
@@ -199,16 +209,91 @@ export function maxRatioFor(devicePixelRatio, quality = 1) {
 }
 
 // The lowest pixel ratio the adaptive resolution may use on a screen:
-// 1.0 on ordinary screens, more on dense ones (1.5 at a 3.5 ratio), where
-// one drawn pixel to a CSS pixel is blown up three times or more and the
-// picture turns to mush. Below it the controller sheds detail instead.
+// 1.0 on ordinary screens, more on dense ones (1.25 at a 3 ratio or over),
+// where one drawn pixel to a CSS pixel is blown up three times or more and
+// the picture turns to mush. Below it the controller sheds detail instead.
+// (0.13.7 render safety: it was 1.5 at a 3.5 ratio, the Low cap itself, so
+// Low could never step down there.)
+export const FLOOR_MAX = 1.25;
 export function floorFor(devicePixelRatio) {
   const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
-  return Math.round(Math.max(1, Math.min(1.5, dpr * 0.43)) * 20) / 20;
+  return Math.round(Math.max(1, Math.min(FLOOR_MAX, dpr * 0.43)) * 20) / 20;
+}
+
+// Drawing-buffer budget (pixels) by Settings quality: about 2.6 million
+// at Normal and Low (the canvas drawing buffer then stays under about
+// 60 MB), 3.2 million at High. A phone at
+// 915x412 CSS px and 2.25 draws 1.9 million; a tablet or a desktop window
+// would otherwise ask for 5 to 10 million.
+export const PIXEL_BUDGET = { normal: 2.6e6, high: 3.2e6 };
+export function pixelBudgetFor(quality = 1) {
+  return Number.isFinite(quality) && quality >= 1.25 ? PIXEL_BUDGET.high : PIXEL_BUDGET.normal;
+}
+
+// The GPU's own size limits, read once from a WebGL context (any object
+// with getParameter and the constants); missing or odd values read as
+// "no limit" (Infinity), so a test or a broken driver never blocks a draw.
+export function contextLimits(gl) {
+  const lim = { renderbuffer: Infinity, viewportW: Infinity, viewportH: Infinity, texture: Infinity };
+  if (!gl || typeof gl.getParameter !== 'function') return lim;
+  const num = (v) => (Number.isFinite(v) && v > 0 ? v : Infinity);
+  try {
+    lim.renderbuffer = num(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+    lim.texture = num(gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+    if (vp && vp.length >= 2) {
+      lim.viewportW = num(vp[0]);
+      lim.viewportH = num(vp[1]);
+    }
+  } catch {
+    /* a lost context answers nothing: no limit known */
+  }
+  return lim;
+}
+
+// Highest pixel ratio a canvas of w x h CSS px may draw at: the drawing
+// buffer (w * ratio by h * ratio) within the renderbuffer, viewport and
+// texture sizes (bloom copies the frame into a texture of that size) and
+// within `budget` pixels. Rounded down to a 0.05 step, at least 0.25.
+export function sizeCapFor(w, h, limits, budget = PIXEL_BUDGET.normal) {
+  if (!(w > 0 && h > 0)) return Infinity;
+  const l = limits || {};
+  const side = Math.min(l.renderbuffer || Infinity, l.texture || Infinity);
+  let r = Math.sqrt(budget / (w * h));
+  r = Math.min(r, side / w, side / h, (l.viewportW || Infinity) / w, (l.viewportH || Infinity) / h);
+  return Math.max(0.25, Math.floor(r * 20 + 1e-9) / 20);
+}
+
+// The WebGL context lost and restored events of a canvas (any object
+// with addEventListener). A lost context is claimed (preventDefault, so
+// the browser may restore it) and onLost runs; onRestored runs when it
+// comes back. Returns { lost, losses, restores, detach }.
+export function watchContext(canvas, { onLost = null, onRestored = null } = {}) {
+  const st = { lost: false, losses: 0, restores: 0, detach: () => {} };
+  if (!canvas || typeof canvas.addEventListener !== 'function') return st;
+  const lost = (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    st.lost = true;
+    st.losses++;
+    if (onLost) onLost(e);
+  };
+  const restored = (e) => {
+    st.lost = false;
+    st.restores++;
+    if (onRestored) onRestored(e);
+  };
+  canvas.addEventListener('webglcontextlost', lost, false);
+  canvas.addEventListener('webglcontextrestored', restored, false);
+  st.detach = () => {
+    if (typeof canvas.removeEventListener !== 'function') return;
+    canvas.removeEventListener('webglcontextlost', lost, false);
+    canvas.removeEventListener('webglcontextrestored', restored, false);
+  };
+  return st;
 }
 
 // Multisampling (MSAA) on every device: the drawing pixel ratio runs
-// from the 1.0 floor to at most 2 (maxRatioFor), where 4x MSAA is what
+// from the 1.0 floor to at most 2.5 (maxRatioFor), where 4x MSAA is what
 // smooths the edges, and on the phone's tile-based GPU the extra samples
 // stay in on-chip tile memory (resolved once per frame), so the cost is
 // small next to raising the resolution. Decided once when the context

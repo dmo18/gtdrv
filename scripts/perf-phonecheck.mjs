@@ -42,6 +42,7 @@ export const LIMITS = {
   maxOver: 4, // frames over in the drive (the owner's target: at most 4 frames over 33 ms)
   maxWorstPhoneMs: 50, // worst frame in phone terms: 16.7 * (1 + excess / overMs)
   maxNewPrograms: 0, // shader programs compiled during the drive
+  maxPrograms: 60, // shader programs in all at the end of the drive (docs/PERF.md programs_start), any --map
 };
 const REFRESH = 1000 / 60;
 
@@ -74,6 +75,7 @@ export function checkDrive(r, limits = LIMITS) {
     { key: `frames over (excess above ${limits.overMs} ms)`, value: r.over, limit: limits.maxOver, ok: r.over <= limits.maxOver },
     { key: 'worst frame, phone ms', value: r1(r.phoneWorst), limit: limits.maxWorstPhoneMs, ok: r.phoneWorst <= limits.maxWorstPhoneMs },
     { key: 'new shader programs in the drive', value: r.newPrograms, limit: limits.maxNewPrograms, ok: r.newPrograms <= limits.maxNewPrograms },
+    { key: 'shader programs in all', value: r.programsEnd, limit: limits.maxPrograms, ok: r.programsEnd <= limits.maxPrograms },
   ];
 }
 

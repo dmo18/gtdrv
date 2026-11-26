@@ -166,6 +166,10 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     systems: [],
     resizeHooks: [], // functions (width, height, pixelRatio) called on resize
     renderFrame: null, // optional replacement for the final draw call
+    // performance.now() (ms) at the first step of the frame being drawn, -1
+    // when not known: the graphics module times the frame's JavaScript from
+    // it to the draw (adaptive resolution); never read by game logic.
+    frameStartMs: -1,
     // Errors caught round each system and at the frame loop (shown once each).
     errors: createErrorLog({ log: consoleLog }),
     time: 0, // simulated seconds since start
@@ -622,6 +626,22 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   const placeNow = { key: '', name: '' };
   let promptFor = null;
   let wakeTick = 0;
+  // The loop's frame timing (for the adaptive resolution only): the first
+  // step of a frame, or its draw when it has no step, opens the frame.
+  let frameOpen = false;
+  function loopStep(dt) {
+    if (!frameOpen) {
+      frameOpen = true;
+      game.frameStartMs = performance.now();
+    }
+    fixedUpdate(dt);
+  }
+  function loopRender(alpha, dt) {
+    if (!frameOpen) game.frameStartMs = performance.now();
+    frameOpen = false;
+    render(alpha, dt);
+  }
+
   function render(alpha, dt) {
     const p = game.player;
     const vs = game.vehicles;
@@ -761,7 +781,8 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     // The graphics module picks the pixel ratio (adaptive, bounded by the
     // device and the quality setting); otherwise cap the drawn height.
     const dpr = window.devicePixelRatio || 1;
-    const ratio = game.graphics && game.graphics.resolution ? game.graphics.resolution(dpr) : Math.max(0.75, Math.min(dpr, (1440 * game.quality) / Math.max(1, h)));
+    // The drawing buffer stays within the GPU's sizes and a pixel budget.
+    const ratio = game.graphics && game.graphics.resolution ? game.graphics.resolution(dpr, w, h) : Math.max(0.75, Math.min(dpr, (1440 * game.quality) / Math.max(1, h)));
     if (ratio !== renderer.getPixelRatio()) renderer.setPixelRatio(ratio);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -784,7 +805,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   // game; a session saved on another map stays with that map).
   game.restoreSession();
 
-  game.loop = createLoop({ fixedUpdate, render, getScale: () => game.timeScale || 1, errors: game.errors });
+  game.loop = createLoop({ fixedUpdate: loopStep, render: loopRender, getScale: () => game.timeScale || 1, errors: game.errors });
   game.resize = resize;
   game.step = fixedUpdate; // for tests
   game.draw = render;
