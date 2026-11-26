@@ -326,7 +326,7 @@ function setLevel(c, lvl) {
   c.m.updateMatrixWorld(true);
 }
 // Camera azimuth from the car's nose (+x) toward its right (+z).
-const VIEWS = { side: { az: Math.PI / 2 + 0.0, el: 0.06 }, left: { az: -Math.PI / 2, el: 0.06 }, front: { az: 0, el: 0.1 }, threequarter: { az: 0.68, el: 0.16 }, rear: { az: Math.PI - 0.68, el: 0.16 }, top: { az: 0.9, el: 0.7 } };
+const VIEWS = { side: { az: Math.PI / 2 + 0.0, el: 0.06 }, left: { az: -Math.PI / 2, el: 0.06 }, front: { az: 0, el: 0.1 }, threequarter: { az: 0.68, el: 0.16 }, rear: { az: Math.PI - 0.68, el: 0.16 }, top: { az: 0.9, el: 0.7 }, chase: { az: Math.PI, el: 0.24 } };
 function aim(c, view, aspect, dist) {
   const V = VIEWS[view];
   const L = c.spec.length, Hh = c.spec.height;

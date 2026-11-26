@@ -3,9 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VEHICLE_SPECS } from '../src/entities/vehicle.js';
-import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile, FLEET_MODELS, buildCarL1, buildCarL2, loftRings, eyePoint, styleFor } from '../src/render/carbody.js';
-import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from '../src/render/vehiclemesh.js';
-import { lampAtlasPixels, PLATE_TEXT, CLS } from '../src/render/vehiclemats.js';
+import { buildCar, buildWheel, wheelLayout, wheelStyle, tireProfile, FLEET_MODELS, buildCarL1, buildCarL2, loftRings, eyePoint, styleFor, SHADOW_FULL_M, SHADOW_GONE_M } from '../src/render/carbody.js';
+import { createVehicleMesh, updateVehicleMesh, vehicleStats, MID_LOD_M, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX, setContactGround, contactClearance } from '../src/render/vehiclemesh.js';
+import { lampAtlasPixels, PLATE_TEXT, CLS, carGlassMaterial } from '../src/render/vehiclemats.js';
 import * as THREE from 'three';
 import { createPersonMesh, personGeometry, resolveLook, walkPose, PERSON_PALETTES, PERSON_LOD_M } from '../src/render/personmesh.js';
 
@@ -627,4 +627,136 @@ test('fleet: the driver sits on the left; the eye point in the spec is in the ca
   const E = (id) => VEHICLE_SPECS[id].eye.y;
   assert.ok(E('midsize') < 1.3 && E('suv') > 1.5 && E('crewcab') > 1.5 && E('sports') < E('midsize'));
   assert.ok(E('truck') > 2 && E('semi') > 2.2 && E('schoolbus') > 1.8 && E('citybus') > 1.8);
+});
+
+// 0.13.7 car looks (docs/STATUS.md).
+test('0.13.7: every loft has one ring length a level (a pickup bed no longer tears the grid)', () => {
+  for (const id of Object.keys(VEHICLE_SPECS)) {
+    const spec = VEHICLE_SPECS[id];
+    if (spec.kind && spec.kind !== 'car') continue;
+    for (const level of [0, 1, 2]) {
+      let R;
+      try {
+        R = loftRings(spec, level);
+      } catch {
+        continue;
+      }
+      const ls = new Set(R.lower.map((r) => r.length));
+      assert.equal(ls.size, 1, `${id} L${level} lower rings ${[...ls]}`);
+      if (R.gh) assert.equal(new Set(R.gh.map((r) => r.length)).size, 1, `${id} L${level} greenhouse rings`);
+    }
+  }
+});
+
+test('0.13.7: the dashboard and steering wheel stay behind the windshield and inside the pillars', () => {
+  for (const id of FLEET_MODELS) {
+    const spec = VEHICLE_SPECS[id];
+    const { gs } = loftRings(spec, 0);
+    if (gs.xA - gs.xC < 0.6) continue;
+    // The near-black cabin parts (dashboard, steering wheel); the seats
+    // the cabin floor and the headliner are lighter.
+    const g = buildCar(spec, true).body, P = g.attributes.position, K = g.attributes.aCls, C = g.attributes.color;
+    let n = 0;
+    for (let i = 0; i < K.count; i++) {
+      if (K.getX(i) !== CLS.CABIN || C.getX(i) > 0.015) continue;
+      const q = [P.getX(i), P.getY(i), P.getZ(i)];
+      if (q[0] < gs.xA - 0.8 || q[1] < gs.baseY(q[0]) + 0.045) continue; // (not the floor)
+      n++;
+      assert.ok(q[1] < gs.roof(q[0]) - 0.01, `${id} cabin point (${q.map((v) => v.toFixed(2))}) above the glass`);
+      assert.ok(Math.abs(q[2]) < gs.baseW(q[0]) - 0.02, `${id} cabin point (${q.map((v) => v.toFixed(2))}) outside the pillars`);
+    }
+    assert.ok(n > 20, `${id} dashboard ${n}`);
+  }
+});
+
+test('0.13.7: an L1 pickup bed reads open (liner-dark floor)', () => {
+  for (const id of ['pickup', 'crewcab']) {
+    const spec = VEHICLE_SPECS[id];
+    const { sh } = loftRings(spec, 1);
+    const bed = classPts(buildCarL1(spec), CLS.TRIM).filter((q) => sh.inBed(q[0]) && Math.abs(q[2]) < 0.3 && q[1] > sh.top(q[0]) - 0.1);
+    assert.ok(bed.length >= 4, `${id} bed floor ${bed.length}`);
+  }
+});
+
+test('0.13.7: the player car is never drawn far, whatever the 75 m slice check left behind', () => {
+  for (const id of ['sedan', 'tidewinder']) {
+    const spec = VEHICLE_SPECS[id];
+    const m = createVehicleMesh(spec, spec.colors[0]);
+    const ud = m.userData;
+    const v = { x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, y: 0, spec, health: spec.health, lodFar: true, driver: null };
+    updateVehicleMesh(m, v, 1, 0);
+    assert.equal(ud.lodFar, true, id + ' a traffic car far');
+    v.driver = 'player';
+    updateVehicleMesh(m, v, 1, 0);
+    assert.equal(ud.lodFar, false, id + ' own car near');
+    // game.js switches through the lamps' visible; graphics.js through setVehicleLod.
+    ud.head.visible = false;
+    setVehicleLod(m, true);
+    assert.equal(ud.lodFar, false, id + ' own car stays near');
+    if (ud.fleet) assert.notEqual(ud.level, 2, id);
+    v.driver = null;
+    updateVehicleMesh(m, v, 1, 0);
+    assert.equal(ud.lodFar, true, id + ' far again once left');
+  }
+});
+
+test('0.13.7: the contact shadow stays on the surface under a jumping car and fades with its clearance', () => {
+  // Every glass geometry carries the one clearance target: SHADOW vertices lifted 1 m, glass not.
+  for (const id of ['sedan', 'pickup', 'tidewinder']) {
+    for (const g of [buildCar(VEHICLE_SPECS[id], true).glass, buildCar(VEHICLE_SPECS[id], true, true).glass]) {
+      const m = g.morphAttributes.position;
+      assert.ok(m && m.length === 1 && g.morphTargetsRelative, id);
+      const K = g.attributes.aCls;
+      let n = 0;
+      for (let i = 0; i < K.count; i++) {
+        const shadow = K.getX(i) === CLS.SHADOW;
+        if (shadow) n++;
+        assert.equal(m[0].getY(i), shadow ? 1 : 0);
+        assert.equal(m[0].getX(i), 0);
+        assert.equal(m[0].getZ(i), 0);
+      }
+      assert.ok(n > 40, id + ' shadow vertices');
+    }
+  }
+  // Clearance over a fake ground: a 2 m ramp deck east of x = 0, 0.5 m ground west.
+  setContactGround((x) => (x > 0 ? 2 : 0.5));
+  try {
+    const v = { x: -5, z: 0, y: 3, air: { on: false }, wg: new Float32Array(4) };
+    assert.equal(contactClearance(v, 3), 0, 'on a deck or a bridge at its own height: full shadow');
+    v.air.on = true;
+    assert.equal(contactClearance(v, 3), 2.5, 'airborne over the ground');
+    v.x = 5;
+    assert.equal(contactClearance(v, 3), 1, 'airborne over the ramp deck');
+    assert.equal(contactClearance(v, 1.5), 0, 'below the deck top: never negative');
+    v.air.on = false;
+    v.tossing = true;
+    assert.equal(contactClearance(v, 2.2), 2.2 - 2, 'thrown by a blast');
+  } finally {
+    setContactGround(null);
+  }
+  // Without a ground function: the last ground under the wheels.
+  const w = { x: 0, z: 0, y: 4, air: { on: true }, wg: Float32Array.of(1, 1, 1, 1) };
+  assert.equal(contactClearance(w, 4), 3);
+  // The mesh update drives the glass's influence (fleet and older bodies).
+  setContactGround(() => 0);
+  try {
+    for (const id of ['sedan', 'tidewinder']) {
+      const spec = VEHICLE_SPECS[id];
+      const m = createVehicleMesh(spec, spec.colors[0]);
+      const ud = m.userData;
+      const v = { x: 0, z: 0, px: 0, pz: 0, heading: 0, pheading: 0, y: 1.2, spec, health: spec.health, air: { on: true } };
+      updateVehicleMesh(m, v, 1, 0);
+      for (const g of ud.glassLevels) assert.ok(Math.abs(g.morphTargetInfluences[0] - 1.2) < 1e-9, id);
+      v.air.on = false;
+      updateVehicleMesh(m, v, 1, 0);
+      for (const g of ud.glassLevels) assert.equal(g.morphTargetInfluences[0], 0, id + ' landed');
+    }
+  } finally {
+    setContactGround(null);
+  }
+  // The shader keeps it on the surface and fades it from SHADOW_FULL_M to SHADOW_GONE_M.
+  assert.ok(SHADOW_FULL_M === 0.3 && SHADOW_GONE_M === 1.5);
+  const sh = { uniforms: {}, vertexShader: '#include <begin_vertex>\n#include <project_vertex>', fragmentShader: '#include <metalnessmap_fragment>' };
+  carGlassMaterial('clean').onBeforeCompile(sh);
+  assert.ok(sh.vertexShader.includes('smoothstep(0.3, 1.5, rwClr)') && sh.vertexShader.includes('modelMatrix[3].y + 0.02 - rwClr'));
 });

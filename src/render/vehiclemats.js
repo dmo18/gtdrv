@@ -232,13 +232,18 @@ const FRAG_REFL = /* glsl */`
   #endif
   vec3 rwR = inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix);
   vec3 rwS = rwStreet(rwR, vRwW, uLamp, rwM) * rwEi;
+  // Flat tops (hood, roof, trunk) take little of the skyline: one block
+  // filled the whole hood as a hard striped rectangle (0.13.7); the sides
+  // and the glass keep it.
+  float rwTop = 1.0 - 0.85 * smoothstep(0.6, 0.92, inverseTransformDirection(geometryNormal, viewMatrix).y);
+  rwM *= rwTop;
   float rwSharp = 1.0 - smoothstep(0.2, 0.7, roughnessFactor);
   radiance = mix(radiance, rwS, rwM * rwSharp * (rwC < 1.5 || (rwC > 3.5 && rwC < 4.5) ? 0.8 : 0.4));
   #ifdef USE_CLEARCOAT
   vec3 rwRc = inverseTransformDirection(reflect(-geometryViewDir, geometryClearcoatNormal), viewMatrix);
   float rwMc;
   vec3 rwSc = rwStreet(rwRc, vRwW, uLamp, rwMc) * rwEi;
-  clearcoatRadiance = mix(clearcoatRadiance, rwSc, rwMc);
+  clearcoatRadiance = mix(clearcoatRadiance, rwSc, rwMc * rwTop);
   #endif
 }
 #endif
@@ -328,11 +333,18 @@ function paintParams(hex) {
 // paintCode: the color with a finish and a decal in the bits above). The
 // finishes only change material numbers (the clearcoat is never 0), so
 // they share the one paint program.
+const PAINT_MAX = 0.68;
 function makePaint(code, damage, physical) {
   const hex = codeRgb(code), fin = FINISHES[codeFinish(code)] || FINISHES[0], dec = DECALS[codeDecal(code)] || DECALS[0];
   const stock = codeFinish(code) === 0;
   const p = stock ? paintParams(hex) : { metalness: fin[1], roughness: fin[2] };
-  const opts = { color: hex, vertexColors: true, metalness: p.metalness, roughness: p.roughness };
+  // White paints held a little under paper white: in the noon sun with
+  // the clear coat on top the roof, hood and trunk burnt out to one flat
+  // white shape (0.13.7).
+  const col = new THREE.Color(hex);
+  const hi = Math.max(col.r, col.g, col.b);
+  if (hi > PAINT_MAX) col.multiplyScalar(PAINT_MAX / hi);
+  const opts = { color: col, vertexColors: true, metalness: p.metalness, roughness: p.roughness };
   const mat = physical
     ? new THREE.MeshPhysicalMaterial({ ...opts, clearcoat: stock ? 1 : fin[3], clearcoatRoughness: stock ? 0.06 : fin[4] })
     : new THREE.MeshStandardMaterial(opts);
@@ -658,8 +670,15 @@ const GLASS_VERT = /* glsl */`
 #include <project_vertex>
 vRwA = uv.x;
 if (aCls > 8.5) {
-  vec4 rwG = modelMatrix * vec4(transformed, 1.0);
-  rwG.y = modelMatrix[3].y + 0.02;
+  // The morph target lifted the vertex by the car's clearance over the
+  // surface under it (carbody.js shadowLift): the shadow stays on that
+  // surface, shrinks a little and fades out from 0.3 to 1.5 m up.
+  float rwClr = max(transformed.y - 0.02, 0.0);
+  float rwFade = smoothstep(0.3, 1.5, rwClr);
+  vec4 rwG = modelMatrix * vec4(transformed.x, 0.02, transformed.z, 1.0);
+  rwG.xz = mix(rwG.xz, modelMatrix[3].xz, rwFade * 0.45);
+  rwG.y = modelMatrix[3].y + 0.02 - rwClr;
+  vRwA *= 1.0 - rwFade;
   mvPosition = viewMatrix * rwG;
   gl_Position = projectionMatrix * mvPosition;
 }

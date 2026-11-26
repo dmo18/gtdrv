@@ -169,7 +169,7 @@ function linkLod(ud) {
   Object.defineProperty(head, 'visible', {
     get() { return vis; },
     set(v) {
-      vis = !!v;
+      vis = !!v || ud.own === true;
       ud.bodyLod.visible = vis;
       ud.glass.visible = vis;
       ud.far.visible = !vis;
@@ -181,8 +181,12 @@ function linkLod(ud) {
 }
 
 // Switch a car mesh between the near model and the one-call far model.
+// The player's own car is never far (ud.own, set by updateVehicleMesh):
+// game.js checks the 75 m rule in slices of eight frames, so after a jump
+// the car under the camera was drawn as the L2 shell for a few frames.
 export function setVehicleLod(mesh, far) {
   const ud = mesh.userData;
+  if (ud.own) far = false;
   if (ud.lodFar === !!far) return;
   ud.head.visible = !far;
   for (let i = 0; i < ud.wheels.length; i++) ud.wheels[i].visible = !far;
@@ -256,7 +260,7 @@ export function createVehicleMesh(spec, color) {
     wheels: [wheelLod], wheelLevels: [wNear, wMid], wheelMatrix: wNear.instanceMatrix,
     bar, barRed: bar, barBlue: bar, glowMesh: glow,
     anchors: e.anchors,
-    lodFar: false,
+    lodFar: false, own: false,
     hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,
     hits: [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(-1, 0, 0, 0)], hitN: 0, hitDirty: false,
     crushF: 0, crushR: 0,
@@ -344,7 +348,7 @@ function createFleetMesh(spec, col, e) {
     wheels: [wNear], wheelLevels: [wNear], wheelMatrix: wNear.instanceMatrix,
     bar, barRed: bar, barBlue: bar, glowMesh: null,
     anchors: e.anchors,
-    fleet: true, level: 0, nearLevel: 0, lodFar: false,
+    fleet: true, level: 0, nearLevel: 0, lodFar: false, own: false,
     hf: 1, wrecked: false, ownPaint: null, glassState: 'clean', lampMat: null,
     hits: [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(-1, 0, 0, 0)], hitN: 0, hitDirty: false,
     crushF: 0, crushR: 0,
@@ -358,7 +362,7 @@ function createFleetMesh(spec, col, e) {
   Object.defineProperty(lamps, 'visible', {
     get() { return ud.level === 0; },
     set(v) {
-      const far = !v;
+      const far = !v && !ud.own;
       if (far === ud.lodFar) return;
       ud.lodFar = far;
       applyLevel(ud);
@@ -507,13 +511,41 @@ function applyLamps(ud, time) {
 
 const MAX_ROLL = 0.075, MAX_PITCH = 0.055;
 
+// Contact shadow clearance (0.13.7, carbody.js shadowLift): the car's
+// height over the surface under it while a ramp jump or a blast owns its
+// height (v.air.on, v.tossing); 0 otherwise (on the road, a bridge or a
+// ramp deck the car sits on that surface). `fn(x, z, v)` gives the surface
+// height (the ground with the ramp decks, graphics.js); without one the
+// last ground the wheels touched (vehicle.js v.wg) stands in.
+let contactGround = null;
+export function setContactGround(fn) {
+  contactGround = typeof fn === 'function' ? fn : null;
+}
+export function contactClearance(v, y) {
+  if (!((v.air && v.air.on) || v.tossing)) return 0;
+  let g = 0;
+  if (contactGround) g = contactGround(v.x, v.z, v);
+  else if (v.wg) g = (v.wg[0] + v.wg[1] + v.wg[2] + v.wg[3]) / 4;
+  const c = y - (Number.isFinite(g) ? g : 0);
+  return c > 0 ? c : 0;
+}
+function setShadowLift(ud, c) {
+  const ls = ud.glassLevels;
+  for (let i = 0; i < ls.length; i++) {
+    const inf = ls[i] && ls[i].morphTargetInfluences;
+    if (inf && inf[0] !== c) inf[0] = c;
+  }
+}
+
 // Place the mesh between the previous and current simulation state.
 export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
   const x = v.px + (v.x - v.px) * alpha;
   const z = v.pz + (v.z - v.pz) * alpha;
   const h = v.pheading + angleDiff(v.heading, v.pheading) * alpha;
   const ud = mesh.userData;
-  mesh.position.set(x, Number.isFinite(v.y) ? v.y : 0, z);
+  const y = Number.isFinite(v.y) ? v.y : 0;
+  mesh.position.set(x, y, z);
+  setShadowLift(ud, contactClearance(v, y));
   // The ground plane under the four wheels (vehicle.js followGround):
   // pitch about the car's side axis, roll about its length.
   const gp = Number.isFinite(v.gPitch) ? (Number.isFinite(v.pgPitch) ? v.pgPitch + (v.gPitch - v.pgPitch) * alpha : v.gPitch) : 0;
@@ -538,8 +570,9 @@ export function updateVehicleMesh(mesh, v, alpha = 1, time = 0) {
 
   // Distance LOD (also driven by game.js through head.visible, and by
   // graphics.js through lodDist: the quality tier's own, nearer limit).
-  if (v.lodFar != null) {
-    const far = !!v.lodFar || ud.lodDist === true;
+  ud.own = v.driver === 'player';
+  if (v.lodFar != null || ud.own) {
+    const far = !ud.own && (!!v.lodFar || ud.lodDist === true);
     if (far !== ud.lodFar) setVehicleLod(mesh, far);
   }
 

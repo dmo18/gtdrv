@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { signalState } from '../world/citygen.js';
 import { createAdaptiveRes, maxRatioFor, floorFor } from './adaptres.js';
-import { vehicleStats, noteVehicleHit, setVehicleLod, setVehicleNearLevel, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from './vehiclemesh.js';
+import { vehicleStats, noteVehicleHit, setVehicleLod, setVehicleNearLevel, setContactGround, FLEET_L0_M, FLEET_L2_M, FLEET_HIDE_M, FLEET_L0_MAX } from './vehiclemesh.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
 import { BOAT_SPECS } from '../entities/boat.js';
 import { AIRCRAFT_SPECS } from '../entities/aircraft.js';
@@ -18,6 +18,8 @@ import { makeWindowAtlas } from './textures.js';
 import { patchWindows, bakeLampLight, patchLampLight, setSpotLight, CARS } from './nightlights.js';
 import { setBeamDaylight, BEAM_TAN } from './aircraftmesh.js';
 import { SHADOW_LAYER } from './realcity.js';
+import { groundFn } from '../world/ground.js';
+import { groundUnder } from '../world/stunts.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -133,6 +135,18 @@ export function createGraphics(game) {
   const t0 = performance.now();
 
   patchShaderChunks();
+  // The surface under an airborne car for its contact shadow (0.13.7,
+  // vehiclemesh.js contactClearance): the ground or a stunt ramp's deck.
+  setContactGround((x, z, v) => {
+    const gf = game.city ? groundFn(game.city) : null;
+    let g = gf ? gf(x, z) : 0;
+    const st = game.stunts;
+    if (st && st.spots) {
+      const r = groundUnder(st.spots, x, z, v.kind === 'boat');
+      if (r > g) g = r;
+    }
+    return g;
+  });
   renderer.toneMapping = THREE.CustomToneMapping;
   renderer.toneMappingExposure = 1.0;
   // A stronger sun against weaker fill light, so shade reads as shade.
@@ -276,7 +290,7 @@ export function createGraphics(game) {
       const r = ud.lodDist ? fr - 4 : fr;
       const far = v !== own && d2 > r * r;
       if (far !== (ud.lodDist === true)) ud.lodDist = far;
-      const want = far || !!v.lodFar;
+      const want = far || (!!v.lodFar && v !== own);
       if (want !== ud.lodFar) setVehicleLod(m, want);
       if (!ud.fleet) continue;
       // L0 candidates: the nearest FLEET_L0_MAX inside the radius (a little

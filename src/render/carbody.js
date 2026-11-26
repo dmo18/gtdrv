@@ -505,7 +505,13 @@ function lowerHalf(sh, x, lod, cut = 0) {
     const ww = Math.max(0.01, ws - 0.07);
     if (lod === LOD_NEAR) {
       const fw = Math.max(0.005, ws - 0.1);
-      out.push([ws * 0.975, top], [ww, top], [ww, (top + floor) / 2], [ww, floor + 0.04], [fw, floor], [fw * 0.6, floor], [fw * 0.25, floor], [0, floor]);
+      // As many points as the deck rings either side (K): the grid takes
+      // the first ring's length, so the fleet's 8-point bed against its
+      // 5-point deck lost the right half of the bed and stretched a big
+      // paint-colored triangle over the bed floor (0.13.7).
+      if (K === 5) out.push([ws * 0.975, top], [ww, top], [ww, floor + 0.04], [fw, floor], [0, floor]);
+      else if (K === 6) out.push([ws * 0.975, top], [ww, top], [ww, floor + 0.04], [fw, floor], [fw * 0.5, floor], [0, floor]);
+      else out.push([ws * 0.975, top], [ww, top], [ww, (top + floor) / 2], [ww, floor + 0.04], [fw, floor], [fw * 0.6, floor], [fw * 0.25, floor], [0, floor]);
     } else {
       out.push([ws * 0.975, top], [ws * 0.5, top - 0.05], [0, top - 0.06]);
     }
@@ -1264,8 +1270,14 @@ function cabin(acc, sh, gs, spec) {
   const belt = gs.baseY(xm);
   const zw = gs.baseW(xm) - 0.06;
   // Dashboard under the windshield with a dark top.
+  // It stands wholly behind the raked glass and inside the A pillars (it
+  // was as wide as the mid cabin with its front at the glass base, so a
+  // black plank stuck out through the cowl and the pillars, 0.13.7).
   const dx = Math.min(0.42, len * 0.25);
-  box(acc, DASH, CLS.CABIN, dx, 0.16, zw * 2, xA - dx * 0.5 - 0.02, gs.baseY(xA - dx * 0.5) + 0.02, 0, 0, 0, 0.12);
+  const xg = ghFaceX(gs, gs.baseY(xA) + 0.14, true);
+  const xf = Math.min(xA - 0.02, xg - 0.03);
+  const zd = Math.min(zw, gs.baseW(xf) - 0.1 - gs.g.tumble * 0.14);
+  box(acc, DASH, CLS.CABIN, dx, 0.16, zd * 2, xf - dx * 0.5, gs.baseY(xf - dx * 0.5) + 0.02, 0, 0, 0, 0.12);
   // Front seats sit a little behind the roof's front edge; a rear bench
   // under the rear glass when the cabin is long enough.
   const fx = seatX(sh, gs);
@@ -1296,7 +1308,7 @@ function cabin(acc, sh, gs, spec) {
     for (const s of [1, -1]) box(acc, SEAT, CLS.CABIN, 0.1, 0.14 * k, 0.24, rx - 0.08, belt - 0.12 + 0.48 * k, s * zw * 0.5, 0, 0, 0.2);
   }
   // Steering wheel (driver on the left: -z) on a short column.
-  const sx = xA - dx - 0.1;
+  const sx = xf - dx - 0.1;
   const sy = gs.baseY(sx) + 0.08;
   const sz = -zw * 0.47;
   // Ring axis along x, tilted so the rim leans back toward the driver.
@@ -1368,6 +1380,23 @@ function contactShadow(acc, sh, spec, near) {
   }
 }
 
+// The contact shadow's clearance channel (0.13.7): one relative morph
+// target that lifts every SHADOW vertex 1 m. vehiclemesh.js sets its
+// influence to the car's height over the surface under it (0 on the road,
+// a ramp deck or a bridge); the glass shader reads the lift back, keeps
+// the shadow on that surface, and shrinks and fades it from 0.3 m to
+// 1.5 m. Every glass geometry carries the target, so the glass keeps one
+// shader program.
+export const SHADOW_FULL_M = 0.3, SHADOW_GONE_M = 1.5;
+function shadowLift(g) {
+  const K = g.attributes.aCls, n = K.count;
+  const d = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) if (K.getX(i) === CLS.SHADOW) d[i * 3 + 1] = 1;
+  g.morphAttributes.position = [new THREE.Float32BufferAttribute(d, 3)];
+  g.morphTargetsRelative = true;
+  return g;
+}
+
 // Join the head and tail lamp builders into one lamp geometry: the front
 // half of the atlas and strip for the head lamps, the rear half for the
 // tail (u halved / offset), and two relative morph targets that push the
@@ -1409,7 +1438,7 @@ export function buildCar(spec, near = true, lite = false) {
   const a = buildAccs(spec, lod);
   const res = { body: a.acc.build(), shape: a.sh, gh: a.gs };
   if (lod !== LOD_FAR) {
-    res.glass = a.glassAcc.build();
+    res.glass = shadowLift(a.glassAcc.build());
     res.lamps = joinLamps(a.headAcc.count ? a.headAcc : null, a.tailAcc.count ? a.tailAcc : null);
   }
   return res;
@@ -1497,8 +1526,12 @@ function buildAccs(spec, lod) {
     }
     if (lod === LOD_MID) {
       if (jj === 0) return pick(TRIM, CLS.TRIM);
+      // The bed reads open: its dipped floor in the liner color (it was
+      // a paint deck, a pickup at range looked like a hatchback).
+      if (sh.inBed(x) && jj >= nSide + 1) return pick(LINER, CLS.TRIM);
       if (front(n, x) && jj <= 2 && az < hw * 0.5 && c[1] < sh.yc(x) - 0.05) return pick(GRILLE, CLS.TRIM);
-      if (S.skirt && jj === 1 && Math.abs(n[2]) > 0.3) return pick(TRIM, CLS.TRIM);
+      // (No skirt band here: the mid section's band 1 is a third of the
+      // side, so the sports cars went black up to the door handles.)
       if (!S.fleet && id === 'police' && jj >= 1 && jj <= 2 && Math.abs(n[2]) > 0.3 && x > -0.205 * L && x < 0.205 * L) return pick(0xf4f4f2, CLS.LIVERY);
       if (S.fleet) return liveryOf(S, L, x, jj, 4, c[1], n, pick) || out;
       return out;
@@ -1609,7 +1642,10 @@ function details(acc, headAcc, tailAcc, sh, gs, spec, lod) {
         blob(acc, WHITE, CLS.PAINT, 0.15, 0.1, 0.21, mx, y, (w + 0.11) * s, 7);
         box(acc, CHROME, CLS.CHROME, 0.01, 0.075, 0.16, mx - 0.075, y, (w + 0.115) * s);
       } else {
-        box(acc, WHITE, CLS.PAINT, 0.12, 0.1, 0.2, mx, y, (w + 0.1) * s);
+        // One box from inside the glass out, swept back a little (a box
+        // standing clear of the coarse glass read as a brick floating off
+        // the car).
+        box(acc, WHITE, CLS.PAINT, 0.11, 0.085, 0.3, mx, y - 0.03, (w + 0.02) * s, 0, s * 0.22, 0);
       }
     }
   }
@@ -2415,7 +2451,10 @@ export function buildCarL1(spec) {
         return out;
       };
       const tireO = ring(wr, zf - s * 0.01, 12), rimO = ring(wr * RIM, zf, 12);
-      const tc = lin(0x161617), rc = lin(rim), hc = lin(0x3c3e42);
+      // The hub a shade of the rim (a near-black hub shaded the whole
+      // face as a dark cone: a hole, not a wheel, 0.13.7).
+      // Dark rims a little lighter than the tire, so the wheel still reads.
+      const tc = lin(0x161617), rf = lin(0x55585d), rc = lin(rim).map((v, k) => Math.max(v, rf[k])), hc = rc.map((v) => v * 0.45);
       for (let k = 0; k < 12; k++) {
         const k2 = (k + 1) % 12;
         const q = [tireO[k], tireO[k2], rimO[k2], rimO[k]].map((p) => acc.vert(p[0], p[1], p[2], 0, 0, s, tc, CLS.RUBBER));
