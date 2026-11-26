@@ -12,18 +12,34 @@ import * as THREE from 'three';
 import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { garageRemove } from '../core/garage.js';
 import { createPointIndex, beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } from '../core/spatial.js';
-import { createLotCarField, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull } from '../render/lotmesh.js';
+import { LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull } from '../render/lotmesh.js';
+import { createParkedLotField } from '../render/parkedfield.js';
+import { lotFill, lotDressCache, blockedBays, bayCount, bayScale } from '../world/lots.js';
 import { groundFn } from '../world/ground.js';
 import { createVehicleMesh } from '../render/vehiclemesh.js';
 import { paintMaterial, carGlassMaterial, wheelMaterial, lotShellMaterial } from '../render/vehiclemats.js';
 import { buildCarL2, isFleetModel } from '../render/carbody.js';
 
-const SPAWN_R = 135;
-const DESPAWN_R = 185;
+const SPAWN_R = 120;
+const DESPAWN_R = 170;
 const MIN_R = 60; // never pop in right next to the player
 const FIRST_FILL_S = 1; // the start fill may use spots inside MIN_R for this long
 // Room left under the live cap for moving traffic and the police.
 export const PARKED_RESERVE = 24;
+// Most curb and listed-bay parked cars (real vehicles) alive at once, all
+// within SPAWN_R of the player, by graphics tier (0.13.8: Low phones 30,
+// Normal 40, High 48; before, every curb spot in 135 m up to the live cap).
+export const PARKED_CAP = [30, 40, 48];
+export const PARKED_CAP_DEFAULT = PARKED_CAP[1];
+// A listed lot bay (city.parkingSpots, lot: true) holds a car when its own
+// hash is under its lot's fill at the hour (lots.js lotFill), the same rule
+// as the drawn bay cars; one not in a lot box as if its lot were this full.
+const LOT_SPOT_FILL = 0.35;
+function spotHash(x, z) {
+  let h = Math.imul(Math.round(x * 3) * 0x27d4eb2d ^ Math.round(z * 3) * 0x165667b1, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
 
 // Curbside parked cars by district (docs/FLEET.md): SUVs, crossovers and
 // pickups about half; convertibles and sports cars at the beach; vans and
@@ -54,7 +70,6 @@ export const LOT_NEAR_MAX = 6; // at most this many real bodies at once
 function createLotCarView(game, field) {
   const scene = game.scene;
   if (!scene || typeof THREE.InstancedMesh !== 'function') return null;
-  const ground = game.city ? groundFn(game.city) : null;
   const root = new THREE.Group();
   root.name = 'lotcars';
   scene.add(root);
@@ -140,6 +155,16 @@ function createLotCarView(game, field) {
   const hullN = new Int32Array(nSpec);
   const view = {
     root, hulls, stats: { hull: 0, real: 0, draws: 0 },
+    // Build the real body of model si ahead of its first use (and its
+    // first paint's instanced body): a mesh build left to the first car
+    // that comes within LOT_NEAR_M cost a step a few ms.
+    warm(si, color) {
+      if (si < 0 || si >= nSpec) return;
+      const r = realOf(si);
+      bodyOf(r, color === undefined ? r.spec.colors[0] : color);
+    },
+    // A real body sync asked for (model, paint), -1 when none.
+    wantSi: -1, wantColor: 0,
     // The distance inside which the real body is drawn (a tool may change it).
     nearM: LOT_NEAR_M,
     // Write the field's cars into the instanced meshes.
@@ -155,12 +180,21 @@ function createLotCarView(game, field) {
         const si = field.spec[i];
         // Heading h (x ahead, z toward +z) is a turn of -h about y.
         tmp.makeRotationY(-field.yaw[i]);
-        // On the ground the moving cars stand on (world/ground.js).
-        tmp.setPosition(field.x[i], ground ? ground(field.x[i], field.z[i]) : 0, field.z[i]);
-        if (field.dist[i] < view.nearM && nReal < LOT_NEAR_MAX) {
+        // On the ground the moving cars stand on (world/ground.js), the
+        // lot's height worked out when the field loaded it.
+        tmp.setPosition(field.x[i], field.y[i], field.z[i]);
+        // The real body only once it is built (view.warm, between
+        // refreshes): a car whose body is not ready is a hull this time.
+        const r0 = real[si];
+        const b0 = r0 ? r0.byColor.get(field.color[i]) : null;
+        if (field.dist[i] < view.nearM && nReal < LOT_NEAR_MAX && !b0 && view.wantSi < 0) {
+          view.wantSi = si;
+          view.wantColor = field.color[i];
+        }
+        if (field.dist[i] < view.nearM && nReal < LOT_NEAR_MAX && b0) {
           nReal++;
-          const r = realOf(si);
-          const b = bodyOf(r, field.color[i]);
+          const r = r0;
+          const b = b0;
           b.setMatrixAt(b.userData.n++, tmp);
           if (r.glass) {
             r.glass.setMatrixAt(r.n, tmp);
@@ -214,25 +248,35 @@ function createLotCarView(game, field) {
 export function createParkedCars(game) {
   // The designed start street's curb spaces (`start`, docs/REVAMP.md 6.8)
   // come first, so the first scan fills them before any other.
-  const spots = game.city.parkingSpots.map((s) => ({ ...s, vehicle: null, used: false }));
+  const spots = game.city.parkingSpots.map((s) => ({ ...s, vehicle: null, used: false, lane: 0, lotU: -1, lotRef: null }));
   spots.sort((a, b) => (b.start ? 1 : 0) - (a.start ? 1 : 0));
   const index = createPointIndex(spots.length, (i) => spots[i].x, (i) => spots[i].z, 64);
   const nearIds = [];
   const live = []; // spots holding a car of ours
-  const queue = []; // spot indices waiting for a car, in fill order
-  const queued = new Uint8Array(spots.length);
-  let qHead = 0;
+  // The spots to fill, nearest first: a scan keeps the nearest PICK_MAX
+  // empty ones it may fill (bounded insertion, no sort of every spot in
+  // reach); the drain takes them a car a step.
+  const PICK_MAX = 64;
+  const pick = new Int32Array(PICK_MAX), pickD = new Float64Array(PICK_MAX);
+  let nPick = 0, pHead = 0;
   let timer = 0;
   let first = true; // the start fill (spots inside MIN_R allowed)
   let firstLeft = FIRST_FILL_S;
   let garageWait = false;
-  const stats = { scans: 0, looked: 0, spawned: 0, deferred: 0, evicted: 0, noLane: 0 };
+  let cap = PARKED_CAP_DEFAULT;
+  const stats = { scans: 0, looked: 0, spawned: 0, deferred: 0, evicted: 0, noLane: 0, lotEmpty: 0, capped: 0, relocated: 0 };
   // Static cars in the lot bays: a field of picked bays near the camera
-  // (render/lotmesh.js) and, when the game draws, the instanced meshes.
+  // (render/parkedfield.js, loaded a few lots a step) and, when the game
+  // draws, the instanced meshes.
   const city = game.city;
-  const lotField = city.lots && city.lots.length ? createLotCarField(city) : null;
+  // The tiles dress the lots near the camera when the game draws: the
+  // parked cars wait for them rather than dress a lot in a step themselves.
+  const tilesDress = !!(city.lots && city.lots.length && game.scene);
+  const lotField = city.lots && city.lots.length ? createParkedLotField(city, { quick: tilesDress, ground: tilesDress ? groundFn(city) : null }) : null;
   const lotView = lotField && game.scene ? createLotCarView(game, lotField) : null;
+  const lotCache = lotField ? lotDressCache(city) : null;
   let lotTimer = 0;
+  let warmAt = 0; // the next lot car model the view builds ahead
   const blockers = new Float32Array(6 * 48);
   const nearEdges = [];
   // True when the curb spot s lies where its street has a parking lane. The
@@ -240,9 +284,15 @@ export function createParkedCars(game) {
   // right of a -> b) once the map has them; until then every street that is
   // not an avenue, bridge or causeway has one, as the city generator
   // placed its curb spots. Start spots (the designed first view) always do.
+  // A listed lot bay is fine unless its car would stand on a lot feature
+  // (lots.js blockedBays).
   function laneOk(s) {
-    if (s.lot || s.start) return true;
+    if (s.start) return true;
     if (s.lane) return s.lane === 1;
+    if (s.lot) {
+      s.lane = lotBayBlocked(s) ? 2 : 1;
+      return s.lane === 1;
+    }
     let best = null, bd = 1e9;
     // The island city has no edge index: every edge is looked at.
     const listed = typeof city.edgesNear === 'function';
@@ -269,6 +319,39 @@ export function createParkedCars(game) {
     s.lane = ok ? 1 : 2;
     return ok;
   }
+  // The listed bay s: its lot (once) and whether its bay is a blocked one.
+  function lotBayBlocked(s) {
+    if (!lotField) return false;
+    if (s.lotU < 0) hourWants(s, 12);
+    const lot = s.lotRef;
+    if (!lot) return false;
+    const feats = lotCache.get(lot);
+    const blocked = blockedBays(feats);
+    let k = 0;
+    for (let q = 0; q < feats.length; q++) {
+      const f = feats[q];
+      if (f.kind !== 'bay') continue;
+      const nb = bayCount(f);
+      const ca = Math.cos(f.heading), sa = Math.sin(f.heading);
+      const half = (nb * 2.5) / 2;
+      for (let b = 0; b < nb; b++, k++) {
+        const o = -half + (b + 0.5) * 2.5;
+        if (Math.abs(f.x + ca * o - s.x) < 0.3 && Math.abs(f.z + sa * o - s.z) < 0.3) return blocked[k] === 1;
+      }
+    }
+    return false;
+  }
+  // A listed lot bay wants a car at this hour (by its lot's fill), a curb
+  // spot always does.
+  function hourWants(s, hour) {
+    if (!s.lot) return true;
+    if (s.lotU < 0) {
+      s.lotRef = lotField ? lotField.lotAt(s.x, s.z) : null;
+      s.lotU = spotHash(s.x, s.z) * bayScale(s.lotRef, s.x, s.z);
+    }
+    const fill = s.lotRef ? lotFill(s.lotRef, hour) : LOT_SPOT_FILL;
+    return s.lotU < fill;
+  }
   // An edge's unit direction (island edges carry no ux, uz).
   const DIR = { ux: 0, uz: 0 };
   function edgeDir(e) {
@@ -277,11 +360,8 @@ export function createParkedCars(game) {
     DIR.ux = (b.x - a.x) / l; DIR.uz = (b.z - a.z) / l;
     return DIR;
   }
-  let sortX = 0, sortZ = 0;
-  const d2 = (s) => (s.x - sortX) * (s.x - sortX) + (s.z - sortZ) * (s.z - sortZ);
-  const byNear = (a, b) => ((spots[b].start ? 1 : 0) - (spots[a].start ? 1 : 0)) || (d2(spots[a]) - d2(spots[b])) || a - b;
 
-  // Under the live cap: the parked car farthest behind (outside the spawn
+  // Under the cap: the parked car farthest behind (outside the spawn
   // ring) makes way for a spot nearer the player. True when one went.
   function evictFar(px, pz, nearer, beyond = SPAWN_R) {
     let far = -1, fd = beyond;
@@ -294,8 +374,44 @@ export function createParkedCars(game) {
     const s = live[far];
     if (s.vehicle && !s.vehicle.removed) game.removeVehicle(s.vehicle);
     s.vehicle = null;
-    live.splice(far, 1);
+    live[far] = live[live.length - 1];
+    live.length--;
     stats.evicted++;
+    return true;
+  }
+
+  // The live parked car farthest behind, past SPAWN_R + 5 m and more than
+  // 20 m farther than the spot, untouched (full health, never hit, asleep)
+  // and of a model the spot's district parks: moved to spot s. True when one
+  // was.
+  function relocate(s, px, pz, d, kinds) {
+    let far = -1, fd = Math.max(SPAWN_R + 5, d + 20);
+    for (let i = 0; i < live.length; i++) {
+      const o = live[i], v = o.vehicle;
+      if (!v || v.removed || !v.asleep || v.driver || v.wrecked || v.onFire || v.garageEntry) continue;
+      if (v.health !== v.spec.health || v.propHits || v.lastHitBy || v.combatHit) continue;
+      const dd = Math.hypot(o.x - px, o.z - pz);
+      if (dd <= fd || kinds.indexOf(v.spec.id) < 0) continue;
+      fd = dd;
+      far = i;
+    }
+    if (far < 0) return false;
+    const old = live[far], v = old.vehicle;
+    old.vehicle = null;
+    live[far] = s;
+    s.vehicle = v;
+    v.x = v.px = s.x;
+    v.z = v.pz = s.z;
+    v.heading = v.pheading = s.heading;
+    v.y = v.py = 0; v.vy = 0;
+    v.vx = v.vz = 0; v.speed = 0; v.yawRate = 0;
+    v.roll = v.pitch = v.proll = v.ppitch = 0; v.rollV = v.pitchV = 0;
+    v.gPitch = v.gRoll = v.pgPitch = v.pgRoll = 0;
+    v.grounded = false;
+    v.wg.fill(0);
+    v.wheelDy.fill(0);
+    v.meshDirty = true;
+    stats.relocated++;
     return true;
   }
 
@@ -356,80 +472,119 @@ export function createParkedCars(game) {
     return false;
   }
 
+  // The cap of this tier (graphics.tierNow when the game has one).
+  function readCap() {
+    const g = game.graphics;
+    let c = PARKED_CAP_DEFAULT;
+    if (g && typeof g.tierNow === 'function') {
+      const t = g.tierNow();
+      c = t && t.name === 'Low' ? PARKED_CAP[0] : t && t.name === 'High' ? PARKED_CAP[2] : PARKED_CAP[1];
+    }
+    if (g && g.parkedLive > 0) c = g.parkedLive | 0;
+    return c;
+  }
+
   function scan() {
     const px = game.player.x, pz = game.player.z;
     stats.scans++;
+    // The tier changes rarely: read it every eighth scan.
+    if ((stats.scans & 7) === 1) cap = readCap();
     scanGarage();
     // The spots holding a car: driven off, shunted, or left far behind.
     for (let i = live.length - 1; i >= 0; i--) {
       const s = live[i];
       const v = s.vehicle;
-      if (!v) {
-        live.splice(i, 1);
-        continue;
-      }
-      if (v.removed) {
+      let drop = false;
+      if (!v) drop = true;
+      else if (v.removed) {
         s.vehicle = null;
-        live.splice(i, 1);
+        drop = true;
       } else if (v.driver || Math.hypot(v.x - s.x, v.z - s.z) > 1.5) {
         // Once somebody has driven or shunted it, it is no longer ours.
         v.parked = false;
         s.vehicle = null;
         s.used = true;
-        live.splice(i, 1);
+        drop = true;
       } else if (Math.hypot(s.x - px, s.z - pz) > DESPAWN_R) {
         game.removeVehicle(v);
         s.vehicle = null;
-        live.splice(i, 1);
+        drop = true;
+      }
+      if (drop) {
+        live[i] = live[live.length - 1];
+        live.length--;
       }
     }
-    // Over the live cap (the berthed craft came in, say): the parked cars
-    // farthest behind go first.
+    // Over the live cap (the berthed craft came in, say) or over the parked
+    // cap: the parked cars farthest behind go first.
     let trims = 4;
-    while (trims-- > 0 && !belowLiveCap(game, PARKED_RESERVE - 1) && evictFar(px, pz, 0, MIN_R));
-    // Empty spots in reach go on the queue.
-    if (qHead > 0 && qHead >= queue.length) {
-      queue.length = 0;
-      qHead = 0;
-    }
+    while (trims-- > 0 && (!belowLiveCap(game, PARKED_RESERVE - 1) || live.length > cap) && evictFar(px, pz, 0, MIN_R));
+    // The nearest empty spots in reach (start curb spots before all), so
+    // the first view is full within a few steps and, under the cap, the
+    // cars stand where the player looks.
     index.near(px, pz, SPAWN_R, nearIds);
     stats.looked += nearIds.length;
-    // Nearest first (start curb spots before all), so the first view is
-    // full within a few steps and, under the live cap, the cars stand
-    // where the player looks.
-    sortX = px;
-    sortZ = pz;
-    nearIds.sort(byNear);
+    const hour = game.clock ?? 12;
+    nPick = 0;
+    pHead = 0;
     for (let j = 0; j < nearIds.length; j++) {
       const i = nearIds[j];
       const s = spots[i];
-      if (s.vehicle || s.used || queued[i]) continue;
-      queued[i] = 1;
-      queue.push(i);
+      if (s.vehicle || s.used || s.lane === 2) continue;
+      const dx = s.x - px, dz = s.z - pz;
+      const d2 = dx * dx + dz * dz - (s.start ? 1e9 : 0);
+      if (nPick === PICK_MAX && d2 >= pickD[nPick - 1]) continue;
+      if (!hourWants(s, hour)) { stats.lotEmpty++; continue; }
+      let at = nPick < PICK_MAX ? nPick++ : PICK_MAX - 1;
+      while (at > 0 && (pickD[at - 1] > d2 || (pickD[at - 1] === d2 && pick[at - 1] > i))) {
+        pick[at] = pick[at - 1]; pickD[at] = pickD[at - 1];
+        at--;
+      }
+      pick[at] = i; pickD[at] = d2;
     }
   }
 
-  // A couple of cars a step from the queue; a spot no longer in reach is
-  // dropped (it is queued again by a later scan when the player is back).
+  // One car a step from the picked spots (and only through the shared
+  // spawn gate); a spot no longer in reach is skipped (a later scan picks
+  // it again when the player is back).
   function drain() {
     const px = game.player.x, pz = game.player.z;
-    while (qHead < queue.length) {
-      const i = queue[qHead];
+    let made = 0;
+    while (pHead < nPick && made < 1) {
+      const i = pick[pHead];
       const s = spots[i];
       const d = Math.hypot(s.x - px, s.z - pz);
       const ok = !s.vehicle && !s.used && d < SPAWN_R && (first || d > MIN_R) && !nearGarage(s.x, s.z);
+      // A listed lot bay whose lot no tile has dressed yet waits (its
+      // blocked-bay test would dress the lot in this step); a later scan
+      // picks it again.
+      if (ok && s.lot && !s.lane && s.lotRef && tilesDress && !lotCache.has(s.lotRef)) {
+        pHead++;
+        continue;
+      }
       if (ok && !laneOk(s)) {
-        // No parking lane on that street: never a car there.
+        // No parking lane on that street (or the bay is on a lot feature): never a car there.
         s.used = true;
         stats.noLane++;
-        queued[i] = 0;
-        qHead++;
+        pHead++;
         continue;
       }
       if (!ok) {
-        queued[i] = 0;
-        qHead++;
+        pHead++;
         continue;
+      }
+      const kinds = MIX[game.city.districtOf(s.x, s.z)] || MIX.midtown;
+      // A car of ours far behind, as new, moves here: no new vehicle, no
+      // new mesh (the record and its mesh are reused).
+      if (relocate(s, px, pz, d, kinds)) {
+        pHead++;
+        made++;
+        continue;
+      }
+      if (live.length >= cap && !evictFar(px, pz, d)) {
+        stats.capped++;
+        pHead = nPick;
+        break;
       }
       if (!belowLiveCap(game, PARKED_RESERVE) && !evictFar(px, pz, d)) {
         stats.deferred++;
@@ -439,9 +594,7 @@ export function createParkedCars(game) {
         stats.deferred++;
         return;
       }
-      queued[i] = 0;
-      qHead++;
-      const kinds = MIX[game.city.districtOf(s.x, s.z)] || MIX.midtown;
+      pHead++;
       const v = createVehicle(game.rng.pick(kinds), s.x, s.z, s.heading, game.rng);
       v.parked = true;
       v.asleep = true;
@@ -449,17 +602,31 @@ export function createParkedCars(game) {
       live.push(s);
       game.addVehicle(v);
       stats.spawned++;
+      made++;
     }
-    if (first && qHead >= queue.length) first = false;
+    if (first && pHead >= nPick) first = false;
   }
 
-  // The lot cars: refresh the field a few times a second from the camera
-  // and the clock. The cap counts every static parked car in view, the
-  // curb cars (real vehicles) first.
+  // The lot cars: a few lots loaded a step, the field refreshed a few
+  // times a second from the camera and the clock. The cap counts every
+  // static parked car in view, the curb cars (real vehicles) first.
   function updateLotCars(dt) {
     if (!lotField) return;
     lotTimer -= dt;
-    if (lotTimer > 0) return;
+    if (lotTimer > 0) {
+      // Between refreshes: a few lots loaded, and at most one real body
+      // built (the one a refresh asked for, else the next model ahead),
+      // never in the step that refreshes (each costs a step a few ms).
+      // (A lot the tiles have not dressed waits for them up to 1.5 s.)
+      lotField.step(undefined, false, tilesDress ? Math.min(255, Math.ceil(1.5 / Math.max(dt, 1e-3))) : 0);
+      if (lotView && lotTimer < 0.2 && lotTimer > 0.05) {
+        if (lotView.wantSi >= 0) {
+          lotView.warm(lotView.wantSi, lotView.wantColor);
+          lotView.wantSi = -1;
+        } else if (warmAt < LOT_CAR_SPECS.length && stats.scans > 2 && (stats.scans & 1) === 0) lotView.warm(warmAt++);
+      }
+      return;
+    }
     lotTimer = 0.25;
     const cam = game.camera;
     let cx = game.player.x, cz = game.player.z, fx = 1, fz = 0;
@@ -471,7 +638,7 @@ export function createParkedCars(game) {
       fx /= l; fz /= l;
     }
     const tier = game.graphics && game.graphics.parkedCars;
-    const cap = Math.min(LOT_CAR_CAP_MAX, tier > 0 ? tier : LOT_CAR_CAP);
+    const lotCap = Math.min(LOT_CAR_CAP_MAX, tier > 0 ? tier : LOT_CAR_CAP);
     let curb = 0;
     for (let i = 0; i < live.length; i++) {
       const v = live[i].vehicle;
@@ -492,7 +659,7 @@ export function createParkedCars(game) {
       blockers[o + 2] = Math.cos(v.heading); blockers[o + 3] = Math.sin(v.heading);
       blockers[o + 4] = (v.spec.length || 4.5) / 2; blockers[o + 5] = (v.spec.width || 1.8) / 2;
     }
-    lotField.update(cx, cz, fx, fz, game.clock ?? 12, Math.max(8, cap - curb), blockers, nb);
+    lotField.update(cx, cz, fx, fz, game.clock ?? 12, Math.max(8, lotCap - curb), blockers, nb);
     if (lotView) lotView.sync();
   }
 
@@ -502,12 +669,19 @@ export function createParkedCars(game) {
     stats,
     lotField,
     lotView,
+    get cap() {
+      return cap;
+    },
+    // Live parked cars of ours (curb spots and listed lot bays).
+    get live() {
+      return live.length;
+    },
     // Indices of the spots within r of (x, z), ascending (grid index).
     spotsNear(x, z, r, out = []) {
       return index.near(x, z, r, out);
     },
     get pending() {
-      return queue.length - qHead;
+      return nPick - pHead;
     },
     fixedUpdate(dt) {
       beginSpawnStep(game, SPAWNER.parked);

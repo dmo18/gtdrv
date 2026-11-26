@@ -16,7 +16,7 @@
 // PROP_SOLIDS entry) is breakable: breakShape switches it and its group
 // (`grp`) off and queues a break record; stepBroken brings it back after
 // BREAK_BACK_T s when the given point (the player) is BREAK_BACK_FAR away.
-import { dressLot, eachBay, lotDressCache, lotFill, FILL_MAX } from './lots.js';
+import { dressLot, eachBay, lotDressCache, lotFill, FILL_MAX, blockedBays, bayScale } from './lots.js';
 import { PROP_SOLIDS, createPropLayer, setBreakGroup } from './propsolid.js';
 import { createEdgeLayer } from './edgelines.js';
 import { attachGround } from './ground.js';
@@ -620,6 +620,15 @@ export function bayCar(city, bx, bz, v, fill = FILL_MAX) {
   const u = cellHash(Math.round(bx * 3), Math.round(bz * 3) + v);
   return listedBays(city).has(key) || u >= fill ? -1 : u;
 }
+// The occupancy hash of a bay of lot `lot` (0.13.8): bayCar's hash scaled by
+// where the bay lies in its lot (lots.js bayScale: a lot fills from its
+// front back). -1 when the bay is a listed one, else a value that may pass
+// 1; the bay holds a car when it is under the lot's fill. The lot layer's
+// bay cars and the drawn ones (render/parkedfield.js) both use it.
+export function bayLotU(city, lot, bx, bz, v) {
+  const u = bayCar(city, bx, bz, v, 2);
+  return u < 0 ? -1 : u * bayScale(lot, bx, bz);
+}
 
 // Collision shapes for the features of one lot (pushed to `list` when
 // given), by their PROP_SOLIDS entry (world/propsolid.js): 'solid' and
@@ -673,14 +682,17 @@ export function addLotSolids(collision, feats, n, list = null) {
 // resolveIn then boxed every number (docs/PERF.md, 0.12.6).
 const BAY_U = new WeakMap();
 // Two circles per static bay car (front and back half), tag 'car'.
-export function addBayCars(city, collision, feats, n, list = null) {
+export function addBayCars(city, collision, feats, n, list = null, lot = null) {
   let made = 0;
+  // A bay whose car would stand on a lot feature never holds one (lots.js blockedBays).
+  const blocked = blockedBays(feats);
+  let k = 0;
   for (let q = 0; q < n; q++) {
     const f = feats[q];
     if (f.kind !== 'bay') continue;
     eachBay(f, (bx, bz, ch) => {
-      const u = bayCar(city, bx, bz, f.v);
-      if (u < 0) return;
+      const u = blocked[k++] ? -1 : bayLotU(city, lot, bx, bz, f.v);
+      if (u < 0 || u >= FILL_MAX) return;
       const cx = Math.cos(ch), cz = Math.sin(ch);
       const a = collision.addCircle(bx - cx * 1.2, bz - cz * 1.2, 1.0, 1.4, 'car');
       const b = collision.addCircle(bx + cx * 1.2, bz + cz * 1.2, 1.0, 1.4, 'car');
@@ -705,7 +717,7 @@ export function fillLotCollision(city, collision, dress = dressLot, list = []) {
     feats.length = 0;
     dress(city, lot, feats);
     addLotSolids(collision, feats, feats.length, list);
-    addBayCars(city, collision, feats, feats.length, list);
+    addBayCars(city, collision, feats, feats.length, list, lot);
   }
   return list;
 }
@@ -774,14 +786,30 @@ export function createLotLayer(city, dress = dressLot) {
   // The bay cars by the hour (setHour): NaN until a game sets the clock,
   // when every bay car up to FILL_MAX stands (tests, tools).
   let fillHour = NaN;
-  const carShapes = [], carLots = [];
-  function setHour(hour) {
+  const carShapes = [], carLots = [], carU = [];
+  // The shapes still to switch for the last hour set (from hourAt on).
+  let hourAt = 0;
+  const HOUR_SLICE = 2500;
+  function setHour(hour, slice = HOUR_SLICE) {
     const h = Math.floor((((hour % 24) + 24) % 24) * 2) / 2;
-    if (!(h >= 0) || h === fillHour) return;
-    fillHour = h;
-    for (let i = 0; i < carShapes.length; i++) {
-      carShapes[i].off = BAY_U.get(carShapes[i]) >= lotFill(carLots[i], h);
+    if (!(h >= 0)) return;
+    if (h !== fillHour) {
+      fillHour = h;
+      hourAt = 0;
     }
+    if (hourAt >= carShapes.length) return;
+    // At most `slice` shapes a call (the parked system calls it every
+    // step: a half hour's switch is spread over a few steps); the shapes
+    // of one lot stand together, so its fill is worked out once per run
+    // (0.13.8: a fill and a WeakMap read per shape, all in one step, cost a
+    // phone a few ms at each half hour).
+    const end = Math.min(carShapes.length, hourAt + slice);
+    let lot = null, fill = 0;
+    for (let i = hourAt; i < end; i++) {
+      if (carLots[i] !== lot) { lot = carLots[i]; fill = lotFill(lot, h); }
+      carShapes[i].off = carU[i] >= fill;
+    }
+    hourAt = end;
   }
   const stats = { cells: 0, lots: 0, shapes: 0 };
   const F_EMPTY = [];
@@ -795,10 +823,11 @@ export function createLotLayer(city, dress = dressLot) {
     list = [];
     addLotSolids(SHAPE_SINK, feats, feats.length, list);
     const n0 = list.length;
-    addBayCars(city, SHAPE_SINK, feats, feats.length, list);
+    addBayCars(city, SHAPE_SINK, feats, feats.length, list, lot);
     for (let i = n0; i < list.length; i++) {
       carShapes.push(list[i]);
       carLots.push(lot);
+      carU.push(BAY_U.get(list[i]));
       if (fillHour === fillHour) list[i].off = BAY_U.get(list[i]) >= lotFill(lot, fillHour);
     }
     lotShapes[k] = list;

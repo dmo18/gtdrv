@@ -2089,26 +2089,120 @@ export function lotShares(lots, keep = () => true) {
 // ---- How full a parking lot is ----
 // Share of the bays holding a car, by the lot's district and the hour:
 // [day, night]. Residential lots fill up at night, the rest empty out. Never
-// below 0.2 and never above 0.55 (a lot is never full; the collision world
-// of world/collision.js only knows cars up to 0.55).
+// above 0.55 (a lot is never full; the collision world of world/collision.js
+// only knows cars up to 0.55).
+// 0.13.8 (the owner on two phones: "lots of car filled lots all over town";
+// every lot was 30 to 60 % full at noon and never under 20 % at night):
+// the fill floor is gone (FILL_MIN 0), nights are near empty but at
+// homes, and each lot has its own pull (lotPull): about one lot in eight
+// is nearly empty whatever the hour, the rest hold 0.55 to 1.15 times the
+// district's share. A lot of its own (no building: a public surface lot)
+// keeps a few more cars overnight than a shop's or an office's.
 export const FILL_BY_DISTRICT = {
-  // (0.13.2: day fills 0.55, 0.5, 0.5 to 0.45, 0.42, 0.42 downtown, midtown
-  // and at the beach: a lot of solid rows read as a wall of bricks.)
-  downtown: [0.45, 0.2], midtown: [0.42, 0.2], residential: [0.3, 0.55], beach: [0.42, 0.2],
-  docks: [0.3, 0.2], industrial: [0.3, 0.2], park: [0.35, 0.2],
+  // [day, night]: offices and garages downtown fullest, shops in midtown
+  // about a third full, the beach a day place, works and parks few.
+  downtown: [0.48, 0.05], midtown: [0.38, 0.04], residential: [0.24, 0.44], beach: [0.48, 0.05],
+  docks: [0.14, 0.02], industrial: [0.14, 0.02], park: [0.26, 0.02],
 };
-export const FILL_MIN = 0.2, FILL_MAX = 0.55;
+export const FILL_MIN = 0, FILL_MAX = 0.55;
+// A lot's own pull (0 to 1.15), from its seed: nearly empty (under 0.12) for
+// about one lot in eight (one in sixteen of the big ones, over 3000 m2).
+function mix32(s) {
+  let h = Math.imul((s | 0) ^ 0x5bd1e995, 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  return (h ^ (h >>> 13)) >>> 0;
+}
+export function lotPull(lot) {
+  const h = mix32(lot.seed);
+  const q = (h & 1023) / 1024, r = ((h >>> 10) & 1023) / 1024;
+  const dead = lot.area > 3000 ? 0.0625 : 0.125;
+  return q < dead ? r * 0.12 : 0.55 + 0.6 * r;
+}
 // The fill of lot `lot` at `hour` (0 to 24): the day and night values blended
-// by a daylight curve (noon 1, midnight 0), a small seeded offset per lot
-// (so two lots never match), clamped to FILL_MIN..FILL_MAX. Hours go by
-// half hours, so the cars of a lot appear one at a time as the day goes.
+// by a daylight curve (noon 1, midnight 0; steeper than a cosine away from
+// homes: shops and offices open and close), times the lot's pull, a small
+// seeded offset per lot (so two lots never match), clamped to
+// FILL_MIN..FILL_MAX. Hours go by half hours, so the cars of a lot appear
+// one at a time as the day goes.
 export function lotFill(lot, hour) {
   const f = FILL_BY_DISTRICT[lot.district] || FILL_BY_DISTRICT.midtown;
   const h = Math.floor((((hour % 24) + 24) % 24) * 2) / 2;
-  const w = 0.5 + 0.5 * Math.cos(((h - 13) * Math.PI) / 12);
-  const jit = (((lot.seed >>> 6) & 255) / 255 - 0.5) * 0.12;
-  const v = f[1] + (f[0] - f[1]) * w + jit;
+  let w = 0.5 + 0.5 * Math.cos(((h - 13) * Math.PI) / 12);
+  if (lot.district !== 'residential') w = w * w * (3 - 2 * w);
+  const own = lot.building === -1 ? 1.5 : 1; // a public lot: some cars stay the night
+  const night = f[1] * own;
+  const pull = lotPull(lot);
+  const jit = (((lot.seed >>> 6) & 255) / 255 - 0.5) * 0.06;
+  const v = (night + (f[0] - night) * w) * pull + jit * Math.min(1, pull);
   return v < FILL_MIN ? FILL_MIN : v > FILL_MAX ? FILL_MAX : v;
+}
+
+// Where in its lot a bay lies, for the order the bays fill in: a lot fills
+// from its front (the road side with the entrance, lot.front 0 +x, 1 +z,
+// 2 -x, 3 -z) back, so the back rows are the empty ones. The bay's hash
+// (0..1) is scaled by 0.55 at the front edge to 1.45 at the back (1 for a
+// lot without a front): about the lot's fill still hold a car (the mean of
+// fill / scale over the depth is 1.08 times the fill), nearly twice the
+// fill at the front, two thirds of it at the back.
+export function bayScale(lot, x, z) {
+  if (!lot || !(lot.front >= 0)) return 1;
+  const f = lot.front;
+  const t = f === 0 ? (lot.x1 - x) / (lot.x1 - lot.x0) : f === 2 ? (x - lot.x0) / (lot.x1 - lot.x0)
+    : f === 1 ? (lot.z1 - z) / (lot.z1 - lot.z0) : (z - lot.z0) / (lot.z1 - lot.z0);
+  return 0.55 + 0.9 * (t < 0 ? 0 : t > 1 ? 1 : t);
+}
+
+// Bays of a lot that never hold a car: the car would stand on a solid
+// feature of the lot (a planter, a lamp, a sign at a row end). One flag per
+// bay in eachBay order over the features, kept per dressing array (the
+// shared cache's arrays are fixed). The collision world's bay cars and the
+// drawn ones both skip them.
+const BLOCK_KINDS = new Set(['planter', 'lamp', 'sign', 'tree', 'bench', 'bin', 'dumpster', 'bollard', 'kiosk', 'pole', 'hydrant']);
+const blockedCache = new WeakMap();
+const BLOCKERS = [];
+// (A caller may dress lot after lot into one array: the flags are kept
+// with the array's first feature and length, and worked out again when
+// either changed.)
+export function blockedBays(feats) {
+  const kept = blockedCache.get(feats);
+  if (kept && kept.first === feats[0] && kept.len === feats.length) return kept.out;
+  let n = 0;
+  for (let q = 0; q < feats.length; q++) if (feats[q].kind === 'bay') n += bayCount(feats[q]);
+  const out = blockedBaysInto(feats, new Uint8Array(n));
+  blockedCache.set(feats, { first: feats[0], len: feats.length, out });
+  return out;
+}
+// The same flags into out (long enough; not kept): for a dressing in a
+// scratch array.
+export function blockedBaysInto(feats, out) {
+  out.fill(0);
+  // The features that can block, first (a few in a lot of hundreds).
+  let nb0 = 0;
+  for (let m = 0; m < feats.length; m++) if (BLOCK_KINDS.has(feats[m].kind)) BLOCKERS[nb0++] = feats[m];
+  if (!nb0) return out;
+  let k = 0;
+  for (let q = 0; q < feats.length; q++) {
+    const f = feats[q];
+    if (f.kind !== 'bay') continue;
+    const nb = bayCount(f);
+    const ca = Math.cos(f.heading), sa = Math.sin(f.heading);
+    const half = (nb * 2.5) / 2;
+    // The car's long axis is across the row (along -sa, ca).
+    for (let s = 0; s < nb; s++, k++) {
+      const o = -half + (s + 0.5) * 2.5;
+      const bx = f.x + ca * o, bz = f.z + sa * o;
+      for (let m = 0; m < nb0; m++) {
+        const g = BLOCKERS[m];
+        const dx = g.x - bx, dz = g.z - bz;
+        if (dx * dx + dz * dz > 16) continue;
+        const along = dx * ca + dz * sa, across = -dx * sa + dz * ca;
+        const r = g.r > 0 ? g.r : Math.max(0.15, Math.min(g.l || 0, g.w || 0) / 2);
+        if (Math.abs(along) < 0.9 + r && Math.abs(across) < 2.2 + r) { out[k] = 1; break; }
+      }
+    }
+  }
+  for (let m = 0; m < nb0; m++) BLOCKERS[m] = null;
+  return out;
 }
 
 // The single bays of a `bay` feature (a row): calls fn(x, z, heading) per
@@ -2174,6 +2268,10 @@ export function lotDressCache(city, dress = dressLot) {
       return f;
     },
     size: () => map.size,
+    // True when lot's features are made (get would not dress it now).
+    has(lot) {
+      return city.lots === lots && city.garages === garages && map.has(lot.id);
+    },
   };
   byFn.set(dress, c);
   return c;

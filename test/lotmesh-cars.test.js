@@ -63,16 +63,40 @@ test('parking lots: every mapped one is a parking lot; bays take at most half a 
   console.log(`# ${parkingLots.length} parking lots (${mapped.length} mapped), ${(total / parkingLots.length).toFixed(1)} bays a lot, the largest ${max}`);
 });
 
-test('fill: by lot type and hour, never empty and never full', () => {
+// 0.13.8: "never empty" (FILL_MIN 0.2) is gone on purpose: the owner saw
+// "lots of car filled lots all over town" on two phones, and a real city has
+// lots empty at night and some empty by chance. What the test protected is
+// kept: never full (FILL_MAX under 0.6, the collision world's limit), the
+// day and night shape by district, half hours; and it now also pins the
+// spread over the real lots (some nearly empty, none crowded, nights emptier).
+test('fill: by lot type and hour, never full, often empty at night', () => {
   const lot = (district, seed = 0x8000) => ({ district, seed });
   for (const d of Object.keys(FILL_BY_DISTRICT).concat(['nowhere'])) {
     for (let h = 0; h < 24; h += 0.25) {
       for (const seed of [0, 0x4000, 0xffff]) {
         const f = lotFill(lot(d, seed), h);
-        assert.ok(f >= FILL_MIN && f <= FILL_MAX && FILL_MAX < 0.6 && FILL_MIN >= 0.2, `${d} ${h}: ${f}`);
+        assert.ok(f >= FILL_MIN && f <= FILL_MAX && FILL_MAX < 0.6 && FILL_MIN >= 0, `${d} ${h}: ${f}`);
       }
     }
   }
+  // The real lots of the whole box at noon and at 2 am.
+  const spread = (h, keep = () => true) => {
+    const ls = parkingLots.filter(keep);
+    let sum = 0, low = 0, high = 0;
+    for (const l of ls) {
+      const f = lotFill(l, h);
+      sum += f;
+      if (f < 0.1) low++;
+      if (f > 0.5) high++;
+    }
+    return { mean: sum / ls.length, low: low / ls.length, high: high / ls.length };
+  };
+  const noon = spread(13), night = spread(2, (l) => l.district !== 'residential');
+  assert.ok(noon.mean > 0.25 && noon.mean < 0.45, `noon mean ${noon.mean}`);
+  assert.ok(noon.low > 0.05 && noon.low < 0.25, `noon: ${noon.low} of the lots nearly empty`);
+  assert.ok(noon.high < 0.15, `noon: ${noon.high} of the lots over half full`);
+  assert.ok(night.mean < 0.12 && night.low > 0.6, `night: mean ${night.mean}, ${night.low} nearly empty`);
+  assert.ok(spread(13, (l) => l.district === 'downtown').mean > spread(13, (l) => l.district === 'midtown').mean, 'downtown fuller than midtown by day');
   assert.ok(lotFill(lot('downtown'), 13) > lotFill(lot('downtown'), 2) + 0.15, 'offices empty out at night');
   assert.ok(lotFill(lot('residential'), 2) > lotFill(lot('residential'), 13) + 0.1, 'homes fill up at night');
   assert.ok(lotFill(lot('beach'), 14) > lotFill(lot('beach'), 3), 'the beach is a day place');

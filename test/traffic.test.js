@@ -335,8 +335,14 @@ test('parked cars fill the parking lots near the player (6 in the first view)', 
   // A parking lot: its listed bays take cars when the player is close.
   const bay = parked.spots.find((s) => s.lot);
   assert.ok(bay, 'the map lists parking lot bays');
-  g.player.x = bay.x + 70;
+  // 0.13.8: at noon and 90 m off (was 70 m at 9 am). A listed bay now
+  // takes a car by its lot's fill at the hour, as the drawn bays do (at
+  // 9 am these lots are a fifth full), and the spawn ring is 120 m (was
+  // 135): from 70 m most of the lot's bays lie inside MIN_R, where no car
+  // ever pops in.
+  g.player.x = bay.x + 90;
   g.player.z = bay.z;
+  g.clock = 13;
   for (let i = 0; i < 40; i++) parked.fixedUpdate(0.5);
   const lotCars = parked.spots.filter((s) => s.lot && s.vehicle && Math.hypot(s.x - g.player.x, s.z - g.player.z) < 135).length;
   assert.ok(lotCars >= 3, `${lotCars} cars in parking lots`);
