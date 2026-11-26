@@ -16,33 +16,33 @@ const CSS = `
 .rw-ex-cars { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; min-height: 0;
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; padding: 2px; }
 .rw-ex-card { min-height: 56px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
-  gap: 2px; padding: 4px 8px; text-align: left; border-radius: 10px; }
-.rw-ex-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--rw-accent); background: rgba(226,115,58,0.22); }
+  gap: 2px; padding: 4px 10px; text-align: left; border-radius: 12px; }
+.rw-ex-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--rw-accent); background: var(--rw-accent-soft, rgba(226,115,58,0.2)); }
 .rw-ex-card b { font-size: 14px; display: flex; gap: 6px; align-items: center; width: 100%; }
-.rw-ex-card small { font-size: 11px; color: var(--rw-dim); font-weight: 500; }
+.rw-ex-card small { font-size: 12px; color: var(--rw-dim); font-weight: 500; }
 .rw-ex-sw { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
-.rw-ex-tag { font-size: 10px; padding: 1px 5px; border-radius: 6px; background: #ffd08a; color: #1b120d; font-weight: 700; }
+.rw-ex-tag { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #ffc49e; color: #1b120d; font-weight: 700; }
 .rw-ex-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden; }
 .rw-ex-name { font-size: 18px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .rw-ex-acts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .rw-ex-acts .rw-menu-btn { padding: 0 6px; }
-.rw-ex-side .rw-menu-confirmrow { min-height: 52px; padding: 2px 0; }
+.rw-ex-side .rw-menu-confirmrow { min-height: 52px; padding: 2px 4px 2px 12px; }
 .rw-ex-word { font-size: 13px; color: var(--rw-dim); margin: 0; }
 .rw-ex-grid { display: grid; grid-template-columns: repeat(auto-fill, 48px); gap: 6px; }
-.rw-ex-swatch { width: 48px; height: 48px; min-height: 48px; padding: 0; border-radius: 10px; }
-.rw-ex-swatch[aria-checked="true"] { box-shadow: 0 0 0 3px #ffd9a8; }
+.rw-ex-swatch { width: 48px; height: 48px; min-height: 48px; padding: 0; border-radius: 12px; }
+.rw-ex-swatch[aria-checked="true"] { box-shadow: inset 0 0 0 3px #fff, 0 0 0 3px var(--rw-accent); }
 .rw-ex-head { display: flex; align-items: center; gap: 8px; }
 .rw-ex-head .rw-menu-btn { flex: 0 0 auto; }
 .rw-ex-garages { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(52px, auto); align-content: start; }
 .rw-ex-g { min-height: 52px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; gap: 1px; padding: 2px 10px; }
 .rw-ex-g b { font-size: 14px; }
-.rw-ex-g small { font-size: 11px; color: var(--rw-dim); font-weight: 500; }
+.rw-ex-g small { font-size: 12px; color: var(--rw-dim); font-weight: 500; }
 .rw-ex-g:disabled { opacity: 0.6; }
 .rw-ex-adv { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 .rw-ex-col { display: flex; flex-direction: column; min-height: 0; }
-.rw-ex-col h3 { margin: 0 0 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--rw-accent); }
+.rw-ex-col h3 { margin: 6px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--rw-accent-hi, #f28d55); }
 .rw-ex-list { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-.rw-ex-row { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 4px 8px; border-radius: 10px; background: rgba(246,239,230,0.07); }
+.rw-ex-row { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 4px 8px; border-radius: 12px; background: var(--rw-fill, rgba(255,255,255,0.06)); }
 .rw-ex-row > div { flex: 1 1 auto; min-width: 0; }
 .rw-ex-row b { display: block; font-size: 14px; }
 .rw-ex-row small { display: block; font-size: 12px; color: var(--rw-dim); }

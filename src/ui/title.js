@@ -50,17 +50,20 @@ export function fillAbout(doc, parent, opts = {}) {
 
 const ABOUT_CSS = `
 #boot .rw-aboutwrap { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
-  padding: calc(8px + var(--st)) calc(12px + var(--sr)) calc(8px + var(--sb)) calc(12px + var(--sl)); background: rgba(12,9,8,0.85); }
+  padding: calc(8px + var(--st)) calc(12px + var(--sr)) calc(8px + var(--sb)) calc(12px + var(--sl)); background: rgba(5,7,11,0.72); }
 #boot .rw-aboutbox { box-sizing: border-box; width: min(640px, 100%); max-height: 100%; display: flex; flex-direction: column;
-  border-radius: 16px; background: rgba(24,18,15,0.95); box-shadow: inset 0 0 0 1px rgba(246,239,230,0.22); color: #f6efe6; font-size: 14px; line-height: 1.3; }
-#boot .rw-abouttop { flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 16px; }
-#boot .rw-abouttop b { font-size: 20px; }
-#boot .rw-aboutbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 16px 10px; -webkit-user-select: text; user-select: text; touch-action: pan-y; overscroll-behavior: contain; }
+  border-radius: 18px; background: rgba(15,19,26,0.94); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12), 0 16px 40px rgba(0,0,0,0.5); color: #f3f5f8; font-size: 14px; line-height: 1.4; }
+#boot .rw-abouttop { flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 18px; box-shadow: inset 0 -1px rgba(255,255,255,0.08); }
+#boot .rw-abouttop b { font-size: 21px; font-weight: 700; }
+#boot .rw-aboutbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 16px 10px; -webkit-user-select: text; user-select: text; touch-action: pan-y; overscroll-behavior: contain; }
 #boot .rw-aboutbody p { margin: 0 0 6px; }
-#boot .rw-about-h { margin: 8px 0 3px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: #e2733a; font-weight: 700; }
-#boot .rw-about-dim { opacity: 0.75; }
-#boot .rw-about-link, .rw-about-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; color: #ffd08a; font-weight: 700; }
-#boot .rw-aboutclose { min-width: 96px; height: 48px; font: inherit; font-size: 16px; font-weight: 700; border-radius: 12px; border: 2px solid #e2733a; background: #e2733a; color: #14110f; cursor: pointer; touch-action: manipulation; }
+#boot .rw-about-h { margin: 10px 0 4px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #f28d55; font-weight: 700; }
+#boot .rw-about-h:first-child { margin-top: 4px; }
+#boot .rw-about-dim { color: rgba(214,222,233,0.74); }
+#boot .rw-about-link, .rw-about-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 4px; color: #ffc49e; font-weight: 700; }
+#boot .rw-aboutclose { min-width: 96px; height: 48px; font: inherit; font-size: 15px; font-weight: 600; border-radius: 999px; border: 0; background: rgba(255,255,255,0.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); color: #f3f5f8; cursor: pointer; touch-action: manipulation; }
+#boot .rw-aboutclose:active { background: rgba(255,255,255,0.18); }
+#boot .rw-aboutclose:focus-visible { outline: 2px solid #ffd2b5; outline-offset: 2px; }
 `;
 // 'Building streets 40 percent' (text only; label is trimmed to a short phrase).
 export function progressText(label, pct) {

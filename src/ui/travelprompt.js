@@ -3,12 +3,14 @@
 // is a document; text goes through textContent.
 const CSS = `
 .rw-tp { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 70; box-sizing: border-box; width: min(420px, calc(100vw - 32px));
-  padding: 14px 16px; border-radius: 16px; background: rgba(24,18,15,0.96); border: 2px solid #e2733a; color: #f6efe6; font-family: system-ui, sans-serif; text-align: center; }
-.rw-tp p { margin: 0 0 12px; font-size: 18px; font-weight: 700; line-height: 24px; }
-.rw-tp div { display: flex; gap: 12px; justify-content: center; }
-.rw-tp button { flex: 1 1 0; min-width: 120px; height: 56px; font: inherit; font-size: 18px; font-weight: 800; border-radius: 12px; border: 2px solid #e2733a; cursor: pointer; touch-action: manipulation; }
-.rw-tp .rw-tp-yes { background: #e2733a; color: #14110f; }
-.rw-tp .rw-tp-stay { background: rgba(0,0,0,0.5); color: #fff; }
+  padding: 16px 16px 14px; border-radius: 18px; background: rgba(15,19,26,0.94); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12), 0 16px 40px rgba(0,0,0,0.5);
+  color: #f3f5f8; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-align: center; }
+.rw-tp p { margin: 0 0 14px; font-size: 18px; font-weight: 700; line-height: 24px; }
+.rw-tp div { display: flex; gap: 10px; justify-content: center; }
+.rw-tp button { flex: 1 1 0; min-width: 120px; height: 56px; font: inherit; font-size: 17px; font-weight: 700; border-radius: 14px; border: 0; cursor: pointer; touch-action: manipulation; }
+.rw-tp .rw-tp-yes { background: linear-gradient(180deg, #f28d55, #e2733a); color: #1c0f07; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25); }
+.rw-tp .rw-tp-stay { background: rgba(255,255,255,0.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); color: #f3f5f8; }
+.rw-tp button:focus-visible { outline: 2px solid #ffd2b5; outline-offset: 2px; }
 `;
 
 export function createTravelPrompt(doc, { onYes, onStay }) {

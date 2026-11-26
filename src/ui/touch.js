@@ -91,15 +91,18 @@ export const WEAPON_ICONS = {
 };
 
 // The steering wheel: an original three-spoke design drawn here.
+// 0.13.7: a dark glass rim with thin light edges, grips that light up under the thumb, an accent top mark.
 const WHEEL_SVG = '<svg viewBox="0 0 150 150" aria-hidden="true">'
-  + '<circle cx="75" cy="75" r="64" class="rw-w-rim"/>'
-  + '<path d="M26 52 A56 56 0 0 1 52 26" class="rw-w-grip"/>'
-  + '<path d="M98 26 A56 56 0 0 1 124 52" class="rw-w-grip"/>'
   + '<path d="M19 82 L57 78 L75 90 L93 78 L131 82" class="rw-w-spoke"/>'
   + '<path d="M75 90 L75 131" class="rw-w-spoke"/>'
-  + '<circle cx="75" cy="78" r="17" class="rw-w-hub"/>'
-  + '<path d="M67 76 l8 -7 l8 7" class="rw-w-mark"/>'
-  + '<rect x="70" y="5" width="10" height="16" rx="3" class="rw-w-top"/>'
+  + '<circle cx="75" cy="75" r="64" class="rw-w-rim"/>'
+  + '<circle cx="75" cy="75" r="70.5" class="rw-w-edge"/>'
+  + '<circle cx="75" cy="75" r="57.5" class="rw-w-edge"/>'
+  + '<path d="M14.5 62 A62 62 0 0 1 36 27" class="rw-w-grip"/>'
+  + '<path d="M114 27 A62 62 0 0 1 135.5 62" class="rw-w-grip"/>'
+  + '<circle cx="75" cy="80" r="17" class="rw-w-hub"/>'
+  + '<path d="M67 83 l8 -7 l8 7" class="rw-w-mark"/>'
+  + '<rect x="70" y="4" width="10" height="17" rx="3" class="rw-w-top"/>'
   + '</svg>';
 
 function svg(name) {

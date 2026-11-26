@@ -2,11 +2,13 @@
 const CSS = `
 .rw-touch, .rw-hud, .rw-chud {
   --rw-accent: #e2733a;
+  --rw-accent-hi: #f28d55;
   --rw-accent-soft: rgba(226, 115, 58, 0.78);
-  --rw-text: #f6efe6;
-  --rw-dim: rgba(246, 239, 230, 0.62);
-  --rw-panel: rgba(24, 18, 15, 0.58);
-  --rw-panel-edge: rgba(246, 239, 230, 0.22);
+  --rw-text: #f6f7f9;
+  --rw-dim: rgba(222, 228, 236, 0.66);
+  /* 0.13.7: dark blue-gray glass, see-through enough to keep the road visible */
+  --rw-panel: rgba(12, 16, 22, 0.46);
+  --rw-panel-edge: rgba(255, 255, 255, 0.3);
   --rw-sl: max(env(safe-area-inset-left, 0px), var(--rw-test-sl, 0px));
   --rw-sr: max(env(safe-area-inset-right, 0px), var(--rw-test-sr, 0px));
   --rw-st: max(env(safe-area-inset-top, 0px), var(--rw-test-st, 0px));
@@ -40,28 +42,31 @@ const CSS = `
 .rw-wheel {
   position: absolute; left: calc(var(--rw-sl) + 16px + (var(--slot) - var(--wsize)) / 2);
   bottom: calc(var(--rw-sb) + var(--sgap) + (var(--slot) - var(--wsize)) / 2);
-  width: var(--wsize); height: var(--wsize); pointer-events: none; opacity: 0.7; transition: opacity 0.12s;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+  width: var(--wsize); height: var(--wsize); pointer-events: none; opacity: 0.78; transition: opacity 0.12s;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
 }
 .rw-wheel.rw-active { opacity: 1; }
 .rw-wheel-rot { width: 100%; height: 100%; will-change: transform; }
 .rw-wheel.rw-spring .rw-wheel-rot { transition: transform 0.24s cubic-bezier(0.3, 1.45, 0.55, 1); }
 .rw-wheel svg { display: block; width: 100%; height: 100%; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.rw-w-rim { stroke: rgba(30, 23, 19, 0.88); stroke-width: 15; }
-.rw-w-grip { stroke: var(--rw-accent); stroke-width: 15; }
-.rw-w-spoke { stroke: rgba(30, 23, 19, 0.88); stroke-width: 11; }
-.rw-w-hub { fill: rgba(30, 23, 19, 0.92); stroke: var(--rw-panel-edge); stroke-width: 2; }
-.rw-w-mark { stroke: var(--rw-accent); stroke-width: 3; }
-.rw-w-top { fill: #ffd0b5; stroke: none; }
-.rw-wheel.rw-active .rw-w-rim { stroke: rgba(46, 33, 26, 0.95); }
+.rw-w-rim { stroke: rgba(14, 18, 25, 0.82); stroke-width: 13; }
+.rw-w-edge { stroke: rgba(255, 255, 255, 0.34); stroke-width: 1.5; }
+.rw-w-grip { stroke: rgba(255, 255, 255, 0.24); stroke-width: 9; }
+.rw-w-spoke { stroke: rgba(14, 18, 25, 0.8); stroke-width: 9; }
+.rw-w-hub { fill: rgba(14, 18, 25, 0.88); stroke: rgba(255, 255, 255, 0.3); stroke-width: 1.5; }
+.rw-w-mark { stroke: var(--rw-accent-hi); stroke-width: 3; }
+.rw-w-top { fill: var(--rw-accent); stroke: none; }
+.rw-wheel.rw-active .rw-w-rim { stroke: rgba(20, 25, 34, 0.92); }
+.rw-wheel.rw-active .rw-w-edge { stroke: rgba(242, 141, 85, 0.85); }
+.rw-wheel.rw-active .rw-w-grip { stroke: rgba(242, 141, 85, 0.55); }
 
 /* floating steering slider (car, style 'slider'): rests in the steering slot (docs/REVAMP.md 6.5) */
 .rw-pad {
   position: absolute; left: 0; top: 0; width: var(--slot); height: 56px; border-radius: 28px;
-  background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
-  opacity: 0.55; pointer-events: none; transition: opacity 0.12s;
+  background: var(--rw-panel); border: 1.5px solid var(--rw-panel-edge);
+  opacity: 0.7; pointer-events: none; transition: opacity 0.12s;
 }
-.rw-pad.rw-active { opacity: 0.95; border-color: var(--rw-accent-soft); }
+.rw-pad.rw-active { opacity: 1; border-color: var(--rw-accent-hi); box-shadow: 0 0 0 3px rgba(226, 115, 58, 0.35); }
 .rw-pad::before, .rw-pad::after {
   content: ""; position: absolute; top: 50%; width: 0; height: 0; margin-top: -6px;
   border: 6px solid transparent;
@@ -96,17 +101,17 @@ const CSS = `
 /* floating 2-axis stick (foot, plane, heli, tank): rests in the steering slot */
 .rw-stick {
   position: absolute; left: 0; top: 0; width: 128px; height: 128px; border-radius: 50%;
-  background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
-  opacity: 0.55; pointer-events: none; transition: opacity 0.12s;
+  background: radial-gradient(circle, rgba(12, 16, 22, 0.2) 0 38%, var(--rw-panel) 39%); border: 1.5px solid var(--rw-panel-edge);
+  opacity: 0.7; pointer-events: none; transition: opacity 0.12s;
 }
-.rw-stick.rw-active { opacity: 0.95; border-color: var(--rw-accent-soft); }
-.rw-stick.rw-sprint { border-color: var(--rw-accent); box-shadow: 0 0 14px var(--rw-accent-soft); }
+.rw-stick.rw-active { opacity: 1; border-color: var(--rw-accent-hi); box-shadow: 0 0 0 3px rgba(226, 115, 58, 0.35); }
+.rw-stick.rw-sprint { border-color: var(--rw-accent); box-shadow: 0 0 0 3px rgba(226, 115, 58, 0.6), 0 0 16px var(--rw-accent-soft); }
 .rw-stick .rw-knob { left: 50%; top: 50%; margin: -26px 0 0 -26px; width: 52px; height: 52px; }
 
 .rw-knob {
   position: absolute; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle at 35% 30%, #f3a173, var(--rw-accent) 70%);
-  border: 2px solid rgba(255, 255, 255, 0.5); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  background: radial-gradient(circle at 38% 32%, #ffb488, var(--rw-accent) 72%);
+  border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
 }
 
 /* buttons: the box is the hit area; the .rw-face inside is what you see */
@@ -114,30 +119,37 @@ const CSS = `
   position: absolute; pointer-events: auto; display: block; padding: 0; margin: 0;
   width: 58px; height: 58px; border-radius: 50%; background: transparent; color: var(--rw-text);
   border: 0; outline: none;
-  font: 700 10px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.06em;
+  font: 700 11px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.05em;
 }
+/* 0.13.7: the face fills the hit box (a full circle or pedal), dark glass with a thin light edge;
+   pressed: accent fill and a ring around it */
 .rw-face {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-  background: var(--rw-panel); border: 2px solid var(--rw-panel-edge);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  transition: transform 0.12s ease-out, opacity 0.12s ease-out, background 0.08s;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: var(--rw-panel); border: 1.5px solid var(--rw-panel-edge);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: inset 0.1s ease-out, opacity 0.12s ease-out, background-color 0.08s, border-color 0.08s, box-shadow 0.12s ease-out;
 }
-.rw-btn svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-.rw-btn span { pointer-events: none; }
-.rw-btn:focus-visible .rw-face { outline: 3px solid #fff; outline-offset: 3px; }
-.rw-btn.rw-down .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
+.rw-btn svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+.rw-btn span { pointer-events: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.rw-btn:focus-visible .rw-face { outline: 2px solid #fff; outline-offset: 3px; }
+.rw-btn.rw-down .rw-face {
+  background: rgba(226, 115, 58, 0.82); border-color: #ffd7bf;
+  box-shadow: 0 0 0 3px rgba(242, 141, 85, 0.45), 0 2px 12px rgba(0, 0, 0, 0.3);
+}
 .rw-off { display: none !important; }
 
-/* idle: a little smaller and dimmer until a finger is on it (hit box unchanged) */
-.rw-pri .rw-face { transform: scale(0.85); opacity: 0.7; }
-.rw-pri.rw-down .rw-face, .rw-pri:focus-visible .rw-face { transform: none; opacity: 1; }
-.rw-full .rw-pri .rw-face { transform: none; opacity: 1; }
+/* idle: the face sits 7.5 percent in from the hit box (85 percent wide, the HUD cover budget) and dims; under a
+   finger it fills the box and gets the ring. Inset, not a scale, so icons and labels keep their size. */
+.rw-pri .rw-face { inset: 7.5%; opacity: 0.7; }
+.rw-pri.rw-down .rw-face, .rw-pri:focus-visible .rw-face { inset: 0; opacity: 1; }
+.rw-full .rw-pri .rw-face { inset: 0; opacity: 1; }
 
-.rw-pedal { width: var(--pw); height: var(--ph); border-radius: 22px; font-size: 13px; }
+.rw-pedal { width: var(--pw); height: var(--ph); border-radius: 20px; font-size: 12px; }
 .rw-pedal .rw-face { gap: 6px; }
-.rw-pedal svg { width: 28px; height: 28px; }
-.rw-pedal.rw-gas .rw-face { border-color: rgba(226, 115, 58, 0.7); }
+.rw-pedal svg { width: 26px; height: 26px; }
+.rw-pedal.rw-gas .rw-face { border-color: rgba(242, 141, 85, 0.9); background: linear-gradient(180deg, rgba(226, 115, 58, 0.34), rgba(12, 16, 22, 0.5)); }
+.rw-pedal.rw-gas.rw-down .rw-face { background: rgba(226, 115, 58, 0.88); }
 
 /* per-mode groups: a gated element shows only in the modes it lists */
 .rw-mode-foot .rw-gated:not(.rw-m-foot),
@@ -179,14 +191,14 @@ const CSS = `
 .rw-enter span { font-size: 11px; }
 .rw-dbfire { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
 .rw-lock, .rw-chipbtn { --x: 184px; --y: 84px; width: var(--ew); height: var(--ew); }
-.rw-chipbtn .rw-face { background: rgba(120, 30, 22, 0.7); border-color: rgba(255, 150, 120, 0.85); font-size: 9px; }
+.rw-chipbtn .rw-face { background: rgba(140, 34, 24, 0.66); border-color: rgba(255, 150, 120, 0.9); font-size: 10px; }
 .rw-chipbtn svg { width: 22px; height: 22px; }
 .rw-touch:not(.rw-chip-on) .rw-chipbtn, .rw-full .rw-chipbtn { display: none; }
 .rw-chip-on:not(.rw-full) .rw-lock { display: none; }
 .rw-enter.rw-dim { opacity: 0.32; filter: grayscale(0.8); pointer-events: none; }
 .rw-more { --x: var(--mx); --y: var(--my); width: var(--ew); height: var(--ew); }
 .rw-full .rw-more { display: none; }
-.rw-touch.rw-fan-open .rw-more .rw-face { background: var(--rw-accent-soft); border-color: #ffd0b5; }
+.rw-touch.rw-fan-open .rw-more .rw-face { background: rgba(226, 115, 58, 0.82); border-color: #ffd7bf; opacity: 1; box-shadow: 0 0 0 3px rgba(242, 141, 85, 0.45); }
 /* extra primaries other systems register without a slot (GARAGE, TALK): the BOOST cell above MORE
    (docs/REVAMP.md 6.12). BOOST hides while one shows; a second one waits; the cell above is never used. */
 .rw-extra { --x: var(--mx); --y: calc(var(--my) + 64px); width: var(--ew); height: var(--ew); }
@@ -196,9 +208,9 @@ const CSS = `
 .rw-slot-hand { --x: 100px; --y: 108px; width: var(--ew); height: var(--ew); }
 /* BOOST: the cell above MORE (915x412: 843, 116; 780x360: 716, 88) */
 .rw-slot-boost { --x: var(--mx); --y: calc(var(--my) + 64px); width: var(--ew); height: var(--ew); }
-.rw-slot-boost .rw-face { border-color: rgba(255, 170, 60, 0.85); }
-.rw-slot-boost.rw-down .rw-face { background: rgba(255, 140, 30, 0.85); box-shadow: 0 0 12px rgba(255, 150, 40, 0.8); }
-.rw-slot-run { --x: calc(8px + var(--pw) + 12px); --y: 8px; width: var(--pw); height: var(--ph); border-radius: 22px; }
+.rw-slot-boost .rw-face { border-color: rgba(255, 190, 90, 0.9); color: #ffe1b8; }
+.rw-slot-boost.rw-down .rw-face { background: rgba(255, 150, 40, 0.88); color: #fff; box-shadow: 0 0 0 3px rgba(255, 170, 60, 0.5), 0 0 14px rgba(255, 150, 40, 0.7); }
+.rw-slot-run { --x: calc(8px + var(--pw) + 12px); --y: 8px; width: var(--pw); height: var(--ph); border-radius: 20px; }
 .rw-slot-run .rw-face { gap: 6px; }
 .rw-a-detonate .rw-face { border-color: rgba(255, 120, 90, 0.95); animation: rw-pulse 0.9s ease-in-out infinite; }
 @keyframes rw-pulse { 50% { box-shadow: 0 0 14px rgba(255, 90, 60, 0.9); } }
@@ -208,7 +220,7 @@ const CSS = `
    strip: GUN (FIRE rect), BOMB (HAND rect), LOCK (LOCK rect), MSL left of
    LOCK, BOOM beside or above MSL. Tank: CANNON (FIRE rect), LOCK (LOCK rect),
    COAX left of LOCK. */
-.rw-slot span { font-size: 10px; }
+.rw-slot span { font-size: 11px; }
 .rw-slot svg { width: 24px; height: 24px; }
 .rw-slot-gun, .rw-slot-cannon { --x: 180px; --y: 8px; width: var(--fw); height: var(--fw); }
 .rw-slot-msl, .rw-slot-coax { --x: calc(184px + var(--ew) + 8px); --y: 84px; }
@@ -230,9 +242,9 @@ const CSS = `
 .rw-slot-det { --x: 272px; --y: 148px; }
 .rw-slot-gun svg, .rw-slot-cannon svg { width: 28px; height: 28px; }
 .rw-mode-tank .rw-exit { --x: 16px; --y: 108px; }
-.rw-slot-gun .rw-face, .rw-slot-cannon .rw-face { border-color: rgba(226, 115, 58, 0.8); }
-.rw-slot.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
-.rw-slot.rw-on .rw-face { background: rgba(226, 46, 31, 0.85); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 70, 50, 0.8); }
+.rw-slot-gun .rw-face, .rw-slot-cannon .rw-face { border-color: rgba(255, 120, 96, 0.85); background: rgba(120, 28, 20, 0.5); }
+.rw-slot.rw-down .rw-face { background: rgba(226, 70, 48, 0.86); border-color: #ffd7bf; box-shadow: 0 0 0 3px rgba(255, 110, 80, 0.45); }
+.rw-slot.rw-on .rw-face { background: rgba(226, 46, 31, 0.86); border-color: #ffd7bf; box-shadow: 0 0 0 3px rgba(255, 90, 60, 0.5), 0 0 12px rgba(255, 70, 50, 0.7); }
 .rw-slot .rw-face::after {
   content: ""; position: absolute; inset: -4px; border-radius: 50%; pointer-events: none; opacity: 0;
   background: conic-gradient(#ffb48a calc(var(--ring, 0) * 1turn), rgba(0, 0, 0, 0.25) 0);
@@ -254,7 +266,9 @@ const CSS = `
 .rw-fan-open .rw-sec, .rw-full .rw-sec {
   transform: none; opacity: 1; visibility: visible; transition-delay: 0s;
 }
-.rw-sec span { font-size: 9px; }
+.rw-sec { border-radius: 16px; }
+.rw-sec .rw-face { background: rgba(12, 16, 22, 0.62); }
+.rw-sec span { font-size: 10px; letter-spacing: 0.03em; }
 .rw-sec svg { width: 22px; height: 22px; }
 
 /* 780 by 360 and smaller: the second set of rectangles */
@@ -332,19 +346,19 @@ const CSS = `
 .rw-ww.rw-ww-open { visibility: visible; opacity: 1; transition-delay: 0s; }
 .rw-ww-disc {
   position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(circle, rgba(10, 14, 20, 0.96) 0 24px, rgba(16, 22, 30, 0.93) 25px);
-  border: 2px solid var(--rw-panel-edge); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle, rgba(8, 11, 16, 0.96) 0 24px, rgba(14, 18, 25, 0.9) 25px);
+  border: 1.5px solid rgba(255, 255, 255, 0.22); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
 }
 .rw-ww-cancel .rw-ww-disc { border-color: rgba(226, 70, 48, 0.8); opacity: 0.7; }
 .rw-ww-slice {
   position: absolute; width: 54px; height: 50px; margin: -25px 0 0 -27px; border-radius: 14px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   color: var(--rw-text); border: 2px solid transparent;
-  font: 700 8px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.05em;
+  font: 700 9px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.04em;
 }
 .rw-ww-slice svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rw-ww-slice.rw-cur { border-color: rgba(255, 255, 255, 0.28); }
-.rw-ww-slice.rw-sel { background: var(--rw-accent); border-color: #ffd0b5; transform: scale(1.14); box-shadow: 0 0 12px var(--rw-accent-soft); }
+.rw-ww-slice.rw-sel { background: var(--rw-accent); border-color: #ffd7bf; transform: scale(1.14); box-shadow: 0 0 0 3px rgba(242, 141, 85, 0.4); }
 .rw-ww-label {
   position: absolute; left: 50%; top: 50%; width: 84px; transform: translate(-50%, -50%);
   text-align: center; font: 700 11px/1.15 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--rw-text);
@@ -352,22 +366,22 @@ const CSS = `
 .rw-ww-cancel .rw-ww-label { color: #ff9c86; }
 
 /* combat: FIRE takes the GAS rect on foot, LOCK and the reload chip share the LOCK rect */
-.rw-btn.rw-fire { --x: 8px; --y: 8px; width: var(--pw); height: var(--ph); border-radius: 22px; font-size: 13px; }
+.rw-btn.rw-fire { --x: 8px; --y: 8px; width: var(--pw); height: var(--ph); border-radius: 20px; font-size: 12px; }
 .rw-btn.rw-fire .rw-face, .rw-btn.rw-dbfire .rw-face {
-  background: rgba(120, 30, 22, 0.62); border: 3px solid rgba(255, 120, 96, 0.8);
+  background: linear-gradient(180deg, rgba(196, 48, 34, 0.5), rgba(90, 20, 14, 0.5)); border: 1.5px solid rgba(255, 130, 105, 0.92);
 }
 .rw-btn.rw-fire svg { width: 32px; height: 32px; }
 .rw-btn.rw-dbfire { font-size: 11px; }
 .rw-btn.rw-dbfire svg { width: 26px; height: 26px; }
-.rw-btn.rw-fire.rw-down .rw-face, .rw-btn.rw-dbfire.rw-down .rw-face { background: rgba(226, 70, 48, 0.85); border-color: #ffd0b5; }
+.rw-btn.rw-fire.rw-down .rw-face, .rw-btn.rw-dbfire.rw-down .rw-face { background: rgba(226, 70, 48, 0.88); border-color: #ffd7bf; box-shadow: 0 0 0 3px rgba(255, 110, 80, 0.45); }
 .rw-fire-mag { position: absolute; right: 10%; top: 8%; font: 800 11px/1 system-ui, sans-serif; color: #ffe2cc; font-variant-numeric: tabular-nums; }
 .rw-dbfire .rw-fire-mag { right: 14%; top: 12%; }
-.rw-lock.rw-on .rw-face { background: rgba(226, 70, 48, 0.8); border-color: #ffd0b5; box-shadow: 0 0 12px rgba(255, 110, 80, 0.7); }
+.rw-lock.rw-on .rw-face { background: rgba(226, 70, 48, 0.82); border-color: #ffd7bf; opacity: 1; box-shadow: 0 0 0 3px rgba(255, 110, 80, 0.45); }
 /* ammo panel: HUD Full only, under the score; a display (reload is RELOAD in the fan or the chip) */
 .rw-btn.rw-ammo { right: calc(var(--rw-sr) + 64px); top: calc(var(--rw-st) + 60px); width: 160px; height: 40px; border-radius: 6px; pointer-events: none; }
 .rw-ammo .rw-face {
-  flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; border-radius: 6px;
-  background: rgba(0, 0, 0, 0.6); border: 0;
+  flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0 8px; border-radius: 8px;
+  background: rgba(10, 14, 20, 0.66); border: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 .rw-touch:not(.rw-full) .rw-ammo { display: none; }
 .rw-ammo-icon svg { width: 20px; height: 20px; display: block; }
@@ -397,6 +411,10 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) {
   .rw-hot .rw-badge.rw-on { animation: none !important; background: #ff3b30; }
   .rw-face, .rw-sec, .rw-ww, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl { transition: none !important; }
+}
+html[data-rw-calm="on"] .rw-face, html[data-rw-calm="on"] .rw-sec, html[data-rw-calm="on"] .rw-ww, html[data-rw-calm="on"] .rw-wheel,
+html[data-rw-calm="on"] .rw-pad, html[data-rw-calm="on"] .rw-stick { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
   .rw-a-detonate .rw-face { animation: none; }
 }
 
@@ -413,7 +431,8 @@ const CSS = `
 }
 .rw-minimap:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 .rw-pill {
-  background: rgba(0, 0, 0, 0.6); color: #fff; border-radius: 6px;
+  background: rgba(10, 14, 20, 0.64); color: #fff; border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 /* speed: always 8 px right of the minimap (also when it is grown); a craft only */
@@ -668,6 +687,8 @@ html[data-rw-contrast="high"] .rw-hpmeter, html[data-rw-contrast="high"] .rw-clo
   outline: 2px solid #fff; outline-offset: -2px; background-color: rgba(0, 0, 0, 0.82); color: #fff; text-shadow: 0 0 2px #000, 0 1px 3px #000;
 }
 html[data-rw-contrast="high"] .rw-btn { outline: 2px solid #fff; outline-offset: -2px; }
+html[data-rw-contrast="high"] .rw-face { background-color: rgba(0, 0, 0, 0.72); border-color: #fff; opacity: 1; }
+html[data-rw-contrast="high"] .rw-btn span { text-shadow: 0 0 2px #000, 0 1px 3px #000; }
 `;
 
 // Adds the style element once (safe to call many times).
