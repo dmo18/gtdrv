@@ -7,7 +7,7 @@
 //
 // Coordinates: x east, z south, meters, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
-import { DISTRICTS, STREET_W, lanePoint, laneOffset } from './citygen.js';
+import { DISTRICTS, STREET_W, lanePoint, laneOffset, SIGNAL } from './citygen.js';
 import { roadProfile, pairDivided, harmonizeStreets, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
 import { buildRoadGeo, onJunction } from './junctions.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
@@ -3268,7 +3268,22 @@ export function createMiamiCity(data, opts = {}) {
     // would never add up to 400 m.)
     for (let walked = 0, hops = 0; cur && walked < 400 && hops < 64; hops++) {
       const n = nodes[at];
-      if (n.signal) { n.phase = cur.horizontal ? 0 : 12; return; }
+      if (n.signal) {
+        // The whole junction (signal nodes joined by short edges, as in
+        // signalClusters) takes the phase, or its other lights fall out of step.
+        const ph = cur.horizontal ? 0 : 12, todo = [at];
+        n.phase = ph;
+        while (todo.length) {
+          const mi = todo.pop(), m = nodes[mi];
+          for (let k = 0; k < m.edges.length; k++) {
+            const e2 = edges[m.edges[k]], o = e2.a === mi ? e2.b : e2.a;
+            if (!(e2.length < SIGNAL.cluster) || !nodes[o].signal || nodes[o].phase === ph) continue;
+            nodes[o].phase = ph;
+            todo.push(o);
+          }
+        }
+        return;
+      }
       walked += cur.length;
       let next = null, best = 0.9;
       for (let k = 0; k < n.edges.length; k++) {

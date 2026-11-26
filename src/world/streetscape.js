@@ -573,9 +573,12 @@ export function settleStreetProps(city, specs) {
       city.signals.push(item);
       lit.add(litKey(item.node));
     }
-    for (const item of dropped) {
-      const node = city.nodes[item.node];
-      if (lit.has(litKey(item.node)) || !node || !node.signal) continue;
+    // A junction with no visible light holds no signal on any of its nodes.
+    const dark = new Set();
+    for (const item of dropped) if (!lit.has(litKey(item.node))) dark.add(litKey(item.node));
+    for (let i = 0; i < city.nodes.length; i++) {
+      const node = city.nodes[i];
+      if (!node.signal || !dark.has(litKey(i))) continue;
       node.signal = false;
       stats.unlit = (stats.unlit || 0) + 1;
     }

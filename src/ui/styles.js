@@ -413,7 +413,10 @@ const CSS = `
   .rw-face, .rw-sec, .rw-ww, .rw-wheel, .rw-wheel-rot, .rw-pad, .rw-stick, .rw-minimap, .rw-tl { transition: none !important; }
 }
 html[data-rw-calm="on"] .rw-face, html[data-rw-calm="on"] .rw-sec, html[data-rw-calm="on"] .rw-ww, html[data-rw-calm="on"] .rw-wheel,
-html[data-rw-calm="on"] .rw-pad, html[data-rw-calm="on"] .rw-stick { transition: none !important; }
+html[data-rw-calm="on"] .rw-pad, html[data-rw-calm="on"] .rw-stick, html[data-rw-calm="on"] .rw-wheel-rot, html[data-rw-calm="on"] .rw-minimap,
+html[data-rw-calm="on"] .rw-tl { transition: none !important; }
+html[data-rw-calm="on"] .rw-badge, html[data-rw-calm="on"] .rw-hot, html[data-rw-calm="on"] [class*="rw-siren"], html[data-rw-calm="on"] [class*="rw-pulse"],
+html[data-rw-calm="on"] [class*="rw-hplow"], html[data-rw-calm="on"] .rw-a-detonate .rw-face { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .rw-a-detonate .rw-face { animation: none; }
 }
