@@ -155,6 +155,13 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       at.position.z = z0 + Math.sin(h) * START_AT[k];
       while (n < 6 && stream0.flush(at, START_AT[k + 1], true)) yield { label: 'Building streets', pct: 26 + 2 * n++ };
     }
+    // The spawn itself, when the title shot looks from elsewhere: a quick
+    // tap on Play must not stand on unbuilt ground.
+    if (pose) {
+      at.position.x = sp.x;
+      at.position.z = sp.z;
+      while (n < 8 && stream0.flush(at, 40, true)) yield { label: 'Building streets', pct: 26 + 2 * n++ };
+    }
   }
   yield { label: 'Building streets', pct: 40 };
   scene.add(cityMesh);

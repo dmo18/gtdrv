@@ -2147,6 +2147,7 @@ export function lotFill(lot, hour) {
 export function bayScale(lot, x, z) {
   if (!lot || !(lot.front >= 0)) return 1;
   const f = lot.front;
+  if (!((lot.x1 - lot.x0) > 0) || !((lot.z1 - lot.z0) > 0)) return 1; // a lot with no span has no gradient
   const t = f === 0 ? (lot.x1 - x) / (lot.x1 - lot.x0) : f === 2 ? (x - lot.x0) / (lot.x1 - lot.x0)
     : f === 1 ? (lot.z1 - z) / (lot.z1 - lot.z0) : (z - lot.z0) / (lot.z1 - lot.z0);
   return 0.55 + 0.9 * (t < 0 ? 0 : t > 1 ? 1 : t);
