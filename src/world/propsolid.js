@@ -1,4 +1,6 @@
 import { mkShape } from './shape.js';
+import { groundOf } from './ground.js';
+import { curbSpot, footClear } from './streetscape.js';
 // Solid props (docs/PLAN_V3.md 2.2 items 1 and 2). One table, PROP_SOLIDS,
 // says what every prop type the city can emit is to a car: its shape, its
 // height and whether it stops the car, shears off above a speed, or is only
@@ -127,16 +129,20 @@ export function miamiPalmSpots(city) {
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (lampNear.has((i + a) * 100000 + j + b)) return true;
     return false;
   };
+  // (0.13.7: on the real profile of the curb, off the drivable surface,
+  // world/streetscape.js; the island has no road geometry: none there.)
+  const G = city.roadGeo ? groundOf(city) : null;
+  const P = { x: 0, z: 0, o: 0, on: '' };
   for (const e of city.edges) {
-    if (e.causeway || e.bridge) continue;
+    if (e.causeway || e.bridge || !G) continue;
     const named = !!(e.name && PALM_STREET.test(e.name));
     if (e.width < 18 && !named) continue;
     const a = city.nodes[e.a], bn = city.nodes[e.b];
     if (!named && !PALM_PLACES.has(city.placeOf((a.x + bn.x) / 2, (a.z + bn.z) / 2))) continue;
-    const half = e.width / 2, rx = -e.uz, rz = e.ux;
     for (const sd of [-1, 1]) {
       for (let d = (a.hx || 0) + 8; d + 8 <= e.length - (bn.hx || 0); d += 13) {
-        const x = a.x + e.ux * d + rx * sd * (half + 1.15), z = a.z + e.uz * d + rz * sd * (half + 1.15);
+        if (!curbSpot(city, G, e, d, sd, 1.15, PROP_SOLIDS.palm.r, 'tree', P)) continue;
+        const x = P.x, z = P.z;
         // Diagonal streets have no block beside them: any open land will do.
         const ground = city.blockAt(x, z) || (city.isLand && city.isLand(x, z) && city.onRoad && !city.onRoad(x, z));
         if (!ground || (city.inBuilding && city.inBuilding(x, z, 1)) || nearLamp(x, z)) continue;
@@ -155,6 +161,7 @@ export function miamiPalmSpots(city) {
         if (s2 < 3.5 || hash(jx + 1, jz) > 0.75) continue;
         if (!PALM_PLACES.has(city.placeOf(jx, jz))) continue;
         if ((city.onRoad && city.onRoad(jx, jz)) || (city.inBuilding && city.inBuilding(jx, jz, 1.5)) || propBlocked(city, jx, jz)) continue;
+        if (G && !footClear(city, G, jx, jz, PROP_SOLIDS.palm.r)) continue;
         // Not in a parking lot, a yard, a works or a site: their bays,
         // drives and fences are the lot's own (world/lots.js dressLot).
         const lot = city.lotAt ? city.lotAt(jx, jz) : null;

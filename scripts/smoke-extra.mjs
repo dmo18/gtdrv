@@ -1145,6 +1145,54 @@ export default async function extra(page, check) {
       });
       await mp.keyboard.up('ArrowUp');
       await mp.screenshot({ path: 'shots/miami.png' });
+      // 0.13.7 (props off the road): a street-level view down Northwest 1st
+      // Avenue, where lamps stood in the paved gap between the two
+      // carriageways in 0.13.6; no street prop within 120 m of the eye
+      // stands on the drivable surface of the built game's city.
+      const sv = await mp.evaluate(() => {
+        const g = window.__rw, c = g.city;
+        const x = -1578.4, z = -141.3;
+        let best = null, bd = 1e9;
+        for (const e of c.edges) {
+          if (e.name !== 'Northwest 1st Avenue') continue;
+          const a = c.nodes[e.a];
+          const t = Math.max(0, Math.min(e.length, (x - a.x) * e.ux + (z - a.z) * e.uz));
+          const d = Math.hypot(a.x + e.ux * t - x, a.z + e.uz * t - z);
+          if (d < bd) { bd = d; best = { e, px: a.x + e.ux * t, pz: a.z + e.uz * t }; }
+        }
+        if (!best) return { missing: true };
+        const ux = best.e.ux, uz = best.e.uz;
+        const v = g.player.vehicle;
+        v.x = v.px = best.px - ux * 30; v.z = v.pz = best.pz - uz * 30; v.heading = v.pheading = Math.atan2(uz, ux); v.vx = v.vz = 0; v.speed = 0;
+        g.player.x = v.x; g.player.z = v.z;
+        g.snapCam();
+        for (let i = 0; i < 30; i++) g.step(1 / 60);
+        const st = g.cityMesh.userData.stream;
+        for (let k = 0; k < 3; k++) { g.draw(1, 1 / 60); if (st) st.flush(g.camera); }
+        g.camera.position.set(v.x + ux * 3, 1.6, v.z + uz * 3);
+        g.camera.lookAt(v.x + ux * 40, 0.6, v.z + uz * 40);
+        g.camera.updateMatrixWorld();
+        if (st) st.flush(g.camera);
+        for (const s of g.systems) if (s.name === 'graphics' || s.name === 'daynight') s.render(1, 0);
+        if (g.renderFrame) g.renderFrame(0); else g.renderer.render(g.scene, g.camera);
+        const cx = g.camera.position.x, cz = g.camera.position.z;
+        const on = [];
+        let n = 0;
+        const test = (type, px, pz, r) => {
+          if (Math.hypot(px - cx, pz - cz) > 120) return;
+          n++;
+          for (let k = 0; k <= 8; k++) {
+            const qx = px + (k ? Math.cos(k * Math.PI / 4) * (r - 0.03) : 0), qz = pz + (k ? Math.sin(k * Math.PI / 4) * (r - 0.03) : 0);
+            if (c.surfaceAt(qx, qz) === 1) { on.push(`${type} ${px.toFixed(1)},${pz.toFixed(1)}`); return; }
+          }
+        };
+        for (const p of c.props) test(p.type, p.x, p.z, 0.18);
+        for (const f of c.furniture) test(f.type, f.x, f.z, 0.08);
+        for (const s of c.signals) test('signal', s.x, s.z, 0.16);
+        return { n, on };
+      });
+      await mp.screenshot({ path: 'shots/props-street.png' });
+      check(sv && !sv.missing && sv.n > 10 && sv.on.length === 0, `street-level view: no street prop on the road near the eye (${sv && sv.n} props, on the road: ${sv && JSON.stringify(sv.on)})`);
     }
     check(ok && m && m.map === 'miami', `the Downtown page starts the Miami map (city ${m && m.buildMs} ms, mesh ${m && m.meshMs} ms)`);
     check(!!m && m.finite && m.onLand && m.moved > 3 && m.cars > 3, `Miami: 300 steps, the car drives on land (${m && m.moved.toFixed(1)} m, ${m && m.cars} vehicles, ${m && m.traffic} traffic, ${m && m.peds} peds, ${m && m.calls} draw calls, ${m && m.tris} triangles)`);

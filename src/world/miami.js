@@ -15,6 +15,7 @@ import { buildLots, planInfill, stepDistance, dressLot, bayCount, bayAt, INFILL_
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
+import { settleStreetProps } from './streetscape.js';
 import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX, BOX } from './regions.js';
 
 export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
@@ -2949,6 +2950,11 @@ export function createMiamiCity(data, opts = {}) {
 
   // ---- 10. Curb parking, lamps, street trees, signals. ----
   const parkingSpots = [], props = [], furniture = [], signals = [];
+  // Where each lamp, tree, signal and stop sign was meant to stand (edge,
+  // side, d, m from the curb, slide): world/streetscape.js settles them on
+  // the real profile once the city is made (no rng there).
+  const SPEC = new Map();
+  const spec = (item, eIdx, side, d, want, slide = 0) => { SPEC.set(item, [eIdx, side, d, want, slide]); return item; };
   const dr = createRng(seed ^ 0x5eed51);
   (function streetProps() {
     for (let eIdx = 0; eIdx < edges.length; eIdx++) {
@@ -2964,7 +2970,7 @@ export function createMiamiCity(data, opts = {}) {
           const lo = (e.off || 0) + side * (half + 0.8);
           const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
           if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.3) || mainShore(x, z) < 1) continue;
-          props.push({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) });
+          props.push(spec({ type: 'lamp', x, z, r: 0.18, h: 7, rot: Math.atan2(-rx * side, -rzv * side) }, eIdx, side, d, 0.8));
         }
       }
       if (!e.causeway && !e.bridge && usable > 14) {
@@ -3023,7 +3029,7 @@ export function createMiamiCity(data, opts = {}) {
           const lo = (e.off || 0) + side * (half + 1.15);
           const x = a.x + e.ux * d + rx * lo, z = a.z + e.uz * d + rzv * lo;
           if (!blockAt(x, z) || inBuilding(x, z, 1) || onOtherRoad(x, z, e, 0.5)) continue;
-          furniture.push({ type: 'streettree', x, z, rot: dr.range(0, TAU), q: 0, v: dr.next() });
+          furniture.push(spec({ type: 'streettree', x, z, rot: dr.range(0, TAU), q: 0, v: dr.next() }, eIdx, side, d, 1.15));
         }
       }
     }
@@ -3043,7 +3049,9 @@ export function createMiamiCity(data, opts = {}) {
         const x = n.x - tx * (trimAt(e, n.id) + 0.9) + rx * rc;
         const z = n.z - tz * (trimAt(e, n.id) + 0.9) + rzv * rc;
         if (inBuilding(x, z, 0.5) || onOtherRoad(x, z, e, 0.2)) continue;
-        signals.push({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal });
+        const fwd = e.b === n.id, back = trimAt(e, n.id) + 0.9;
+        signals.push(spec({ node: n.id, x, z, face: Math.atan2(-tz, -tx), armDir: Math.atan2(-rzv, -rx), armLen: (e.width / 2) * 0.5 + 0.9, horizontal: e.horizontal },
+          eid, fwd ? 1 : -1, fwd ? e.length - back : back, 0.9, fwd ? -1 : 1));
       }
     }
   })();
@@ -3119,7 +3127,7 @@ export function createMiamiCity(data, opts = {}) {
                 const x = px + rx * side * (half + off), z = pz + rzv * side * (half + off);
                 if (framed(x, z, off > 2 ? 1.5 : 0.5)) continue;
                 if (!inBuilding(x, z, 1.2) && !onOtherRoad(x, z, e, 0.5) && !inJunctionBox(x, z, 2) && mainShore(x, z) > 2 && !anyWithin(furniture, x, z, 4)) {
-                  furniture.push({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 });
+                  furniture.push(spec({ type: 'streettree', x, z, rot: (k * 0.61) % TAU, q: 0, v: ((k * 37 + (side > 0 ? 11 : 0)) % 100) / 100 }, eIdx, side, d, off));
                 }
                 break;
               }
@@ -3351,7 +3359,7 @@ export function createMiamiCity(data, opts = {}) {
         const back = trimAt(e, n.id) + 1.5;
         const x = n.x - tx * back - tz * (rc + 0.7), z = n.z - tz * back + tx * (rc + 0.7);
         if (onRoad(x, z) || inBuilding(x, z, 0.5)) continue;
-        furniture.push({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 });
+        furniture.push(spec({ type: 'stopsign', x, z, rot: Math.atan2(-tz, -tx), q: 0, v: 0 }, eid, fwd ? 1 : -1, fwd ? e.length - back : back, 0.7, fwd ? -1 : 1));
         stopCount++;
       }
     }
@@ -3778,6 +3786,9 @@ export function createMiamiCity(data, opts = {}) {
   if (city.courseSpec) city.courses = buildCourses(city);
   lap('places.courses');
   lap('places');
+  // ---- 13. Street props on the real profile, off the drivable surface. ----
+  graphStats.streetProps = settleStreetProps(city, SPEC);
+  lap('streetscape');
   if (cpuTimings) city.cpuTimings = cpuTimings;
   city.buildMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart);
   return city;

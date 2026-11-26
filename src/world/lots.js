@@ -10,6 +10,9 @@
 import { createRng, firstNext } from '../core/rng.js';
 import { SERVICE_SPOTS } from '../entities/servicevehicles.js';
 import { onJunction, junctionsInBox, pairGap } from './junctions.js';
+import { groundOf } from './ground.js';
+import { PROP_SOLIDS } from './propsolid.js';
+import { discOnRoad, ROAD_REACH } from './streetscape.js';
 
 export const LOT_TYPES = ['yard', 'carpark', 'plaza', 'grass', 'works', 'beach', 'park',
   'wateredge', 'site', 'verge', 'airfield'];
@@ -1072,6 +1075,16 @@ function bayRows(Q, rows, islands) {
 let NB_BOX = new Float64Array(256); // scratch: their boxes, 4 values each
 const NEAR_E = []; // scratch: edges round the lot being dressed
 const NEAR_S = []; // scratch: service homes round the lot being dressed
+const NEAR_R = []; // scratch: road edges round the lot being dressed
+const FE = new Int32Array(64); // scratch: those that reach the feature being tested
+// Solid lot features stay off the drivable surface (0.13.7, docs/
+// STREETSCAPE.md "props off the road"): a lot cell can lie partly under a
+// road strip, a junction or a paved gap, so a hedge, wall, fence or tree
+// 1 m inside the lot's outer face could stand in the road. Its footprint,
+// LOT_ROAD_CLEAR wider, is tested against the road strips within
+// ROAD_NEAR m of the lot (world/streetscape.js discOnRoad).
+const ROAD_NEAR = ROAD_REACH;
+export const LOT_ROAD_CLEAR = 0.1;
 const SERVICE_KEEP = 6.5; // m round a service home kept clear of lot features
 // Scratch per feature index of the lot being dressed (put fills it):
 // center and radius, 1 for a drive, bay or path, with the cosine and sine
@@ -1143,6 +1156,70 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   // No junction near the lot's box: put skips the junction test (a point
   // that passes inLot is inside the box, padded 1 m).
   const nearJunction = !!roadGeo && junctionsInBox(roadGeo, lot.x0 - 1, lot.z0 - 1, lot.x1 + 1, lot.z1 + 1);
+  // The road strips that reach within ROAD_NEAR m of the lot's box.
+  NEAR_R.length = 0;
+  if (roadGeo && city.edgesNear && !baysOnly) {
+    city.edgesNear((lot.x0 + lot.x1) / 2, (lot.z0 + lot.z1) / 2, Math.hypot(lot.x1 - lot.x0, lot.z1 - lot.z0) / 2 + ROAD_NEAR + 2, NEAR_R);
+  }
+  const nRoad = NEAR_R.length;
+  let roadG = null, roadHit = false, nFe = 0, roadSkip = 0;
+  // The edges whose strip or gap can reach a feature of reach R at (x, z)
+  // into FE; true when some edge or junction can.
+  const featureEdges = (x, z, R) => {
+    nFe = 0;
+    for (let k = 0; k < nRoad && nFe < FE.length; k++) {
+      const e = city.edges[NEAR_R[k]];
+      if (roadGeo.inner[e.id]) continue;
+      const a = city.nodes[e.a];
+      const dx = x - a.x, dz = z - a.z;
+      const d = dx * e.ux + dz * e.uz;
+      if (d < -0.5 - R || d > e.length + 0.5 + R) continue;
+      const sl = -dx * e.uz + dz * e.ux - (e.off || 0) - roadGeo.eoff[e.id];
+      // (A taper widens a strip by a few m at most.)
+      if (Math.abs(sl) > e.width / 2 + ROAD_REACH + 4 + R) continue;
+      FE[nFe++] = e.id;
+    }
+    return nFe > 0 || (nearJunction && junctionsInBox(roadGeo, x - R, z - R, x + R, z + R));
+  };
+  // A solid feature's footprint (as world/collision.js addLotSolids makes
+  // its shapes), LOT_ROAD_CLEAR wider, reaches the drivable surface
+  // (world/streetscape.js discOnRoad: the cross sections, else the ground).
+  // Every lot cell within one cell of the box round (x, z, R) is this
+  // lot's: no road reaches there (a road strip, 7 m wide or more, takes
+  // the cells whose centers it covers out of every lot).
+  const interior = (x, z, R) => {
+    const i0 = Math.floor((x - R - gx0) / cell) - 1, i1 = Math.floor((x + R - gx0) / cell) + 1;
+    const j0 = Math.floor((z - R - gz0) / cell) - 1, j1 = Math.floor((z + R - gz0) / cell) + 1;
+    if (i0 < 0 || j0 < 0 || i1 >= W || j1 >= gh) return false;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (gid[j * W + i] !== id) return false;
+    return true;
+  };
+  const footOnRoad = (kind, x, z, heading, l, w, r) => {
+    const e = PROP_SOLIDS[kind];
+    if (!e || e.mode === 'flat' || (!nRoad && !nearJunction)) return false;
+    const bl = Array.isArray(e.box) ? e.box[0] : l || 0, bw = Array.isArray(e.box) ? e.box[1] : w || 0;
+    if (interior(x, z, e.r ? (e.r === 'feat' ? r || 0.5 : e.lotR || e.r) : Math.hypot(bl, bw) / 2 + 0.3)) return false;
+    if (e.r) {
+      const rr = (e.r === 'feat' ? r || 0.5 : e.lotR || e.r) + LOT_ROAD_CLEAR;
+      if (!featureEdges(x, z, rr)) return false;
+      return discOnRoad(city, roadG || (roadG = groundOf(city)), x, z, rr, FE, nFe, false, false);
+    }
+    const fixed = Array.isArray(e.box);
+    const hl = (fixed ? e.box[0] : l || 0) / 2, hw = Math.max(0.15, (fixed ? e.box[1] : w || 0) / 2) + LOT_ROAD_CLEAR;
+    // The disc round the whole box first, then discs along the middle
+    // line every 1 m or less, to the ends (an oblique box is a row of
+    // discs of its half width).
+    if (!featureEdges(x, z, hl + hw)) return false;
+    const G = roadG || (roadG = groundOf(city));
+    if (!discOnRoad(city, G, x, z, Math.hypot(hl, hw), FE, nFe, true, false)) return false;
+    const ca = Math.cos(heading || 0), sa = Math.sin(heading || 0);
+    const n = Math.max(1, Math.ceil(2 * hl)), R = Math.sqrt(hw * hw + 0.25);
+    for (let i = 0; i <= n; i++) {
+      const u = -hl + (2 * hl * i) / n;
+      if (discOnRoad(city, G, x + ca * u, z + sa * u, R, FE, nFe, false, false)) return true;
+    }
+    return false;
+  };
   // The hand-placed service homes (entities/servicevehicles.js
   // SERVICE_SPOTS) near this lot: nothing stands within SERVICE_KEEP m.
   NEAR_S.length = 0;
@@ -1202,14 +1279,21 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   // is ringed whole, and every meter of it counts toward its content.)
   const skew = lot.type === 'works' || lot.type === 'site' ? 0 : gridSkew(city, (lot.x0 + lot.x1) / 2, (lot.z0 + lot.z1) / 2);
   // Adds a feature when its center is in the lot and the caps allow.
+  // (roadSkip: boundary rows left out for the road only, counted against
+  // the cap as if they stood, so the bays of a parking lot, placed after
+  // its hedges, are the same whether the hedges were tested (a full
+  // dressing) or not (baysOnly, the build's parking spots, which skips
+  // the test).)
   const put = (kind, x0f, z0f, heading, l, w, h, r, isSolid, v) => {
-    if (out.length >= cap || (isSolid && solid >= MAX_SOLID)) return false;
+    if (out.length + roadSkip >= cap || (isSolid && solid >= MAX_SOLID)) return false;
     // Rounded to the centimeter first, so the stored point is the tested one.
     const x = Math.round(x0f * 100) / 100, z = Math.round(z0f * 100) / 100;
     if (!inLot(x, z) || inGarage(x, z, Math.max(l, w) / 2 + r) || !offBuildings(x, z, heading, l, w, r)) return false;
     // Never on a junction's asphalt (a wide junction can reach over the
     // lot raster: a tree would stand in the road).
     if (nearJunction && onJunction(roadGeo, x, z)) return false;
+    // Nor any part of a solid one on a road strip, a gap or a crosswalk.
+    if (!baysOnly && footOnRoad(kind, x, z, heading, l, w, r)) { roadHit = true; return false; }
     const q = out.length;
     out.push({ kind, x, z, heading, l, w, h, r, solid: isSolid, v });
     // What scatter tests against this feature, in flat scratch arrays
@@ -1268,15 +1352,34 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   // A boundary row along side s, turned to the street (skew): moved in
   // from the side and, where that is not enough, shortened until both its
   // ends are on the lot.
+  // (A row that the road alone kept out counts against the cap once.)
   const row = (kind, x, z, hd, l, w, h, s) => {
-    if (!skew) return put(kind, x, z, hd, l, w, h, 0, true, set.furn);
+    const ok = rowTry(kind, x, z, hd, l, w, h, s);
+    if (!ok && firstRoad) roadSkip++;
+    return ok;
+  };
+  let firstRoad = false;
+  const rowTry = (kind, x, z, hd, l, w, h, s) => {
+    firstRoad = false;
+    let first = true;
+    if (!skew) {
+      roadHit = false;
+      if (put(kind, x, z, hd, l, w, h, 0, true, set.furn)) return true;
+      firstRoad = roadHit;
+      first = false;
+      if (!roadHit) return false;
+    }
     const ca = Math.cos(hd + skew), sa = Math.sin(hd + skew);
     for (let t = 0; t < 12; t++) {
       const ll = l * (1 - 0.15 * (t >> 2)), inset = (t & 3) * 1.25;
       if (ll < 2) break;
       const px = x - SNX[s] * inset, pz = z - SNZ[s] * inset, e = ll / 2 - 0.2;
       if (!inLot(px + ca * e, pz + sa * e) || !inLot(px - ca * e, pz - sa * e)) continue;
-      return put(kind, px, pz, hd + skew, Math.round(ll * 100) / 100, w, h, 0, true, set.furn);
+      // (Moved in or shortened on until it is off the road as well.)
+      roadHit = false;
+      if (put(kind, px, pz, hd + skew, Math.round(ll * 100) / 100, w, h, 0, true, set.furn)) return true;
+      if (first) { firstRoad = roadHit; first = false; }
+      if (!roadHit) return false;
     }
     return false;
   };
@@ -1347,7 +1450,7 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
     const ox = x0 + margin + (wx - nx * p) / 2, oz = z0 + margin + (wz - nz * p) / 2;
     for (let b2 = 0; b2 <= nz; b2++) {
       for (let a = 0; a <= nx; a++) {
-        if (out.length >= cap) return;
+        if (out.length + roadSkip >= cap) return;
         fn(ox + a * p + (rng.next() - 0.5) * jit, oz + b2 * p + (rng.next() - 0.5) * jit, a, b2);
       }
     }

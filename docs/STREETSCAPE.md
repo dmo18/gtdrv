@@ -154,3 +154,14 @@ and lane counts at every straight same-street join.
 Moved by the road change and re-pinned or followed (docs/STATUS.md): the
 region fingerprints, two generated ramps' ids, the Central Patrol Base
 home 0.9 m east, the service curb bays kept as curb spots.
+## 0.13.7 props off the road
+
+Owner: "light poles in the middle of the road". Every street prop and
+solid lot feature of the five regions was tested against the drivable
+surface (surfaceAt 1); 1695 stood on it in 0.13.6, none now. Placement
+rules (world/streetscape.js): a prop stands on the real profile of its
+edge's side (curb from junctions.js curbsAt, then sidewalk, verge, or
+centered on a median 2 m wide or more for a lamp, 3 m for a tree), never
+on a side facing a paved gap; its footprint plus 0.15 m must be clear,
+else it slides up to 3 m along the edge or goes. Lot features: the same
+footprint test in dressLot. Details and numbers: docs/STATUS.md 0.13.7.
