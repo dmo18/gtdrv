@@ -560,6 +560,7 @@ export function blockCapacity(b, clock) {
   return Math.min(BLOCK_MAX, Math.round((per / 100) * d * crowdAt(b.district, clock)));
 }
 const NEAR = 25, FAR = 110, RECYCLE = 150;
+const FAR_SEEN = 60; // m: a new walker in plain view only this far off
 const NEAR_FIRST = 8, FAR_FIRST = 80; // first fill and after a jump: people close around the camera
 const JUMP = 150; // m moved between two scans that counts as a teleport
 const SKY = 120; // above this altitude nobody is simulated
@@ -575,6 +576,10 @@ const PED_DENSITY = 3.2; // walkers per 100 m on each line of a pedestrian stree
 // coarse grid so a scan only looks near.
 function buildAreas(city) {
   const areas = city.blocks.slice();
+  // A region map is played whole (0.13.5): the old core box of the whole
+  // map (MIAMI_CORE) left the Beach, North, West and South streets
+  // without sidewalk walkers. It still trims the whole box (tests only).
+  const inCore = city.region ? null : city.inCore;
   const nodes = city.nodes, edges = city.edges;
   if (edges && nodes && city.districtOf) {
     for (let i = 0; i < edges.length; i++) {
@@ -588,7 +593,7 @@ function buildAreas(city) {
       const len = t1 - t0;
       if (!(len >= SEG_MIN)) continue;
       const mx = na.x + ux * (t0 + t1) / 2, mz = na.z + uz * (t0 + t1) / 2;
-      if (city.inCore && !city.inCore(mx, mz)) continue;
+      if (inCore && !inCore(mx, mz)) continue;
       const district = city.districtOf(mx, mz);
       if (!(DENSITY[district] > 0)) continue;
       // The walking line SIDE_GAP past each curb: the cross section's
@@ -617,7 +622,7 @@ function buildAreas(city) {
       const w = l.x1 - l.x0, h = l.z1 - l.z0, long = Math.max(w, h);
       if (!(long >= SEG_MIN + 8) || !(Math.min(w, h) >= 8)) continue;
       const cx = (l.x0 + l.x1) / 2, cz = (l.z0 + l.z1) / 2;
-      if (city.inCore && !city.inCore(cx, cz)) continue;
+      if (inCore && !inCore(cx, cz)) continue;
       const district = l.type === 'plaza' ? l.district : l.type;
       if (!(DENSITY[district] > 0)) continue;
       const ux = w >= h ? 1 : 0, uz = w >= h ? 0 : 1, len = long - 8;
@@ -812,15 +817,16 @@ export function createPeds(game, { max = 30 } = {}) {
     const park = block.district === 'park' && !block.seg;
     let kind = park ? (rng.chance(0.5) ? 'jog' : 'loop') : rng.chance(0.14) && active + 1 < cap() ? 'chat' : 'loop';
     if (kind === 'chat' && spawnsLeft(game) < 2) kind = 'loop'; // a pair is two spawns
-    let fallback = false;
     let ok = false;
     for (let tries = 0; tries < 10 && !ok; tries++) {
       placePed(ped, block, rng, kind);
       const d = Math.hypot(ped.x - px, ped.z - pz);
       if (d < nearMin || d > farMax) continue;
       if (unseen(px, pz, ped.x, ped.z) || anywhere) ok = true;
-      else if (d > 60) fallback = true; // visible but far: acceptable last resort
-      if (!ok && fallback && tries === 9) ok = true;
+      // Visible but far: an acceptable last resort, taken where it is (it
+      // was the last try's place before 0.13.5, which could be 25 m off
+      // in plain view: a pop-in).
+      else if (d > FAR_SEEN && tries >= 6) ok = true;
     }
     ped.active = ok;
     if (!ok) return false;

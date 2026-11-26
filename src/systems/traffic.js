@@ -42,6 +42,9 @@ const STOP_DECEL = 3.5;
 const MIN_GAP = 3.5; // standstill gap to the car ahead (m)
 const STOPLINE_BACK = 1; // stop line sits this far before the junction box
 const LEFT_R = 11; // left turns are wide so opposing left turns pass
+const CLOSE_GAP = 2; // m: a car this close ahead of the bumper stops this one, on the path or not
+const MERGE_NEAR = 35, MERGE_IN = 10; // m: the zipper holds this close to the exit, the other this close to its turn
+const DEAD_END_KEEP = 0.5; // m: a dead end's U-turn stays this far short of the end node
 // Traffic stays off the airfield causeway for now: where it meets the
 // islet, city.shoreDist dips below 2 m and the vehicle's keep-on-land
 // push stops cars dead. Raise this once that seam is fixed.
@@ -84,7 +87,7 @@ export function createDriver(city, rng) {
     tick: 0,
     // Results of the sparse scan.
     obsGap: Infinity, obsSpeed: 0, obsAlong: Infinity, obsVeh: null,
-    boxBusy: false, oncoming: false, exitBlocked: false,
+    boxBusy: false, boxOcc: false, oncoming: false, exitBlocked: false,
     // Timers and state.
     yieldTime: 0, oncomingTime: 0, blockedTime: 0, waitTime: 0, noProgress: 0, nextAround: 6, pause: 0,
     nudge: 0, // small sideways shift away from things beside the lane
@@ -150,7 +153,48 @@ function weightOf(dr, ea, fa, eb, fb) {
   if (!canDrive(e, fb)) return 0;
   let w = turnType(dr.city, ea, fa, eb, fb) === STRAIGHT ? 1.7 : 1;
   if (e.causeway) w *= CAUSEWAY_WEIGHT;
+  // A street that only ends (0.13.5): through traffic does not drive into
+  // a cul-de-sac; a road to the crop edge is taken now and then.
+  const de = deadEndAhead(dr.city, eb, fb);
+  if (de) w *= de === 2 ? CROP_END_WEIGHT : 0;
   return w;
+}
+
+// Does edge `edgeId`, driven away from `from`, run (through two-way
+// bends only) into a node with no other road? 0 no, 1 a dead end (the
+// barricades of world/deadends.js), 2 the crop edge of the region.
+// Cached per city, two entries an edge (0 unknown, else value + 1).
+const DEAD_CACHE = new WeakMap();
+const CROP_END_WEIGHT = 0.2;
+const DEAD_HOPS = 16;
+export function deadEndAhead(city, edgeId, from) {
+  let c = DEAD_CACHE.get(city);
+  if (!c) {
+    c = { memo: new Int8Array(city.edges.length * 2), crop: null };
+    if (city.roadEnds) {
+      c.crop = new Uint8Array(city.nodes.length);
+      for (const re of city.roadEnds) if (re && re.node >= 0) c.crop[re.node] = 1;
+    }
+    DEAD_CACHE.set(city, c);
+  }
+  const e0 = city.edges[edgeId];
+  const slot = 2 * edgeId + (from === e0.a ? 0 : 1);
+  if (c.memo[slot]) return c.memo[slot] - 1;
+  let e = e0, node = otherEnd(e0, from), res = 0;
+  for (let k = 0; k < DEAD_HOPS; k++) {
+    const n = city.nodes[node];
+    if (n.edges.length === 1) {
+      res = c.crop && c.crop[node] ? 2 : 1;
+      break;
+    }
+    if (n.edges.length !== 2) break;
+    const next = city.edges[n.edges[0] === e.id ? n.edges[1] : n.edges[0]];
+    if (!canDrive(next, node)) break;
+    e = next;
+    node = otherEnd(next, node);
+  }
+  c.memo[slot] = res + 1;
+  return res;
 }
 
 // The lane on edge `edgeId` driven away from `from`: lane 0 is the inner
@@ -193,8 +237,32 @@ function buildPath(dr) {
   if (t === UTURN) {
     // Keyhole: tangent out to a circle beyond the node, round it to the
     // left, and tangent back into the opposite lane.
-    const R = Math.max(dr.rmin, 7);
-    const qx = T.x + h0x * (R * 0.7), qz = T.z + h0z * (R * 0.7);
+    let R = Math.max(dr.rmin, 7);
+    let qx = T.x + h0x * (R * 0.7), qz = T.z + h0z * (R * 0.7);
+    // A dead end (0.13.5): a barricade or the road end posts stand just
+    // past the node (world/deadends.js), so the turn is as tight as the
+    // car can make it and stays short of the node, between the two lanes.
+    if (T.edges.length === 1) {
+      const R2 = dr.rmin;
+      const nx = -h0z, nz = h0x;
+      const latB = (bx - T.x) * nx + (bz - T.z) * nz, latC = (cx - T.x) * nx + (cz - T.z) * nz;
+      const qa = -(R2 + DEAD_END_KEEP), ql = (latB + latC) / 2;
+      const db = latB - ql, dc = latC - ql;
+      // Along the road from the node: outside the circle, before it.
+      const aB = Math.min((bx - T.x) * h0x + (bz - T.z) * h0z, qa - Math.sqrt(Math.max(0, R2 * R2 - db * db)) - 0.6);
+      const aC = Math.min((cx - T.x) * h0x + (cz - T.z) * h0z, qa - Math.sqrt(Math.max(0, R2 * R2 - dc * dc)) - 0.6);
+      // Room on the edge for it (else the wide keyhole as before).
+      const room = -(e0.length - Math.min(extAt(F, e0), e0.length * 0.3)) + 1;
+      if (aB > room && aC > room) {
+        R = R2;
+        qx = T.x + h0x * qa + nx * ql;
+        qz = T.z + h0z * qa + nz * ql;
+        bx = T.x + h0x * aB + nx * latB;
+        bz = T.z + h0z * aB + nz * latB;
+        cx = T.x + h0x * aC + nx * latC;
+        cz = T.z + h0z * aC + nz * latC;
+      }
+    }
     const a0 = tangentAngle(bx, bz, qx, qz, R, h0x, h0z, 1);
     const a1 = tangentAngle(cx, cz, qx, qz, R, h0x, h0z, -1);
     // Going left means the position angle decreases.
@@ -215,7 +283,13 @@ function buildPath(dr) {
       const den = h0x * h1z - h0z * h1x;
       let dB = (wx * h1z - wz * h1x) / den;
       let dC = (wx * h0z - wz * h0x) / den;
-      const rWant = t === LEFT ? Math.max(LEFT_R, dr.rmin, Math.min(dB, dC) * 1.25) : dr.rmin;
+      // (A bend is no junction: no opposing left turn to pass, and a wide
+      // curve there runs off a short bent street, 0.13.5.)
+      let rWant = t === LEFT && !T.bend ? Math.max(LEFT_R, dr.rmin, Math.min(dB, dC) * 1.25) : dr.rmin;
+      // Never wider than the two edges hold (0.13.5: onto a 15 m link of a
+      // cluster junction the curve ended past the link's far node, and cars
+      // ran 5 to 7 m off it into each other).
+      if (t === LEFT) rWant = Math.max(dr.rmin, Math.min(rWant, dC + e1.length * 0.45 - extAt(T, e1), dB + e0.length * 0.6 - extAt(T, e0)));
       const ox = bx + h0x * dB, oz = bz + h0z * dB; // corner
       if (dB < rWant) {
         back = rWant - dB;
@@ -334,6 +408,7 @@ function advance(dr) {
   dr.yieldTime = 0;
   dr.oncomingTime = 0;
   dr.boxBusy = false;
+  dr.boxOcc = false;
   dr.oncoming = false;
   dr.exitBlocked = false;
 }
@@ -464,6 +539,7 @@ function scan(dr, v, ctx) {
   const distLine = dr.stopS - dr.s - halfL;
   const approaching = distLine > -0.5 && distLine < 30;
   const h0x = dr.ux[0], h0z = dr.uz[0];
+  const vch = Math.cos(v.heading), vsh = Math.sin(v.heading);
   // Time to reach the junction box, measured like it is for others below.
   const mtx = v.x - T.x, mtz = v.z - T.z;
   const myDbo = Math.max(0, Math.abs(mtx) - T.hx, Math.abs(mtz) - T.hz);
@@ -471,7 +547,7 @@ function scan(dr, v, ctx) {
   // Too late to stop comfortably: carry on.
   const committed = distLine < (sp * sp) / (2 * 6);
   let gap = Infinity, gSpeed = 0, gAlong = Infinity, gVeh = null;
-  let boxBusy = false, oncoming = false, nudge = 0;
+  let boxBusy = false, boxOcc = false, oncoming = false, nudge = 0;
   for (let i = 0; i < list.length; i++) {
     const o = list[i];
     if (o === v || o.removed || (o.y || 0) > 2.5) continue;
@@ -479,7 +555,28 @@ function scan(dr, v, ctx) {
     if (rx * rx + rz * rz > r2 && !approaching) continue;
     const os = o.spec;
     const oL = os ? os.length : 4, oW = os ? os.width : 2;
-    if (rx * rx + rz * rz <= r2 && projectAhead(dr, o.x, o.z, range, PR)) {
+    const onPath = rx * rx + rz * rz <= r2 && projectAhead(dr, o.x, o.z, range, PR);
+    if (!onPath && rx * rx + rz * rz < 100) {
+      // Off the local path but right at the bumper (a path cut short by a
+      // chain of short edges, a car swung wide across it, 0.13.5): closing
+      // on it in the car's own frame counts too, so the two do not touch.
+      const fwd = rx * vch + rz * vsh, side = -rx * vsh + rz * vch;
+      const ch = Math.abs(Math.cos(o.heading) * vch + Math.sin(o.heading) * vsh);
+      const sh = Math.sqrt(Math.max(0, 1 - ch * ch));
+      const oHalfL = ch * oL / 2 + sh * oW / 2, oHalfW = sh * oL / 2 + ch * oW / 2;
+      const g = fwd - halfL - oHalfL;
+      const os2 = o.vx * vch + o.vz * vsh;
+      // (The deadlock breaker below holds here too: two cars nose to flank.)
+      if (o.ai && o.ai.obsVeh === v && dr.waitTime > 1.5 && o.ai.waitTime > 1.5 && v.id < o.id) dr.override = 2;
+      const waived = dr.override > 0 && o.ai && o.ai.obsVeh === v;
+      if (!waived && fwd > 0 && g < CLOSE_GAP && Math.abs(side) < oHalfW + halfW - 0.2 && os2 < sp - 0.2 && g < gap) {
+        gap = g;
+        gSpeed = os2;
+        gAlong = dr.s + halfL + g;
+        gVeh = o;
+      }
+    }
+    if (onPath) {
       const around = o === dr.aroundVeh && dr.mode !== 0;
       const ch = Math.abs(Math.cos(o.heading) * PR.ux + Math.sin(o.heading) * PR.uz);
       const sh = Math.sqrt(Math.max(0, 1 - ch * ch));
@@ -511,9 +608,47 @@ function scan(dr, v, ctx) {
         }
       }
     }
+    // Merging (0.13.5): another approach into the same lane of the same
+    // exit (a side street onto a one-way, the arms of a fan junction), or a
+    // car from this approach whose turn crosses this one's (into the far
+    // lane of the exit, for its next turn), meets this car past the box,
+    // where neither sees the other on its path. Zipper: whoever is nearer
+    // the exit is the car ahead, at that distance before the exit, and the
+    // other keeps its gap to it as to any car ahead.
+    const oa = o.ai;
+    if (oa && oa !== dr && oa.f1 === dr.f1 && oa.e1 === dr.e1 && !oa.dead && !T.bend && dr.s < dr.cum[IC] &&
+      (oa.e0 !== dr.e0 ? oa.l1 === dr.l1 : (oa.l0 !== dr.l0 || oa.l1 !== dr.l1) && (oa.l0 - dr.l0) * (oa.l1 - dr.l1) <= 0)) {
+      const myLeft = dr.cum[IC] - dr.s, oLeft = oa.cum[IC] - oa.s;
+      // (The deadlock breaker holds here too: the car ahead wedged on this one.)
+      if (oa.obsVeh === v && dr.waitTime > 1.5 && oa.waitTime > 1.5 && v.id < o.id) dr.override = 2;
+      // Only near the merge, and not behind a car still waiting at its own
+      // line (a red light, far up a U-turn: it merges after this one).
+      const near = myLeft < MERGE_NEAR && oa.s > oa.cum[IB] - MERGE_IN && (oa.inJunction || Math.abs(o.speed) > 1);
+      if (near && (oLeft < myLeft || (oLeft === myLeft && o.id < v.id)) && !(dr.override > 0 && oa.obsVeh === v)) {
+        const g = myLeft - oLeft - halfL - oL / 2;
+        if (g < gap) {
+          gap = g;
+          gSpeed = Math.max(0, o.speed);
+          gAlong = dr.cum[IC] - oLeft - oL / 2;
+          gVeh = o;
+        }
+      }
+    }
     if (approaching) {
       const tx = o.x - T.x, tz = o.z - T.z;
       const inBox = Math.abs(tx) < T.hx + 0.5 && Math.abs(tz) < T.hz + 0.5;
+      // A crossing car moving in the box (or about to be): wait for it
+      // however long this car has waited (0.13.5: the give-way timeout
+      // below and a light gone green sent cars into it). Stopped cars in
+      // the box are obstacles on the path instead.
+      if (!T.bend && !committed && o.kind === 'car' && Math.abs(o.speed) > 0.5 && !boxOcc &&
+        Math.abs(Math.cos(o.heading) * h0x + Math.sin(o.heading) * h0z) < 0.7) {
+        if (inBox) boxOcc = true;
+        else if (!T.signal && Math.abs(tx) < T.hx + 4 && Math.abs(tz) < T.hz + 4) {
+          const td = Math.hypot(tx, tz) || 1;
+          if (-(o.vx * tx + o.vz * tz) / td > 2) boxOcc = true;
+        }
+      }
       // Bend nodes (degree two, real maps) are not junctions: no giving way.
       if (!T.signal && !T.bend) {
         if (inBox) boxBusy = true;
@@ -544,6 +679,7 @@ function scan(dr, v, ctx) {
   dr.obsAlong = gAlong;
   dr.obsVeh = gVeh;
   dr.boxBusy = boxBusy;
+  dr.boxOcc = boxOcc;
   dr.oncoming = oncoming;
   dr.nudge = nudge;
   // Do not enter the junction when the exit is queued up.
@@ -622,7 +758,7 @@ export function driveStep(dr, v, dt, ctx = {}) {
       mustStop = true;
       if (sp < 0.5 && distLine < 2) dr.oncomingTime += dt;
     }
-    if (dr.exitBlocked) mustStop = true;
+    if (dr.exitBlocked || dr.boxOcc) mustStop = true;
     // A stop sign: a full stop on the line, then on (giving way as above).
     if (!dr.stopDone && stopSignFor(city, T, e0)) {
       if (sp < 0.4 && distLine < 2.5) {
@@ -668,7 +804,10 @@ export function driveStep(dr, v, dt, ctx = {}) {
   // Waiting in a queue behind another working driver does not count.
   const ov = dr.obsVeh;
   const queued = ov && ov.ai && !ov.ai.stuck && !ov.ai.dead && ov.ai.mode === 0;
-  if (obsLimited && vt < 0.5 && Math.abs(sp) < 0.5) dr.waitTime += dt;
+  // (Held at the line by a queued exit counts too, 0.13.5: a car turning
+  // across a queue and the queue's head each waited on the other, and the
+  // deadlock breaker never saw the one held at its line.)
+  if ((obsLimited || (dr.exitBlocked && ov)) && vt < 0.5 && Math.abs(sp) < 0.5) dr.waitTime += dt;
   else dr.waitTime = 0;
   if (obsLimited && vt < 0.5 && Math.abs(sp) < 0.5 && !mustStop && !queued && dr.mode === 0) dr.blockedTime += dt;
   else if (sp > 2 && dr.mode === 0) {
@@ -801,6 +940,7 @@ export function pickBus(rng, clock, edge, alive) {
 const SPAWN_MIN = 90, SPAWN_MAX = 220;
 const DESPAWN = 280, OUT_OF_VIEW = 120;
 const CLEARANCE = 12;
+const JAM_WAIT = 40, JAM_NEAR = 30; // s behind a car, m from the player
 
 export function createTraffic(game, { max = 14 } = {}) {
   const city = game.city;
@@ -882,7 +1022,9 @@ export function createTraffic(game, { max = 14 } = {}) {
     for (let k = 0; k < 8; k++) {
       const e = city.edges[near[rng.int(0, near.length - 1)]];
       if (e.causeway && CAUSEWAY_WEIGHT <= 0) continue;
-      const from = e.oneway ? e.a : rng.next() < 0.5 ? e.a : e.b;
+      let from = e.oneway ? e.a : rng.next() < 0.5 ? e.a : e.b;
+      // Leaving a cul-de-sac, not driving into it.
+      if (!e.oneway && deadEndAhead(city, e.id, from) === 1 && deadEndAhead(city, e.id, otherEnd(e, from)) !== 1) from = otherEnd(e, from);
       const to = otherEnd(e, from);
       const d0 = extAt(city.nodes[from], e) + 12, d1 = e.length - extAt(city.nodes[to], e) - 22;
       if (d1 <= d0) continue;
@@ -919,7 +1061,9 @@ export function createTraffic(game, { max = 14 } = {}) {
     const kinds = MIX[city.districtOf(LP.x, LP.z)] || MIX.midtown;
     svcAlive.length = 0;
     for (let i = 0; i < cars.length; i++) if (cars[i].spec.service && !cars[i].removed) svcAlive.push(cars[i]);
-    const svc = pickTrafficService(svcRng, game.clock, svcAlive, LP.x, LP.z, city.inCore ? city.inCore(LP.x, LP.z) : true);
+    // (A region map is played whole, 0.13.5: the whole map's core box kept
+    // service vehicles out of four of the five regions.)
+    const svc = pickTrafficService(svcRng, game.clock, svcAlive, LP.x, LP.z, city.inCore && !city.region ? city.inCore(LP.x, LP.z) : true);
     let buses = 0;
     for (let i = 0; i < cars.length; i++) if (cars[i].spec.body === 'bus' && !cars[i].removed) buses++;
     const bus = svc ? null : pickBus(busRng, game.clock, e, buses);
@@ -1196,7 +1340,12 @@ export function createTraffic(game, { max = 14 } = {}) {
           }
           continue;
         }
-        if (d > DESPAWN || ((dr.stuck || dr.dead || v.wrecked) && d > OUT_OF_VIEW)) {
+        // A gridlock (cars in a junction cluster waiting on each other in a
+        // ring, 0.13.5): one that has stood behind another car for
+        // JAM_WAIT s goes, once out of the player's sight.
+        const jammed = dr.waitTime > JAM_WAIT && d > JAM_NEAR && game.collision && game.collision.lineClear &&
+          !game.collision.lineClear(p.x, p.z, v.x, v.z);
+        if (d > DESPAWN || ((dr.stuck || dr.dead || v.wrecked) && d > OUT_OF_VIEW) || jammed) {
           game.removeVehicle(v);
           release(v);
           cars.splice(i, 1);

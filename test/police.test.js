@@ -283,6 +283,47 @@ test('keeps within 80 m of a car doing 20 m/s along an avenue for 30 s', () => {
   assert.ok(minGap > 1.5, 'did not drive through the target');
 });
 
+// 0.13.5: below heat 3 police box the car in, never hit it: a chase
+// along the avenue at town speed, from behind and from either side.
+test('a chase car at heat 1 keeps off a car doing 12 m/s, from behind or beside', () => {
+  const av = city.edges.filter((e) => e.avenue && !e.horizontal && !e.causeway);
+  const xs = new Map();
+  for (const e of av) {
+    const x = Math.round(city.nodes[e.a].x);
+    xs.set(x, (xs.get(x) || 0) + e.length);
+  }
+  const ax = [...xs.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const line = av.filter((e) => Math.round(city.nodes[e.a].x) === ax);
+  const z0 = Math.min(...line.flatMap((e) => [city.nodes[e.a].z, city.nodes[e.b].z]));
+  const lx = city.nodes[line[0].a].x - 2.6;
+  let contacts = 0, runs = 0;
+  for (const [dx, dz] of [[0, -25], [3.4, -12], [-3.4, -12], [3.4, -4], [-3.4, 0]]) {
+    const rng = createRng(31 + runs++);
+    const target = createVehicle('sedan', lx, z0 + 80, Math.PI / 2, rng);
+    target.vz = 12; target.speed = 12;
+    const cv = createVehicle('police', lx + dx, z0 + 80 + dz, Math.PI / 2, rng);
+    cv.vz = 12; cv.speed = 12;
+    cv.police = true;
+    const cop = createCop(city, rng);
+    let touching = false;
+    chase(cop, cv, target, 25, {
+      collide: false,
+      moveTarget() {
+        target.px = target.x; target.pz = target.z;
+        target.z += target.vz * DT;
+      },
+      onStep() {
+        const hit = collideVehicles(cv, target) && cv.impact > 1;
+        if (hit && !touching) contacts++;
+        touching = hit;
+        target.x = lx; // kinematic: the contact does not move it
+        return false;
+      },
+    });
+  }
+  assert.equal(contacts, 0, `${contacts} contacts in ${runs} chases`);
+});
+
 // --- The system with a minimal game. ---
 
 function fakeGame(police = true) {

@@ -209,13 +209,20 @@ export function bustFine(level, money) {
 export const escapeReward = (level) => ESCAPE_REWARD_PER_LEVEL * Math.max(0, level | 0);
 
 // Did the player ram `other` hard enough to count? Only traffic and police
-// cars count, and only when the player was the faster one into the hit.
+// cars count, and only when the player was the faster one into the hit:
+// each car's speed toward the other (0.13.5: was each car's whole speed,
+// so a patrol car swiping a faster player from the side or behind gave
+// the player the heat).
 export function isRam(player, other, strength, dt = 1 / 60) {
   if (!player || !other || player === other) return false;
   if (!(other.traffic || other.police)) return false;
   if (!(strength >= RAM_SPEED)) return false;
-  const ps = Math.hypot(player.x - player.px, player.z - player.pz) / dt;
-  const os = Math.hypot(other.x - other.px, other.z - other.pz) / dt;
+  let nx = other.x - player.x, nz = other.z - player.z;
+  const d = Math.hypot(nx, nz);
+  if (!(d > 1e-6)) return false;
+  nx /= d; nz /= d;
+  const ps = ((player.x - player.px) * nx + (player.z - player.pz) * nz) / dt;
+  const os = -((other.x - other.px) * nx + (other.z - other.pz) * nz) / dt;
   return ps >= 4 && ps >= os;
 }
 
