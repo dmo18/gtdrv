@@ -67,3 +67,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 - 0.13.9 published. Round: R1 0.4M, R2 0.42M, review 0.12M. Total about 30.6M of 32M. Review found warmCombat leaving the stand-in damage rule bound; fixed with a test.
 - Cap raised by the owner to 42M (about 31.3M used at 0.13.10 gate).
 - 0.13.10 published. Round: S1 0.12M, S2 0.11M, review 0.10M. Total about 31.4M of 42M.
+- 0.13.10 live. CI tag job could not push tag v0.13.10: GitHub refuses the Actions token when the commit history touches .github/workflows/pages.yml without the workflows permission (T2 added a non-blocking smoke job). Cosmetic. Whole-box build timing test failed twice on CI (3.08 s, 3.14 s, limit 3 s) and passed on the third run; T3 is cutting build time.
