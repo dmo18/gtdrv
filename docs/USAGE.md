@@ -68,3 +68,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 - Cap raised by the owner to 42M (about 31.3M used at 0.13.10 gate).
 - 0.13.10 published. Round: S1 0.12M, S2 0.11M, review 0.10M. Total about 31.4M of 42M.
 - 0.13.10 live. CI tag job could not push tag v0.13.10: GitHub refuses the Actions token when the commit history touches .github/workflows/pages.yml without the workflows permission (T2 added a non-blocking smoke job). Cosmetic. Whole-box build timing test failed twice on CI (3.08 s, 3.14 s, limit 3 s) and passed on the third run; T3 is cutting build time.
+- 0.13.11 published. Round: T1 0.17M, T2 0.14M, T3 0.15M, review 0.10M. Total about 32.7M of 42M.
