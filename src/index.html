@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rustwater">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-U34t2sOxLD6A/cefDdWGilmmi4/gvYaYncRoXFBD8/Y='; style-src 'self' 'unsafe-inline'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
@@ -48,7 +48,9 @@
   @keyframes rw-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { #play[disabled]::before { animation: none; } #bootbtns button { transition: none; } }
   #continue { color: #fff; background: var(--glass); box-shadow: inset 0 0 0 1px var(--edge), 0 6px 18px rgba(0,0,0,0.3); order: 1; }
-  #continue[hidden] { display: none; }
+  #continue[hidden], #play[hidden] { display: none; }
+  #bootretry { color: #1c0f07; background: linear-gradient(180deg, var(--acc-hi), var(--acc)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 8px 22px rgba(226,115,58,0.35); }
+  #bootretry[hidden] { display: none; }
   #boot .rw-aboutbtn, #boot .rw-mapbtn { position: absolute; top: calc(16px + var(--st)); height: 48px; font: inherit; font-size: 15px; font-weight: 600; line-height: 48px; color: #fff; background: var(--glass); border: 0; box-shadow: inset 0 0 0 1px var(--edge); border-radius: 999px; cursor: pointer; touch-action: manipulation; }
   #boot .rw-aboutbtn:active, #boot .rw-mapbtn:active { background: rgba(40,48,60,0.8); }
   #boot .rw-aboutbtn { right: calc(24px + var(--sr)); min-width: 96px; padding: 0 16px; }
@@ -72,12 +74,66 @@
   <div id="bootbar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="bootbarfill"></span></div>
   <div id="bootbtns">
     <button id="continue" type="button" hidden>Continue</button>
+    <button id="bootretry" type="button" hidden>Retry</button>
     <button id="play" type="button" disabled></button>
   </div>
   <p id="bootcredit">Map data (c) OpenStreetMap contributors, ODbL</p>
   <p id="bootver" class="rw-ver">v{{VERSION}}</p>
 </div>
 <div id="rotate">Turn your phone sideways to play</div>
+<script>
+(function () {
+  var MSG = {
+    graphics: 'Graphics failed to start. Try closing other tabs or apps, or open the game in another browser.',
+    download: 'The game did not finish downloading. Check your connection and try again.',
+    other: 'The game could not start on this device. Try again, or use another browser.'
+  };
+  var LIMIT = 25000, failed = false, ready = false, timer = 0, armed = 0;
+  function $(id) { return document.getElementById(id); }
+  function arm() {
+    clearTimeout(timer);
+    if (ready) return;
+    armed = Date.now();
+    timer = setTimeout(function () {
+      if (ready || failed) return;
+      if (document.hidden || Date.now() - armed > LIMIT + 3000) { arm(); return; }
+      fail('download');
+    }, LIMIT);
+  }
+  function fail(kind, detail) {
+    if (failed || ready) return;
+    failed = true;
+    clearTimeout(timer);
+    var m = $('bootmsg'), bar = $('bootbar'), play = $('play'), cont = $('continue'), retry = $('bootretry');
+    if (m) m.textContent = (MSG[kind] || MSG.other) + (detail ? ' (' + detail + ')' : '');
+    if (bar) bar.hidden = true;
+    if (play) play.hidden = true;
+    if (cont) cont.hidden = true;
+    if (retry) { retry.hidden = false; retry.onclick = function () { location.reload(); }; }
+  }
+  window.__rwFail = fail;
+  window.__rwTick = arm;
+  window.__rwOk = function () {
+    ready = true;
+    clearTimeout(timer);
+    if (failed) {
+      failed = false;
+      var retry = $('bootretry'), play = $('play');
+      if (retry) retry.hidden = true;
+      if (play) play.hidden = false;
+    }
+  };
+  window.addEventListener('error', function (e) {
+    var t = e && e.target;
+    if (t && t.tagName === 'SCRIPT') fail('download');
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason, s = String((r && (r.name + ' ' + r.message)) || r || '').toLowerCase();
+    fail(/webgl|context|gpu|renderer|shader/.test(s) ? 'graphics' : /fetch|import|network|load|chunk|script|module/.test(s) ? 'download' : 'other');
+  });
+  arm();
+})();
+</script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

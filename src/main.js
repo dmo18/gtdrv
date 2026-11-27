@@ -5,9 +5,21 @@ import { mapFromSearch, loadMapCity, MAP_CHOICE_KEY } from './world/maps.js';
 import { migrateMapChoice } from './core/save.js';
 import { takeTravelNote } from './core/travel.js';
 import { createQualityBench, neverChosen } from './core/qualitybench.js';
+import { continueAfter, failureKind, failureMessage } from './core/launch.js';
 
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
+// Each progress step tells the HTML shell's watchdog the start is alive.
+const shellCall = (name) => {
+  if (typeof window[name] === 'function') window[name]();
+};
+{
+  const setProgress = title.setProgress;
+  title.setProgress = (...a) => {
+    shellCall('__rwTick');
+    return setProgress.apply(title, a);
+  };
+}
 
 const uiRoot = document.getElementById('ui');
 const showUi = (on) => {
@@ -210,6 +222,7 @@ async function startUp() {
   }
   title.setMap(mapId);
   title.setReady(true);
+  shellCall('__rwOk');
   if (!autostart) markRunning();
   title.setCanContinue(game.session.canContinue());
   // Idle work after the title is up: the first-run benchmark, then the map
@@ -239,12 +252,14 @@ async function startUp() {
   async function continueGame(tapped, link, traveled = false) {
     game.audio.unlock();
     if (tapped) {
-      try {
-        await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
-        await screen.orientation?.lock?.('landscape');
-      } catch {
-        /* fine without */
-      }
+      // Never wait on the browser: a promise that does not settle moves on after 1.5 s.
+      await new Promise((resolve) => {
+        continueAfter(
+          () => Promise.resolve(document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })).then(() => screen.orientation?.lock?.('landscape')),
+          resolve,
+          setTimeout,
+        );
+      });
     }
     const veil = fadeVeil();
     await veil.to(1);
@@ -277,7 +292,8 @@ startUp().catch((err) => {
   console.error(err);
   // Say what failed, so it can be reported (name and message only).
   const why = err && (err.name || err.message) ? ' (' + String(err.name || '') + ': ' + String(err.message || '').slice(0, 120) + ')' : '';
-  msg.textContent = 'Sorry, the game could not start on this device.' + why;
+  if (typeof window.__rwFail === 'function') window.__rwFail(failureKind(err), why.slice(2, -1));
+  else msg.textContent = failureMessage(failureKind(err)) + why;
 });
 
 // Offline support. A new version is applied right away only while the

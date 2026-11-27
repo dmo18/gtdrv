@@ -8,7 +8,8 @@
 
 export const BENCH_MS = 3000; // length of the run
 export const WARMUP_MS = 500; // shader compiles and the first draws are not counted
-export const MIN_FRAMES = 60; // fewer counted frames than this: no verdict
+export const MIN_FRAMES = 60; // fewer counted frames than this: no verdict, except sustained slowness
+export const MIN_SLOW_FRAMES = 20; // a slow device gets fewer frames in 3 s (50 ms: 50, 100 ms: 25)
 const MAX_FRAMES = 1024;
 const STALL_MS = 250; // a frame this long was a hidden page or a pause, not the load
 
@@ -59,11 +60,14 @@ export function createQualityBench() {
     get frames() { return n; },
     // { quality, median, p95, frames } or null (too few frames to say).
     result() {
-      if (n < MIN_FRAMES) return null;
+      if (n < MIN_SLOW_FRAMES) return null;
       for (let i = 0; i < n; i++) sorted[i] = frames[i];
       const view = sorted.subarray(0, n).sort();
       const median = view[Math.floor(n / 2)];
       const p95 = view[Math.min(n - 1, Math.floor(n * 0.95))];
+      // 20 to 59 frames: only a sustained slow run (median over 24 ms; stalls
+      // were already dropped) gives a verdict.
+      if (n < MIN_FRAMES && !(median > 24)) return null;
       return { quality: pickQuality(median, p95), median, p95, frames: n };
     },
   };

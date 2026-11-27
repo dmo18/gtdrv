@@ -72,6 +72,7 @@ import { createAdventures } from './systems/adventures.js';
 import { createGarages, favoriteCar } from './systems/garages.js';
 import { registerExploreScreens } from './ui/explore.js';
 import { SEA_LEVEL } from './world/ground.js';
+import { createRotationGate } from './core/launch.js';
 
 const SKY = 0x9fc8e8;
 // Street tiles built before the first frame (docs/PERF.md, 0.13.8
@@ -865,6 +866,27 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', resize);
   resize();
+
+  // The portrait cover (index.html #rotate, the same media query) hides the
+  // game: pause under it and let go of held controls. A manual pause stays.
+  const rotation = createRotationGate();
+  const portraitQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(orientation: portrait) and (pointer: coarse)') : null;
+  const clearHeld = () => {
+    // The touch layer lets go of everything on a window blur.
+    try {
+      window.dispatchEvent(new Event('blur'));
+    } catch {
+      /* no events: nothing to clear */
+    }
+  };
+  const checkRotation = () => {
+    const portrait = portraitQuery ? portraitQuery.matches : false;
+    rotation.update(portrait, game, (p) => events.emit('pause', p), clearHeld);
+  };
+  window.addEventListener('resize', checkRotation);
+  window.addEventListener('orientationchange', checkRotation);
+  if (portraitQuery && portraitQuery.addEventListener) portraitQuery.addEventListener('change', checkRotation);
+  checkRotation();
 
   // Pause automatically when the page is hidden.
   document.addEventListener('visibilitychange', () => {

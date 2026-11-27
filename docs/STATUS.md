@@ -14,6 +14,12 @@ the final review and fix stage; nothing is in progress that blocks play.
 - Hints (systems/tutorial.js): the car steering line follows settings.steering (wheel, buttons, tilt, slider) and settings.leftHanded; the fighter says hold BOOST for afterburner; the map is top left.
 - Combat HUD (ui/combathud.js): the "Knocked out" text sets hidden and aria-hidden with its visible state (`setShown`).
 - Tests: test/saves-records.test.js.
+## 0.14.0 launch and quality (2026-11-27, in the tree, no version bump)
+- Continue (main.js): fullscreen and orientation lock no longer block restoring the saved game; `continueAfter` (core/launch.js) runs the restore exactly once when the browser promise settles, rejects, is absent, or after 1.5 s.
+- Quality benchmark (core/qualitybench.js): 20 to 59 counted frames now give a verdict when the median is over 24 ms (Low); fast or stall-heavy runs with few frames still give none. 60 or more frames: unchanged.
+- Rotation (game.js, core/launch.js `createRotationGate`): the portrait cover pauses the simulation and releases held controls (a window blur, which the touch layer already handles); only a pause the gate made is undone on return, a manual pause stays.
+- Launch failure (index.html, main.js): inline shell script (CSP allows exactly its sha256; test checks the hash) with a window error listener, an unhandled rejection listener and a 25 s no-progress timer (re-armed when the page is hidden or the thread was blocked); the failed state stops the bar, shows plain guidance via textContent and a Retry button that only reloads. main.js startup catch calls it; progress calls reset the timer.
+- Tests: test/launch.test.js. Not verified: real browser behavior (headless smoke not run), the failed state on a real WebGL loss, the rotation on a device.
 
 ## 0.13.9 hitches and start (2026-11-27, published)
 - Owner on 0.13.7 (weak phone, Downtown): 397 frames over 33 ms, worst 83.7 ms, start 9.8 s. Measured with `scripts/perf-phonecheck.mjs --profile --passes 2` at 4x, Downtown and Beach (the script now prints a "top 10 frames" line: frame, excess, cause, top function). Before, Downtown drive top 10: 1090, 1091, 1089, 3564 street tiles 'roads' (geoSurface, pointInRing under citymesh.js cornerTri: cold narrow-gap net asks, one slice 104 ms); 1080 police (createSkin); 556 police/core; 1717 core (fixedUpdate); 1456 and 2012 new tile geometries (upload up to 1.2 MB); 522 map with a collection. Beach: 1082 combat's first hit (15 ms), 1081 the fixture's spawn.
