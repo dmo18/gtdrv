@@ -93,6 +93,8 @@ test('the two halves of a pair drawn as one road paint one double yellow, not tw
   for (const id of REGION_IDS) {
     const r = streets(id);
     assert.ok(r.yellowApart < WAS[id], `${id}: ${r.yellowApart} of ${r.yellowSamples} yellow samples apart`);
+    // Review 0.15: keep a per-region share bound next to the totals.
+    assert.ok(r.yellowApart < 0.25 * r.yellowSamples, `${id}: ${r.yellowApart} of ${r.yellowSamples} apart is a quarter or more`);
     apart += r.yellowApart;
     samples += r.yellowSamples;
   }

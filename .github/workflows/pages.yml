@@ -46,8 +46,7 @@ jobs:
           path: dist
   # Headless browser check (build, phone size Chromium, fails on any page error).
   # playwright is a pinned devDependency, so it comes from the lockfile. The job
-  # blocks publishing (publish needs it). It has its own concurrency group so it
-  # cannot delay or be cancelled by another run of the workflow. CI cannot be
+  # blocks publishing (publish needs it). CI cannot be
   # tested locally: the runner's software WebGL speed is the unknown.
   smoke:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[wip]')
@@ -55,9 +54,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-    concurrency:
-      group: smoke-${{ github.ref }}-${{ github.run_id }}
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
