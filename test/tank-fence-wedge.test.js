@@ -4,8 +4,6 @@
 // while the front circle is pushed into the fence, 0.62 m deep at 7, 16 and
 // 29 mph (limit 0.30 m). Each body circle is resolved on its own in
 // entities/tank.js, so nothing stops the tank before the wedge closes.
-// Marked todo until the tank resolution is fixed (tank.js was out of scope
-// for 0.14.1 task 1); flip `todo` off then.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWorld, collectTargets, runOne, CRAFTS, PEN_MAX } from '../scripts/collision-sweep.mjs';

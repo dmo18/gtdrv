@@ -244,22 +244,22 @@ export function stepTank(t, controls, dt, world) {
     }
     // A wedge (a wall converging on another solid) cannot be resolved by
     // pushing each circle alone: if a body circle still overlaps, step back
-    // and lose the forward speed, so the tank stops instead of plowing in.
+    // and lose the forward speed, so the tank stops instead of driving in.
     const chw = Math.cos(t.heading), shw = Math.sin(t.heading);
     let deep = 0;
     for (let k = -1; k <= 1; k += 2) {
       const res = col.resolveCircle(t.x + chw * off * k, t.z + shw * off * k, r, 1);
       if (res.hit && res.depth > deep) deep = res.depth;
     }
-    if (deep > WEDGE_DEPTH) {
+    // Only while driving forward into it: reversing or pivoting out of a
+    // wedge keeps the resolved position, so a pinned tank can always back out.
+    const fv = t.vx * chw + t.vz * shw;
+    if (deep > WEDGE_DEPTH && fv > 0.05) {
       t.x = t.px;
       t.z = t.pz;
-      const fv = t.vx * chw + t.vz * shw;
-      if (fv > 0) {
-        t.vx -= fv * chw;
-        t.vz -= fv * shw;
-      }
-      if (close < 1) close = 1;
+      t.vx -= fv * chw;
+      t.vz -= fv * shw;
+      if (fv > 0.5 && close < 1) close = 1;
     }
   }
   if (close > 0) {
