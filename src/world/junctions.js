@@ -21,6 +21,12 @@
 //   before the taper.
 // - Sidewalk corners are offsets of the curb lines: the curb return arc and
 //   the back of sidewalk where the two back lines meet (`corners`).
+// - (0.15, docs/ROADS.md WP2) Two arms of one street side by side are one
+//   composite arm (no corner or gore between them, one mouth line); three
+//   or more side by side are a bundle; two roads that fork are moved apart
+//   to meet curb to curb with a gore between them; an offset crossing stays
+//   two T junctions; one-way lane divides line up straight through a
+//   junction (alignThrough).
 //
 // Lateral offsets are meters right of the node line seen a -> b (the edge
 // frame of docs/MAP.md); along distances are meters from node a.
@@ -118,9 +124,44 @@ function mergeClusters(nodes, edges, uf, hasArms, want) {
     const ta = want[2 * e.id], tb = want[2 * e.id + 1];
     const both = ha && hb;
     const bend = !both && nodes[ha ? e.b : e.a].edges.length === 2;
+    if (both && ta + tb > e.length - 1 && e.length < 30 && offsetTees(nodes, edges, e)) continue;
     if ((both && ta + tb > e.length - 1 && e.length < 30) || (bend && ta + tb > e.length - 1)) { union(uf, e.a, e.b); merged++; }
   }
   return merged;
+}
+// (0.15 WP2) An offset crossing: edge e is a block of a street that runs
+// straight on through both its nodes, each node a T whose side street
+// leaves on the other side of it, the two side streets' node lines over
+// OFFSET_MIN m apart. Two T junctions with a short curbed block of the
+// street between them, not one skewed junction.
+export const OFFSET_MIN = 6;
+const OFF_COS = Math.cos((35 * Math.PI) / 180);
+function offsetTees(nodes, edges, e) {
+  if (!e.name) return false;
+  let side0 = 0, sx = 0, sz = 0;
+  for (let end = 0; end < 2; end++) {
+    const n = nodes[end ? e.b : e.a];
+    if (n.edges.length !== 3) return false;
+    // Along e away from this node.
+    const ux = end ? -e.ux : e.ux, uz = end ? -e.uz : e.uz;
+    let through = false, side = null, sd = 0, dx = 0, dz = 0;
+    for (let k = 0; k < 3; k++) {
+      const f = edges[n.edges[k]];
+      if (f === e) continue;
+      const fx = f.a === n.id ? f.ux : -f.ux, fz = f.a === n.id ? f.uz : -f.uz;
+      if (f.name === e.name && fx * ux + fz * uz < -OFF_COS) through = true;
+      else if (side) return false;
+      else { side = f; sd = ux * fz - uz * fx; dx = fx; dz = fz; }
+    }
+    if (!through || !side || Math.abs(sd) < 0.5) return false;
+    // (Sides seen along e from node a.)
+    const s = end ? -Math.sign(sd) : Math.sign(sd);
+    if (end === 0) { side0 = s; sx = dx; sz = dz; } else if (s === side0) return false;
+  }
+  // The node lines: the second node's distance from the first side
+  // street's line.
+  const a = nodes[e.a], b = nodes[e.b];
+  return Math.abs((b.x - a.x) * sz - (b.z - a.z) * sx) > OFFSET_MIN;
 }
 function union(uf, a, b) {
   const ra = find(uf, a), rb = find(uf, b);
@@ -141,17 +182,32 @@ function isect(px, pz, ux, uz, qx, qz, vx, vz) {
 // An arm: one edge end at a junction, in its own frame: outward u, right r,
 // strip middle o right of the node line, half width h, sidewalks on its
 // right and left (seen outward).
-let EOFF = null;
+let EOFF = null, PE = null;
 function makeArm(nodes, e, end) {
   const n = nodes[end ? e.b : e.a];
   const s = end ? -1 : 1;
-  const sh = EOFF ? EOFF[e.id] : 0;
+  const q = 2 * e.id + end;
+  // (0.15) The strip middle at the node as the strip draws it: a pair
+  // half's end target (pairEnds) where it has one.
+  const own = (e.off || 0) + (EOFF ? EOFF[e.id] : 0), tp = PE ? PE.taper[q] : 0;
+  const c = tp > 0 ? (PE.tcl[q] + PE.tcr[q]) / 2 : own;
   const ux = e.ux * s, uz = e.uz * s;
   return {
-    q: 2 * e.id + end, e, end, node: n.id, nx: n.x, nz: n.z, ux, uz, rx: -uz, rz: ux,
-    o: ((e.off || 0) + sh) * s, h: e.width / 2, wR: end ? walkL(e) : walkR(e), wL: end ? walkR(e) : walkL(e),
-    len: e.length, ang: 0, trim: 0, want: 0, shift: 0, tl: 0, partner: -1,
+    q, e, end, node: n.id, nx: n.x, nz: n.z, ux, uz, rx: -uz, rz: ux,
+    o: c * s, h: e.width / 2, wR: end ? walkL(e) : walkR(e), wL: end ? walkR(e) : walkL(e),
+    len: e.length, ang: 0, trim: 0, want: 0, shift: 0, tl: 0, partner: -1, fork: -1, bund: -1, bnext: -1,
+    // (The strip middle, arm frame: `own` untapered, `pe` at the node
+    // before any shift, fading to own over `tp` m.)
+    own: own * s, pe: c * s, tp, al: 0, alT: 0,
   };
+}
+// The strip middle of arm A at s m out (arm frame, as modeled while the
+// trims are solved): the pair half's end target fading over tp, plus the
+// side shift fading over tl.
+function armMid(A, s) {
+  let b = A.tp > s ? A.own + (A.pe - A.own) * (1 - s / A.tp) : A.own;
+  if (A.alT > s) b += A.al * (1 - s / A.alT);
+  return A.tl > s ? b + A.shift * (1 - s / A.tl) : b;
 }
 
 // The largest distance along arm i at which its strip still meets arm j's
@@ -208,14 +264,20 @@ function cornerOf(A, B, C) {
   if (th <= 0) th += TAU;
   C.th = th;
   C.kind = 0; // 0 chord, 1 curb return, 2 outside miter
-  const pax = A.nx + A.rx * (A.o + A.h), paz = A.nz + A.rz * (A.o + A.h);
-  const pbx = B.nx + B.rx * (B.o - B.h), pbz = B.nz + B.rz * (B.o - B.h);
+  // (The curb lines through the mouths: an arm moved sideways at its
+  // node has faded part of the way back there.)
+  const oa = armMid(A, A.trim), ob = armMid(B, B.trim);
+  const pax = A.nx + A.rx * (oa + A.h), paz = A.nz + A.rz * (oa + A.h);
+  const pbx = B.nx + B.rx * (ob - B.h), pbz = B.nz + B.rz * (ob - B.h);
   C.pax = pax; C.paz = paz; C.pbx = pbx; C.pbz = pbz;
   // (A pedestrian street meets the junction with a straight edge.)
   if (A.e.ped || B.e.ped) return C;
   if (th > PAR && th < STRAIGHT) {
     if (!isect(pax, paz, A.ux, A.uz, pbx, pbz, B.ux, B.uz)) return C;
-    if (ISX.s < -3 || ISX.t < -3 || ISX.s > TRIM_MAX || ISX.t > TRIM_MAX) return C;
+    // (0.15: arms from two nodes of one junction may meet behind their
+    // nodes, inside it: their curbs run on to the corner.)
+    const back = -3 - (A.node === B.node ? 0 : Math.min(CLUSTER_LEN, Math.hypot(A.nx - B.nx, A.nz - B.nz)));
+    if (ISX.s < back || ISX.t < back || ISX.s > TRIM_MAX || ISX.t > TRIM_MAX) return C;
     const s = Math.sin(th / 2), tn = Math.tan(th / 2);
     const w = Math.min(A.wR, B.wL);
     let R = w > 0 ? (w - 0.3 * s) / (1 - s) : 3;
@@ -346,6 +408,11 @@ function goreOf(PG, A, B) {
     const sa = A.trim + 2 * k, sb = B.trim + 2 * k;
     if (sa > A.len * 0.9 || sb > B.len * 0.9) break;
     const a = mouth(PG, A, true, sa), b = mouth(PG, B, false, sb);
+    // (Two strips still touching there: the gore's two sides meet.)
+    if ((b[0] - a[0]) * A.rx + (b[1] - a[1]) * A.rz < 0) {
+      a[0] = b[0] = (a[0] + b[0]) / 2;
+      a[1] = b[1] = (a[1] + b[1]) / 2;
+    }
     pa.push(a[0], a[1]);
     pb.push(b[0], b[1]);
     if (Math.hypot(a[0] - b[0], a[1] - b[1]) >= GORE_W) break;
@@ -449,6 +516,19 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const NN = nodes.length, NE = edges.length;
   const eoff = sideShifts(nodes, edges, edgesNear);
   EOFF = eoff;
+  const taper = new Float64Array(2 * NE), tcl = new Float64Array(2 * NE), tcr = new Float64Array(2 * NE), tlin = new Uint8Array(2 * NE);
+  // (0.13.8) The halves of a one-way pair drawn as one road (no median,
+  // `off`): `off` puts the left curb on the middle line at the edge's
+  // midpoint only. Where the two node lines converge or part along the
+  // street, each block's half sat on its own straight line, so the
+  // curbs stepped at every joint and the two yellow edge lines crossed
+  // and parted (NW 1st Avenue). Each end's curbs now sit on the middle
+  // line at its node (measured against whichever half lies there), and
+  // the strip runs straight from end to end (two linear tapers over
+  // half the edge each, meeting at `off`). (0.15: before the junctions,
+  // so their arms start where the strips do.)
+  if (edgesNear) pairEnds(nodes, edges, edgesNear, eoff, taper, tcl, tcr, tlin);
+  PE = { taper, tcl, tcr };
   const deg = (id) => nodes[id].edges.length;
   const uf = new Int32Array(NN);
   for (let i = 0; i < NN; i++) uf[i] = i;
@@ -476,10 +556,9 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
     if (dividedAt(e.a, e, null, e.b)) union(uf, e.a, e.b);
   }
 
-  const trim = new Float64Array(2 * NE), miter = new Float64Array(2 * NE), taper = new Float64Array(2 * NE);
-  const tcl = new Float64Array(2 * NE), tcr = new Float64Array(2 * NE);
+  const trim = new Float64Array(2 * NE), miter = new Float64Array(2 * NE);
   const nbr = new Int32Array(2 * NE).fill(-1), flip = new Uint8Array(2 * NE), inner = new Uint8Array(NE);
-  const jEnd = new Int32Array(2 * NE).fill(-1), ctrl = new Uint8Array(2 * NE), tlin = new Uint8Array(2 * NE);
+  const jEnd = new Int32Array(2 * NE).fill(-1), ctrl = new Uint8Array(2 * NE);
   const nodeJ = new Int32Array(NN).fill(-1);
   const stats = { junctions: 0, multi: 0, hull: 0, merged: 0, bends: 0, tapers: 0, capped: 0 };
 
@@ -555,24 +634,19 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   }
   // Pair shifts as linear tapers of the curbs (edge frame), within the
   // room the other end leaves.
+  // (On top of a pair half's end target, over the longer of the two runs.)
+  // (One linear fade over the longer run, exact at the mouth: armMid
+  // there.)
+  arms.forEach((list) => alignThrough(list));
   armAt.forEach((A) => {
-    if (!(A.tl > 0)) return;
-    const sg = A.end ? -1 : 1, e = A.e, sh = A.shift * sg, o = (e.off || 0) + eoff[e.id];
-    tcl[A.q] = o - e.width / 2 + sh;
-    tcr[A.q] = o + e.width / 2 + sh;
-    taper[A.q] = A.tl;
+    if (!((A.tl > 0 && A.shift) || (A.alT > 0 && A.al))) return;
+    const sg = A.end ? -1 : 1, e = A.e, own = A.own * sg, T = Math.max(A.tp, A.tl, A.alT);
+    const c = T > A.trim + 0.5 ? own + (armMid(A, A.trim) * sg - own) * T / (T - A.trim) : armMid(A, 0) * sg;
+    tcl[A.q] = c - e.width / 2;
+    tcr[A.q] = c + e.width / 2;
+    taper[A.q] = T;
     tlin[A.q] = 1;
   });
-  // (0.13.8) The halves of a one-way pair drawn as one road (no median,
-  // `off`): `off` puts the left curb on the middle line at the edge's
-  // midpoint only. Where the two node lines converge or part along the
-  // street, each block's half sat on its own straight line, so the
-  // curbs stepped at every joint and the two yellow edge lines crossed
-  // and parted (NW 1st Avenue). Each end's curbs now sit on the middle
-  // line at its node (measured against whichever half lies there), and
-  // the strip runs straight from end to end (two linear tapers over
-  // half the edge each, meeting at `off`).
-  if (edgesNear) pairEnds(nodes, edges, edgesNear, eoff, taper, tcl, tcr, tlin);
   // Bends: mitered joins and tapers.
   for (let i = 0; i < NN; i++) {
     if (arms.has(find(uf, i)) || deg(i) !== 2) continue;
@@ -832,7 +906,7 @@ function solveTrims(list, C) {
   const D = rad + 15;
   for (let i = 0; i < list.length; i++) { const A = list[i]; A.ang = Math.atan2(A.nz + A.uz * D + A.rz * A.o - cz, A.nx + A.ux * D + A.rx * A.o - cx); }
   list.sort((a, b) => a.ang - b.ang || a.q - b.q);
-  pairShifts(list);
+  pairArms(list);
   // Two arms moved side by side keep that order round the junction (the
   // left one first: the order runs toward each arm's right).
   for (let i = 0; i < list.length; i++) {
@@ -842,7 +916,7 @@ function solveTrims(list, C) {
   for (let i = 0; i < list.length; i++) list[i].trim = list.length > 1 ? 0.5 : 0;
   for (let i = 0; i < list.length; i++) {
     for (let j = 0; j < list.length; j++) {
-      if (i === j || list[i].partner === list[j].q) continue;
+      if (i === j || list[i].partner === list[j].q || list[i].fork === list[j].q || (list[i].bund >= 0 && list[i].bund === list[j].bund)) continue;
       const t = clipReach(list[i], list[j]);
       if (t + 0.3 > list[i].trim) list[i].trim = t + 0.3;
     }
@@ -850,50 +924,370 @@ function solveTrims(list, C) {
   if (list.length > 1) {
     for (let i = 0; i < list.length; i++) {
       const A = list[i], B = list[(i + 1) % list.length];
+      // (No corner inside a composite arm: its two halves are one street;
+      // nor between the two roads of a fork: a gore lies there.)
+      if (A.partner === B.q || A.fork === B.q || (A.bund >= 0 && A.bnext === B.q)) continue;
       cornerOf(A, B, C);
       if (C.kind !== 1) continue;
+      // (A corner behind the nodes is drawn only where it fits: it never
+      // draws the arms out.)
+      if (C.sa < -3 || C.sb < -3) continue;
       A.trim = Math.max(A.trim, C.sa + C.T + 0.2);
       B.trim = Math.max(B.trim, C.sb + C.T + 0.2);
     }
   }
+  // (What the arms want before the composite mouths line up: a mouth
+  // drawn out to its partner's does not join two junctions.)
+  for (let armIdx = 0; armIdx < list.length; armIdx++) list[armIdx].want = list[armIdx].trim;
+  compositeMouths(list);
   for (let armIdx = 0; armIdx < list.length; armIdx++) {
     const A = list[armIdx];
-    A.want = A.trim;
     A.trim = Math.min(A.trim, TRIM_MAX, Math.max(0.5, A.len - 1));
   }
 }
 
-// Two arms leaving a junction side by side whose node lines converge
-// there (the halves of a paired one-way, a fork) overlap for tens of
-// meters: each is
-// moved sideways at the node (half the overlap each, back to its own line
-// over `tl` m, linearly) so the two meet curb to curb (one surface).
+// (0.15 WP2, docs/ROADS.md) Composite arms: two arms of one street that
+// leave a junction side by side under 25 degrees apart (the halves of a
+// divided street, with or without a median, the two one-way legs where a
+// street splits, or two ways of one name drawn over each other) are one
+// arm for the trims, the corners and the gores: they do not clip each
+// other, get no curb return, sidewalk corner or chevron gore between
+// them, and both end on one mouth line square to the street (the
+// farther of the two mouths the other arms ask for). Where their strips
+// overlap at the node (the node lines converge there), each is moved
+// sideways (half the overlap each, back to its own line over `tl` m,
+// linearly) so the two meet curb to curb (one surface).
 const PAIR_COS = Math.cos((25 * Math.PI) / 180);
-function pairShifts(list) {
+// Are edges e and f two carriageways of one street (one name, or the
+// divided pair of each other)?
+export function oneStreet(e, f) {
+  return (!!e.name && e.name === f.name) || (e.pair >= 0 && e.pair === f.id) || (f.pair >= 0 && f.pair === e.id);
+}
+// (0.15) Three or more arms side by side (under 25 degrees from the next,
+// their strips touching or overlapping at the node: the two halves of a
+// street and a turn roadway between them, a street and two ramps): one
+// bundle. Each is moved sideways at the node just enough that none
+// overlaps the next (left to right, then centered on where they were),
+// fading back to its own line; they do not clip each other, get no curb
+// return or sidewalk between them, and end on one mouth line.
+function bundleArms(list) {
+  const n = list.length;
+  if (n < 4) return;
+  // A start: an arm not tied to the one before it.
+  let s0 = -1;
+  for (let i = 0; i < n && s0 < 0; i++) if (!tied(list[(i + n - 1) % n], list[i])) s0 = i;
+  if (s0 < 0) return;
+  for (let k = 0; k < n;) {
+    let m = 1;
+    while (m < n && tied(list[(s0 + k + m - 1) % n], list[(s0 + k + m) % n])) m++;
+    if (m >= 3 && m < n) packBundle(list, s0 + k, m, (s0 + k) % n);
+    k += m;
+  }
+}
+function tied(A, B) {
+  if (A.e.ped || B.e.ped || A.e.bridge || B.e.bridge) return false;
+  const dot = A.ux * B.ux + A.uz * B.uz;
+  if (dot < PAIR_COS) return false;
+  const cB = (B.nx + B.rx * B.o - A.nx) * A.rx + (B.nz + B.rz * B.o - A.nz) * A.rz;
+  // (B on A's right: the gap between A's right curb and B's left curb.)
+  return cB - B.h - (A.o + A.h) < 1;
+}
+const BX = [];
+function packBundle(list, i0, m, id) {
+  const n = list.length;
+  let ax = 0, az = 0;
+  for (let k = 0; k < m; k++) { const A = list[(i0 + k) % n]; ax += A.ux; az += A.uz; }
+  const al = Math.hypot(ax, az);
+  ax /= al; az /= al;
+  const rx = -az, rz = ax, R = list[i0 % n];
+  // Strip middles at the node across the bundle; pushed right where one
+  // overlaps the one before it.
+  BX.length = 0;
+  let prev = -Infinity, sum = 0;
+  for (let k = 0; k < m; k++) {
+    const A = list[(i0 + k) % n];
+    const c = (A.nx + A.rx * A.o - R.nx) * rx + (A.nz + A.rz * A.o - R.nz) * rz;
+    const d = Math.max(c, prev + A.h);
+    BX.push(c, d);
+    prev = d + A.h;
+    sum += d - c;
+  }
+  const mean = sum / m;
+  for (let k = 0; k < m; k++) {
+    const A = list[(i0 + k) % n];
+    A.bund = id;
+    if (k + 1 < m) A.bnext = list[(i0 + k + 1) % n].q;
+    const sh = (BX[2 * k + 1] - BX[2 * k] - mean) / Math.max(0.5, A.rx * rx + A.rz * rz);
+    if (Math.abs(sh) < 0.05) continue;
+    // The fade: until the arm has parted from its neighbors on its own.
+    let tl = 3;
+    for (const j of [k - 1, k + 1]) {
+      if (j < 0 || j >= m) continue;
+      const B = list[(i0 + j) % n], dot = A.ux * B.ux + A.uz * B.uz;
+      const sin = Math.sqrt(Math.max(0, 1 - dot * dot));
+      tl = Math.max(tl, (Math.abs(sh) + B.h + A.h) / Math.max(sin, 0.02) + 2);
+    }
+    A.shift = sh;
+    A.tl = Math.min(TRIM_MAX, tl, 0.45 * A.len);
+    A.o += sh;
+  }
+}
+function pairArms(list) {
+  bundleArms(list);
   for (let armIdx = 0; armIdx < list.length; armIdx++) {
     const A = list[armIdx];
-    if (A.partner >= 0 || A.e.median > 0) continue;
+    if (A.partner >= 0 || A.bund >= 0) continue;
+    let best = null, bestDot = PAIR_COS, bestOv = 0, bestTl = 0, bestRight = false;
     for (let otherIdx = 0; otherIdx < list.length; otherIdx++) {
       const B = list[otherIdx];
-      if (B === A || B.partner >= 0 || B.e.median > 0 || B.e.name !== A.e.name) continue;
+      if (B === A || B.partner >= 0 || B.bund >= 0) continue;
+      const dot = A.ux * B.ux + A.uz * B.uz;
+      if (dot < bestDot) continue;
+      // Halves: one street, both one-way, traffic in opposite directions
+      // (one arm runs into the junction, the other out of it).
+      const halves = oneStreet(A.e, B.e) && A.e.oneway && B.e.oneway && A.end !== B.end;
+      // (Before 0.15: any two arms of one name without a median whose
+      // strips overlap at the node.)
+      const same = B.e.name === A.e.name && !(A.e.median > 0) && !(B.e.median > 0);
+      if (!halves && !same) continue;
+      const cB = (B.nx + B.rx * B.o - A.nx) * A.rx + (B.nz + B.rz * B.o - A.nz) * A.rz;
+      // (Halves: the arm out of the junction lies on the right, their left
+      // curbs facing, as traffic keeps right.)
+      const right = halves ? B.end === 0 : cB > A.o;
+      const ov = right ? A.o + A.h - (cB - B.h) : cB + B.h - (A.o - A.h);
+      const sin = Math.sqrt(Math.max(0, 1 - dot * dot));
+      const tl = Math.min(TRIM_MAX, ov / Math.max(sin, 0.02) + 2, 0.45 * A.len, 0.45 * B.len);
+      const shifts = ov > 0.3 && tl >= 3;
+      if (!halves && !shifts) continue;
+      best = B; bestDot = dot; bestOv = shifts ? ov : 0; bestTl = tl; bestRight = right;
+    }
+    if (!best) continue;
+    const B = best;
+    if (bestOv > 0) {
+      const half = bestOv / 2;
+      A.shift = bestRight ? -half : half;
+      B.shift = bestRight ? half : -half;
+      A.tl = B.tl = bestTl;
+      A.o += A.shift;
+      B.o += B.shift;
+    }
+    A.partner = B.q;
+    B.partner = A.q;
+  }
+  // (0.15) A fork or merge of two different roads (a ramp, a link) whose
+  // strips overlap at the node: moved apart the same way, so the two
+  // meet curb to curb at the mouth with the gore between them, not drawn
+  // out until they part on their own (tens of meters at a few degrees).
+  for (let armIdx = 0; armIdx < list.length; armIdx++) {
+    const A = list[armIdx];
+    if (A.partner >= 0 || A.fork >= 0 || A.bund >= 0 || A.e.ped || A.e.bridge) continue;
+    for (let otherIdx = 0; otherIdx < list.length; otherIdx++) {
+      const B = list[otherIdx];
+      if (B === A || B.partner >= 0 || B.fork >= 0 || B.bund >= 0 || B.e.ped || B.e.bridge) continue;
       const dot = A.ux * B.ux + A.uz * B.uz;
       if (dot < PAIR_COS) continue;
       const cB = (B.nx + B.rx * B.o - A.nx) * A.rx + (B.nz + B.rz * B.o - A.nz) * A.rz;
-      const right = cB > A.o;
+      // (Which side B lies on: where the two run 15 m out, not at the
+      // node they share.)
+      const far = (B.nx + B.ux * 15 + B.rx * B.o - A.nx - A.ux * 15) * A.rx + (B.nz + B.uz * 15 + B.rz * B.o - A.nz - A.uz * 15) * A.rz;
+      const right = far > A.o;
       const ov = right ? A.o + A.h - (cB - B.h) : cB + B.h - (A.o - A.h);
-      if (ov <= 0.3) continue;
       const sin = Math.sqrt(Math.max(0, 1 - dot * dot));
       const tl = Math.min(TRIM_MAX, ov / Math.max(sin, 0.02) + 2, 0.45 * A.len, 0.45 * B.len);
-      if (tl < 3) continue;
-      const half = ov / 2;
-      A.shift = right ? -half : half;
-      B.shift = right ? half : -half;
+      if (!(ov > 0.3) || tl < 3) continue;
+      // (A street running straight on through the junction keeps its
+      // line: the other road moves the whole way.)
+      const ta = runsOn(A, list), tb = runsOn(B, list);
+      if (ta && tb) continue;
+      const fa = ta ? 0 : tb ? 1 : 0.5, fb = 1 - fa;
+      // (Only where the two part within the fade, by at most FORK_MAX m
+      // each: a long shallow merge keeps its trims.)
+      if (ov / Math.max(sin, 0.02) + 2 > tl || ov * Math.max(fa, fb) > FORK_MAX) continue;
+      A.shift = (right ? -ov : ov) * fa;
+      B.shift = (right ? ov : -ov) * fb;
       A.tl = B.tl = tl;
       A.o += A.shift;
       B.o += B.shift;
-      A.partner = B.q;
-      B.partner = A.q;
+      A.fork = B.q;
+      B.fork = A.q;
       break;
+    }
+  }
+}
+// (0.15 WP2) Lanes straight through a junction: two one-way arms of one
+// street, one into the junction and one out of it, running straight on
+// (under 35 degrees off) with their node lines within 1 m: both mouths
+// put the lane divide (the left lane edge) on one line, fading back to
+// each edge's own line away from the junction (as pairEnds and the bend
+// tapers do). Two halves that meet curb to curb at the mouth move as one
+// (the mean of what they ask); an arm that moves as one with its partner,
+// or has no room to fade, leaves the move to the other side; halves with
+// a gap between them may close it, never cross.
+const THRU_COS = Math.cos((35 * Math.PI) / 180);
+function alignThrough(list) {
+  const n = list.length;
+  if (n < 2) return;
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    const A = list[i];
+    A.req = 0; A.nreq = 0; A.mv = 0; A.mate = null;
+    A.can = Math.min(TRIM_MAX + A.trim, 0.45 * A.len) > A.trim + 2;
+  }
+  // Halves curb to curb at the mouth: one rigid unit.
+  for (let i = 0; i < n; i++) {
+    const A = list[i], B = list[(i + 1) % n];
+    if (A.partner !== B.q || n < 3) continue;
+    if (Math.abs(mouthGap(A, B)) <= 1) { A.mate = B; B.mate = A; }
+  }
+  const stiff = (A) => (!A.can || (A.mate && !A.mate.can) ? Infinity : A.mate ? 2 : 1);
+  for (let i = 0; i < n; i++) {
+    const P = list[i];
+    // (P runs into the junction; its best straight partner out of it.)
+    if (!P.e.oneway || !P.end || !P.e.name || P.e.ped || P.e.bridge || P.e.causeway) continue;
+    let Q = null, best = THRU_COS;
+    for (let j = 0; j < n; j++) {
+      const X = list[j];
+      if (X === P || !X.e.oneway || X.end || X.e.name !== P.e.name || X.e.ped || X.e.bridge || X.e.causeway) continue;
+      const d = -(P.ux * X.ux + P.uz * X.uz);
+      if (d > best) { best = d; Q = X; }
+    }
+    if (!Q || Q.mate === P) continue;
+    // The data's node lines (raw offset): over 1 m apart, a real jog.
+    if (Math.abs((Q.nx - P.nx) * P.rx + (Q.nz - P.nz) * P.rz) > 1) continue;
+    // (Each mouth's divide carried back to its node along its arm: the
+    // two divide lines meet the junction's middle at one point.)
+    const dp = divAt(P), dq = divAt(Q);
+    const dl = (Q.nx + Q.rx * dq - P.nx - P.rx * dp) * P.rx + (Q.nz + Q.rz * dq - P.nz - P.rz * dp) * P.rz;
+    if (Math.abs(dl) < 0.1 || Math.abs(dl) > 8) continue;
+    const sp = stiff(P), sq = stiff(Q);
+    if (sp === Infinity && sq === Infinity) continue;
+    const fp = sp === sq ? 0.5 : sp < sq ? 1 : 0;
+    P.req += dl * fp; P.nreq++;
+    Q.req += -dl * (1 - fp) * (P.rx * Q.rx + P.rz * Q.rz); Q.nreq++;
+    any = true;
+  }
+  if (!any) return;
+  for (let i = 0; i < n; i++) {
+    const A = list[i], B = A.mate;
+    // (A rigid pair: the mean of the halves that ask, in A's frame.)
+    let r = A.nreq ? A.req / A.nreq : 0;
+    const k = A.nreq ? 1 : 0;
+    if (B && B.nreq) { r = (r * k + (B.req / B.nreq) * (B.rx * A.rx + B.rz * A.rz)) / (k + 1); }
+    A.mv = A.can ? r : 0;
+  }
+  // Halves with a gap: closing it at most.
+  for (let i = 0; i < n; i++) {
+    const A = list[i], B = list[(i + 1) % n];
+    if (A.partner !== B.q || A.mate || n < 3) continue;
+    const g0 = mouthGap(A, B), close = A.mv - B.mv * (B.rx * A.rx + B.rz * A.rz);
+    if (close > Math.max(0, g0) && close > 1e-6) { const f = Math.max(0, g0) / close; A.mv *= f; B.mv *= f; }
+  }
+  for (let i = 0; i < n; i++) {
+    const A = list[i], d = A.mv;
+    if (!(Math.abs(d) >= 0.05) || !A.can) continue;
+    const T = Math.min(A.trim + Math.max(TAPER_LEN, TAPER_SLOPE * Math.abs(d)), 0.45 * A.len);
+    if (!(T > A.trim + 2)) continue;
+    A.alT = T;
+    A.al = d / (1 - A.trim / T);
+    A.o = armMid(A, 0);
+  }
+}
+// The gap at the mouths between arm A's right curb and the next arm B's
+// left curb, along A's right (negative: they overlap).
+function mouthGap(A, B) {
+  const oa = armMid(A, A.trim) + A.h, ob = armMid(B, B.trim) - B.h;
+  return (B.nx + B.ux * B.trim + B.rx * ob - A.nx - A.ux * A.trim - A.rx * oa) * A.rx + (B.nz + B.uz * B.trim + B.rz * ob - A.nz - A.uz * A.trim - A.rz * oa) * A.rz;
+}
+// The lane divide of one-way arm A at its mouth (arm frame lateral).
+function divAt(A) {
+  const e = A.e;
+  return armMid(A, A.trim) + (A.end ? -1 : 1) * (divideOf(e) - (e.off || 0));
+}
+
+const FORK_MAX = 4;
+// Does arm A's street run straight on through the junction (an arm of
+// its name leaving the other way, under 35 degrees off)?
+function runsOn(A, list) {
+  if (!A.e.name) return false;
+  for (let k = 0; k < list.length; k++) {
+    const X = list[k];
+    if (X !== A && X.e.name === A.e.name && -(A.ux * X.ux + A.uz * X.uz) > THRU_COS) return true;
+  }
+  return false;
+}
+
+// The two arms of a composite arm next to each other round the junction
+// end on one mouth line: square to their mean direction, through the
+// mouth (strip middle at the trim) that lies farther out.
+const COMPOSITE_STEP = 14;
+function compositeMouths(list) {
+  const n = list.length;
+  if (n < 3) return;
+  // Bundles: every member to the farthest mouth along the bundle's axis.
+  for (let i = 0; i < n; i++) {
+    const S = list[i];
+    if (S.bund < 0 || list[(i + n - 1) % n].bnext === S.q) continue;
+    let cx = 0, cz = 0, m = 0;
+    for (let X = S; ; X = list[(i + ++m) % n]) { cx += X.ux; cz += X.uz; if (X.bnext < 0 || m > n) break; }
+    m++;
+    const cl = Math.hypot(cx, cz);
+    cx /= cl; cz /= cl;
+    let p = -Infinity, lo = Infinity, hi = -Infinity, ok = true;
+    for (let k = 0; k < m; k++) {
+      const X = list[(i + k) % n], x0 = (X.nx - S.nx + X.rx * X.o) * cx + (X.nz - S.nz + X.rz * X.o) * cz, xk = X.ux * cx + X.uz * cz;
+      if (xk < 0.5) ok = false;
+      lo = Math.min(lo, x0); hi = Math.max(hi, x0);
+      p = Math.max(p, x0 + xk * X.trim);
+    }
+    if (!ok || hi - lo > COMPOSITE_STEP) continue;
+    for (let k = 0; k < m; k++) {
+      const X = list[(i + k) % n], x0 = (X.nx - S.nx + X.rx * X.o) * cx + (X.nz - S.nz + X.rz * X.o) * cz, xk = X.ux * cx + X.uz * cz;
+      X.trim = Math.max(X.trim, (p - x0) / xk);
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const A = list[i], B = list[(i + 1) % n];
+    if (A.partner !== B.q && !(A.bund >= 0 && A.bnext === B.q)) continue;
+    let cx = A.ux + B.ux, cz = A.uz + B.uz;
+    const cl = Math.hypot(cx, cz);
+    if (cl < 1e-6) continue;
+    cx /= cl; cz /= cl;
+    // Along the composite axis from A's node: each arm's strip middle at
+    // its node, and per m of trim.
+    const a0 = A.rx * A.o * cx + A.rz * A.o * cz, ak = A.ux * cx + A.uz * cz;
+    const b0 = (B.nx - A.nx + B.rx * B.o) * cx + (B.nz - A.nz + B.rz * B.o) * cz, bk = B.ux * cx + B.uz * cz;
+    if (ak < 0.5 || bk < 0.5) continue;
+    const pa = a0 + ak * A.trim, pb = b0 + bk * B.trim, p = Math.max(pa, pb);
+    // (Nodes over COMPOSITE_STEP m apart along the street: the halves
+    // meet the junction at different places, each keeps its own mouth.)
+    if (Math.abs(a0 - b0) > COMPOSITE_STEP) continue;
+    A.trim = Math.max(A.trim, (p - a0) / ak);
+    B.trim = Math.max(B.trim, (p - b0) / bk);
+    // Strips that still overlap at the mouth (their node lines converge
+    // faster than the shift fades, or no shift): each moved apart by half
+    // the overlap there, fading out past the mouth.
+    const rx = -cz, rz = cx;
+    // Lateral of A's right curb and B's left curb at the mouths.
+    const oa = armMid(A, A.trim), ob = armMid(B, B.trim);
+    const ar = (A.ux * A.trim + A.rx * (oa + A.h)) * rx + (A.uz * A.trim + A.rz * (oa + A.h)) * rz;
+    const bl = (B.nx - A.nx + B.ux * B.trim + B.rx * (ob - B.h)) * rx + (B.nz - A.nz + B.uz * B.trim + B.rz * (ob - B.h)) * rz;
+    const ov = ar - bl;
+    if (!(ov > 0.05)) continue;
+    // (A new fade runs from the node, past the mouth, as long as the room
+    // allows; an arm with no room for one leaves the move to the other.)
+    const fadeOf = (X) => (X.tl > X.trim + 2 ? X.tl : Math.min(TRIM_MAX, 0.45 * X.len));
+    const ta = fadeOf(A), tb = fadeOf(B), okA = ta > A.trim + 2, okB = tb > B.trim + 2;
+    if (!okA && !okB) continue;
+    for (let k = 0; k < 2; k++) {
+      const X = k ? B : A, sg = k ? 1 : -1, tl = k ? tb : ta;
+      if (!(k ? okB : okA)) continue;
+      // The shift at the node that moves the mouth by its part of the
+      // overlap.
+      const want = armMid(X, X.trim) + (sg * ov) / (okA && okB ? 2 : 1);
+      X.shift = 0;
+      X.tl = tl;
+      X.shift = (want - armMid(X, X.trim)) / (1 - X.trim / tl);
+      X.o = armMid(X, 0);
     }
   }
 }
@@ -910,18 +1304,50 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   };
   const L = (A) => { const o = lat(A, false); return [A.nx + A.ux * A.trim + A.rx * o, A.nz + A.uz * A.trim + A.rz * o]; };
   const R = (A) => { const o = lat(A, true); return [A.nx + A.ux * A.trim + A.rx * o, A.nz + A.uz * A.trim + A.rz * o]; };
+  let skipL = false;
   for (let i = 0; i < n; i++) {
     const A = list[i], B = list[(i + 1) % n];
     const la = L(A), ra = R(A), lb = L(B);
-    ring.push(la[0], la[1], ra[0], ra[1]);
+    if (!skipL) ring.push(la[0], la[1]);
+    ring.push(ra[0], ra[1]);
+    skipL = false;
     if (n < 2) break;
+    // The two halves of a composite arm: the ring runs straight across
+    // from one mouth to the other (no curb return, sidewalk or gore);
+    // two mouths that touch (curb to curb) share one ring point.
+    const comp = A.partner === B.q && n > 2, bun = A.bund >= 0 && A.bnext === B.q;
+    if (comp || bun) {
+      const t = (lb[0] - ra[0]) * A.rx + (lb[1] - ra[1]) * A.rz;
+      if (t < 0.3 && Math.hypot(lb[0] - ra[0], lb[1] - ra[1]) < 0.6) {
+        const mx = (ra[0] + lb[0]) / 2, mz = (ra[1] + lb[1]) / 2;
+        if (i < n - 1) {
+          ring[ring.length - 2] = mx; ring[ring.length - 1] = mz;
+          skipL = true;
+        } else {
+          ring.length -= 2;
+          ring[0] = mx; ring[1] = mz;
+        }
+      }
+      if (comp) continue;
+    }
     cornerOf(A, B, C);
-    if (C.th < GORE_TH && !A.e.ped && !B.e.ped && !A.e.bridge && !B.e.bridge) {
+    // (0.15) Chevrons only where two different roads part (a ramp, a
+    // fork of two names, a link), never inside one street.
+    if (C.th < GORE_TH && !A.e.ped && !B.e.ped && !A.e.bridge && !B.e.bridge && !oneStreet(A.e, B.e)) {
       const G = goreOf(PG, A, B);
       if (G) gores.push(G);
     }
     const curb = [ra[0], ra[1]];
     let fan = null;
+    // (A fork's two roads: no curb return or sidewalk between them.)
+    if ((A.fork === B.q && C.th < GORE_TH) || bun) continue;
+    if (C.kind === 1 && (C.sa + C.T > A.trim + 0.01 || C.sb + C.T > B.trim + 0.01)) {
+      // (0.15) No room for the full return (arms capped by a short block,
+      // an offset crossing): the largest return that fits, not a chord
+      // across the corner.
+      const tn = Math.tan(C.th / 2), T = Math.min(A.trim - C.sa, B.trim - C.sb) - 0.01;
+      if (T * tn >= 0.5) { C.R = T * tn; C.T = T; }
+    }
     if (C.kind === 1 && C.sa + C.T <= A.trim + 0.01 && C.sb + C.T <= B.trim + 0.01) {
       // Curb return: tangent points, then the arc round its center.
       const tax = C.pax + A.ux * (C.sa + C.T), taz = C.paz + A.uz * (C.sa + C.T);
@@ -984,6 +1410,11 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
     if (wa > 0 || wb > 0) corners.push({ curb, tris, qa: A.q, sideA: A.end ? 1 : 0, qb: B.q, sideB: B.end ? 0 : 1 });
   }
   let hull = false;
+  // (0.15) Two ring points under 0.1 m apart (two mouths that touch) are
+  // one: a sliver of a side read as a crossing.
+  for (let k = ring.length - 2; k >= 2 && ring.length > 6; k -= 2) {
+    if (Math.abs(ring[k] - ring[k - 2]) < 0.1 && Math.abs(ring[k + 1] - ring[k - 1]) < 0.1) ring.splice(k, 2);
+  }
   let poly = ring;
   if (n >= 2 && !isSimple(ring)) {
     // The arm ends alone (no curb returns); else the ring as it is, drawn
@@ -1040,17 +1471,42 @@ function buildJunction(id, nodes, g, list, C, PG, forceHull = false) {
   };
 }
 // The kept draft as a junction: typed arrays, its asphalt triangulated.
+// (0.15) A sidewalk corner triangle whose middle lies on the junction's
+// own asphalt (a corner cut by a chord, a skewed ring) is left out: no
+// sidewalk piece on the crossing.
+const DROP = new Uint8Array(4096);
 function finishJunction(D) {
   const corners = D.corners;
-  for (let k = 0; k < corners.length; k++) {
-    const c = corners[k];
-    corners[k] = { curb: new Float64Array(c.curb), tris: c.tris ? new Float64Array(c.tris) : null, qa: c.qa, sideA: c.sideA, qb: c.qb, sideB: c.sideB };
-  }
-  return {
+  // (The arms in ring order from the first gore's arm before it: gore k
+  // lies between arms k and k + 1 where the gores follow one another.)
+  const qs = D.arms.map((A) => A.q);
+  if (D.gores.length) { const k0 = qs.indexOf(D.gores[0].qa); if (k0 > 0) qs.push(...qs.splice(0, k0)); }
+  const J = {
     id: D.id, lead: D.lead, nodes: new Int32Array(D.nodes), x: D.x, z: D.z, signal: D.signal, stop: D.stop, hull: D.hull, fan: D.fan,
     ring: new Float64Array(D.ring), tris: D.arms.length < 2 ? new Float64Array(0) : new Float64Array(D.tris || triangulate(D.ring)),
-    corners, gores: D.gores, arms: new Int32Array(D.arms.map((A) => A.q)), x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, hullRing: D.hullRing,
+    corners, gores: D.gores, arms: new Int32Array(qs), x0: D.x0, z0: D.z0, x1: D.x1, z1: D.z1, hullRing: D.hullRing,
   };
+  for (let k = 0; k < corners.length; k++) {
+    const c = corners[k];
+    let tris = null;
+    if (c.tris) {
+      const T = c.tris;
+      let drop = 0;
+      for (let m = 0; m + 5 < T.length; m += 6) {
+        const cx = (T[m] + T[m + 2] + T[m + 4]) / 3, cz = (T[m + 1] + T[m + 3] + T[m + 5]) / 3;
+        const out = !inJunctionArea(J, cx, cz);
+        DROP[m / 6] = out ? 0 : 1;
+        if (!out) drop++;
+      }
+      if (!drop) tris = new Float64Array(T);
+      else if (drop * 6 < T.length) {
+        tris = new Float64Array(T.length - drop * 6);
+        for (let m = 0, w = 0; m + 5 < T.length; m += 6) if (!DROP[m / 6]) for (let t = 0; t < 6; t++) tris[w++] = T[m + t];
+      }
+    }
+    corners[k] = { curb: new Float64Array(c.curb), tris, qa: c.qa, sideA: c.sideA, qb: c.qb, sideB: c.sideB };
+  }
+  return J;
 }
 
 const JCELL = 32;
