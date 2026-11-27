@@ -10,7 +10,9 @@ import { continueAfter, failureKind, failureMessage } from './core/launch.js';
 const msg = document.getElementById('bootmsg');
 const title = createTitle(document);
 // Each progress step tells the HTML shell's watchdog the start is alive.
+let shellOk = false; // __rwOk was sent: the shell no longer shows failures
 const shellCall = (name) => {
+  if (name === '__rwOk') shellOk = true;
   if (typeof window[name] === 'function') window[name]();
 };
 {
@@ -292,7 +294,8 @@ startUp().catch((err) => {
   console.error(err);
   // Say what failed, so it can be reported (name and message only).
   const why = err && (err.name || err.message) ? ' (' + String(err.name || '') + ': ' + String(err.message || '').slice(0, 120) + ')' : '';
-  if (typeof window.__rwFail === 'function') window.__rwFail(failureKind(err), why.slice(2, -1));
+  // After __rwOk the shell ignores a failure: write it to the message line.
+  if (typeof window.__rwFail === 'function' && !shellOk) window.__rwFail(failureKind(err), why.slice(2, -1));
   else msg.textContent = failureMessage(failureKind(err)) + why;
 });
 

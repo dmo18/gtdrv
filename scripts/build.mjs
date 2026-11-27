@@ -23,6 +23,14 @@ async function walk(dir, base = dir) {
   return out.sort();
 }
 
+// The cache version: a hash of the template (so editing only sw.js changes
+// the cache name) and of every listed file's name and bytes.
+export function swVersion(template, entries) {
+  const hash = createHash('sha256').update('sw-template').update(template);
+  for (const [f, data] of entries) hash.update(f).update(data);
+  return hash.digest('hex').slice(0, 12);
+}
+
 // Writes dist/sw.js: the template in public/ with the list of files to
 // keep offline and a version that changes whenever any of them changes.
 async function writeServiceWorker(dist) {
@@ -30,11 +38,11 @@ async function writeServiceWorker(dist) {
   // Lazily loaded chunks (the Miami map) are kept offline too.
   const chunks = (await readdir(dist)).filter((f) => /^chunk-[\w-]+\.js$/.test(f)).sort();
   const all = ['index.html', 'game.js', ...chunks, ...files];
-  const hash = createHash('sha256');
-  for (const f of all) hash.update(f).update(await read(join(dist, f)));
+  const entries = [];
+  for (const f of all) entries.push([f, await read(join(dist, f))]);
   const list = ['./', ...all];
   const template = await read(join(root, 'public/sw.js'), 'utf8');
-  const out = template.replace('__VERSION__', hash.digest('hex').slice(0, 12)).replace('const FILES = __FILES__;', `const FILES = ${JSON.stringify(list)};`);
+  const out = template.replace('__VERSION__', swVersion(template, entries)).replace('const FILES = __FILES__;', `const FILES = ${JSON.stringify(list)};`);
   await writeFile(join(dist, 'sw.js'), out);
 }
 

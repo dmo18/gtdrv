@@ -30,7 +30,7 @@ import {
 } from '../core/garage.js';
 import { placeValid, startSpot } from '../core/startplace.js';
 import {
-  padNear, padHint, travelRefusal, travelSave, TRAVEL_SAVE_FAILED, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
+  padNear, padHint, travelRefusal, travelSave, TRAVEL_SAVE_FAILED, TRAVEL_NO_STORAGE, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
 } from '../core/travel.js';
 import { regionFor, REGIONS } from '../world/regions.js';
 import { createTravelMarkers } from '../render/markers.js';
@@ -400,6 +400,7 @@ export function createSession(game, storage) {
     const p = game.player;
     const why = travelRefusal(p.wanted || 0);
     if (why) return why;
+    if (!storage) return TRAVEL_NO_STORAGE; // nothing can be saved: say so, no reload
     snapshot();
     const car = p.vehicle && savable(p.vehicle) ? p.vehicle : null;
     const pose = linkId ? arrivalApprox(toId, linkId) : null;

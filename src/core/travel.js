@@ -128,6 +128,8 @@ export function travelSession(progress, fromId, toId, car, player, pose) {
 // `progress` gets its earlier session and map sessions again, so the game
 // stays playable where it was and the departure can be tried again.
 export const TRAVEL_SAVE_FAILED = 'Could not save, try again';
+// No storage at all (site data blocked): trying again cannot help.
+export const TRAVEL_NO_STORAGE = 'Saving is blocked in this browser. Turn on site data to travel.';
 export function travelSave(storage, progress, fromId, toId, car, player, pose) {
   if (!storage) return false;
   const oldSession = structuredClone(progress.session);

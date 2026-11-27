@@ -12,14 +12,17 @@ const OPTIONAL = /\.(png|svg|ico|webp|jpe?g)$/i;
 const mk = (f) => new Request(f, { cache: 'reload' });
 
 async function install() {
+  // A cache that already holds this version stays if the install fails.
+  const existed = (await caches.keys()).includes(CACHE);
   const cache = await caches.open(CACHE);
   try {
     // One atomic step: a missing or failing play file rejects the install.
     await cache.addAll(FILES.filter((f) => !OPTIONAL.test(f)).map(mk));
   } catch (err) {
-    // Drop the partial cache; the previous version's cache is untouched
-    // (activate removes old caches only after an install succeeds).
-    await caches.delete(CACHE);
+    // Drop the partial cache, unless it was there before this install (it
+    // may be live); the previous version's cache is untouched (activate
+    // removes old caches only after an install succeeds).
+    if (!existed) await caches.delete(CACHE);
     throw err;
   }
   // Optional files one by one; a 404 or a network error is ignored.

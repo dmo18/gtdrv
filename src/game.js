@@ -879,8 +879,18 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
       /* no events: nothing to clear */
     }
   };
+  // The title screen (#boot, shown until play starts) covers the game: a
+  // portrait start must not pause the game and open the pause menu behind it.
+  const titleUp = () => {
+    const boot = typeof document !== 'undefined' && document.getElementById ? document.getElementById('boot') : null;
+    return !!boot && boot.style.display !== 'none';
+  };
   const checkRotation = () => {
     const portrait = portraitQuery ? portraitQuery.matches : false;
+    if (portrait && titleUp()) {
+      clearHeld();
+      return;
+    }
     rotation.update(portrait, game, (p) => events.emit('pause', p), clearHeld);
   };
   window.addEventListener('resize', checkRotation);

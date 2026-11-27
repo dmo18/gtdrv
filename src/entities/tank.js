@@ -107,6 +107,7 @@ function wallCircle(t, col, off, r) {
 // tank drove 1 m and more past a sea wall and over a bridge rail;
 // scripts/collision-sweep.mjs, test/collision-sweep.test.js.)
 const EDGE_CORNER_R = 0.08;
+const WEDGE_DEPTH = 0.12; // m a body circle may still overlap after the passes
 function edgePoint(t, col, ox, oz, r) {
   const cx = t.x + ox, cz = t.z + oz;
   const res = col.resolveLayer('edges', cx, cz, r, 0);
@@ -240,6 +241,25 @@ export function stepTank(t, controls, dt, world) {
     for (let pass = 0; pass < 2; pass++) {
       close = Math.max(close, wallCircle(t, col, off, r), wallCircle(t, col, -off, r));
       if (col.resolveLayer) close = Math.max(close, edgeWalls(t, col));
+    }
+    // A wedge (a wall converging on another solid) cannot be resolved by
+    // pushing each circle alone: if a body circle still overlaps, step back
+    // and lose the forward speed, so the tank stops instead of plowing in.
+    const chw = Math.cos(t.heading), shw = Math.sin(t.heading);
+    let deep = 0;
+    for (let k = -1; k <= 1; k += 2) {
+      const res = col.resolveCircle(t.x + chw * off * k, t.z + shw * off * k, r, 1);
+      if (res.hit && res.depth > deep) deep = res.depth;
+    }
+    if (deep > WEDGE_DEPTH) {
+      t.x = t.px;
+      t.z = t.pz;
+      const fv = t.vx * chw + t.vz * shw;
+      if (fv > 0) {
+        t.vx -= fv * chw;
+        t.vz -= fv * shw;
+      }
+      if (close < 1) close = 1;
     }
   }
   if (close > 0) {

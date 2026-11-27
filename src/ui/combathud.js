@@ -44,6 +44,15 @@ export function setShown(el, on) {
   if (el.setAttribute) el.setAttribute('aria-hidden', on ? 'false' : 'true');
 }
 
+// For an element that fades by CSS opacity: hidden (display none) would cut
+// the transition, so only the accessibility tree changes (aria-hidden).
+// The element stays out of it while it is invisible. Safe on null.
+export function setAriaShown(el, on) {
+  if (!el) return;
+  el.hidden = false;
+  if (el.setAttribute) el.setAttribute('aria-hidden', on ? 'false' : 'true');
+}
+
 export const AIM_HOLD = 1.2; // s the aim view stays after FIRE is let go
 export const FIGHT_T = 6; // s the health bar stays after the last shot or hit
 export const MUZZLE_Y = 1.4;
@@ -661,7 +670,7 @@ export function createCombatHud(game, uiRoot) {
       ui.fade.style.opacity = String(fade);
       ui.fade.classList.toggle('rw-on', fade > 0);
       ui.fadeText.classList.toggle('rw-on', downText);
-      setShown(ui.fadeText, downText);
+      setAriaShown(ui.fadeText, downText); // aria only: display none would cut the fade
     }
   }
 
@@ -677,7 +686,7 @@ export function createCombatHud(game, uiRoot) {
     const fade = mk('rw-cfade', layer);
     const fadeText = mk('rw-cfade-text', layer);
     fadeText.textContent = 'Knocked out';
-    setShown(fadeText, false);
+    setAriaShown(fadeText, false);
     const dmgEls = [];
     for (let i = 0; i < 3; i++) dmgEls.push(mk('rw-dmg', layer, '<i></i>'));
     const tgt = mk('rw-tgt', layer, '<i></i><i></i><i></i><i></i>');

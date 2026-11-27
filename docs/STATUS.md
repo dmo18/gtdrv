@@ -7,6 +7,14 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.14.1 tank fence and lows (2026-11-27, in the tree, no version bump)
+- Tank and fence (fixed): the sweep finding (miami-west, lot:fence, tank, x -3012.5, z -233.7, 0.62 m) was a wedge: the fence converges on a building face and each body circle was resolved alone. `stepTank` (entities/tank.js) now checks both body circles after the resolve passes; if one still overlaps more than 0.12 m (WEDGE_DEPTH) it restores the pre-move position and removes the forward speed. Full sweep (--per 3, all regions, all crafts): 0 failing runs. Test: test/tank-fence-wedge.test.js.
+- Service worker: the cache version hash now includes the sw.js template (`swVersion` in scripts/build.mjs), and a failed install deletes the cache only if it did not exist before the install. Tests: test/sw-cache.test.js.
+- Travel: no storage at all gives "Saving is blocked in this browser. Turn on site data to travel." (`TRAVEL_NO_STORAGE`), no reload; a failing write still gives "Could not save, try again". Tests: test/travel-nostorage.test.js.
+- Portrait start (game.js): the rotation gate only clears held input while the title (#boot) shows, so no pause menu opens behind it. Tests: test/launch-title.test.js.
+- Knockout fade (ui/combathud.js): the "Knocked out" text toggles aria-hidden only (`setAriaShown`), so display none no longer cuts its opacity fade. `setShown` is unchanged. Tests: test/knockout-shell.test.js.
+- Startup shell (main.js): an error after `__rwOk` is written to the visible message line, since the shell ignores failures once ready.
+
 ## 0.14.0 saves and records (2026-11-27, not yet published)
 - Travel save (core/travel.js, systems/session.js): `travelSave` is all or nothing. It remembers the stored progress and map values and the in-memory session, writes both keys, and on any failure puts the earlier values back; `travelTo` then returns "Could not save, try again", holds nothing, writes no arrival note and does not reload. Tests inject blocked progress, blocked map key and all blocked; after recovery one departure succeeds.
 - Records (core/records.js): `recordTry` makes the empty record (no medal, no best) on the first failed attempt, within the same event limit. Tests: five failures then a completion gives n=6 with the medal and best kept; saved-data validation accepts it. Two older tests expected no record after a failed first try and now expect the empty one.
