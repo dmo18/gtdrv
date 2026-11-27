@@ -182,7 +182,10 @@ function isect(px, pz, ux, uz, qx, qz, vx, vz) {
 // An arm: one edge end at a junction, in its own frame: outward u, right r,
 // strip middle o right of the node line, half width h, sidewalks on its
 // right and left (seen outward).
-let EOFF = null, PE = null;
+let EOFF = null, PE = null, UF = null;
+// (0.15) The cluster (junction) of the node at arm A's far end.
+const LEG_MAX = 60; // m: a leg round a triangle island is shorter
+const farOf = (A) => { const n = A.end ? A.e.a : A.e.b; return UF ? find(UF, n) : n; };
 function makeArm(nodes, e, end) {
   const n = nodes[end ? e.b : e.a];
   const s = end ? -1 : 1;
@@ -213,8 +216,16 @@ function armMid(A, s) {
 // The largest distance along arm i at which its strip still meets arm j's
 // strip (both from their nodes outward, up to 60 m); 0 when they do not.
 const CLIP_A = new Float64Array(32), CLIP_B = new Float64Array(32);
+const CLIP_S = { min: 0 }; // the nearest s of the last clip's overlap
 function clipReach(A, B) {
-  const SA = Math.min(A.len, 60), SB = Math.min(B.len, 60);
+  const t = clipSpan(A, B, Math.min(A.len, 60), Math.min(B.len, 60));
+  // (0.15) Two arms apart at their nodes that run to one far node (the
+  // two legs round a triangle island): where they meet is the far
+  // junction's (it trims them there), not a clip of this one.
+  if (t > 0 && CLIP_S.min > 3 && (A.end ? A.e.a : A.e.b) === (B.end ? B.e.a : B.e.b)) return 0;
+  return t;
+}
+function clipSpan(A, B, SA, SB) {
   // B's quad in A's frame (s along, l lateral).
   let n = 4;
   const P = CLIP_A;
@@ -248,8 +259,9 @@ function clipReach(A, B) {
     n = m;
     const t = src; src = dst; dst = t;
   }
-  let best = 0;
-  for (let k = 0; k < n; k++) if (src[2 * k] > best) best = src[2 * k];
+  let best = 0, min = Infinity;
+  for (let k = 0; k < n; k++) { if (src[2 * k] > best) best = src[2 * k]; if (src[2 * k] < min) min = src[2 * k]; }
+  CLIP_S.min = min;
   // A sliver of contact (touching curbs) is not an overlap.
   return n >= 3 ? best : 0;
 }
@@ -532,6 +544,7 @@ export function buildRoadGeo(nodes, edges, edgesNear = null) {
   const deg = (id) => nodes[id].edges.length;
   const uf = new Int32Array(NN);
   for (let i = 0; i < NN; i++) uf[i] = i;
+  UF = uf;
   for (let eIdx = 0; eIdx < edges.length; eIdx++) {
     const e = edges[eIdx];
     if (e.causeway) continue;
@@ -1047,8 +1060,12 @@ function pairArms(list) {
       // (one arm runs into the junction, the other out of it).
       const halves = oneStreet(A.e, B.e) && A.e.oneway && B.e.oneway && A.end !== B.end;
       // (Before 0.15: any two arms of one name without a median whose
-      // strips overlap at the node.)
-      const same = B.e.name === A.e.name && !(A.e.median > 0) && !(B.e.median > 0);
+      // strips overlap at the node. 0.15 integration: not two one-way legs
+      // in one direction that run to one far junction, the legs round a
+      // triangle island: they clip each other, so the junction paves where
+      // they run over each other, no yellow lines crossing.)
+      const legs = A.e.oneway && B.e.oneway && A.end === B.end && A.len < LEG_MAX && B.len < LEG_MAX && farOf(A) === farOf(B);
+      const same = B.e.name === A.e.name && !(A.e.median > 0) && !(B.e.median > 0) && !legs;
       if (!halves && !same) continue;
       const cB = (B.nx + B.rx * B.o - A.nx) * A.rx + (B.nz + B.rz * B.o - A.nz) * A.rz;
       // (Halves: the arm out of the junction lies on the right, their left

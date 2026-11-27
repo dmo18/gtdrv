@@ -7,6 +7,52 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.15 integration (2026-11-27, in the tree, no version bump)
+The four road packages merged left 18 failing tests; all pass now, no road improvement undone. Fixes in code:
+- world/junctions.js: two arms apart at their node that run to one far node (the legs round a triangle island) no longer clip each other along their whole length (`clipReach`: the overlap is the far junction's). NW 2nd St at NW 3rd Ave (Downtown) was a 1808 m2 ring over the island and the lot east of it (lot 5142's bed stood on it: props-offroad), now 423 m2. Same-direction one-way legs under 60 m that meet at one far junction clip there instead of being composite partners (their yellow lines crossed): 14 -> 218 m2, a plain merge.
+- world/miami.js `CURB_FILL` 0.6 -> 0.3: WP4's static curb cars stay off curb spots and the live cars (cap 40 with the lot cars) only filled the nearest, so at 60 % most spots stood empty and the lane held 44 to 50 % (curb field tests). Now static plus live hold 64 / 60 / 66 / 59 / 64 % (D/B/N/W/S); spots within 135 m of the start 44 / 38 / 40 / 74 / 28.
+- core/route.js tracker: the cursor projection counts a segment against the car's heading 4 m further (`BACK_PEN`): on a route that U-turns at a dead end the car 2 m to the side snapped to the way back and re-routed (Downtown "car on the line"; the 0.14 tree fails that pair too). A car wrong way and over 5 m off the line re-routes after 0.6 s (`OFF_BACK_M`, `OFF_BACK_S`): a U-turn onto the other carriageway 8 to 10 m over was caught only by the 4 s wrong-way timer (South wrong-turn p90 3.2 -> 2.0 s, median 1.35 -> 0.62).
+- entities/servicevehicles.js: Central Patrol Base's far spot 3.5 m east (-1489.4, 985.3): Water Avenue is one road on the pair's mean line, 11 m away (rule 12). Fixes SV-P1, SV-R1, regioncontent (Downtown 20 homes again).
+- world/lots.js `SAND_RINGS` 3 -> 4: Parrot Jungle Trail parks on one curb (9.6 m) and took a beach cell; the bare band between sand and road was one cell wider than the rings (wastelands beach stair).
+- main.js: the late-failure path writes `msg.textContent = failureMessage(...)` again and then re-shows #boot (`showBoot`), so the post-ok message test and C1's re-show both hold.
+Test changes, each intended and understood:
+- regions.test.js fingerprints re-pinned (all six; edges are WP1's, unchanged; nodes, buildings, lots, lot grids move with the WP2 rings, the island legs and the curb fill).
+- stunts.test.js generated ramp ids: Beach skip -> launch, West Civic Center launch -> Overtown skip, South Shenandoah launch -> hop (the collapsed pairs change the seeded edge order; checks on place unchanged).
+- tank-fence-wedge.test.js: WP2 moved the yard fence of the fixture (its approach is now blocked); fixture moved to the same kind of wedge at -2027.5, 756.75 (0.54 / 0.57 m at 16 / 29 mph with WEDGE_DEPTH disabled, 0.24 / 0.22 with it), all fences as candidates. Every fence of miami-west at 8 angles: worst 0.26 m with the check.
+- junction-shape.test.js: sample floor 100 -> 30 pairs (141 before WP1; most halves are one road now, one mouth by construction); the 90 % on-one-line share kept (38 of 38).
+- streetalign.test.js yellow: per-region bounds kept; the all-region bound is now the share (under 10 %: 416 of 4514 = 9.2 %; WP1 alone 353 of 3614 = 9.8 %) since WP2's mouths run the same pairs' paint closer to the junctions.
+- beach-checklist: Washington Avenue is drawn as one 4-lane two-way street (pairmerge), test asserts that (one-way share under 20 %, 4 lanes); Alton Road median allowance 0.40 -> 0.41 (231 m of pair counted once instead of twice; median meters 3703 -> 3716).
+- curblife.test.js lane check against the drawn curbs (`curbsAt`, as streetalign does), not the nominal width: a station by SE 2nd Street sat 1.5 m off the nominal lane where the strip is shifted, exactly in the drawn lane.
+- prop-collision.test.js shaped share 0.85 -> 0.845 (84.9 %: 357 more flat carpark bays on the land narrower local streets leave).
+Audit, five regions D / B / N / W / S (total), before (docs/ROADS.md) -> after:
+| Metric | before | after |
+|---|---|---|
+| width change over 1 m | 626 | 84 / 77 / 21 / 71 / 49 (302) |
+| width change over 3 m | 540 | 46 / 55 / 15 / 49 / 39 (204) |
+| divided half against two-way block | 483 | 44 / 40 / 12 / 41 / 35 (172) |
+| lanes per direction differ (half vs two-way) | 161 | 27 / 15 / 12 / 23 / 12 (89) |
+| class changes at a joint | 156 | 45 / 37 / 24 / 25 / 16 (147) |
+| parking changes at a joint | 106 | 28 / 21 / 4 / 11 / 5 (69) |
+| paint set changes at a joint | 139 | 53 / 27 / 18 / 34 / 21 (153) |
+| median toggles | 127 | 19 / 35 / 11 / 8 / 12 (85) |
+| gores / of one street | 145 / 73 | 31 / 16 / 10 / 3 / 4 (64) / 0 |
+| divided runs / bubbles / under 60 m | 215 / 88 / 30 | 102 / 27 / 5 |
+| junctions over 800 / 1500 m2 | 134 / 38 | 18 / 15 / 6 / 15 / 13 (67) / 5 / 3 / 2 / 3 / 5 (18) |
+| junction area p90 (m2) | 558 / 567 / 515 / 511 / 674 | 443 / 473 / 433 / 436 / 531 |
+| junctions of 4+ nodes | 119 | 77 |
+| hull / fan junctions | (fans 22) | 12 / 12 |
+| through: data node lines over 1 m apart | 131 | 100 |
+| code-made lane divide jumps one-way / two-way | 102 / 5 | 22 / 13 |
+| sliver curb meters | 1904 | 76 / 60 / 6 / 20 / 14 (176) |
+| strip over strip (m) | 260 | 324 |
+| runs under 25 m | 1478 | 1078 |
+| merged halves' curbs apart / samples | 2367 / 4950 | 838 / 2132 |
+| yellow lines apart / samples | 766 | 416 / 4514 |
+| corner triangles on asphalt, mouth misses | 363, 0 | 0, 0 |
+| parking lane share held, within 135 m of the start | (14 to 22 %) | 64 / 60 / 66 / 59 / 64 % |
+- Budgets: Normal street view day calls / triangles D 174 / 224k, B 160 / 238k, N 161 / 222k, W 169 / 228k, S 136 / 218k (limit 210 / 295k), 60 programs. Whole-box build alone 1.63 to 1.78 s, median 1.67 (HEAD before this pass 1.63 to 1.82 interleaved; the test prints 1709 / 1749). No per-frame allocation added (the tracker's penalty is scalar math).
+- Renders (aerial Washington Ave at 7th, 5th St at Alton, NW 3rd Ave at NW 2nd St; street level at the same three): Washington Avenue now reads as one 4-lane street with one double yellow through a compact box; NW 3rd Ave's legs are a plain one-lane one-way and a merge. Still wrong: 5th Street at Alton Road is a 3074 m2 asphalt plain (10 nodes) with median noses cut square and no crosswalks inside; the 10-node junction at -2643, 162 (3307 m2), traffic circles and port interchanges stay big (WP2 "not reached"); North Miami Ave at 31st (1652 m2) has a 3.9 m link drawn inside the avenue's strip for 66 m; strip over strip grew to 324 m (Downtown 168, West 152); curb parking lanes away from the player are drawn empty in the top view (static cars load near the camera only); Washington Avenue lost its parking lanes when its pair became one 4-lane road.
+
 ## 0.15 roads WP4 curbs and lots that read right (2026-11-27, in the tree, no version bump)
 - Static curb cars (render/parkedfield.js `createParkedCurbField`, systems/parked.js): the parking lanes near the camera hold drawn cars (no vehicle), a station every 6.5 m (the curb spot grid), 74 % of them by a position hash (no rng), loaded one street side at a time (48 stations a step, pooled records, none allocated per frame). Left empty: 9 m past a junction's trimmed end, junction asphalt, where another street meets the lane (drives), near shore or a building, within 3.4 m of a curb spot (the live cars keep those, `PARKED_CAP` unchanged), and under a real vehicle standing there. Same car models, paints and district mix as the lot cars; they face the traffic of their side. Drawn through the lot car view (one merged set, hull instances, real body inside 24 m); cap by tier 14 / 24 / 32 (`CURB_CAP`) on top of the lot cars; cars within 28 m of the player are drawn whatever the view.
 - Collision: the static curb cars near the player (26 m, at most 24) are shapes of a lazy collision layer `curbcars` (`createCurbCarLayer`, two circles a car, tag `car`, as the bay cars); pooled shapes, cells reused, set a few times a second. Nothing in world/collision.js changed.

@@ -220,7 +220,9 @@ test('on the real map: lamps and signal masts stop a sedan at 11 mph from their 
     }
   }
   console.log(`# Downtown: ${Object.keys(PROP_SOLIDS).length} prop types in the table, ${total} props emitted, ${shaped} with a shape (${((shaped / total) * 100).toFixed(1)} %)`);
-  assert.ok(shaped / total > 0.85, `${shaped} / ${total} solid or breakable`);
+  // (0.15: 84.9 %, was 85.1: local streets 2.4 m narrower, WP1, leave more
+  // carpark land, 357 more bays, which are flat paint.)
+  assert.ok(shaped / total > 0.845, `${shaped} / ${total} solid or breakable`);
   // Drive into lamps (and masts) from the road side, at 11 mph.
   const posts = [];
   for (const p of city.props) if (p.type === 'lamp' && posts.length < 12 && Math.hypot(p.x - city.spawn.x, p.z - city.spawn.z) < 1500) posts.push(p);

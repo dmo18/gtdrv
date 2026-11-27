@@ -36,8 +36,11 @@ test('Collins and Washington Avenues are not drawn wider than a Beach avenue and
     const { f } = by(n);
     assert.ok(f.ft <= 60 && f.medianShare <= 0.1, n);
   }
-  // Washington is mostly one-way in the data, Collins two-way.
-  assert.ok(by('Washington Avenue').f.onewayShare > 0.6);
+  // Washington is mapped as a pair of one-ways under 4 m apart: since 0.15
+  // (world/pairmerge.js) it is drawn as one two-way street of 4 lanes;
+  // Collins is two-way.
+  const wa = by('Washington Avenue').f;
+  assert.ok(wa.onewayShare < 0.2 && wa.lanes === 4, `Washington one-way ${wa.onewayShare}`);
   assert.ok(by('Collins Avenue').f.onewayShare < 0.5);
 });
 

@@ -25,6 +25,11 @@ export const OFF_ROUTE_M = 18; // off the line by more than this ...
 export const OFF_ROUTE_S = 0.5; // ... for this long: re-route
 export const OFF_NEAR_M = 10; // or off by more than this while heading away from the line ...
 export const OFF_NEAR_S = 0.4; // ... for this long (a missed turn is told within about 2 s)
+export const BACK_PEN = 4; // m a line segment against the car's heading counts further (tracker)
+// Wrong way and off the line by more than a lane (a U-turn onto the other
+// carriageway, 8 to 10 m over: inside OFF_NEAR_M, so only the 4 s wrong-way
+// timer caught it): re-route after this long.
+export const OFF_BACK_M = 5, OFF_BACK_S = 0.6;
 export const NEAR_REROUTE_GAP_S = 3; // the near-miss trigger searches at most this often (cross-country on foot or in a tank)
 export const REROUTE_GAP_S = 0.5; // at most one search per this long
 export const ARRIVE_M = 22; // this close to the end: arrived
@@ -735,11 +740,15 @@ export function createTracker(router, opts = {}) {
   }
 
   // Project (x, z) on segments [i0, i1): writes best into bSeg / bAlong
-  // (returns the distance).
+  // (returns the distance). With a heading (hx, hz, unit; 0 0 for none) a
+  // segment that runs against it counts BACK_PEN m further: where the line
+  // comes back on itself a few m over (a U-turn at a dead end or round a
+  // median), a car 2 m to the side of the way out is nearer the way back,
+  // and the cursor jumped to it (wrong way at speed: a re-route on the line).
   let bSeg = 0, bAlong = 0;
-  function project(x, z, i0, i1) {
+  function project(x, z, i0, i1, hx = 0, hz = 0) {
     const X = route.x, Z = route.z, C = route.cum;
-    let bd = Infinity;
+    let bd = Infinity, be = Infinity;
     for (let i = Math.max(0, i0); i < i1 && i + 1 < route.n; i++) {
       const ax = X[i], az = Z[i], dx = X[i + 1] - ax, dz = Z[i + 1] - az;
       const l2 = dx * dx + dz * dz || 1;
@@ -747,7 +756,9 @@ export function createTracker(router, opts = {}) {
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const px = ax + dx * t - x, pz = az + dz * t - z;
       const d = px * px + pz * pz;
-      if (d < bd - 1e-6) { bd = d; bSeg = i; bAlong = C[i] + (C[i + 1] - C[i]) * t; }
+      let e = d;
+      if ((hx || hz) && dx * hx + dz * hz < -0.3 * Math.sqrt(l2)) { const r = Math.sqrt(d) + BACK_PEN; e = r * r; }
+      if (e < be - 1e-6) { be = e; bd = d; bSeg = i; bAlong = C[i] + (C[i + 1] - C[i]) * t; }
     }
     return Math.sqrt(bd);
   }
@@ -773,11 +784,12 @@ export function createTracker(router, opts = {}) {
       if (!route.ok) return true;
     }
     // Cursor window: a few segments back, more ahead.
-    let off = project(x, z, st.seg - 2, st.seg + 24);
+    const hx = spd > 2 ? Math.cos(heading) : 0, hz = spd > 2 ? Math.sin(heading) : 0;
+    let off = project(x, z, st.seg - 2, st.seg + 24, hx, hz);
     if (off > OFF_ROUTE_M * 0.5) {
       // Maybe further along (a jump): the whole line, no allocation.
       const s0 = bSeg, a0 = bAlong;
-      const offAll = project(x, z, 0, route.n);
+      const offAll = project(x, z, 0, route.n, hx, hz);
       if (offAll < off - 1) off = offAll; else { bSeg = s0; bAlong = a0; }
     }
     st.seg = bSeg;
@@ -793,7 +805,8 @@ export function createTracker(router, opts = {}) {
     // A missed turn: moving, off the line and not along it (a car cutting a
     // corner is within a few meters of the line, so this does not fire there).
     if (off > OFF_NEAR_M && spd > 2 && dot < 0.5) st.nearT += dt; else st.nearT = 0;
-    if ((st.offT >= OFF_ROUTE_S || (st.nearT >= OFF_NEAR_S && st.sinceSearch >= NEAR_REROUTE_GAP_S) || st.wrongT >= 4) && st.sinceSearch >= REROUTE_GAP_S) {
+    const back = st.wrongT >= 4 || (off > OFF_BACK_M && st.wrongT >= OFF_BACK_S);
+    if ((st.offT >= OFF_ROUTE_S || (st.nearT >= OFF_NEAR_S && st.sinceSearch >= NEAR_REROUTE_GAP_S) || back) && st.sinceSearch >= REROUTE_GAP_S) {
       if (startSearch(x, z, heading, 'reroute')) {
         st.reroutes++;
         changed = true;

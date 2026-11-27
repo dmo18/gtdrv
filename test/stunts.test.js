@@ -215,16 +215,21 @@ const RAMPS = {
   // 0.13.7 re-pin (deliberate, docs/STATUS.md "0.13.7 road logic"): one
   // cross section along a street merges neighbor edges, so the seeded order
   // of the Beach's edges changed and its generated ramp is a skip.
-  'miami-beach': ['stunt_palm_island_skip', 'stunt_miami_beach_skip'],
+  // 0.15 re-pin (deliberate, docs/STATUS.md "0.15 integration"): pairs drawn
+  // as one road (world/pairmerge.js) take edges out of the seeded order, so
+  // the same place draws another name: a launch.
+  'miami-beach': ['stunt_palm_island_skip', 'stunt_miami_beach_launch'],
   'miami-north': ['stunt_wynwood_kicker', 'stunt_edgewater_launch', 'stunt_dock_kicker', 'stunt_dock_splash'],
   // 0.9.0 re-pin (deliberate): the West's generated ramp follows the settled
   // lots (junction-band boundary cells are lots now), a Little Havana launch.
   // 0.13.7 re-pin (deliberate, as the Beach above): a Civic Center launch.
-  'miami-west': ['stunt_little_havana_hop', 'stunt_civic_center_launch'],
+  // 0.15 re-pin (deliberate, as the Beach above): an Overtown skip.
+  'miami-west': ['stunt_little_havana_hop', 'stunt_overtown_skip'],
   // 0.9.0 re-pin (deliberate): the South's two generated ramps follow the
   // settled lots too.
   // 0.13.7 re-pin (deliberate, as the Beach above): two launches.
-  'miami-south': ['stunt_bay_heights_launch', 'stunt_shenandoah_launch'],
+  // 0.15 re-pin (deliberate, as the Beach above): a Shenandoah hop.
+  'miami-south': ['stunt_bay_heights_launch', 'stunt_shenandoah_hop'],
 };
 
 test('regions: every region has at least two ramps, on land or in the water, clear of buildings, inside the crop', () => {

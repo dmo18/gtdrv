@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createMiamiCity } from '../src/world/miami.js';
 import { createCollisionWorld } from '../src/world/collision.js';
-import { onJunction } from '../src/world/junctions.js';
+import { onJunction, curbsAt } from '../src/world/junctions.js';
 import { GUTTER, PARK_W } from '../src/world/roadprofile.js';
 import { createParkedCurbField, CURB_MAX, CURB_STEP, COL_R, COL_MAX } from '../src/render/parkedfield.js';
 import { createParkedCars, createCurbCarLayer, CURB_CAP } from '../src/systems/parked.js';
@@ -23,14 +23,14 @@ function edgeSide(x, z) {
   // The nearest street and the side (1 right, 0 left of a -> b) of a point.
   const out = [];
   city.edgesNear(x, z, 16, out);
-  let best = null, bd = 1e9, side = 0, lat = 0;
+  let best = null, bd = 1e9, side = 0, lat = 0, at = 0;
   for (const i of out) {
     const e = city.edges[i], a = city.nodes[e.a];
     const t = Math.max(0, Math.min(e.length, (x - a.x) * e.ux + (z - a.z) * e.uz));
     const d = Math.hypot(x - a.x - e.ux * t, z - a.z - e.uz * t);
-    if (d < bd) { bd = d; best = e; lat = -(x - a.x) * e.uz + (z - a.z) * e.ux; side = lat - (e.off || 0) > 0 ? 1 : 0; }
+    if (d < bd) { bd = d; best = e; at = t; lat = -(x - a.x) * e.uz + (z - a.z) * e.ux; side = lat - (e.off || 0) > 0 ? 1 : 0; }
   }
-  return { e: best, side, lat, d: bd };
+  return { e: best, side, lat, d: bd, at };
 }
 
 test('curb field: cars only in parking lanes, clear of junctions, curb spots and each other', () => {
@@ -43,11 +43,14 @@ test('curb field: cars only in parking lanes, clear of junctions, curb spots and
   const n = f.update(sx, sz, 1, 0, sx, sz, CURB_MAX);
   assert.ok(n > 10 && n <= CURB_MAX, `${n} in view`);
   for (let i = 0; i < n; i++) {
-    const { e, side, lat } = edgeSide(f.x[i], f.z[i]);
+    const { e, side, lat, at } = edgeSide(f.x[i], f.z[i]);
     assert.ok(e && (side ? e.parkR : e.parkL) > 0, `car ${i} is on a side with a parking lane`);
-    const half = e.width / 2;
-    const want = side ? half - GUTTER - PARK_W / 2 : -(half - GUTTER - PARK_W / 2);
-    assert.ok(Math.abs(lat - (e.off || 0) - want) < 1.2, `car ${i} lateral ${lat.toFixed(2)} vs lane ${want.toFixed(2)}`);
+    // (The lane as drawn: the curbs with their side shifts and tapers, as
+    // test/streetalign.test.js checks the curb spots; 0.15: a station by
+    // SE 2nd Street, 1.5 m off the nominal lane where its strip is shifted.)
+    const C = curbsAt(city.roadGeo, e, at);
+    const want = side ? C.r - GUTTER - PARK_W / 2 : C.l + GUTTER + PARK_W / 2;
+    assert.ok(Math.abs(lat - want) < 1.2, `car ${i} lateral ${lat.toFixed(2)} vs lane ${want.toFixed(2)}`);
     assert.ok(!onJunction(city.roadGeo, f.x[i], f.z[i]), `car ${i} is not on a junction`);
     assert.ok(!spotNear(f.x[i], f.z[i], 3.2), `car ${i} is not on a curb spot`);
     for (let j = i + 1; j < n; j++) assert.ok(Math.hypot(f.x[i] - f.x[j], f.z[i] - f.z[j]) > 3.5, `cars ${i} and ${j} overlap`);

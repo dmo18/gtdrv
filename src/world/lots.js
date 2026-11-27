@@ -751,7 +751,10 @@ const MEDIAN_REACH = 40; // m: a pair further apart is two roads, not one with a
 // beach's 5 m stair steps cut into it (sand triangles along the road).
 // A cell takes sand where three or more of its eight neighbors are sand,
 // so the front moves on straight; a cell on a road's asphalt stays out.
-export const SAND_RINGS = 3;
+// (0.15: 4 rings, was 3: a local street that parks on one curb, 2.4 m
+// wider, takes a beach cell, and the band left to fill is one cell wider,
+// Parrot Jungle Trail at the MacArthur Causeway ramp.)
+export const SAND_RINGS = 4;
 const T_BEACH = LOT_TYPES.indexOf('beach') + 1;
 const SAND_NEAR = [];
 function onCarriageway(city, x, z) {

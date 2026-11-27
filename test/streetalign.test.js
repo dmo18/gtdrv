@@ -84,14 +84,19 @@ test('the two halves of a pair drawn as one road paint one double yellow, not tw
   // (world/pairmerge.js: no yellow edge lines to sample, 193 to 2104
   // samples a region left), so the bound is on the samples apart: fewer
   // than 0.13.8 left in every region, under half of its 766 in all (353).
+  // 0.15 integration: the WP2 mouths run the halves' paint closer to the
+  // junctions (3614 samples -> 4514, the same pair edges: Fountain Street
+  // 20 -> 38 samples, all apart), so the bound on all regions is the share:
+  // 9.8 percent apart with WP1 alone, 9.2 merged, under 10.
   const WAS = { 'miami-downtown': 187, 'miami-beach': 300, 'miami-north': 98, 'miami-west': 49, 'miami-south': 132 };
-  let apart = 0;
+  let apart = 0, samples = 0;
   for (const id of REGION_IDS) {
     const r = streets(id);
     assert.ok(r.yellowApart < WAS[id], `${id}: ${r.yellowApart} of ${r.yellowSamples} yellow samples apart`);
     apart += r.yellowApart;
+    samples += r.yellowSamples;
   }
-  assert.ok(apart < 383, `${apart} yellow samples apart`);
+  assert.ok(apart < 0.1 * samples, `${apart} of ${samples} yellow samples apart`);
 });
 
 test('curb parking spots stand in the drawn parking lane; borders do not step at a joint; arm mouths meet their junction', () => {

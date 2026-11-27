@@ -1082,7 +1082,13 @@ function districtKeyAt(districts, x, z) {
 // (0.15 WP1) Share of the 6.5 m slots of a parking lane that list a curb
 // spot (was 22 %, a seeded draw: a parking lane stood 78 % empty even
 // with every spot taken), and the hash seed that picks them.
-const CURB_FILL = 0.6, CURB_SEED = 0xc0b5;
+// (0.15 integration: 30 %, was 60 %. The static curb cars of
+// render/parkedfield.js fill the lane stations clear of a spot; the live
+// cars, capped at 40 with the lot cars, filled only the spots nearest the
+// player, so at 60 % most spots stood empty and the lane held 44 to 50 %.
+// At 30 % the live cap about covers the spots near the start (28 to 74
+// within 135 m) and static plus live cars hold 59 to 66 % of the lane.)
+const CURB_FILL = 0.3, CURB_SEED = 0xc0b5;
 // (0.15 WP1) Streets that keep a parking lane on both curbs where a local
 // street parks on one: the hand table (MIAMI_SPOTS.curbParking), the
 // streets of the regions' start places (their designed first views: parked

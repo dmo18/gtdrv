@@ -99,7 +99,10 @@ test('a street dividing at a junction: its two halves end on one mouth line', ()
       }
     }
   }
-  assert.ok(pairs > 100, `${pairs} pairs`);
+  // (141 pairs before WP1: world/pairmerge.js draws most halves under 4 m
+  // apart as one two-way road, which has one mouth by construction; the
+  // divided halves that stay are the sample.)
+  assert.ok(pairs > 30, `${pairs} pairs`);
   assert.ok(even / pairs > 0.9, `${even} of ${pairs} on one mouth line`);
 });
 

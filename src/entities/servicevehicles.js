@@ -229,7 +229,7 @@ export const SERVICE_SPOTS = [
   { kind: 'towtruck', x: 1306.8, z: 598.8, heading: 0.416, name: 'Sunline Towing', yard: true },
   { kind: 'towtruck', x: 1261.8, z: 578.8, heading: 0.416, name: 'Sunline Towing', yard: true },
   { kind: 'towtruck', x: -1053.16, z: 948.3, heading: -2.462, name: 'Sunline Towing curb bay', curb: true },
-  { kind: 'police', x: -1492.9, z: 985.3, heading: 0.067, name: 'Central Patrol Base' }, // 1 m west for the 5.1 m patrol car (HANDLE); 0.9 m back east in 0.13.7 (Water Avenue's halves no longer park on their inner curbs, its west curb 2.4 m nearer the middle)
+  { kind: 'police', x: -1489.4, z: 985.3, heading: 0.067, name: 'Central Patrol Base' }, // 1 m west for the 5.1 m patrol car (HANDLE); 0.9 m back east in 0.13.7 (Water Avenue's halves no longer park on their inner curbs, its west curb 2.4 m nearer the middle); 3.5 m east in 0.15 (Water Avenue's pair is one road on the mean line: 11 m from it, rule 12)
   { kind: 'police', x: -1488.8, z: 977.3, heading: 0.067, name: 'Central Patrol Base' },
   { kind: 'police', x: -2321.3, z: 587.55, heading: -1.605, name: 'Ocho Patrol Base' }, // 0.75 m back for the 5.1 m patrol car (HANDLE)
   { kind: 'police', x: -2316.3, z: 587.55, heading: -1.605, name: 'Ocho Patrol Base' }, // 0.75 m back for the 5.1 m patrol car (HANDLE)
