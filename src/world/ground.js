@@ -22,6 +22,8 @@ export const FILL_STEP = 2; // m between sliver fill samples
 export const FILL_MAX = 1.5; // m, gaps narrower than this are filled
 export const GAP_MAX = 6; // m, a gap to a facing strip under this is asphalt
 const GAP_COS = Math.cos((25 * Math.PI) / 180);
+export const SLIVER_MAX = 2.0; // m, ground under this between a curb and more road is paved
+const SLIVER_PROBES = [0.5, 1.0, 1.5, 2.0];
 const NOFILL_ALL = new Float32Array(0);
 
 // The sidewalk beside an edge: its own `sidewalk` (a real map's profile,
@@ -293,7 +295,60 @@ export function createGround(city) {
         if (g < best) best = g;
       }
       if (best <= GAP_MAX && best > 0.02) f[2 * i + side] = best + 0.05;
+      else if (!(best <= GAP_MAX)) {
+        // (WP3, no slivers: no facing strip, but a strip at another angle
+        // or a junction's asphalt within SLIVER_MAX m of the curb: the
+        // ground between is a sliver, paved like a facing gap.)
+        const sn = e.ped ? 0 : sliverGap(k, x, z, nx, nz);
+        if (sn > 0) f[2 * i + side] = sn;
+      }
     }
+  }
+  // Carriageway beyond (x, z) along (nx, nz) within SLIVER_MAX m: junction
+  // areas, gores and strips between their curbs, no gaps (so no chain, no
+  // recursion). Returns the paved width (m from the curb), 0 for none.
+  function sliverGap(k, x, z, nx, nz) {
+    const br = !!edges[k].bridge;
+    for (let q = 0; q < SLIVER_PROBES.length; q++) {
+      const t = SLIVER_PROBES[q];
+      if (hardRoadAt(x + nx * t, z + nz * t, k, br)) return t + 0.05;
+    }
+    return 0;
+  }
+  function hardRoadAt(x, z, kSkip, br) {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    const i = cx - gx0, j = cz - gz0;
+    if (i < 0 || j < 0 || i >= W || j >= H) return false;
+    const c = j * W + i;
+    if (!cellE[c]) build(c, cx, cz);
+    const js = cellJ[c];
+    if (!br) {
+      for (let q = 0; q < js.length; q++) {
+        const J = geo.junctions[js[q]];
+        if (x < J.x0 || x > J.x1 || z < J.z0 || z > J.z1) continue;
+        if (inJunctionArea(J, x, z)) return true;
+        for (let gq = 0; gq < J.gores.length; gq++) if (pointInRing(J.gores[gq].poly, x, z)) return true;
+      }
+    }
+    const es = cellE[c];
+    for (let q = 0; q < es.length; q++) {
+      const k = es[q];
+      if (k === kSkip || geo.inner[k]) continue;
+      const o = 6 * k, rk = ER[o + 5], ox = x - ER[o], oz = z - ER[o + 1];
+      const d = ox * ER[o + 2] + oz * ER[o + 3];
+      if (d < -rk || d > ER[o + 4] + rk) continue;
+      const s = -ox * ER[o + 3] + oz * ER[o + 2];
+      if (Math.abs(s) > rk) continue;
+      const e2 = edges[k];
+      if (e2.ped || !!e2.bridge !== br) continue;
+      const qa = 2 * k, qb = qa + 1;
+      const d0 = geo.jEnd[qa] >= 0 ? 0 : geo.trim[qa] + geo.miter[qa] * s;
+      const d1 = geo.jEnd[qb] >= 0 ? len[k] : len[k] - geo.trim[qb] + geo.miter[qb] * s;
+      if (d < d0 || d > d1) continue;
+      const C = curbsAt(geo, e2, d);
+      if (s >= C.l && s <= C.r) return true;
+    }
+    return false;
   }
   function gapAt(k, side, d) {
     const f = gapArr(k);

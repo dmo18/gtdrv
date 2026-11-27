@@ -1069,6 +1069,41 @@ export function realRoads(city, B, nodes, edges, own = null) {
   }
 }
 
+// Stations of an edge with paved gaps (world/ground.js gapOf): the plain
+// stations and a cut wherever a side's gap starts or stops on the gap's own
+// grid (every FILL_STEP from the strip start), so a piece is wholly gapped
+// or wholly not on each side and the sidewalk the piece draws is the
+// sidewalk the ground has (WP3: gaps are short and many; a piece with a gap
+// at its middle left a bare sidewalk over ground that says sidewalk).
+const GRID = [];
+function gapStations(geo, e, gaps, piece, out) {
+  edgeStations(geo, e, piece, out);
+  if (out.length < 8) return out;
+  const k0 = out[1], k1 = out[out.length - 3], d0 = out[0], d1 = out[out.length - 4];
+  GRID.length = 0;
+  for (let i = 0; i < out.length; i += 4) GRID.push(out[i]);
+  const n = gaps.length / 2;
+  for (let i = 1; i + 1 < n; i++) {
+    const d = d0 + i * FILL_STEP;
+    if (d >= d1 - 0.05) break;
+    for (let side = 0; side < 2; side++) {
+      const prev = Math.max(gaps[2 * i - 2 + side], gaps[2 * i + side]) > 0, next = Math.max(gaps[2 * i + side], gaps[2 * i + 2 + side]) > 0;
+      if (prev !== next) { GRID.push(d); break; }
+    }
+  }
+  GRID.sort((a, b) => a - b);
+  out.length = 0;
+  let last = -Infinity;
+  for (let i = 0; i < GRID.length; i++) {
+    const d = GRID[i];
+    if (d <= last + 0.05) continue;
+    last = d;
+    const C = curbsAt(geo, e, d);
+    out.push(d, d === d0 ? k0 : d === d1 ? k1 : 0, C.l, C.r);
+  }
+  return out;
+}
+
 // One edge of realRoads (its strip, sidewalks, median, fills and paint
 // where own accepts them) as a generator, like realJunctionJob: with over
 // it stops between stations and inside a cold ground ask; null never
@@ -1124,7 +1159,9 @@ export function* realEdgeJob(city, B, e, own, over) {
   const G = groundOf(city), gaps = e.ped ? null : G.gapOf(e.id);
   let gapped = false;
   if (gaps) for (let k = 0; k < gaps.length; k++) if (gaps[k] > 0) { gapped = true; break; }
-  edgeStations(geo, e, gapped ? 10 : medianBand(e) > 0 && e.median <= 8 ? 4 : ROAD_PIECE, ST);
+  const piece = medianBand(e) > 0 && e.median <= 8 ? 4 : ROAD_PIECE;
+  if (gapped) gapStations(geo, e, gaps, piece, ST);
+  else edgeStations(geo, e, piece, ST);
   if (gapped) {
     const n = gaps.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
     for (let i = 0; i + 1 < n; i++) {
