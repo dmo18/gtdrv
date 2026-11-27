@@ -12,7 +12,7 @@
 // tested on the ground itself (surfaceAt 1 is drivable: strips, gaps,
 // junction areas and crosswalks); with no clear place the prop is dropped.
 // Pure: no three.js, no DOM.
-import { groundOf, GAP_MAX } from './ground.js';
+import { groundOf, GAP_MAX, SLIVER_MAX } from './ground.js';
 import { curbsAt, supAt, walkOf, walkLeftOf, medianBand, medianAt, pairGap, pointInRing, junctionsInBox } from './junctions.js';
 
 // m kept between a prop's footprint and the drivable surface.
@@ -150,6 +150,19 @@ function gapCould(T, k0, side, d, R, list, n) {
     const facing = nx * -uz2 + nz * ux2;
     const g = facing < 0 ? s2 - (V[o2 + 5] + V[o2 + 6]) : V[o2 + 5] - V[o2 + 6] - s2;
     if (g > -sl && g < GAP_MAX + sl) return true;
+  }
+  // (WP3, ground.js sliverGap: ground under SLIVER_MAX between this curb
+  // and a strip at any angle, or a junction's asphalt, is paved too.)
+  const rs = span + SLIVER_MAX + amp + 1.5;
+  if (junctionsInBox(geo, px - rs, pz - rs, px + rs, pz + rs)) return true;
+  for (let k = 0; k < n; k++) {
+    const k2 = list[k];
+    if (k2 === k0 || F[k2] & (F_INNER | F_PED) || (F[k2] & F_BRIDGE) !== br) continue;
+    const o2 = ES * k2, len2 = V[o2 + 4];
+    let t = (px - V[o2]) * V[o2 + 2] + (pz - V[o2 + 1]) * V[o2 + 3];
+    t = t < 0 ? 0 : t > len2 ? len2 : t;
+    const qx = V[o2] + V[o2 + 2] * t - px, qz = V[o2 + 1] + V[o2 + 3] * t - pz, r2 = rs + V[o2 + 6] + Math.abs(V[o2 + 5]) + V[o2 + 10];
+    if (qx * qx + qz * qz < r2 * r2) return true;
   }
   return false;
 }
