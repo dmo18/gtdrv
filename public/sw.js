@@ -6,12 +6,40 @@ const VERSION = '__VERSION__';
 const CACHE = 'rustwater-' + VERSION;
 const FILES = __FILES__;
 
+// Optional files (icons and artwork) never decide whether the game installs.
+// Everything else is needed to play and is cached all together or not at all.
+const OPTIONAL = /\.(png|svg|ico|webp|jpe?g)$/i;
+const mk = (f) => new Request(f, { cache: 'reload' });
+
+async function install() {
+  const cache = await caches.open(CACHE);
+  try {
+    // One atomic step: a missing or failing play file rejects the install.
+    await cache.addAll(FILES.filter((f) => !OPTIONAL.test(f)).map(mk));
+  } catch (err) {
+    // Drop the partial cache; the previous version's cache is untouched
+    // (activate removes old caches only after an install succeeds).
+    await caches.delete(CACHE);
+    throw err;
+  }
+  // Optional files one by one; a 404 or a network error is ignored.
+  await Promise.all(
+    FILES.filter((f) => OPTIONAL.test(f)).map(async (f) => {
+      try {
+        const r = mk(f);
+        const res = await fetch(r);
+        if (res && res.ok) await cache.put(r, res);
+      } catch {
+        /* optional */
+      }
+    }),
+  );
+}
+
 self.addEventListener('install', (event) => {
   // New versions wait until the page asks for them (see src/pwa.js) so a
   // running game never has its files swapped underneath it.
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))),
-  );
+  event.waitUntil(install());
 });
 
 self.addEventListener('activate', (event) => {

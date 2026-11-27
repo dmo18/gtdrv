@@ -15,17 +15,32 @@ import { loopOf } from '../core/records.js';
 import { nearestEvent } from '../world/eventspots.js';
 
 const HINTS = {
-  car: ['Hold GAS to drive.', 'Steer with the wheel on the left.', 'Tap EXIT to get out of the car.', 'Walk up to a car and tap ENTER.'],
+  car: null, // built from the steering choice by carHints()
   foot: ['Left stick to walk.', 'Drag the right side to look around.', 'Hold FIRE to shoot. LOCK sticks to a target.', 'SWAP changes weapon.', 'Boats wait at the piers.', 'Aircraft are at Gullwing Airfield.'],
   boat: ['Hold GAS. Boats turn best under power.', 'Pull up beside a pier to get out.'],
   plane: ['Hold THRUST, push the stick up.', 'Let go of the stick to level out.', 'Ease off THRUST to come down.'],
   heli: ['Hold UP to lift off.', 'Stick forward to fly, sideways to turn.', 'Let go of both pedals to hover.'],
   // Craft hints by spec id, offered on entering (docs/ARMS.md section 8).
-  fighter: ['Gannetfang: full THRUST is afterburner.', 'LOCK on, then MSL.'],
+  fighter: ['Gannetfang: hold BOOST for afterburner.', 'LOCK on, then MSL.'],
   patrolheli: ['Lampwatch: SIREN and SPOT are under more.'],
   tank: ['Left stick drives. Push sideways to pivot.', 'Drag the right side to aim the turret.', 'Tap CANNON for a shell, hold COAX.', 'LOCK swings the turret onto a target.'], // task 32
 };
-const FIRST = ['Open the map (top right) for races.', 'Stop in a glowing marker, tap START.'];
+const FIRST = ['Open the map (top left) for races.', 'Stop in a glowing marker, tap START.'];
+
+// The steering line of the car hints, from settings.steering (wheel,
+// buttons, tilt, slider) and settings.leftHanded (the controls mirror).
+// Unknown values read as the defaults.
+export function steerHint(settings) {
+  const st = settings && settings.steering;
+  const side = settings && settings.leftHanded === true ? 'right' : 'left';
+  if (st === 'buttons') return 'Tap the arrow pads on the ' + side + ' to steer.';
+  if (st === 'tilt') return 'Tilt your phone to steer.';
+  if (st === 'slider') return 'Slide your thumb on the ' + side + ' to steer.';
+  return 'Steer with the wheel on the ' + side + '.';
+}
+export function carHints(settings) {
+  return ['Hold GAS to drive.', steerHint(settings), 'Tap EXIT to get out of the car.', 'Walk up to a car and tap ENTER.'];
+}
 
 // The intro's beats and lines (US English, 9 words at most each).
 export const INTRO_STEPS = ['run', 'medal', 'police', 'ramp', 'garage'];
@@ -76,7 +91,7 @@ export function createTutorial(game) {
   // A real map words the place hints for itself (city.texts).
   const texts = (game.city && game.city.texts) || {};
   function offer(mode) {
-    let list = HINTS[mode];
+    let list = mode === 'car' ? carHints(game.progress && game.progress.settings) : HINTS[mode];
     // A real map words the craft hints for itself, one sentence per line.
     if (list && mode === 'foot' && texts.craft) list = list.slice(0, 4).concat(String(texts.craft).split(/(?<=[.!?])\s+/));
     if (!list || seen(mode)) return;

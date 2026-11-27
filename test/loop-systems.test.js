@@ -310,7 +310,8 @@ test('each template runs on the game: passes, a jump, a drop with the GPS, stars
   assert.equal(se.lastResult.result, 'fail');
   assert.equal(se.lastResult.why, 'Left the car');
   const tried = Object.keys(g.progress.loop.events).map((id) => id.split('_')[2]).sort();
-  assert.deepEqual(tried, ['dash', 'heat', 'jump', 'miss']);
+  // the failed first try at the wreck event now makes its empty record (no medal, one try)
+  assert.deepEqual(tried, ['dash', 'heat', 'jump', 'miss', 'wreck']);
 });
 
 test('a tracked gate: the GPS leads to a point before it and lets go close by', () => {

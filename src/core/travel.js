@@ -8,7 +8,7 @@ import { ADVENTURE_DEFS } from '../world/adventures.js';
 import { GARAGE_DEFS } from '../world/garages.js';
 import { MIAMI_SPOTS } from '../world/miami-spots.js';
 import { MAP_CHOICE_KEY } from '../world/maps.js';
-import { saveProgress } from './save.js';
+import { saveProgress, SAVE_KEY } from './save.js';
 import { sanitizeSession, craftRecord, savable, selectMapSession } from './garage.js';
 
 export const ISLAND = 'island';
@@ -122,15 +122,47 @@ export function travelSession(progress, fromId, toId, car, player, pose) {
   return progress.session;
 }
 
-// One save call: the session of the target region and the map choice
-// (PLAN_V2 3.5 rule 9). Returns true when both were written.
+// One coherent departure (PLAN_V2 3.5 rule 9): the target region's session
+// and the map choice are both stored, or neither. Returns true when both
+// were written. On any failure the earlier stored values are put back and
+// `progress` gets its earlier session and map sessions again, so the game
+// stays playable where it was and the departure can be tried again.
+export const TRAVEL_SAVE_FAILED = 'Could not save, try again';
 export function travelSave(storage, progress, fromId, toId, car, player, pose) {
+  if (!storage) return false;
+  const oldSession = structuredClone(progress.session);
+  const oldMaps = structuredClone(progress.mapSessions);
+  const read = (k) => {
+    try {
+      return storage.getItem(k);
+    } catch {
+      return null;
+    }
+  };
+  const oldSave = read(SAVE_KEY);
+  const oldMap = read(MAP_CHOICE_KEY);
+  const put = (k, v) => {
+    try {
+      if (v === null || v === undefined) storage.removeItem(k);
+      else storage.setItem(k, v);
+    } catch {
+      /* nothing more can be done */
+    }
+  };
   travelSession(progress, fromId, toId, car, player, pose);
-  const ok = saveProgress(storage, progress);
-  try {
-    storage.setItem(MAP_CHOICE_KEY, toId);
-  } catch {
-    return false;
+  let ok = saveProgress(storage, progress);
+  if (ok) {
+    try {
+      storage.setItem(MAP_CHOICE_KEY, toId);
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    put(SAVE_KEY, oldSave);
+    put(MAP_CHOICE_KEY, oldMap);
+    progress.session = oldSession;
+    progress.mapSessions = oldMaps;
   }
   return ok;
 }

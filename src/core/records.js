@@ -53,9 +53,15 @@ export function recordEvent(loop, ev, value, medal) {
   return RES;
 }
 // An event given up or failed still counts as a try.
+// The first failed try makes the empty record (no medal, no best), within
+// the same event limit as a finished run.
 export function recordTry(loop, ev) {
-  const r = loop.events[ev.id];
-  if (r) r.n = Math.min(99999, r.n + 1);
+  let r = loop.events[ev.id];
+  if (!r) {
+    if (Object.keys(loop.events).length >= MAX_EVENTS) return;
+    r = loop.events[ev.id] = { m: '', b: NaN, n: 0 };
+  }
+  r.n = Math.min(99999, r.n + 1);
 }
 
 // A banked flow run. Returns true when it is the region's best.

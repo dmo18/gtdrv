@@ -31,7 +31,7 @@ test('an event keeps its best medal and best value; tries count', () => {
   recordTry(L, dash);
   assert.equal(L.events[dash.id].n, 4);
   recordTry(L, ev('heat', 2));
-  assert.equal(L.events.ev_beach_heat_2, undefined, 'a failed first try stores nothing');
+  assert.deepEqual(L.events.ev_beach_heat_2, { m: '', b: NaN, n: 1 }, 'a failed first try makes the empty record');
   assert.equal(L.totals.events, 6);
   // a run with no medal stores the value, not a medal
   recordEvent(L, ev('miss', 3), 1, null);

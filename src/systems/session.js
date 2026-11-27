@@ -30,7 +30,7 @@ import {
 } from '../core/garage.js';
 import { placeValid, startSpot } from '../core/startplace.js';
 import {
-  padNear, padHint, travelRefusal, travelSave, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
+  padNear, padHint, travelRefusal, travelSave, TRAVEL_SAVE_FAILED, arrivalApprox, writeTravelNote, mapName, PAD_STOP,
 } from '../core/travel.js';
 import { regionFor, REGIONS } from '../world/regions.js';
 import { createTravelMarkers } from '../render/markers.js';
@@ -404,7 +404,10 @@ export function createSession(game, storage) {
     const car = p.vehicle && savable(p.vehicle) ? p.vehicle : null;
     const pose = linkId ? arrivalApprox(toId, linkId) : null;
     // One save call: the target's session and the map choice (PLAN_V2 3.5 rule 9).
-    travelSave(storage, game.progress, mapId, toId, car, p, pose);
+    if (!travelSave(storage, game.progress, mapId, toId, car, p, pose)) {
+      // Nothing was committed and the earlier values are back: stay and play. The caller shows the message; no reload.
+      return TRAVEL_SAVE_FAILED;
+    }
     traveling = true;
     held = true; // no autosave or page-hide save may overwrite what was just written
     const ns = noteStore();
