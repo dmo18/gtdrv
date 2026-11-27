@@ -95,3 +95,32 @@ test('the system reads the date once, through the injected function', () => {
   assert.equal(d2.doneCount, 0);
   assert.equal(d2.go(0), 'Lose the police first');
 });
+
+test('refresh follows the date across midnight, never during a run', () => {
+  let date = new Date(2026, 10, 23, 23, 50);
+  const events = createEvents();
+  const se = { list, slug: 'beach', active: null, stage: () => true };
+  const game = {
+    events, progress: defaultProgress(), player: { x: 0, z: 0, wanted: 0, vehicle: null }, clock: 12, weather: { name: 'clear' },
+    streetEvents: se, daynight: {}, hud: { toast() {} },
+  };
+  const d = createDaily(game, { now: () => date });
+  assert.equal(d.day, 20261123);
+  const before = d.picks;
+  assert.equal(d.refresh(), false, 'same day: nothing changes');
+  assert.equal(d.picks, before);
+  date = new Date(2026, 10, 24, 0, 5);
+  se.active = { id: 'x' };
+  assert.equal(d.refresh(), false, 'deferred during a run');
+  assert.equal(d.day, 20261123);
+  assert.equal(d.picks, before);
+  // the in-flight challenge still counts for the day it started
+  events.emit('streetEventEnd', { id: before[0].ev.id, medal: 'bronze', daily: before[0].slot });
+  assert.equal(d.doneCount, 1);
+  se.active = null;
+  assert.equal(d.refresh(), true);
+  assert.equal(d.day, 20261124);
+  assert.equal(d.picks.length, 3);
+  assert.equal(d.doneCount, 0, 'a new day starts clean');
+  assert.equal(d.refresh(), false);
+});

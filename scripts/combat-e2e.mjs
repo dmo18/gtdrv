@@ -1,7 +1,7 @@
 // End to end checks for killing cops and for bombs and missiles that must
 // visibly hit and destroy targets, in headless Chromium at phone size.
 // Uses the debug fixtures (g.debug.spawnCar) and steps the game by hand.
-// usage: node scripts/combat-e2e.mjs [cops|missiles|bombs|feel]  (default: all)
+// usage: node scripts/combat-e2e.mjs [cops|missiles|bombs|feel, comma separated]  (default: all)
 import { createRequire } from 'node:module';
 import { buildGame, serve } from './build.mjs';
 
@@ -11,7 +11,8 @@ try {
 } catch {
   ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
 }
-const only = process.argv[2] || 'all';
+const onlyArg = process.argv[2] || 'all';
+const wants = (name) => onlyArg === 'all' || onlyArg.split(',').includes(name);
 await buildGame({ minify: false });
 const server = await serve(0);
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -32,7 +33,9 @@ page.on('console', (m) => {
   }
 });
 page.setDefaultNavigationTimeout(180000);
-await page.goto(`http://127.0.0.1:${server.address().port}/?autostart`);
+// Pinned region: Miami Downtown holds the airfield (runway, fighter and tank berths).
+// The default region may not, and Beach has no airfield at all.
+await page.goto(`http://127.0.0.1:${server.address().port}/?autostart&map=miami-downtown`);
 await page.waitForFunction(() => window.__rw && window.__rw.loop.running, null, { timeout: 180000 });
 await page.waitForTimeout(2500);
 await page.evaluate(() => {
@@ -41,9 +44,18 @@ await page.evaluate(() => {
   g.daynight.setHour(14);
   g.daynight.setWeather('clear', true);
   window.__run = (n) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
+  // Each case makes the craft it needs itself: the fleet fills its berths in play, so step
+  // until the berth of `specId` holds a live craft (the case then runs alone). Returns it or null.
+  window.__ensure = (specId) => {
+    const fleet = g.systems.find((s) => s.name === 'fleet');
+    const spot = fleet && fleet.spots.find((s) => s.spec === specId);
+    if (!spot) return null;
+    for (let i = 0; i < 6000 && !(spot.craft && !spot.craft.removed && !spot.craft.wrecked); i++) window.__run(1);
+    return spot.craft && !spot.craft.removed ? spot.craft : null;
+  };
 });
 
-if (only === 'all' || only === 'cops') {
+if (wants('cops')) {
   // A patrol car with two officers, in front of the player on foot; shoot the driver.
   const r = await page.evaluate(() => {
     const g = window.__rw;
@@ -127,16 +139,22 @@ if (only === 'all' || only === 'cops') {
 }
 
 
-if (only === 'all' || only === 'missiles' || only === 'bombs') {
+if (wants('missiles') || wants('bombs')) {
   // Fixture helpers shared by the missile and bomb checks.
   await page.evaluate(() => {
     const g = window.__rw;
     window.__fighter = () => {
-      const f = g.vehicles.find((v) => v.kind === 'plane' && v.spec.id === 'fighter');
+      const f = window.__ensure('fighter');
       if (f) {
         f.wrecked = false;
         f.exploded = false;
         f.burning = false;
+        // A fighter that ditched in an earlier case keeps these: a bomb is refused while onWater.
+        f.onWater = false;
+        f.crashed = false;
+        f.impact = 0;
+        f.stalled = false;
+        f.ignite = false;
         f.removed = false;
         f.health = f.spec.health;
         f.arms = undefined;
@@ -212,13 +230,14 @@ if (only === 'all' || only === 'missiles' || only === 'bombs') {
         if (fired && (t.wrecked || i > firedAt + 480)) break;
       }
       offs.forEach((o) => o());
-      run(20);
+      // A craft hurt in combat burns for about 8 s at 1 health before it is destroyed.
+      run(t.burning || t.ignite || t.health <= 1 ? 60 * 10 : 20);
       return { locked: ev.lock.includes('locked'), fired, launches: ev.launch, hp0: Math.round(h0), hp: Math.round(t.health), max: t.spec.health, wrecked: !!t.wrecked, homing: ev.homing, booms: ev.boom.length, first: ev.boom[0] || null, steps: firedAt };
     };
   });
 }
 
-if (only === 'all' || only === 'missiles') {
+if (wants('missiles')) {
   const rwy = await page.evaluate(() => ({ ...window.__rw.city.airfield.runway }));
   const mk = (id, x, z) => page.evaluate(({ id, x, z }) => {
     const g = window.__rw;
@@ -253,9 +272,8 @@ if (only === 'all' || only === 'missiles') {
   check(r.fired && r.wrecked, `a missile destroys a moving car (${r.speed} m/s)`);
   // 3. Tank: two missiles badly damage or wreck it.
   const tr = await page.evaluate(({ tx, tz }) => {
-    const g = window.__rw;
     const f = window.__fighter();
-    const tank = g.vehicles.find((v) => v.kind === 'tank' && !v.wrecked && !v.removed);
+    const tank = window.__ensure('rustback');
     if (!tank) return { ok: false };
     tank.x = tank.px = tx + 100;
     tank.z = tank.pz = tz;
@@ -266,7 +284,7 @@ if (only === 'all' || only === 'missiles') {
     for (let k = 0; k < 2; k++) {
       window.__fly(f, tank.x, tank.z, 420, 90, 80);
       f.arms = f.arms || undefined;
-      res.push(window.__missile(f, tank));
+      res.push(window.__missile(f, tank, { needLock: true, maxSteps: 1500 }));
       if (tank.wrecked) break;
     }
     return { ok: true, res, hp: Math.round(tank.health), max: tank.spec.health, wrecked: !!tank.wrecked };
@@ -294,7 +312,7 @@ if (only === 'all' || only === 'missiles') {
   } else check(false, 'police heli fixture');
 }
 
-if (only === 'all' || only === 'bombs') {
+if (wants('bombs')) {
   const rwy = await page.evaluate(() => ({ ...window.__rw.city.airfield.runway }));
   const tz = (rwy.z0 + rwy.z1) / 2, tx = rwy.x0 + 420;
   const r = await page.evaluate(({ tx, tz }) => {
@@ -311,7 +329,9 @@ if (only === 'all' || only === 'bombs') {
       g.combat.addActor(a);
       people.push(a);
     }
-    window.__fly(f, tx, tz, 500, 70, 70);
+    // The run starts 350 m before the car: on the runway islet, over land the whole way
+    // (500 m put the start over the sea, past the islet's west edge).
+    window.__fly(f, tx, tz, 350, 70, 70);
     const booms = [];
     // Only blasts at the target count: wrecks now stay 60 s, so the police heli
     // shot down above can still crash and blow up far away during this run.
@@ -338,6 +358,8 @@ if (only === 'all' || only === 'bombs') {
       if (dropped && booms.length) break;
     }
     run(30);
+    // A car hurt in combat burns about 8 s at 1 health before it is destroyed.
+    if (car.burning || car.ignite || car.health <= 1) run(60 * 10);
     off();
     const pj = g.combat.projectiles.filter((q) => q.active).map((q) => ({ t: q.type, y: Math.round(q.y), x: Math.round(q.x), z: Math.round(q.z), f: +q.fuse.toFixed(1) }));
     return { dropped, dbg: window.__dbg, pj, fx: Math.round(f.x), fy: Math.round(f.y), mode: g.player.mode, booms, hp: Math.round(car.health), max: car.spec.health, wrecked: !!car.wrecked, people: people.map((a) => a.life) };
@@ -348,7 +370,7 @@ if (only === 'all' || only === 'bombs') {
 }
 
 console.log(bad ? `${bad} page errors` : 'no page errors');
-if (only === 'all' || only === 'feel') {
+if (wants('feel')) {
   // W6 (REVAMP 6.7): a car blast leaves a hull that still stands 30 s later,
   // throws 14 or more parts, and a kill by the player freezes the world.
   const r = await page.evaluate(() => {
@@ -361,21 +383,32 @@ if (only === 'all' || only === 'feel') {
       g.setPlayerMode('foot');
     }
     const w = p.walker;
-    const sp = g.city.spawn;
+    // Alone, on open ground: the middle of the runway, nothing there to bump a car held at
+    // 1 health (a crash hit then wrecks it with no blast).
+    const rw = g.city.airfield.runway;
+    const sp = { x: rw.x0 + 200, z: (rw.z0 + rw.z1) / 2, heading: 0 };
+    w.x = w.px = sp.x;
+    w.z = w.pz = sp.z;
+    w.y = 0;
+    run(30);
     const fx = Math.cos(sp.heading), fz = Math.sin(sp.heading);
-    const car = g.debug.spawnCar('sedan', sp.x + fx * 30, sp.z + fz * 30, sp.heading);
+    const car = g.debug.spawnCar('sedan', sp.x + fx * 20, sp.z + fz * 20, sp.heading);
     car.vx = car.vz = car.speed = 0;
     const cfx = g.systems.find((s) => s.name === 'combatfx');
     const before = cfx.counts().debris;
     g.combat.damage(car, 1e5, w, 'blast');
-    run(60);
+    // The car burns about 8 s at 1 health, then blows: wait it out before counting parts.
+    run(60 * 10);
     const parts = cfx.counts().debris - before;
-    run(60 * 29);
+    run(60 * 20);
     const at30 = { removed: !!car.removed, hull: g.combat.hulls.includes(car), fade: car.wreckFade };
     // A kill by the player: the kill event and a 3 frame freeze.
     const kills = [];
     const off = g.events.on('kill', (e) => kills.push({ byPlayer: e.byPlayer, cause: e.cause }));
-    const a = g.actors.find((q) => q.team === 'civ' && q.life === 'ok');
+    // The person is made here, as the bomb case does: no pedestrians stream in on the runway.
+    const a = { x: w.x + 5, z: w.z, y: 0, heading: 0, radius: 0.35, px: w.x + 5, pz: w.z, vx: 0, vz: 0,
+      team: 'civ', maxHp: 30, hp: 30, height: 1.8, arms: null, life: 'ok', lifeT: 0, fade: 0, hitT: 0, kx: 0, kz: 0, lastHitBy: null, sinceHit: 99, bonks: 0 };
+    g.combat.addActor(a);
     let held = 0, freezes = 0;
     const c0 = g.hitStopper.count;
     if (a) {

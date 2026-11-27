@@ -1,7 +1,10 @@
 // The Daily Three in the game (docs/LOOP.md section d). The phone's local
-// date is read ONCE, when the system is made, through `opts.now` (a
-// function returning a Date: injectable for tests); nothing else here or in
-// the simulation looks at a clock. No network, no account.
+// date is read when the system is made and again by `refresh()` (called by
+// the UI when the daily screen opens and when the page becomes visible
+// again), through `opts.now` (a function returning a Date: injectable for
+// tests). A refresh is deferred while an event run is active, so a challenge
+// in flight is never reset. The simulation never looks at a clock. No
+// network, no account.
 import { dayKey, dailyThree, rollDay, completeDaily } from '../core/daily.js';
 import { loopOf } from '../core/records.js';
 import { VEHICLE_SPECS } from '../entities/vehicle.js';
@@ -10,11 +13,12 @@ const TIME_SLACK = 1.5; // hours either side of the twist's hour
 
 export function createDaily(game, opts = {}) {
   const now = typeof opts.now === 'function' ? opts.now : () => new Date();
-  const day = dayKey(now());
+  let day = dayKey(now());
   const se = game.streetEvents;
   const labels = {};
   for (const id of Object.keys(VEHICLE_SPECS)) labels[id] = VEHICLE_SPECS[id].label;
-  const picks = se ? dailyThree(se.list, day, se.slug, labels) : [];
+  const pickFor = (d) => (se ? dailyThree(se.list, d, se.slug, labels) : []);
+  let picks = pickFor(day);
   const state = () => rollDay(loopOf(game.progress).daily, day);
   const toast = (text, s) => { if (game.hud && game.hud.toast) game.hud.toast(text, s, 'info'); };
 
@@ -40,6 +44,19 @@ export function createDaily(game, opts = {}) {
     if (t.kind === 'time' && game.daynight && game.daynight.setHour) game.daynight.setHour(t.value);
     return '';
   }
+  // The phone's date may have changed (a session left open overnight). Returns
+  // true when the choices changed. Never while a run is active.
+  function refresh() {
+    if (se && se.active) return false;
+    const d = dayKey(now());
+    if (d === day) return false;
+    day = d;
+    picks = pickFor(d);
+    return true;
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  }
   if (game.events) {
     game.events.on('streetEventEnd', (r) => {
       if (!r || !(r.daily >= 0) || !r.medal) return;
@@ -53,8 +70,9 @@ export function createDaily(game, opts = {}) {
   }
   return {
     name: 'daily',
-    day,
-    picks,
+    get day() { return day; },
+    get picks() { return picks; },
+    refresh,
     slotFor,
     go,
     get state() { return state(); },

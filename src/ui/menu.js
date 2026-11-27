@@ -560,6 +560,7 @@ export function createMenu(root, game, economy) {
       const mc = medalCounts(loopOf(game.progress), se.slug);
       tile('records', 'Records', mc.any + ' / ' + se.list.length + ' medals', () => go('records'));
     }
+    if (game.daily && game.daily.refresh) game.daily.refresh();
     if (game.daily && game.daily.picks.length) tile('daily', 'Daily Three', game.daily.doneCount + ' / 3 today', () => go('daily'));
     if (game.custom) tile('customize', 'Customize', 'Paint and wheels, free', () => go('customize'));
     const tut = game.tutorial;
@@ -970,6 +971,7 @@ export function createMenu(root, game, economy) {
   // ---------- Daily Three (docs/LOOP.md section d) ----------
   function renderDaily() {
     const d = game.daily;
+    if (d && d.refresh) d.refresh();
     if (!d || !d.picks.length) { body.appendChild(h('p', 'rw-menu-dim', 'No daily events on this map.')); return; }
     const st = d.state;
     const top = h('p', '', 'Three events a day, each with a twist. Days played: ' + st.streak + '.');
