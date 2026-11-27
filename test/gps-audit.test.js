@@ -122,7 +122,10 @@ test('a merged pair of turns onto an unnamed ramp keeps the street name', () => 
   // (0.13.8: ids re-pinned, the same edges and node: 864, 1654 and 626
   // before; the build drops the fold stubs of small traffic circles,
   // docs/STATUS.md "0.13.8 street alignment".)
-  const a = c.edges[859], b = c.edges[1648], N0 = 621;
+  // (0.15 WP1: ids re-pinned, the same edges and node at the same places:
+  // 859, 1648 and 621 before; pairs of one street collapse into one road,
+  // world/pairmerge.js, docs/STATUS.md "0.15 roads WP1".)
+  const a = c.edges[802], b = c.edges[1542], N0 = 596;
   const A = { x: 0, z: 0, heading: 0 }, B = { x: 0, z: 0 };
   const na = c.nodes[a.a === N0 ? a.b : a.a], nb = c.nodes[b.a];
   A.x = c.nodes[N0].x + (na.x - c.nodes[N0].x) * 0.35; A.z = c.nodes[N0].z + (na.z - c.nodes[N0].z) * 0.35;

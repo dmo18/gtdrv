@@ -93,13 +93,20 @@ const inCrop = (c, x, z, m = 0) => x >= c.x0 + m && x <= c.x1 - m && z >= c.z0 +
 // curb spots stand in the drawn parking lane. Lots and the lot grid follow
 // the strips. All six change but the Downtown, Beach and North buildings
 // and the North nodes.
+// 0.15 roads WP1 re-pin (deliberate; docs/STATUS.md "0.15 roads WP1: one
+// street, one cross section"): pairs of one-ways that are one street become
+// one two-way road (world/pairmerge.js), a two-way local street parks on
+// one curb (9.6 m), a street keeps one section across a class change and a
+// split, curb spots on 60 % of the slots. Node and edge ids, widths and
+// lanes change in every region; buildings, lots and the lot grid follow the
+// road strips. All six change.
 const PINNED = {
-[WHOLE_BOX]: { nodes: '7cb26841', edges: '1915f194', buildings: 'b852e428', lots: '95ecc9a7', lotGrid: 'fc2b1b22' },
-  'miami-downtown': { nodes: '8d9959e1', edges: '132c14ed', buildings: 'c7dfb9b9', lots: '4218b808', lotGrid: 'a18a246b' },
-  'miami-beach': { nodes: '1cb5b063', edges: '0ba37a1f', buildings: '064a6632', lots: 'e21370ca', lotGrid: '6ee9a1cd' },
-  'miami-north': { nodes: '485a494e', edges: 'da0af93a', buildings: 'aeb7166d', lots: '406f5522', lotGrid: '26bf3599' },
-  'miami-west': { nodes: '62997934', edges: '8527e10a', buildings: 'ced6ef22', lots: '6d313064', lotGrid: 'c634d70d' },
-  'miami-south': { nodes: 'c8a5aaf7', edges: '838ee119', buildings: 'd9d03093', lots: '4b43088d', lotGrid: '5970c9b3' },
+[WHOLE_BOX]: { nodes: 'f4961066', edges: 'd6ed4a9b', buildings: 'd9bdb1f5', lots: '8b269432', lotGrid: 'e229256a' },
+  'miami-downtown': { nodes: 'f58063a5', edges: 'd4ed92e9', buildings: 'aacfd103', lots: 'a987ad35', lotGrid: '929aedac' },
+  'miami-beach': { nodes: 'ce1ec4a4', edges: 'f65946dc', buildings: '80fda4cc', lots: '82b19794', lotGrid: 'cc1e6c75' },
+  'miami-north': { nodes: '13c4e1d6', edges: '4b15a088', buildings: 'f9e86535', lots: '0250fb3d', lotGrid: '6277a80d' },
+  'miami-west': { nodes: '1476d5d6', edges: '1fecb300', buildings: '2ee91a8b', lots: '2543c6a4', lotGrid: '8e565394' },
+  'miami-south': { nodes: '3c714c1a', edges: '8eb8770e', buildings: 'a2678115', lots: '7d8eb14d', lotGrid: 'c21fe27b' },
 };
 const fpOf = (c) => {
   const f = cityFingerprint(c);

@@ -15,9 +15,19 @@ import { REGION_IDS } from '../src/world/regions.js';
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 
 test('the profile of a way: US lane widths, parking, gutters (the plan\'s worked examples)', () => {
-  // A two-way residential street: 2 x 3.3 + 2 x 2.4 + 0.6 = 12.0 m.
+  // A two-way residential street: 2 x 3.3 + 2.4 + 0.6 = 9.6 m (0.15 WP1:
+  // one parking lane, on the right of the way here; harmonizeStreets puts
+  // a street's edges on one side. Was 2 x 3.3 + 2 x 2.4 + 0.6 = 12.0 m with
+  // two parking lanes that stood nearly empty and read as four lanes.)
   const res = roadProfile({ class: 'residential' });
-  assert.deepEqual([res.lanesF, res.lanesB, res.laneW, res.parkL, res.parkR, res.width], [1, 1, LANE_W, PARK_W, PARK_W, 12]);
+  assert.deepEqual([res.lanesF, res.lanesB, res.laneW, res.parkL, res.parkR, res.width], [1, 1, LANE_W, 0, PARK_W, 9.6]);
+  // On both curbs where the hand table says so (MIAMI_SPOTS.curbParking).
+  const both = roadProfile({ class: 'residential' }, { curbParking: true });
+  assert.deepEqual([both.parkL, both.parkR, both.width], [PARK_W, PARK_W, 12]);
+  // A named two-way living street or unclassified road parks as a
+  // residential street (0.15 WP1); unnamed, it does not.
+  assert.equal(roadProfile({ class: 'living_street', name: 'Meridian Avenue' }).width, 9.6);
+  assert.equal(roadProfile({ class: 'unclassified' }).width, 7.2);
   assert.equal(res.sidewalk, 1.8);
   // Without parking (a bridge): 7.2 m.
   assert.equal(roadProfile({ class: 'residential', bridge: 1 }).width, 7.2);
@@ -37,7 +47,7 @@ test('the profile of a way: US lane widths, parking, gutters (the plan\'s worked
   assert.equal(roadProfile({ class: 'trunk' }).laneW, LANE_W_FAST);
   assert.equal(roadProfile({ class: 'motorway_link', oneway: 1 }).laneW, LANE_W_FAST);
   assert.equal(roadProfile({ class: 'secondary' }).laneW, LANE_W);
-  // Parking only on residential and tertiary streets.
+  // Parking only on residential and tertiary streets (and named local ones).
   for (const c of ['secondary', 'primary', 'trunk', 'unclassified']) assert.equal(roadProfile({ class: c }).parkL, 0, c);
   assert.equal(roadProfile({ class: 'tertiary' }).parkR, PARK_W);
   // The tag wins: lanes, lanes:forward and lanes:backward; an odd count
@@ -79,7 +89,8 @@ test('lane offsets: right of the divide, inner lane first; one-ways centered on 
 test('US paint: double yellow on two-way roads, yellow left and white right on one-ways', () => {
   const out = [];
   const kinds = (p) => { paintLines({ ...p, off: 0 }, out); const k = []; for (let i = 1; i < out.length; i += 2) k.push(out[i]); return k; };
-  assert.deepEqual(kinds(roadProfile({ class: 'residential' })).sort(), ['park', 'park', 'yellow2']);
+  // (0.15 WP1: one parking lane on a two-way residential street.)
+  assert.deepEqual(kinds(roadProfile({ class: 'residential' })).sort(), ['park', 'yellow2']);
   assert.deepEqual(kinds(roadProfile({ class: 'secondary' })).sort(), ['dash', 'dash', 'white', 'white', 'yellow2']);
   assert.deepEqual(kinds(roadProfile({ class: 'primary', oneway: 1, lanes: 3 })).sort(), ['dash', 'dash', 'white', 'yellow']);
   assert.deepEqual(kinds(roadProfile({ class: 'primary', lanes: 5 })).filter((k) => k === 'turn').length, 2);

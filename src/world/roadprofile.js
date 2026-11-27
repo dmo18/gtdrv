@@ -30,6 +30,13 @@ export const MAX_UNTAGGED_W = 15;
 
 const FAST = new Set(['trunk', 'trunk_link', 'motorway', 'motorway_link']);
 const PARKING = new Set(['residential', 'tertiary']);
+// (0.15 WP1) A named two-way living_street or unclassified road is a
+// residential street for parking (Meridian Avenue was 7.2 m south of 16th
+// Street and 12 m north of it: one street, two classes).
+const PARK_AS_RESIDENTIAL = new Set(['living_street', 'unclassified']);
+// Local street classes: a two-way local street parks on one curb.
+const LOCAL_TIER = new Set(['residential', 'living_street', 'unclassified', 'service', 'road', 'pedestrian']);
+export const isLocalClass = (cls) => LOCAL_TIER.has(cls);
 const LINK = /_link$/;
 // Sane lanes by class (0.13.7 road logic; the owner drove 5 to 8 lane
 // residential and collector streets that no city builds). Per class:
@@ -116,16 +123,26 @@ export function roadProfile(way, opts = {}) {
     }
     lanesB = lanesF;
   }
-  // Parking lanes: residential and tertiary streets, not on bridges, not
-  // on a pedestrian street. A two-way street of one lane each way parks on
-  // both curbs, a wider one (or one with a turn lane) on neither; a one-way
-  // of one or two lanes on both curbs, of three on the right only.
-  const park = (PARKING.has(cls) || opts.curbParking) && !way.bridge && !ped ? PARK_W : 0;
+  // Parking lanes: residential and tertiary streets (and named two-way
+  // living streets and unclassified roads), not on bridges, not on a
+  // pedestrian street. A two-way street of one lane each way parks on its
+  // curbs, a wider one (or one with a turn lane) on neither; a one-way of
+  // one or two lanes on both curbs, of three on the right only.
+  // (0.15 WP1) A two-way local street parks on one curb (9.6 m: the 12 m
+  // street with two nearly empty parking lanes read as four lanes); a
+  // collector, or a street the hand table names (opts.curbParking), on
+  // both. The curb is the right one here; harmonizeStreets puts every edge
+  // of one street on the same curb.
+  const byClass = PARKING.has(cls) || (!oneway && !!name && PARK_AS_RESIDENTIAL.has(cls));
+  const park = (byClass || opts.curbParking) && !way.bridge && !ped ? PARK_W : 0;
   let parkL = 0, parkR = 0;
   if (oneway) {
     parkR = lanesF <= 3 ? park : 0;
     parkL = lanesF <= 2 ? park : 0;
-  } else if (!center && lanesF === 1) parkL = parkR = park;
+  } else if (!center && lanesF === 1) {
+    parkR = park;
+    parkL = LOCAL_TIER.has(cls) && !opts.curbParking ? 0 : park;
+  }
   const width = (lanesF + lanesB) * laneW + center + parkL + parkR + 2 * GUTTER;
   const district = opts.district || '';
   const sidewalk = cls === 'motorway' || cls === 'motorway_link' || way.bridge ? 0
@@ -313,20 +330,59 @@ const nominalW = (e) => (PARKING.has(e.cls) && !e.bridge && !e.ped ? e.width + 2
 // road went from big to small and back along one street. Edges of one
 // street, joined where they run on through a node (same name, both
 // one-way or both two-way, a one-way entering where the other leaves,
-// within 35 degrees of straight; same class except at a plain bend; an
-// unnamed road only at a bend), take the lanes, turn lane and parking of
-// the cross section that covers most of that street's length. Bridges
-// keep no parking. Pedestrian streets and causeways are left alone.
+// within 35 degrees of straight; an unnamed road only at a bend), take the
+// lanes, turn lane and parking of the cross section that covers most of
+// that street's length. (0.15 WP1) Across a class change too, at a junction as
+// at a bend: OSM changes the class of one street mid-way (Meridian Avenue
+// living_street and residential, Northwest 3rd Avenue residential and
+// tertiary), and the road doubled in width there; each edge keeps its
+// class and its class's lane caps. Bridges keep no parking. Pedestrian
+// streets and causeways are left alone.
+// (0.15 WP1) Lanes across a split: a one-way half of a divided street that
+// runs on straight from a two-way block of its name takes the lanes per
+// direction of that street's one cross section (a 2 + 2 avenue splits into
+// halves of 2, not of 1 or 3). Parking stays per kind.
+// (0.15 WP1) One curb: a street that parks on one curb parks on the same
+// side along all its edges (the side by a position hash of the street).
 // Mutates edges (lanesF, lanesB, center, parkL, parkR, width, avenue);
 // returns the count of edges changed.
 const RUN_COS = Math.cos((35 * Math.PI) / 180), FORK = (15 * Math.PI) / 180;
-export function harmonizeStreets(nodes, edges) {
+// Parking key with left and right swapped (an edge running against its
+// street's frame).
+const swapLR = (k) => ((k & 1) << 1) | ((k & 2) >> 1);
+// A small integer hash (the curb side of a one-curb street; no rng).
+function sideHash(name, x, z) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 0x01000193);
+  h = Math.imul(h ^ (Math.round(x / 10) | 0), 0x27d4eb2d);
+  h = Math.imul(h ^ (Math.round(z / 10) | 0), 0x165667b1);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h >>> 0) & 1;
+}
+// made: (optional) a mark per edge id, 1 on the two-way edges collapsePairs
+// made of a pair (world/pairmerge.js).
+export function harmonizeStreets(nodes, edges, made = null) {
   const n = edges.length;
-  const uf = new Int32Array(n);
+  const isMade = (e) => !!made && made[e.id] === 1;
+  // Street groups: a union-find with each edge's direction against its
+  // root (par 1: runs the other way), so a one-curb street keeps its side.
+  const uf = new Int32Array(n), par = new Uint8Array(n);
   for (let i = 0; i < n; i++) uf[i] = i;
+  let fp = 0;
   const find = (v) => {
-    while (uf[v] !== v) { uf[v] = uf[uf[v]]; v = uf[v]; }
-    return v;
+    let r = v, p = 0;
+    while (uf[r] !== r) { p ^= par[r]; r = uf[r]; }
+    for (let c = v, cp = p; c !== r;) {
+      const nx = uf[c], old = par[c];
+      uf[c] = r;
+      par[c] = cp;
+      cp ^= old;
+      c = nx;
+    }
+    fp = p;
+    return r;
   };
   const skip = (e) => e.ped || e.causeway || e.lanesF === undefined;
   // How straight e runs on into f through node (cosine of the turn; -2: not
@@ -334,7 +390,10 @@ export function harmonizeStreets(nodes, edges) {
   const onward = (node, e, f, bend) => {
     if (f === e || skip(f)) return -2;
     if (e.oneway !== f.oneway || (e.name || '') !== (f.name || '')) return -2;
-    if (!bend && (!e.name || e.cls !== f.cls)) return -2;
+    if (!bend && !e.name) return -2;
+    // (A pair collapsed into one road joins the street where its lanes
+    // each way and turn lane agree: the data's lanes on either side stand.)
+    if ((isMade(e) || isMade(f)) && (e.lanesF !== f.lanesF || !e.center !== !f.center)) return -2;
     // Directions leaving the node: straight on when they are opposite.
     const se = e.a === node.id ? 1 : -1, sf = f.a === node.id ? 1 : -1;
     const c = -(e.ux * se * f.ux * sf + e.uz * se * f.uz * sf);
@@ -364,19 +423,83 @@ export function harmonizeStreets(nodes, edges) {
       if (skip(e)) continue;
       const f = bestOf(node, e, bend);
       if (f < 0 || f < e.id || bestOf(node, edges[f], bend) !== e.id) continue;
-      const ra = find(e.id), rb = find(f);
-      if (ra !== rb) uf[ra] = rb;
+      // The same direction along the street when one arrives where the
+      // other leaves.
+      const rel = (e.a === node.id) === (edges[f].a === node.id) ? 1 : 0;
+      const ra = find(e.id), pa = fp, rb = find(f), pb = fp;
+      if (ra !== rb) { uf[ra] = rb; par[ra] = pa ^ pb ^ rel; }
     }
   }
+  // Lane groups: the street groups, and a one-way half joined to the
+  // two-way block of its name it runs on from (either way).
+  const ul = new Int32Array(n);
+  for (let i = 0; i < n; i++) ul[i] = find(i);
+  const findL = (v) => {
+    while (ul[v] !== v) { ul[v] = ul[ul[v]]; v = ul[v]; }
+    return v;
+  };
+  // (Where the street splits: a one-way of the name leaves the node and
+  // another arrives, the two halves; and a local one-way street that
+  // becomes two-way. A one-way collector or arterial that becomes two-way
+  // keeps its own lanes: downtown's one-way grid.)
+  const halvesAt = (node, name) => {
+    let out = false, inn = false;
+    for (let j = 0; j < node.edges.length; j++) {
+      const f = edges[node.edges[j]];
+      if (skip(f) || !f.oneway || f.name !== name) continue;
+      if (f.a === node.id) out = true; else inn = true;
+    }
+    return out && inn;
+  };
+  for (const node of nodes) {
+    const list = node.edges;
+    if (!list || list.length < 3) continue;
+    for (let i = 0; i < list.length; i++) {
+      const e = edges[list[i]];
+      if (skip(e) || !e.oneway || !e.name || !(halvesAt(node, e.name) || LOCAL_TIER.has(e.cls))) continue;
+      const se = e.a === node.id ? 1 : -1;
+      for (let j = 0; j < list.length; j++) {
+        const f = edges[list[j]];
+        if (skip(f) || f.oneway || f.name !== e.name) continue;
+        const sf = f.a === node.id ? 1 : -1;
+        if (-(e.ux * se * f.ux * sf + e.uz * se * f.uz * sf) < RUN_COS) continue;
+        const ra = findL(e.id), rb = findL(f.id);
+        if (ra !== rb) ul[ra] = rb;
+      }
+    }
+  }
+  const mixed = new Uint8Array(n);
+  for (const e of edges) if (!skip(e)) mixed[findL(e.id)] |= e.oneway ? 1 : 2;
   // Length per (group, cross section): lanes as lanesF and the turn lane
-  // (a two-way road has equal lanes each way), parking as left and right.
-  const lanesLen = new Map(), parkLen = new Map();
+  // (a two-way road has equal lanes each way; a half in a mixed group
+  // counts its lanes inside the two-way lanes of its class), parking as
+  // left and right in the street group's frame. The longest edge of each
+  // street group places a one-curb street's side.
+  const lanesLen = new Map(), parkLen = new Map(), longest = new Map();
+  // (And per street group alone, with the tagged length of each: a half
+  // street the data tags keeps its own one section.)
+  const lanesLenS = new Map(), tagLen = new Map();
   const add = (M, key, len) => M.set(key, (M.get(key) || 0) + len);
   for (const e of edges) {
     if (skip(e)) continue;
-    const g = find(e.id);
-    add(lanesLen, g * 64 + e.lanesF * 2 + (e.center ? 1 : 0), e.length);
-    if (!e.bridge) add(parkLen, g * 4 + (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0), e.length);
+    const gl = findL(e.id);
+    const lk = e.oneway && mixed[gl] === 3 ? Math.min(e.lanesF, laneCaps(e.cls)[1]) * 2 : e.lanesF * 2 + (e.center ? 1 : 0);
+    // (A split street's two-way blocks decide its lanes: a half takes
+    // their lanes per direction, and so does a pair collapsed into one
+    // road, unless the collapsed pieces are all there is.)
+    const weak = isMade(e) || (e.oneway && mixed[gl] === 3);
+    add(lanesLen, gl * 64 + lk, weak ? e.length * 1e-3 : e.length);
+    const g = find(e.id), p = fp;
+    add(lanesLenS, g * 64 + e.lanesF * 2 + (e.center ? 1 : 0), e.length);
+    if (e.lanesTag) add(tagLen, g, e.length);
+    // (A two-way edge on one curb votes "one curb", either side: the side
+    // is the street's, below.)
+    let k = (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0);
+    if (!e.oneway && (k === 1 || k === 2)) k = 1;
+    else if (p) k = swapLR(k);
+    if (!e.bridge) add(parkLen, g * 4 + k, e.length);
+    const L = longest.get(g);
+    if (L === undefined || e.length > edges[L].length) longest.set(g, e.id);
   }
   const bestLanes = new Map(), bestPark = new Map();
   const pick = (M, div, out) => {
@@ -387,14 +510,36 @@ export function harmonizeStreets(nodes, edges) {
     }
   };
   pick(lanesLen, 64, bestLanes);
+  const bestLanesS = new Map();
+  pick(lanesLenS, 64, bestLanesS);
   pick(parkLen, 4, bestPark);
+  // A two-way street on one curb: the side by its longest edge's place.
+  for (const [g, b] of bestPark) {
+    if (b[0] !== 1 && b[0] !== 2) continue;
+    const L = edges[longest.get(g)];
+    if (L.oneway) continue;
+    find(L.id);
+    const a = nodes[L.a], bn = nodes[L.b];
+    const own = sideHash(L.name || '', (a.x + bn.x) / 2, (a.z + bn.z) / 2) ? 2 : 1;
+    b[0] = fp ? swapLR(own) : own;
+  }
   let changed = 0;
   for (const e of edges) {
     if (e.causeway || e.lanesF === undefined) continue;
-    const g = find(e.id);
     // (A pedestrian street keeps its own lanes, inside the class's.)
     if (e.ped) fitSection(e, e.lanesF * 2 + (e.center ? 1 : 0), (e.parkL > 0 ? 2 : 0) + (e.parkR > 0 ? 1 : 0), FIT);
-    else fitSection(e, bestLanes.get(g)[0], e.bridge ? 0 : bestPark.has(g) ? bestPark.get(g)[0] : 0, FIT);
+    else {
+      const g = find(e.id), p = fp, gl = findL(e.id);
+      const pk = e.bridge || !bestPark.has(g) ? 0 : bestPark.get(g)[0];
+      // (A half in a mixed group: no more lanes than a two-way street of
+      // its class carries each way.)
+      let lk = bestLanes.get(gl)[0];
+      // (A half street the data tags keeps its own one section: the tags
+      // say the carriageways are wider or narrower than the street's
+      // two-way blocks.)
+      if (e.oneway && mixed[gl] === 3) lk = tagLen.has(g) ? bestLanesS.get(g)[0] & ~1 : Math.min(lk >> 1, laneCaps(e.cls)[1]) * 2;
+      fitSection(e, lk, p ? swapLR(pk) : pk, FIT);
+    }
     // A block the data tags under 4 lanes is not widened past
     // MAX_UNTAGGED_W by the rest of its street: it keeps its own lanes.
     if (FIT.width > MAX_UNTAGGED_W && (e.lanesTag || 0) * (e.merged ? 2 : 1) < 4) {

@@ -77,13 +77,21 @@ test('no junction keeps the stubs of a folded traffic circle (five regions)', ()
 });
 
 test('the two halves of a pair drawn as one road paint one double yellow, not two lines that part and cross', () => {
+  // 0.13.7: 64 to 79 percent of the samples over 0.6 m apart (Beach
+  // 3408 of 4336); 0.13.8: 5 to 12 percent (data halves that part for a
+  // block, where each line keeps to its own curb), 187, 300, 98, 49 and 132
+  // samples apart. 0.15 WP1: most of those pairs are one two-way road now
+  // (world/pairmerge.js: no yellow edge lines to sample, 193 to 2104
+  // samples a region left), so the bound is on the samples apart: fewer
+  // than 0.13.8 left in every region, under half of its 766 in all (353).
+  const WAS = { 'miami-downtown': 187, 'miami-beach': 300, 'miami-north': 98, 'miami-west': 49, 'miami-south': 132 };
+  let apart = 0;
   for (const id of REGION_IDS) {
     const r = streets(id);
-    // 0.13.7: 64 to 79 percent of the samples over 0.6 m apart (Beach
-    // 3408 of 4336); now 5 to 12 percent (data halves that part for a
-    // block, where each line keeps to its own curb).
-    assert.ok(r.yellowSamples > 900 && r.yellowApart / r.yellowSamples < 0.15, `${id}: ${r.yellowApart} of ${r.yellowSamples} yellow samples apart`);
+    assert.ok(r.yellowApart < WAS[id], `${id}: ${r.yellowApart} of ${r.yellowSamples} yellow samples apart`);
+    apart += r.yellowApart;
   }
+  assert.ok(apart < 383, `${apart} yellow samples apart`);
 });
 
 test('curb parking spots stand in the drawn parking lane; borders do not step at a joint; arm mouths meet their junction', () => {

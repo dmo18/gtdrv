@@ -8,15 +8,16 @@
 // Coordinates: x east, z south, meters, flat ground y = 0.
 import { createRng, TAU } from '../core/rng.js';
 import { DISTRICTS, STREET_W, lanePoint, laneOffset, SIGNAL } from './citygen.js';
-import { roadProfile, pairDivided, harmonizeStreets, divideOf, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
+import { roadProfile, pairDivided, harmonizeStreets, divideOf, isLocalClass, PED_STREETS, SIDEWALK_WIDE, GUTTER, PARK_W } from './roadprofile.js';
 import { buildRoadGeo, onJunction, curbsAt } from './junctions.js';
+import { collapsePairs } from './pairmerge.js';
 import { MIAMI_CROP, MIAMI_CORE, LAND_MARGIN, MIAMI_SPOTS, MIAMI_LANDMARKS } from './miami-spots.js';
-import { buildLots, planInfill, stepDistance, dressLot, BAYS_ONLY_FAST, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO } from './lots.js';
+import { buildLots, planInfill, stepDistance, dressLot, BAYS_ONLY_FAST, bayCount, bayAt, INFILL_GAP, SRC_ID, SRC_ZERO, hash32 } from './lots.js';
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
 import { settleStreetProps } from './streetscape.js';
-import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX, BOX } from './regions.js';
+import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX, BOX, REGIONS } from './regions.js';
 
 export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
 
@@ -892,7 +893,7 @@ const GROW_F64 = (a, n) => {
 // run leaves the crop: x, z, unit direction out, run index).
 function readWays(data, S, crop, landCell, coastLand, baseLand) {
   const R = {
-    crop, landCell, coastLand, baseLand, districts: S.districts, curb: S.curbParking || [],
+    crop, landCell, coastLand, baseLand, districts: S.districts, curb: bothCurbs(S),
     popts: { district: '', curbParking: false }, classIds: new Map(), profiles: new Map(),
     ways: [], wayS: [], wayE: [], P: new Float64Array(1 << 16), np: 0, cuts: [],
     // decodePolyline's output for one road, reused (pts[0, m)).
@@ -1074,8 +1075,24 @@ function districtKeyAt(districts, x, z) {
 // roadProfile(r, { district, curbParking }) shared by every way with the
 // same inputs (it reads class, name, oneway, lanes, lf, lb, mall, bridge,
 // and of the options only whether the district is downtown and whether
-// the street parks on its curbs): one frozen profile per key. Lane tags
-// other than whole numbers 0 to 15 (or none) are not cached.
+// the street parks on its curbs; of the name only whether it is one of
+// the pedestrian streets, Lincoln Road, or any name at all): one frozen
+// profile per key. Lane tags other than whole numbers 0 to 15 (or none)
+// are not cached.
+// (0.15 WP1) Share of the 6.5 m slots of a parking lane that list a curb
+// spot (was 22 %, a seeded draw: a parking lane stood 78 % empty even
+// with every spot taken), and the hash seed that picks them.
+const CURB_FILL = 0.6, CURB_SEED = 0xc0b5;
+// (0.15 WP1) Streets that keep a parking lane on both curbs where a local
+// street parks on one: the hand table (MIAMI_SPOTS.curbParking), the
+// streets of the regions' start places (their designed first views: parked
+// cars on both curbs, the spawn on its lane) and the streets of the
+// service homes' marked curb bays (CURB_BAYS stand in the middle of a
+// parking lane of a 12 m street). The same in every build, so a region and
+// the whole box agree.
+const CURB_BAY_STREETS = ['Southeast 4th Street', 'Northeast 7th Street', 'Southeast 10th Street'];
+const START_STREETS = REGIONS.map((r) => (r.start ? r.start.street : MIAMI_SPOTS.spawn.street));
+const bothCurbs = (S) => (S.curbParking || []).concat(CURB_BAY_STREETS, START_STREETS);
 // The service homes' marked curb bays (x, z, heading; entities/
 // servicevehicles.js SERVICE_SPOTS with `curb: true`), kept as curb spots.
 const CURB_BAYS = [-1053.16, 948.3, -2.462, -964.83, -118.63, 3.1043, -1174.5, 1739.29, -2.9102];
@@ -1100,6 +1117,7 @@ function cachedProfile(R, r, downtown, curb) {
   key = key * 2 + (name === 'Lincoln Road' ? 1 : 0);
   key = key * 2 + (downtown ? 1 : 0);
   key = key * 2 + (curb ? 1 : 0);
+  key = key * 2 + (name ? 1 : 0);
   let prof = R.profiles.get(key);
   if (!prof) R.profiles.set(key, (prof = Object.freeze(roadProfile(r, popts))));
   return prof;
@@ -1830,7 +1848,8 @@ function addEdge(W, na, nb, wi, both) {
     if (e.oneway && w.oneway && e.a === nb && e.name === w.name) {
       e.oneway = false;
       e.lanesB = w.prof.lanesF;
-      e.parkL = w.prof.parkR;
+      // (0.15 WP1: a local street parks on one curb.)
+      e.parkL = isLocalClass(e.cls) ? 0 : w.prof.parkR;
       e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
       e.avenue = isAvenue(e);
       e.merged = true;
@@ -1864,6 +1883,7 @@ function addEdge(W, na, nb, wi, both) {
     const e = edges[edges.length - 1];
     e.oneway = false;
     e.lanesB = e.lanesF;
+    if (isLocalClass(e.cls)) e.parkL = 0;
     e.width = Math.round(((e.lanesF + e.lanesB) * e.laneW + e.center + e.parkL + e.parkR + 0.6) * 100) / 100;
     e.avenue = isAvenue(e);
     e.merged = true;
@@ -2088,9 +2108,16 @@ function buildRoadGraph(data, S, crop, landCell, coastLand, baseLand) {
   const parent = M.parent, rx = M.rx, rz = M.rz;
   const G = linkReps(seg, parent, ways, S.links || [], rx, rz);
   const g = walkChains(G, ways, rx, rz);
+  // (0.15 roads, WP1) A pair of one-ways that is one street (a refuge
+  // island, a turn bay, a sliver median, a short split) becomes one two-way
+  // street (world/pairmerge.js); a true divided road is kept.
+  const pm = collapsePairs(g.nodes, g.edges, { curb: bothCurbs(S) });
   // One cross section along each street (0.13.7 road logic).
-  harmonizeStreets(g.nodes, g.edges);
-  return { nodes: g.nodes, edges: g.edges, joined: { uf: g.uf, nodes: g.nodes.length, edges: g.edges.length }, cuts: R.cuts };
+  harmonizeStreets(g.nodes, g.edges, pm.made || null);
+  // (After a collapse the nodes and edges changed: keepMainNetwork joins
+  // the network again from scratch.)
+  const joined = pm.collapsed ? { uf: new Int32Array(g.nodes.length + 1), nodes: 0, edges: 0 } : { uf: g.uf, nodes: g.nodes.length, edges: g.edges.length };
+  return { nodes: g.nodes, edges: g.edges, joined, cuts: R.cuts, pairMerge: pm };
 }
 
 // True when some item of list (x, z fields) has Math.hypot(dx, dz) < r
@@ -2348,7 +2375,7 @@ export function createMiamiCity(data, opts = {}) {
   const inCrop = (x, z) => x >= CX0 && x <= CX1 && z >= CZ0 && z <= CZ1;
   // The road graph (buildRoadGraph: module functions, so every loop of
   // the stage runs optimized).
-  const { nodes, edges, cuts, joined } = buildRoadGraph(data, S, crop, landCell, coastLand, baseLand);
+  const { nodes, edges, cuts, joined, pairMerge } = buildRoadGraph(data, S, crop, landCell, coastLand, baseLand);
   lap('graph');
 
   // ---- 3. Airfield islet and causeway (citygen's layout, placed here). ----
@@ -2382,6 +2409,7 @@ export function createMiamiCity(data, opts = {}) {
   // Keep the largest connected road network only.
   const kept = keepMainNetwork(nodes, edges, joined);
   const graphStats = kept.stats;
+  graphStats.pairMerge = { runs: pairMerge.runs, collapsed: pairMerge.collapsed, kept: pairMerge.kept, legs: pairMerge.legs };
   if (gate && (gate.id >= nodes.length || nodes[gate.id] !== gate)) throw new Error('miami: the airfield causeway is not on the main road network');
   signalsAndStops(edges, data, kept.juncGrid, kept.juncs);
   lap('network');
@@ -3109,7 +3137,11 @@ export function createMiamiCity(data, opts = {}) {
           // service bays stay where they were; a spot on a junction's
           // asphalt is dropped by inJunctionBox.)
           for (let d = a.hx + 9; d < e.length - nodes[e.b].hx - 9; d += 6.5) {
-            if (!rng.chance(0.22)) continue;
+            // (0.15 WP1) A spot on CURB_FILL of the slots, by a hash of the
+            // slot's place (no rng); the seeded draw is still made, so the
+            // draws after it in the stream are the ones they were.
+            rng.chance(0.22);
+            if (hash32(CURB_SEED, Math.round((a.x + e.ux * d) * 2), Math.round((a.z + e.uz * d) * 2), side + 1) >= CURB_FILL * 4294967296) continue;
             // (0.13.8: in the parking lane as drawn, tapers and side
             // shifts included, not the edge's nominal cross section.)
             const C = curbsAt(roadGeo, e, d);
