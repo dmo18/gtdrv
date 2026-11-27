@@ -589,6 +589,10 @@ async function main() {
       if (d.gc && d.gc.majors.length) console.log('  major collections (second, ms, type, MB before to after): ' + d.gc.majors.map((m) => `${m.s}s ${m.ms} ${m.type} ${m.beforeMb}>${m.afterMb}`).join('; '));
       console.log(`  to the GPU in play: ${d.uploadMb} MB uploaded; ${d.gpuEvents.filter((e) => e.newPrograms > 0).length} frames with new programs, ${d.gpuEvents.filter((e) => e.newTextures > 0).length} with new textures, ${d.gpuEvents.filter((e) => e.uploadKb > 256).length} with over 256 KB`);
       console.log('  worst system calls (ms, frame of each pass): ' + d.systems.slice(0, 8).map((x) => `${x.name} ${x.worstMs.toFixed(1)} @${x.at.join('/')}`).join(', '));
+      // The ten worst frames in one line: frame, excess, the tile slice or the system that cost
+      // most, and with --profile the function with the most samples in that frame.
+      const worst10 = d.slow.slice().sort((a, b) => b.excess - a.excess).slice(0, 10);
+      console.log('  top 10 frames (frame excess: cause / top function): ' + worst10.map((r) => `${r.frame} ${r.excess}: ${r.streamMs > 4 ? 'tiles ' + (r.slice || '?') : r.topSystemMs > 4 ? r.topSystem : r.coreMs > 4 ? 'core' : 'draw'}${r.top && r.top[0] ? ' / ' + r.top[0].replace(/ [\d.]+$/, '') : ''}`).join(', '));
       if (quiet) return;
       console.log('  slow frames: frame, second, excess, step, draw | cause');
       for (const r of d.slow.slice().sort((a, b) => b.excess - a.excess).slice(0, has('--all') ? 1e9 : 25)) {

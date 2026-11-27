@@ -31,7 +31,7 @@ import { lookOf } from './miamilook.js';
 import { addProps, treeSpecies, rectColor } from './props.js';
 import { createTreeBatch, TREE_STRIDE } from './treebatch.js';
 import { fillCollision, attachLotCollision } from '../world/collision.js';
-import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realRoads, netRoadsJob, orientedQuad, ROAD_PIECE } from './citymesh.js';
+import { makeMaterials, COL, addSurfaces, addBlock, drawnGroundY, realLand, realJunctionJob, realEdgeJob, netRoadsJob, orientedQuad, ROAD_PIECE } from './citymesh.js';
 import { groundFn } from '../world/ground.js';
 import { cityPatch, patchCityMaterials } from './citypatch.js';
 import { lotGround, lotFringe, lotEdges, lotJob, lotsByTile } from './lotmesh.js';
@@ -60,6 +60,7 @@ const WINDOW_STYLES = new Set(['glass', 'office', 'brick', 'stucco', 'havana']);
 // Slices stay under 3 ms (docs/PLAN_V2.md section 4): SLICE_MS plus the
 // longest single piece of work (pieces are kept small below).
 export const SLICE_MS = 0.9;
+const NEVER = () => false;
 // The net of narrow road gaps is found and drawn in boxes this wide (m).
 export const NET_BOX = 60;
 // Lot ground rows per slice (5 m rows).
@@ -798,9 +799,13 @@ export function buildRealCity(city, collision, opts = {}) {
   const netCache = new Map();
   // One tile, built a slice at a time: yields between pieces of work,
   // at the first break point after SLICE_MS of work.
-  function* tileJob(t) {
+  // sliced false (a flush: the start's tiles, built whole in a stage of
+  // their own): no clock at all, the ground asked straight (0.13.9: the
+  // clock reads of the slices were a tenth of the start tiles' cost).
+  function* tileJob(t, sliced = true) {
     let ts = now();
-    const over = () => now() - ts > SLICE_MS;
+    const over = sliced ? () => now() - ts > SLICE_MS : NEVER;
+    const sub = sliced ? over : null;
     const B = {};
     for (const [key, uv, scale] of TILE_KEYS) B[key] = QUARTERED.has(key) ? new QuarterBuilder(t, uv, scale) : new ChunkedBuilder(1e7, 1, uv, scale);
     const own = (x, z) => tileOf(x, z) === t.k;
@@ -833,13 +838,15 @@ export function buildRealCity(city, collision, opts = {}) {
     }
     // One junction a piece (a fan or mall junction alone was up to 20 ms
     // at 1x; three of them in one piece made the worst tile slice).
+    // (A junction stops inside itself too: a corner's ground ask where
+    // the narrow-gap net is not known yet was up to 100 ms at 4x.)
     for (let a = 0; a < t.nodes.length; a++) {
-      realRoads(city, B, t.nodes.slice(a, a + 1), [], own);
-      if (over()) { yield 'roads'; ts = now(); }
+      for (const step of realJunctionJob(city, B, t.nodes[a], own, sub)) { yield step; ts = now(); }
+      if (over()) { yield 'junction'; ts = now(); }
     }
     for (let a = 0; a < t.edges.length; a++) {
-      realRoads(city, B, [], t.edges.slice(a, a + 1), own);
-      if (over()) { yield 'roads'; ts = now(); }
+      for (const step of realEdgeJob(city, B, t.edges[a], own, sub)) { yield step; ts = now(); }
+      if (over()) { yield 'edge'; ts = now(); }
     }
     // The narrow-gap net as asphalt, in boxes of NET_BOX m (a slice each).
     if (city.roadGeo) {
@@ -850,8 +857,8 @@ export function buildRealCity(city, collision, opts = {}) {
           for (let kind = 1; kind <= 2; kind++) {
             // (The flood itself stops and goes on inside a box: a dense
             // box was 30 to 50 ms at 4x in one piece.)
-            for (const _ of netRoadsJob(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX), kind, netCache, over)) { yield 'roads'; ts = now(); }
-            if (over()) { yield 'roads'; ts = now(); }
+            for (const _ of netRoadsJob(city, B, x, z, Math.min(t.x1, x + NET_BOX), Math.min(t.z1, z + NET_BOX), kind, netCache, sub)) { yield 'net'; ts = now(); }
+            if (over()) { yield 'net'; ts = now(); }
           }
         }
       }
@@ -1167,7 +1174,7 @@ export function buildRealCity(city, collision, opts = {}) {
         }
         stale[best.k] = 0;
         jobTile = best;
-        job = tileJob(best);
+        job = tileJob(best, budgetMs !== Infinity);
         best = null;
       }
       const s0 = now();

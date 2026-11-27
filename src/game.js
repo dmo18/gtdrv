@@ -32,7 +32,7 @@ import { createTraffic } from './systems/traffic.js';
 import { createDayNight } from './systems/daynight.js';
 import { createActivities } from './systems/activities.js';
 import { createPolice, resetHeat } from './systems/police.js';
-import { createCombat, layDown } from './systems/combat.js';
+import { createCombat, layDown, warmCombat } from './systems/combat.js';
 import { createCrew } from './systems/crew.js';
 import { createMissions } from './systems/missions.js';
 import { createScore } from './systems/score.js';
@@ -277,6 +277,22 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
     },
   };
 
+  // Work the first view does not need, done after the first frames of
+  // play, one job a drawn frame (game.later(fn), in the order given):
+  // what it makes is never read by the simulation's answers, only its
+  // cost moves out of the start (0.13.9 hitches and start).
+  const laterJobs = [];
+  let drawnFrames = 0;
+  game.later = (fn) => { laterJobs.push(fn); };
+  function runLater() {
+    const f = laterJobs.shift();
+    try {
+      f();
+    } catch (e) {
+      game.errors.report('later', e);
+    }
+  }
+
   // --- Player starts in a car on the street. ---
   const car = createVehicle('sedan', city.spawn.x, city.spawn.z, city.spawn.heading, rng);
   car.driver = 'player';
@@ -458,6 +474,10 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   // later combat tasks fill these files without touching this one.
   yield { label: 'Setting the scene', pct: 70 };
   game.combat = game.addSystem(createCombat(game));
+  // The first hit rehearsed on a stand-in (systems/combat.js warmCombat:
+  // nothing of the game changes), so the first real one costs no
+  // first-run code (11 to 15 ms at 4x).
+  game.later(() => warmCombat(city, city.spawn.x, city.spawn.z, city.spawn.heading || 0));
   game.crew = game.addSystem(createCrew(game));
   game.carjack = game.addSystem(createCarjack(game)); // after traffic, police and crew: it holds the car still
   game.service = game.addSystem(createService(game)); // after combat: water-downed people, hulls put out, the tow
@@ -685,6 +705,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
   }
 
   function render(alpha, dt) {
+    if (laterJobs.length && ++drawnFrames > 2) runLater();
     const p = game.player;
     const vs = game.vehicles;
     for (let i = 0; i < vs.length; i++) {

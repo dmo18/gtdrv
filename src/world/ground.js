@@ -593,24 +593,134 @@ export function createGround(city) {
     const slot = keyed ? (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS) : 0;
     if (keyed && c.v[slot] >= 0 && c.qx[slot] === qx && c.qz[slot] === qz) return c.v[slot] === kind;
     // netRound(x, z, netCache, net1) with a stop between probes.
-    let out = net1(x, z);
+    let out = net1Try(x, z);
+    if (out < 0) out = yield* net1Job(x, z, over);
     for (let q = 0, raised = !out; q < 8 && (!out || (raised && out !== 1)); q += 2) {
       const ux2 = NET_DIRS[q], uz2 = NET_DIRS[q + 1];
       let a = 0, sa = 0;
       for (let g = NET_STEP / 2; g <= NET_MAX; g += NET_STEP / 2) {
         if (over()) yield 'net';
-        sa = net1(x + ux2 * g, z + uz2 * g);
+        sa = net1Try(x + ux2 * g, z + uz2 * g);
+        if (sa < 0) sa = yield* net1Job(x + ux2 * g, z + uz2 * g, over);
         if (sa) { a = g; break; }
       }
       if (!a) continue;
       for (let g = NET_STEP / 2; a + g <= NET_MAX + 1e-9; g += NET_STEP / 2) {
         if (over()) yield 'net';
-        const sb = net1(x - ux2 * g, z - uz2 * g);
+        let sb = net1Try(x - ux2 * g, z - uz2 * g);
+        if (sb < 0) sb = yield* net1Job(x - ux2 * g, z - uz2 * g, over);
         if (sb) { out = sa === 1 || sb === 1 ? 1 : 2; break; }
       }
     }
     if (keyed) { c.qx[slot] = qx; c.qz[slot] = qz; c.v[slot] = out; }
     return out === kind;
+  }
+  // net1 in slices: netRound(x, z, netCache1, baseSurface) with a stop
+  // between its probes (over() is asked every NQ_PROBE probes: a clock
+  // read per probe cost more than the probes near known ground); the
+  // same answer and cache.
+  const NQ_PROBE = 24;
+  let probes = 0;
+  const stop = (over) => ++probes >= NQ_PROBE && ((probes = 0), over());
+  // net1 when it is cheap (road space there, or the point already worked
+  // out), else -1: spares a generator for most probes.
+  function net1Try(x, z) {
+    const b = baseSurface(x, z);
+    if (b) return b;
+    const c = netCache1;
+    const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
+    if ((qx | 0) !== qx || (qz | 0) !== qz) return -1;
+    const slot = (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS);
+    return c.v[slot] >= 0 && c.qx[slot] === qx && c.qz[slot] === qz ? c.v[slot] : -1;
+  }
+  function* net1Job(x, z, over) {
+    const b = baseSurface(x, z);
+    if (b) return b;
+    const c = netCache1;
+    const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
+    const keyed = (qx | 0) === qx && (qz | 0) === qz;
+    const slot = keyed ? (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS) : 0;
+    if (keyed && c.v[slot] >= 0 && c.qx[slot] === qx && c.qz[slot] === qz) return c.v[slot];
+    x = qx * NET_STEP;
+    z = qz * NET_STEP;
+    let out = 0;
+    for (let q = 0, raised = true; q < 8 && (!out || (raised && out !== 1)); q += 2) {
+      const ux2 = NET_DIRS[q], uz2 = NET_DIRS[q + 1];
+      let a = 0, sa = 0;
+      for (let g = NET_STEP / 2; g <= NET_MAX; g += NET_STEP / 2) {
+        if (stop(over)) yield 'net';
+        sa = baseSurface(x + ux2 * g, z + uz2 * g);
+        if (sa) { a = g; break; }
+      }
+      if (!a) continue;
+      for (let g = NET_STEP / 2; a + g <= NET_MAX + 1e-9; g += NET_STEP / 2) {
+        if (stop(over)) yield 'net';
+        const sb = baseSurface(x - ux2 * g, z - uz2 * g);
+        if (sb) { out = sa === 1 || sb === 1 ? 1 : 2; break; }
+      }
+    }
+    if (keyed) { c.qx[slot] = qx; c.qz[slot] = qz; c.v[slot] = out; }
+    return out;
+  }
+  // netAt in slices (netRound(x, z, netCache, net1) with a stop between
+  // probes and inside each cold net1): the same answer and the same cache.
+  function* netAtJob(x, z, over) {
+    const c = netCache;
+    const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
+    const keyed = (qx | 0) === qx && (qz | 0) === qz;
+    const slot = keyed ? (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS) : 0;
+    if (keyed && c.v[slot] >= 0 && c.qx[slot] === qx && c.qz[slot] === qz) return c.v[slot];
+    x = qx * NET_STEP;
+    z = qz * NET_STEP;
+    if (stop(over)) yield 'net';
+    let out = net1Try(x, z);
+    if (out < 0) out = yield* net1Job(x, z, over);
+    for (let q = 0, raised = !out; q < 8 && (!out || (raised && out !== 1)); q += 2) {
+      const ux2 = NET_DIRS[q], uz2 = NET_DIRS[q + 1];
+      let a = 0, sa = 0;
+      for (let g = NET_STEP / 2; g <= NET_MAX; g += NET_STEP / 2) {
+        if (stop(over)) yield 'net';
+        sa = net1Try(x + ux2 * g, z + uz2 * g);
+        if (sa < 0) sa = yield* net1Job(x + ux2 * g, z + uz2 * g, over);
+        if (sa) { a = g; break; }
+      }
+      if (!a) continue;
+      for (let g = NET_STEP / 2; a + g <= NET_MAX + 1e-9; g += NET_STEP / 2) {
+        if (stop(over)) yield 'net';
+        let sb = net1Try(x - ux2 * g, z - uz2 * g);
+        if (sb < 0) sb = yield* net1Job(x - ux2 * g, z - uz2 * g, over);
+        if (sb) { out = sa === 1 || sb === 1 ? 1 : 2; break; }
+      }
+    }
+    if (keyed) { c.qx[slot] = qx; c.qz[slot] = qz; c.v[slot] = out; }
+    return out;
+  }
+  // surfaceAt without the net's cost: the answer when it is known cheaply
+  // (off the net's ground, or the net's lattice point already worked
+  // out), else -1 (ask surfaceAtJob). Allocates nothing.
+  function surfaceTry(x, z) {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    const i = cx - gx0, j = cz - gz0;
+    if (i < 0 || j < 0 || i >= W || j >= H) return 0;
+    const c = j * W + i;
+    if (!cellE[c]) build(c, cx, cz);
+    if (!geo) return surfaceAt(x, z);
+    const r = geoSurface(x, z, c);
+    if (r !== 0 || nearEdges < 1) return r;
+    const qx = Math.round(x / NET_STEP), qz = Math.round(z / NET_STEP);
+    if ((qx | 0) !== qx || (qz | 0) !== qz) return -1;
+    const slot = (Math.imul(qx, 0x9e3779b1) ^ Math.imul(qz, 0x7feb352d)) >>> (32 - NET_BITS);
+    return netCache.v[slot] >= 0 && netCache.qx[slot] === qx && netCache.qz[slot] === qz ? netCache.v[slot] : -1;
+  }
+  // surfaceAt in slices: a generator that yields whenever over() says the
+  // slice's time is up while it works out the narrow-gap net of a point
+  // where nothing near is known yet (0.13.9: a single cold ask from a
+  // junction corner was up to 100 ms at a 4x throttle). Returns exactly
+  // surfaceAt(x, z) and fills the same caches.
+  function* surfaceAtJob(x, z, over) {
+    const s = surfaceTry(x, z);
+    if (s >= 0) return s;
+    return yield* netAtJob(x, z, over);
   }
   // kind: 1 the flat net (road beside it), 2 the raised net (between two
   // sidewalks or medians).
@@ -840,7 +950,7 @@ export function createGround(city) {
     }
     return 0;
   }
-  return { groundAt, surfaceAt, baseAt, roadAt, netQuads, netQuadsJob, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
+  return { groundAt, surfaceAt, surfaceTry, surfaceAtJob, baseAt, roadAt, netQuads, netQuadsJob, fillOf: geo ? fillOf : () => NOFILL_ALL, gapOf: geo ? gapOf : () => NOFILL_ALL, gapAt: geo ? gapAt : () => 0, stats: () => ({ cells: cellE.filter(Boolean).length, W, H }) };
 }
 
 // The ground of a city, made once and kept (city.groundAt when the city

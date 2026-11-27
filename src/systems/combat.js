@@ -23,13 +23,15 @@
 //   into CRAFT_HOOKS below (tasks 32 and 33 fill them).
 import { createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
-import { setDamageRule } from '../entities/vehicle.js';
+import { setDamageRule, createVehicle } from '../entities/vehicle.js';
+import { createEvents } from '../core/events.js';
+import { createCollisionWorld } from '../world/collision.js';
 import {
   RULES, WEAPONS, MOUNTS, createArms, nextWeapon, selectWeapon, startReload, stepArms, tryUse, USE_NO, USE_LAST,
   isThrown, createCraftArms, mountFor, stepCraftArms, tryMount,
 } from '../core/weapons.js';
 import { createSeeker, resetSeeker, stepSeeker, noseRay } from '../core/seeker.js';
-import { targetPoint, angleTo, lineOfSight, wallAlong, AIR_REACH, airborne } from '../core/aim.js';
+import { targetPoint, angleTo, lineOfSight, wallAlong, AIR_REACH, airborne, pickAssist } from '../core/aim.js';
 import { createRagdolls, startRagdoll, kickRagdoll, directRagdoll, stepRagdolls, RAGDOLL_MAX } from '../core/ragdoll.js';
 import { poseRagdoll } from '../render/ragdoll.js';
 
@@ -2574,3 +2576,60 @@ export function createCombat(game, { seed = 23023 } = {}) {
   }
   return sys;
 }
+
+// The first hit, rehearsed off the books (0.13.9 hitches: the first shot
+// that hit something cost 11 to 15 ms at a 4x throttle, the code of the
+// aim, trace, damage, hit, knock-down, ragdoll and blast paths running
+// for the first time). A throwaway combat on a stand-in game: its own
+// events (no listener), its own empty collision world (a blast breaks
+// nothing real), its own dice, a player in a car of its own holding fire
+// at a crew car and a crew member in front, then a blast between them,
+// stepped one simulated second. Of the real game only the city's ground
+// is read (pure, cached) and nothing is written: no actor, craft, event,
+// dice or mesh of the game changes, so play is the same with or without
+// it. Returns what it went through ({ steps, hits, shots, blasts, downs }).
+export function warmCombat(city, x = 0, z = 0, heading = 0) {
+  const collision = createCollisionWorld();
+  const rng = createRng(1);
+  const car = createVehicle('sedan', x, z, heading, rng);
+  const walker = initActor({ x, z, y: 0, heading, radius: 0.35, px: x, pz: z, vx: 0, vz: 0 }, 'player');
+  walker.arms = createArms('pistol');
+  car.driver = 'player';
+  const ux = Math.cos(heading), uz = Math.sin(heading);
+  const target = createVehicle('sedan', x + ux * 12, z + uz * 12, heading, rng);
+  target.occ = [1];
+  const cx = x + ux * 8 + uz * 2, cz = z + uz * 8 - ux * 2;
+  const crew = initActor({ x: cx, z: cz, y: 0, heading, radius: 0.35, px: cx, pz: cz, vx: 0, vz: 0 }, 'crew');
+  crew.arms = createArms('pistol');
+  const input = { held: (k) => k === 'fire', consume: () => false };
+  const g = {
+    events: createEvents(), collision, city, world: { collision, city, time: 0 }, seaY: -0.6,
+    vehicles: [car, target], actors: [], time: 0, input, aim: { dx: ux, dy: 0, dz: uz, manual: true },
+    player: { mode: 'car', vehicle: car, walker, x, z, y: 0, heading, health: 100, wanted: 0 },
+    progress: { stats: {} }, camHeading: heading,
+  };
+  const sys = createCombat(g, { seed: 1 });
+  addActor(g, crew);
+  const out = { steps: 0, hits: 0, shots: 0, blasts: 0, downs: 0 };
+  g.events.on('hit', () => out.hits++);
+  g.events.on('shot', () => out.shots++);
+  g.events.on('explosion', () => out.blasts++);
+  g.events.on('down', () => out.downs++);
+  // The drive-by aim assist (ui/combathud.js) asks this first, every shot.
+  const actx = { actors: g.actors, vehicles: g.vehicles, collision, self: walker, selfCraft: car, seaY: g.seaY };
+  const eye = { x, y: 1.2, z }, fwd = { x: ux, y: 0, z: uz }, tp = { x: 0, y: 0, z: 0 };
+  for (let k = 0; k < 3; k++) {
+    const t = pickAssist(actx, eye, fwd, eye, { range: 35, cone: 0.3 });
+    if (t) targetPoint(t, g.seaY, tp);
+  }
+  let n = 0;
+  for (; n < 60; n++) {
+    if (n === 20) sys.explode(x + ux * 10, 0.5, z + uz * 10, 6);
+    if (n === 30) damage(g, crew, 100, walker, 'bullet');
+    sys.fixedUpdate(1 / 60);
+  }
+  sys.fire(crew, -ux, 0, -uz);
+  out.steps = n;
+  return out;
+}
+

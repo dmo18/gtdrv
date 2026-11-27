@@ -99,7 +99,8 @@ function normalFromHeight(height, size, strength) {
   for (let y = 0; y < size; y++) {
     const yu = ((y + size - 1) % size) * size, yd = ((y + 1) % size) * size, yc = y * size;
     for (let x = 0; x < size; x++) {
-      const xl = (x + size - 1) % size, xr = (x + 1) % size;
+      // (The wrapped neighbors without a remainder per pixel: 0.13.9.)
+      const xl = x === 0 ? size - 1 : x - 1, xr = x === size - 1 ? 0 : x + 1;
       const dx = (height[yc + xr] - height[yc + xl]) * strength;
       const dy = (height[yd + x] - height[yu + x]) * strength;
       const l = 1 / Math.sqrt(dx * dx + dy * dy + 1); // Math.hypot is several times slower

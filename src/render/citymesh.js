@@ -852,16 +852,17 @@ function flatTris(bld, tris, y, color) {
 // most), so a sliver across the asphalt is not drawn as a raised strip
 // and a corner that only touches the road keeps its sidewalk.
 const CORNER_CUT = 1.5;
-function cornerTri(wb, G, J, ax, az, bx, bz, cx, cz, depth) {
+// (A generator: each ground ask goes through onRoadAsk, which only stops
+// for a point whose narrow-gap net is not known yet; see realJunctionJob.)
+function* cornerTri(wb, G, J, ax, az, bx, bz, cx, cz, depth, over) {
   const mx = (ax + bx + cx) / 3, mz = (az + bz + cz) / 3;
-  const onRoad = (x, z) => (J.fan && inJunctionArea(J, x, z)) || G.surfaceAt(x, z) === 1;
-  let n = onRoad(mx, mz) ? 1 : 0;
-  n += onRoad(ax * 0.75 + mx * 0.25, az * 0.75 + mz * 0.25) ? 1 : 0;
-  n += onRoad(bx * 0.75 + mx * 0.25, bz * 0.75 + mz * 0.25) ? 1 : 0;
-  n += onRoad(cx * 0.75 + mx * 0.25, cz * 0.75 + mz * 0.25) ? 1 : 0;
-  n += onRoad((ax + bx) * 0.375 + mx * 0.25, (az + bz) * 0.375 + mz * 0.25) ? 1 : 0;
-  n += onRoad((bx + cx) * 0.375 + mx * 0.25, (bz + cz) * 0.375 + mz * 0.25) ? 1 : 0;
-  n += onRoad((cx + ax) * 0.375 + mx * 0.25, (cz + az) * 0.375 + mz * 0.25) ? 1 : 0;
+  let n = (yield* onRoadAsk(G, J, mx, mz, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, ax * 0.75 + mx * 0.25, az * 0.75 + mz * 0.25, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, bx * 0.75 + mx * 0.25, bz * 0.75 + mz * 0.25, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, cx * 0.75 + mx * 0.25, cz * 0.75 + mz * 0.25, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, (ax + bx) * 0.375 + mx * 0.25, (az + bz) * 0.375 + mz * 0.25, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, (bx + cx) * 0.375 + mx * 0.25, (bz + cz) * 0.375 + mz * 0.25, over)) ? 1 : 0;
+  n += (yield* onRoadAsk(G, J, (cx + ax) * 0.375 + mx * 0.25, (cz + az) * 0.375 + mz * 0.25, over)) ? 1 : 0;
   if (n === 7) return;
   const lab = Math.hypot(bx - ax, bz - az), lbc = Math.hypot(cx - bx, cz - bz), lca = Math.hypot(ax - cx, az - cz);
   const long = Math.max(lab, lbc, lca);
@@ -872,20 +873,33 @@ function cornerTri(wb, G, J, ax, az, bx, bz, cx, cz, depth) {
     const qx = long === lab ? bx : long === lbc ? cx : ax, qz = long === lab ? bz : long === lbc ? cz : az;
     for (let t = 1; t < long && !n; t += 1) {
       const f = t / long;
-      if (onRoad((px + (qx - px) * f) * 0.75 + mx * 0.25, (pz + (qz - pz) * f) * 0.75 + mz * 0.25)) n = 1;
+      if (yield* onRoadAsk(G, J, (px + (qx - px) * f) * 0.75 + mx * 0.25, (pz + (qz - pz) * f) * 0.75 + mz * 0.25, over)) n = 1;
     }
   }
   if (n === 0 || depth >= 3 || long < CORNER_CUT) {
-    if (n > 0 && onRoad(mx, mz)) return;
+    if (n > 0 && (yield* onRoadAsk(G, J, mx, mz, over))) return;
     TRI6[0] = ax; TRI6[1] = az; TRI6[2] = bx; TRI6[3] = bz; TRI6[4] = cx; TRI6[5] = cz;
     flatTris(wb, TRI6, CURB_H, COL.sidewalk);
     return;
   }
   const abx = (ax + bx) / 2, abz = (az + bz) / 2, bcx = (bx + cx) / 2, bcz = (bz + cz) / 2, cax = (cx + ax) / 2, caz = (cz + az) / 2;
-  cornerTri(wb, G, J, ax, az, abx, abz, cax, caz, depth + 1);
-  cornerTri(wb, G, J, abx, abz, bx, bz, bcx, bcz, depth + 1);
-  cornerTri(wb, G, J, cax, caz, bcx, bcz, cx, cz, depth + 1);
-  cornerTri(wb, G, J, abx, abz, bcx, bcz, cax, caz, depth + 1);
+  yield* cornerTri(wb, G, J, ax, az, abx, abz, cax, caz, depth + 1, over);
+  yield* cornerTri(wb, G, J, abx, abz, bx, bz, bcx, bcz, depth + 1, over);
+  yield* cornerTri(wb, G, J, cax, caz, bcx, bcz, cx, cz, depth + 1, over);
+  yield* cornerTri(wb, G, J, abx, abz, bcx, bcz, cax, caz, depth + 1, over);
+}
+// Road at (x, z) as a junction corner sees it: the fan's area, or road in
+// world/ground.js surfaceAt.
+function* onRoadAsk(G, J, x, z, over) {
+  if (J.fan && inJunctionArea(J, x, z)) return true;
+  return (yield* surfaceAsk(G, x, z, over)) === 1;
+}
+// G.surfaceAt(x, z); with over, the cheap answer when the ground has it
+// (surfaceTry), else the ground's sliced ask (surfaceAtJob).
+function* surfaceAsk(G, x, z, over) {
+  if (!over) return G.surfaceAt(x, z);
+  const s = G.surfaceTry(x, z);
+  return s >= 0 ? s : yield* G.surfaceAtJob(x, z, over);
 }
 
 // A junction where a pedestrian street meets two or more streets.
@@ -964,6 +978,78 @@ function bareEnd(geo, G, edges, q, side) {
   return false;
 }
 
+// One junction of realRoads (node n, when it leads its junction and own
+// accepts it), as a generator: with over (a slice's clock) it stops
+// between corner triangles and inside a ground ask whose narrow-gap net
+// is not known yet (0.13.9: one cold ask was up to 100 ms at a 4x
+// throttle); null never stops. The same triangles either way.
+export function* realJunctionJob(city, B, n, own, over) {
+  if (!city.roadGeo) city.roadGeo = buildRoadGeo(city.nodes, city.edges, city.edgesNear);
+  const geo = city.roadGeo;
+  const J = geo.junctions[geo.nodeJ[n.id]];
+  if (!J || J.lead !== n.id || (own && !own(n.x, n.z))) return;
+  // (Where a pedestrian street meets two or more streets, the ring past
+  // the streets' mouths is the mall's paving, not asphalt: no wedge of
+  // road out to the mall's end, Lincoln Road.)
+  if (!J.fan && mallJunction(city, J)) {
+    const hull = fanMouthHull(city, J, true), t = J.tris;
+    for (let k = 0; k + 5 < t.length; k += 6) mallTri(B, J, hull, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0);
+  } else {
+    flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
+    armUnderlay(city, geo, B.asphalt.at(J.x, J.z), J);
+  }
+  // Fork and merge gores: asphalt with white edge lines and chevrons.
+  for (const G of J.gores) {
+    flatTris(B.asphalt.at(J.x, J.z), G.tris, -0.004, COL.junction);
+    const lb = B.paint.at(J.x, J.z), P = G.paint;
+    for (let k = 0; k + 4 < P.length; k += 5) {
+      const dx = P[k + 2] - P[k], dz = P[k + 3] - P[k + 1], L = Math.hypot(dx, dz);
+      if (L < 0.05) continue;
+      const nx = (-dz / L) * P[k + 4], nz = (dx / L) * P[k + 4];
+      orientedQuad(lb, P[k] + nx, P[k + 1] + nz, P[k + 2] + nx, P[k + 3] + nz, P[k + 2] - nx, P[k + 3] - nz, P[k] - nx, P[k + 1] - nz, 0.015, COL.line);
+    }
+  }
+  // A fan junction: its mouth hull paved under the arms, so no lot or
+  // land shows in the crossing where an arm's sidewalk no longer runs
+  // on past its mouth (world/junctions.js fanMouthHull).
+  if (J.fan) flatPoly(B.asphalt.at(J.x, J.z), fanMouthHull(city, J), -0.007, COL.junction);
+  const wb = B.sidewalk.at(J.x, J.z);
+  const GJ = groundOf(city);
+  for (const c of J.corners) {
+    // A corner between two bare sides (a gore, a gap to a facing strip:
+    // no sidewalk along either arm, flat in world/ground.js) is asphalt,
+    // not a raised pad standing alone in the road.
+    if (c.qa !== undefined && bareEnd(geo, GJ, city.edges, c.qa, c.sideA) && bareEnd(geo, GJ, city.edges, c.qb, c.sideB)) {
+      if (c.tris) flatTris(B.asphalt.at(J.x, J.z), c.tris, -0.004, COL.junction);
+      continue;
+    }
+    // Only the corner triangles the ground has raised: one that lies on
+    // road (the junction area, another strip's asphalt; road first in
+    // world/ground.js) is left to the asphalt under it, not drawn as a
+    // pad a car drives through. A fan junction (its ring crosses
+    // itself) draws no curb through the crossing.
+    if (c.tris) {
+      const t = c.tris;
+      for (let k = 0; k + 5 < t.length; k += 6) {
+        yield* cornerTri(wb, GJ, J, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0, over);
+        if (over && over()) yield 'junction';
+      }
+    }
+    if (J.fan) continue;
+    const p = c.curb;
+    for (let k = 0; k + 3 < p.length; k += 2) {
+      const dx = p[k + 2] - p[k], dz = p[k + 3] - p[k + 1], L = Math.hypot(dx, dz);
+      // (A curb under 0.6 m long, where the return meets the strip's
+      // own curb, is not drawn: under a pixel past a few meters. Nor a
+      // curb with road on both sides.)
+      if (!(L > 0.6)) continue;
+      const mx = (p[k] + p[k + 2]) / 2, mz = (p[k + 1] + p[k + 3]) / 2, nx = (-dz / L) * 0.4, nz = (dx / L) * 0.4;
+      if ((yield* surfaceAsk(GJ, mx + nx, mz + nz, over)) === 1 && (yield* surfaceAsk(GJ, mx - nx, mz - nz, over)) === 1) continue;
+      wb.wall(p[k], p[k + 1], p[k + 2], p[k + 3], -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+    }
+  }
+}
+
 // Roads (docs/PLAN_V3.md 13, ROADS; world/junctions.js): one asphalt
 // polygon per junction with its sidewalk corners and curb returns, and
 // per edge a strip trimmed to the junction boundary (mitered at bends,
@@ -973,323 +1059,277 @@ function bareEnd(geo, G, edges, q, side) {
 // streamed tile); null for all.
 export function realRoads(city, B, nodes, edges, own = null) {
   if (!city.roadGeo) city.roadGeo = buildRoadGeo(city.nodes, city.edges, city.edgesNear);
-  const geo = city.roadGeo;
   for (const n of nodes) {
-    const J = geo.junctions[geo.nodeJ[n.id]];
-    if (!J || J.lead !== n.id || (own && !own(n.x, n.z))) continue;
-    // (Where a pedestrian street meets two or more streets, the ring past
-    // the streets' mouths is the mall's paving, not asphalt: no wedge of
-    // road out to the mall's end, Lincoln Road.)
-    if (!J.fan && mallJunction(city, J)) {
-      const hull = fanMouthHull(city, J, true), t = J.tris;
-      for (let k = 0; k + 5 < t.length; k += 6) mallTri(B, J, hull, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0);
-    } else {
-      flatTris(B.asphalt.at(J.x, J.z), J.tris, -0.004, COL.junction);
-      armUnderlay(city, geo, B.asphalt.at(J.x, J.z), J);
+    const it = realJunctionJob(city, B, n, own, null);
+    while (!it.next().done);
+  }
+  for (const e of edges) {
+    const it = realEdgeJob(city, B, e, own, null);
+    while (!it.next().done);
+  }
+}
+
+// One edge of realRoads (its strip, sidewalks, median, fills and paint
+// where own accepts them) as a generator, like realJunctionJob: with over
+// it stops between stations and inside a cold ground ask; null never
+// stops. The same triangles either way.
+export function* realEdgeJob(city, B, e, own, over) {
+  if (!city.roadGeo) city.roadGeo = buildRoadGeo(city.nodes, city.edges, city.edgesNear);
+  const geo = city.roadGeo;
+  const a = city.nodes[e.a], b = city.nodes[e.b];
+  const ux = e.ux ?? (b.x - a.x) / e.length, uz = e.uz ?? (b.z - a.z) / e.length;
+  const rx = -uz, rz = ux;
+  const prof = e.avenue ? PROFILE_AVENUE : PROFILE_STREET;
+  const pw = prof[prof.length - 1][0];
+  // A tone of its own per edge (from its id, so every tile agrees).
+  const t = shade(COL.asphalt, 0.9 + 0.16 * edgeHash(e.id));
+  // World x, z of (d, o) on the edge.
+  const wx = (d, o) => a.x + ux * d + rx * o, wz = (d, o) => a.z + uz * d + rz * o;
+  // The round end of the median band (lateral l - m .. l) at along d,
+  // bulging toward dir (-1: node a), with its curb.
+  // (0.13.7: a quarter disc from the curb to the middle of the median,
+  // so the two halves' noses make one round end; each half drew a half
+  // disc on its own band before, two green lobes with a notch between.
+  // A median over 8 m, whose middle is lot ground, gets its middle filled
+  // 6 m back from the nose, so the lot's 5 m raster does not show as a
+  // notch.)
+  const nose = function* (mb, wb, d, l, m, dir, col) {
+    if (!(m > 0.05)) return;
+    const g = e.pair >= 0 ? pairGap(city, e, d, l) : 2 * m;
+    const r = e.median > 8 && g < 24 ? g / 2 + 0.15 : m, oc = l - r;
+    // (Along the road it reaches m / 2 past d, as the half disc did: an
+    // elliptic quarter, so a wide nose does not run onto the crossing.)
+    const ra = Math.min(r, Math.max(m / 2, 1));
+    // (Not on road in the ground: a street crossing the median there.)
+    if ((yield* surfaceAsk(G, wx(d + dir * ra * 0.5, l - r * 0.5), wz(d + dir * ra * 0.5, l - r * 0.5), over)) === 1) return;
+    if (r > m + 0.05) {
+      orientedQuad(mb, wx(d, l - m), wz(d, l - m), wx(d, oc), wz(d, oc), wx(d - dir * 6, oc), wz(d - dir * 6, oc), wx(d - dir * 6, l - m), wz(d - dir * 6, l - m), CURB_H - 0.002, col);
     }
-    // Fork and merge gores: asphalt with white edge lines and chevrons.
-    for (const G of J.gores) {
-      flatTris(B.asphalt.at(J.x, J.z), G.tris, -0.004, COL.junction);
-      const lb = B.paint.at(J.x, J.z), P = G.paint;
-      for (let k = 0; k + 4 < P.length; k += 5) {
-        const dx = P[k + 2] - P[k], dz = P[k + 3] - P[k + 1], L = Math.hypot(dx, dz);
-        if (L < 0.05) continue;
-        const nx = (-dz / L) * P[k + 4], nz = (dx / L) * P[k + 4];
-        orientedQuad(lb, P[k] + nx, P[k + 1] + nz, P[k + 2] + nx, P[k + 3] + nz, P[k + 2] - nx, P[k + 3] - nz, P[k] - nx, P[k + 1] - nz, 0.015, COL.line);
-      }
+    NOSE.length = 0;
+    for (let k = 0; k <= 6; k++) {
+      const t = (k / 6) * Math.PI / 2;
+      NOSE.push(wx(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)), wz(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)));
     }
-    // A fan junction: its mouth hull paved under the arms, so no lot or
-    // land shows in the crossing where an arm's sidewalk no longer runs
-    // on past its mouth (world/junctions.js fanMouthHull).
-    if (J.fan) flatPoly(B.asphalt.at(J.x, J.z), fanMouthHull(city, J), -0.007, COL.junction);
-    const wb = B.sidewalk.at(J.x, J.z);
-    const GJ = groundOf(city);
-    for (const c of J.corners) {
-      // A corner between two bare sides (a gore, a gap to a facing strip:
-      // no sidewalk along either arm, flat in world/ground.js) is asphalt,
-      // not a raised pad standing alone in the road.
-      if (c.qa !== undefined && bareEnd(geo, GJ, city.edges, c.qa, c.sideA) && bareEnd(geo, GJ, city.edges, c.qb, c.sideB)) {
-        if (c.tris) flatTris(B.asphalt.at(J.x, J.z), c.tris, -0.004, COL.junction);
-        continue;
-      }
-      // Only the corner triangles the ground has raised: one that lies on
-      // road (the junction area, another strip's asphalt; road first in
-      // world/ground.js) is left to the asphalt under it, not drawn as a
-      // pad a car drives through. A fan junction (its ring crosses
-      // itself) draws no curb through the crossing.
-      if (c.tris) {
-        const t = c.tris;
-        for (let k = 0; k + 5 < t.length; k += 6) cornerTri(wb, GJ, J, t[k], t[k + 1], t[k + 2], t[k + 3], t[k + 4], t[k + 5], 0);
-      }
-      if (J.fan) continue;
-      const p = c.curb;
-      for (let k = 0; k + 3 < p.length; k += 2) {
-        const dx = p[k + 2] - p[k], dz = p[k + 3] - p[k + 1], L = Math.hypot(dx, dz);
-        // (A curb under 0.6 m long, where the return meets the strip's
-        // own curb, is not drawn: under a pixel past a few meters. Nor a
-        // curb with road on both sides.)
-        if (!(L > 0.6)) continue;
-        const mx = (p[k] + p[k + 2]) / 2, mz = (p[k + 1] + p[k + 3]) / 2, nx = (-dz / L) * 0.4, nz = (dx / L) * 0.4;
-        if (GJ.surfaceAt(mx + nx, mz + nz) === 1 && GJ.surfaceAt(mx - nx, mz - nz) === 1) continue;
-        wb.wall(p[k], p[k + 1], p[k + 2], p[k + 3], -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+    const cx = wx(d, oc), cz = wz(d, oc);
+    for (let k = 0; k + 3 < NOSE.length; k += 2) {
+      TRI6[0] = cx; TRI6[1] = cz; TRI6[2] = NOSE[k]; TRI6[3] = NOSE[k + 1]; TRI6[4] = NOSE[k + 2]; TRI6[5] = NOSE[k + 3];
+      flatTris(mb, TRI6, CURB_H, col);
+      let ax = NOSE[k], az = NOSE[k + 1], bx = NOSE[k + 2], bz = NOSE[k + 3];
+      if (-(bz - az) * ((ax + bx) / 2 - cx) + (bx - ax) * ((az + bz) / 2 - cz) < 0) { const tx = ax, tz = az; ax = bx; az = bz; bx = tx; bz = tz; }
+      wb.wall(ax, az, bx, bz, -0.02, CURB_H, COL.curb, 0, 0, 0.2, 0.05, 1, 1);
+    }
+  };
+  // Gaps to facing strips under 6 m (world/ground.js gapOf): asphalt,
+  // and no sidewalk, median or fill on that side there.
+  const G = groundOf(city), gaps = e.ped ? null : G.gapOf(e.id);
+  let gapped = false;
+  if (gaps) for (let k = 0; k < gaps.length; k++) if (gaps[k] > 0) { gapped = true; break; }
+  edgeStations(geo, e, gapped ? 10 : medianBand(e) > 0 && e.median <= 8 ? 4 : ROAD_PIECE, ST);
+  if (gapped) {
+    const n = gaps.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
+    for (let i = 0; i + 1 < n; i++) {
+      const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
+      if (d1 - d0 < 0.05) continue;
+      for (let side = 0; side < 2; side++) {
+        const w = Math.max(gaps[2 * i + side], gaps[2 * i + 2 + side]);
+        if (!(w > 0)) continue;
+        const c0 = curbsAt(geo, e, d0), a0 = side ? c0.l : c0.r;
+        const c1 = curbsAt(geo, e, d1), a1 = side ? c1.l : c1.r;
+        const mx = wx((d0 + d1) / 2, a0), mz = wz((d0 + d1) / 2, a0);
+        if (own && !own(mx, mz)) continue;
+        const b0 = side ? a0 - w : a0 + w, b1 = side ? a1 - w : a1 + w;
+        const lo0 = Math.min(a0, b0), hi0 = Math.max(a0, b0), lo1 = Math.min(a1, b1), hi1 = Math.max(a1, b1);
+        orientedQuad(B.asphalt.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), 0.008, COL.junction); // (over lot ground, BLOCK_Y)
+        // A white edge line along the strip where the gap is wide.
+        if (w > 1.5) {
+          const p0 = side ? a0 + 0.25 : a0 - 0.25, p1 = side ? a1 + 0.25 : a1 - 0.25;
+          orientedQuad(B.paint.at(mx, mz), wx(d0, p0 + 0.07), wz(d0, p0 + 0.07), wx(d1, p1 + 0.07), wz(d1, p1 + 0.07), wx(d1, p1 - 0.07), wz(d1, p1 - 0.07), wx(d0, p0 - 0.07), wz(d0, p0 - 0.07), 0.015, COL.line);
+        }
       }
     }
   }
-  for (const e of edges) {
-    const a = city.nodes[e.a], b = city.nodes[e.b];
-    const ux = e.ux ?? (b.x - a.x) / e.length, uz = e.uz ?? (b.z - a.z) / e.length;
-    const rx = -uz, rz = ux;
-    const prof = e.avenue ? PROFILE_AVENUE : PROFILE_STREET;
-    const pw = prof[prof.length - 1][0];
-    // A tone of its own per edge (from its id, so every tile agrees).
-    const t = shade(COL.asphalt, 0.9 + 0.16 * edgeHash(e.id));
-    // World x, z of (d, o) on the edge.
-    const wx = (d, o) => a.x + ux * d + rx * o, wz = (d, o) => a.z + uz * d + rz * o;
-    // The round end of the median band (lateral l - m .. l) at along d,
-    // bulging toward dir (-1: node a), with its curb.
-    // (0.13.7: a quarter disc from the curb to the middle of the median,
-    // so the two halves' noses make one round end; each half drew a half
-    // disc on its own band before, two green lobes with a notch between.
-    // A median over 8 m, whose middle is lot ground, gets its middle filled
-    // 6 m back from the nose, so the lot's 5 m raster does not show as a
-    // notch.)
-    const nose = (mb, wb, d, l, m, dir, col) => {
-      if (!(m > 0.05)) return;
-      const g = e.pair >= 0 ? pairGap(city, e, d, l) : 2 * m;
-      const r = e.median > 8 && g < 24 ? g / 2 + 0.15 : m, oc = l - r;
-      // (Along the road it reaches m / 2 past d, as the half disc did: an
-      // elliptic quarter, so a wide nose does not run onto the crossing.)
-      const ra = Math.min(r, Math.max(m / 2, 1));
-      // (Not on road in the ground: a street crossing the median there.)
-      if (G.surfaceAt(wx(d + dir * ra * 0.5, l - r * 0.5), wz(d + dir * ra * 0.5, l - r * 0.5)) === 1) return;
-      if (r > m + 0.05) {
-        orientedQuad(mb, wx(d, l - m), wz(d, l - m), wx(d, oc), wz(d, oc), wx(d - dir * 6, oc), wz(d - dir * 6, oc), wx(d - dir * 6, l - m), wz(d - dir * 6, l - m), CURB_H - 0.002, col);
-      }
-      NOSE.length = 0;
-      for (let k = 0; k <= 6; k++) {
-        const t = (k / 6) * Math.PI / 2;
-        NOSE.push(wx(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)), wz(d + dir * ra * Math.sin(t), oc + r * Math.cos(t)));
-      }
-      const cx = wx(d, oc), cz = wz(d, oc);
-      for (let k = 0; k + 3 < NOSE.length; k += 2) {
-        TRI6[0] = cx; TRI6[1] = cz; TRI6[2] = NOSE[k]; TRI6[3] = NOSE[k + 1]; TRI6[4] = NOSE[k + 2]; TRI6[5] = NOSE[k + 3];
-        flatTris(mb, TRI6, CURB_H, col);
-        let ax = NOSE[k], az = NOSE[k + 1], bx = NOSE[k + 2], bz = NOSE[k + 3];
-        if (-(bz - az) * ((ax + bx) / 2 - cx) + (bx - ax) * ((az + bz) / 2 - cz) < 0) { const tx = ax, tz = az; ax = bx; az = bz; bx = tx; bz = tz; }
-        wb.wall(ax, az, bx, bz, -0.02, CURB_H, COL.curb, 0, 0, 0.2, 0.05, 1, 1);
-      }
+  // Raised strips beside the road (2.1 item 7): sidewalks with a 0.15 m
+  // curb on streets with a profile, and the median half a paired
+  // one-way owns along its left curb (planted from 1.5 m).
+  const wR = walkOf(e), wL = walkLeftOf(e);
+  // (A median wider than 8 m is lot ground in its middle: the raised
+  // strip covers the 4 m band along each curb, world/miami.js LOT_SETBACK.)
+  const med = medianBand(e);
+  for (let i = 0; i + 7 < ST.length; i += 4) {
+    const d0 = ST[i], k0 = ST[i + 1], l0 = ST[i + 2], r0 = ST[i + 3];
+    const d1 = ST[i + 4], k1 = ST[i + 5], l1 = ST[i + 6], r1 = ST[i + 7];
+    const mo = (l0 + r0 + l1 + r1) / 4, mx = wx((d0 + d1) / 2, mo), mz = wz((d0 + d1) / 2, mo);
+    if (over && over()) yield 'edge';
+    if (own && !own(mx, mz)) continue;
+    // The band from lateral o = lo..hi at both stations, as one quad.
+    const band = (bld, lo0, hi0, lo1, hi1, y, col) => orientedQuad(bld,
+      wx(d0 + k0 * hi0, hi0), wz(d0 + k0 * hi0, hi0), wx(d1 + k1 * hi1, hi1), wz(d1 + k1 * hi1, hi1),
+      wx(d1 + k1 * lo1, lo1), wz(d1 + k1 * lo1, lo1), wx(d0 + k0 * lo0, lo0), wz(d0 + k0 * lo0, lo0), y, col);
+    const curb = (bld, o0, o1, fwd) => {
+      const ax = wx(d0 + k0 * o0, o0), az = wz(d0 + k0 * o0, o0), bx = wx(d1 + k1 * o1, o1), bz = wz(d1 + k1 * o1, o1);
+      const L = Math.hypot(bx - ax, bz - az);
+      if (fwd) bld.wall(ax, az, bx, bz, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
+      else bld.wall(bx, bz, ax, az, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
     };
-    // Gaps to facing strips under 6 m (world/ground.js gapOf): asphalt,
-    // and no sidewalk, median or fill on that side there.
-    const G = groundOf(city), gaps = e.ped ? null : G.gapOf(e.id);
-    let gapped = false;
-    if (gaps) for (let k = 0; k < gaps.length; k++) if (gaps[k] > 0) { gapped = true; break; }
-    edgeStations(geo, e, gapped ? 10 : medianBand(e) > 0 && e.median <= 8 ? 4 : ROAD_PIECE, ST);
-    if (gapped) {
-      const n = gaps.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
-      for (let i = 0; i + 1 < n; i++) {
-        const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
-        if (d1 - d0 < 0.05) continue;
-        for (let side = 0; side < 2; side++) {
-          const w = Math.max(gaps[2 * i + side], gaps[2 * i + 2 + side]);
-          if (!(w > 0)) continue;
-          const c0 = curbsAt(geo, e, d0), a0 = side ? c0.l : c0.r;
-          const c1 = curbsAt(geo, e, d1), a1 = side ? c1.l : c1.r;
-          const mx = wx((d0 + d1) / 2, a0), mz = wz((d0 + d1) / 2, a0);
-          if (own && !own(mx, mz)) continue;
-          const b0 = side ? a0 - w : a0 + w, b1 = side ? a1 - w : a1 + w;
-          const lo0 = Math.min(a0, b0), hi0 = Math.max(a0, b0), lo1 = Math.min(a1, b1), hi1 = Math.max(a1, b1);
-          orientedQuad(B.asphalt.at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), 0.008, COL.junction); // (over lot ground, BLOCK_Y)
-          // A white edge line along the strip where the gap is wide.
-          if (w > 1.5) {
-            const p0 = side ? a0 + 0.25 : a0 - 0.25, p1 = side ? a1 + 0.25 : a1 - 0.25;
-            orientedQuad(B.paint.at(mx, mz), wx(d0, p0 + 0.07), wz(d0, p0 + 0.07), wx(d1, p1 + 0.07), wz(d1, p1 + 0.07), wx(d1, p1 - 0.07), wz(d1, p1 - 0.07), wx(d0, p0 - 0.07), wz(d0, p0 - 0.07), 0.015, COL.line);
-          }
-        }
+    if (e.ped) {
+      // A pedestrian street: one paving of pavers curb to curb, flush.
+      const w = e.sidewalk || 0;
+      band(B.sidewalk.at(mx, mz), l0 - w, r0 + w, l1 - w, r1 + w, 0.005, COL.plaza);
+      continue;
+    }
+    const bld = B.asphalt.at(mx, mz);
+    for (let k = 0; k < prof.length - 1; k++) {
+      const f0 = (prof[k][0] / pw + 1) / 2, f1 = (prof[k + 1][0] / pw + 1) / 2, sa = prof[k][1], sb = prof[k + 1][1];
+      const a0 = l0 + (r0 - l0) * f0, b0 = l0 + (r0 - l0) * f1, a1 = l1 + (r1 - l1) * f0, b1 = l1 + (r1 - l1) * f1;
+      orientedQuad(bld, wx(d0 + k0 * b0, b0), wz(d0 + k0 * b0, b0), wx(d1 + k1 * b1, b1), wz(d1 + k1 * b1, b1),
+        wx(d1 + k1 * a1, a1), wz(d1 + k1 * a1, a1), wx(d0 + k0 * a0, a0), wz(d0 + k0 * a0, a0), 0, t, sb, sb, sa, sa);
+    }
+    // The halves of a divided road under MEDIAN_GAP apart (no median
+    // there: a bridge, a narrow pair): this half's share of the gap is
+    // asphalt, so the two read as one road with a painted middle.
+    if (e.divided && e.pair >= 0 && !(e.median > 8) && !geo.inner[e.pair]) {
+      const g0 = pairGap(city, e, d0 + k0 * l0, l0), g1 = pairGap(city, e, d1 + k1 * l1, l1);
+      if (g0 < MEDIAN_GAP && g1 < MEDIAN_GAP && (g0 > 0.05 || g1 > 0.05) && !(medianAt(city, e, d0, l0) > 0 && medianAt(city, e, d1, l1) > 0)) {
+        band(bld, l0 - g0 / 2 - 0.3, l0, l1 - g1 / 2 - 0.3, l1, 0.008, COL.junction);
       }
     }
-    // Raised strips beside the road (2.1 item 7): sidewalks with a 0.15 m
-    // curb on streets with a profile, and the median half a paired
-    // one-way owns along its left curb (planted from 1.5 m).
-    const wR = walkOf(e), wL = walkLeftOf(e);
-    // (A median wider than 8 m is lot ground in its middle: the raised
-    // strip covers the 4 m band along each curb, world/miami.js LOT_SETBACK.)
-    const med = medianBand(e);
-    for (let i = 0; i + 7 < ST.length; i += 4) {
-      const d0 = ST[i], k0 = ST[i + 1], l0 = ST[i + 2], r0 = ST[i + 3];
-      const d1 = ST[i + 4], k1 = ST[i + 5], l1 = ST[i + 6], r1 = ST[i + 7];
-      const mo = (l0 + r0 + l1 + r1) / 4, mx = wx((d0 + d1) / 2, mo), mz = wz((d0 + d1) / 2, mo);
+    if (wR > 0 || med > 0) {
+      const wb = B.sidewalk.at(mx, mz);
+      // (Bare where a gore or a median nose keeps the side clear.)
+      const dm = (d0 + d1) / 2, bareR = supAt(geo, e, 0, dm) || G.gapAt(e.id, 0, dm) > 0, bareL = supAt(geo, e, 1, dm) || G.gapAt(e.id, 1, dm) > 0;
+      // (Nor where the side lies on another carriageway's asphalt: two
+      // strips that overlap, road first in world/ground.js, so a
+      // sidewalk drawn there was a raised strip a car drove through.)
+      const rm = (r0 + r1) / 2 + wR / 2, lm = (l0 + l1) / 2 - wL / 2;
+      if (wR > 0 && !bareR && (yield* surfaceAsk(G, wx(dm, rm), wz(dm, rm), over)) !== 1) {
+        band(wb, r0, r0 + wR, r1, r1 + wR, CURB_H, COL.sidewalk);
+        curb(wb, r0, r1, false);
+      }
+      if (wL > 0 && !bareL && (yield* surfaceAsk(G, wx(dm, lm), wz(dm, lm), over)) !== 1) {
+        band(wb, l0 - wL, l0, l1 - wL, l1, CURB_H, COL.sidewalk);
+        curb(wb, l0, l1, true);
+      }
+      if (med > 0 && !bareL) {
+        const mb = e.median > MEDIAN_PLANT ? B.grass.at(mx, mz) : wb;
+        const m0 = medianAt(city, e, d0, l0), m1 = medianAt(city, e, d1, l1);
+        if (m0 > 0 && m1 > 0) {
+        band(mb, l0 - m0, l0, l1 - m1, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+        curb(wb, l0, l1, true);
+        // A round nose where the median starts or stops.
+        const before = d0 - 4, after = d1 + 4;
+        if (before > geo.trim[2 * e.id] && !(medianAt(city, e, before, curbsAt(geo, e, before).l) > 0)) yield* nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+        if (after < e.length - geo.trim[2 * e.id + 1] && !(medianAt(city, e, after, curbsAt(geo, e, after).l) > 0)) yield* nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+        }
+        if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0)) yield* nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+        if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0)) yield* nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
+      }
+    }
+  }
+  // The median carried through a junction that nothing crosses it at
+  // (world/junctions.js mthru): from the strip end to the node, along
+  // the curb line the junction's asphalt ends on.
+  if (med > 0 && !geo.inner[e.id]) {
+    for (let end = 0; end < 2; end++) {
+      const q = 2 * e.id + end;
+      if (!geo.mthru[q] || geo.jEnd[q] < 0 || !(geo.trim[q] > 0.05)) continue;
+      const da = end ? e.length - geo.trim[q] : 0, db = end ? e.length : geo.trim[q];
+      const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
       if (own && !own(mx, mz)) continue;
-      // The band from lateral o = lo..hi at both stations, as one quad.
-      const band = (bld, lo0, hi0, lo1, hi1, y, col) => orientedQuad(bld,
-        wx(d0 + k0 * hi0, hi0), wz(d0 + k0 * hi0, hi0), wx(d1 + k1 * hi1, hi1), wz(d1 + k1 * hi1, hi1),
-        wx(d1 + k1 * lo1, lo1), wz(d1 + k1 * lo1, lo1), wx(d0 + k0 * lo0, lo0), wz(d0 + k0 * lo0, lo0), y, col);
-      const curb = (bld, o0, o1, fwd) => {
-        const ax = wx(d0 + k0 * o0, o0), az = wz(d0 + k0 * o0, o0), bx = wx(d1 + k1 * o1, o1), bz = wz(d1 + k1 * o1, o1);
-        const L = Math.hypot(bx - ax, bz - az);
-        if (fwd) bld.wall(ax, az, bx, bz, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
-        else bld.wall(bx, bz, ax, az, -0.02, CURB_H, COL.curb, 0, 0, L / 4.8, 0.05, 1, 1);
-      };
-      if (e.ped) {
-        // A pedestrian street: one paving of pavers curb to curb, flush.
-        const w = e.sidewalk || 0;
-        band(B.sidewalk.at(mx, mz), l0 - w, r0 + w, l1 - w, r1 + w, 0.005, COL.plaza);
-        continue;
+      const lc = curbsAt(geo, e, end ? da : db).l;
+      const m0 = medianAt(city, e, da, lc), m1 = medianAt(city, e, db, lc);
+      if (!(m0 > 0 && m1 > 0)) continue;
+      // (0.13.7: not where a street that does cross the median lies on
+      // it, road in the ground: a lawn across its asphalt.)
+      const GM = groundOf(city);
+      let onRoad = false;
+      for (let k = 0; k <= 4 && !onRoad; k++) {
+        const dk = da + ((db - da) * k) / 4, ok = lc - (m0 + ((m1 - m0) * k) / 4) / 2;
+        if ((yield* surfaceAsk(GM, wx(dk, ok), wz(dk, ok), over)) === 1) onRoad = true;
       }
-      const bld = B.asphalt.at(mx, mz);
-      for (let k = 0; k < prof.length - 1; k++) {
-        const f0 = (prof[k][0] / pw + 1) / 2, f1 = (prof[k + 1][0] / pw + 1) / 2, sa = prof[k][1], sb = prof[k + 1][1];
-        const a0 = l0 + (r0 - l0) * f0, b0 = l0 + (r0 - l0) * f1, a1 = l1 + (r1 - l1) * f0, b1 = l1 + (r1 - l1) * f1;
-        orientedQuad(bld, wx(d0 + k0 * b0, b0), wz(d0 + k0 * b0, b0), wx(d1 + k1 * b1, b1), wz(d1 + k1 * b1, b1),
-          wx(d1 + k1 * a1, a1), wz(d1 + k1 * a1, a1), wx(d0 + k0 * a0, a0), wz(d0 + k0 * a0, a0), 0, t, sb, sb, sa, sa);
-      }
-      // The halves of a divided road under MEDIAN_GAP apart (no median
-      // there: a bridge, a narrow pair): this half's share of the gap is
-      // asphalt, so the two read as one road with a painted middle.
-      if (e.divided && e.pair >= 0 && !(e.median > 8) && !geo.inner[e.pair]) {
-        const g0 = pairGap(city, e, d0 + k0 * l0, l0), g1 = pairGap(city, e, d1 + k1 * l1, l1);
-        if (g0 < MEDIAN_GAP && g1 < MEDIAN_GAP && (g0 > 0.05 || g1 > 0.05) && !(medianAt(city, e, d0, l0) > 0 && medianAt(city, e, d1, l1) > 0)) {
-          band(bld, l0 - g0 / 2 - 0.3, l0, l1 - g1 / 2 - 0.3, l1, 0.008, COL.junction);
-        }
-      }
-      if (wR > 0 || med > 0) {
-        const wb = B.sidewalk.at(mx, mz);
-        // (Bare where a gore or a median nose keeps the side clear.)
-        const dm = (d0 + d1) / 2, bareR = supAt(geo, e, 0, dm) || G.gapAt(e.id, 0, dm) > 0, bareL = supAt(geo, e, 1, dm) || G.gapAt(e.id, 1, dm) > 0;
-        // (Nor where the side lies on another carriageway's asphalt: two
-        // strips that overlap, road first in world/ground.js, so a
-        // sidewalk drawn there was a raised strip a car drove through.)
-        const rm = (r0 + r1) / 2 + wR / 2, lm = (l0 + l1) / 2 - wL / 2;
-        if (wR > 0 && !bareR && G.surfaceAt(wx(dm, rm), wz(dm, rm)) !== 1) {
-          band(wb, r0, r0 + wR, r1, r1 + wR, CURB_H, COL.sidewalk);
-          curb(wb, r0, r1, false);
-        }
-        if (wL > 0 && !bareL && G.surfaceAt(wx(dm, lm), wz(dm, lm)) !== 1) {
-          band(wb, l0 - wL, l0, l1 - wL, l1, CURB_H, COL.sidewalk);
-          curb(wb, l0, l1, true);
-        }
-        if (med > 0 && !bareL) {
-          const mb = e.median > MEDIAN_PLANT ? B.grass.at(mx, mz) : wb;
-          const m0 = medianAt(city, e, d0, l0), m1 = medianAt(city, e, d1, l1);
-          if (m0 > 0 && m1 > 0) {
-          band(mb, l0 - m0, l0, l1 - m1, l1, CURB_H, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          curb(wb, l0, l1, true);
-          // A round nose where the median starts or stops.
-          const before = d0 - 4, after = d1 + 4;
-          if (before > geo.trim[2 * e.id] && !(medianAt(city, e, before, curbsAt(geo, e, before).l) > 0)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          if (after < e.length - geo.trim[2 * e.id + 1] && !(medianAt(city, e, after, curbsAt(geo, e, after).l) > 0)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          }
-          if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d0 - 0.05) || G.gapAt(e.id, 1, d0 - 0.05) > 0)) nose(mb, wb, d0, l0, m0, -1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-          if (m0 > 0 && m1 > 0 && (supAt(geo, e, 1, d1 + 0.05) || G.gapAt(e.id, 1, d1 + 0.05) > 0)) nose(mb, wb, d1, l1, m1, 1, e.median > MEDIAN_PLANT ? COL.lawn : COL.curb);
-        }
-      }
+      if (onRoad) continue;
+      const planted = e.median > MEDIAN_PLANT;
+      orientedQuad((planted ? B.grass : B.sidewalk).at(mx, mz), wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), wx(db, lc - m1), wz(db, lc - m1), wx(da, lc - m0), wz(da, lc - m0), CURB_H, planted ? COL.lawn : COL.curb);
+      B.sidewalk.at(mx, mz).wall(wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), -0.02, CURB_H, COL.curb, 0, 0, (db - da) / 4.8, 0.05, 1, 1);
     }
-    // The median carried through a junction that nothing crosses it at
-    // (world/junctions.js mthru): from the strip end to the node, along
-    // the curb line the junction's asphalt ends on.
-    if (med > 0 && !geo.inner[e.id]) {
-      for (let end = 0; end < 2; end++) {
-        const q = 2 * e.id + end;
-        if (!geo.mthru[q] || geo.jEnd[q] < 0 || !(geo.trim[q] > 0.05)) continue;
-        const da = end ? e.length - geo.trim[q] : 0, db = end ? e.length : geo.trim[q];
-        const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
+  }
+  // Where a street crosses a divided road its median stops short of the
+  // junction (sup): from the node to the nose this half's share of the
+  // gap is asphalt, so the crossing is one paved area between the two
+  // halves' junctions, not a band of the block's ground.
+  if (e.divided && e.pair >= 0 && !geo.inner[e.id] && !geo.inner[e.pair] && !e.bridge) {
+    for (let end = 0; end < 2; end++) {
+      const q = 2 * e.id + end;
+      if (geo.jEnd[q] < 0) continue;
+      // (A median carried through the junction, mthru, keeps the gap;
+      // one too narrow to draw leaves it to this asphalt, 0.13.7: lot
+      // ground showed between the halves on 5th Street at Collins.)
+      if (geo.mthru[q] && medianAt(city, e, end ? e.length - geo.trim[q] : geo.trim[q], curbsAt(geo, e, end ? e.length - geo.trim[q] : geo.trim[q]).l) > 0) continue;
+      const reach = Math.min(e.length / 2, Math.max(geo.trim[q], geo.sup[2 * q + 1]));
+      if (!(reach > 0.5)) continue;
+      const da = end ? e.length - reach : 0, db = end ? e.length : reach;
+      const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
+      if (own && !own(mx, mz)) continue;
+      const la = curbsAt(geo, e, da).l, lb = curbsAt(geo, e, db).l;
+      const ga = Math.min(16, pairGap(city, e, da, la)), gb = Math.min(16, pairGap(city, e, db, lb));
+      if (!(ga > 0.05 || gb > 0.05)) continue;
+      orientedQuad(B.asphalt.at(mx, mz), wx(da, la), wz(da, la), wx(db, lb), wz(db, lb), wx(db, lb - gb / 2 - 0.3), wz(db, lb - gb / 2 - 0.3), wx(da, la - ga / 2 - 0.3), wz(da, la - ga / 2 - 0.3), -0.006, COL.junction);
+    }
+  }
+  // Sliver fills (world/ground.js fillOf): raised concrete over gaps
+  // under 1.5 m between this road's back of sidewalk and more road.
+  const fill = e.ped ? null : G.fillOf(e.id);
+  if (fill && fill.length) {
+    const n = fill.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
+    const backAt = (d, side) => {
+      const C = curbsAt(geo, e, d);
+      return side ? C.l - (med > 0 ? medianAt(city, e, d, C.l) : wL) : C.r + wR;
+    };
+    for (let i = 0; i + 1 < n; i++) {
+      const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
+      for (let side = 0; side < 2; side++) {
+        const w0 = Math.max(fill[2 * i + side], fill[2 * i + 2 + side]), w1 = w0;
+        if (!(w0 > 0 || w1 > 0)) continue;
+        const b0 = backAt(d0, side), b1 = backAt(d1, side);
+        const mx = wx((d0 + d1) / 2, b0), mz = wz((d0 + d1) / 2, b0);
         if (own && !own(mx, mz)) continue;
-        const lc = curbsAt(geo, e, end ? da : db).l;
-        const m0 = medianAt(city, e, da, lc), m1 = medianAt(city, e, db, lc);
-        if (!(m0 > 0 && m1 > 0)) continue;
-        // (0.13.7: not where a street that does cross the median lies on
-        // it, road in the ground: a lawn across its asphalt.)
-        const GM = groundOf(city);
-        let onRoad = false;
-        for (let k = 0; k <= 4 && !onRoad; k++) {
-          const dk = da + ((db - da) * k) / 4, ok = lc - (m0 + ((m1 - m0) * k) / 4) / 2;
-          if (GM.surfaceAt(wx(dk, ok), wz(dk, ok)) === 1) onRoad = true;
-        }
-        if (onRoad) continue;
-        const planted = e.median > MEDIAN_PLANT;
-        orientedQuad((planted ? B.grass : B.sidewalk).at(mx, mz), wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), wx(db, lc - m1), wz(db, lc - m1), wx(da, lc - m0), wz(da, lc - m0), CURB_H, planted ? COL.lawn : COL.curb);
-        B.sidewalk.at(mx, mz).wall(wx(da, lc), wz(da, lc), wx(db, lc), wz(db, lc), -0.02, CURB_H, COL.curb, 0, 0, (db - da) / 4.8, 0.05, 1, 1);
+        // (Never on a junction's asphalt, nor beside a gore.)
+        if (supAt(geo, e, side, (d0 + d1) / 2) || G.gapAt(e.id, side, (d0 + d1) / 2) > 0 || onJunction(geo, mx + (wx(0, side ? -1 : 1) - wx(0, 0)) * 0.5, mz + (wz(0, side ? -1 : 1) - wz(0, 0)) * 0.5)) continue;
+        const lo0 = side ? b0 - w0 : b0, hi0 = side ? b0 : b0 + w0, lo1 = side ? b1 - w1 : b1, hi1 = side ? b1 : b1 + w1;
+        // (0.13.3: beyond a planted median, lawn like the median, not a
+        // pale seam of concrete down the middle of a green.)
+        const lawn = side === 1 && med > 0 && e.median > MEDIAN_PLANT;
+        orientedQuad((lawn ? B.grass : B.sidewalk).at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, lawn ? COL.lawn : COL.sidewalk);
       }
     }
-    // Where a street crosses a divided road its median stops short of the
-    // junction (sup): from the node to the nose this half's share of the
-    // gap is asphalt, so the crossing is one paved area between the two
-    // halves' junctions, not a band of the block's ground.
-    if (e.divided && e.pair >= 0 && !geo.inner[e.id] && !geo.inner[e.pair] && !e.bridge) {
-      for (let end = 0; end < 2; end++) {
-        const q = 2 * e.id + end;
-        if (geo.jEnd[q] < 0) continue;
-        // (A median carried through the junction, mthru, keeps the gap;
-        // one too narrow to draw leaves it to this asphalt, 0.13.7: lot
-        // ground showed between the halves on 5th Street at Collins.)
-        if (geo.mthru[q] && medianAt(city, e, end ? e.length - geo.trim[q] : geo.trim[q], curbsAt(geo, e, end ? e.length - geo.trim[q] : geo.trim[q]).l) > 0) continue;
-        const reach = Math.min(e.length / 2, Math.max(geo.trim[q], geo.sup[2 * q + 1]));
-        if (!(reach > 0.5)) continue;
-        const da = end ? e.length - reach : 0, db = end ? e.length : reach;
-        const mx = wx((da + db) / 2, 0), mz = wz((da + db) / 2, 0);
-        if (own && !own(mx, mz)) continue;
-        const la = curbsAt(geo, e, da).l, lb = curbsAt(geo, e, db).l;
-        const ga = Math.min(16, pairGap(city, e, da, la)), gb = Math.min(16, pairGap(city, e, db, lb));
-        if (!(ga > 0.05 || gb > 0.05)) continue;
-        orientedQuad(B.asphalt.at(mx, mz), wx(da, la), wz(da, la), wx(db, lb), wz(db, lb), wx(db, lb - gb / 2 - 0.3), wz(db, lb - gb / 2 - 0.3), wx(da, la - ga / 2 - 0.3), wz(da, la - ga / 2 - 0.3), -0.006, COL.junction);
-      }
-    }
-    // Sliver fills (world/ground.js fillOf): raised concrete over gaps
-    // under 1.5 m between this road's back of sidewalk and more road.
-    const fill = e.ped ? null : G.fillOf(e.id);
-    if (fill && fill.length) {
-      const n = fill.length / 2, f0 = geo.trim[2 * e.id], f1 = e.length - geo.trim[2 * e.id + 1];
-      const backAt = (d, side) => {
-        const C = curbsAt(geo, e, d);
-        return side ? C.l - (med > 0 ? medianAt(city, e, d, C.l) : wL) : C.r + wR;
-      };
-      for (let i = 0; i + 1 < n; i++) {
-        const d0 = Math.min(f1, f0 + i * FILL_STEP), d1 = i + 1 === n - 1 ? f1 : Math.min(f1, f0 + (i + 1) * FILL_STEP);
-        for (let side = 0; side < 2; side++) {
-          const w0 = Math.max(fill[2 * i + side], fill[2 * i + 2 + side]), w1 = w0;
-          if (!(w0 > 0 || w1 > 0)) continue;
-          const b0 = backAt(d0, side), b1 = backAt(d1, side);
-          const mx = wx((d0 + d1) / 2, b0), mz = wz((d0 + d1) / 2, b0);
-          if (own && !own(mx, mz)) continue;
-          // (Never on a junction's asphalt, nor beside a gore.)
-          if (supAt(geo, e, side, (d0 + d1) / 2) || G.gapAt(e.id, side, (d0 + d1) / 2) > 0 || onJunction(geo, mx + (wx(0, side ? -1 : 1) - wx(0, 0)) * 0.5, mz + (wz(0, side ? -1 : 1) - wz(0, 0)) * 0.5)) continue;
-          const lo0 = side ? b0 - w0 : b0, hi0 = side ? b0 : b0 + w0, lo1 = side ? b1 - w1 : b1, hi1 = side ? b1 : b1 + w1;
-          // (0.13.3: beyond a planted median, lawn like the median, not a
-          // pale seam of concrete down the middle of a green.)
-          const lawn = side === 1 && med > 0 && e.median > MEDIAN_PLANT;
-          orientedQuad((lawn ? B.grass : B.sidewalk).at(mx, mz), wx(d0, hi0), wz(d0, hi0), wx(d1, hi1), wz(d1, hi1), wx(d1, lo1), wz(d1, lo1), wx(d0, lo0), wz(d0, lo0), CURB_H, lawn ? COL.lawn : COL.sidewalk);
-        }
-      }
-    }
-    if (own && !own((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
-    if (e.ped) continue;
-    // Painted lines (world/junctions.js edgePaint): US paint from the
-    // profile (double yellow center, white dashed lane lines, yellow left
-    // edge on one-ways), stopping at the junction boundary; two-line
-    // crosswalk and stop bar on approaches with a signal or stop sign.
-    const lb = B.paint.at((a.x + b.x) / 2, (a.z + b.z) / 2);
-    edgePaint(city, e, PAINT6);
-    for (let k = 0; k + 5 < PAINT6.length; k += 6) {
-      edgePoint(city, e, PAINT6[k], PAINT6[k + 1], PT);
-      edgePoint(city, e, PAINT6[k + 2], PAINT6[k + 3], PT2);
-      const dx = PT2.x - PT.x, dz = PT2.z - PT.z, L = Math.hypot(dx, dz);
-      if (L < 0.05) continue;
-      const hw = PAINT6[k + 4], nx = (-dz / L) * hw, nz = (dx / L) * hw;
-      orientedQuad(lb, PT.x + nx, PT.z + nz, PT2.x + nx, PT2.z + nz, PT2.x - nx, PT2.z - nz, PT.x - nx, PT.z - nz, 0.015, PAINT6[k + 5] ? COL.yellow : COL.line);
-    }
-    // Bridges and the causeway over water: concrete deck sides.
-    if (e.bridge || e.causeway) {
-      const wb = B.sidewalk.at((a.x + b.x) / 2, (a.z + b.z) / 2);
-      const L = e.length;
-      const off = e.off || 0, half = e.width / 2;
-      const hr = half + off, hl = half - off;
-      wb.wall(a.x + rx * hr, a.z + rz * hr, b.x + rx * hr, b.z + rz * hr, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
-      // (No left side where the partner deck is under MEDIAN_GAP away:
-      // the gap is paved, world/edgelines.js.)
-      const lc = off - half;
-      if (!(e.pair >= 0 && Math.max(pairGap(city, e, 0, lc), pairGap(city, e, L, lc)) < MEDIAN_GAP)) {
-        wb.wall(b.x - rx * hl, b.z - rz * hl, a.x - rx * hl, a.z - rz * hl, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
-      }
+  }
+  if (own && !own((a.x + b.x) / 2, (a.z + b.z) / 2)) return;
+  if (e.ped) return;
+  // Painted lines (world/junctions.js edgePaint): US paint from the
+  // profile (double yellow center, white dashed lane lines, yellow left
+  // edge on one-ways), stopping at the junction boundary; two-line
+  // crosswalk and stop bar on approaches with a signal or stop sign.
+  const lb = B.paint.at((a.x + b.x) / 2, (a.z + b.z) / 2);
+  edgePaint(city, e, PAINT6);
+  for (let k = 0; k + 5 < PAINT6.length; k += 6) {
+    edgePoint(city, e, PAINT6[k], PAINT6[k + 1], PT);
+    edgePoint(city, e, PAINT6[k + 2], PAINT6[k + 3], PT2);
+    const dx = PT2.x - PT.x, dz = PT2.z - PT.z, L = Math.hypot(dx, dz);
+    if (L < 0.05) continue;
+    const hw = PAINT6[k + 4], nx = (-dz / L) * hw, nz = (dx / L) * hw;
+    orientedQuad(lb, PT.x + nx, PT.z + nz, PT2.x + nx, PT2.z + nz, PT2.x - nx, PT2.z - nz, PT.x - nx, PT.z - nz, 0.015, PAINT6[k + 5] ? COL.yellow : COL.line);
+  }
+  // Bridges and the causeway over water: concrete deck sides.
+  if (e.bridge || e.causeway) {
+    const wb = B.sidewalk.at((a.x + b.x) / 2, (a.z + b.z) / 2);
+    const L = e.length;
+    const off = e.off || 0, half = e.width / 2;
+    const hr = half + off, hl = half - off;
+    wb.wall(a.x + rx * hr, a.z + rz * hr, b.x + rx * hr, b.z + rz * hr, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
+    // (No left side where the partner deck is under MEDIAN_GAP away:
+    // the gap is paved, world/edgelines.js.)
+    const lc = off - half;
+    if (!(e.pair >= 0 && Math.max(pairGap(city, e, 0, lc), pairGap(city, e, L, lc)) < MEDIAN_GAP)) {
+      wb.wall(b.x - rx * hl, b.z - rz * hl, a.x - rx * hl, a.z - rz * hl, -1.4, 0.02, 0xa8a49a, 0, 0, L / 4.8, 0.3, 0.6, 1);
     }
   }
 }
@@ -1343,7 +1383,7 @@ export function* netRoadsJob(city, B, x0, z0, x1, z1, kinds = 3, cache = null, o
       if (over && kind === 2 && over()) yield 'net';
       const xa = Q[k], za = Q[k + 1], xb = Q[k + 2], zb = Q[k + 3], mx = (xa + xb) / 2, mz = (za + zb) / 2;
       if (kind === 1) B.asphalt.at(mx, mz).flat(xa, za, xb, zb, NET_Y, COL.junction);
-      else if (betweenMedians(G, xa, za, xb, zb)) B.grass.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.lawn);
+      else if (over ? yield* betweenMediansJob(G, xa, za, xb, zb, over) : betweenMedians(G, xa, za, xb, zb)) B.grass.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.lawn);
       else B.sidewalk.at(mx, mz).flat(xa, za, xb, zb, CURB_H - 0.004, COL.sidewalk);
       n++;
     }
@@ -1357,6 +1397,12 @@ export function* netRoadsJob(city, B, x0, z0, x1, z1, kinds = 3, cache = null, o
 function betweenMedians(G, xa, za, xb, zb) {
   const mx = (xa + xb) / 2, mz = (za + zb) / 2, hx = (xb - xa) / 2 + 0.6, hz = (zb - za) / 2 + 0.6;
   return G.surfaceAt(mx - hx, mz) === 3 || G.surfaceAt(mx + hx, mz) === 3 || G.surfaceAt(mx, mz - hz) === 3 || G.surfaceAt(mx, mz + hz) === 3;
+}
+
+// The same, its ground asks in slices (surfaceAsk).
+function* betweenMediansJob(G, xa, za, xb, zb, over) {
+  const mx = (xa + xb) / 2, mz = (za + zb) / 2, hx = (xb - xa) / 2 + 0.6, hz = (zb - za) / 2 + 0.6;
+  return (yield* surfaceAsk(G, mx - hx, mz, over)) === 3 || (yield* surfaceAsk(G, mx + hx, mz, over)) === 3 || (yield* surfaceAsk(G, mx, mz - hz, over)) === 3 || (yield* surfaceAsk(G, mx, mz + hz, over)) === 3;
 }
 
 function edgeHash(id) {
