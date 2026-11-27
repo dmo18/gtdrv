@@ -267,3 +267,10 @@ Source: owner pasted a mobile review of commit 310b4b9. Claims re-checked agains
 - S1 (Sonnet): saves and records. Files: src/systems/session.js, src/core/travel.js, src/core/records.js, src/systems/events.js, public/sw.js, src/systems/tutorial.js, src/ui/combathud.js and tests. Items 1, 6, 10, 8, 9.
 - S2 (Sonnet): launch and quality. Files: src/main.js, src/index.html, src/core/qualitybench.js, src/game.js orientation pause and tests. Items 2, 3, 4, 5.
 - Deferred (budget): tank fence overlap (item 7), publish workflow browser gate, combat harness fixtures, Daily Three midnight refresh, share link, privacy email (owner input).
+
+## 0.15 plan: roads and gameplay to production (2026-11-27, owner approved, cap 60M, about 33M used)
+Owner: "Roads are a mess and make no sense. Focus on gameplay, map and roads. Bring the game out of alpha."
+- Milestone A, roads that make sense. D1 (Opus, read-only): diagnose with renders and data audits, rank root causes, write a design to docs/ROADS.md. Then implementers on disjoint files (data cleanup in src/world/miami.js and realcity.js; mesh and markings in citymesh.js and streetscape.js; junction geometry), each with measurable before/after audits (street-align.mjs, aerial-review.mjs, drive-review.mjs). Acceptance: fewer curb kinks, jogs and width jumps; lane count and markings consistent per street; no grass wedges in junctions; no props in lanes; every audit number reported before and after.
+- Milestone B, gameplay to production: first-run flow (first medal teaching, clear feedback, retry on one tap), failure feedback, event approach routing, Records. Combat damage bug (burning car at 1 health becomes plain wreck). Review lows.
+- Milestone C, release candidate hygiene: pin Playwright and make the smoke job block publishing (owner approved), concurrency fix, privacy email stays placeholder until owner supplies it.
+- Routine: one gate and one independent Opus review per publish; models ladder; never loosen a test.
