@@ -64,3 +64,4 @@ Cap raised to 16M (about 9.6M used). Pacing rules: one helper at a time, never t
 - Cap raised by the owner to 32M (about 23.0M used at 0.13.6). Owner phone test of 0.13.6: streets messy (grass in roads, light poles in roads, illogical lane counts, width jumps, stray lines), cars poor, laggy and pixelated. Round 0.13.7: four helpers M1 to M4.
 - 0.13.7 published (53c2fc4). Round: helpers about 3.6M, reviews 0.4M. Total about 27.5M of 32M. Soak not running; restart on the quiet box.
 - 0.13.8 published (4baa55c). Round (P1 0.38M, P2 0.38M, P3 0.35M, Q1 0.33M, review 0.16M). Total about 29.6M of 32M.
+- 0.13.9 published. Round: R1 0.4M, R2 0.42M, review 0.12M. Total about 30.6M of 32M. Review found warmCombat leaving the stand-in damage rule bound; fixed with a test.
