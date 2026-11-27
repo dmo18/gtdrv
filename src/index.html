@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rustwater">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-U34t2sOxLD6A/cefDdWGilmmi4/gvYaYncRoXFBD8/Y='; style-src 'self' 'unsafe-inline'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-y63eB7jhIXpDrwPQCEtQhpuZU+7Co9cBEnVWTARHtew='; style-src 'self' 'unsafe-inline'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
@@ -88,17 +88,18 @@
     download: 'The game did not finish downloading. Check your connection and try again.',
     other: 'The game could not start on this device. Try again, or use another browser.'
   };
-  var LIMIT = 25000, failed = false, ready = false, timer = 0, armed = 0;
+  var LIMIT = 25000, FIRST = 90000, failed = false, ready = false, ticked = false, timer = 0, armed = 0;
   function $(id) { return document.getElementById(id); }
   function arm() {
     clearTimeout(timer);
     if (ready) return;
     armed = Date.now();
+    var limit = ticked ? LIMIT : FIRST;
     timer = setTimeout(function () {
       if (ready || failed) return;
-      if (document.hidden || Date.now() - armed > LIMIT + 3000) { arm(); return; }
+      if (document.hidden || Date.now() - armed > limit + 3000) { arm(); return; }
       fail('download');
-    }, LIMIT);
+    }, limit);
   }
   function fail(kind, detail) {
     if (failed || ready) return;
@@ -112,7 +113,16 @@
     if (retry) { retry.hidden = false; retry.onclick = function () { location.reload(); }; }
   }
   window.__rwFail = fail;
-  window.__rwTick = arm;
+  window.__rwTick = function () {
+    ticked = true;
+    if (failed) {
+      failed = false;
+      var retry = $('bootretry'), bar = $('bootbar');
+      if (retry) retry.hidden = true;
+      if (bar) bar.hidden = false;
+    }
+    arm();
+  };
   window.__rwOk = function () {
     ready = true;
     clearTimeout(timer);
@@ -129,7 +139,8 @@
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason, s = String((r && (r.name + ' ' + r.message)) || r || '').toLowerCase();
-    fail(/webgl|context|gpu|renderer|shader/.test(s) ? 'graphics' : /fetch|import|network|load|chunk|script|module/.test(s) ? 'download' : 'other');
+    var kind = /webgl|context|gpu|renderer|shader/.test(s) ? 'graphics' : /fetch|import|network|load|chunk|script|module/.test(s) ? 'download' : '';
+    if (kind) fail(kind);
   });
   arm();
 })();

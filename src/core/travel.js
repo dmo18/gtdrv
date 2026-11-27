@@ -132,9 +132,12 @@ export function travelSave(storage, progress, fromId, toId, car, player, pose) {
   if (!storage) return false;
   const oldSession = structuredClone(progress.session);
   const oldMaps = structuredClone(progress.mapSessions);
+  const known = {};
   const read = (k) => {
     try {
-      return storage.getItem(k);
+      const v = storage.getItem(k);
+      known[k] = true;
+      return v;
     } catch {
       return null;
     }
@@ -142,6 +145,7 @@ export function travelSave(storage, progress, fromId, toId, car, player, pose) {
   const oldSave = read(SAVE_KEY);
   const oldMap = read(MAP_CHOICE_KEY);
   const put = (k, v) => {
+    if (!known[k]) return; // never wipe a key whose old value could not be read
     try {
       if (v === null || v === undefined) storage.removeItem(k);
       else storage.setItem(k, v);
