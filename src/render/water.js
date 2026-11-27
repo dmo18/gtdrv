@@ -16,6 +16,12 @@ const SHORE_SPAN = SHORE_N * SHORE_CELL;
 const SHORE_NEG = 16; // the map holds distances from -16 m (land) ...
 const SHORE_RANGE = 64; // ... to +48 m (sea)
 const FAR_Y = -0.3; // just under the deepest trough (waves are +-0.24)
+// The far plane stands FAR_DROP under the near patch's rim (0.13.9): the
+// rim fades down to FAR_Y, and with the far plane at FAR_Y too the last
+// meters of the patch, 200 m out, lay on it and fought for depth (a
+// flickering square round the camera from a boat or the air).
+export const FAR_DROP = 0.1;
+export const FAR_PLANE_Y = FAR_Y - FAR_DROP, NEAR_RIM_Y = FAR_Y;
 
 function glslFloat(v) {
   const s = String(+v);
@@ -260,7 +266,7 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
     uShore: { value: null }, uShoreOrg: { value: new THREE.Vector2() }, uShoreOn: { value: 0 },
   };
   const far = new THREE.Mesh(farGeo, makeFarMaterial(farCol, uniforms));
-  far.position.y = FAR_Y;
+  far.position.y = FAR_PLANE_Y;
   far.name = 'sea-far';
   far.renderOrder = -2;
   group.add(far);
@@ -293,7 +299,7 @@ export function createWater({ size = 9000, color = 0x1f8aa0, shoreDist = null } 
     }
     shore.update(cameraPos.x, cameraPos.z, sd);
     const fs = 500;
-    far.position.set(Math.round(cameraPos.x / fs) * fs, FAR_Y, Math.round(cameraPos.z / fs) * fs);
+    far.position.set(Math.round(cameraPos.x / fs) * fs, FAR_PLANE_Y, Math.round(cameraPos.z / fs) * fs);
   }
 
   return { mesh: group, near, far, update };

@@ -6,6 +6,16 @@
 // are built once; nothing is allocated per frame.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+
+// Draw orders of the see-through layers (0.13.9 visual glitches). Glass
+// (cars 1, boats and aircraft 2) does not write depth, so whatever is
+// drawn after it lands on top of the window even when it is behind the
+// car: the clouds (were 2) showed through windshields untinted against
+// the sky, the rain streaks (were 4) and the lamp glows (3) ran over every
+// window. The sky goes first; the rain, glows and wet streaks after the
+// ground's own decals (0) but before any glass.
+export const SKY_ORDER = { dome: -10, stars: -9, clouds: -8 };
+export const BEHIND_GLASS = { streaks: 0.4, glow: 0.45, rain: 0.5 };
 import { createRng, clamp, TAU } from '../core/rng.js';
 
 // ---- keyframes --------------------------------------------------------------
@@ -514,7 +524,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(1400, 32, 16), domeMat);
     dome.name = 'sky-dome';
-    dome.renderOrder = -10;
+    dome.renderOrder = SKY_ORDER.dome;
     dome.frustumCulled = false;
     scene.add(dome);
     vis.dome = dome;
@@ -536,7 +546,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const starMat = new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false });
     const stars = new THREE.Points(sg, starMat);
     stars.name = 'stars';
-    stars.renderOrder = -9;
+    stars.renderOrder = SKY_ORDER.stars;
     stars.frustumCulled = false;
     stars.visible = false;
     scene.add(stars);
@@ -549,7 +559,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     clouds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     clouds.frustumCulled = false;
     clouds.name = 'clouds';
-    clouds.renderOrder = 2;
+    clouds.renderOrder = SKY_ORDER.clouds;
     scene.add(clouds);
     vis.clouds = clouds;
     vis.cloudX = new Float32Array(NC); vis.cloudY = new Float32Array(NC); vis.cloudZ = new Float32Array(NC);
@@ -623,7 +633,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     lampPts.name = 'lamp-glow';
     lampPts.frustumCulled = false;
     lampPts.visible = false;
-    lampPts.renderOrder = 3;
+    lampPts.renderOrder = BEHIND_GLASS.glow;
     scene.add(lampPts);
     vis.lampPts = lampPts;
     vis.lampU = lampMat.uniforms;
@@ -689,7 +699,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
       streaks.name = 'lamp-reflections';
       streaks.frustumCulled = false;
       streaks.visible = false;
-      streaks.renderOrder = 2;
+      streaks.renderOrder = BEHIND_GLASS.streaks;
       scene.add(streaks);
       vis.streaks = streaks;
       vis.streakU = streakMat.uniforms;
@@ -763,7 +773,7 @@ export function createDayNight(game, { dayMinutes = 14, seed = 90731 } = {}) {
     const rain = new THREE.LineSegments(rg, rainMat);
     rain.frustumCulled = false;
     rain.visible = false;
-    rain.renderOrder = 4;
+    rain.renderOrder = BEHIND_GLASS.rain;
     rain.name = 'rain';
     scene.add(rain);
     vis.rain = rain;

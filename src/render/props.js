@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { MeshBuilder } from './meshbuilder.js';
 import { createRng, TAU } from '../core/rng.js';
 import { PALM_PLACES, miamiPalmSpots as palmSpots } from '../world/propsolid.js';
-import { WALL_H } from '../world/edgelines.js';
+import { WALL_H, WALL_R, RAIL_OFF } from '../world/edgelines.js';
 import { deadEnds, DEAD_END_BASE } from '../world/deadends.js';
 
 const GREENS = [0x3f7f3c, 0x4a8a3e, 0x356f38, 0x5a9444, 0x447a4a];
@@ -1070,8 +1070,12 @@ const EDGE_COLORS = { seawall: 0xbdb7aa, rail: 0xa9aaa6, steel: 0x8d949b };
 // `out` (x0, z0, x1, z1, kind) with kind 0 sea wall, 1 rail. Only cells
 // already traced are read unless `trace` (cells to trace now) allows more;
 // returns the number of cells still untraced. Pure (no three.js).
-export function edgeLinePieces(layer, x0, z0, x1, z1, out, trace = Infinity) {
+// `sides` (optional): per piece the unit normal toward the road (x, z) and
+// the ledge's reach (railInward) for a rail, 0, 0, 0 for a sea wall.
+// `city`: for the reach (the drawn deck's edge).
+export function edgeLinePieces(layer, x0, z0, x1, z1, out, trace = Infinity, sides = null, city = null) {
   out.length = 0;
+  if (sides) sides.length = 0;
   let missing = 0, budget = trace;
   const C = 32;
   for (let cz = Math.floor(z0 / C); cz <= Math.floor(z1 / C); cz++) {
@@ -1085,10 +1089,70 @@ export function edgeLinePieces(layer, x0, z0, x1, z1, out, trace = Infinity) {
         const tag = r.tags[t];
         if (tag !== 'seawall' && tag !== 'rail') continue;
         out.push(r.segs[s], r.segs[s + 1], r.segs[s + 2], r.segs[s + 3], tag === 'rail' ? 1 : 0);
+        if (sides) {
+          const io = railInward(layer, r, city);
+          sides.push(io[t * 3], io[t * 3 + 1], io[t * 3 + 2]);
+        }
       }
     }
   }
   return missing;
+}
+
+// The road side of each rail segment of a traced cell (0.13.9), and how
+// far toward the road the ledge must reach. The rail line runs RAIL_OFF
+// outside the road's half width from its center line (world/edgelines.js),
+// but the deck is drawn round the lanes, shifted by the edge's `off`
+// (render/citymesh.js: half + off on the right, half - off on the left),
+// and the barrier (2 WALL_R thick) stood centered on the line: a slot of
+// sea 0.25 m wide, up to 0.9 m beside a shifted deck (MacArthur Causeway,
+// off -0.65), showed between the deck and the barrier along every bridge.
+// The normal toward the higher edge field (the road) and the distance to
+// the drawn deck's edge (city.streetAt, the edge's off) are worked out once
+// per cell and kept with it: 3 numbers a segment. Pure (no three.js).
+const INWARD = new WeakMap();
+const AT = { edge: -1, name: '', cross: '', d: 0, side: 1 };
+export const LEDGE_IN = WALL_R - 0.05, LEDGE_TOP = 0.12;
+// Past the deck's edge onto the deck (the traced line runs a little oblique
+// on bends), and the longest reach.
+export const LEDGE_OVER = 0.3, LEDGE_MAX = 2.5;
+export function railInward(layer, r, city = null) {
+  let io = INWARD.get(r);
+  if (io) return io;
+  io = new Float32Array(r.tags.length * 3);
+  for (let s = 0, t = 0; s < r.segs.length; s += 4, t++) {
+    if (r.tags[t] !== 'rail' || typeof layer.fieldAt !== 'function') continue;
+    const dx = r.segs[s + 2] - r.segs[s], dz = r.segs[s + 3] - r.segs[s + 1], L = Math.hypot(dx, dz);
+    if (L < 1e-6) continue;
+    const nx = -dz / L, nz = dx / L, mx = (r.segs[s] + r.segs[s + 2]) / 2, mz = (r.segs[s + 1] + r.segs[s + 3]) / 2;
+    // (A pier's rails, whose field is flat, get no ledge.)
+    const fa = layer.fieldAt(mx + nx * 0.75, mz + nz * 0.75), fb = layer.fieldAt(mx - nx * 0.75, mz - nz * 0.75);
+    if (!(Math.abs(fa - fb) > 0.5)) continue;
+    const k = fa > fb ? 1 : -1;
+    const ix = nx * k, iz = nz * k;
+    io[t * 3] = ix;
+    io[t * 3 + 1] = iz;
+    // The gap from the line to the drawn deck: the line's side of the edge
+    // under it, that side's deck edge.
+    let gap = RAIL_OFF;
+    if (city && typeof city.streetAt === 'function' && city.edges && city.nodes) {
+      AT.edge = -1;
+      const st = city.streetAt(mx + ix * 1.5, mz + iz * 1.5, AT);
+      const e = st && st.edge >= 0 ? city.edges[st.edge] : null;
+      if (e && e.length > 0) {
+        const a = city.nodes[e.a], b = city.nodes[e.b];
+        const ux = (b.x - a.x) / e.length, uz = (b.z - a.z) / e.length;
+        const lat = (mx - a.x) * -uz + (mz - a.z) * ux; // + right (citymesh rx = -uz, rz = ux)
+        const half = e.width / 2, off = e.off || 0;
+        const deck = lat > 0 ? half + off : half - off;
+        const g = Math.abs(lat) - deck;
+        if (g > 0 && g < LEDGE_MAX) gap = Math.max(gap, g);
+      }
+    }
+    io[t * 3 + 2] = Math.min(LEDGE_MAX, gap + LEDGE_OVER);
+  }
+  INWARD.set(r, io);
+  return io;
 }
 
 export function createEdgeLineView(game) {
@@ -1108,7 +1172,7 @@ export function createEdgeLineView(game) {
   for (let i = 0; i < EDGE_VIEW_MAX; i++) { mesh.setMatrixAt(i, zero); mesh.setColorAt(i, col.setHex(EDGE_COLORS.seawall)); }
   mesh.count = 0;
   scene.add(mesh);
-  const pieces = [];
+  const pieces = [], sides = [];
   let lastKey = null, pending = 0;
   const ground = city.groundAt || (() => 0);
   function put(i, x0, z0, x1, z1, y0, h, w, hex) {
@@ -1121,14 +1185,20 @@ export function createEdgeLineView(game) {
     mesh.setColorAt(i, col.setHex(hex));
   }
   function refill(cx, cz) {
-    pending = edgeLinePieces(layer, cx - EDGE_VIEW_R, cz - EDGE_VIEW_R, cx + EDGE_VIEW_R, cz + EDGE_VIEW_R, pieces, EDGE_CELLS_PER_FRAME);
+    pending = edgeLinePieces(layer, cx - EDGE_VIEW_R, cz - EDGE_VIEW_R, cx + EDGE_VIEW_R, cz + EDGE_VIEW_R, pieces, EDGE_CELLS_PER_FRAME, sides, city);
     let n = 0;
-    for (let k = 0; k < pieces.length && n < EDGE_VIEW_MAX - 1; k += 5) {
+    for (let k = 0, j = 0; k < pieces.length && n < EDGE_VIEW_MAX - 2; k += 5, j += 3) {
       const x0 = pieces[k], z0 = pieces[k + 1], x1 = pieces[k + 2], z1 = pieces[k + 3], rail = pieces[k + 4] === 1;
       const y = Math.min(ground(x0, z0), ground(x1, z1)) - 0.05;
       if (rail) {
         put(n++, x0, z0, x1, z1, y, 0.82, 0.5, EDGE_COLORS.rail);
         put(n++, x0, z0, x1, z1, y + 0.82, 0.08, 0.12, EDGE_COLORS.steel);
+        // The ledge over the slot between the deck and the barrier.
+        const ix = sides[j], iz = sides[j + 1], reach = sides[j + 2];
+        if (ix || iz) {
+          const o = (LEDGE_IN + reach) / 2;
+          put(n++, x0 + ix * o, z0 + iz * o, x1 + ix * o, z1 + iz * o, y, LEDGE_TOP + 0.05, reach - LEDGE_IN, EDGE_COLORS.rail);
+        }
       } else put(n++, x0, z0, x1, z1, -0.95, 0.95 + WALL_H, 0.5, EDGE_COLORS.seawall); // from below the water to the cap
     }
     // Only the instances in use go to the GPU, and nothing while it stays

@@ -14,6 +14,12 @@
 import * as THREE from 'three';
 import { angleDiff } from '../core/rng.js';
 import { buildCar, buildCarL1, buildCarL2, buildWheel, wheelLayout, wheelStyle, styleFor, isFleetModel } from './carbody.js';
+
+// Draw order of the car glass among the see-through things (0.13.9): after
+// the rain, the lamp glows and the wet-road streaks (daynight.js
+// BEHIND_GLASS), so those seen through a window are tinted by it instead of
+// drawn over it; the sky's clouds go first of all (SKY_ORDER).
+export const GLASS_ORDER = 1;
 import { paintMaterial, ownPaintMaterial, releaseMaterial, farMaterial, wheelMaterial, lampMaterial, carGlassMaterial, LAMP } from './vehiclemats.js';
 
 // ---- per-spec geometry cache ------------------------------------------------------
@@ -223,7 +229,10 @@ export function createVehicleMesh(spec, color) {
   const [bodyLod, body, bodyMid] = lodPair(e.body, e.mid, paint);
   const [glass, glassNear, glassMid] = lodPair(e.glass, e.glassMid, carGlassMaterial('clean'));
   const [lamps, lampNear, lampMid] = lodPair(e.lamps, e.lampsMid, lampMaterial(false, 0));
-  glass.renderOrder = 1;
+  // On the meshes themselves: three.js ignores an LOD's own renderOrder
+  // (only a Group's passes to its children), so the glass of every LOD car
+  // drew at 0, under the rain and the clouds (0.13.9).
+  glass.renderOrder = glassNear.renderOrder = glassMid.renderOrder = GLASS_ORDER;
   const far = new THREE.Mesh(e.far, farMaterial(col));
   far.visible = false;
   rig.add(bodyLod, glass, far, lamps);
@@ -324,7 +333,7 @@ function createFleetMesh(spec, col, e) {
   const body = new THREE.Mesh(e.body, paint);
   const bodyMid = new THREE.Mesh(e.mid, paint);
   const glass = new THREE.Mesh(e.glass, carGlassMaterial('clean'));
-  glass.renderOrder = 1;
+  glass.renderOrder = GLASS_ORDER;
   const lamps = new THREE.Mesh(e.lamps, lampMaterial(false, 0));
   const far = new THREE.Mesh(e.far, farMaterial(col));
   rig.add(body, bodyMid, glass, far, lamps);

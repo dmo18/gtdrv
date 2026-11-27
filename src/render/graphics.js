@@ -20,6 +20,8 @@ import { setBeamDaylight, BEAM_TAN } from './aircraftmesh.js';
 import { SHADOW_LAYER } from './realcity.js';
 import { groundFn } from '../world/ground.js';
 import { groundUnder } from '../world/stunts.js';
+import { createShadowFrame, shadowFrame } from './shadowframe.js';
+import { skyAt } from '../systems/daynight.js';
 
 const SKY_VS = `
 varying vec3 vDir;
@@ -165,8 +167,7 @@ export function createGraphics(game) {
   // The street tiles' shadow proxies live on their own layer (realcity.js).
   sc.layers.enable(SHADOW_LAYER);
   let extent = 72, mapSize = 0;
-  const dir = new THREE.Vector3(), right = new THREE.Vector3(), upv = new THREE.Vector3(), focus = new THREE.Vector3(), view = new THREE.Vector3();
-  const UP = new THREE.Vector3(0, 1, 0);
+  const dir = new THREE.Vector3(), focus = new THREE.Vector3(), view = new THREE.Vector3();
 
   function updateShadow(sky) {
     const inten = sky ? sky.shadow : 1;
@@ -179,7 +180,12 @@ export function createGraphics(game) {
     // Shedding its last step, the shadow map is redrawn every other frame.
     renderer.shadowMap.autoUpdate = inten > 0.03 && !(shedApplied >= 2 && (frame & 1));
     if (inten <= 0.03) return;
-    if (sky) dir.copy(sky.lightDir);
+    // The light at this frame's clock (the sky's own copy moves in 0.1
+    // degree steps; a smooth sun moves the shadows smoothly).
+    if (sky && Number.isFinite(game.clock)) {
+      skyAt(game.clock, SKY_NOW);
+      dir.set(SKY_NOW.sunDirX, SKY_NOW.sunDirY, SKY_NOW.sunDirZ);
+    } else if (sky) dir.copy(sky.lightDir);
     else dir.copy(sun.position).normalize();
     // Cover the ground ahead of the camera; wider from the air.
     const h = Math.max(0, camera.position.y);
@@ -189,18 +195,20 @@ export function createGraphics(game) {
     let t = extent * 0.62;
     if (view.y < -0.05) t = Math.min(t + h, h / -view.y);
     focus.copy(camera.position).addScaledVector(view, t);
-    focus.y = 0;
-    right.crossVectors(UP, dir).normalize();
-    upv.crossVectors(dir, right);
-    // Snap to whole shadow texels so edges do not crawl as we move.
+    // The frame (shadowframe.js): the ground seen along the sun, its texel
+    // grid fixed on the ground in world axes, the middle on whole texels
+    // (the old frame turned with every 0.1 degree step of the sun and drew
+    // every shadow edge again on other texels).
     const texel = (2 * extent) / mapSize;
-    const r = Math.round(focus.dot(right) / texel) * texel, u = Math.round(focus.dot(upv) / texel) * texel, d = Math.round(focus.dot(dir));
-    focus.set(0, 0, 0).addScaledVector(right, r).addScaledVector(upv, u).addScaledVector(dir, d);
-    const slope = Math.sqrt(Math.max(0, 1 - dir.y * dir.y)) / Math.max(0.15, dir.y);
-    const D = Math.min(900, 170 / Math.max(0.15, dir.y) + 60);
+    const ly = Math.max(0.15, dir.y);
+    const slope = Math.sqrt(Math.max(0, 1 - dir.y * dir.y)) / ly;
+    const D = Math.min(900, 170 / ly + 60);
+    shadowFrame(SF, dir.x, dir.y, dir.z, focus.x, focus.z, texel, D);
+    // The light itself (shading) keeps the true sun.
+    focus.set(SF.tx, 0, SF.tz);
     sun.target.position.copy(focus);
     sun.position.copy(focus).addScaledVector(dir, D);
-    const far = D + extent * slope + 30;
+    const far = D + extent * (slope + 1) + 30;
     if (sc.right !== extent || Math.abs(sc.far - far) > 1) {
       sc.left = -extent; sc.right = extent; sc.top = extent; sc.bottom = -extent;
       sc.near = 1; sc.far = far;
@@ -208,7 +216,33 @@ export function createGraphics(game) {
       sun.shadow.bias = -0.06 / (far - 1);
       sun.shadow.normalBias = texel * 0.9;
     }
+    shadowOn = true;
   }
+  // The shadow camera from the frame (in place of LightShadow.updateMatrices,
+  // which stood it on the light looking at the target): at the frame's
+  // middle with no rotation, the projection the ortho box times the frame's
+  // ground-along-the-sun matrix.
+  const SF = createShadowFrame(), SKY_NOW = {};
+  const frameM = new THREE.Matrix4();
+  let shadowOn = false;
+  const baseUpdate = sun.shadow.updateMatrices;
+  sun.shadow.updateMatrices = function (light) {
+    if (!shadowOn || typeof this._updateMatrix !== 'function') return baseUpdate.call(this, light);
+    const cam = this.camera;
+    cam.position.set(SF.tx, 0, SF.tz);
+    cam.quaternion.identity();
+    cam.updateMatrixWorld();
+    cam.updateProjectionMatrix();
+    frameM.set(
+      1, -SF.sx, 0, 0,
+      0, SF.sz, -1, 0,
+      SF.lx, SF.ly, SF.lz, -SF.d,
+      0, 0, 0, 1,
+    );
+    cam.projectionMatrix.multiply(frameM);
+    cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    this._updateMatrix(cam, this.matrix, this._frustum);
+  };
   function setShadowSize(size) {
     if (size === mapSize) return;
     mapSize = size;

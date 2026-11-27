@@ -13,7 +13,8 @@ import { attachGround } from '../src/world/ground.js';
 import { createVehicle, stepVehicle, vehicleCorners } from '../src/entities/vehicle.js';
 import { createMiamiCity } from '../src/world/miami.js';
 import { generateCity } from '../src/world/citygen.js';
-import { edgeLinePieces } from '../src/render/props.js';
+import { edgeLinePieces, railInward, LEDGE_IN, LEDGE_OVER, LEDGE_MAX } from '../src/render/props.js';
+import { RAIL_OFF } from '../src/world/edgelines.js';
 
 const DT = 1 / 60, MPH = 2.23694;
 const city = createMiamiCity(JSON.parse(fs.readFileSync(new URL('../src/world/data/miami-downtown.json', import.meta.url), 'utf8')), { region: 'miami-downtown' });
@@ -282,3 +283,58 @@ test('lazy and deterministic: a cell is the same traced first or last; the drawn
   assert.ok(drawn.size > 5);
   assert.deepEqual([...drawn].sort(), [...shapes].sort(), 'drawn = collision (0 m apart)');
 });
+
+// The drawn deck under a point (render/citymesh.js: half + off right of the
+// center line, half - off left): true when the point is on it.
+const AT = { edge: -1, name: '', cross: '', d: 0, side: 1 };
+function onDeck(c, x, z, slack) {
+  const st = c.streetAt(x, z, AT);
+  const e = st && st.edge >= 0 ? c.edges[st.edge] : null;
+  if (!e) return false;
+  const a = c.nodes[e.a], b = c.nodes[e.b];
+  const ux = (b.x - a.x) / e.length, uz = (b.z - a.z) / e.length;
+  const lat = (x - a.x) * -uz + (z - a.z) * ux;
+  return Math.abs(lat) <= (lat > 0 ? e.width / 2 + (e.off || 0) : e.width / 2 - (e.off || 0)) + slack;
+}
+
+for (const region of ['miami-downtown', 'miami-beach']) {
+  test(`0.13.9: no slot of sea between a bridge deck and its barrier, ${region} (the ledge reaches the drawn deck)`, () => {
+    // Rail pieces along every bridge of the region: the side toward the
+    // road is known, the ledge starts under the barrier (2 WALL_R thick,
+    // centered on the line) and its road end lies on the drawn deck, also
+    // where the deck is shifted off the edge's center line.
+    const c = region === 'miami-downtown' ? city : createMiamiCity(JSON.parse(fs.readFileSync(new URL(`../src/world/data/${region}.json`, import.meta.url), 'utf8')), { region });
+    if (c !== city) attachGround(c);
+    assert.ok(LEDGE_IN <= WALL_R, 'the ledge starts under the barrier');
+    const L = createEdgeLayer(c);
+    let checked = 0, flat = 0, short = 0, shifted = 0;
+    for (const e of c.edges) {
+      if (!e.bridge || e.ped || e.length < 30 || checked > 400) continue;
+      const a = c.nodes[e.a], mx = a.x + e.ux * e.length / 2, mz = a.z + e.uz * e.length / 2;
+      const pieces = [], sides = [];
+      edgeLinePieces(L, mx - 20, mz - 20, mx + 20, mz + 20, pieces, Infinity, sides, c);
+      assert.equal(sides.length, (pieces.length / 5) * 3);
+      for (let k = 0, j = 0; k < pieces.length; k += 5, j += 3) {
+        if (pieces[k + 4] !== 1) continue;
+        const ix = sides[j], iz = sides[j + 1], reach = sides[j + 2];
+        if (!ix && !iz) { flat++; continue; }
+        assert.ok(Math.abs(Math.hypot(ix, iz) - 1) < 1e-4);
+        const px = (pieces[k] + pieces[k + 2]) / 2, pz = (pieces[k + 1] + pieces[k + 3]) / 2;
+        assert.ok(L.fieldAt(px + ix, pz + iz) > L.fieldAt(px - ix, pz - iz), 'inward is the road side');
+        assert.ok(reach >= RAIL_OFF + LEDGE_OVER - 1e-6 && reach <= LEDGE_MAX + 1e-6);
+        if (reach > RAIL_OFF + LEDGE_OVER + 0.2) shifted++;
+        // The ledge's road end over the drawn deck (a few chamfered
+        // corner pieces of the traced line aside).
+        if (!onDeck(c, px + ix * (reach - 0.05), pz + iz * (reach - 0.05), 0.02)) short++;
+        checked++;
+      }
+    }
+    assert.ok(checked > 20, `bridge rail pieces checked: ${checked}`);
+    assert.ok(flat < checked / 4, `rails with no road side found: ${flat}`);
+    assert.ok(short <= checked * 0.05, `pieces whose ledge stops short of the deck: ${short} of ${checked}`);
+    if (region === 'miami-beach') assert.ok(shifted > 10, `pieces beside a shifted deck (MacArthur Causeway): ${shifted}`);
+    // The cache: the same array for a cell asked twice.
+    const r = L.rawCell(0, 0);
+    assert.equal(railInward(L, r, c), railInward(L, r, c));
+  });
+}

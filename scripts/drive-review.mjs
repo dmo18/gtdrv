@@ -12,6 +12,7 @@
 //          [--survey] [--size=748x360] [--day] (survey: no night shots)
 //          [--hour=6.4] (the day shots at this hour, default 13)
 //          [--weather=rain|fog|overcast|clear] (held for every shot)
+//          [--dpr=3] (device scale factor, default 1)
 // --survey (0.13.2): ten places a region picked from the city data (downtown
 // core, beach strip, bridge, residential yards, industrial, park, airfield
 // or its causeway, the biggest parking lot, the biggest grass lot, a street
@@ -41,6 +42,10 @@ const only = onlyArg ? onlyArg.slice(7).split(',') : null;
 const sizeArg = process.argv.find((a) => a.startsWith('--size='));
 const [VW, VH] = sizeArg ? sizeArg.slice(7).split('x').map(Number) : [915, 412];
 const SURVEY = flag('survey');
+// --dpr=3 (0.13.9): the page's device scale factor (a phone draws at a
+// render scale of 2.25 on a 3.5 ratio screen; 3 keeps swiftshader in time).
+const dprArg = process.argv.find((a) => a.startsWith('--dpr='));
+const DPR = dprArg ? +dprArg.slice(6) : 1;
 const hourArg = process.argv.find((a) => a.startsWith('--hour='));
 const HOUR = hourArg ? +hourArg.slice(7) : 13;
 const weatherArg = process.argv.find((a) => a.startsWith('--weather='));
@@ -74,7 +79,7 @@ const errors = [];
 for (const id of REGIONS) {
   if (only && !only.includes(id)) continue;
   const short = id.slice(6);
-  const page = await browser.newPage({ viewport: { width: VW, height: VH }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: VW, height: VH }, deviceScaleFactor: DPR });
   page.setDefaultTimeout(300000);
   page.on('pageerror', (e) => errors.push(`${id}: ${String(e)}`));
   await page.goto(`http://127.0.0.1:${server.address().port}/?autostart&map=${id}`);

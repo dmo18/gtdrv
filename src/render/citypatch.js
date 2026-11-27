@@ -289,6 +289,13 @@ export function patchCityMaterials(M) {
     const m = M[k];
     if (m && m.isMeshStandardMaterial && m !== M.detailMat) cityPatch(m);
   }
+  // The see-through detail panels (picket and chain-link fences, sign
+  // cut-outs) are alpha-tested: at 20 to 80 m the mipmapped alpha sat round
+  // the 0.5 cut and the pales sparkled on and off from frame to frame
+  // (0.13.9, scripts/glitch-seq.mjs). Alpha to coverage turns the cut into
+  // the MSAA samples' share (the same program count: the material's one
+  // program changes, it is shared with no other).
+  if (M.detailMat && M.detailMat.alphaTest > 0) M.detailMat.alphaToCoverage = true;
   if (M.asphaltMat) cityFeature(M.asphaltMat, 'wet');
   for (const k of ['grassMat', 'landMat', 'landRimMat']) if (M[k]) cityFeature(M[k], 'grass');
   for (const k of ['glass', 'brick', 'office', 'stucco', 'havana', 'siding', 'corrugated', 'roofing', 'shopfront']) if (M[k]) cityFeature(M[k], 'facade');
