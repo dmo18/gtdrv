@@ -261,3 +261,9 @@ place of money. Earlier "no combat" decision superseded. Then (direction
 change 3, cap 2.8M): bombs, grenades, fighter jets, flyable police
 helicopters, stealable tanks and heat-5 chases added as tasks 31 to 34
 (docs/ARMS.md) ahead of missions 28 and review 30; task 29 parked.
+
+## 0.14.0 plan: external review round (2026-11-27)
+Source: owner pasted a mobile review of commit 310b4b9. Claims re-checked against HEAD 438c1e3: travel save ignored result, Continue awaits fullscreen, recordTry drops first fails, sw.js single addAll, stale hints, knockout text all still present. Budget left about 1.3M of 32M, so two helpers on disjoint files, then one gate and review.
+- S1 (Sonnet): saves and records. Files: src/systems/session.js, src/core/travel.js, src/core/records.js, src/systems/events.js, public/sw.js, src/systems/tutorial.js, src/ui/combathud.js and tests. Items 1, 6, 10, 8, 9.
+- S2 (Sonnet): launch and quality. Files: src/main.js, src/index.html, src/core/qualitybench.js, src/game.js orientation pause and tests. Items 2, 3, 4, 5.
+- Deferred (budget): tank fence overlap (item 7), publish workflow browser gate, combat harness fixtures, Daily Three midnight refresh, share link, privacy email (owner input).
