@@ -23,7 +23,7 @@
 //   into CRAFT_HOOKS below (tasks 32 and 33 fill them).
 import { createRng } from '../core/rng.js';
 import { exitPosition } from '../entities/onfoot.js';
-import { setDamageRule, createVehicle } from '../entities/vehicle.js';
+import { setDamageRule, getDamageRule, createVehicle } from '../entities/vehicle.js';
 import { createEvents } from '../core/events.js';
 import { createCollisionWorld } from '../world/collision.js';
 import {
@@ -2608,6 +2608,9 @@ export function warmCombat(city, x = 0, z = 0, heading = 0) {
     player: { mode: 'car', vehicle: car, walker, x, z, y: 0, heading, health: 100, wanted: 0 },
     progress: { stats: {} }, camHeading: heading,
   };
+  // createCombat binds the global damage rule to this stand-in game; put the
+  // real one back when the rehearsal is over.
+  const savedRule = getDamageRule();
   const sys = createCombat(g, { seed: 1 });
   addActor(g, crew);
   const out = { steps: 0, hits: 0, shots: 0, blasts: 0, downs: 0 };
@@ -2630,6 +2633,7 @@ export function warmCombat(city, x = 0, z = 0, heading = 0) {
   }
   sys.fire(crew, -ux, 0, -uz);
   out.steps = n;
+  setDamageRule(savedRule);
   return out;
 }
 

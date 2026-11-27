@@ -12,7 +12,7 @@ import { realRoads, realJunctionJob, realEdgeJob } from '../src/render/citymesh.
 import { createEvents } from '../src/core/events.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { createWalker } from '../src/entities/onfoot.js';
-import { createVehicle } from '../src/entities/vehicle.js';
+import { createVehicle, getDamageRule, setDamageRule } from '../src/entities/vehicle.js';
 import { createRng } from '../src/core/rng.js';
 import { RULES, createArms } from '../src/core/weapons.js';
 import { createCombat, initActor, addActor, warmCombat } from '../src/systems/combat.js';
@@ -109,7 +109,11 @@ function fight() {
 test('warmCombat: hits, a blast and a knock-down on a stand-in; a real fight is the same after it', () => {
   const before = fight();
   assert.ok(before.filter((x) => x === 'hit').length >= 2 && before.includes('explosion'), 'the fight lands a shot and a blast');
-  const r =warmCombat(city, sp.x, sp.z, sp.heading || 0);
+  const sentinel = () => 0;
+  setDamageRule(sentinel);
+  const r = warmCombat(city, sp.x, sp.z, sp.heading || 0);
+  assert.equal(getDamageRule(), sentinel, 'the real damage rule is restored after the rehearsal');
+  setDamageRule(null);
   assert.ok(r.hits > 0, 'the rehearsal hit something');
   assert.equal(r.blasts, 1);
   assert.ok(r.downs > 0);
