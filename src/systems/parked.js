@@ -13,7 +13,8 @@ import { createVehicle, VEHICLE_SPECS } from '../entities/vehicle.js';
 import { garageRemove } from '../core/garage.js';
 import { createPointIndex, beginSpawnStep, takeSpawn, belowLiveCap, SPAWNER } from '../core/spatial.js';
 import { LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, buildLotHull } from '../render/lotmesh.js';
-import { createParkedLotField } from '../render/parkedfield.js';
+import { createParkedLotField, createParkedCurbField, CURB_MAX, COL_MAX } from '../render/parkedfield.js';
+import { mkShape } from '../world/shape.js';
 import { lotFill, lotDressCache, blockedBays, bayCount, bayScale } from '../world/lots.js';
 import { groundFn } from '../world/ground.js';
 import { createVehicleMesh } from '../render/vehiclemesh.js';
@@ -31,6 +32,9 @@ export const PARKED_RESERVE = 24;
 // Normal 40, High 48; before, every curb spot in 135 m up to the live cap).
 export const PARKED_CAP = [30, 40, 48];
 export const PARKED_CAP_DEFAULT = PARKED_CAP[1];
+// Static cars (drawn, no vehicle) in the parking lanes in view, by the same
+// tier (0.15 roads WP4), on top of the lot cars.
+export const CURB_CAP = [14, 24, 32];
 // A listed lot bay (city.parkingSpots, lot: true) holds a car when its own
 // hash is under its lot's fill at the hour (lots.js lotFill), the same rule
 // as the drawn bay cars; one not in a lot box as if its lot were this full.
@@ -74,7 +78,7 @@ function createLotCarView(game, field) {
   root.name = 'lotcars';
   scene.add(root);
   const nSpec = LOT_CAR_SPECS.length;
-  const MAXC = LOT_CAR_CAP_MAX;
+  const MAXC = field.x.length;
   const tmp = new THREE.Matrix4(), wm = new THREE.Matrix4();
   const col = new THREE.Color();
   // Hulls: one instanced mesh per model, the paint color per instance.
@@ -245,6 +249,56 @@ function createLotCarView(game, field) {
   return view;
 }
 
+// The collision shapes of the static curb cars (0.15 roads WP4) as a lazy
+// layer of the collision world: two circles a car, as the lot bay cars
+// (world/collision.js addBayCars), for the cars near the player. set()
+// moves the pooled shapes to the cars given (x, z, yaw, three floats each);
+// the cells are lists reused from one set to the next.
+const CELL = 32;
+const NO_ITEMS = Object.freeze([]);
+export function createCurbCarLayer() {
+  const shapes = [];
+  for (let i = 0; i < COL_MAX * 2; i++) shapes.push(mkShape(1, 0, 0, 0, 0, 0, 0, 1.0, 1.4, 'car'));
+  const lists = new Map();
+  const used = [];
+  const key = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
+  const layer = {
+    name: 'curbcars',
+    shapes,
+    count: 0,
+    cell(cx, cz) {
+      return lists.get(key(cx, cz)) || NO_ITEMS;
+    },
+    set(col, n) {
+      for (let i = 0; i < used.length; i++) used[i].length = 0;
+      used.length = 0;
+      if (lists.size > 600) lists.clear();
+      const m = Math.min(n, COL_MAX);
+      for (let i = 0; i < m; i++) {
+        const x = col[i * 3], z = col[i * 3 + 1], c = Math.cos(col[i * 3 + 2]), sn = Math.sin(col[i * 3 + 2]);
+        for (let h = 0; h < 2; h++) {
+          const sh = shapes[i * 2 + h], o = h ? 1.2 : -1.2;
+          sh.x = x + c * o;
+          sh.z = z + sn * o;
+          sh.off = false;
+          for (let cx = Math.floor((sh.x - sh.r) / CELL); cx <= Math.floor((sh.x + sh.r) / CELL); cx++) {
+            for (let cz = Math.floor((sh.z - sh.r) / CELL); cz <= Math.floor((sh.z + sh.r) / CELL); cz++) {
+              const k = key(cx, cz);
+              let list = lists.get(k);
+              if (!list) lists.set(k, (list = []));
+              if (!list.length) used.push(list);
+              list.push(sh);
+            }
+          }
+        }
+      }
+      for (let i = m * 2; i < shapes.length; i++) shapes[i].off = true;
+      layer.count = m * 2;
+    },
+  };
+  return layer;
+}
+
 export function createParkedCars(game) {
   // The designed start street's curb spaces (`start`, docs/REVAMP.md 6.8)
   // come first, so the first scan fills them before any other.
@@ -273,7 +327,34 @@ export function createParkedCars(game) {
   // parked cars wait for them rather than dress a lot in a step themselves.
   const tilesDress = !!(city.lots && city.lots.length && game.scene);
   const lotField = city.lots && city.lots.length ? createParkedLotField(city, { quick: tilesDress, ground: tilesDress ? groundFn(city) : null }) : null;
-  const lotView = lotField && game.scene ? createLotCarView(game, lotField) : null;
+  // The static cars of the parking lanes (0.15 roads WP4), where the city
+  // has street geometry and lots. A curb station near a curb spot stays
+  // empty: the live cars keep the spots.
+  const spotTmp = [];
+  const curbField = lotField && city.roadGeo && city.edges && city.edges.length
+    ? createParkedCurbField(city, { spotNear: (x, z, r) => index.near(x, z, r, spotTmp).length > 0 })
+    : null;
+  const curbLayer = curbField ? createCurbCarLayer() : null;
+  if (curbLayer && game.collision && typeof game.collision.addLayer === 'function') game.collision.addLayer(curbLayer);
+  // What the view draws: the lot cars and the curb cars in one set.
+  const carField = lotField ? {
+    n: 0, x: new Float32Array(LOT_CAR_CAP_MAX + CURB_MAX), z: new Float32Array(LOT_CAR_CAP_MAX + CURB_MAX), yaw: new Float32Array(LOT_CAR_CAP_MAX + CURB_MAX),
+    y: new Float32Array(LOT_CAR_CAP_MAX + CURB_MAX), spec: new Uint8Array(LOT_CAR_CAP_MAX + CURB_MAX), color: new Uint32Array(LOT_CAR_CAP_MAX + CURB_MAX), dist: new Float32Array(LOT_CAR_CAP_MAX + CURB_MAX),
+  } : null;
+  function mergeCars() {
+    let n = 0;
+    const f = lotField, c = curbField;
+    for (let i = 0; i < f.n; i++, n++) {
+      carField.x[n] = f.x[i]; carField.z[n] = f.z[i]; carField.yaw[n] = f.yaw[i]; carField.y[n] = f.y[i];
+      carField.spec[n] = f.spec[i]; carField.color[n] = f.color[i]; carField.dist[n] = f.dist[i];
+    }
+    for (let i = 0; c && i < c.n; i++, n++) {
+      carField.x[n] = c.x[i]; carField.z[n] = c.z[i]; carField.yaw[n] = c.yaw[i]; carField.y[n] = c.y[i];
+      carField.spec[n] = c.spec[i]; carField.color[n] = c.color[i]; carField.dist[n] = c.dist[i];
+    }
+    carField.n = n;
+  }
+  const lotView = lotField && game.scene ? createLotCarView(game, carField) : null;
   const lotCache = lotField ? lotDressCache(city) : null;
   let lotTimer = 0;
   let warmAt = 0; // the next lot car model the view builds ahead
@@ -619,6 +700,7 @@ export function createParkedCars(game) {
       // never in the step that refreshes (each costs a step a few ms).
       // (A lot the tiles have not dressed waits for them up to 1.5 s.)
       lotField.step(undefined, false, tilesDress ? Math.min(255, Math.ceil(1.5 / Math.max(dt, 1e-3))) : 0);
+      if (curbField) curbField.step();
       if (lotView && lotTimer < 0.2 && lotTimer > 0.05) {
         if (lotView.wantSi >= 0) {
           lotView.warm(lotView.wantSi, lotView.wantColor);
@@ -639,6 +721,7 @@ export function createParkedCars(game) {
     }
     const tier = game.graphics && game.graphics.parkedCars;
     const lotCap = Math.min(LOT_CAR_CAP_MAX, tier > 0 ? tier : LOT_CAR_CAP);
+    const curbCap = Math.min(CURB_MAX, cap <= PARKED_CAP[0] ? CURB_CAP[0] : cap >= PARKED_CAP[2] ? CURB_CAP[2] : CURB_CAP[1]);
     let curb = 0;
     for (let i = 0; i < live.length; i++) {
       const v = live[i].vehicle;
@@ -660,6 +743,11 @@ export function createParkedCars(game) {
       blockers[o + 4] = (v.spec.length || 4.5) / 2; blockers[o + 5] = (v.spec.width || 1.8) / 2;
     }
     lotField.update(cx, cz, fx, fz, game.clock ?? 12, Math.max(8, lotCap - curb), blockers, nb);
+    if (curbField) {
+      curbField.update(cx, cz, fx, fz, game.player.x, game.player.z, curbCap, blockers, nb);
+      curbLayer.set(curbField.col, curbField.nCol);
+    }
+    if (carField) mergeCars();
     if (lotView) lotView.sync();
   }
 
@@ -668,6 +756,9 @@ export function createParkedCars(game) {
     spots,
     stats,
     lotField,
+    curbField,
+    carField,
+    curbLayer,
     lotView,
     get cap() {
       return cap;

@@ -20,6 +20,8 @@
 import { bayCar, bayLotU } from '../world/collision.js';
 import { lotDressCache, lotFill, dressLot, blockedBays, blockedBaysInto, bayCount, BAYS_ONLY_FAST } from '../world/lots.js';
 import { LOT_CAR_MIX, LOT_CAR_SPECS, LOT_CAR_CAP, LOT_CAR_CAP_MAX, lotCarColor } from './lotmesh.js';
+import { curbsAt, onJunction } from '../world/junctions.js';
+import { GUTTER, PARK_W } from '../world/roadprofile.js';
 
 const MIX_IDX = {};
 for (const k of Object.keys(LOT_CAR_MIX)) MIX_IDX[k] = LOT_CAR_MIX[k].map((id) => LOT_CAR_SPECS.indexOf(id));
@@ -327,6 +329,250 @@ export function createParkedLotField(city, opts = {}) {
       }
     }
     field.n = n;
+    return n;
+  };
+  return field;
+}
+
+// ---- Static cars at the curb (0.15 roads WP4) ----
+//
+// The parking lanes of the streets near the camera hold static, drawn cars
+// (no vehicle, no simulation): a station every CURB_STEP m along each
+// parking lane (the grid the curb spots of world/miami.js use), a car at
+// CURB_FILL of them by a position hash (no rng). A station is left empty
+// at a junction approach, where another street (a drive) meets the lane,
+// on a junction's asphalt, near the shore or a building, and where a curb
+// spot is (opts.spotNear: the live cars of systems/parked.js keep those).
+// One street side is loaded at a time, a few stations a step; the records
+// are pooled, like the lot field's. update() fills the same arrays as the
+// lot field (x, z, yaw, y, spec, color, dist: the nearest `cap` in view)
+// and col: every station car within COL_R m of the player (x, z, yaw), for
+// the collision shapes of systems/parked.js.
+export const CURB_STEP = 6.5;
+export const CURB_FILL = 0.74;
+export const CURB_MAX = 40; // most cars the field hands back
+export const CURB_NEAR_M = 28; // within this of the player a car is drawn whatever the view
+export const COL_R = 26; // cars within this of the player get a collision shape
+export const COL_MAX = 24;
+export const CURB_APPROACH = 9; // m of lane left empty past a junction's trimmed end
+const STATIONS_STEP = 48;
+const REC0 = 48;
+const REC_CAP = 64;
+
+function makeCurbRecord(cap) {
+  return { key: -1, edge: -1, n: 0, cap, x: new Float32Array(cap), z: new Float32Array(cap), yaw: new Float32Array(cap), spec: new Uint8Array(cap), color: new Uint32Array(cap) };
+}
+
+export function createParkedCurbField(city, opts = {}) {
+  const range = opts.range || 150;
+  const spotNear = opts.spotNear || null;
+  const MAX = CURB_MAX;
+  const field = {
+    n: 0, cap: opts.cap || 24,
+    x: new Float32Array(MAX), z: new Float32Array(MAX), yaw: new Float32Array(MAX), y: new Float32Array(MAX),
+    spec: new Uint8Array(MAX), color: new Uint32Array(MAX), dist: new Float32Array(MAX), pri: new Float32Array(MAX),
+    nCol: 0, col: new Float32Array(COL_MAX * 3),
+    stats: { loads: 0, released: 0, stations: 0, filled: 0, updates: 0, edges: 0 },
+    update: null, step: null, plan: null, pending: null, loadAll: null,
+  };
+  const nodes = city.nodes, edges = city.edges || [];
+  const geo = city.roadGeo || null;
+  const listed = typeof city.edgesNear === 'function';
+  const edgeTmp = [], nearTmp = [];
+  const byKey = new Map();
+  const active = [];
+  const pool = [];
+  for (let k = 0; k < REC0; k++) pool.push(makeCurbRecord(REC_CAP));
+  // Street sides to load, nearest first.
+  let qKeys = new Int32Array(256), qD = new Float32Array(256), qLen = 0, qHead = 0;
+  const queuedKey = new Set();
+  let lastCx = NaN, lastCz = NaN;
+  const MIX = {};
+  for (const k of Object.keys(LOT_CAR_MIX)) MIX[k] = LOT_CAR_MIX[k].map((id) => LOT_CAR_SPECS.indexOf(id));
+
+  const parkOf = (e, side) => (side ? e.parkR : e.parkL) > 0;
+  const usableEdge = (e) => !!e && !e.bridge && !e.causeway && !e.ped && !(geo && geo.inner[e.id]) && e.length > 30;
+  function segDist(e, x, z) {
+    const a = nodes[e.a];
+    const t = Math.max(0, Math.min(e.length, (x - a.x) * e.ux + (z - a.z) * e.uz));
+    return Math.hypot(x - (a.x + e.ux * t), z - (a.z + e.uz * t));
+  }
+  // Is point (x, z) on the strip of another street than e (a drive or a side
+  // street meeting the lane), or on a junction's asphalt?
+  function otherRoad(e, x, z) {
+    if (geo && onJunction(geo, x, z)) return true;
+    if (!listed) return false;
+    city.edgesNear(x, z, 12, nearTmp);
+    for (let q = 0; q < nearTmp.length; q++) {
+      const o = edges[nearTmp[q]];
+      if (!o || o === e || o.bridge) continue;
+      if (segDist(o, x, z) < o.width / 2 + 0.6) return true;
+    }
+    return false;
+  }
+
+  // Load one street side: its stations and their cars.
+  function load(key) {
+    const eid = key >> 1, side = key & 1, e = edges[eid];
+    const rec = pool.length ? pool.pop() : makeCurbRecord(REC_CAP);
+    rec.key = key; rec.edge = eid; rec.n = 0;
+    byKey.set(key, rec);
+    active.push(rec);
+    if (!usableEdge(e) || !parkOf(e, side)) return 0;
+    const a = nodes[e.a], b = nodes[e.b];
+    const ta = geo ? geo.trim[2 * eid] : 0, tb = geo ? geo.trim[2 * eid + 1] : 0;
+    const d0 = Math.max(a.hx || 0, ta) + CURB_APPROACH, d1 = e.length - Math.max(b.hx || 0, tb) - CURB_APPROACH;
+    const rx = -e.uz, rz = e.ux;
+    const heading = side || e.oneway ? Math.atan2(e.uz, e.ux) : Math.atan2(-e.uz, -e.ux);
+    const need = d1 > d0 ? Math.floor((d1 - d0) / CURB_STEP) + 1 : 0;
+    if (need > rec.cap) {
+      rec.cap = need;
+      rec.x = new Float32Array(need); rec.z = new Float32Array(need); rec.yaw = new Float32Array(need);
+      rec.spec = new Uint8Array(need); rec.color = new Uint32Array(need);
+    }
+    let n = 0;
+    for (let k = 0; k < need; k++) {
+      const d = d0 + k * CURB_STEP;
+      field.stats.stations++;
+      const C = curbsAt(geo, e, d);
+      const off = side ? C.r - GUTTER - PARK_W / 2 : C.l + GUTTER + PARK_W / 2;
+      const x = a.x + e.ux * d + rx * off, z = a.z + e.uz * d + rz * off;
+      const bi = Math.round(x * 5), bj = Math.round(z * 5);
+      if (hash2(bi, bj, 11) >= CURB_FILL) continue;
+      if (spotNear && spotNear(x, z, 3.4)) continue;
+      if (otherRoad(e, x, z) || city.mainShore(x, z) < 3 || city.inBuilding(x, z, 1.5)) continue;
+      const mix = MIX[city.districtOf(x, z)] || MIX.midtown;
+      const sp = mix[Math.floor(hash2(bi, bj, 1) * mix.length)];
+      const slide = (hash2(bi, bj, 4) - 0.5) * 0.9;
+      rec.x[n] = x + e.ux * slide;
+      rec.z[n] = z + e.uz * slide;
+      rec.yaw[n] = heading + (hash2(bi, bj, 2) - 0.5) * 0.07;
+      rec.spec[n] = sp;
+      rec.color[n] = lotCarColor(sp, hash2(bi, bj, 5));
+      n++;
+    }
+    rec.n = n;
+    field.stats.filled += n;
+    field.stats.loads++;
+    return need;
+  }
+
+  function plan(cx, cz) {
+    lastCx = cx; lastCz = cz;
+    const keep = range + 60;
+    for (let k = active.length - 1; k >= 0; k--) {
+      const r = active[k], e = edges[r.edge];
+      if (e && segDist(e, cx, cz) <= keep) continue;
+      byKey.delete(r.key);
+      r.n = 0; r.key = -1; r.edge = -1;
+      active[k] = active[active.length - 1];
+      active.length--;
+      pool.push(r);
+      field.stats.released++;
+    }
+    for (let k = qHead; k < qLen; k++) queuedKey.delete(qKeys[k]);
+    qHead = qLen = 0;
+    const reach = range + 20;
+    let n;
+    if (listed) { city.edgesNear(cx, cz, reach, edgeTmp); n = edgeTmp.length; } else n = edges.length;
+    for (let q = 0; q < n; q++) {
+      const eid = listed ? edgeTmp[q] : q;
+      const e = edges[eid];
+      if (!usableEdge(e) || !(e.parkL > 0 || e.parkR > 0)) continue;
+      const d = segDist(e, cx, cz);
+      if (d > reach) continue;
+      for (let side = 0; side < 2; side++) {
+        const key = eid * 2 + side;
+        if (!parkOf(e, side) || byKey.has(key) || queuedKey.has(key)) continue;
+        if (qLen === qKeys.length) {
+          const k2 = new Int32Array(qLen * 2), d2 = new Float32Array(qLen * 2);
+          k2.set(qKeys); d2.set(qD); qKeys = k2; qD = d2;
+        }
+        let at = qLen++;
+        while (at > 0 && qD[at - 1] > d) { qKeys[at] = qKeys[at - 1]; qD[at] = qD[at - 1]; at--; }
+        qKeys[at] = key; qD[at] = d;
+        queuedKey.add(key);
+      }
+    }
+    field.stats.edges = active.length;
+  }
+  field.plan = plan;
+  field.pending = () => qLen - qHead;
+  // One step of loading: street sides off the queue, nearest first, up to
+  // `stations` stations (at least one side).
+  field.step = (stations = STATIONS_STEP) => {
+    let done = 0, sides = 0;
+    while (qHead < qLen && (sides === 0 || done < stations)) {
+      const key = qKeys[qHead++];
+      queuedKey.delete(key);
+      if (byKey.has(key)) continue;
+      done += load(key) + 4;
+      sides++;
+    }
+    return sides;
+  };
+  field.loadAll = (cx, cz) => {
+    plan(cx, cz);
+    while (field.step(1e9));
+  };
+  // Cars of the loaded records within r m of (x, z) (tests, tools).
+  field.countNear = (x, z, r) => {
+    let c = 0;
+    for (let a = 0; a < active.length; a++) {
+      const rec = active[a];
+      for (let s = 0; s < rec.n; s++) if (Math.hypot(rec.x[s] - x, rec.z[s] - z) < r) c++;
+    }
+    return c;
+  };
+  // (cx, cz): the camera, (fx, fz) its look direction, (px, pz) the player;
+  // cap: cars wanted; blk, nBlk: real vehicles standing near (six floats
+  // each, as the lot field's): a station one overlaps stays empty.
+  field.update = (cx, cz, fx, fz, px, pz, cap = field.cap, blk = null, nBlk = 0) => {
+    const want = Math.min(MAX, Math.max(0, cap | 0));
+    field.stats.updates++;
+    if (!(Math.abs(cx - lastCx) < 24 && Math.abs(cz - lastCz) < 24)) plan(cx, cz);
+    let n = 0, nc = 0;
+    const r2 = range * range, c2 = COL_R * COL_R, n2 = CURB_NEAR_M * CURB_NEAR_M;
+    for (let a = 0; a < active.length; a++) {
+      const rec = active[a];
+      const X = rec.x, Z = rec.z;
+      for (let s = 0, m = rec.n; s < m; s++) {
+        const dx = X[s] - cx, dz = Z[s] - cz;
+        const d2 = dx * dx + dz * dz;
+        const qx = X[s] - px, qz = Z[s] - pz, p2 = qx * qx + qz * qz;
+        if (d2 > r2 && p2 > c2) continue;
+        let blocked = false;
+        for (let k = 0; k < nBlk && !blocked; k++) {
+          const o = k * 6, rx = X[s] - blk[o], rz = Z[s] - blk[o + 1];
+          const lx = rx * blk[o + 2] + rz * blk[o + 3], lz = -rx * blk[o + 3] + rz * blk[o + 2];
+          blocked = Math.abs(lx) < blk[o + 4] + 2.4 && Math.abs(lz) < blk[o + 5] + 1.0;
+        }
+        if (blocked) continue;
+        if (p2 < c2 && nc < COL_MAX) {
+          field.col[nc * 3] = X[s]; field.col[nc * 3 + 1] = Z[s]; field.col[nc * 3 + 2] = rec.yaw[s];
+          nc++;
+        }
+        if (d2 > r2) continue;
+        const d = Math.sqrt(d2);
+        // Near the player or the camera, or ahead within about 57 degrees.
+        const near = p2 < n2 || d <= 14;
+        if (!near && dx * fx + dz * fz < 0.54 * d) continue;
+        // Kept by priority (the near ones first, then by distance).
+        const pri = near ? d - 1000 : d;
+        if (n >= want && pri >= field.pri[n - 1]) continue;
+        let at = n < want ? n++ : want - 1;
+        while (at > 0 && field.pri[at - 1] > pri) {
+          const t = at - 1;
+          field.x[at] = field.x[t]; field.z[at] = field.z[t]; field.yaw[at] = field.yaw[t];
+          field.spec[at] = field.spec[t]; field.color[at] = field.color[t]; field.dist[at] = field.dist[t]; field.pri[at] = field.pri[t];
+          at--;
+        }
+        field.x[at] = X[s]; field.z[at] = Z[s]; field.yaw[at] = rec.yaw[s]; field.y[at] = 0;
+        field.spec[at] = rec.spec[s]; field.color[at] = rec.color[s]; field.dist[at] = d; field.pri[at] = pri;
+      }
+    }
+    field.n = n;
+    field.nCol = nc;
     return n;
   };
   return field;

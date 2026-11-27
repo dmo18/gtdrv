@@ -41,6 +41,9 @@ export const LOT_Y = -0.035;
 export const EDGE_Y = LOT_Y + 0.02;
 export const FLAT_Y = EDGE_Y + 0.02;
 
+// (0.15 roads WP4: the parking lot is a lighter, warmer concrete tone than
+// the roads' dark asphalt, so a lot beside a street no longer reads as more
+// road; the bay lines show on it from the street.)
 // Ground per lot type (one ground per block: no per-lot tone, no pattern
 // of its own): builder key and color. The paved types share one stone
 // and one slab lay, the lawns one green, so a block of forecourts and
@@ -50,7 +53,7 @@ export const FLAT_Y = EDGE_Y + 0.02;
 const PAVING = 0xd2cbbd, LAWN = 0x86a95e;
 export const LOT_GROUND = {
   yard: { key: 'grass', col: LAWN },
-  carpark: { key: 'asphalt', col: 0x63666a },
+  carpark: { key: 'asphalt', col: 0xb5a88f },
   plaza: { key: 'sidewalk', col: PAVING },
   grass: { key: 'grass', col: LAWN },
   works: { key: 'ground', col: 0xaaa59a },
@@ -259,7 +262,10 @@ export function lotFringe(city, B, i0, i1, j0, j1) {
 // is not asphalt. Paved lots meet without a border. Runs of cells along
 // one side merge into one strip. Returns the strips drawn.
 const CURB = 0.3, VERGE = 0.5;
-const CURB_COL = 0xd4d0c6, VERGE_COL = 0x7a9a50;
+// A parking lot edge toward a street, a lawn or the land outside any lot
+// (kind 5) also gets a PLANT m planting strip inside its curb.
+const PLANT = 1.0;
+const CURB_COL = 0xd4d0c6, VERGE_COL = 0x7a9a50, PLANT_COL = 0x628a44;
 const T_CARPARK = LOT_TYPES.indexOf('carpark') + 1;
 export function lotEdges(city, B, i0, i1, j0, j1) {
   const G = city.lotGrid;
@@ -269,12 +275,13 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
   const { x0, z0, cell, w, h, id, type } = G, ground = G.ground || G.type;
   let strips = 0;
   // Which edge cell k shows toward neighbor cell n (-1 off the grid):
-  // 1 lawn edge, 4 parking lot curb, 0 none.
+  // 1 lawn edge, 4 parking lot curb, 5 parking lot curb and planting strip
+  // (toward a street or the land outside any lot), 0 none.
   const cuts = !!G.ground;
-  const kindOf = (code, o) => {
+  const kindOf = (code, o, fringe = false) => {
     const g = GROUND_BY_T[code];
     if (g.key === 'grass') return o && o.key === 'grass' ? 0 : 1;
-    if (code === T_CARPARK) return o && o.key === 'asphalt' ? 0 : 4;
+    if (code === T_CARPARK) return o && o.key === 'asphalt' && !fringe ? 0 : fringe || !o ? 5 : 4;
     return 0;
   };
   const edgeOf = (k, n) => {
@@ -282,13 +289,15 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
     if (!g) return 0;
     // (A side on a diagonal cut has its strip along the cut, below.)
     if (cuts && n >= 0 && (cutToward(G, ground, k, n) || cutToward(G, ground, n, k))) return 0;
-    return kindOf(ground[k], n < 0 ? null : GROUND_BY_T[ground[n]]);
+    // (A neighbor in no lot of its own that takes the lot's ground, the
+    // setback band beside a street, is the street side of the lot.)
+    return kindOf(ground[k], n < 0 ? null : GROUND_BY_T[ground[n]], n >= 0 && !type[n] && ground[n] === ground[k]);
   };
   // side: 0 north (-z), 1 south (+z), 2 west (-x), 3 east (+x).
   const strip = (kind, side, a0, a1, line) => {
-    for (let layer = 0; layer < (kind === 1 ? 2 : 1); layer++) {
-      const d0 = layer ? CURB : 0, d1 = layer ? CURB + VERGE : CURB;
-      const col = layer ? VERGE_COL : CURB_COL;
+    for (let layer = 0; layer < (kind === 1 || kind === 5 ? 2 : 1); layer++) {
+      const d0 = layer ? CURB : 0, d1 = layer ? CURB + (kind === 5 ? PLANT : VERGE) : CURB;
+      const col = layer ? (kind === 5 ? PLANT_COL : VERGE_COL) : CURB_COL;
       const bld = layer ? B.grass : B.sidewalk;
       let xa, xb, za, zb;
       if (side < 2) {
@@ -351,9 +360,9 @@ export function lotEdges(city, B, i0, i1, j0, j1) {
           if (!GROUND_BY_T[type[side ? nb : k]]) continue;
           const kind = side ? kindOf(b, GROUND_BY_T[ground[k]]) : kindOf(ground[k], GROUND_BY_T[b]);
           if (!kind) continue;
-          for (let layer = 0; layer < (kind === 1 ? 2 : 1); layer++) {
-            const d0 = layer ? CURB : 0, d1 = layer ? CURB + VERGE : CURB;
-            cutStrip((layer ? B.grass : B.sidewalk).at(cx, cz), c, side === 1, d0, d1, EDGE_Y, layer ? VERGE_COL : CURB_COL);
+          for (let layer = 0; layer < (kind === 1 || kind === 5 ? 2 : 1); layer++) {
+            const d0 = layer ? CURB : 0, d1 = layer ? CURB + (kind === 5 ? PLANT : VERGE) : CURB;
+            cutStrip((layer ? B.grass : B.sidewalk).at(cx, cz), c, side === 1, d0, d1, EDGE_Y, layer ? (kind === 5 ? PLANT_COL : VERGE_COL) : CURB_COL);
             strips++;
           }
         }
@@ -660,8 +669,11 @@ export function drawLotFeatures(C, lot, feats, n, stamps, from = 0) {
         for (let s = 0; s <= nb; s++) {
           const o = -half + s * bw;
           const px = x + ca * o, pz = z + sa * o;
-          orientedQuad(lb, px - ca * BAY_HW - cx * dh, pz - sa * BAY_HW - cz * dh, px + ca * BAY_HW - cx * dh, pz + sa * BAY_HW - cz * dh,
-            px + ca * BAY_HW + cx * dh, pz + sa * BAY_HW + cz * dh, px - ca * BAY_HW + cx * dh, pz - sa * BAY_HW + cz * dh, FLAT_Y, 0xf6f6ee);
+          // (0.15 WP4: corners wound as MeshBuilder.flat, the top face. The
+          // quad was wound the other way round and culled: the bay lines
+          // never showed.)
+          orientedQuad(lb, px - ca * BAY_HW + cx * dh, pz - sa * BAY_HW + cz * dh, px + ca * BAY_HW + cx * dh, pz + sa * BAY_HW + cz * dh,
+            px + ca * BAY_HW - cx * dh, pz + sa * BAY_HW - cz * dh, px - ca * BAY_HW - cx * dh, pz - sa * BAY_HW - cz * dh, FLAT_Y, 0xf6f6ee);
         }
         break;
       }
