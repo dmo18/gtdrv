@@ -2450,14 +2450,17 @@ export function createCombat(game, { seed = 23023 } = {}) {
   // The crash rule for every car (vehicle.js damageVehicle): the floor of
   // the default mode for the player's car, props cost nothing outside Hard.
   function crashRule(v, amount, kind) {
-    if (kind === 'prop') return RULES.invulnerable ? 0 : amount;
-    if (kind !== 'crash') return amount;
+    if (kind === 'prop' && RULES.invulnerable) return 0;
+    if (kind !== 'prop' && kind !== 'crash') return amount;
     const p = game.player;
-    if (RULES.invulnerable && p && p.vehicle === v) {
+    if (kind === 'crash' && RULES.invulnerable && p && p.vehicle === v) {
       const floor = ((v.spec && v.spec.health) || 1000) * CRASH_FLOOR;
       const room = v.health - floor;
       return room > 0 ? Math.min(amount, room) : 0;
     }
+    // A burning car hit by anything ends its burn now: the burn step wrecks
+    // it through the combat path (blast, parts, hull), never as a crash wreck.
+    if (v.burning && !v.wrecked && v.health - amount <= 0) v.burnT = BURN_T;
     return amount;
   }
   setDamageRule(crashRule);

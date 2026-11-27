@@ -44,16 +44,20 @@ jobs:
         if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push' && !contains(github.event.head_commit.message, '[wip]')
         with:
           path: dist
-  # Headless browser check (build, phone size Chromium, fails on any page error). Not a
-  # gate: playwright is not in package.json (no dependency may be added here), so it is
-  # installed for this job only, and the runner's software WebGL speed is untested. It runs
-  # next to the blocking check and never holds back publishing. Promote it to `needs` of
-  # publish once it has passed on the runner for a while.
+  # Headless browser check (build, phone size Chromium, fails on any page error).
+  # playwright is a pinned devDependency, so it comes from the lockfile. The job
+  # blocks publishing (publish needs it). It has its own concurrency group so it
+  # cannot delay or be cancelled by another run of the workflow. CI cannot be
+  # tested locally: the runner's software WebGL speed is the unknown.
   smoke:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[wip]')
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: smoke-${{ github.ref }}-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,15 +66,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Install playwright and Chromium for this job only
-        run: |
-          npm install --no-save --no-package-lock playwright@1.63.0
-          npx playwright install --with-deps chromium
+      - run: npm ci --ignore-scripts
+      - name: Install Chromium for the pinned playwright
+        run: npx playwright install --with-deps chromium
       - run: npm run smoke
   publish:
     if: github.ref_name == github.event.repository.default_branch && github.event_name == 'push' && !contains(github.event.head_commit.message, '[wip]')
-    needs: check
+    needs: [check, smoke]
     runs-on: ubuntu-latest
     permissions:
       pages: write

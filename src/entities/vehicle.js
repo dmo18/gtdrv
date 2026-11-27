@@ -331,6 +331,9 @@ export function damageVehicle(v, amount, kind = 'crash', source = null) {
   v.health -= amount;
   if (v.health <= 0) {
     v.health = 0;
+    // A burning car finishes by the fire path (blast, parts, hull), not as
+    // a crash wreck: it stays unwrecked and the burn step ends it.
+    if (v.burning && !v.wrecked) return amount;
     if (!v.wrecked && (kind === 'crash' || kind === 'prop')) v.crashWreck = true;
     v.wrecked = true;
   }

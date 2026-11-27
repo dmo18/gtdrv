@@ -912,6 +912,7 @@ export function* createGameSteps({ canvas, uiRoot, city: givenCity = null }) {
 
   game.loop = createLoop({ fixedUpdate: loopStep, render: loopRender, getScale: () => game.timeScale || 1, errors: game.errors });
   game.resize = resize;
+  game.checkRotation = checkRotation; // start() re-runs it once the title is gone
   game.step = fixedUpdate; // for tests
   game.draw = render;
   return game;

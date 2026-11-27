@@ -48,6 +48,8 @@ function start(game, blend) {
   // Play begins: from here the place is autosaved again.
   game.session.hold(false);
   game.resize();
+  // The title no longer covers a portrait screen: pause under the rotate cover.
+  if (game.checkRotation) game.checkRotation();
   game.loop.start();
   markRunning();
   // The HUD and controls show when the camera has blended to the chase view
@@ -290,13 +292,20 @@ async function startUp() {
   if (note && !autostart) continueGame(false, note.link, true);
   if (autostart) start(game);
 }
+// A failure after the title hid #boot: write the line to #bootmsg, and bring
+// #boot back (textContent only) when it is hidden so the player sees it.
+function showFailure(text) {
+  msg.textContent = text;
+  const boot = document.getElementById('boot');
+  if (boot && boot.style.display === 'none') boot.style.display = '';
+}
 startUp().catch((err) => {
   console.error(err);
   // Say what failed, so it can be reported (name and message only).
   const why = err && (err.name || err.message) ? ' (' + String(err.name || '') + ': ' + String(err.message || '').slice(0, 120) + ')' : '';
   // After __rwOk the shell ignores a failure: write it to the message line.
   if (typeof window.__rwFail === 'function' && !shellOk) window.__rwFail(failureKind(err), why.slice(2, -1));
-  else msg.textContent = failureMessage(failureKind(err)) + why;
+  else showFailure(failureMessage(failureKind(err)) + why);
 });
 
 // Offline support. A new version is applied right away only while the

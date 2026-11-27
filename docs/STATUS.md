@@ -7,6 +7,11 @@ Every publish bumps the version: `version` in package.json and android/package.j
 Last updated: 2026-11-20. The game is playable and published. Work is at
 the final review and fix stage; nothing is in progress that blocks play.
 
+## 0.15 ci and lows (2026-11-27, in the tree, no version bump)
+- CI: playwright 1.63.0 (Apache-2.0, plus playwright-core) is an exact-pinned devDependency; `npm audit --omit=dev` reports 0 vulnerabilities. The `smoke` job now runs `npm ci --ignore-scripts` and `npx playwright install --with-deps chromium`, has `contents: read`, its own concurrency group (smoke plus ref plus run id, no cancel), and is a `needs` of publish, so a failing smoke blocks publishing. `npm run smoke` passes locally with the pinned dependency. The workflow itself cannot be tested locally.
+- Portrait autostart (game.js, main.js): `game.checkRotation` is exposed and `start()` calls it after the title hides, so a portrait ?autostart pauses under the rotate cover.
+- Late failure (main.js): `showFailure` writes the message to #bootmsg and re-shows #boot if the title had hidden it (textContent only).
+- Burning car hit (entities/vehicle.js, systems/combat.js): a burning, unwrecked car taking crash or prop damage that would kill it now ends its burn (crash rule sets burnT) and stays unwrecked in `damageVehicle`; the burn step then wrecks it through `craftDestroyed` (blast, parts, hull). The player's cannot-die floor is applied first and unchanged. Test: test/burnhit.test.js.
 ## 0.14.1 tank fence and lows (2026-11-27, in the tree, no version bump)
 - Tank and fence (fixed): the sweep finding (miami-west, lot:fence, tank, x -3012.5, z -233.7, 0.62 m) was a wedge: the fence converges on a building face and each body circle was resolved alone. `stepTank` (entities/tank.js) now checks both body circles after the resolve passes; if one still overlaps more than 0.12 m (WEDGE_DEPTH) it restores the pre-move position and removes the forward speed. Full sweep (--per 3, all regions, all crafts): 0 failing runs. Test: test/tank-fence-wedge.test.js.
 - Service worker: the cache version hash now includes the sw.js template (`swVersion` in scripts/build.mjs), and a failed install deletes the cache only if it did not exist before the install. Tests: test/sw-cache.test.js.
