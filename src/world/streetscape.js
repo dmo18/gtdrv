@@ -13,6 +13,7 @@
 // junction areas and crosswalks); with no clear place the prop is dropped.
 // Pure: no three.js, no DOM.
 import { groundOf, GAP_MAX, SLIVER_MAX } from './ground.js';
+import { ownField } from './lazy.js';
 import { curbsAt, supAt, walkOf, walkLeftOf, medianBand, medianAt, pairGap, pointInRing, junctionsInBox } from './junctions.js';
 
 // m kept between a prop's footprint and the drivable surface.
@@ -497,9 +498,54 @@ export const propRadius = (type) => RADIUS[type] ?? 0.35;
 // Mutates city.props, city.furniture and city.signals; returns counts.
 const P = { x: 0, z: 0, o: 0, on: '' };
 export function settleStreetProps(city, specs) {
+  const S = makeSettler(city, specs);
+  if (!S) return { kept: 0, moved: 0, dropped: 0, median: 0, verge: 0 };
+  S.keepIf(city.props, (p) => p.type);
+  S.keepIf(city.furniture, (f) => f.type);
+  S.signals();
+  return S.stats;
+}
+// settleStreetProps on demand (0.15 build time): nothing is settled in the
+// build; city.props, city.furniture, city.signals and city.nodes (the
+// settle may turn a node's light off) become accessors that settle all
+// of them, as settleStreetProps does and in its order, at the first read
+// or write of any of them (or of holder[key], the stats). Then each is a
+// plain data property again. The settle reads only what is final once
+// the build is done (the roads, junctions, buildings and shore), so the
+// lists, the nodes and the stats come out the same whenever the first
+// read comes. Call it at the very end of the build. Returns nothing: the
+// stats are holder[key].
+const LAZY_KEYS = ['props', 'furniture', 'signals', 'nodes'];
+export function settleStreetPropsLater(city, specs, holder = null, key = 'streetProps') {
+  const val = {};
+  for (const k of LAZY_KEYS) val[k] = city[k];
+  let stats = null, busy = false;
+  const resolve = () => {
+    if (stats || busy) return;
+    // (While it runs the accessors hand out the lists as they stand.)
+    busy = true;
+    try {
+      stats = settleStreetProps(city, specs);
+    } finally {
+      busy = false;
+    }
+    for (const k of LAZY_KEYS) ownField(city, k, val[k]);
+    if (holder) ownField(holder, key, stats);
+  };
+  const lazy = (o, k, get, set) => Object.defineProperty(o, k, { get, set, enumerable: true, configurable: true });
+  for (const k of LAZY_KEYS) {
+    lazy(city, k, () => { resolve(); return val[k]; }, (v) => {
+      resolve();
+      val[k] = v;
+      if (!busy) ownField(city, k, v);
+    });
+  }
+  if (holder) lazy(holder, key, () => { resolve(); return stats; }, (v) => { resolve(); ownField(holder, key, v); });
+}
+function makeSettler(city, specs) {
   const G = groundOf(city);
   const stats = { kept: 0, moved: 0, dropped: 0, median: 0, verge: 0 };
-  if (!G || !city.roadGeo) return stats;
+  if (!G || !city.roadGeo) return null;
   // `wide`: the last mast of a signaled junction, tried further back and
   // further out (BACK_WIDE, WANT_WIDE) once every nearer place failed.
   const settle = (item, type, wide = false) => {
@@ -563,8 +609,6 @@ export function settleStreetProps(city, specs) {
     }
     list.length = n;
   };
-  keepIf(city.props, (p) => p.type);
-  keepIf(city.furniture, (f) => f.type);
   // A signaled junction keeps at least one mast: the node's light stops
   // cars (world/citygen.js signalState), so one with none would stop them
   // at a light no one can see. Where every mast of a junction was
@@ -572,29 +616,31 @@ export function settleStreetProps(city, specs) {
   // the junction loses its light (node.signal false, stats.unlit). (A
   // junction polygon that joins several nodes is one junction: a mast at
   // any of its nodes lights it.)
-  const dropped = [];
-  keepIf(city.signals, () => 'signal', dropped);
-  if (dropped.length && city.signals) {
-    const nodeJ = city.roadGeo.nodeJ;
-    const litKey = (id) => (nodeJ && nodeJ[id] >= 0 ? -1 - nodeJ[id] : id);
-    const lit = new Set();
-    for (const s of city.signals) lit.add(litKey(s.node));
-    for (const item of dropped) {
-      if (lit.has(litKey(item.node)) || !settle(item, 'signal', true)) continue;
-      stats.dropped--;
-      stats.rescued = (stats.rescued || 0) + 1;
-      city.signals.push(item);
-      lit.add(litKey(item.node));
+  const signals = () => {
+    const dropped = [];
+    keepIf(city.signals, () => 'signal', dropped);
+    if (dropped.length && city.signals) {
+      const nodeJ = city.roadGeo.nodeJ;
+      const litKey = (id) => (nodeJ && nodeJ[id] >= 0 ? -1 - nodeJ[id] : id);
+      const lit = new Set();
+      for (const s of city.signals) lit.add(litKey(s.node));
+      for (const item of dropped) {
+        if (lit.has(litKey(item.node)) || !settle(item, 'signal', true)) continue;
+        stats.dropped--;
+        stats.rescued = (stats.rescued || 0) + 1;
+        city.signals.push(item);
+        lit.add(litKey(item.node));
+      }
+      // A junction with no visible light holds no signal on any of its nodes.
+      const dark = new Set();
+      for (const item of dropped) if (!lit.has(litKey(item.node))) dark.add(litKey(item.node));
+      for (let i = 0; i < city.nodes.length; i++) {
+        const node = city.nodes[i];
+        if (!node.signal || !dark.has(litKey(i))) continue;
+        node.signal = false;
+        stats.unlit = (stats.unlit || 0) + 1;
+      }
     }
-    // A junction with no visible light holds no signal on any of its nodes.
-    const dark = new Set();
-    for (const item of dropped) if (!lit.has(litKey(item.node))) dark.add(litKey(item.node));
-    for (let i = 0; i < city.nodes.length; i++) {
-      const node = city.nodes[i];
-      if (!node.signal || !dark.has(litKey(i))) continue;
-      node.signal = false;
-      stats.unlit = (stats.unlit || 0) + 1;
-    }
-  }
-  return stats;
+  };
+  return { stats, keepIf, signals };
 }

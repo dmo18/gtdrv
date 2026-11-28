@@ -1181,7 +1181,7 @@ function gridSkew(city, x, z) {
 // bays, the solid features before them not tested against the road
 // (see put), and no road verdicts kept.
 export const BAYS_ONLY_FAST = 2;
-export function dressLot(city, lot, out = [], baysOnly = false) {
+export function dressLot(city, lot, out = [], baysOnly = false, garagesAt = undefined) {
   const noRoad = baysOnly === BAYS_ONLY_FAST;
   out.length = 0;
   const G = city.lotGrid;
@@ -1193,7 +1193,8 @@ export function dressLot(city, lot, out = [], baysOnly = false) {
   const id = lot.id;
   const cap = featureCap(lot);
   let solid = 0;
-  const garages = city.garages;
+  // (garagesAt: the garages to keep clear of, when not the city's own (null: none).)
+  const garages = garagesAt === undefined ? city.garages : garagesAt;
   // (The grid's fields read once: inLot runs some ten times a feature.)
   const gx0 = G.x0, gz0 = G.z0, gh = G.h, gid = G.id;
   const inLot = (x, z) => {

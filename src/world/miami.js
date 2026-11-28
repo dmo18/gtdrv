@@ -16,7 +16,8 @@ import { buildLots, planInfill, stepDistance, dressLot, BAYS_ONLY_FAST, bayCount
 import { buildCourses } from './courses.js';
 import { placeSecrets } from './secrets.js';
 import { placeRamps } from './stunts.js';
-import { settleStreetProps } from './streetscape.js';
+import { settleStreetPropsLater } from './streetscape.js';
+import { lazyField } from './lazy.js';
 import { regionFor, inRegion, holdsAll, pointsIn, WHOLE_BOX, BOX, REGIONS } from './regions.js';
 
 export { MIAMI_CROP, MIAMI_CORE, MIAMI_SPOTS };
@@ -257,13 +258,14 @@ function stampLine(R, ax, az, bx, bz, v) {
 // distance transform of each side) less half a cell, clamped to CLAMP.
 // A squared distance of FAR cells or more always clamps, so the column
 // pass caps at FAR (squared run length to the nearest cell of the other
-// side: one sweep down, then one sweep up fused with the row passes), and
-// the row pass builds the lower envelope of the cells under FAR only,
-// within `reach` cells of the row's first and last cell of its side,
-// skipping cells of the other side inside a run of it (never the
-// nearest), and writes the clamp past reach of the outer sources. Each
-// skip leaves out only parabolas that are never the minimum under FAR,
-// so the field is the full transform's, value for value.
+// side: one sweep down, then one sweep up fused with the row pass). The
+// row pass (0.15 build time: both sides in one sweep, was one sweep a
+// side) builds the lower envelope of each side from the cells under FAR
+// and the cells of the other side at the ends of their runs (one inside
+// a run is never the nearest), then reads every cell's distance off its
+// side's envelope (FAR or more: the clamp). Each skip leaves out only
+// parabolas that are never the minimum under FAR, so the field is the
+// full transform's, value for value.
 // sdBuf (Uint8) and colBuf (Int16 when FAR < 32768, else Int32), N cells
 // each: optional scratch views for the sides and the column pass (every
 // cell of both is written before it is read).
@@ -271,8 +273,6 @@ function signedField(R, sdBuf = null, colBuf = null) {
   const W = R.w, H = R.h, N = W * H, m = R.data;
   const lim = CLAMP * 10;
   const FAR = (Math.ceil(lim / (10 * R.cell) + 0.5) + 1) ** 2;
-  let reach = 0;
-  while (reach * reach < FAR) reach++;
   const posOf = new Int16Array(FAR), negOf = new Int16Array(FAR);
   for (let d = 0; d < FAR; d++) {
     const p = Math.round((Math.sqrt(d) - 0.5) * R.cell * 10), q = Math.round(-(Math.sqrt(d) - 0.5) * R.cell * 10);
@@ -283,21 +283,76 @@ function signedField(R, sdBuf = null, colBuf = null) {
   const col = colBuf && (FAR < 32768) === (colBuf instanceof Int16Array) ? colBuf : FAR < 32768 ? new Int16Array(N) : new Int32Array(N);
   colUp(sd, col, W, H);
   const out = new Int16Array(N);
-  const v = new Int32Array(W), zz = new Float64Array(W + 1), gv = new Float64Array(W);
+  // One lower envelope per side (0 water, 1 land), both built in one
+  // sweep of the row and read in a second.
+  const v0 = new Int32Array(W), zz0 = new Float64Array(W + 1), gv0 = new Float64Array(W);
+  const v1 = new Int32Array(W), zz1 = new Float64Array(W + 1), gv1 = new Float64Array(W);
   const run = new Int32Array(W).fill(-1), side = new Uint8Array(W).fill(2);
   for (let y = H - 1; y >= 0; y--) {
     const row = y * W;
-    colDown(sd, col, row, W, FAR, run, side);
-    for (let t = 0; t < 2; t++) {
-      let a = 0, b = W - 1;
-      while (a < W && sd[row + a] !== t) a++;
-      if (a === W) continue;
-      while (sd[row + b] !== t) b--;
-      rowPass(sd, col, out, row, W, t, a, b, reach, FAR, t ? posOf : negOf, t ? lim : -lim, v, zz, gv);
-    }
+    rowBoth(sd, col, out, row, W, FAR, negOf, posOf, -lim, lim, v0, zz0, gv0, v1, zz1, gv1, run, side);
   }
   return out;
 }
+// Felzenszwalb's lower envelope of both sides along one row, then the
+// distances read off it. A cell of side t is a source for side t with its
+// column distance (when under FAR) and, at the edge of its run (or the
+// row), a source for the other side at 0.
+function rowBoth(sd, col, out, row, W, FAR, tab0, tab1, far0, far1, v0, zz0, gv0, v1, zz1, gv1, run, side) {
+  let k0 = -1, k1 = -1;
+  for (let x = 0; x < W; x++) {
+    const c = row + x, t = sd[c];
+    // Same side: its column distance (the nearer of the runs up and down).
+    if (t !== side[x]) { run[x] = side[x] === 2 ? -1 : 0; side[x] = t; }
+    let dn = run[x];
+    if (dn >= 0) run[x] = ++dn;
+    const up = col[c];
+    const r = up < 0 ? dn : dn < 0 ? up : up < dn ? up : dn;
+    const g = r < 0 || r * r >= FAR ? FAR : r * r;
+    // Other side: an end of a run (a cell whose neighbor is of the other side) or of the row.
+    const edge = x === 0 || x === W - 1 || sd[c - 1] !== t || sd[c + 1] !== t;
+    if (t === 1) {
+      if (g < FAR) k1 = envPush(v1, zz1, gv1, k1, x, g);
+      if (edge) k0 = envPush(v0, zz0, gv0, k0, x, 0);
+    } else {
+      if (g < FAR) k0 = envPush(v0, zz0, gv0, k0, x, g);
+      if (edge) k1 = envPush(v1, zz1, gv1, k1, x, 0);
+    }
+  }
+  zz0[k0 + 1] = Infinity;
+  zz1[k1 + 1] = Infinity;
+  let e0 = 0, e1 = 0;
+  for (let x = 0; x < W; x++) {
+    const c = row + x;
+    if (sd[c] === 1) {
+      if (k1 < 0) { out[c] = far1; continue; }
+      while (zz1[e1 + 1] < x) e1++;
+      const q = x - v1[e1], d = q * q + gv1[e1];
+      out[c] = d < FAR ? tab1[d] : far1;
+    } else {
+      if (k0 < 0) { out[c] = far0; continue; }
+      while (zz0[e0 + 1] < x) e0++;
+      const q = x - v0[e0], d = q * q + gv0[e0];
+      out[c] = d < FAR ? tab0[d] : far0;
+    }
+  }
+}
+function envPush(v, zz, gv, k, x, g) {
+  const gq = g + x * x;
+  let s = -Infinity;
+  while (k >= 0) {
+    s = (gq - (gv[k] + v[k] * v[k])) / (2 * x - 2 * v[k]);
+    if (s > zz[k]) break;
+    k--;
+  }
+  if (k < 0) s = -Infinity;
+  k++;
+  v[k] = x;
+  gv[k] = g;
+  zz[k] = s;
+  return k;
+}
+
 // The side of each cell (0 water, 1 land).
 function sidesOf(m, N, buf) {
   const sd = buf || new Uint8Array(N);
@@ -310,62 +365,6 @@ function colUp(sd, col, W, H) {
   for (let c = W, N = W * H; c < N; c++) {
     const p = col[c - W];
     col[c] = sd[c] !== sd[c - W] ? 1 : p >= 0 ? p + 1 : -1;
-  }
-}
-function colDown(sd, col, row, W, FAR, run, side) {
-  for (let i = 0; i < W; i++) {
-    const c = row + i, t = sd[c];
-    if (t !== side[i]) { run[i] = side[i] === 2 ? -1 : 0; side[i] = t; }
-    if (run[i] >= 0) run[i]++;
-    const up = col[c], dn = run[i];
-    const r = up < 0 ? dn : dn < 0 ? up : up < dn ? up : dn;
-    col[c] = r < 0 || r * r >= FAR ? FAR : r * r;
-  }
-}
-function rowPass(sd, col, out, row, W, t, a, b, reach, FAR, tab, far, v, zz, gv) {
-  const x0 = a - reach < 0 ? 0 : a - reach, x1 = b + reach > W - 1 ? W - 1 : b + reach;
-  let k = -1;
-  for (let x = x0; x <= x1; x++) {
-    const c = row + x;
-    let g;
-    if (sd[c] === t) {
-      g = col[c];
-      if (g >= FAR) continue;
-    } else {
-      // A cell of the other side inside a run of its side is never the
-      // nearest of them to a cell of this side.
-      if (x > 0 && x < W - 1 && sd[c - 1] !== t && sd[c + 1] !== t) continue;
-      g = 0;
-    }
-    const gq = g + x * x;
-    let s = -Infinity;
-    while (k >= 0) {
-      s = (gq - (gv[k] + v[k] * v[k])) / (2 * x - 2 * v[k]);
-      if (s > zz[k]) break;
-      k--;
-    }
-    if (k < 0) s = -Infinity;
-    k++;
-    v[k] = x;
-    gv[k] = g;
-    zz[k] = s;
-  }
-  if (k < 0) {
-    for (let x = a; x <= b; x++) if (sd[row + x] === t) out[row + x] = far;
-    return;
-  }
-  zz[k + 1] = Infinity;
-  // Past reach of the first and last source every distance clamps.
-  const lo = v[0] - reach + 1 > a ? v[0] - reach + 1 : a, hi = v[k] + reach - 1 < b ? v[k] + reach - 1 : b;
-  for (let x = a; x < lo; x++) if (sd[row + x] === t) out[row + x] = far;
-  for (let x = hi + 1; x <= b; x++) if (sd[row + x] === t) out[row + x] = far;
-  let e = 0;
-  for (let x = lo; x <= hi; x++) {
-    const c = row + x;
-    if (sd[c] !== t) continue;
-    while (zz[e + 1] < x) e++;
-    const d = (x - v[e]) * (x - v[e]) + gv[e];
-    out[c] = d < FAR ? tab[d] : far;
   }
 }
 
@@ -3589,16 +3588,20 @@ export function createMiamiCity(data, opts = {}) {
     return out;
   }
   // Spatial queries (out arrays are cleared and filled with indices).
+  // (`out` is overwritten in place and cut to length at the end: setting
+  // an array's length to 0 drops its backing store, so every push after
+  // it allocated a new one, some 40 MB of garbage over a build.)
   function edgesNear(x, z, r, out) {
-    out.length = 0;
     const n = edgeIds(x - r, z - r, x + r, z + r);
     const S = STRIPS;
+    let m = 0;
     if (S !== null && S.length === 5 * edges.length) {
       for (let k = 0; k < n; k++) {
         const o = 5 * EIDS[k], h = r + S[o + 4];
         if (boxFar(x, z, S[o], S[o + 1], S[o + 2], S[o + 3], h)) continue;
-        if (segDist2(x, z, S[o], S[o + 1], S[o + 2], S[o + 3]) <= h * h) out.push(EIDS[k]);
+        if (segDist2(x, z, S[o], S[o + 1], S[o + 2], S[o + 3]) <= h * h) out[m++] = EIDS[k];
       }
+      out.length = m;
       return out;
     }
     for (let k = 0; k < n; k++) {
@@ -3606,8 +3609,9 @@ export function createMiamiCity(data, opts = {}) {
       // The strip (moved `off` on a tight divided pair).
       const g = stripOf(e), h = r + e.width / 2;
       if (boxFar(x, z, g[0], g[1], g[2], g[3], h)) continue;
-      if (segDist2(x, z, g[0], g[1], g[2], g[3]) <= h * h) out.push(e.id);
+      if (segDist2(x, z, g[0], g[1], g[2], g[3]) <= h * h) out[m++] = e.id;
     }
+    out.length = m;
     return out;
   }
   // The street under a point (docs/MAP.md "Edge contract", 2.1 item 11):
@@ -3683,7 +3687,7 @@ export function createMiamiCity(data, opts = {}) {
     return out;
   }
   function buildingsNear(x0, z0, x1, z1, out) {
-    out.length = 0;
+    let m = 0;
     const i0 = Math.max(0, Math.floor((x0 - gx0) / GRID)), i1 = Math.min(gw - 1, Math.floor((x1 - gx0) / GRID));
     const j0 = Math.max(0, Math.floor((z0 - gz0) / GRID)), j1 = Math.min(gh - 1, Math.floor((z1 - gz0) / GRID));
     const mark = ++buildingMark;
@@ -3694,10 +3698,11 @@ export function createMiamiCity(data, opts = {}) {
           const id = buildingIndex.items[k], q = 4 * id;
           if (buildingSeen[id] === mark || BBOX[q + 2] < x0 || BBOX[q] > x1 || BBOX[q + 3] < z0 || BBOX[q + 1] > z1) continue;
           buildingSeen[id] = mark;
-          out.push(id);
+          out[m++] = id;
         }
       }
     }
+    out.length = m;
     return out;
   }
   // The real neighborhood (or water, or bridge) name at a point, for the
@@ -3906,6 +3911,10 @@ export function createMiamiCity(data, opts = {}) {
   };
 
   // ---- 11b. Lots: every free land cell typed and dressed (world/lots.js). ----
+  // (The lot spots made at the first read: their lots, the spots made in
+  // the build, the drops; see lotsAndBays.)
+  const laterLots = [], heldSpots = new Map(), spotDrops = [];
+  let lotSpotsOf = null;
   (function lotsAndBays() {
     lotIn.timings = timings;
     const L = buildLots(city, lotIn);
@@ -3924,10 +3933,10 @@ export function createMiamiCity(data, opts = {}) {
     // the lot is dressed only as far as its bay rows.)
     const F = [], BAY = [0, 0, 0];
     let order = new Int32Array(1024);
-    for (let lotIdx = 0; lotIdx < city.lots.length; lotIdx++) {
-      const lot = city.lots[lotIdx];
-      if (lot.type !== 'carpark') continue;
-      dressLot(city, lot, F, BAYS_ONLY_FAST);
+    // (garages null, as in the build: the lots done at the first read are
+    // dressed after the game has placed its garages.)
+    const spotsOf = (lot, list) => {
+      dressLot(city, lot, F, BAYS_ONLY_FAST, null);
       let n = 0;
       for (let k = 0; k < F.length; k++) if (F[k].kind === 'bay') n += bayCount(F[k]);
       const keep = Math.min(BAY_LIST_MAX, Math.floor(n * 0.6));
@@ -3947,13 +3956,44 @@ export function createMiamiCity(data, opts = {}) {
           if (s < c) { bayAt(f, s, BAY); break; }
           s -= c;
         }
-        parkingSpots.push({ x: BAY[0], z: BAY[1], heading: BAY[2], lot: true });
+        list.push({ x: BAY[0], z: BAY[1], heading: BAY[2], lot: true });
       }
+    };
+    // (0.15 build time) The build itself reads the lot spots in one place
+    // only: the secret garage (world/secrets.js) seeds from those in the
+    // industrial district. So only the parking lots that can hold such a
+    // bay (an industrial district cell within BAY_REACH m of the lot's
+    // box; a bay lies inside its lot) are done here, the rest at the first
+    // read of city.parkingSpots, which puts every lot spot back in lot
+    // order and drops them as the build dropped its own (spotDrops).
+    const BAY_REACH = 10, IND = DKEYS.indexOf('industrial');
+    const mayIndustrial = (lot) => {
+      const x1 = lot.x1 + BAY_REACH, z1 = lot.z1 + BAY_REACH;
+      for (let z = lot.z0 - BAY_REACH; ; z = Math.min(z + DC, z1)) {
+        for (let x = lot.x0 - BAY_REACH; ; x = Math.min(x + DC, x1)) {
+          const c = distCell(x, z);
+          if (c >= 0 && distData[c] === IND) return true;
+          if (x >= x1) break;
+        }
+        if (z >= z1) break;
+      }
+      return false;
+    };
+    for (let lotIdx = 0; lotIdx < city.lots.length; lotIdx++) {
+      const lot = city.lots[lotIdx];
+      if (lot.type !== 'carpark') continue;
+      if (!mayIndustrial(lot)) { laterLots.push(lotIdx); continue; }
+      const a = [];
+      spotsOf(lot, a);
+      heldSpots.set(lotIdx, a);
+      for (let k = 0; k < a.length; k++) parkingSpots.push(a[k]);
     }
+    lotSpotsOf = spotsOf;
     lap('lots.build');
     for (const t of tankSpots) {
       if (t.place !== 'cinder') continue;
       dropSpotsNear(parkingSpots, t.x, t.z, 6, true);
+      spotDrops.push(t.x, t.z, 6, 1);
     }
   })();
   lap('lots');
@@ -3965,6 +4005,7 @@ export function createMiamiCity(data, opts = {}) {
     for (const r of city.rampSpots) {
       if (r.water) continue;
       dropSpotsNear(parkingSpots, r.x, r.z, r.r + 6, false);
+      spotDrops.push(r.x, r.z, r.r + 6, 0);
     }
   }
   lap('places.ramps');
@@ -3975,11 +4016,34 @@ export function createMiamiCity(data, opts = {}) {
     city.secretGarage = sec.garage;
   }
   lap('places.secrets');
-  if (city.courseSpec) city.courses = buildCourses(city);
+  // (0.15 build time) The courses are made at the first read of
+  // city.courses (world/lazy.js): they read the roads, nodes, spots,
+  // piers and buildings only, which stay as they are after the build.
+  if (city.courseSpec) lazyField(city, 'courses', () => buildCourses(city));
   lap('places.courses');
   lap('places');
   // ---- 13. Street props on the real profile, off the drivable surface. ----
-  graphStats.streetProps = settleStreetProps(city, SPEC);
+  settleStreetPropsLater(city, SPEC, graphStats, 'streetProps');
+  // The other parking lots' spots at the first read (see lotsAndBays):
+  // every lot spot in lot order after the street spots, in the same
+  // array, dropped as the build dropped its own.
+  if (laterLots.length) {
+    lazyField(city, 'parkingSpots', () => {
+      const all = [];
+      let next = 0;
+      for (let lotIdx = 0; lotIdx < city.lots.length; lotIdx++) {
+        const held = heldSpots.get(lotIdx);
+        if (held) { for (let k = 0; k < held.length; k++) all.push(held[k]); continue; }
+        if (laterLots[next] === lotIdx) { next++; lotSpotsOf(city.lots[lotIdx], all); }
+      }
+      for (let k = 0; k < spotDrops.length; k += 4) dropSpotsNear(all, spotDrops[k], spotDrops[k + 1], spotDrops[k + 2], spotDrops[k + 3] === 1);
+      let w = 0;
+      for (let k = 0; k < parkingSpots.length; k++) if (!parkingSpots[k].lot) parkingSpots[w++] = parkingSpots[k];
+      parkingSpots.length = w;
+      for (let k = 0; k < all.length; k++) parkingSpots.push(all[k]);
+      return parkingSpots;
+    });
+  }
   lap('streetscape');
   if (cpuTimings) city.cpuTimings = cpuTimings;
   city.buildMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - tStart);

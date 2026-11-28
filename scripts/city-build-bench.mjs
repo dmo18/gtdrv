@@ -77,6 +77,12 @@ async function child() {
   t = now();
   for (const [name, keys] of CITY_STAGES) out[name] = keys.reduce((s, k) => s + (city.timings[k] || 0), 0);
   out['parking lot bays'] -= out['lot grid and classes'];
+  // (0.15) The street props settle, the courses and most parking lot
+  // spots are made at their first read (world/lazy.js): read here, before
+  // the garages, so their cost has its own line.
+  t = now();
+  void city.props; void city.courses; void city.parkingSpots;
+  lap('first reads (props, courses, lot spots)');
   // What the game does next (game.js): explore, then the renderer's
   // whole-map collision. Garages and adventures timed on their own first.
   // (attachExplore does these three plus the clean-up of spots and props.)
