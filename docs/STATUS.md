@@ -1577,3 +1577,6 @@ Review 0.13.11: tank wedge revert now only while driving forward (fv > 0.05) so 
 
 ## 2026-11-27: 0.13.11 published
 Tank no longer drives through the Little Havana fence and building wedge (and can still back out), Daily Three refreshes after midnight, combat test fixtures repaired, service worker version includes its own template, clearer no-storage travel message, non-blocking CI smoke job, knockout text fade, post-ready startup error message. Gate passed.
+
+## 2026-11-28: 0.14.0 roads that make sense (published)
+Roads rebuilt from the diagnosis in docs/ROADS.md: fake divided streets merged into one street (pairmerge.js), one cross section per street, junctions treat two halves of one street as one arm, slivers of grass and sidewalk paved, parking lots drawn as lots, curbs hold parked cars, one-curb parking on local streets, GPS re-route fix, tank fence wedge, burning car wreck, Playwright pinned and the browser smoke job now blocks publishing. Whole-box build 1.7 to 1.24 s locally (part of the cut moves work to first read). Still wrong: 5th St at Alton Rd junction blob, 10 node junction at (-2643, 162), N Miami Ave at 31st link road, Washington Ave parking lanes, strip over strip 324 m.
