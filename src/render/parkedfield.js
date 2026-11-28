@@ -371,7 +371,7 @@ export function createParkedCurbField(city, opts = {}) {
     n: 0, cap: opts.cap || 24,
     x: new Float32Array(MAX), z: new Float32Array(MAX), yaw: new Float32Array(MAX), y: new Float32Array(MAX),
     spec: new Uint8Array(MAX), color: new Uint32Array(MAX), dist: new Float32Array(MAX), pri: new Float32Array(MAX),
-    nCol: 0, col: new Float32Array(COL_MAX * 3),
+    nCol: 0, col: new Float32Array(COL_MAX * 3), colD: new Float32Array(COL_MAX),
     stats: { loads: 0, released: 0, stations: 0, filled: 0, updates: 0, edges: 0 },
     update: null, step: null, plan: null, pending: null, loadAll: null,
   };
@@ -548,9 +548,19 @@ export function createParkedCurbField(city, opts = {}) {
           blocked = Math.abs(lx) < blk[o + 4] + 2.4 && Math.abs(lz) < blk[o + 5] + 1.0;
         }
         if (blocked) continue;
-        if (p2 < c2 && nc < COL_MAX) {
-          field.col[nc * 3] = X[s]; field.col[nc * 3 + 1] = Z[s]; field.col[nc * 3 + 2] = rec.yaw[s];
-          nc++;
+        if (p2 < c2) {
+          // The COL_MAX nearest to the player get a collision shape.
+          let slot = -1;
+          if (nc < COL_MAX) slot = nc++;
+          else {
+            let far = 0;
+            for (let k = 1; k < COL_MAX; k++) if (field.colD[k] > field.colD[far]) far = k;
+            if (p2 < field.colD[far]) slot = far;
+          }
+          if (slot >= 0) {
+            field.col[slot * 3] = X[s]; field.col[slot * 3 + 1] = Z[s]; field.col[slot * 3 + 2] = rec.yaw[s];
+            field.colD[slot] = p2;
+          }
         }
         if (d2 > r2) continue;
         const d = Math.sqrt(d2);
